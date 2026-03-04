@@ -44,6 +44,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get manifest")
 	}
+	defer C.loon_manifest_destroy(cLoonManifest)
 
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
@@ -74,7 +75,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 			storage_type:           C.CString(storageConfig.GetStorageType()),
 			cloud_provider:         C.CString(storageConfig.GetCloudProvider()),
 			iam_endpoint:           C.CString(storageConfig.GetIAMEndpoint()),
-			log_level:              C.CString("Warn"), // TODO use config after storage support lower case configuration
+			log_level:              C.CString("warn"),
 			useSSL:                 C.bool(storageConfig.GetUseSSL()),
 			sslCACert:              C.CString(storageConfig.GetSslCACert()),
 			useIAM:                 C.bool(storageConfig.GetUseIAM()),
@@ -196,6 +197,7 @@ func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig
 	if err != nil {
 		return cManifestHandle, err
 	}
+	defer C.loon_properties_free(cProperties)
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 

@@ -9,23 +9,29 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <string.h>
+#include <exception>
+#include <iosfwd>
 #include <memory>
-
-#ifdef __linux__
-#include <malloc.h>
-#endif
+#include <string>
+#include <unordered_map>
+#include <utility>
 
 #include "analyze_c.h"
-#include "common/type_c.h"
-#include "type_c.h"
-#include "types.h"
-#include "index/Utils.h"
-#include "index/Meta.h"
-#include "storage/StorageV2FSCache.h"
-#include "storage/Util.h"
-#include "pb/clustering.pb.h"
-#include "monitor/scope_metric.h"
+#include "bitset/common.h"
+#include "bitset/common.h"
 #include "clustering/KmeansClustering.h"
+#include "common/EasyAssert.h"
+#include "common/Types.h"
+#include "fmt/core.h"
+#include "monitor/scope_metric.h"
+#include "pb/clustering.pb.h"
+#include "pb/schema.pb.h"
+#include "storage/FileManager.h"
+#include "storage/StorageV2FSCache.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "type_c.h"
 
 using namespace milvus;
 

@@ -424,13 +424,13 @@ CreateArrowField(const JsonKey& key, const JsonKeyLayoutType& key_type);
 
 std::pair<std::vector<std::shared_ptr<arrow::ArrayBuilder>>,
           std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>>
-CreateArrowBuilders(std::map<JsonKey, JsonKeyLayoutType> column_map);
+CreateArrowBuilders(const std::map<JsonKey, JsonKeyLayoutType>& column_map);
 
 std::shared_ptr<arrow::Schema>
-CreateArrowSchema(std::map<JsonKey, JsonKeyLayoutType> column_map);
+CreateArrowSchema(const std::map<JsonKey, JsonKeyLayoutType>& column_map);
 
 std::vector<std::pair<std::string, std::string>>
-CreateParquetKVMetadata(std::map<JsonKey, JsonKeyLayoutType> column_map);
+CreateParquetKVMetadata(const std::map<JsonKey, JsonKeyLayoutType>& column_map);
 
 inline size_t
 GetArrowArrayMemorySize(const std::shared_ptr<arrow::Array>& array) {

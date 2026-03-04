@@ -9,20 +9,73 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/container/vector.hpp>
+#include <fmt/core.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <simdjson.h>
+#include <stddef.h>
+#include <cstdint>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <optional>
 #include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
+#include "NamedType/named_type_impl.hpp"
+#include "bitset/bitset.h"
+#include "bitset/detail/element_vectorized.h"
+#include "common/Consts.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
+#include "common/Json.h"
+#include "common/JsonCastType.h"
 #include "common/Schema.h"
-#include "test_utils/GenExprProto.h"
-#include "query/PlanProto.h"
-#include "query/ExecPlanNodeVisitor.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "common/type_c.h"
+#include "exec/expression/Expr.h"
+#include "exec/expression/function/FunctionFactory.h"
 #include "expr/ITypeExpr.h"
-#include "test_utils/storage_test_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
 #include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/IndexStats.h"
+#include "index/Meta.h"
 #include "index/NgramInvertedIndex.h"
+#include "index/Utils.h"
+#include "pb/common.pb.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "query/PlanProto.h"
+#include "query/Utils.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/Types.h"
 #include "segcore/load_index_c.h"
+#include "segcore/segment_c.h"
+#include "simdjson/padded_string.h"
+#include "storage/FileManager.h"
+#include "storage/InsertData.h"
+#include "storage/PayloadReader.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
-#include "expr/ITypeExpr.h"
+#include "test_utils/Constants.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -55,7 +108,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
 
-    std::string root_path = "/tmp/test-inverted-index/";
+    std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
@@ -84,7 +137,8 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
     auto get_binlog_path = [=](int64_t log_id) {
-        return fmt::format("{}/{}/{}/{}/{}",
+        return fmt::format("{}{}/{}/{}/{}/{}",
+                           TestLocalPath,
                            collection_id,
                            partition_id,
                            segment_id,
@@ -153,7 +207,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
                                        0);
         if (op_type != proto::plan::OpType::Equal) {
             std::optional<TargetBitmap> bitset_opt =
-                index->ExecuteQuery(literal, op_type, &segment_expr);
+                index->ExecuteQueryForUT(literal, op_type, &segment_expr);
             if (forward_to_br) {
                 ASSERT_TRUE(!bitset_opt.has_value());
             } else {
@@ -179,7 +233,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         load_index_info.field_id = field_id.get();
         load_index_info.field_type = DataType::VARCHAR;
         load_index_info.enable_mmap = true;
-        load_index_info.mmap_dir_path = "/tmp/test-ngram-index-mmap-dir";
+        load_index_info.mmap_dir_path = TestLocalPath + "mmap";
         load_index_info.index_id = index_id;
         load_index_info.index_build_id = index_build_id;
         load_index_info.index_version = index_version;
@@ -380,7 +434,7 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
 
-    std::string root_path = "/tmp/test-inverted-index/";
+    std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
@@ -409,7 +463,8 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
     auto get_binlog_path = [=](int64_t log_id) {
-        return fmt::format("{}/{}/{}/{}/{}",
+        return fmt::format("{}{}/{}/{}/{}/{}",
+                           TestLocalPath,
                            collection_id,
                            partition_id,
                            segment_id,
@@ -459,7 +514,7 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
         load_index_info.field_id = field_id.get();
         load_index_info.field_type = DataType::VARCHAR;
         load_index_info.enable_mmap = true;
-        load_index_info.mmap_dir_path = "/tmp/test-ngram-index-mmap-dir";
+        load_index_info.mmap_dir_path = TestLocalPath + "mmap";
         load_index_info.index_id = index_id;
         load_index_info.index_build_id = index_build_id;
         load_index_info.index_version = index_version;

@@ -13,6 +13,9 @@ from config.log_config import log_config
 from utils.util_pymilvus import get_milvus, gen_unique_str, gen_default_fields, gen_binary_default_fields
 from pymilvus.orm.types import CONSISTENCY_STRONG
 
+# Register the log filter plugin
+pytest_plugins = ['plugin.log_filter']
+
 timeout = 60
 dimension = 128
 delete_timeout = 60
@@ -39,7 +42,7 @@ def pytest_addoption(parser):
     parser.addoption('--search_vectors', action='store', default="search_vectors", help="vectors of search")
     parser.addoption('--index_param', action='store', default="index_param", help="index_param of index")
     parser.addoption('--data', action='store', default="data", help="data of request")
-    parser.addoption('--clean_log', action='store_true', default=False, help="clean log before testing")
+    parser.addoption('--clean_log', action='store_true', default=True, help="clean log before testing (default: True)")
     parser.addoption('--schema', action='store', default="schema", help="schema of test interface")
     parser.addoption('--err_msg', action='store', default="err_msg", help="error message of test")
     parser.addoption('--term_expr', action='store', default="term_expr", help="expr of query quest")
@@ -265,9 +268,7 @@ def initialize_env(request):
     assert ip_check(host) and number_check(port)
 
     """ modify log files """
-    file_path_list = [log_config.log_debug, log_config.log_info, log_config.log_err]
-    if log_config.log_worker != "":
-        file_path_list.append(log_config.log_worker)
+    file_path_list = [log_config.log_report_json, log_config.log_report_html]
     cf.modify_file(file_path_list=file_path_list, is_modify=clean_log)
 
     log.info("#" * 80)

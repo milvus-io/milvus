@@ -21,6 +21,12 @@ include_directories(
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
+# Plan parser shared library
+set(PLANPARSER_INCLUDE_DIR ${CMAKE_HOME_DIRECTORY}/output/include)
+set(PLANPARSER_LIB_DIR ${CMAKE_HOME_DIRECTORY}/output/lib)
+include_directories(${PLANPARSER_INCLUDE_DIR})
+link_directories(${PLANPARSER_LIB_DIR})
+
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/test_utils/test_segcore.yaml")
 
 # Collect test files from source directories using glob pattern
@@ -103,6 +109,9 @@ if (LINUX)
     endif()
 endif()
 
+add_compile_definitions(
+        MILVUS_CPPUT_OUTPUT_DIR="${CMAKE_INSTALL_PREFIX}/cpput_output")
+
 add_executable(all_tests
         ${MILVUS_TEST_FILES}
         )
@@ -114,11 +123,17 @@ target_link_libraries(all_tests
         knowhere
         milvus-storage
         milvus-common
+        milvus-planparser-cpp
+        )
+
+# Add RPATH for plan parser library to find libmilvus-planparser.so at runtime
+set_target_properties(all_tests PROPERTIES
+        BUILD_RPATH "${PLANPARSER_LIB_DIR}"
+        INSTALL_RPATH "${PLANPARSER_LIB_DIR}"
         )
 
 install(TARGETS all_tests DESTINATION unittest)
 
-add_subdirectory(bench)
 add_subdirectory(test_json_stats)
 
 # bitset unit test

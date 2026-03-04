@@ -9,20 +9,32 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <arrow/array/builder_binary.h>
-#include <arrow/type.h>
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
-
-#include "index/Index.h"
-#include "index/ScalarIndex.h"
-#include "index/StringIndexMarisa.h"
-
-#include "index/IndexFactory.h"
-#include "test_utils/indexbuilder_test_utils.h"
-#include "test_utils/AssertUtils.h"
-#include <boost/filesystem.hpp>
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <memory>
 #include <numeric>
-#include "test_utils/storage_test_utils.h"
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "bitset/bitset.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/Meta.h"
+#include "index/ScalarIndex.h"
+#include "index/StringIndex.h"
+#include "index/StringIndexMarisa.h"
+#include "knowhere/dataset.h"
+#include "pb/schema.pb.h"
+#include "test_utils/AssertUtils.h"
+#include "test_utils/indexbuilder_test_utils.h"
 
 constexpr int64_t nb = 100;
 namespace schemapb = milvus::proto::schema;

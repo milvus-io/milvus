@@ -11,13 +11,12 @@
 
 #pragma once
 
-#include <map>
+#include <stdint.h>
 #include <string>
+#include <unordered_set>
 
-#include "common/Types.h"
-#include "common/Json.h"
-#include "index/Utils.h"
 #include "common/EasyAssert.h"
+#include "knowhere/comp/index_param.h"
 
 namespace milvus::segcore {
 

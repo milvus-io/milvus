@@ -10,7 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <aws/core/auth/AWSCredentialsProvider.h>
+#include <memory>
+
 #include "HuaweiCloudSTSClient.h"
+#include "aws/core/auth/AWSCredentials.h"
+#include "aws/core/utils/memory/AWSMemory.h"
+#include "aws/core/utils/memory/stl/AWSString.h"
 
 namespace Aws {
 namespace Auth {

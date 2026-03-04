@@ -1,6 +1,7 @@
 package io
 
 import (
+	"os"
 	"path"
 	"testing"
 
@@ -13,7 +14,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-const binlogIOTestDir = "/tmp/milvus_test/binlog_io"
+var binlogIOTestDir string
+
+func init() {
+	dir, _ := os.MkdirTemp("", "milvus_test_binlog_io_*")
+	binlogIOTestDir = dir
+}
 
 func TestBinlogIO(t *testing.T) {
 	suite.Run(t, new(BinlogIOSuite))

@@ -16,22 +16,36 @@
 
 #pragma once
 
+#include <simdjson.h>
+#include <stdint.h>
+#include <cstddef>
+#include <memory>
 #include <optional>
-#include <type_traits>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/JsonUtils.h"
+#include "common/OpContext.h"
 #include "common/QueryInfo.h"
+#include "common/QueryResult.h"
 #include "common/Types.h"
-#include "exec/expression/Expr.h"
-#include "knowhere/index/index_node.h"
-#include "segcore/SegmentInterface.h"
-#include "segcore/SegmentGrowingImpl.h"
+#include "common/protobuf_utils.h"
+#include "folly/FBVector.h"
+#include "index/Index.h"
+#include "index/ScalarIndex.h"
+#include "knowhere/comp/index_param.h"
 #include "segcore/ConcurrentVector.h"
-#include "common/Span.h"
-#include "query/Utils.h"
+#include "segcore/InsertRecord.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentInterface.h"
 #include "segcore/SegmentSealed.h"
+#include "simdjson/error.h"
 
 namespace milvus {
 namespace exec {

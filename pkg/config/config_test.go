@@ -18,7 +18,6 @@ package config
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -47,11 +46,10 @@ func TestConfigFromEnv(t *testing.T) {
 
 func TestConfigFromRemote(t *testing.T) {
 	cfg, _ := embed.ConfigFromFile("../../configs/advanced/etcd.yaml")
-	cfg.Dir = "/tmp/milvus/test"
+	cfg.Dir = t.TempDir()
 	e, err := embed.StartEtcd(cfg)
 	assert.NoError(t, err)
 	defer e.Close()
-	defer os.RemoveAll(cfg.Dir)
 
 	client := v3client.New(e.Server)
 

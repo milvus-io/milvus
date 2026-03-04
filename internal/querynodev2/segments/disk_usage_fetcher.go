@@ -18,7 +18,6 @@ package segments
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"go.uber.org/atomic"
@@ -59,7 +58,7 @@ func (d *diskUsageFetcher) fetch() {
 	}
 	d.usage.Store(diskUsage)
 	d.err.Store(nil)
-	metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(diskUsage) / 1024 / 1024) // in MB
+	metrics.QueryNodeDiskUsedSize.WithLabelValues(paramtable.GetStringNodeID()).Set(float64(diskUsage) / 1024 / 1024) // in MB
 	log.Ctx(d.ctx).WithRateGroup("diskUsageFetcher", 1, 300).
 		RatedInfo(300, "querynode disk usage", zap.Int64("size", diskUsage), zap.Int64("nodeID", paramtable.GetNodeID()))
 }

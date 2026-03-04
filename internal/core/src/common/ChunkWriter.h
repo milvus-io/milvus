@@ -10,16 +10,29 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+#include <simdjson.h>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include "arrow/array/array_base.h"
+#include "arrow/array/array_binary.h"
 #include "arrow/array/array_primitive.h"
-#include "arrow/type_fwd.h"
-#include "common/ChunkTarget.h"
+#include "arrow/buffer.h"
 #include "arrow/record_batch.h"
+#include "bitset/detail/element_wise.h"
 #include "common/Chunk.h"
+#include "common/ChunkTarget.h"
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/Json.h"
+#include "common/Types.h"
 #include "pb/common.pb.h"
 
 namespace milvus {
@@ -230,6 +243,9 @@ class JSONChunkWriter : public ChunkWriterBase {
     void
     write_to_target(const arrow::ArrayVector& array_vec,
                     const std::shared_ptr<ChunkTarget>& target) override;
+
+ private:
+    std::vector<Json> cached_jsons_;
 };
 
 class GeometryChunkWriter : public ChunkWriterBase {

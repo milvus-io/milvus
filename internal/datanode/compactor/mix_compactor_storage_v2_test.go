@@ -293,7 +293,7 @@ func (s *MixCompactionTaskStorageV2Suite) initStorageV2Segments(rows int, seed i
 	bw := syncmgr.NewBulkPackWriterV2(mc, s.meta.Schema, cm, alloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
 		StorageType: "local",
 		RootPath:    rootPath,
-	}, columnGroups, "")
+	}, columnGroups)
 	return bw.Write(context.Background(), pack)
 }
 

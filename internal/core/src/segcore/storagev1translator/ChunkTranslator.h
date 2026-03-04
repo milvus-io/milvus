@@ -65,7 +65,8 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
                     std::vector<FileInfo>&& file_infos,
                     bool use_mmap,
                     bool mmap_populate,
-                    milvus::proto::common::LoadPriority load_priority);
+                    milvus::proto::common::LoadPriority load_priority,
+                    const std::string& warmup_policy);
 
     size_t
     num_cells() const override;
@@ -78,7 +79,8 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
     key() const override;
     std::vector<
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
-    get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override;
+    get_cells(milvus::OpContext* ctx,
+              const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
     milvus::cachinglayer::Meta*
     meta() override {

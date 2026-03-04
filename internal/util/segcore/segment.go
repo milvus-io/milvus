@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 const (
@@ -128,6 +129,13 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(searchReq)
 
+	// Use physical time for entity-level TTL (issue #47413)
+	physicalTimeUs := int64(searchReq.entityTTLPhysicalTime)
+	if physicalTimeUs == 0 {
+		physicalTimeMs, _ := tsoutil.ParseHybridTs(searchReq.mvccTimestamp)
+		physicalTimeUs = physicalTimeMs * 1000
+	}
+
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
 			return (cgo.CFuturePtr)(C.AsyncSearch(
@@ -138,6 +146,7 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 				C.uint64_t(searchReq.mvccTimestamp),
 				C.int32_t(searchReq.consistencyLevel),
 				C.uint64_t(searchReq.collectionTTL),
+				C.uint64_t(physicalTimeUs),
 			))
 		},
 		cgo.WithName("search"),
@@ -155,6 +164,14 @@ func (s *cSegmentImpl) Retrieve(ctx context.Context, plan *RetrievePlan) (*Retri
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(plan)
+
+	// Use physical time for entity-level TTL (issue #47413)
+	physicalTimeUs := int64(plan.entityTTLPhysicalTime)
+	if physicalTimeUs == 0 {
+		physicalTimeMs, _ := tsoutil.ParseHybridTs(plan.Timestamp)
+		physicalTimeUs = physicalTimeMs * 1000
+	}
+
 	future := cgo.Async(
 		ctx,
 		func() cgo.CFuturePtr {
@@ -167,6 +184,7 @@ func (s *cSegmentImpl) Retrieve(ctx context.Context, plan *RetrievePlan) (*Retri
 				C.bool(plan.ignoreNonPk),
 				C.int32_t(plan.consistencyLevel),
 				C.uint64_t(plan.collectionTTL),
+				C.uint64_t(physicalTimeUs),
 			))
 		},
 		cgo.WithName("retrieve"),
@@ -288,34 +306,17 @@ func (s *cSegmentImpl) LoadFieldData(ctx context.Context, request *LoadFieldData
 	return &LoadFieldDataResult{}, nil
 }
 
-// AddFieldDataInfo adds field data info into the segment.
-func (s *cSegmentImpl) AddFieldDataInfo(ctx context.Context, request *AddFieldDataInfoRequest) (*AddFieldDataInfoResult, error) {
-	creq, err := request.getCLoadFieldDataRequest()
-	if err != nil {
-		return nil, err
-	}
-	defer creq.Release()
-
-	status := C.AddFieldDataInfoForSealed(s.ptr, creq.cLoadFieldDataInfo)
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return nil, errors.Wrap(err, "failed to add field data info")
-	}
-	return &AddFieldDataInfoResult{}, nil
-}
-
-// FinishLoad wraps up the load process and let segcore do the leftover jobs.
-func (s *cSegmentImpl) FinishLoad() error {
-	status := C.FinishLoad(s.ptr)
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return errors.Wrap(err, "failed to finish load segment")
-	}
-	return nil
-}
-
 func (s *cSegmentImpl) Load(ctx context.Context) error {
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
-	status := C.SegmentLoad(traceCtx.ctx, s.ptr)
+
+	// Create cancellation guard for this load operation
+	guard := NewCancellationGuard(ctx)
+	defer guard.Close()
+
+	// Perform the load with cancellation support
+	status := C.SegmentLoad(traceCtx.ctx, s.ptr, (C.CLoadCancellationSource)(guard.Source()))
+
 	return ConsumeCStatusIntoError(&status)
 }
 
@@ -447,18 +448,18 @@ func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) []*segcorepb.FieldInd
 		}
 
 		result = append(result, &segcorepb.FieldIndexInfo{
-			FieldID:             fii.GetFieldID(),
-			EnableIndex:         fii.GetEnableIndex(),
-			IndexName:           fii.GetIndexName(),
-			IndexID:             fii.GetIndexID(),
-			BuildID:             fii.GetBuildID(),
-			IndexParams:         fii.GetIndexParams(),
-			IndexFilePaths:      fii.GetIndexFilePaths(),
-			IndexSize:           fii.GetIndexSize(),
-			IndexVersion:        fii.GetIndexVersion(),
-			NumRows:             fii.GetNumRows(),
-			CurrentIndexVersion: fii.GetCurrentIndexVersion(),
-			IndexStoreVersion:   fii.GetIndexStoreVersion(),
+			FieldID:                   fii.GetFieldID(),
+			EnableIndex:               fii.GetEnableIndex(),
+			IndexName:                 fii.GetIndexName(),
+			IndexID:                   fii.GetIndexID(),
+			BuildID:                   fii.GetBuildID(),
+			IndexParams:               fii.GetIndexParams(),
+			IndexFilePaths:            fii.GetIndexFilePaths(),
+			IndexSize:                 fii.GetIndexSize(),
+			IndexVersion:              fii.GetIndexVersion(),
+			NumRows:                   fii.GetNumRows(),
+			CurrentIndexVersion:       fii.GetCurrentIndexVersion(),
+			CurrentScalarIndexVersion: fii.GetCurrentScalarIndexVersion(),
 		})
 	}
 	return result

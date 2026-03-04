@@ -15,11 +15,39 @@
 // limitations under the License.
 
 #include "IterativeFilterNode.h"
-#include "common/Tracer.h"
-#include "fmt/format.h"
 
-#include "exec/Driver.h"
+#include <string.h>
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <functional>
+#include <iosfwd>
+#include <optional>
+#include <ratio>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include "bitset/bitset.h"
+#include "bitset/detail/element_vectorized.h"
+#include "common/ArrayOffsets.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/QueryResult.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "exec/QueryContext.h"
+#include "exec/expression/EvalCtx.h"
+#include "expr/ITypeExpr.h"
+#include "fmt/core.h"
+#include "folly/FBVector.h"
+#include "knowhere/comp/index_param.h"
 #include "monitor/Monitor.h"
+#include "plan/PlanNode.h"
+#include "prometheus/histogram.h"
+
 namespace milvus {
 namespace exec {
 PhyIterativeFilterNode::PhyIterativeFilterNode(

@@ -26,6 +26,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -252,6 +253,18 @@ func (sched *TaskScheduler) processTask(t Task) {
 		}
 	}
 	t.SetState(indexpb.JobState_JobStateFinished, "")
+
+	// Publish filesystem metrics after index task completion
+	// Only publish for index build tasks (not stats or analyze tasks)
+	if indexTask, ok := t.(*indexBuildTask); ok {
+		// Extract storage config from task to get the filesystem key
+		var fsKey string
+		if indexTask.req != nil && indexTask.req.GetStorageConfig() != nil {
+			fsKey = storagev2.GetFilesystemKeyFromStorageConfig(indexTask.req.GetStorageConfig())
+		}
+		// If no storage config or empty key, use default filesystem (empty key)
+		storagev2.PublishCachedFilesystemMetrics(fsKey)
+	}
 }
 
 func (sched *TaskScheduler) indexBuildLoop() {

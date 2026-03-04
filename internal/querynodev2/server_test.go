@@ -19,7 +19,6 @@ package querynodev2
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -71,7 +70,7 @@ func (suite *QueryNodeSuite) SetupTest() {
 
 	// mock factory
 	suite.factory = dependency.NewMockFactory(suite.T())
-	suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", objectstorage.RootPath("/tmp/milvus_test"))
+	suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", objectstorage.RootPath(suite.T().TempDir()))
 	// new node
 	suite.node = NewQueryNode(context.Background(), suite.factory)
 	// init etcd
@@ -88,7 +87,6 @@ func (suite *QueryNodeSuite) SetupTest() {
 
 func (suite *QueryNodeSuite) TearDownTest() {
 	suite.etcd.Close()
-	os.RemoveAll("/tmp/milvus-test")
 }
 
 func (suite *QueryNodeSuite) TestBasic() {

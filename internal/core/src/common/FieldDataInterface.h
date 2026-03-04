@@ -603,10 +603,8 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
             resize_field_data(length_ + n);
         }
 
-        auto i = 0;
-        for (const auto& str : *array) {
-            data_[length_ + i] = str.value();
-            i++;
+        for (int64_t i = 0; i < n; ++i) {
+            data_[length_ + i] = std::string(array->GetView(i));
         }
         if (IsNullable()) {
             auto valid_data = array->null_bitmap_data();

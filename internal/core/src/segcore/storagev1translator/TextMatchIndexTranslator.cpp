@@ -16,12 +16,18 @@
 
 #include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 
+#include <algorithm>
+#include <functional>
+#include <string_view>
+#include <type_traits>
 #include <utility>
 
-#include "cachinglayer/CacheSlot.h"
-#include "segcore/Utils.h"
-#include "monitor/Monitor.h"
 #include "common/ScopedTimer.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
+#include "index/TextMatchIndex.h"
+#include "log/Log.h"
+#include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -39,7 +45,8 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
             milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
             milvus::segcore::getCellDataType(/* is_vector */ false,
                                              /* is_index */ true),
-            milvus::segcore::getCacheWarmupPolicy(/* is_vector */ false,
+            milvus::segcore::getCacheWarmupPolicy(load_info_.warmup_policy,
+                                                  /* is_vector */ false,
                                                   /* is_index */ true),
             /* support_eviction */ true) {
 }
@@ -87,7 +94,12 @@ TextMatchIndexTranslator::key() const {
 std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::TextMatchIndex>>>
 TextMatchIndexTranslator::get_cells(
-    const std::vector<milvus::cachinglayer::cid_t>&) {
+    milvus::OpContext* ctx,
+    const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    // Check for cancellation before loading text match index
+    CheckCancellation(
+        ctx, load_info_.segment_id, "TextMatchIndexTranslator::get_cells()");
+
     auto index =
         std::make_unique<milvus::index::TextMatchIndex>(file_manager_context_);
 

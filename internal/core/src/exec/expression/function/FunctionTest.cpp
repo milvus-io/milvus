@@ -10,11 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <stdint.h>
+#include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
+#include "bitset/bitset.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/function/impl/StringFunctions.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 
 using namespace milvus;
 using namespace milvus::exec::expression::function;

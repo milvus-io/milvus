@@ -35,19 +35,27 @@ func NewFieldAccessor(fieldType schemapb.DataType) (FieldAccessor, error) {
 type FieldAccessor interface {
 	Hash(idx int) uint64
 	ValAt(idx int) interface{}
+	IsNullAt(idx int) bool
 	SetVals(fieldData *schemapb.FieldData)
 	RowCount() int
 }
 
+// Special hash value for null - using a prime number unlikely to collide
+const nullHashValue uint64 = 0x9E3779B97F4A7C15
+
 type Int32FieldAccessor struct {
-	vals   []int32
-	hasher hash.Hash64
-	buffer []byte
+	vals      []int32
+	validData []bool
+	hasher    hash.Hash64
+	buffer    []byte
 }
 
 func (i32Field *Int32FieldAccessor) Hash(idx int) uint64 {
 	if idx < 0 || idx >= len(i32Field.vals) {
 		panic(fmt.Sprintf("Int32FieldAccessor.Hash: index %d out of range [0,%d)", idx, len(i32Field.vals)))
+	}
+	if i32Field.IsNullAt(idx) {
+		return nullHashValue
 	}
 	i32Field.hasher.Reset()
 	val := i32Field.vals[idx]
@@ -59,6 +67,7 @@ func (i32Field *Int32FieldAccessor) Hash(idx int) uint64 {
 
 func (i32Field *Int32FieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	i32Field.vals = fieldData.GetScalars().GetIntData().GetData()
+	i32Field.validData = fieldData.GetValidData()
 }
 
 func (i32Field *Int32FieldAccessor) RowCount() int {
@@ -69,19 +78,30 @@ func (i32Field *Int32FieldAccessor) ValAt(idx int) interface{} {
 	return i32Field.vals[idx]
 }
 
+func (i32Field *Int32FieldAccessor) IsNullAt(idx int) bool {
+	if len(i32Field.validData) == 0 {
+		return false // No validity data means all values are valid
+	}
+	return !i32Field.validData[idx]
+}
+
 func newInt32FieldAccessor() FieldAccessor {
 	return &Int32FieldAccessor{hasher: fnv.New64a(), buffer: make([]byte, 4)}
 }
 
 type Int64FieldAccessor struct {
-	vals   []int64
-	hasher hash.Hash64
-	buffer []byte
+	vals      []int64
+	validData []bool
+	hasher    hash.Hash64
+	buffer    []byte
 }
 
 func (i64Field *Int64FieldAccessor) Hash(idx int) uint64 {
 	if idx < 0 || idx >= len(i64Field.vals) {
 		panic(fmt.Sprintf("Int64FieldAccessor.Hash: index %d out of range [0,%d)", idx, len(i64Field.vals)))
+	}
+	if i64Field.IsNullAt(idx) {
+		return nullHashValue
 	}
 	i64Field.hasher.Reset()
 	val := i64Field.vals[idx]
@@ -92,6 +112,7 @@ func (i64Field *Int64FieldAccessor) Hash(idx int) uint64 {
 
 func (i64Field *Int64FieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	i64Field.vals = fieldData.GetScalars().GetLongData().GetData()
+	i64Field.validData = fieldData.GetValidData()
 }
 
 func (i64Field *Int64FieldAccessor) RowCount() int {
@@ -102,19 +123,30 @@ func (i64Field *Int64FieldAccessor) ValAt(idx int) interface{} {
 	return i64Field.vals[idx]
 }
 
+func (i64Field *Int64FieldAccessor) IsNullAt(idx int) bool {
+	if len(i64Field.validData) == 0 {
+		return false
+	}
+	return !i64Field.validData[idx]
+}
+
 func newInt64FieldAccessor() FieldAccessor {
 	return &Int64FieldAccessor{hasher: fnv.New64a(), buffer: make([]byte, 8)}
 }
 
 type TimestamptzFieldAccessor struct {
-	vals   []int64
-	hasher hash.Hash64
-	buffer []byte
+	vals      []int64
+	validData []bool
+	hasher    hash.Hash64
+	buffer    []byte
 }
 
 func (tzField *TimestamptzFieldAccessor) Hash(idx int) uint64 {
 	if idx < 0 || idx >= len(tzField.vals) {
 		panic(fmt.Sprintf("TimestamptzFieldAccessor.Hash: index %d out of range [0,%d)", idx, len(tzField.vals)))
+	}
+	if tzField.IsNullAt(idx) {
+		return nullHashValue
 	}
 	tzField.hasher.Reset()
 	val := tzField.vals[idx]
@@ -125,6 +157,7 @@ func (tzField *TimestamptzFieldAccessor) Hash(idx int) uint64 {
 
 func (tzField *TimestamptzFieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	tzField.vals = fieldData.GetScalars().GetTimestamptzData().GetData()
+	tzField.validData = fieldData.GetValidData()
 }
 
 func (tzField *TimestamptzFieldAccessor) RowCount() int {
@@ -135,20 +168,31 @@ func (tzField *TimestamptzFieldAccessor) ValAt(idx int) interface{} {
 	return tzField.vals[idx]
 }
 
+func (tzField *TimestamptzFieldAccessor) IsNullAt(idx int) bool {
+	if len(tzField.validData) == 0 {
+		return false
+	}
+	return !tzField.validData[idx]
+}
+
 func newTimestamptzFieldAccessor() FieldAccessor {
 	return &TimestamptzFieldAccessor{hasher: fnv.New64a(), buffer: make([]byte, 8)}
 }
 
 // BoolFieldAccessor
 type BoolFieldAccessor struct {
-	vals   []bool
-	hasher hash.Hash64
-	buffer []byte
+	vals      []bool
+	validData []bool
+	hasher    hash.Hash64
+	buffer    []byte
 }
 
 func (boolField *BoolFieldAccessor) Hash(idx int) uint64 {
 	if idx < 0 || idx >= len(boolField.vals) {
 		panic(fmt.Sprintf("BoolFieldAccessor.Hash: index %d out of range [0,%d)", idx, len(boolField.vals)))
+	}
+	if boolField.IsNullAt(idx) {
+		return nullHashValue
 	}
 	boolField.hasher.Reset()
 	val := boolField.vals[idx]
@@ -163,6 +207,7 @@ func (boolField *BoolFieldAccessor) Hash(idx int) uint64 {
 
 func (boolField *BoolFieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	boolField.vals = fieldData.GetScalars().GetBoolData().GetData()
+	boolField.validData = fieldData.GetValidData()
 }
 
 func (boolField *BoolFieldAccessor) RowCount() int {
@@ -173,20 +218,31 @@ func (boolField *BoolFieldAccessor) ValAt(idx int) interface{} {
 	return boolField.vals[idx]
 }
 
+func (boolField *BoolFieldAccessor) IsNullAt(idx int) bool {
+	if len(boolField.validData) == 0 {
+		return false
+	}
+	return !boolField.validData[idx]
+}
+
 func newBoolFieldAccessor() FieldAccessor {
 	return &BoolFieldAccessor{hasher: fnv.New64a(), buffer: make([]byte, 1)}
 }
 
 // Float32FieldAccessor
 type Float32FieldAccessor struct {
-	vals   []float32
-	hasher hash.Hash64
-	buffer []byte
+	vals      []float32
+	validData []bool
+	hasher    hash.Hash64
+	buffer    []byte
 }
 
 func (f32FieldAccessor *Float32FieldAccessor) Hash(idx int) uint64 {
 	if idx < 0 || idx >= len(f32FieldAccessor.vals) {
 		panic(fmt.Sprintf("Float32FieldAccessor.Hash: index %d out of range [0,%d)", idx, len(f32FieldAccessor.vals)))
+	}
+	if f32FieldAccessor.IsNullAt(idx) {
+		return nullHashValue
 	}
 	f32FieldAccessor.hasher.Reset()
 	val := f32FieldAccessor.vals[idx]
@@ -197,6 +253,7 @@ func (f32FieldAccessor *Float32FieldAccessor) Hash(idx int) uint64 {
 
 func (f32FieldAccessor *Float32FieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	f32FieldAccessor.vals = fieldData.GetScalars().GetFloatData().GetData()
+	f32FieldAccessor.validData = fieldData.GetValidData()
 }
 
 func (f32FieldAccessor *Float32FieldAccessor) RowCount() int {
@@ -207,20 +264,31 @@ func (f32FieldAccessor *Float32FieldAccessor) ValAt(idx int) interface{} {
 	return f32FieldAccessor.vals[idx]
 }
 
+func (f32FieldAccessor *Float32FieldAccessor) IsNullAt(idx int) bool {
+	if len(f32FieldAccessor.validData) == 0 {
+		return false
+	}
+	return !f32FieldAccessor.validData[idx]
+}
+
 func newFloat32FieldAccessor() FieldAccessor {
 	return &Float32FieldAccessor{hasher: fnv.New64a(), buffer: make([]byte, 4)}
 }
 
 // Float64FieldAccessor
 type Float64FieldAccessor struct {
-	vals   []float64
-	hasher hash.Hash64
-	buffer []byte
+	vals      []float64
+	validData []bool
+	hasher    hash.Hash64
+	buffer    []byte
 }
 
 func (f64Field *Float64FieldAccessor) Hash(idx int) uint64 {
 	if idx < 0 || idx >= len(f64Field.vals) {
 		panic(fmt.Sprintf("Float64FieldAccessor.Hash: index %d out of range [0,%d)", idx, len(f64Field.vals)))
+	}
+	if f64Field.IsNullAt(idx) {
+		return nullHashValue
 	}
 	f64Field.hasher.Reset()
 	val := f64Field.vals[idx]
@@ -231,6 +299,7 @@ func (f64Field *Float64FieldAccessor) Hash(idx int) uint64 {
 
 func (f64Field *Float64FieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	f64Field.vals = fieldData.GetScalars().GetDoubleData().GetData()
+	f64Field.validData = fieldData.GetValidData()
 }
 
 func (f64Field *Float64FieldAccessor) RowCount() int {
@@ -241,19 +310,30 @@ func (f64Field *Float64FieldAccessor) ValAt(idx int) interface{} {
 	return f64Field.vals[idx]
 }
 
+func (f64Field *Float64FieldAccessor) IsNullAt(idx int) bool {
+	if len(f64Field.validData) == 0 {
+		return false
+	}
+	return !f64Field.validData[idx]
+}
+
 func newFloat64FieldAccessor() FieldAccessor {
 	return &Float64FieldAccessor{hasher: fnv.New64a(), buffer: make([]byte, 8)}
 }
 
 // StringFieldAccessor
 type StringFieldAccessor struct {
-	vals   []string
-	hasher hash.Hash64
+	vals      []string
+	validData []bool
+	hasher    hash.Hash64
 }
 
 func (stringField *StringFieldAccessor) Hash(idx int) uint64 {
 	if idx < 0 || idx >= len(stringField.vals) {
 		panic(fmt.Sprintf("StringFieldAccessor.Hash: index %d out of range [0,%d)", idx, len(stringField.vals)))
+	}
+	if stringField.IsNullAt(idx) {
+		return nullHashValue
 	}
 	stringField.hasher.Reset()
 	val := stringField.vals[idx]
@@ -264,6 +344,7 @@ func (stringField *StringFieldAccessor) Hash(idx int) uint64 {
 
 func (stringField *StringFieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	stringField.vals = fieldData.GetScalars().GetStringData().GetData()
+	stringField.validData = fieldData.GetValidData()
 }
 
 func (stringField *StringFieldAccessor) RowCount() int {
@@ -272,6 +353,13 @@ func (stringField *StringFieldAccessor) RowCount() int {
 
 func (stringField *StringFieldAccessor) ValAt(idx int) interface{} {
 	return stringField.vals[idx]
+}
+
+func (stringField *StringFieldAccessor) IsNullAt(idx int) bool {
+	if len(stringField.validData) == 0 {
+		return false
+	}
+	return !stringField.validData[idx]
 }
 
 func newStringFieldAccessor() FieldAccessor {
@@ -291,7 +379,7 @@ func AssembleBucket(bucket *Bucket, fieldDatas []*schemapb.FieldData) error {
 
 func AssembleSingleRow(colCount int, row *Row, fieldDatas []*schemapb.FieldData) error {
 	for c := 0; c < colCount; c++ {
-		err := AssembleSingleValue(row.ValAt(c), fieldDatas[c])
+		err := AssembleSingleValue(row.FieldValueAt(c), fieldDatas[c])
 		if err != nil {
 			return err
 		}
@@ -299,7 +387,36 @@ func AssembleSingleRow(colCount int, row *Row, fieldDatas []*schemapb.FieldData)
 	return nil
 }
 
-func AssembleSingleValue(val interface{}, fieldData *schemapb.FieldData) error {
+func AssembleSingleValue(fv *FieldValue, fieldData *schemapb.FieldData) error {
+	isNull := fv.IsNull()
+	// Append validity data (true = valid, false = null)
+	fieldData.ValidData = append(fieldData.ValidData, !isNull)
+
+	// For null values, append zero/default values to maintain array alignment
+	if isNull {
+		switch fieldData.GetType() {
+		case schemapb.DataType_Bool:
+			fieldData.GetScalars().GetBoolData().Data = append(fieldData.GetScalars().GetBoolData().GetData(), false)
+		case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+			fieldData.GetScalars().GetIntData().Data = append(fieldData.GetScalars().GetIntData().GetData(), 0)
+		case schemapb.DataType_Int64:
+			fieldData.GetScalars().GetLongData().Data = append(fieldData.GetScalars().GetLongData().GetData(), 0)
+		case schemapb.DataType_Timestamptz:
+			fieldData.GetScalars().GetTimestamptzData().Data = append(fieldData.GetScalars().GetTimestamptzData().GetData(), 0)
+		case schemapb.DataType_Float:
+			fieldData.GetScalars().GetFloatData().Data = append(fieldData.GetScalars().GetFloatData().GetData(), 0)
+		case schemapb.DataType_Double:
+			fieldData.GetScalars().GetDoubleData().Data = append(fieldData.GetScalars().GetDoubleData().GetData(), 0)
+		case schemapb.DataType_VarChar, schemapb.DataType_String:
+			fieldData.GetScalars().GetStringData().Data = append(fieldData.GetScalars().GetStringData().GetData(), "")
+		default:
+			return fmt.Errorf("unsupported DataType:%d", fieldData.GetType())
+		}
+		return nil
+	}
+
+	// For non-null values, append the actual value
+	val := fv.val
 	switch fieldData.GetType() {
 	case schemapb.DataType_Bool:
 		boolVal, ok := val.(bool)

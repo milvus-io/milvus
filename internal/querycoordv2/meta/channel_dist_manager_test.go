@@ -93,6 +93,18 @@ func (suite *ChannelDistManagerSuite) SetupTest() {
 	suite.dist.Update(suite.nodes[2], suite.channels["dmc1"].Clone())
 }
 
+func (suite *ChannelDistManagerSuite) TestVersion() {
+	dist := suite.dist
+	v1 := dist.GetVersion()
+
+	// Update with some new data
+	newChannel := suite.channels["dmc0"].Clone()
+	newChannel.Version = 2
+	dist.Update(suite.nodes[0], newChannel)
+	v2 := dist.GetVersion()
+	suite.Greater(v2, v1)
+}
+
 func (suite *ChannelDistManagerSuite) TestGetBy() {
 	dist := suite.dist
 

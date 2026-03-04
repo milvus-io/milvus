@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
@@ -173,6 +172,8 @@ type lruCache[K comparable, V any] struct {
 	finalizer Finalizer[K, V]
 	scavenger Scavenger[K]
 	reloader  Loader[K, V]
+
+	retryMaxAttempts int
 }
 
 type CacheBuilder[K comparable, V any] struct {
@@ -236,15 +237,16 @@ func newLRUCache[K comparable, V any](
 	reloader Loader[K, V],
 ) Cache[K, V] {
 	return &lruCache[K, V]{
-		items:          make(map[K]*list.Element),
-		accessList:     list.New(),
-		waitNotifier:   syncutil.NewVersionedNotifier(),
-		loaderKeyLocks: lock.NewKeyLock[K](),
-		stats:          new(Stats),
-		loader:         loader,
-		finalizer:      finalizer,
-		scavenger:      scavenger,
-		reloader:       reloader,
+		items:            make(map[K]*list.Element),
+		accessList:       list.New(),
+		waitNotifier:     syncutil.NewVersionedNotifier(),
+		loaderKeyLocks:   lock.NewKeyLock[K](),
+		stats:            new(Stats),
+		loader:           loader,
+		finalizer:        finalizer,
+		scavenger:        scavenger,
+		reloader:         reloader,
+		retryMaxAttempts: 1,
 	}
 }
 
@@ -350,9 +352,9 @@ func (c *lruCache[K, V]) getAndPin(ctx context.Context, key K) (*cacheItem[K, V]
 		timer := time.Now()
 		value, err := c.loader(ctx, key)
 
-		for retryAttempt := 0; merr.ErrServiceDiskLimitExceeded.Is(err) && retryAttempt < paramtable.Get().QueryNodeCfg.LazyLoadMaxRetryTimes.GetAsInt(); retryAttempt++ {
+		for retryAttempt := 0; merr.ErrServiceDiskLimitExceeded.Is(err) && retryAttempt < c.retryMaxAttempts; retryAttempt++ {
 			// Try to evict one item if there is not enough disk space, then retry.
-			c.evictItems(ctx, paramtable.Get().QueryNodeCfg.LazyLoadMaxEvictPerRetry.GetAsInt())
+			c.evictItems(ctx, c.retryMaxAttempts)
 			value, err = c.loader(ctx, key)
 		}
 

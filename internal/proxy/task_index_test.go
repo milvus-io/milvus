@@ -668,6 +668,8 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.HybridLowCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexLowCardinalityIndexType.GetValue()},
+			{Key: common.HybridHighCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
@@ -712,6 +714,8 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.HybridLowCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexLowCardinalityIndexType.GetValue()},
+			{Key: common.HybridHighCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
@@ -941,6 +945,8 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.HybridLowCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexLowCardinalityIndexType.GetValue()},
+			{Key: common.HybridHighCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
@@ -971,6 +977,8 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.HybridLowCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexLowCardinalityIndexType.GetValue()},
+			{Key: common.HybridHighCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
@@ -1001,6 +1009,8 @@ func Test_parseIndexParams(t *testing.T) {
 		sortKeyValuePairs(cit.newIndexParams)
 		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid},
+			{Key: common.HybridLowCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexLowCardinalityIndexType.GetValue()},
+			{Key: common.HybridHighCardinalityIndexTypeKey, Value: paramtable.Get().DataCoordCfg.HybridIndexHighCardinalityIndexType.GetValue()},
 			{Key: common.BitmapCardinalityLimitKey, Value: strconv.Itoa(paramtable.DefaultBitmapCardinalityLimit)},
 		})
 	})
@@ -1630,4 +1640,104 @@ func newTestSchema() *schemapb.CollectionSchema {
 		Fields:             fields,
 		EnableDynamicField: true,
 	}
+}
+
+func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
+	t.Run("nil config", func(t *testing.T) {
+		result := adjustAutoIndexParamsByDataType(nil, schemapb.DataType_FloatVector)
+		assert.Nil(t, result)
+	})
+
+	t.Run("no refine_type", func(t *testing.T) {
+		config := map[string]string{
+			"index_type": "HNSW_SQ",
+			"M":          "18",
+		}
+		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
+		assert.Equal(t, config, result)
+	})
+
+	t.Run("fp32 vector keeps any refine_type", func(t *testing.T) {
+		config := map[string]string{
+			"index_type":  "HNSW_SQ",
+			"refine_type": "FP16",
+		}
+		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_FloatVector)
+		assert.Contains(t, result, "refine_type")
+		assert.Equal(t, "FP16", result["refine_type"])
+	})
+
+	t.Run("fp16 vector keeps fp16 refine_type", func(t *testing.T) {
+		config := map[string]string{
+			"index_type":  "HNSW_SQ",
+			"refine_type": "FP16",
+		}
+		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_Float16Vector)
+		assert.Equal(t, config, result) // same object, no copy needed
+	})
+
+	t.Run("fp16 vector adjusts bf16 refine_type to FP16", func(t *testing.T) {
+		config := map[string]string{
+			"index_type":  "HNSW_SQ",
+			"refine_type": "BF16",
+			"M":           "18",
+		}
+		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_Float16Vector)
+		assert.Contains(t, result, "refine_type")
+		assert.Equal(t, "FP16", result["refine_type"])
+		assert.Contains(t, result, "index_type")
+		assert.Contains(t, result, "M")
+	})
+
+	t.Run("bf16 vector keeps bf16 refine_type", func(t *testing.T) {
+		config := map[string]string{
+			"index_type":  "HNSW_SQ",
+			"refine_type": "BF16",
+		}
+		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
+		assert.Equal(t, config, result) // same object, no copy needed
+	})
+
+	t.Run("bf16 vector adjusts fp16 refine_type to BF16", func(t *testing.T) {
+		config := map[string]string{
+			"index_type":  "HNSW_SQ",
+			"refine_type": "FP16",
+			"M":           "18",
+		}
+		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
+		assert.Contains(t, result, "refine_type")
+		assert.Equal(t, "BF16", result["refine_type"])
+		assert.Contains(t, result, "index_type")
+		assert.Contains(t, result, "M")
+	})
+
+	t.Run("fp16 vector keeps other refine_type unchanged", func(t *testing.T) {
+		config := map[string]string{
+			"index_type":  "HNSW_SQ",
+			"refine_type": "SQ8",
+		}
+		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_Float16Vector)
+		assert.Equal(t, config, result) // not modified
+	})
+
+	t.Run("bf16 vector keeps other refine_type unchanged", func(t *testing.T) {
+		config := map[string]string{
+			"index_type":  "HNSW_SQ",
+			"refine_type": "SQ8",
+		}
+		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
+		assert.Equal(t, config, result) // not modified
+	})
+
+	t.Run("original config not modified", func(t *testing.T) {
+		config := map[string]string{
+			"index_type":  "HNSW_SQ",
+			"refine_type": "FP16",
+		}
+		result := adjustAutoIndexParamsByDataType(config, schemapb.DataType_BFloat16Vector)
+		// Original config should still have original refine_type
+		assert.Equal(t, "FP16", config["refine_type"])
+		// Result should have replaced refine_type
+		assert.Equal(t, "BF16", result["refine_type"])
+	})
 }

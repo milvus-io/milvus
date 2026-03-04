@@ -27,11 +27,12 @@ import (
 
 // ReplicateConfigValidator validates ReplicateConfiguration according to business rules
 type ReplicateConfigValidator struct {
-	currentClusterID string
-	currentPChannels []string
-	clusterMap       map[string]*commonpb.MilvusCluster
-	incomingConfig   *commonpb.ReplicateConfiguration
-	currentConfig    *commonpb.ReplicateConfiguration
+	currentClusterID     string
+	currentPChannels     []string
+	clusterMap           map[string]*commonpb.MilvusCluster
+	incomingConfig       *commonpb.ReplicateConfiguration
+	currentConfig        *commonpb.ReplicateConfiguration
+	isPChannelIncreasing bool // detected during validateConfigComparison
 }
 
 // NewReplicateConfigValidator creates a new validator instance with the given configuration
@@ -262,15 +263,64 @@ func (v *ReplicateConfigValidator) validateConfigComparison() error {
 		// If cluster doesn't exist in current config, it's a new cluster, which is allowed
 	}
 
+	// When pchannels are increasing, enforce stricter rules
+	if v.isPChannelIncreasing {
+		if err := v.validatePChannelIncreasingConstraints(currentClusterMap); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validatePChannelIncreasingConstraints enforces that when pchannels grow,
+// only pchannel lists can change — cluster set and topology must remain identical.
+func (v *ReplicateConfigValidator) validatePChannelIncreasingConstraints(currentClusterMap map[string]*commonpb.MilvusCluster) error {
+	// Cluster set must be identical (no new or removed clusters)
+	if len(currentClusterMap) != len(v.clusterMap) {
+		return fmt.Errorf("when pchannels are increasing, cluster set must remain identical: current has %d clusters, incoming has %d",
+			len(currentClusterMap), len(v.clusterMap))
+	}
+	for clusterID := range currentClusterMap {
+		if _, ok := v.clusterMap[clusterID]; !ok {
+			return fmt.Errorf("when pchannels are increasing, cluster set must remain identical: cluster '%s' missing from incoming config", clusterID)
+		}
+	}
+
+	// Topology must be identical
+	currentTopos := v.currentConfig.GetCrossClusterTopology()
+	incomingTopos := v.incomingConfig.GetCrossClusterTopology()
+	if len(currentTopos) != len(incomingTopos) {
+		return fmt.Errorf("when pchannels are increasing, topology must remain identical: current has %d edges, incoming has %d",
+			len(currentTopos), len(incomingTopos))
+	}
+	currentEdges := make(map[string]struct{})
+	for _, topo := range currentTopos {
+		currentEdges[topo.GetSourceClusterId()+"->"+topo.GetTargetClusterId()] = struct{}{}
+	}
+	for _, topo := range incomingTopos {
+		edge := topo.GetSourceClusterId() + "->" + topo.GetTargetClusterId()
+		if _, ok := currentEdges[edge]; !ok {
+			return fmt.Errorf("when pchannels are increasing, topology must remain identical: edge '%s' not in current config", edge)
+		}
+	}
 	return nil
 }
 
 // validateClusterConsistency validates that no cluster attributes can be changed between current and incoming cluster
 func (v *ReplicateConfigValidator) validateClusterConsistency(current, incoming *commonpb.MilvusCluster) error {
-	// Check Pchannels consistency
-	if !slices.Equal(current.GetPchannels(), incoming.GetPchannels()) {
-		return fmt.Errorf("cluster '%s' pchannels cannot be changed: current=%v, incoming=%v",
-			current.GetClusterId(), current.GetPchannels(), incoming.GetPchannels())
+	// Check Pchannels consistency: existing pchannels must be preserved (append-only growth allowed)
+	currentPchannels := current.GetPchannels()
+	incomingPchannels := incoming.GetPchannels()
+	if len(incomingPchannels) < len(currentPchannels) {
+		return fmt.Errorf("cluster '%s' pchannels cannot decrease: current=%d, incoming=%d",
+			current.GetClusterId(), len(currentPchannels), len(incomingPchannels))
+	}
+	if !slices.Equal(currentPchannels, incomingPchannels[:len(currentPchannels)]) {
+		return fmt.Errorf("cluster '%s' existing pchannels must be preserved at the same positions: current=%v, incoming=%v",
+			current.GetClusterId(), currentPchannels, incomingPchannels)
+	}
+	if len(incomingPchannels) > len(currentPchannels) {
+		v.isPChannelIncreasing = true
 	}
 
 	// Check ConnectionParam consistency
@@ -287,6 +337,12 @@ func (v *ReplicateConfigValidator) validateClusterConsistency(current, incoming 
 	}
 
 	return nil
+}
+
+// IsPChannelIncreasing returns true if any cluster's pchannel list is growing.
+// Must be called after Validate().
+func (v *ReplicateConfigValidator) IsPChannelIncreasing() bool {
+	return v.isPChannelIncreasing
 }
 
 func equalIgnoreOrder(a, b []string) bool {

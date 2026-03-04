@@ -9,26 +9,57 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <stddef.h>
+#include <algorithm>
+#include <cstdint>
+#include <iostream>
+#include <map>
+#include <memory>
 #include <numeric>
-
+#include <optional>
+#include <string>
 #include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
-#include "common/Types.h"
+#include "NamedType/named_type_impl.hpp"
+#include "bitset/bitset.h"
+#include "bitset/detail/element_vectorized.h"
+#include "cachinglayer/Utils.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
 #include "common/IndexMeta.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
+#include "expr/ITypeExpr.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/dataset.h"
+#include "knowhere/object.h"
+#include "knowhere/sparse_utils.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "query/Plan.h"
+#include "query/PlanNode.h"
+#include "segcore/ConcurrentVector.h"
+#include "segcore/InsertRecord.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "pb/schema.pb.h"
-#include "pb/plan.pb.h"
-#include "query/Plan.h"
-#include "expr/ITypeExpr.h"
-#include "plan/PlanNode.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
-#include "test_utils/GenExprProto.h"
-#include "query/ExecPlanNodeVisitor.h"
 
 using namespace milvus::segcore;
 using namespace milvus;
@@ -451,7 +482,8 @@ class GrowingNullableTest : public ::testing::TestWithParam<
                                            /*metric_type*/ knowhere::MetricType,
                                            /*index_type*/ std::string,
                                            /*null_percent*/ int,
-                                           /*enable_interim_index*/ bool>> {
+                                           /*enable_interim_index*/ bool,
+                                           /*use_iterator*/ bool>> {
  public:
     void
     SetUp() override {
@@ -459,7 +491,8 @@ class GrowingNullableTest : public ::testing::TestWithParam<
                  metric_type,
                  index_type,
                  null_percent,
-                 enable_interim_index) = GetParam();
+                 enable_interim_index,
+                 use_iterator) = GetParam();
     }
 
     DataType data_type;
@@ -467,13 +500,15 @@ class GrowingNullableTest : public ::testing::TestWithParam<
     std::string index_type;
     int null_percent;
     bool enable_interim_index;
+    bool use_iterator;
 };
 
 static std::vector<
-    std::tuple<DataType, knowhere::MetricType, std::string, int, bool>>
+    std::tuple<DataType, knowhere::MetricType, std::string, int, bool, bool>>
 GenerateGrowingNullableTestParams() {
     std::vector<
-        std::tuple<DataType, knowhere::MetricType, std::string, int, bool>>
+        std::
+            tuple<DataType, knowhere::MetricType, std::string, int, bool, bool>>
         params;
 
     // Dense float vectors with IVF_FLAT
@@ -497,11 +532,23 @@ GenerateGrowingNullableTestParams() {
 
     std::vector<bool> interim_index_configs = {true, false};
 
+    std::vector<bool> iterator_configs = {false, true};
+
     for (const auto& [dtype, metric, idx_type] : base_configs) {
         for (int null_pct : null_percents) {
             for (bool enable_interim : interim_index_configs) {
-                params.push_back(
-                    {dtype, metric, idx_type, null_pct, enable_interim});
+                for (bool use_iter : iterator_configs) {
+                    // Skip iterator for sparse vectors (not supported)
+                    if (use_iter && dtype == DataType::VECTOR_SPARSE_U32_F32) {
+                        continue;
+                    }
+                    params.push_back({dtype,
+                                      metric,
+                                      idx_type,
+                                      null_pct,
+                                      enable_interim,
+                                      use_iter});
+                }
             }
         }
     }
@@ -554,42 +601,41 @@ TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
     int64_t batch_size = 2000;
     int64_t num_rounds = 10;
     int64_t topk = 5;
-    int64_t num_queries = 2;
+    // Iterator only supports single query
+    int64_t num_queries = use_iterator ? 1 : 2;
     Timestamp timestamp = 10000000;
 
-    // Prepare search plan
-    std::string search_params_fmt;
+    // Prepare search plan using ScopedSchemaHandle
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    std::vector<char> plan_str;
     if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
-        search_params_fmt = R"(
-            vector_anns:<
-                field_id: {}
-                query_info:<
-                    topk: {}
-                    round_decimal: 3
-                    metric_type: "{}"
-                    search_params: "{{\"drop_ratio_search\": 0.1}}"
-                >
-                placeholder_tag: "$0"
-            >
-        )";
+        plan_str = schema_handle.ParseSearch(
+            "",                               // expression (no filter)
+            "embeddings",                     // vector field name
+            topk,                             // topk
+            metric_type,                      // metric_type
+            R"({"drop_ratio_search": 0.1})",  // search_params
+            3);                               // round_decimal
+    } else if (use_iterator) {
+        plan_str = schema_handle.ParseSearchIterator(
+            "",                           // expression (no filter)
+            "embeddings",                 // vector field name
+            topk,                         // topk
+            metric_type,                  // metric_type
+            R"({"nprobe": 10})",          // search_params
+            static_cast<uint32_t>(topk),  // batch_size
+            "",                           // token (empty)
+            std::nullopt,                 // last_bound (none)
+            3);                           // round_decimal
     } else {
-        search_params_fmt = R"(
-            vector_anns:<
-                field_id: {}
-                query_info:<
-                    topk: {}
-                    round_decimal: 3
-                    metric_type: "{}"
-                    search_params: "{{\"nprobe\": 10}}"
-                >
-                placeholder_tag: "$0"
-            >
-        )";
+        plan_str =
+            schema_handle.ParseSearch("",            // expression (no filter)
+                                      "embeddings",  // vector field name
+                                      topk,          // topk
+                                      metric_type,   // metric_type
+                                      R"({"nprobe": 10})",  // search_params
+                                      3);                   // round_decimal
     }
-
-    auto raw_plan =
-        fmt::format(search_params_fmt, vec.get(), topk, metric_type);
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
 
@@ -681,7 +727,7 @@ TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
         ASSERT_TRUE(insert_record.is_valid_data_exist(vec));
 
         auto valid_data_ptr = insert_record.get_data_base(vec);
-        const auto& valid_data = valid_data_ptr->get_valid_data();
+        auto valid_data = valid_data_ptr->get_valid_data();
 
         // Test search
         auto sr =
@@ -948,19 +994,15 @@ TEST(GrowingTest, SearchVectorArray) {
     query_vec_offsets.push_back(3);
     query_vec_offsets.push_back(10);  // Second query has 7 vectors
 
-    // Create search plan
-    const char* raw_plan = R"(vector_anns: <
-                                  field_id: 101
-                                  query_info: <
-                                    topk: 5
-                                    round_decimal: 3
-                                    metric_type: "MAX_SIM"
-                                    search_params: "{\"nprobe\": 10}"
-                                  >
-                                  placeholder_tag: "$0"
-      >)";
-
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    // Create search plan using ScopedSchemaHandle
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("",           // expression (no filter)
+                                  "array_vec",  // vector field name
+                                  5,            // topk
+                                  "MAX_SIM",    // metric_type
+                                  R"({"nprobe": 10})",  // search_params
+                                  3);                   // round_decimal
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
 

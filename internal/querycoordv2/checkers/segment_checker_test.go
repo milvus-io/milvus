@@ -21,6 +21,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -684,7 +685,9 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriority() {
 	suite.checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 
 	// test getSealedSegmentDiff
-	toLoad, loadPriorities, toRelease, toUpdate := suite.checker.getSealedSegmentDiff(ctx, collectionID, replicaID)
+	// Pre-fetch segment distribution for the test
+	dist := suite.checker.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
+	toLoad, loadPriorities, toRelease, toUpdate := suite.checker.getSealedSegmentDiff(ctx, collectionID, replica, dist)
 
 	// verify results
 	suite.Equal(2, len(toLoad))
@@ -706,12 +709,240 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriority() {
 	// update current target to include segment2
 	suite.checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 	// test again
-	toLoad, loadPriorities, toRelease, toUpdate = suite.checker.getSealedSegmentDiff(ctx, collectionID, replicaID)
+	dist = suite.checker.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
+	toLoad, loadPriorities, toRelease, toUpdate = suite.checker.getSealedSegmentDiff(ctx, collectionID, replica, dist)
 	// verify results
 	suite.Equal(0, len(toLoad))
 	suite.Equal(0, len(loadPriorities))
 	suite.Equal(0, len(toRelease))
 	suite.Equal(0, len(toUpdate))
+}
+
+func (suite *SegmentCheckerTestSuite) TestLoadPriorityHandoff() {
+	ctx := context.Background()
+	collectionID := int64(2)
+	replicaID := int64(2)
+
+	// Create a collection with Loaded status to simulate handoff scenario
+	collection := utils.CreateTestCollectionWithStatus(collectionID, 1, querypb.LoadStatus_Loaded)
+	suite.meta.CollectionManager.PutCollection(ctx, collection)
+
+	// prepare replica with HIGH priority (to verify handoff overrides it to LOW)
+	replica := meta.NewReplicaWithPriority(&querypb.Replica{
+		ID:           replicaID,
+		CollectionID: collectionID,
+		Nodes:        []int64{1, 2},
+	}, commonpb.LoadPriority_HIGH)
+	suite.meta.ReplicaManager.Put(ctx, replica)
+
+	// prepare segments
+	segment1 := &datapb.SegmentInfo{
+		ID:            101,
+		CollectionID:  collectionID,
+		PartitionID:   -1,
+		InsertChannel: "channel2",
+		State:         commonpb.SegmentState_Sealed,
+		NumOfRows:     100,
+		StartPosition: &msgpb.MsgPosition{Timestamp: 100},
+		DmlPosition:   &msgpb.MsgPosition{Timestamp: 200},
+	}
+	// segment2 is a new segment from handoff (not in currentTarget)
+	segment2 := &datapb.SegmentInfo{
+		ID:            102,
+		CollectionID:  collectionID,
+		PartitionID:   -1,
+		InsertChannel: "channel2",
+		State:         commonpb.SegmentState_Sealed,
+		NumOfRows:     100,
+		StartPosition: &msgpb.MsgPosition{Timestamp: 100},
+		DmlPosition:   &msgpb.MsgPosition{Timestamp: 200},
+	}
+
+	// set up current target with only segment1
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		[]*datapb.VchannelInfo{
+			{
+				CollectionID: collectionID,
+				ChannelName:  "channel2",
+			},
+		},
+		[]*datapb.SegmentInfo{segment1},
+		nil,
+	).Once()
+	suite.checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+
+	// set up next target with segment1 and segment2 (segment2 is new from handoff)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		[]*datapb.VchannelInfo{
+			{
+				CollectionID: collectionID,
+				ChannelName:  "channel2",
+			},
+		},
+		[]*datapb.SegmentInfo{segment1, segment2},
+		nil,
+	).Once()
+	suite.checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+
+	// test getSealedSegmentDiff
+	dist := suite.checker.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
+	toLoad, loadPriorities, toRelease, toUpdate := suite.checker.getSealedSegmentDiff(ctx, collectionID, replica, dist)
+
+	// verify results
+	suite.Equal(2, len(toLoad))
+	suite.Equal(2, len(loadPriorities))
+	suite.Equal(0, len(toRelease))
+	suite.Equal(0, len(toUpdate))
+
+	// Find the priorities for each segment
+	var segment1Priority, segment2Priority commonpb.LoadPriority
+	for i, seg := range toLoad {
+		if seg.GetID() == segment1.GetID() {
+			segment1Priority = loadPriorities[i]
+		} else if seg.GetID() == segment2.GetID() {
+			segment2Priority = loadPriorities[i]
+		}
+	}
+
+	// segment1 is in currentTarget but missing in dist -> Recovery scenario -> HIGH priority
+	suite.Equal(commonpb.LoadPriority_HIGH, segment1Priority, "segment1 should have HIGH priority (recovery)")
+	// segment2 is NOT in currentTarget, collection is Loaded AND no refresh in progress (IsRefreshed()=true)
+	// -> Handoff scenario (growing -> sealed flush) -> LOW priority
+	// Even though replica's priority is HIGH, handoff should use LOW
+	suite.Equal(commonpb.LoadPriority_LOW, segment2Priority, "segment2 should have LOW priority (handoff)")
+}
+
+func (suite *SegmentCheckerTestSuite) TestLoadPriorityUserLoad() {
+	ctx := context.Background()
+	collectionID := int64(3)
+	replicaID := int64(3)
+
+	// Create a collection with Loading status to simulate user-initiated load
+	collection := utils.CreateTestCollectionWithStatus(collectionID, 1, querypb.LoadStatus_Loading)
+	suite.meta.CollectionManager.PutCollection(ctx, collection)
+
+	// prepare replica with HIGH priority
+	replica := meta.NewReplicaWithPriority(&querypb.Replica{
+		ID:           replicaID,
+		CollectionID: collectionID,
+		Nodes:        []int64{1, 2},
+	}, commonpb.LoadPriority_HIGH)
+	suite.meta.ReplicaManager.Put(ctx, replica)
+
+	// prepare a new segment (not in currentTarget)
+	segment := &datapb.SegmentInfo{
+		ID:            201,
+		CollectionID:  collectionID,
+		PartitionID:   -1,
+		InsertChannel: "channel3",
+		State:         commonpb.SegmentState_Sealed,
+		NumOfRows:     100,
+		StartPosition: &msgpb.MsgPosition{Timestamp: 100},
+		DmlPosition:   &msgpb.MsgPosition{Timestamp: 200},
+	}
+
+	// Initial Load scenario: only nextTarget exists, no currentTarget
+	// This simulates the real load_collection flow where currentTarget doesn't exist yet
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		[]*datapb.VchannelInfo{
+			{
+				CollectionID: collectionID,
+				ChannelName:  "channel3",
+			},
+		},
+		[]*datapb.SegmentInfo{segment},
+		nil,
+	).Once()
+	suite.checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	// Note: Do NOT call UpdateCollectionCurrentTarget - this is the key difference
+	// In real Initial Load, currentTarget doesn't exist until all segments are loaded
+
+	// test getSealedSegmentDiff
+	dist := suite.checker.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
+	toLoad, loadPriorities, _, _ := suite.checker.getSealedSegmentDiff(ctx, collectionID, replica, dist)
+
+	// verify results
+	suite.Equal(1, len(toLoad))
+	suite.Equal(1, len(loadPriorities))
+
+	// segment is NOT in currentTarget, collection is Loading -> User-initiated load -> Use replica's priority (HIGH)
+	suite.Equal(commonpb.LoadPriority_HIGH, loadPriorities[0], "segment should use replica's priority (HIGH) for user-initiated load")
+}
+
+func (suite *SegmentCheckerTestSuite) TestLoadPriorityRefresh() {
+	ctx := context.Background()
+	collectionID := int64(4)
+	replicaID := int64(4)
+
+	// Create a collection with Loaded status
+	collection := utils.CreateTestCollectionWithStatus(collectionID, 1, querypb.LoadStatus_Loaded)
+	suite.meta.CollectionManager.PutCollection(ctx, collection)
+
+	// Set refresh notifier to simulate refresh in progress (e.g., after import)
+	// This makes IsRefreshed() return false
+	refreshNotifier := make(chan struct{})
+	suite.meta.CollectionManager.UpdateCollection(ctx, collectionID, meta.SetNotifierCollectionOp(refreshNotifier))
+
+	// prepare replica with HIGH priority
+	replica := meta.NewReplicaWithPriority(&querypb.Replica{
+		ID:           replicaID,
+		CollectionID: collectionID,
+		Nodes:        []int64{1, 2},
+	}, commonpb.LoadPriority_HIGH)
+	suite.meta.ReplicaManager.Put(ctx, replica)
+
+	// prepare a new segment (not in currentTarget) - simulates imported segment
+	segment := &datapb.SegmentInfo{
+		ID:            301,
+		CollectionID:  collectionID,
+		PartitionID:   -1,
+		InsertChannel: "channel4",
+		State:         commonpb.SegmentState_Sealed,
+		NumOfRows:     100,
+		StartPosition: &msgpb.MsgPosition{Timestamp: 100},
+		DmlPosition:   &msgpb.MsgPosition{Timestamp: 200},
+	}
+
+	// set up empty current target
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		[]*datapb.VchannelInfo{
+			{
+				CollectionID: collectionID,
+				ChannelName:  "channel4",
+			},
+		},
+		[]*datapb.SegmentInfo{},
+		nil,
+	).Once()
+	suite.checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+
+	// set up next target with the imported segment
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		[]*datapb.VchannelInfo{
+			{
+				CollectionID: collectionID,
+				ChannelName:  "channel4",
+			},
+		},
+		[]*datapb.SegmentInfo{segment},
+		nil,
+	).Once()
+	suite.checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+
+	// test getSealedSegmentDiff
+	dist := suite.checker.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
+	toLoad, loadPriorities, _, _ := suite.checker.getSealedSegmentDiff(ctx, collectionID, replica, dist)
+
+	// verify results
+	suite.Equal(1, len(toLoad))
+	suite.Equal(1, len(loadPriorities))
+
+	// segment is NOT in currentTarget, collection is Loaded BUT refresh is in progress
+	// -> Should use replica's priority (HIGH), NOT LOW
+	// This is the import/refresh scenario where we want user's configured priority
+	suite.Equal(commonpb.LoadPriority_HIGH, loadPriorities[0], "segment should use replica's priority (HIGH) during refresh/import")
 }
 
 func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {
@@ -737,8 +968,17 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {
 		utils.CreateTestSegment(collectionID, partitionID, segmentID3, nodeID1, 1, channel),
 	}
 
+	// Helper to get ch2DelegatorList
+	getCh2DelegatorList := func() map[string][]*meta.DmChannel {
+		delegatorList := checker.dist.ChannelDistManager.GetByCollectionAndFilter(collectionID, meta.WithReplica2Channel(replica))
+		return lo.GroupBy(delegatorList, func(d *meta.DmChannel) string {
+			return d.View.Channel
+		})
+	}
+
 	// Test case 1: No leader views - should skip releasing segments
-	result := checker.filterOutExistedOnLeader(replica, segments)
+	ch2DelegatorList := getCh2DelegatorList()
+	result := checker.filterOutExistedOnLeader(replica, segments, ch2DelegatorList)
 	suite.Equal(0, len(result), "Should return all segments when no leader views")
 
 	// Test case 2: Segment serving on leader - should be filtered out
@@ -753,7 +993,8 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {
 		View: leaderView1,
 	})
 
-	result = checker.filterOutExistedOnLeader(replica, segments)
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutExistedOnLeader(replica, segments, ch2DelegatorList)
 	suite.Len(result, 2, "Should filter out segment serving on leader")
 
 	// Check that segmentID1 is filtered out
@@ -773,7 +1014,8 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {
 		View: leaderView2,
 	})
 
-	result = checker.filterOutExistedOnLeader(replica, segments)
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutExistedOnLeader(replica, segments, ch2DelegatorList)
 	suite.Len(result, 1, "Should filter out segments serving on their respective leaders")
 	suite.Equal(segmentID3, result[0].GetID(), "Only non-serving segment should remain")
 
@@ -789,7 +1031,8 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {
 		View: leaderView3,
 	})
 
-	result = checker.filterOutExistedOnLeader(replica, []*meta.Segment{segments[2]}) // Only test segmentID3
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutExistedOnLeader(replica, []*meta.Segment{segments[2]}, ch2DelegatorList) // Only test segmentID3
 	suite.Len(result, 1, "Segment not serving on its actual node should not be filtered")
 }
 
@@ -833,8 +1076,17 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 	currentTargetVersion := checker.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
 
+	// Helper to get ch2DelegatorList
+	getCh2DelegatorList := func() map[string][]*meta.DmChannel {
+		delegatorList := checker.dist.ChannelDistManager.GetByCollectionAndFilter(collectionID, meta.WithReplica2Channel(replica))
+		return lo.GroupBy(delegatorList, func(d *meta.DmChannel) string {
+			return d.View.Channel
+		})
+	}
+
 	// Test case 1: No leader views - should skip releasing segments
-	result := checker.filterOutSegmentInUse(ctx, replica, segments)
+	ch2DelegatorList := getCh2DelegatorList()
+	result := checker.filterOutSegmentInUse(ctx, replica, segments, ch2DelegatorList)
 	suite.Equal(0, len(result), "Should return all segments when no leader views")
 
 	// Test case 2: Leader view with outdated target version - segment should be filtered (still in use)
@@ -850,7 +1102,8 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 		View: leaderView1,
 	})
 
-	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]})
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]}, ch2DelegatorList)
 	suite.Len(result, 0, "Segment should be filtered out when delegator hasn't updated to latest version")
 
 	// Test case 3: Leader view with current target version - segment should not be filtered
@@ -866,7 +1119,8 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 		View: leaderView2,
 	})
 
-	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]})
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]}, ch2DelegatorList)
 	suite.Len(result, 1, "Segment should not be filtered when delegator has updated to latest version")
 
 	// Test case 4: Leader view with initial target version - segment should not be filtered
@@ -882,7 +1136,8 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 		View: leaderView3,
 	})
 
-	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[1]})
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[1]}, ch2DelegatorList)
 	suite.Len(result, 1, "Segment should not be filtered when leader has initial target version")
 
 	// Test case 5: Multiple leader views with mixed versions - segment should be filtered (still in use)
@@ -915,12 +1170,14 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 		utils.CreateTestSegment(collectionID, partitionID, segmentID2, nodeID2, 1, channel),
 	}
 
-	result = checker.filterOutSegmentInUse(ctx, replica, testSegments)
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutSegmentInUse(ctx, replica, testSegments, ch2DelegatorList)
 	suite.Len(result, 0, "Should release all segments when any delegator hasn't updated")
 
 	// Test case 6: Partition is nil - should release all segments (no partition info)
 	checker.meta.CollectionManager.RemovePartition(ctx, partitionID)
-	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]})
+	ch2DelegatorList = getCh2DelegatorList()
+	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]}, ch2DelegatorList)
 	suite.Len(result, 0, "Should release all segments when partition is nil")
 }
 

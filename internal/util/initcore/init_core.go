@@ -372,6 +372,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	evictionIntervalMs := C.int64_t(params.QueryNodeCfg.TieredEvictionIntervalMs.GetAsInt64())
 	cacheCellUnaccessedSurvivalTime := C.int64_t(params.QueryNodeCfg.CacheCellUnaccessedSurvivalTime.GetAsInt64())
 	loadingResourceFactor := C.float(params.QueryNodeCfg.TieredLoadingResourceFactor.GetAsFloat())
+	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
 	maxDiskUsagePercentage := C.float(diskMaxRatio)
 	diskPath := C.CString(params.LocalStorageCfg.Path.GetValue())
@@ -386,7 +387,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		storageUsageTrackingEnabled,
 		evictionEnabled, cacheTouchWindowMs,
 		backgroundEvictionEnabled, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
-		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath)
+		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath, loadingTimeoutMs)
 
 	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
 	tieredEvictableDiskCacheRatio := params.QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
@@ -549,6 +550,15 @@ func SetupCoreConfigChangelCallback() {
 				return err
 			}
 			UpdateDefaultDeleteDumpBatchSize(size)
+			return nil
+		})
+
+		paramtable.Get().QueryNodeCfg.EnableLatestDeleteSnapshotOptimization.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateEnableLatestDeleteSnapshotOptimization(enable)
 			return nil
 		})
 

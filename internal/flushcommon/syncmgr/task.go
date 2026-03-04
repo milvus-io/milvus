@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -106,9 +107,9 @@ func (t *SyncTask) HandleError(err error) {
 		t.failureCallback(err)
 	}
 
-	metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel, t.level.String()).Inc()
+	metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
 	if !t.pack.isFlush {
-		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel, t.level.String()).Inc()
+		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
 	}
 }
 
@@ -135,24 +136,23 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	columnGroups := t.getColumnGroups(segmentInfo)
 
 	switch segmentInfo.GetStorageVersion() {
-	case storage.StorageV2, storage.StorageV3:
+	case storage.StorageV2:
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
 		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
+			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)
+		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
+	case storage.StorageV3:
+		writer := NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
-		if err != nil {
-			log.Warn("failed to write sync data with storage v2 format", zap.Error(err))
-			return err
-		}
-	// case storage.StorageV3:
-
 	default:
 		writer := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
-		if err != nil {
-			log.Warn("failed to write sync data", zap.Error(err))
-			return err
-		}
+	}
+
+	if err != nil {
+		log.Warn("failed to write sync data with storage v2 format", zap.Error(err))
+		return err
 	}
 
 	getDataCount := func(binlogs ...*datapb.FieldBinlog) int64 {
@@ -164,13 +164,13 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		}
 		return count
 	}
-	metrics.DataNodeWriteDataCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, metrics.InsertLabel, fmt.Sprint(t.collectionID)).Add(float64(t.batchRows))
-	metrics.DataNodeWriteDataCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, metrics.DeleteLabel, fmt.Sprint(t.collectionID)).Add(float64(getDataCount(t.deltaBinlog)))
-	metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource, t.level.String()).Add(float64(t.flushedSize))
+	metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, metrics.InsertLabel, fmt.Sprint(t.collectionID)).Add(float64(t.batchRows))
+	metrics.DataNodeWriteDataCount.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, metrics.DeleteLabel, fmt.Sprint(t.collectionID)).Add(float64(getDataCount(t.deltaBinlog)))
+	metrics.DataNodeFlushedSize.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, t.level.String()).Add(float64(t.flushedSize))
 
-	metrics.DataNodeFlushedRows.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource).Add(float64(t.batchRows))
+	metrics.DataNodeFlushedRows.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource).Add(float64(t.batchRows))
 
-	metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))
+	metrics.DataNodeSave2StorageLatency.WithLabelValues(paramtable.GetStringNodeID(), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))
 
 	if t.metaWriter != nil {
 		err = t.writeMeta(ctx)
@@ -200,9 +200,12 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	log.Info("task done", zap.Int64("flushedSize", t.flushedSize), zap.Duration("timeTaken", t.execTime))
 
 	if !t.pack.isFlush {
-		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, t.level.String()).Inc()
+		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel, t.level.String()).Inc()
 	}
-	metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, t.level.String()).Inc()
+	metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel, t.level.String()).Inc()
+
+	// Publish filesystem metrics after sync task completion
+	storagev2.PublishFilesystemMetricsWithConfig(t.storageConfig)
 
 	return nil
 }

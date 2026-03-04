@@ -14,14 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "common/FieldDataInterface.h"
+#include <algorithm>
+#include <utility>
+#include <vector>
+
+#include "common/Tracer.h"
 #include "common/Vector.h"
 #include "exec/expression/CallExpr.h"
 #include "exec/expression/EvalCtx.h"
-#include "exec/expression/function/FunctionFactory.h"
-
-#include <utility>
-#include <vector>
+#include "opentelemetry/trace/span.h"
 
 namespace milvus {
 namespace exec {

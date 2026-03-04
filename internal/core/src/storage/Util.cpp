@@ -504,6 +504,9 @@ CreateArrowBuilder(DataType data_type,
             return std::make_shared<arrow::FixedSizeBinaryBuilder>(
                 arrow::fixed_size_binary(dim * sizeof(int8)));
         }
+        case DataType::VECTOR_SPARSE_U32_F32: {
+            return std::make_shared<arrow::BinaryBuilder>();
+        }
         case DataType::VECTOR_ARRAY: {
             AssertInfo(dim > 0, "invalid dim value");
             AssertInfo(element_type != DataType::NONE,
@@ -1316,11 +1319,9 @@ FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
     std::vector<std::string> batch_files;
     auto FetchRawData = [&]() {
         auto fds = GetObjectData(cm, batch_files);
-        // Wait for all futures and collect exceptions to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(std::move(fds));
-        for (auto& codec : codecs) {
+        ProcessFuturesInOrder(fds, [&](std::unique_ptr<DataCodec> codec) {
             field_datas.emplace_back(codec->GetFieldData());
-        }
+        });
     };
 
     auto parallel_degree =

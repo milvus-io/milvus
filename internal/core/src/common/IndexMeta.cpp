@@ -14,11 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <memory>
+#include <assert.h>
+#include <math.h>
+#include <stdlib.h>
+#include <ostream>
+#include <utility>
 
 #include "IndexMeta.h"
+#include "NamedType/named_type_impl.hpp"
+#include "common/Types.h"
+#include "pb/segcore.pb.h"
 #include "protobuf_utils.h"
-#include "log/Log.h"
 
 namespace milvus {
 
@@ -49,10 +55,9 @@ CollectionIndexMeta::CollectionIndexMeta(
 CollectionIndexMeta::CollectionIndexMeta(
     const milvus::proto::segcore::CollectionIndexMeta& collectionIndexMeta) {
     max_index_row_cnt_ = collectionIndexMeta.maxindexrowcount();
-    for (auto& filed_index_meta : collectionIndexMeta.index_metas()) {
-        FieldIndexMeta fieldIndexMeta(filed_index_meta);
+    for (const auto& filed_index_meta : collectionIndexMeta.index_metas()) {
         fieldMetas_.emplace(FieldId(filed_index_meta.fieldid()),
-                            fieldIndexMeta);
+                            FieldIndexMeta(filed_index_meta));
     }
 }
 
@@ -76,15 +81,15 @@ std::string
 CollectionIndexMeta::ToString() {
     std::stringstream ss;
     ss << "maxRowCount : {" << max_index_row_cnt_ << "} ";
-    for (auto& filed_meta : fieldMetas_) {
+    for (const auto& filed_meta : fieldMetas_) {
         ss << "FieldId : {" << abs(filed_meta.first.get()) << " ";
         ss << "IndexParams : { ";
-        for (auto& kv : filed_meta.second.GetIndexParams()) {
+        for (const auto& kv : filed_meta.second.GetIndexParams()) {
             ss << kv.first << " : " << kv.second << ", ";
         }
         ss << " }";
         ss << "TypeParams : {";
-        for (auto& kv : filed_meta.second.GetTypeParams()) {
+        for (const auto& kv : filed_meta.second.GetTypeParams()) {
             ss << kv.first << " : " << kv.second << ", ";
         }
         ss << "}";

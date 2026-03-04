@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -31,10 +32,12 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -149,7 +152,8 @@ func packLoadSegmentRequest(
 		loadScope = querypb.LoadScope_Delta
 	}
 
-	schema = applyCollectionMmapSetting(schema, collectionProperties)
+	finalSchema := applyCollectionSettings(schema, collectionProperties)
+	applyIndexWarmupSetting(loadInfo, finalSchema, collectionProperties)
 
 	return &querypb.LoadSegmentsRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -157,8 +161,8 @@ func packLoadSegmentRequest(
 			commonpbutil.WithMsgID(task.ID()),
 		),
 		Infos:          []*querypb.SegmentLoadInfo{loadInfo},
-		Schema:         schema,   // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		LoadMeta:       loadMeta, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		Schema:         finalSchema, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		LoadMeta:       loadMeta,    // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
 		CollectionID:   task.CollectionID(),
 		ReplicaID:      task.ReplicaID(),
 		DeltaPositions: []*msgpb.MsgPosition{loadInfo.GetDeltaPosition()}, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
@@ -209,7 +213,7 @@ func packSubChannelRequest(
 	partitions []int64,
 	targetVersion int64,
 ) *querypb.WatchDmChannelsRequest {
-	schema = applyCollectionMmapSetting(schema, collectionProperties)
+	finalSchema := applyCollectionSettings(schema, collectionProperties)
 	return &querypb.WatchDmChannelsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_WatchDmChannels),
@@ -219,8 +223,8 @@ func packSubChannelRequest(
 		CollectionID:  task.CollectionID(),
 		PartitionIDs:  partitions,
 		Infos:         []*datapb.VchannelInfo{channel.VchannelInfo},
-		Schema:        schema,   // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
-		LoadMeta:      loadMeta, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		Schema:        finalSchema, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
+		LoadMeta:      loadMeta,    // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
 		ReplicaID:     task.ReplicaID(),
 		Version:       time.Now().UnixNano(),
 		IndexInfoList: indexInfo,
@@ -271,11 +275,23 @@ func packUnsubDmChannelRequest(task *ChannelTask, action Action) *querypb.UnsubD
 	}
 }
 
+// applyCollectionSettings applies collection-level mmap and warmup settings to all fields.
+// It combines applyCollectionMmapSetting and applyCollectionWarmupSetting into a single call.
+func applyCollectionSettings(schema *schemapb.CollectionSchema,
+	collectionProperties []*commonpb.KeyValuePair,
+) *schemapb.CollectionSchema {
+	// first clone the schema then apply some settings to it
+	schemaCloned := typeutil.Clone(schema)
+	schemaCloned.Properties = mergeCollectionProps(schemaCloned.Properties, collectionProperties)
+
+	schemaCloned = applyCollectionMmapSetting(schemaCloned, collectionProperties)
+	schemaCloned = applyCollectionWarmupSetting(schemaCloned, collectionProperties)
+	return schemaCloned
+}
+
 func applyCollectionMmapSetting(schema *schemapb.CollectionSchema,
 	collectionProperties []*commonpb.KeyValuePair,
 ) *schemapb.CollectionSchema {
-	schema = typeutil.Clone(schema)
-	schema.Properties = mergeCollectionProps(schema.Properties, collectionProperties)
 	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
 	collectionMmapEnabled, exist := common.IsMmapDataEnabled(collectionProperties...)
 	for _, field := range schema.GetFields() {
@@ -326,4 +342,166 @@ func applyCollectionMmapSetting(schema *schemapb.CollectionSchema,
 		}
 	}
 	return schema
+}
+
+// autoWarmupForNonPKIsolationCollection checks if autoWarmupForNonPKIsolationCollection should be applied for a collection.
+// Returns true when the AutoWarmupForNonPKIsolationCollection config is enabled AND the collection
+// does NOT have partition key isolation.
+func autoWarmupForNonPKIsolationCollection(collectionProperties []*commonpb.KeyValuePair) bool {
+	if !paramtable.Get().QueryCoordCfg.AutoWarmupForNonPKIsolationCollection.GetAsBool() {
+		return false
+	}
+	isPKI, isError := common.IsPartitionKeyIsolationKvEnabled(collectionProperties...)
+	if isError != nil {
+		log.Warn("failed to parse partition key isolation, autowarmup is disabled", zap.Error(isError))
+		return false
+	}
+	if !isPKI {
+		log.Info("collection is not partition key isolated and autowarmup is enabled, force scalar field/index and vector index warmup to sync")
+	}
+	return !isPKI
+}
+
+// applyCollectionWarmupSetting applies collection-level warmup setting to all fields
+// and propagates struct-level warmup to nested fields.
+// Priority: field-level > struct-level > collection-level > autoWarmupForNonPKIsolationCollection (scalar only)
+// Collection-level granular keys: warmup.scalarField, warmup.vectorField
+func applyCollectionWarmupSetting(schema *schemapb.CollectionSchema,
+	collectionProperties []*commonpb.KeyValuePair,
+) *schemapb.CollectionSchema {
+	// Get collection-level granular warmup policies
+	scalarFieldWarmup, scalarFieldExist := common.GetWarmupPolicyByKey(common.WarmupScalarFieldKey, collectionProperties...)
+	vectorFieldWarmup, vectorFieldExist := common.GetWarmupPolicyByKey(common.WarmupVectorFieldKey, collectionProperties...)
+	autoWarmup := autoWarmupForNonPKIsolationCollection(collectionProperties)
+
+	// Apply collection-level warmup to regular fields
+	for _, field := range schema.GetFields() {
+		// field-level warmup setting has higher priority, skip if field already has warmup setting
+		if common.FieldHasWarmupKey(schema, field.GetFieldID()) {
+			continue
+		}
+
+		isVector := typeutil.IsVectorType(field.GetDataType())
+		if isVector && vectorFieldExist {
+			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+				Key:   common.WarmupKey,
+				Value: vectorFieldWarmup,
+			})
+		} else if !isVector && scalarFieldExist {
+			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+				Key:   common.WarmupKey,
+				Value: scalarFieldWarmup,
+			})
+		} else if autoWarmup && !isVector {
+			// autoWarmupForNonPKIsolationCollection fallback: force sync warmup for scalar fields (not vector fields)
+			// vector fields are excluded from autowarmup due to its large size
+			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+				Key:   common.WarmupKey,
+				Value: common.WarmupSync,
+			})
+		}
+	}
+
+	// Apply warmup to struct array fields and their nested fields
+	for _, structField := range schema.GetStructArrayFields() {
+		// Get struct field's warmup setting
+		structFieldWarmup, structHasWarmup := common.GetWarmupPolicy(structField.GetTypeParams()...)
+
+		// Apply warmup setting to fields inside struct
+		for _, field := range structField.GetFields() {
+			// Skip if field already has warmup setting
+			if common.FieldHasWarmupKey(schema, field.GetFieldID()) {
+				continue
+			}
+
+			// Priority: struct field setting > collection setting > autoWarmupForNonPKIsolationCollection
+			if structHasWarmup {
+				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+					Key:   common.WarmupKey,
+					Value: structFieldWarmup,
+				})
+			} else {
+				isVector := typeutil.IsVectorType(field.GetDataType())
+				if isVector && vectorFieldExist {
+					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+						Key:   common.WarmupKey,
+						Value: vectorFieldWarmup,
+					})
+				} else if !isVector && scalarFieldExist {
+					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+						Key:   common.WarmupKey,
+						Value: scalarFieldWarmup,
+					})
+				} else if autoWarmup && !isVector {
+					// autoWarmupForNonPKIsolationCollection fallback for struct nested scalar fields
+					// vector fields are excluded from autowarmup due to its large size
+					field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+						Key:   common.WarmupKey,
+						Value: common.WarmupSync,
+					})
+				}
+			}
+		}
+	}
+	return schema
+}
+
+// applyIndexWarmupSetting applies collection-level index warmup setting to segment index params
+// Index params warmup setting has higher priority than collection-level
+// Priority: index-level > collection-level > autoWarmupForNonPKIsolationCollection (all indexes)
+// Collection-level granular keys: warmup.scalarIndex, warmup.vectorIndex
+func applyIndexWarmupSetting(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema, collectionProperties []*commonpb.KeyValuePair) {
+	// Get collection-level granular warmup policies for indexes
+	scalarIndexWarmup, scalarIndexExist := common.GetWarmupPolicyByKey(common.WarmupScalarIndexKey, collectionProperties...)
+	vectorIndexWarmup, vectorIndexExist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, collectionProperties...)
+	autoWarmup := autoWarmupForNonPKIsolationCollection(collectionProperties)
+
+	if !scalarIndexExist && !vectorIndexExist && !autoWarmup {
+		return
+	}
+
+	// Build fieldID to field schema map for quick lookup
+	fieldMap := make(map[int64]*schemapb.FieldSchema)
+	for _, field := range schema.GetFields() {
+		fieldMap[field.GetFieldID()] = field
+	}
+	// Include nested fields from struct arrays (struct array fields themselves don't support indexes)
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, field := range structField.GetFields() {
+			fieldMap[field.GetFieldID()] = field
+		}
+	}
+
+	for _, indexInfo := range loadInfo.GetIndexInfos() {
+		// Check if index params already has warmup setting
+		_, exist := common.GetWarmupPolicy(indexInfo.IndexParams...)
+		if exist {
+			continue
+		}
+
+		field, ok := fieldMap[indexInfo.GetFieldID()]
+		if !ok {
+			continue
+		}
+
+		isVector := typeutil.IsVectorType(field.GetDataType())
+		if isVector && vectorIndexExist {
+			indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
+				Key:   common.WarmupKey,
+				Value: vectorIndexWarmup,
+			})
+		} else if !isVector && scalarIndexExist {
+			indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
+				Key:   common.WarmupKey,
+				Value: scalarIndexWarmup,
+			})
+		} else if autoWarmup {
+			// autoWarmupForNonPKIsolationCollection fallback: force sync warmup for ALL indexes (scalar and vector)
+			// here vector indexes are included in autowarmup bcz they are critical for search performance
+			indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
+				Key:   common.WarmupKey,
+				Value: common.WarmupSync,
+			})
+		}
+	}
 }

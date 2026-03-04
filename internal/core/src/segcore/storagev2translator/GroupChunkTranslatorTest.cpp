@@ -14,26 +14,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <folly/Conv.h>
+#include <arrow/api.h>
 #include <arrow/record_batch.h>
-#include <arrow/util/key_value_metadata.h>
-#include <gtest/gtest.h>
+#include <parquet/properties.h>
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
-#include "arrow/type_fwd.h"
-#include "common/Schema.h"
-#include "common/Types.h"
-#include "gtest/gtest.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/packed/writer.h"
-#include "milvus-storage/format/parquet/file_reader.h"
-#include "test_utils/DataGen.h"
-#include "segcore/storagev2translator/GroupChunkTranslator.h"
-#include "mmap/ChunkedColumnGroup.h"
-
+#include <filesystem>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
-#include <filesystem>
+
+#include "NamedType/underlying_functionalities.hpp"
+#include "cachinglayer/Utils.h"
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/GroupChunk.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "milvus-storage/common/config.h"
+#include "milvus-storage/common/metadata.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/packed/writer.h"
+#include "mmap/ChunkedColumnGroup.h"
+#include "mmap/Types.h"
+#include "pb/common.pb.h"
+#include "segcore/Collection.h"
+#include "segcore/Utils.h"
+#include "segcore/storagev2translator/GroupCTMeta.h"
+#include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -42,10 +59,6 @@ using namespace milvus::segcore::storagev2translator;
 class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
     void
     SetUp() override {
-        auto conf = milvus_storage::ArrowFileSystemConfig();
-        conf.storage_type = "local";
-        conf.root_path = path_;
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
         fs_ = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
         schema_ = CreateTestSchema();
@@ -94,7 +107,7 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
     SchemaPtr schema_;
     milvus_storage::ArrowFileSystemPtr fs_;
     std::shared_ptr<arrow::Schema> arrow_schema_;
-    std::string path_ = "/tmp";
+    std::string path_ = TestLocalPath;
 
     std::vector<std::string> paths_;
     int64_t segment_id_ = 0;
@@ -102,7 +115,7 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
 
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     auto temp_dir =
-        std::filesystem::temp_directory_path() / "gctt_test_with_mmap";
+        std::filesystem::path(TestLocalPath) / "gctt_test_with_mmap";
     std::filesystem::create_directory(temp_dir);
 
     auto use_mmap = GetParam();
@@ -118,7 +131,8 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
         use_mmap,
         true,
         schema_->get_field_ids().size(),
-        milvus::proto::common::LoadPriority::LOW);
+        milvus::proto::common::LoadPriority::LOW,
+        /* warmup_policy */ "");
 
     // num cells - get the expected number from the file directly
     auto reader_result =
@@ -170,7 +184,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     for (size_t i = 0; i < translator->num_cells(); ++i) {
         cids.push_back(i);
     }
-    auto cells = translator->get_cells(cids);
+    auto cells = translator->get_cells(nullptr, cids);
     EXPECT_EQ(cells.size(), cids.size());
 
     // Test DataByteSize from meta
@@ -269,7 +283,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     }
 
     auto temp_dir =
-        std::filesystem::temp_directory_path() / "gctt_test_multiple_files";
+        std::filesystem::path(TestLocalPath) / "gctt_test_multiple_files";
     std::filesystem::create_directory(temp_dir);
     auto column_group_info = FieldDataInfo(0, total_rows, temp_dir.string());
 
@@ -282,15 +296,16 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         use_mmap,
         true,
         schema_->get_field_ids().size(),
-        milvus::proto::common::LoadPriority::LOW);
+        milvus::proto::common::LoadPriority::LOW,
+        /* warmup_policy */ "");
 
     // Test total number of cells across all files
+    // Cells never span files, so count per-file ceil
     int64_t expected_total_cells = 0;
     for (auto row_groups : expected_row_groups_per_file) {
-        expected_total_cells += row_groups;
+        expected_total_cells +=
+            (row_groups + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
     }
-    expected_total_cells =
-        (expected_total_cells + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
     EXPECT_EQ(translator->num_cells(), expected_total_cells);
 
     // Test get_file_and_row_group_offset for global row group indices across
@@ -315,7 +330,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     for (size_t i = 0; i < std::min(num_cells, static_cast<size_t>(2)); ++i) {
         first_cids.push_back(i);
     }
-    auto first_cells = translator->get_cells(first_cids);
+    auto first_cells = translator->get_cells(nullptr, first_cids);
     EXPECT_EQ(first_cells.size(), first_cids.size());
     int i = 0;
     for (const auto& [cid, chunk] : first_cells) {
@@ -328,7 +343,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     for (size_t j = num_cells; j > 0; --j) {
         reverse_cids.push_back(j - 1);
     }
-    auto cells = translator->get_cells(reverse_cids);
+    auto cells = translator->get_cells(nullptr, reverse_cids);
     // Returned cids should be in the same order as input (reverse order)
     i = 0;
     for (const auto& [cid, chunk] : cells) {
@@ -364,9 +379,8 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         auto usage = translator->estimated_byte_size_of_cell(cid).first;
 
         // Calculate expected size by summing all row groups in this cell
-        size_t rg_start = cid * kRowGroupsPerCell;
-        size_t rg_end =
-            std::min(rg_start + kRowGroupsPerCell, total_row_groups);
+        auto [rg_start, rg_end] = static_cast<GroupCTMeta*>(translator->meta())
+                                      ->get_row_group_range(cid);
         int64_t expected_size = 0;
         for (size_t rg_idx = rg_start; rg_idx < rg_end; ++rg_idx) {
             auto [file_idx, local_rg_idx] =

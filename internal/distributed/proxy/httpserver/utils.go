@@ -174,6 +174,81 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 	return filter, nil
 }
 
+// convertIDsToSchemapbIDs converts a slice of interface{} (JSON ids) to schemapb.IDs
+// based on the primary key field type
+func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (*schemapb.IDs, error) {
+	if len(ids) == 0 {
+		return nil, errors.New("ids array cannot be empty")
+	}
+
+	switch pkField.DataType {
+	case schemapb.DataType_Int64:
+		int64IDs := make([]int64, 0, len(ids))
+		for i, id := range ids {
+			var int64ID int64
+			switch v := id.(type) {
+			case int64:
+				int64ID = v
+			case int:
+				int64ID = int64(v)
+			case float64:
+				// JSON numbers are decoded as float64
+				// Check if the float has a fractional part
+				if v != math.Trunc(v) {
+					return nil, fmt.Errorf("invalid int64 id at index %d: %v has fractional part", i, v)
+				}
+				int64ID = int64(v)
+			case string:
+				// Try to parse string as int64
+				parsed, err := strconv.ParseInt(v, 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("invalid int64 id at index %d: %v, error: %v", i, id, err)
+				}
+				int64ID = parsed
+			default:
+				return nil, fmt.Errorf("invalid id type at index %d: expected int64, got %T", i, id)
+			}
+			int64IDs = append(int64IDs, int64ID)
+		}
+		return &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: int64IDs,
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_VarChar:
+		stringIDs := make([]string, 0, len(ids))
+		for i, id := range ids {
+			var stringID string
+			switch v := id.(type) {
+			case string:
+				stringID = v
+			case int64, int, float64:
+				// Convert number to string
+				stringID = fmt.Sprintf("%v", v)
+			default:
+				return nil, fmt.Errorf("invalid id type at index %d: expected string, got %T", i, id)
+			}
+			if stringID == "" {
+				return nil, fmt.Errorf("empty string id at index %d", i)
+			}
+			stringIDs = append(stringIDs, stringID)
+		}
+		return &schemapb.IDs{
+			IdField: &schemapb.IDs_StrId{
+				StrId: &schemapb.StringArray{
+					Data: stringIDs,
+				},
+			},
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported primary key type: %s", pkField.DataType.String())
+	}
+}
+
 // --------------------- collection details --------------------- //
 
 func printFields(fields []*schemapb.FieldSchema) []gin.H {

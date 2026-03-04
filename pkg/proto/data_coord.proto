@@ -116,6 +116,14 @@ service DataCoord {
   rpc RestoreSnapshot(RestoreSnapshotRequest) returns(RestoreSnapshotResponse){}
   rpc GetRestoreSnapshotState(GetRestoreSnapshotStateRequest) returns(GetRestoreSnapshotStateResponse){}
   rpc ListRestoreSnapshotJobs(ListRestoreSnapshotJobsRequest) returns(ListRestoreSnapshotJobsResponse){}
+
+  // batch update manifest
+  rpc BatchUpdateManifest(BatchUpdateManifestRequest) returns(common.Status){}
+
+  // External Table Refresh APIs
+  rpc RefreshExternalCollection(RefreshExternalCollectionRequest) returns(RefreshExternalCollectionResponse){}
+  rpc GetRefreshExternalCollectionProgress(GetRefreshExternalCollectionProgressRequest) returns(GetRefreshExternalCollectionProgressResponse){}
+  rpc ListRefreshExternalCollectionJobs(ListRefreshExternalCollectionJobsRequest) returns(ListRefreshExternalCollectionJobsResponse){}
 }
 
 service DataNode {
@@ -234,6 +242,7 @@ message AllocSegmentRequest {
   string vchannel = 4;
   int64 storage_version = 5;
   bool is_created_by_streaming = 6;
+  int32 schema_version = 7;
 }
 
 message AllocSegmentResponse {
@@ -419,7 +428,6 @@ message SegmentInfo {
   // For example, segments that have been clustered but haven't undergone stats yet.
   bool is_invisible = 28;
 
-
   // jsonKeyStats is used to record json key index for fields.
   map<int64, JsonKeyStats> jsonKeyStats = 29;
     // This field is used to indicate that the segment is created by streaming service.
@@ -438,6 +446,7 @@ message SegmentInfo {
   // expirQuantiles records the expiration timestamptz values of the segment
   // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
   repeated int64 expirQuantiles = 33;
+  int32 schema_version = 34;
 }
 
 message SegmentStartPosition {
@@ -526,6 +535,7 @@ message TextIndexStats {
   int64 log_size = 4;
   int64 memory_size = 5;
   int64 buildID = 6;
+  int32 current_scalar_index_version = 7;
 }
 
 message JsonKeyStats {
@@ -654,6 +664,7 @@ enum CompactionType {
   SortCompaction = 9;
   PartitionKeySortCompaction = 10;
   ClusteringPartitionKeySortCompaction = 11;
+  BackfillCompaction = 12;
 }
 
 message CompactionStateRequest {
@@ -731,6 +742,7 @@ message CompactionPlan {
   int32 current_scalar_index_version = 23;
   repeated common.KeyValuePair plugin_context = 29;
   repeated internal.FileResourceInfo file_resources = 30;
+  repeated schema.FunctionSchema functions = 31;
 }
 
 message CompactionSegment {
@@ -1030,6 +1042,13 @@ message CopySegmentSource {
 
   // JSON key index files (for JSON index)
   map<int64, JsonKeyStats> json_key_index_files = 10;  // json key index files by field ID
+
+  // StorageV2 manifest (JSON encoded)
+  string manifest_path = 11;
+
+  // Storage version: 0=V1(legacy binlog), 2=V2(packed parquet), 3=V3(loon manifest)
+  // When storage_version >= 3, binlog paths must be resolved from manifest_path
+  int64 storage_version = 12;
 }
 
 message CopySegmentTarget {
@@ -1105,6 +1124,9 @@ message CopySegmentResult {
 
   // JSON Key indexes - map<int64, JsonKeyStats>
   map<int64, JsonKeyStats> json_key_index_infos = 9;
+
+  // Transformed manifest path for target segment
+  string manifest_path = 10;
 }
 
 // CopySegmentTask represents a copy segment task that copies segment data and optionally indexes
@@ -1334,6 +1356,7 @@ message CompactionTask{
   int64 max_size = 26;
   repeated int64 tmpSegments = 27;
   IDRange pre_allocated_segmentIDs = 28;
+  repeated schema.FunctionSchema diff_functions = 29;
 }
 
 message PartitionStatsInfo {
@@ -1377,6 +1400,72 @@ message QueryExternalCollectionRequest {
 
 message DropExternalCollectionRequest {
   int64 taskID = 1;
+}
+
+// External Table Refresh Messages
+
+message RefreshExternalCollectionRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  string collection_name = 3;
+  string external_source = 4;    // Optional: new external source path
+  string external_spec = 5;      // Optional: new external spec configuration
+}
+
+message RefreshExternalCollectionResponse {
+  common.Status status = 1;
+  int64 job_id = 2;
+}
+
+message GetRefreshExternalCollectionProgressRequest {
+  common.MsgBase base = 1;
+  int64 job_id = 2;
+}
+
+// ExternalCollectionRefreshJob - Job level abstraction for API tracking and user queries
+// A Job represents a user-initiated refresh operation and can contain multiple tasks (1:N)
+message ExternalCollectionRefreshJob {
+  int64 job_id = 1;              // Unique job identifier for API tracking
+  int64 collection_id = 2;
+  string collection_name = 3;
+  string external_source = 4;
+  string external_spec = 5;
+  index.JobState state = 6;      // Aggregated state from all tasks
+  string fail_reason = 7;        // Error message if failed
+  int64 start_time = 8;          // Job start timestamp (Unix ms)
+  int64 end_time = 9;            // Job end timestamp (Unix ms, 0 if not completed)
+  int64 progress = 10;           // Aggregated progress percentage (0-100)
+  repeated int64 task_ids = 11;  // Task IDs belonging to this job
+}
+
+// ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution
+// A Task is an execution unit managed by the scheduler, belonging to a parent Job
+message ExternalCollectionRefreshTask {
+  int64 task_id = 1;             // Unique task identifier
+  int64 job_id = 2;              // Parent job ID
+  int64 collection_id = 3;
+  int64 version = 4;             // Task version for CAS
+  int64 node_id = 5;             // Assigned worker node
+  index.JobState state = 6;      // Task execution state
+  string fail_reason = 7;
+  string external_source = 8;    // Copied from job for worker execution
+  string external_spec = 9;      // Copied from job for worker execution
+  int64 progress = 10;           // Task-level progress (0-100)
+}
+
+message GetRefreshExternalCollectionProgressResponse {
+  common.Status status = 1;
+  ExternalCollectionRefreshJob job_info = 2;
+}
+
+message ListRefreshExternalCollectionJobsRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+}
+
+message ListRefreshExternalCollectionJobsResponse {
+  common.Status status = 1;
+  repeated ExternalCollectionRefreshJob jobs = 2;
 }
 
 // Note: QueryExternalCollectionRequest and DropExternalCollectionRequest are kept
@@ -1483,6 +1572,7 @@ message RestoreSnapshotInfo {
   int32 progress = 5; // progress percentage (0-100)
   string reason = 6; // error reason if failed
   uint64 time_cost = 7; // time cost in milliseconds
+  uint64 start_time = 8; // start time in milliseconds since Unix epoch
 }
 
 message DescribeSnapshotRequest {
@@ -1538,4 +1628,15 @@ message ListRestoreSnapshotJobsRequest {
 message ListRestoreSnapshotJobsResponse {
   common.Status status = 1;
   repeated RestoreSnapshotInfo jobs = 2; // list of restore snapshot jobs
+}
+
+message BatchUpdateManifestRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  repeated BatchUpdateManifestItem items = 3;
+}
+
+message BatchUpdateManifestItem {
+  int64 segment_id = 1;
+  int64 manifest_version = 2;
 }

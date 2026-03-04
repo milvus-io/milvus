@@ -14,6 +14,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/properties.h"
 #include "log/Log.h"
 
 namespace milvus::storage {
@@ -26,79 +27,47 @@ StorageV2FSCache::Instance() {
 
 milvus_storage::ArrowFileSystemPtr
 StorageV2FSCache::Get(const Key& key) {
-    {
-        std::shared_lock lck(mutex_);
-        auto it = concurrent_map_.find(key);
-        if (it != concurrent_map_.end()) {
-            return it->second.second.get();
-        }
-    }
+    // Convert Key to api::Properties and delegate to FilesystemCache
+    // This ensures all filesystems are managed by a single cache with metrics support
+    milvus_storage::api::Properties props;
+    props[PROPERTY_FS_ADDRESS] = key.address;
+    props[PROPERTY_FS_BUCKET_NAME] = key.bucket_name;
+    props[PROPERTY_FS_ACCESS_KEY_ID] = key.access_key_id;
+    props[PROPERTY_FS_ACCESS_KEY_VALUE] = key.access_key_value;
+    props[PROPERTY_FS_ROOT_PATH] = key.root_path;
+    props[PROPERTY_FS_STORAGE_TYPE] = key.storage_type;
+    props[PROPERTY_FS_CLOUD_PROVIDER] = key.cloud_provider;
+    props[PROPERTY_FS_IAM_ENDPOINT] = key.iam_endpoint;
+    props[PROPERTY_FS_LOG_LEVEL] = key.log_level;
+    props[PROPERTY_FS_REGION] = key.region;
+    props[PROPERTY_FS_USE_SSL] = key.useSSL;
+    props[PROPERTY_FS_SSL_CA_CERT] = key.sslCACert;
+    props[PROPERTY_FS_USE_IAM] = key.useIAM;
+    props[PROPERTY_FS_USE_VIRTUAL_HOST] = key.useVirtualHost;
+    props[PROPERTY_FS_REQUEST_TIMEOUT_MS] = key.requestTimeoutMs;
+    props[PROPERTY_FS_GCP_NATIVE_WITHOUT_AUTH] = key.gcp_native_without_auth;
+    props[PROPERTY_FS_GCP_CREDENTIAL_JSON] = key.gcp_credential_json;
+    props[PROPERTY_FS_USE_CUSTOM_PART_UPLOAD] = key.use_custom_part_upload;
+    props[PROPERTY_FS_MAX_CONNECTIONS] = key.max_connections;
 
-    std::promise<milvus_storage::ArrowFileSystemPtr> p;
-    std::shared_future<milvus_storage::ArrowFileSystemPtr> f = p.get_future();
+    LOG_INFO(
+        "StorageV2FSCache::Get: address={}, bucket={}, root_path={}, "
+        "storage_type={}",
+        key.address,
+        key.bucket_name,
+        key.root_path,
+        key.storage_type);
 
-    std::shared_lock lck(mutex_);
-    auto [iter, inserted] =
-        concurrent_map_.emplace(key, Value(std::move(p), f));
-    lck.unlock();
+    auto result = milvus_storage::FilesystemCache::getInstance().get(props, "");
 
-    if (!inserted) {
-        std::shared_lock lck(mutex_);
-        // double check: avoid iter has been erased by other thread
-        auto it = concurrent_map_.find(key);
-        if (it != concurrent_map_.end()) {
-            return it->second.second.get();
-        }
-        lck.unlock();
-        // retry if already delete
-        return Get(key);
-    }
-
-    try {
-        milvus_storage::ArrowFileSystemConfig conf;
-        conf.address = std::string(key.address);
-        conf.bucket_name = std::string(key.bucket_name);
-        conf.access_key_id = std::string(key.access_key_id);
-        conf.access_key_value = std::string(key.access_key_value);
-        conf.root_path = std::string(key.root_path);
-        conf.storage_type = std::string(key.storage_type);
-        conf.cloud_provider = std::string(key.cloud_provider);
-        conf.iam_endpoint = std::string(key.iam_endpoint);
-        conf.log_level = std::string(key.log_level);
-        conf.region = std::string(key.region);
-        conf.use_ssl = key.useSSL;
-        conf.ssl_ca_cert = std::string(key.sslCACert);
-        conf.use_iam = key.useIAM;
-        conf.use_virtual_host = key.useVirtualHost;
-        conf.request_timeout_ms = key.requestTimeoutMs;
-        conf.gcp_credential_json = std::string(key.gcp_credential_json);
-        conf.use_custom_part_upload = key.use_custom_part_upload;
-        conf.max_connections = key.max_connections;
-
-        auto result = milvus_storage::CreateArrowFileSystem(conf);
-
-        if (!result.ok()) {
-            LOG_WARN("create arrow file system failed, error: {}",
-                     result.status().ToString());
-            iter->second.first.set_value(nullptr);
-            std::unique_lock lck(mutex_);
-            concurrent_map_.unsafe_erase(iter);
-            return nullptr;
-        }
-
-        auto fs = result.ValueOrDie();
-        iter->second.first.set_value(fs);
-        return fs;
-    } catch (...) {
-        try {
-            iter->second.first.set_exception(std::current_exception());
-        } catch (...) {
-        }
-
-        std::unique_lock lck(mutex_);
-        concurrent_map_.unsafe_erase(iter);
+    if (!result.ok()) {
+        LOG_WARN("create arrow file system failed, error: {}",
+                 result.status().ToString());
         return nullptr;
     }
+
+    LOG_INFO("StorageV2FSCache::Get: got filesystem successfully");
+    return result.ValueOrDie();
 }
 
 }  // namespace milvus::storage

@@ -9,18 +9,46 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <boost/filesystem.hpp>
-#include "common/Slice.h"  // for INDEX_FILE_SLICE_META and Disassemble
+#include <string.h>
+#include <algorithm>
+#include <cstdint>
+#include <exception>
+#include <list>
+#include <map>
+#include <utility>
+
+#include "boost/filesystem/directory.hpp"
+#include "boost/filesystem/operations.hpp"
+#include "boost/filesystem/path.hpp"
+#include "boost/iterator/iterator_facade.hpp"
 #include "common/EasyAssert.h"
-#include "log/Log.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include "pb/schema.pb.h"
-#include "index/Utils.h"
+#include "common/FieldDataInterface.h"
+#include "common/Geometry.h"
+#include "common/Slice.h"  // for INDEX_FILE_SLICE_META and Disassemble
+#include "common/Tracer.h"
+#include "folly/SharedMutex.h"
+#include "geos_c.h"
+#include "glog/logging.h"
 #include "index/RTreeIndex.h"
+#include "index/Utils.h"
+#include "knowhere/dataset.h"
+#include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "storage/DataCodec.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
 
 namespace milvus::index {
 
-constexpr const char* TMP_RTREE_INDEX_PREFIX = "/tmp/milvus/rtree-index/";
+static std::string
+GetRTreeTempPrefix() {
+    auto& lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance();
+    return lcm.GetChunkManager()->GetRootPath() + "/rtree-index/";
+}
 
 // helper to check suffix
 static inline bool
@@ -38,7 +66,7 @@ RTreeIndex<T>::InitForBuildIndex(bool is_growing) {
         path_ = "";
     } else {
         auto prefix = disk_file_manager_->GetIndexIdentifier();
-        path_ = std::string(TMP_RTREE_INDEX_PREFIX) + prefix;
+        path_ = GetRTreeTempPrefix() + prefix;
         boost::filesystem::create_directories(path_);
         index_file_path = path_ + "/index_file";  // base path (no ext)
         if (boost::filesystem::exists(index_file_path + ".bgi")) {
@@ -436,7 +464,7 @@ RTreeIndex<T>::NotIn(size_t n, const T* values) {
 
 template <typename T>
 const TargetBitmap
-RTreeIndex<T>::Range(T value, OpType op) {
+RTreeIndex<T>::Range(const T& value, OpType op) {
     ThrowInfo(ErrorCode::NotImplemented,
               "Range(value, op) not supported for RTreeIndex");
     return {};
@@ -444,9 +472,9 @@ RTreeIndex<T>::Range(T value, OpType op) {
 
 template <typename T>
 const TargetBitmap
-RTreeIndex<T>::Range(T lower_bound_value,
+RTreeIndex<T>::Range(const T& lower_bound_value,
                      bool lb_inclusive,
-                     T upper_bound_value,
+                     const T& upper_bound_value,
                      bool ub_inclusive) {
     ThrowInfo(ErrorCode::NotImplemented,
               "Range(lower, upper) not supported for RTreeIndex");

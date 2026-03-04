@@ -9,14 +9,15 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <memory>
-
-#include "future_c.h"
-#include "folly/init/Init.h"
-#include "Future.h"
 #include "Executor.h"
+#include "Future.h"
+#include "folly/executors/CPUThreadPoolExecutor.h"
+#include "future_c.h"
+#include "futures/future_c_types.h"
+#include "glog/logging.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
+#include "prometheus/gauge.h"
 
 extern "C" void
 future_cancel(CFuture* future) {

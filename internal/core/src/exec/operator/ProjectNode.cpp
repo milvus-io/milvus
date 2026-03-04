@@ -15,7 +15,16 @@
 // limitations under the License.
 
 #include "ProjectNode.h"
+
+#include <algorithm>
+#include <utility>
+
+#include "common/EasyAssert.h"
+#include "exec/QueryContext.h"
 #include "exec/expression/Utils.h"
+#include "exec/operator/Operator.h"
+#include "plan/PlanNode.h"
+#include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
 
 namespace milvus {

@@ -15,10 +15,23 @@
 // limitations under the License.
 
 #include "storage/IndexData.h"
-#include "common/EasyAssert.h"
+
+#include <any>
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <utility>
+
+#include "PluginInterface.h"
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
 #include "log/Log.h"
+#include "pb/schema.pb.h"
 #include "storage/Event.h"
+#include "storage/PayloadReader.h"
 #include "storage/PluginLoader.h"
 
 namespace milvus::storage {

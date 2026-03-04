@@ -10,28 +10,57 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/Utils.h"
-#include <arrow/record_batch.h>
 
+#include <cxxabi.h>
+#include <folly/ExceptionWrapper.h>
+#include <algorithm>
+#include <cstdint>
+#include <exception>
 #include <future>
 #include <memory>
+#include <optional>
 #include <string>
+#include <unordered_set>
+#include <variant>
 #include <vector>
 
+#include "arrow/api.h"
+#include "arrow/io/memory.h"
 #include "cachinglayer/Manager.h"
-#include "common/type_c.h"
-#include "common/Common.h"
+#include "cachinglayer/Translator.h"
+#include "common/Channel.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
+#include "common/FieldMeta.h"
+#include "common/JsonCastType.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "folly/FBVector.h"
+#include "glog/logging.h"
+#include "google/protobuf/descriptor.h"
+#include "index/Index.h"
+#include "index/IndexInfo.h"
+#include "index/Meta.h"
 #include "index/ScalarIndex.h"
+#include "index/Utils.h"
+#include "knowhere/sparse_utils.h"
 #include "log/Log.h"
-#include "segcore/storagev1translator/SealedIndexTranslator.h"
-#include "segcore/storagev1translator/V1SealedIndexTranslator.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "nlohmann/json.hpp"
+#include "parquet/arrow/reader.h"
+#include "pb/schema.pb.h"
+#include "segcore/ConcurrentVector.h"
+#include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
+#include "segcore/storagev1translator/SealedIndexTranslator.h"
+#include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
+#include "storage/FileManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
+#include "storage/Types.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore {
@@ -1232,12 +1261,10 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
 
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority), false);
-        // Wait for all futures to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(std::move(codec_futures));
-        for (auto& codec : codecs) {
-            auto reader = codec->GetReader();
-            channel->push(reader);
-        }
+        storage::ProcessFuturesInOrder(
+            codec_futures, [&](std::unique_ptr<storage::DataCodec> codec) {
+                channel->push(codec->GetReader());
+            });
         channel->close();
     } catch (std::exception& e) {
         LOG_INFO("failed to load data from remote: {}", e.what());
@@ -1254,12 +1281,10 @@ LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                        .GetRemoteChunkManager();
         auto codec_futures = storage::GetObjectData(
             rcm.get(), remote_files, milvus::PriorityForLoad(priority));
-        // Wait for all futures to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(std::move(codec_futures));
-        for (auto& codec : codecs) {
-            auto field_data = codec->GetFieldData();
-            channel->push(field_data);
-        }
+        storage::ProcessFuturesInOrder(
+            codec_futures, [&](std::unique_ptr<storage::DataCodec> codec) {
+                channel->push(codec->GetFieldData());
+            });
         channel->close();
     } catch (std::exception& e) {
         LOG_INFO("failed to load data from remote: {}", e.what());
@@ -1283,14 +1308,32 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
     return first;
 }
 
-// Get the globally configured cache warmup policy for the given content type.
+// Get the cache warmup policy for the given content type.
+// If warmup_policy is not empty, parse it and return the corresponding policy.
+// If warmup_policy is empty, fall back to the global config.
 CacheWarmupPolicy
-getCacheWarmupPolicy(bool is_vector, bool is_index, bool in_load_list) {
-    auto& manager = milvus::cachinglayer::Manager::GetInstance();
+getCacheWarmupPolicy(const std::string& warmup_policy,
+                     bool is_vector,
+                     bool is_index,
+                     bool in_load_list) {
     // if field not in load list(hint), disable warmup
     if (!in_load_list) {
         return CacheWarmupPolicy::CacheWarmupPolicy_Disable;
     }
+
+    // If user specified a warmup policy, use it
+    if (!warmup_policy.empty()) {
+        if (warmup_policy == "disable") {
+            return CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+        } else if (warmup_policy == "sync") {
+            return CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+        }
+        // Unknown policy string, should not happen, been checked by milvus proxy side
+        AssertInfo(false, "Unknown warmup policy '{}'", warmup_policy);
+    }
+
+    // Fall back to global config
+    auto& manager = milvus::cachinglayer::Manager::GetInstance();
     if (is_index) {
         return is_vector ? manager.getVectorIndexCacheWarmupPolicy()
                          : manager.getScalarIndexCacheWarmupPolicy();
@@ -1313,7 +1356,8 @@ getCellDataType(bool is_vector, bool is_index) {
 
 void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
-              milvus::segcore::LoadIndexInfo* load_index_info) {
+              milvus::segcore::LoadIndexInfo* load_index_info,
+              milvus::OpContext* op_ctx) {
     auto& index_params = load_index_info->index_params;
     auto field_type = load_index_info->field_type;
     auto engine_version = load_index_info->index_engine_version;
@@ -1420,7 +1464,7 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
 
     load_index_info->cache_index =
         milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-            std::move(translator));
+            std::move(translator), op_ctx);
 }
 
 FieldDataPtr
@@ -1549,6 +1593,6 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
         }
     }
 
-    return std::move(ret);
+    return ret;
 }
 }  // namespace milvus::segcore

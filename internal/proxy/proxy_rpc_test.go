@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -23,9 +21,8 @@ import (
 func TestProxyRpcLimit(t *testing.T) {
 	var err error
 
-	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
+	path := t.TempDir() + "/rocksmq"
 	t.Setenv("ROCKSMQ_PATH", path)
-	defer os.RemoveAll(path)
 
 	ctx := GetContext(context.Background(), "root:123456")
 	localMsg := true

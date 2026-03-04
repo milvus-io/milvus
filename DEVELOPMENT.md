@@ -6,10 +6,12 @@ This document will help to set up your Milvus development environment and to run
 
 - [Development](#development)
 - [Table of contents](#table-of-contents)
+  - [Quick Start](#quick-start)
   - [Building Milvus with Docker](#building-milvus-with-docker)
   - [Building Milvus on a local OS/shell environment](#building-milvus-on-a-local-osshell-environment)
     - [Hardware Requirements](#hardware-requirements)
     - [Software Requirements](#software-requirements)
+      - [Supported Platforms](#supported-platforms)
       - [Prerequisites](#prerequisites)
       - [Installing Dependencies](#installing-dependencies)
       - [Caveats](#caveats)
@@ -27,6 +29,20 @@ This document will help to set up your Milvus development environment and to run
       - [With docker](#with-docker)
   - [GitHub Flow](#github-flow)
   - [FAQs](#faqs)
+
+## Quick Start
+
+For a clean machine, you can build Milvus with just 2 commands:
+
+```bash
+# Step 1: Install Go (>= 1.21) first, then install all dependencies
+./scripts/install_deps.sh
+
+# Step 2: Build Milvus
+make
+```
+
+The compiled binary will be at `bin/milvus`.
 
 ## Building Milvus with Docker
 
@@ -47,14 +63,33 @@ The following specification (either physical or virtual machine resources) is re
 
 ### Software Requirements
 
-All Linux distributions are available for Milvus development. However a majority of our contributor worked with Ubuntu or CentOS systems, with a small portion of Mac (both x86_64 and Apple Silicon) contributors. If you would like Milvus to build and run on other distributions, you are more than welcome to file an issue and contribute!
+#### Supported Platforms
 
-Here's a list of verified OS types where Milvus can successfully build and run:
+| Platform | Versions | Architecture | Notes |
+|----------|----------|--------------|-------|
+| macOS | 12, 13, 14, 15 | Intel (x86_64), Apple Silicon (arm64) | Requires Homebrew |
+| Ubuntu | 20.04, 22.04, 24.04 | x86_64, arm64 | |
+| Rocky Linux | 8, 9 | x86_64, arm64 | RHEL compatible |
+| Amazon Linux | 2023 | x86_64, arm64 | |
+| CentOS | 7 (legacy) | x86_64 | EOL, use Rocky Linux instead |
 
-- Debian/Ubuntu
-- Amazon Linux
-- MacOS (x86_64)
-- MacOS (Apple Silicon)
+#### Prerequisites
+
+**Compiler Requirements:**
+
+| Platform | Compiler | Supported Versions |
+|----------|----------|-------------------|
+| macOS | LLVM/Clang | 14, 15, 16, 17, 18 |
+| Linux | GCC | 9, 10, 11, 12, 13, 14 |
+
+**Tool Requirements:**
+
+| Tool | Minimum Version | Notes |
+|------|----------------|-------|
+| Go | 1.21 | Required. Install from https://go.dev/dl/ |
+| CMake | 3.26 | Auto-installed by install_deps.sh |
+| Conan | 1.64.1 | Auto-installed. Conan 2.x not supported |
+| Rust | 1.89 | Auto-installed by install_deps.sh |
 
 ### Compiler Setup
 
@@ -65,20 +100,20 @@ You can use Vscode to integrate C++ and Go together. Please replace user.setting
     "go.toolsEnvVars": {
         "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:${workspaceFolder}/internal/core/output/lib/pkgconfig:${workspaceFolder}/internal/core/output/lib64/pkgconfig",
         "LD_LIBRARY_PATH": "${env:LD_LIBRARY_PATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
-        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
+        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64"
     },
     "go.testEnvVars": {
         "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:${workspaceFolder}/internal/core/output/lib/pkgconfig:${workspaceFolder}/internal/core/output/lib64/pkgconfig",
         "LD_LIBRARY_PATH": "${env:LD_LIBRARY_PATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
-        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
+        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64"
     },
     "go.buildFlags": [
-        "-ldflags=-r=/Users/zilliz/workspace/milvus/internal/core/output/lib"
+        "-ldflags=-r=${workspaceFolder}/internal/core/output/lib"
     ],
     "terminal.integrated.env.linux": {
         "PKG_CONFIG_PATH": "${env:PKG_CONFIG_PATH}:${workspaceFolder}/internal/core/output/lib/pkgconfig:${workspaceFolder}/internal/core/output/lib64/pkgconfig",
         "LD_LIBRARY_PATH": "${env:LD_LIBRARY_PATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
-        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64",
+        "RPATH": "${env:RPATH}:${workspaceFolder}/internal/core/output/lib:${workspaceFolder}/internal/core/output/lib64"
     },
     "go.useLanguageServer": true,
     "gopls": {
@@ -91,35 +126,6 @@ You can use Vscode to integrate C++ and Go together. Please replace user.setting
 }
 ```
 
-#### Prerequisites
-
-Linux systems (Recommend Ubuntu 20.04 or later):
-
-```text
-go: >= 1.21
-cmake: >= 3.18
-gcc: 12
-conan: 1.61
-```
-
-MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
-
-```text
-go: >= 1.21
-cmake: >= 3.18
-llvm: >= 15
-conan: 1.61
-```
-
-MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
-
-```text
-go: >= 1.21 (Arch=ARM64)
-cmake: >= 3.18
-llvm: >= 15
-conan: 1.61
-```
-
 #### Installing Dependencies
 
 In the Milvus repository root, simply run:
@@ -128,15 +134,25 @@ In the Milvus repository root, simply run:
 ./scripts/install_deps.sh
 ```
 
+This script will:
+- Detect your OS and version automatically
+- Install the appropriate compiler (LLVM on macOS, GCC on Linux)
+- Install CMake, Ninja, ccache, and other build tools
+- Install Conan package manager
+- Install Rust toolchain
+
 #### Caveats
 
 - [Google Test](https://github.com/google/googletest.git) is automatically cloned from GitHub, which in some case could conflict with your local google test library.
 
-Once you have finished, confirm that `gcc` and `make` are installed:
+Once you have finished, confirm that the compiler is installed:
 
 ```shell
+# On macOS
+clang --version
+
+# On Linux
 gcc --version
-make --version
 ```
 
 #### CMake & Conan
@@ -149,17 +165,17 @@ Confirm that cmake is available:
 cmake --version
 ```
 
-Note: 3.25 or higher cmake version is required to build Milvus.
+Note: CMake 3.26 or higher is required to build Milvus.
 
 Milvus uses Conan to manage third-party dependencies for c++.
 
-Install Conan
+Install Conan:
 
 ```shell
 pip install conan==1.64.1
 ```
 
-Note: Conan version 2.x is not currently supported, please use version 1.61.
+Note: Conan version 2.x is not currently supported, please use version 1.64.1.
 
 #### Go
 
@@ -171,7 +187,7 @@ Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set a
 go version
 ```
 
-Note: go >= 1.22 is required to build Milvus.
+Note: Go >= 1.21 is required to build Milvus.
 
 #### Docker & Docker Compose
 
@@ -201,7 +217,11 @@ If this command succeeds, you will now have an executable at `bin/milvus` in you
 If you want to run the `bin/milvus` executable on the host machine, you need to set `LD_LIBRARY_PATH` temporarily:
 
 ```shell
+# Linux
 LD_LIBRARY_PATH=./internal/core/output/lib:lib:$LD_LIBRARY_PATH ./bin/milvus
+
+# macOS
+DYLD_LIBRARY_PATH=./internal/core/output/lib:lib:$DYLD_LIBRARY_PATH ./bin/milvus
 ```
 
 If you want to update proto file before `make`, we can use the following command:
@@ -228,7 +248,7 @@ make verifiers
 
 It is required that all pull request candidates should pass all Milvus unit tests.
 
-Beforce running unit tests, you need to first bring up the Milvus deployment environment.
+Before running unit tests, you need to first bring up the Milvus deployment environment.
 You may set up a local docker environment with our docker compose yaml file to start unit testing.
 For Apple Silicon users (Apple M1):
 
@@ -305,7 +325,7 @@ Milvus uses Python SDK to write test cases to verify the correctness of Milvus f
 Both include three components:
 
 1. Milvus: The core functional component.
-2. Etcd: The metadata engine. Access and store metadata of Milvus’ internal components.
+2. Etcd: The metadata engine. Access and store metadata of Milvus' internal components.
 3. MinIO: The storage engine. Responsible for data persistence for Milvus.
 Milvus Cluster includes further component — Pulsar, to be distributed through Pub/Sub mechanism.
 
@@ -413,7 +433,7 @@ git config --global http.postBuffer 1M
 
 ---
 
-Q: Brew: command not found” after installation
+Q: Brew: command not found" after installation
 
 A: set up git config
 
@@ -426,7 +446,7 @@ git config --global user.name xxx
 
 Q: Docker: error getting credentials - err: exit status 1, out: ``
 
-A: removing “credsStore”:from ~/.docker/config.json
+A: removing "credsStore":from ~/.docker/config.json
 
 ---
 
@@ -438,25 +458,29 @@ A: Python 3.12 has removed the imp module, please downgrade to 3.11 for now.
 
 Q: Conan: Unrecognized arguments: — install-folder conan
 
-A: The version is not correct. Please change to 1.61 for now.
+A: The version is not correct. Please use Conan 1.64.1.
 
 ---
 
 Q: Conan command not found
 
-A: Fixed by exporting Python bin PATH in your bash.
+A: Fixed by exporting Python bin PATH in your bash:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
 
 ---
 
-Q: Llvm: use of undeclared identifier ‘kSecFormatOpenSSL’
+Q: LLVM: use of undeclared identifier 'kSecFormatOpenSSL'
 
-A: Reinstall llvm@15
+A: This is a known issue on macOS 15+. Try using a newer version of LLVM:
 
 ```bash
-brew reinstall llvm@15
-export LDFLAGS="-L/opt/homebrew/opt/llvm@15/lib"
-export CPPFLAGS="-I/opt/homebrew/opt/llvm@15/include"
+brew install llvm@17
 ```
+
+The build scripts will automatically detect and use LLVM 14-18.
 
 ---
 

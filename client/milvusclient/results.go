@@ -148,7 +148,14 @@ func (sr *ResultSet) fillPKEntry(receiver any) (err error) {
 			if err != nil {
 				return err
 			}
-			row.Field(candi).Set(reflect.ValueOf(val))
+			field := row.Field(candi)
+			if field.Kind() == reflect.Ptr {
+				ptr := reflect.New(field.Type().Elem())
+				ptr.Elem().Set(reflect.ValueOf(val))
+				field.Set(ptr)
+			} else {
+				field.Set(reflect.ValueOf(val))
+			}
 		}
 		rr.Set(rv)
 	default:
@@ -227,12 +234,33 @@ func (ds DataSet) fillData(data reflect.Value, dataType reflect.Type, idx int) e
 			// `strict` mode could be added in the future to return error if any column missing
 			continue
 		}
-		val, err := ds[i].Get(idx)
-		if err != nil {
-			return err
+
+		field := data.Field(fidx)
+		fieldType := dataType.Field(fidx).Type
+
+		if fieldType.Kind() == reflect.Ptr {
+			isNull, err := ds[i].IsNull(idx)
+			if err != nil {
+				return err
+			}
+			if isNull {
+				field.Set(reflect.Zero(fieldType))
+				continue
+			}
+			val, err := ds[i].Get(idx)
+			if err != nil {
+				return err
+			}
+			ptr := reflect.New(fieldType.Elem())
+			ptr.Elem().Set(reflect.ValueOf(val))
+			field.Set(ptr)
+		} else {
+			val, err := ds[i].Get(idx)
+			if err != nil {
+				return err
+			}
+			field.Set(reflect.ValueOf(val))
 		}
-		// TODO check datatype, return error here instead of reflect panicking & recover
-		data.Field(fidx).Set(reflect.ValueOf(val))
 	}
 	return nil
 }

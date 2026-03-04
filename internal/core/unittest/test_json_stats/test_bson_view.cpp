@@ -1,12 +1,28 @@
-#include <gtest/gtest.h>
-#include "common/bson_view.h"
-#include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/builder/basic/array.hpp>
-#include <bsoncxx/json.hpp>
+#include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/types.hpp>
-#include <bsoncxx/types/value.hpp>
 #include <bsoncxx/types/bson_value/view.hpp>
-#include <bsoncxx/types/bson_value/value.hpp>
+#include <stddef.h>
+#include <cstdint>
+#include <iostream>
+#include <iterator>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+#include "bsoncxx/array/element.hpp"
+#include "bsoncxx/array/view.hpp"
+#include "bsoncxx/builder/basic/kvp.hpp"
+#include "bsoncxx/document/element.hpp"
+#include "bsoncxx/document/view.hpp"
+#include "common/bson_view.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
 #include "index/json_stats/bson_builder.h"
 
 namespace milvus::index {

@@ -490,3 +490,188 @@ func TestRewrite_AlwaysTrue_Elimination_InAND(t *testing.T) {
 	require.Equal(t, planpb.OpType_GreaterThan, ure.GetOp())
 	require.Equal(t, int64(10), ure.GetValue().GetInt64Val())
 }
+
+// Test constant-folded ValueExpr(bool=true) is converted to AlwaysTrueExpr
+func TestRewrite_ConstantTrue_EqualInts(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// "1==1" is constant-folded by parser to ValueExpr(bool=true),
+	// rewriter should convert it to AlwaysTrueExpr
+	expr, err := parser.ParseExpr(helper, `1==1`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.True(t, rewriter.IsAlwaysTrueExpr(expr))
+}
+
+// Test constant-folded ValueExpr(bool=true) from greater-than comparison
+func TestRewrite_ConstantTrue_GreaterThan(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	expr, err := parser.ParseExpr(helper, `1>0`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.True(t, rewriter.IsAlwaysTrueExpr(expr))
+}
+
+// Test constant-folded ValueExpr(bool=true) from not-equal comparison
+func TestRewrite_ConstantTrue_NotEqual(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	expr, err := parser.ParseExpr(helper, `2!=3`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.True(t, rewriter.IsAlwaysTrueExpr(expr))
+}
+
+// Test constant-folded ValueExpr(bool=false) is converted to AlwaysFalseExpr
+func TestRewrite_ConstantFalse_EqualInts(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// "1==2" is constant-folded by parser to ValueExpr(bool=false),
+	// rewriter should convert it to AlwaysFalseExpr (NOT AlwaysTrueExpr)
+	expr, err := parser.ParseExpr(helper, `1==2`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
+}
+
+// Test constant-folded ValueExpr(bool=false) from greater-than comparison
+func TestRewrite_ConstantFalse_GreaterThan(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	expr, err := parser.ParseExpr(helper, `1>2`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
+}
+
+// Test rewriter directly with ValueExpr(bool=true) in AND — bypassing parser validation
+func TestRewrite_Direct_ValueExprTrue_InAND(t *testing.T) {
+	// Construct: (Int64Field > 10) AND ValueExpr(true)
+	// This simulates what would happen if the parser allowed it
+	left := &planpb.Expr{
+		Expr: &planpb.Expr_UnaryRangeExpr{
+			UnaryRangeExpr: &planpb.UnaryRangeExpr{
+				ColumnInfo: &planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_Int64},
+				Op:         planpb.OpType_GreaterThan,
+				Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 10}},
+			},
+		},
+	}
+	right := &planpb.Expr{
+		Expr: &planpb.Expr_ValueExpr{
+			ValueExpr: &planpb.ValueExpr{
+				Value: &planpb.GenericValue{Val: &planpb.GenericValue_BoolVal{BoolVal: true}},
+			},
+		},
+	}
+	input := &planpb.Expr{
+		Expr: &planpb.Expr_BinaryExpr{
+			BinaryExpr: &planpb.BinaryExpr{
+				Left:  left,
+				Right: right,
+				Op:    planpb.BinaryExpr_LogicalAnd,
+			},
+		},
+	}
+	result := rewriter.RewriteExprWithConfig(input, false)
+	// ValueExpr(true) → AlwaysTrueExpr, then eliminated from AND → just Int64Field > 10
+	ure := result.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "constant true should be eliminated from AND, leaving range expr")
+	require.Equal(t, planpb.OpType_GreaterThan, ure.GetOp())
+	require.Equal(t, int64(10), ure.GetValue().GetInt64Val())
+}
+
+// Test rewriter directly with ValueExpr(bool=false) in AND — short-circuits to AlwaysFalse
+func TestRewrite_Direct_ValueExprFalse_InAND(t *testing.T) {
+	left := &planpb.Expr{
+		Expr: &planpb.Expr_UnaryRangeExpr{
+			UnaryRangeExpr: &planpb.UnaryRangeExpr{
+				ColumnInfo: &planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_Int64},
+				Op:         planpb.OpType_GreaterThan,
+				Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 10}},
+			},
+		},
+	}
+	right := &planpb.Expr{
+		Expr: &planpb.Expr_ValueExpr{
+			ValueExpr: &planpb.ValueExpr{
+				Value: &planpb.GenericValue{Val: &planpb.GenericValue_BoolVal{BoolVal: false}},
+			},
+		},
+	}
+	input := &planpb.Expr{
+		Expr: &planpb.Expr_BinaryExpr{
+			BinaryExpr: &planpb.BinaryExpr{
+				Left:  left,
+				Right: right,
+				Op:    planpb.BinaryExpr_LogicalAnd,
+			},
+		},
+	}
+	result := rewriter.RewriteExprWithConfig(input, false)
+	// ValueExpr(false) → AlwaysFalseExpr, then AND short-circuits → AlwaysFalse
+	require.True(t, rewriter.IsAlwaysFalseExpr(result))
+}
+
+// Test rewriter directly with ValueExpr(bool=true) in OR — short-circuits to AlwaysTrue
+func TestRewrite_Direct_ValueExprTrue_InOR(t *testing.T) {
+	left := &planpb.Expr{
+		Expr: &planpb.Expr_UnaryRangeExpr{
+			UnaryRangeExpr: &planpb.UnaryRangeExpr{
+				ColumnInfo: &planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_Int64},
+				Op:         planpb.OpType_GreaterThan,
+				Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 10}},
+			},
+		},
+	}
+	right := &planpb.Expr{
+		Expr: &planpb.Expr_ValueExpr{
+			ValueExpr: &planpb.ValueExpr{
+				Value: &planpb.GenericValue{Val: &planpb.GenericValue_BoolVal{BoolVal: true}},
+			},
+		},
+	}
+	input := &planpb.Expr{
+		Expr: &planpb.Expr_BinaryExpr{
+			BinaryExpr: &planpb.BinaryExpr{
+				Left:  left,
+				Right: right,
+				Op:    planpb.BinaryExpr_LogicalOr,
+			},
+		},
+	}
+	result := rewriter.RewriteExprWithConfig(input, false)
+	// ValueExpr(true) → AlwaysTrueExpr, then OR short-circuits → AlwaysTrue
+	require.True(t, rewriter.IsAlwaysTrueExpr(result))
+}
+
+// Test rewriter directly with ValueExpr(bool=false) in OR — eliminated
+func TestRewrite_Direct_ValueExprFalse_InOR(t *testing.T) {
+	left := &planpb.Expr{
+		Expr: &planpb.Expr_UnaryRangeExpr{
+			UnaryRangeExpr: &planpb.UnaryRangeExpr{
+				ColumnInfo: &planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_Int64},
+				Op:         planpb.OpType_GreaterThan,
+				Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 10}},
+			},
+		},
+	}
+	right := &planpb.Expr{
+		Expr: &planpb.Expr_ValueExpr{
+			ValueExpr: &planpb.ValueExpr{
+				Value: &planpb.GenericValue{Val: &planpb.GenericValue_BoolVal{BoolVal: false}},
+			},
+		},
+	}
+	input := &planpb.Expr{
+		Expr: &planpb.Expr_BinaryExpr{
+			BinaryExpr: &planpb.BinaryExpr{
+				Left:  left,
+				Right: right,
+				Op:    planpb.BinaryExpr_LogicalOr,
+			},
+		},
+	}
+	result := rewriter.RewriteExprWithConfig(input, false)
+	// ValueExpr(false) → AlwaysFalseExpr, then eliminated from OR → just Int64Field > 10
+	ure := result.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "constant false should be eliminated from OR, leaving range expr")
+	require.Equal(t, planpb.OpType_GreaterThan, ure.GetOp())
+	require.Equal(t, int64(10), ure.GetValue().GetInt64Val())
+}

@@ -11,16 +11,35 @@
 
 #include "Reduce.h"
 
-#include "log/Log.h"
+#include <math.h>
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <map>
+#include <numeric>
+#include <optional>
+#include <queue>
+#include <ratio>
+#include <type_traits>
 #include <vector>
 
+#include "NamedType/named_type_impl.hpp"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/Schema.h"
+#include "common/Tracer.h"
+#include "common/protobuf_utils.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
+#include "log/Log.h"
 #include "monitor/Monitor.h"
+#include "pb/schema.pb.h"
+#include "prometheus/histogram.h"
+#include "query/PlanImpl.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
 #include "segcore/pkVisitor.h"
-#include "segcore/ReduceUtils.h"
 
 namespace milvus::segcore {
 
@@ -216,6 +235,13 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                     search_result->element_level_
                         ? search_result->element_indices_[start + i]
                         : -1;
+                // Also save group_by_value if present (for group by search)
+                GroupByValueType temp_group_by_val;
+                bool has_group_by = search_result->group_by_values_.has_value();
+                if (has_group_by) {
+                    temp_group_by_val =
+                        search_result->group_by_values_.value()[start + i];
+                }
 
                 size_t curr = i;
                 while (indices[curr] != i) {
@@ -228,6 +254,11 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                         search_result->element_indices_[start + curr] =
                             search_result->element_indices_[start + next];
                     }
+                    if (has_group_by) {
+                        search_result->group_by_values_.value()[start + curr] =
+                            search_result->group_by_values_
+                                .value()[start + next];
+                    }
                     indices[curr] = curr;  // Mark as processed
                     curr = next;
                 }
@@ -237,6 +268,10 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                 if (search_result->element_level_) {
                     search_result->element_indices_[start + curr] =
                         temp_elem_idx;
+                }
+                if (has_group_by) {
+                    search_result->group_by_values_.value()[start + curr] =
+                        temp_group_by_val;
                 }
                 indices[curr] = curr;
             }

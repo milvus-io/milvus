@@ -14,42 +14,56 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <folly/Conv.h>
+#include <arrow/api.h>
+#include <arrow/array/array_base.h>
+#include <arrow/array/builder_binary.h>
+#include <arrow/array/builder_primitive.h>
+#include <arrow/filesystem/filesystem.h>
 #include <arrow/record_batch.h>
-#include <arrow/util/key_value_metadata.h>
-#include <arrow/table_builder.h>
 #include <arrow/type_fwd.h>
 #include <gtest/gtest.h>
+#include <parquet/properties.h>
+#include <stdlib.h>
+#include <time.h>
 #include <algorithm>
 #include <cstdint>
-#include <iostream>
+#include <map>
 #include <memory>
+#include <numeric>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
+#include "NamedType/named_type_impl.hpp"
+#include "cachinglayer/CacheSlot.h"
 #include "common/Consts.h"
-#include "common/FieldDataInterface.h"
+#include "common/LoadInfo.h"
 #include "common/Schema.h"
+#include "common/Span.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
 #include "expr/ITypeExpr.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
 #include "index/Meta.h"
-#include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/writer.h"
-#include "milvus-storage/format/parquet/file_reader.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
+#include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentSealed.h"
-#include "segcore/ChunkedSegmentSealedImpl.h"
-#include "segcore/SegmentGrowing.h"
-#include "segcore/SegmentGrowingImpl.h"
-#include "segcore/Utils.h"
-#include "segcore/memory_planner.h"
 #include "segcore/Types.h"
+#include "segcore/storagev1translator/ChunkTranslator.h"
+#include "storage/FileManager.h"
+#include "storage/Types.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
 
@@ -70,11 +84,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             segcore::SegcoreConfig::default_config(),
             true);
 
-        // Initialize file system
-        auto conf = milvus_storage::ArrowFileSystemConfig();
-        conf.storage_type = "local";
-        conf.root_path = "/tmp/test_data";
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
+        // Use globally initialized ArrowFileSystem
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
 
@@ -92,7 +102,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         }
 
         std::vector<std::vector<int>> column_groups = {
-            {0, 4, 3}, {2}, {1}};  // narrow columns and wide columns
+            {0, 1, 4}, {2}, {3}};  // narrow columns and wide columns
         auto writer_memory = 16 * 1024 * 1024;
         auto storage_config = milvus_storage::StorageConfig();
 
@@ -175,6 +185,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 std::vector<int64_t>(chunk_num * test_data_count),
                 std::vector<int64_t>(chunk_num * test_data_count * 4),
                 false,
+                "",
                 std::vector<std::string>({paths[0]})});
         load_info.field_infos.emplace(
             int64_t(102),
@@ -184,6 +195,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 std::vector<int64_t>(chunk_num * test_data_count),
                 std::vector<int64_t>(chunk_num * test_data_count * 4),
                 false,
+                "",
                 std::vector<std::string>({paths[1]})});
         load_info.field_infos.emplace(
             int64_t(103),
@@ -193,6 +205,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 std::vector<int64_t>(chunk_num * test_data_count),
                 std::vector<int64_t>(chunk_num * test_data_count * 4),
                 false,
+                "",
                 std::vector<std::string>({paths[2]})});
         load_info.storage_version = 2;
         segment->AddFieldDataInfoForSealed(load_info);

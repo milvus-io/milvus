@@ -12,12 +12,12 @@
 #pragma once
 
 #include <memory>
-#include "common/common_type_c.h"
+#include <string>
+
 #include "common/type_c.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/manifest.h"
 #include "milvus-storage/properties.h"
-#include "milvus-storage/column_groups.h"
 #include "storage/Types.h"
 
 /**

@@ -10,16 +10,26 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include <queue>
-#include <random>
-#include <vector>
+#include <string.h>
+#include <algorithm>
+#include <cstdint>
 #include <iostream>
+#include <limits>
+#include <memory>
+#include <random>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
+#include "common/EasyAssert.h"
 #include "common/RangeSearchHelper.h"
 #include "common/Types.h"
 #include "common/Utils.h"
-#include "common/Schema.h"
-#include "test_utils/indexbuilder_test_utils.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/dataset.h"
 
 namespace milvus::test {
 

@@ -10,12 +10,29 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "HuaweiCloudCredentialsProvider.h"
-#include <fstream>
-#include "HuaweiCloudSTSClient.h"
-#include <aws/core/platform/Environment.h>
-#include <aws/core/utils/logging/LogMacros.h>
+
 #include <aws/core/client/SpecifiedRetryableErrorsRetryStrategy.h>
+#include <aws/core/platform/Environment.h>
 #include <aws/core/utils/UUID.h>
+#include <aws/core/utils/logging/LogMacros.h>
+#include <algorithm>
+#include <chrono>
+#include <fstream>
+#include <iterator>
+#include <string>
+#include <vector>
+
+#include "HuaweiCloudSTSClient.h"
+#include "aws/core/auth/AWSCredentialsProvider.h"
+#include "aws/core/client/ClientConfiguration.h"
+#include "aws/core/config/AWSProfileConfig.h"
+#include "aws/core/config/ConfigAndCredentialsCacheManager.h"
+#include "aws/core/http/Scheme.h"
+#include "aws/core/utils/DateTime.h"
+#include "aws/core/utils/memory/stl/AWSAllocator.h"
+#include "aws/core/utils/memory/stl/AWSStreamFwd.h"
+#include "aws/core/utils/threading/ReaderWriterLock.h"
+#include "glog/logging.h"
 #include "log/Log.h"
 
 static const char STS_ASSUME_ROLE_WEB_IDENTITY_LOG_TAG[] =

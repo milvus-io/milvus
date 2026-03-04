@@ -23,6 +23,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -248,7 +249,7 @@ func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *met
 		c.ID(),
 		segment.GetCollectionID(),
 		replica,
-		replica.LoadPriority(),
+		commonpb.LoadPriority_LOW, // Index update is not urgent
 		action,
 	)
 	if err != nil {
@@ -303,7 +304,7 @@ func (c *IndexChecker) createSegmentStatsUpdateTask(ctx context.Context, segment
 		c.ID(),
 		segment.GetCollectionID(),
 		replica,
-		replica.LoadPriority(),
+		commonpb.LoadPriority_LOW, // Stats update is not urgent
 		action,
 	)
 	if err != nil {

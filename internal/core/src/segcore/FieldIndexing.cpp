@@ -9,23 +9,43 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <string.h>
+#include <algorithm>
+#include <cstddef>
+#include <exception>
 #include <map>
+#include <optional>
 #include <string>
-#include <thread>
-#include <unordered_map>
+#include <utility>
+#include <vector>
 
+#include "IndexConfigGenerator.h"
 #include "common/EasyAssert.h"
+#include "common/FieldDataInterface.h"
+#include "common/OffsetMapping.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
-#include "fmt/format.h"
+#include "common/Utils.h"
+#include "common/VectorTrait.h"
+#include "common/type_c.h"
+#include "fmt/core.h"
+#include "folly/FBVector.h"
+#include "index/RTreeIndex.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexMarisa.h"
-
-#include "common/SystemProperty.h"
+#include "index/VectorMemIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/dataset.h"
+#include "knowhere/expected.h"
+#include "knowhere/object.h"
+#include "knowhere/sparse_utils.h"
+#include "knowhere/version.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "nlohmann/json.hpp"
+#include "pb/schema.pb.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/FieldIndexing.h"
-#include "index/VectorMemIndex.h"
-#include "IndexConfigGenerator.h"
-#include "index/RTreeIndex.h"
+#include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 
@@ -37,44 +57,49 @@ IndexingRecord::AppendingIndex(int64_t reserved_offset,
                                int64_t size,
                                FieldId fieldId,
                                const DataArray* stream_data,
-                               const InsertRecord<false>& record) {
-    if (!is_in(fieldId)) {
+                               const InsertRecord<false>& record,
+                               const FieldMeta& field_meta) {
+    // Check if field has indexing created
+    auto it = field_indexings_.find(fieldId);
+    if (it == field_indexings_.end()) {
         return;
     }
-    auto& indexing = field_indexings_.at(fieldId);
-    auto type = indexing->get_data_type();
+
+    FieldIndexing* indexing_ptr = it->second.get();
+    auto type = indexing_ptr->get_data_type();
     auto field_raw_data = record.get_data_base(fieldId);
-    auto field_meta = schema_.get_fields().at(fieldId);
+
     int64_t valid_count = reserved_offset + size;
     if (field_meta.is_nullable() && field_raw_data->is_mapping_storage()) {
         valid_count = field_raw_data->get_valid_count();
     }
+
     if (type == DataType::VECTOR_FLOAT &&
-        valid_count >= indexing->get_build_threshold()) {
-        indexing->AppendSegmentIndexDense(
+        valid_count >= indexing_ptr->get_build_threshold()) {
+        indexing_ptr->AppendSegmentIndexDense(
             reserved_offset,
             size,
             field_raw_data,
             stream_data->vectors().float_vector().data().data());
     } else if (type == DataType::VECTOR_FLOAT16 &&
-               valid_count >= indexing->get_build_threshold()) {
-        indexing->AppendSegmentIndexDense(
+               valid_count >= indexing_ptr->get_build_threshold()) {
+        indexing_ptr->AppendSegmentIndexDense(
             reserved_offset,
             size,
             field_raw_data,
             stream_data->vectors().float16_vector().data());
     } else if (type == DataType::VECTOR_BFLOAT16 &&
-               valid_count >= indexing->get_build_threshold()) {
-        indexing->AppendSegmentIndexDense(
+               valid_count >= indexing_ptr->get_build_threshold()) {
+        indexing_ptr->AppendSegmentIndexDense(
             reserved_offset,
             size,
             field_raw_data,
             stream_data->vectors().bfloat16_vector().data());
     } else if (type == DataType::VECTOR_SPARSE_U32_F32 &&
-               valid_count >= indexing->get_build_threshold()) {
+               valid_count >= indexing_ptr->get_build_threshold()) {
         auto data = SparseBytesToRows(
             stream_data->vectors().sparse_float_vector().contents());
-        indexing->AppendSegmentIndexSparse(
+        indexing_ptr->AppendSegmentIndexSparse(
             reserved_offset,
             size,
             stream_data->vectors().sparse_float_vector().dim(),
@@ -82,7 +107,7 @@ IndexingRecord::AppendingIndex(int64_t reserved_offset,
             data.get());
     } else if (type == DataType::GEOMETRY) {
         // For geometry fields, append data incrementally to RTree index
-        indexing->AppendSegmentIndex(
+        indexing_ptr->AppendSegmentIndex(
             reserved_offset, size, field_raw_data, stream_data);
     }
 }
@@ -93,15 +118,19 @@ IndexingRecord::AppendingIndex(int64_t reserved_offset,
                                int64_t size,
                                FieldId fieldId,
                                const FieldDataPtr data,
-                               const InsertRecord<false>& record) {
-    if (!is_in(fieldId)) {
+                               const InsertRecord<false>& record,
+                               const FieldMeta& field_meta) {
+    // Check if field has indexing created
+    auto it = field_indexings_.find(fieldId);
+    if (it == field_indexings_.end()) {
         return;
     }
-    auto& indexing = field_indexings_.at(fieldId);
-    auto type = indexing->get_data_type();
+
+    FieldIndexing* indexing_ptr = it->second.get();
+    auto type = indexing_ptr->get_data_type();
     const void* p = data->Data();
     auto vec_base = record.get_data_base(fieldId);
-    auto field_meta = schema_.get_fields().at(fieldId);
+
     int64_t valid_count = reserved_offset + size;
     if (field_meta.is_nullable() && vec_base->is_mapping_storage()) {
         valid_count = vec_base->get_valid_count();
@@ -109,14 +138,12 @@ IndexingRecord::AppendingIndex(int64_t reserved_offset,
 
     if ((type == DataType::VECTOR_FLOAT || type == DataType::VECTOR_FLOAT16 ||
          type == DataType::VECTOR_BFLOAT16) &&
-        valid_count >= indexing->get_build_threshold()) {
-        auto vec_base = record.get_data_base(fieldId);
-        indexing->AppendSegmentIndexDense(
-            reserved_offset, size, vec_base, data->Data());
+        valid_count >= indexing_ptr->get_build_threshold()) {
+        indexing_ptr->AppendSegmentIndexDense(
+            reserved_offset, size, vec_base, p);
     } else if (type == DataType::VECTOR_SPARSE_U32_F32 &&
-               valid_count >= indexing->get_build_threshold()) {
-        auto vec_base = record.get_data_base(fieldId);
-        indexing->AppendSegmentIndexSparse(
+               valid_count >= indexing_ptr->get_build_threshold()) {
+        indexing_ptr->AppendSegmentIndexSparse(
             reserved_offset,
             size,
             std::dynamic_pointer_cast<const FieldData<SparseFloatVector>>(data)
@@ -125,8 +152,7 @@ IndexingRecord::AppendingIndex(int64_t reserved_offset,
             p);
     } else if (type == DataType::GEOMETRY) {
         // For geometry fields, append data incrementally to RTree index
-        auto vec_base = record.get_data_base(fieldId);
-        indexing->AppendSegmentIndex(reserved_offset, size, vec_base, data);
+        indexing_ptr->AppendSegmentIndex(reserved_offset, size, vec_base, data);
     }
 }
 
@@ -258,7 +284,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
     auto size_per_chunk = field_raw_data->get_size_per_chunk();
     auto build_threshold = get_build_threshold();
     bool is_mapping_storage = field_raw_data->is_mapping_storage();
-    auto& valid_data = field_raw_data->get_valid_data();
+    auto valid_data = field_raw_data->get_valid_data();
 
     if (!built_) {
         const void* data_ptr = nullptr;
@@ -385,7 +411,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
     auto size_per_chunk = field_raw_data->get_size_per_chunk();
     auto build_threshold = get_build_threshold();
     bool is_mapping_storage = field_raw_data->is_mapping_storage();
-    auto& valid_data = field_raw_data->get_valid_data();
+    auto valid_data = field_raw_data->get_valid_data();
 
     AssertInfo(ConcurrentDenseVectorCheck(field_raw_data, get_data_type()),
                "vec_base can't cast to ConcurrentVector type");

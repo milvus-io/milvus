@@ -9,24 +9,36 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <arrow/scalar.h>
+#include <boost/filesystem/path.hpp>
 #include <gtest/gtest.h>
-
+#include <chrono>
+#include <cstdint>
+#include <iosfwd>
+#include <memory>
 #include <optional>
-#include <random>
 #include <string>
-#include <vector>
+
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/Types.h"
+#include "common/common_type_c.h"
+#include "common/type_c.h"
+#include "gtest/gtest.h"
+#include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
+#include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/storage_c.h"
+#include "test_utils/Constants.h"
 
 using namespace std;
 using namespace milvus;
 using namespace milvus::storage;
 
-string rootPath = "files";
 string bucketName = "a-bucket";
 
 CStorageConfig
@@ -41,7 +53,7 @@ get_azure_storage_config() {
                           bucketName.c_str(),
                           accessKey,
                           accessValue,
-                          rootPath.c_str(),
+                          TestRemotePath.c_str(),
                           "remote",
                           "azure",
                           "",
@@ -53,6 +65,7 @@ get_azure_storage_config() {
                           false,
                           30000,
                           "",
+                          false,
                           100};
 }
 
@@ -75,7 +88,7 @@ TEST_F(StorageTest, InitLocalChunkManagerSingleton) {
 TEST_F(StorageTest, GetLocalUsedSize) {
     int64_t size = 0;
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    EXPECT_EQ(lcm->GetRootPath(), "/tmp/milvus/local_data/");
+    EXPECT_EQ(lcm->GetRootPath(), TestLocalPath);
     string test_dir =
         lcm->GetRootPath() + "tmp" +
         // add random number to avoid dir conflict
@@ -103,7 +116,7 @@ TEST_F(StorageTest, InitRemoteChunkManagerSingleton) {
     EXPECT_EQ(status.error_code, Success);
     auto rcm =
         RemoteChunkManagerSingleton::GetInstance().GetRemoteChunkManager();
-    EXPECT_EQ(rcm->GetRootPath(), "/tmp/milvus/remote_data");
+    EXPECT_EQ(rcm->GetRootPath(), TestRemotePath);
 }
 
 TEST_F(StorageTest, CleanRemoteChunkManagerSingleton) {
@@ -213,7 +226,7 @@ TEST_F(StorageUtilTest, TestInitArrowFileSystem) {
     {
         StorageConfig local_config;
         local_config.storage_type = "local";
-        local_config.root_path = "/tmp/milvus/local_data";
+        local_config.root_path = TestLocalPath;
 
         auto fs = InitArrowFileSystem(local_config);
         ASSERT_NE(fs, nullptr);

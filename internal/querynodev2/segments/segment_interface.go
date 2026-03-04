@@ -86,7 +86,6 @@ type Segment interface {
 	LoadDeltaData(ctx context.Context, deltaData *storage.DeltaData) error
 	LastDeltaTimestamp() uint64
 	Load(ctx context.Context) error
-	FinishLoad() error
 	Release(ctx context.Context, opts ...releaseOption)
 	Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error
 
@@ -109,7 +108,6 @@ type Segment interface {
 	Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error)
 	Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)
 	RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error)
-	IsLazyLoad() bool
 	ResetIndexesLazyLoad(lazyState bool)
 
 	// lazy load related

@@ -15,15 +15,22 @@
 // limitations under the License.
 
 #include "storage/storage_c.h"
+
+#include <exception>
+#include <memory>
+#include <string>
+
+#include "PluginInterface.h"
+#include "common/EasyAssert.h"
+#include "monitor/scope_metric.h"
 #include "storage/FileWriter.h"
-#include "monitor/Monitor.h"
-#include "storage/PluginLoader.h"
-#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
+#include "storage/PluginLoader.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
-#include "monitor/scope_metric.h"
-#include "common/EasyAssert.h"
+#include "storage/Types.h"
 
 CStatus
 GetLocalUsedSize(const char* c_dir, int64_t* size) {

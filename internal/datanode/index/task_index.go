@@ -121,8 +121,8 @@ func (it *indexBuildTask) Name() string {
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 	it.manager.StoreIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), commonpb.IndexState(state), failReason)
 	if state == indexpb.JobState_JobStateFinished {
-		metrics.DataNodeBuildIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(it.tr.ElapseSpan().Seconds())
-		metrics.DataNodeIndexTaskLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(it.queueDur.Milliseconds()))
+		metrics.DataNodeBuildIndexLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(it.tr.ElapseSpan().Seconds())
+		metrics.DataNodeIndexTaskLatencyInQueue.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(it.queueDur.Milliseconds()))
 	}
 }
 

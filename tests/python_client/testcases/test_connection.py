@@ -379,7 +379,8 @@ class TestConnectionOperation(TestcaseBase):
         # get the connection address after it disconnected
         self.connection_wrap.get_connection_addr(alias="test_alias_name", check_task=ct.CheckTasks.ccr,
                                                  check_items={ct.dict_content: {"address": f"{host}:{port}",
-                                                                                "user": ""}})
+                                                                                "user": "",
+                                                                                "db_name": "default"}})
 
         # re-add connection by the same alias with different connection params
         self.connection_wrap.add_connection(test_alias_name={"host": "localhost", "port": "1"})
@@ -492,7 +493,8 @@ class TestConnectionOperation(TestcaseBase):
         # get all addr of alias and check the response
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
                                                  check_items={ct.dict_content: {"address": f"{host}:{port}",
-                                                                                "user": ""}})
+                                                                                "user": "",
+                                                                                "db_name": "default"}})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
@@ -554,7 +556,8 @@ class TestConnectionOperation(TestcaseBase):
         # get all addr of alias and check the response
         self.connection_wrap.get_connection_addr(alias=connect_name, check_task=ct.CheckTasks.ccr,
                                                  check_items={ct.dict_content: {"address": f"{host}:{port}",
-                                                                                "user": ""}})
+                                                                                "user": "",
+                                                                                "db_name": "default"}})
      
     @pytest.mark.skip("not support now")
     @pytest.mark.tags(ct.CaseLabel.L2)
@@ -646,7 +649,8 @@ class TestConnectionOperation(TestcaseBase):
         # get all addr of alias and check the response
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
                                                  check_items={ct.dict_content: {"address": f"{host}:{port}",
-                                                                                "user": ""}})
+                                                                                "user": "",
+                                                                                "db_name": "default"}})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_disconnect_after_connect(self, host, port):
@@ -674,7 +678,8 @@ class TestConnectionOperation(TestcaseBase):
         # get all addr of alias and check the response
         self.connection_wrap.get_connection_addr(alias=test_alias_name, check_task=ct.CheckTasks.ccr,
                                                  check_items={ct.dict_content: {"address": f"{host}:{port}",
-                                                                                "user": ""}})
+                                                                                "user": "",
+                                                                                "db_name": "default"}})
 
         # disconnect alias is exist
         self.connection_wrap.disconnect(alias=test_alias_name)
@@ -687,7 +692,8 @@ class TestConnectionOperation(TestcaseBase):
         # get all addr of alias and check the response
         self.connection_wrap.get_connection_addr(alias=test_alias_name, check_task=ct.CheckTasks.ccr,
                                                  check_items={ct.dict_content: {"address": f"{host}:{port}",
-                                                                                "user": ""}})
+                                                                                "user": "",
+                                                                                "db_name": "default"}})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_remove_connection_not_exist(self):

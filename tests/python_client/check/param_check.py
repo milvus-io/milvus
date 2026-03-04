@@ -241,10 +241,17 @@ def exist_check(param, _list):
 
 
 def dict_equal_check(dict1, dict2):
+    """Check if dict2 is a subset of dict1.
+
+    This allows API responses to include additional fields without breaking tests.
+    For example, if dict1 = {'a': 1, 'b': 2, 'c': 3} and dict2 = {'a': 1, 'b': 2},
+    the check will pass because all key-value pairs in dict2 exist in dict1.
+    """
     if not isinstance(dict1, dict) or not isinstance(dict2, dict):
         log.error("[DICT_EQUAL_CHECK] Type of dict(%s) or dict(%s) is not a dict." % (str(dict1), str(dict2)))
         return False
-    return operator.eq(dict1, dict2)
+    # Check if dict2 is a subset of dict1
+    return all(k in dict1 and dict1[k] == v for k, v in dict2.items())
 
 
 def list_de_duplication(_list):
@@ -300,9 +307,8 @@ def list_contain_check(sublist, superlist):
         else:
             superlist.remove(i)
     if not check_result:
-        log.error("list_contain_check: List(%s) does not contain list(%s)"
-                  % (str(superlist), str(sublist)))
-
+        #  truncate the lists to 100 items in log message
+        log.error(f"list_contain_check: List({str(superlist[:20])}...) does not contain list({str(sublist[:20])}...)")
     return check_result
 
 
@@ -456,6 +462,10 @@ def output_field_value_check(search_res, original, pk_name):
                     assert entity[field].keys() == original[-1][_id].keys()
                 else:
                     num = original[original[pk_name] == _id].index.to_list()[0]
-                    assert original[field][num] == entity[field], f"the output field values are wrong at nq={n}"
+                    expected_val = original[field][num]
+                    # pandas converts None to NaN, while Milvus returns None for nullable fields
+                    if entity[field] is None and (expected_val is None or (isinstance(expected_val, float) and np.isnan(expected_val))):
+                        continue
+                    assert expected_val == entity[field], f"the output field values are wrong at nq={n}"
 
     return True

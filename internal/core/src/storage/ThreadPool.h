@@ -16,17 +16,24 @@
 
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <condition_variable>
 #include <functional>
 #include <future>
-#include <mutex>
 #include <memory>
-#include <queue>
+#include <mutex>
+#include <ostream>
+#include <string>
 #include <thread>
-#include <vector>
+#include <unordered_map>
 #include <utility>
-#include <cassert>
 
 #include "SafeQueue.h"
+#include "glog/logging.h"
 #include "log/Log.h"
 
 namespace milvus {
@@ -143,6 +150,10 @@ class ThreadPool {
     Resize(int new_size) {
         //no need to hold mutex here as we don't require
         //max_threads_size to take effect instantly, just guaranteed atomic
+        new_size = std::max(1, new_size);
+        if (new_size > 16) {
+            new_size = 16;
+        }
         max_threads_size_.store(new_size);
     }
 

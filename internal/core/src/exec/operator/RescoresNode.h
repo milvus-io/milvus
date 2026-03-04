@@ -16,15 +16,19 @@
 
 #pragma once
 
+#include <stdint.h>
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "common/Promise.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
 #include "exec/Driver.h"
-#include "exec/expression/Expr.h"
 #include "exec/operator/Operator.h"
-#include "exec/QueryContext.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
+#include "rescores/Scorer.h"
 
 // difference between FilterBitsNode and RescoresNode is that
 // FilterBitsNode will go through whole segment and return bitset to indicate which offset is filtered out or not

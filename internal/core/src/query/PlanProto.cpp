@@ -12,24 +12,39 @@
 #include "PlanProto.h"
 
 #include <google/protobuf/text_format.h>
-
-#include <cstdint>
+#include <algorithm>
+#include <cstddef>
+#include <initializer_list>
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
+#include <type_traits>
+#include <unordered_map>
 #include <vector>
 
-#include "common/Geometry.h"
+#include "NamedType/underlying_functionalities.hpp"
 #include "common/Consts.h"
-#include "common/Types.h"
-#include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "common/protobuf_utils.h"
 #include "exec/expression/function/FunctionFactory.h"
-#include "log/Log.h"
 #include "expr/ITypeExpr.h"
-#include "pb/plan.pb.h"
-#include "query/Utils.h"
+#include "glog/logging.h"
+#include "knowhere/comp/index_param.h"
 #include "knowhere/comp/materialized_view.h"
+#include "knowhere/config.h"
+#include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "nlohmann/json_fwd.hpp"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
+#include "plan/PlanNodeIdGenerator.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
 #include "rescores/Scorer.h"
 
 namespace milvus::query {
@@ -615,7 +630,7 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
         auto field_id = FieldId(field_id_raw);
         plan->target_entries_.push_back(field_id);
     }
-    for (auto dynamic_field : plan_node_proto.dynamic_fields()) {
+    for (const auto& dynamic_field : plan_node_proto.dynamic_fields()) {
         plan->target_dynamic_fields_.push_back(dynamic_field);
     }
 
@@ -635,7 +650,7 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
         auto field_id = FieldId(field_id_raw);
         retrieve_plan->field_ids_.push_back(field_id);
     }
-    for (auto dynamic_field : plan_node_proto.dynamic_fields()) {
+    for (const auto& dynamic_field : plan_node_proto.dynamic_fields()) {
         retrieve_plan->target_dynamic_fields_.push_back(dynamic_field);
     }
     return retrieve_plan;
@@ -656,7 +671,8 @@ ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
         Assert(data_type == static_cast<DataType>(column_info.data_type()));
     }
     std::vector<::milvus::proto::plan::GenericValue> extra_values;
-    for (auto val : expr_pb.extra_values()) {
+    extra_values.reserve(expr_pb.extra_values_size());
+    for (const auto& val : expr_pb.extra_values()) {
         extra_values.emplace_back(val);
     }
     return std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
@@ -751,9 +767,12 @@ ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
 
 expr::TypedExprPtr
 ProtoParser::ParseCallExprs(const proto::plan::CallExpr& expr_pb) {
+    const auto param_count = expr_pb.function_parameters_size();
     std::vector<expr::TypedExprPtr> parameters;
+    parameters.reserve(param_count);
     std::vector<DataType> func_param_type_list;
-    for (auto& param_expr : expr_pb.function_parameters()) {
+    func_param_type_list.reserve(param_count);
+    for (const auto& param_expr : expr_pb.function_parameters()) {
         // function parameter can be any type
         auto e = this->ParseExprs(param_expr, TypeIsAny);
         parameters.push_back(e);
@@ -823,6 +842,7 @@ ProtoParser::ParseTermExprs(const proto::plan::TermExpr& expr_pb) {
         Assert(data_type == (DataType)columnInfo.data_type());
     }
     std::vector<::milvus::proto::plan::GenericValue> values;
+    values.reserve(expr_pb.values_size());
     for (size_t i = 0; i < expr_pb.values_size(); i++) {
         values.emplace_back(expr_pb.values(i));
     }
@@ -901,6 +921,7 @@ ProtoParser::ParseJsonContainsExprs(
         Assert(data_type == (DataType)columnInfo.data_type());
     }
     std::vector<::milvus::proto::plan::GenericValue> values;
+    values.reserve(expr_pb.elements_size());
     for (size_t i = 0; i < expr_pb.elements_size(); i++) {
         values.emplace_back(expr_pb.elements(i));
     }

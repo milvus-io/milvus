@@ -14,11 +14,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "common/Tracer.h"
-#include "fmt/format.h"
+#include <chrono>
+#include <functional>
+#include <optional>
+#include <ratio>
+#include <utility>
+#include <vector>
+
 #include "SearchGroupByNode.h"
+#include "common/EasyAssert.h"
+#include "common/QueryResult.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "exec/QueryContext.h"
 #include "exec/operator/search-groupby/SearchGroupByOperator.h"
+#include "fmt/core.h"
 #include "monitor/Monitor.h"
+#include "plan/PlanNode.h"
+#include "prometheus/histogram.h"
+
 namespace milvus {
 namespace exec {
 

@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
@@ -315,12 +316,11 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	}
 
 	metrics.DataNodeCompactionLatency.
-		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).
+		WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String()).
 		Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	log.Info("Clustering compaction finished", zap.Duration("elapse", t.tr.ElapseSpan()), zap.Int64("flushTimes", t.flushCount.Load()))
 	// clear the buffer cache
 	t.keyToBufferFunc = nil
-
 	return planResult, nil
 }
 
@@ -576,13 +576,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 	processStart := time.Now()
 	var remained int64 = 0
 
-	deltaPaths := make([]string, 0)
-	for _, d := range segment.GetDeltalogs() {
-		for _, l := range d.GetBinlogs() {
-			deltaPaths = append(deltaPaths, l.GetLogPath())
-		}
+	options := []storage.RwOption{
+		storage.WithDownloader(t.binlogIO.Download),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	}
-	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.binlogIO, deltaPaths)
+	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.primaryKeyField.DataType, segment, options...)
 	if err != nil {
 		return err
 	}
@@ -1103,4 +1101,8 @@ func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{
 
 func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
+}
+
+func (t *clusteringCompactionTask) GetStorageConfig() *indexpb.StorageConfig {
+	return t.compactionParams.StorageConfig
 }

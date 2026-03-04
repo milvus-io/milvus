@@ -11,9 +11,8 @@
 
 #pragma once
 
-#include "fusion_compute/fusion_compute_native.h"
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 namespace milvus {
 namespace minhash {

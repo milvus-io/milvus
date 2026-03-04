@@ -13,17 +13,27 @@
 // limitations under the License.
 
 #include <arrow/c/bridge.h>
+#include <exception>
 #include <memory>
+#include <string>
+#include <vector>
+
+#include "PluginInterface.h"
+#include "arrow/result.h"
+#include "arrow/status.h"
 #include "common/EasyAssert.h"
-#include "storage/loon_ffi/ffi_reader_c.h"
 #include "common/common_type_c.h"
+#include "milvus-storage/column_groups.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/ffi_internal/bridge.h"
+#include "milvus-storage/manifest.h"
+#include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
-#include "storage/loon_ffi/util.h"
-#include "storage/PluginLoader.h"
-#include "storage/KeyRetriever.h"
 #include "monitor/scope_metric.h"
+#include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
+#include "storage/loon_ffi/ffi_reader_c.h"
+#include "storage/loon_ffi/util.h"
 
 /**
  * @brief Creates a Loon reader with optional CMEK decryption support.
@@ -129,7 +139,7 @@ NewPackedFFIReaderWithManifest(const LoonManifest* loon_manifest,
             MakeInternalPropertiesFromStorageConfig(c_storage_config);
         auto column_groups =
             std::make_shared<milvus_storage::api::ColumnGroups>();
-        auto status = milvus_storage::import_column_groups(
+        auto status = milvus_storage::column_groups_import(
             &loon_manifest->column_groups, column_groups.get());
         AssertInfo(status.ok(),
                    "Failed to import column groups: {}",

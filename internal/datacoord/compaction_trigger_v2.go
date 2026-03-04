@@ -143,7 +143,7 @@ type CompactionTriggerManager struct {
 	compactionChanLock      sync.Mutex
 }
 
-func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, inspector CompactionInspector, meta *meta, importMeta ImportMeta) *CompactionTriggerManager {
+func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, inspector CompactionInspector, meta *meta, importMeta ImportMeta, versionManager IndexEngineVersionManager) *CompactionTriggerManager {
 	m := &CompactionTriggerManager{
 		allocator:               alloc,
 		handler:                 handler,
@@ -159,7 +159,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
 	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
 	m.forceMergePolicy = newForceMergeCompactionPolicy(meta, m.allocator, m.handler)
-	m.upgradeStorageVersionPolicy = newStorageVersionUpgradePolicy(meta, m.allocator, m.handler)
+	m.upgradeStorageVersionPolicy = newStorageVersionUpgradePolicy(meta, m.allocator, m.handler, versionManager)
 	return m
 }
 
@@ -448,7 +448,7 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 					m.SubmitL0ViewToScheduler(ctx, outView)
 				case TriggerTypeClustering:
 					m.SubmitClusteringViewToScheduler(ctx, outView)
-				case TriggerTypeSingle, TriggerTypeSort, TriggerTypePartitionKeySort, TriggerTypeClusteringPartitionKeySort:
+				case TriggerTypeSingle, TriggerTypeSort, TriggerTypePartitionKeySort, TriggerTypeClusteringPartitionKeySort, TriggerTypeStorageVersionUpgrade:
 					m.SubmitSingleViewToScheduler(ctx, outView, eventType)
 				case TriggerTypeForceMerge:
 					m.SubmitForceMergeViewToScheduler(ctx, outView)

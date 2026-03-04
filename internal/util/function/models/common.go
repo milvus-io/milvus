@@ -124,6 +124,12 @@ const (
 	SiliconflowAKEnvStr string = "MILVUS_SILICONFLOW_API_KEY"
 )
 
+// Yandex Cloud
+
+const (
+	YandexCloudAKEnvStr string = "MILVUS_YC_API_KEY"
+)
+
 // TEI and vllm
 
 const (

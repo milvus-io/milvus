@@ -297,13 +297,13 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 
 // The incoming message id is always sorted with timetick.
 func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
-	if funcutil.IsControlChannel(msg.VChannel()) && msg.MessageType() != message.MessageTypeAlterReplicateConfig && msg.MessageType() != message.MessageTypeAlterWAL {
-		// message on control channel except AlterReplicateConfig message is just used to determine the DDL/DCL order,
+	if funcutil.IsControlChannel(msg.VChannel()) && !msg.IsPChannelLevel() {
+		// message on control channel except pchannel-level messages is just used to determine the DDL/DCL order,
 		// will not affect the recovery storage, so skip it.
 		return
 	}
 
-	if msg.VChannel() != "" && msg.MessageType() != message.MessageTypeAlterWAL && msg.MessageType() != message.MessageTypeCreateCollection &&
+	if msg.VChannel() != "" && !msg.IsPChannelLevel() && msg.MessageType() != message.MessageTypeCreateCollection &&
 		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && !funcutil.IsControlChannel(msg.VChannel()) {
 		r.detectInconsistency(msg, "vchannel not found")
 	}
@@ -420,6 +420,17 @@ func (r *recoveryStorageImpl) handleDelete(msg message.ImmutableDeleteMessageV1)
 
 // handleCreateSegment handles the create segment message.
 func (r *recoveryStorageImpl) handleCreateSegment(msg message.ImmutableCreateSegmentMessageV2) {
+	// Skip segment creation if the vchannel does not exist (collection was dropped).
+	// During WAL replay (e.g., Kafka offset reset), CreateSegment messages may appear
+	// for collections whose vchannels have already been cleaned up.
+	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; !ok || vchannelInfo.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+		r.Logger().Warn("skip create segment for non-active vchannel",
+			log.FieldMessage(msg),
+			zap.String("vchannel", msg.VChannel()),
+			zap.Int64("segmentID", msg.Header().SegmentId),
+		)
+		return
+	}
 	segment := newSegmentRecoveryInfoFromCreateSegmentMessage(msg)
 	r.segments[segment.meta.SegmentId] = segment
 	r.Logger().Info("create segment", log.FieldMessage(msg))
@@ -485,12 +496,13 @@ func (r *recoveryStorageImpl) handleCreateCollection(msg message.ImmutableCreate
 
 // handleDropCollection handles the drop collection message.
 func (r *recoveryStorageImpl) handleDropCollection(msg message.ImmutableDropCollectionMessageV1) {
-	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; !ok || vchannelInfo.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
-		return
-	}
-	r.vchannels[msg.VChannel()].ObserveDropCollection(msg)
-	// flush all existing segments.
+	// Always flush first: during WAL replay, CreateSegment/Insert messages may have recreated
+	// GROWING segments after the vchannel was marked DROPPED (non-atomic etcd persistence or
+	// Kafka offset compaction). Flushing unconditionally ensures idempotent replay.
 	r.flushAllSegmentOfCollection(msg, msg.Header().CollectionId)
+	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok && vchannelInfo.meta.State != streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+		vchannelInfo.ObserveDropCollection(msg)
+	}
 	r.Logger().Info("drop collection", log.FieldMessage(msg))
 }
 
@@ -519,14 +531,12 @@ func (r *recoveryStorageImpl) handleCreatePartition(msg message.ImmutableCreateP
 
 // handleDropPartition handles the drop partition message.
 func (r *recoveryStorageImpl) handleDropPartition(msg message.ImmutableDropPartitionMessageV1) {
-	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; !ok || vchannelInfo.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
-		// TODO: drop partition should never happen after the drop collection message.
-		// But now we don't have strong promise on it.
-		return
-	}
-	r.vchannels[msg.VChannel()].ObserveDropPartition(msg)
-	// flush all existing segments.
+	// Always flush first: same rationale as handleDropCollection — orphaned GROWING segments
+	// may exist for this partition due to non-atomic etcd persistence or WAL offset reset.
 	r.flushAllSegmentOfPartition(msg, msg.Header().PartitionId)
+	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok && vchannelInfo.meta.State != streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+		vchannelInfo.ObserveDropPartition(msg)
+	}
 	r.Logger().Info("drop partition", log.FieldMessage(msg))
 }
 

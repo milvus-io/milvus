@@ -16,14 +16,24 @@
 
 #pragma once
 
-#include <iostream>
+#include <stdint.h>
 #include <stdlib.h>
+#include <atomic>
+#include <exception>
+#include <iostream>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
+
 #include "AzureBlobChunkManager.h"
+#include "azure/core/diagnostics/logger.hpp"
+#include "common/EasyAssert.h"
+#include "glog/logging.h"
+#include "log/Log.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
-#include "log/Log.h"
 
 namespace milvus {
 namespace storage {
@@ -49,7 +59,7 @@ ThrowAzureError(const std::string& func,
                 Args&&... args) {
     std::string error_message =
         AzureErrorMessage(func, err, fmt_string, args...);
-    LOG_WARN(error_message);
+    LOG_WARN("{}", error_message);
     throw SegcoreError(S3Error, error_message);
 }
 

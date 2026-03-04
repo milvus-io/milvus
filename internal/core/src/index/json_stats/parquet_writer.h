@@ -16,16 +16,26 @@
 
 #pragma once
 
+#include <stdint.h>
+#include <cstddef>
+#include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
-#include <map>
+
 #include "arrow/api.h"
-#include "arrow/io/api.h"
-#include "parquet/arrow/writer.h"
+#include "arrow/array/array_base.h"
+#include "arrow/array/builder_base.h"
+#include "arrow/filesystem/filesystem.h"
+#include "common/EasyAssert.h"
+#include "common/protobuf_utils.h"
+#include "glog/logging.h"
 #include "index/json_stats/utils.h"
-#include "milvus-storage/packed/writer.h"
+#include "log/Log.h"
 #include "milvus-storage/common/config.h"
+#include "milvus-storage/packed/writer.h"
+#include "parquet/properties.h"
 
 namespace milvus::index {
 

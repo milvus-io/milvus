@@ -9,14 +9,22 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "pthread.h"
+#include <stdlib.h>
+#include <string.h>
+#include <chrono>
+#include <exception>
+#include <mutex>
+#include <string>
+
+#include "cachinglayer/Manager.h"
+#include "common/EasyAssert.h"
 #include "config/ConfigKnowhere.h"
-#include "fmt/core.h"
+#include "glog/logging.h"
 #include "log/Log.h"
+#include "pthread.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/segcore_init_c.h"
-#include "cachinglayer/Manager.h"
-#include "cachinglayer/Utils.h"
+
 namespace milvus::segcore {
 
 std::once_flag close_glog_once;
@@ -218,7 +226,8 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                        const float overloaded_memory_threshold_percentage,
                        const float loading_resource_factor,
                        const float max_disk_usage_percentage,
-                       const char* disk_path) {
+                       const char* disk_path,
+                       const int64_t loading_timeout_ms) {
     std::string disk_path_str(disk_path);
     milvus::cachinglayer::Manager::ConfigureTieredStorage(
         {scalarFieldCacheWarmupPolicy,
@@ -240,7 +249,8 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
          overloaded_memory_threshold_percentage,
          max_disk_usage_percentage,
          disk_path_str,
-         loading_resource_factor});
+         loading_resource_factor},
+        std::chrono::milliseconds(loading_timeout_ms));
 }
 
 }  // namespace milvus::segcore

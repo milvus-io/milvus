@@ -16,13 +16,20 @@
 
 #pragma once
 
-#include <string>
+#include <ctype.h>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <map>
-#include <google/protobuf/text_format.h>
-#include <google/protobuf/repeated_field.h>
+#include <optional>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <utility>
 
-#include "pb/schema.pb.h"
 #include "common/EasyAssert.h"
+#include "pb/common.pb.h"
 
 using std::string;
 
@@ -71,7 +78,27 @@ GetBoolFromRepeatedKVs(
     return {false, false};
 }
 
+/**
+ * @brief Get a string value from repeated KeyValuePair by key.
+ *
+ * @param kvs The repeated KeyValuePair field to search.
+ * @param key The key to look for.
+ * @return std::optional<std::string> containing the value if found, std::nullopt otherwise.
+ */
+static std::optional<std::string>
+GetStringFromRepeatedKVs(
+    const google::protobuf::RepeatedPtrField<proto::common::KeyValuePair>& kvs,
+    const std::string& key) {
+    for (const auto& kv : kvs) {
+        if (kv.key() == key) {
+            return kv.value();
+        }
+    }
+    return std::nullopt;
+}
+
 class ProtoLayout;
+
 using ProtoLayoutPtr = std::unique_ptr<ProtoLayout>;
 
 // ProtoLayout is a c++ type for esaier resource management at C-side.

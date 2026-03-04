@@ -11,10 +11,8 @@
 
 #pragma once
 
-#include <any>
+#include <stdint.h>
 #include <memory>
-#include <optional>
-#include <vector>
 #include <string>
 
 #include "common/QueryInfo.h"

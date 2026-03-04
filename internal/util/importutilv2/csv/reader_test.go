@@ -147,7 +147,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 
 	// read from csv file
 	ctx := context.Background()
-	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath("/tmp/milvus_test/test_csv_reader/"))
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(suite.T().TempDir()+"/"))
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	suite.NoError(err)
 

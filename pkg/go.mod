@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus/pkg/v2
 
-go 1.24.11
+go 1.24.12
 
 require (
 	cloud.google.com/go/storage v1.50.0
@@ -22,12 +22,11 @@ require (
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12
 	github.com/klauspost/compress v1.18.0
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20260113024922-c7feeb806088
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20260202035249-b2c299650f7e
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/prometheus/client_golang v1.20.5
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
-	github.com/remeh/sizedwaitgroup v1.0.0
 	github.com/samber/lo v1.27.0
 	github.com/shirou/gopsutil/v3 v3.23.12
 	github.com/sirupsen/logrus v1.9.3

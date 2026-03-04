@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -126,6 +127,51 @@ func Parse(schemaID C.longlong, exprStr *C.char, length *C.int, errMsg **C.char)
 	defer entry.releaseRef()
 
 	planNode, err := planparserv2.CreateRetrievePlan(entry.helper, goExprStr, nil)
+	if err != nil {
+		*errMsg = C.CString(err.Error())
+		return nil
+	}
+
+	bytes, err := proto.Marshal(planNode)
+	if err != nil {
+		*errMsg = C.CString("failed to marshal plan node: " + err.Error())
+		return nil
+	}
+
+	*length = C.int(len(bytes))
+	return C.CBytes(bytes)
+}
+
+//export ParseSearch
+func ParseSearch(schemaID C.longlong, exprStr *C.char, vectorFieldName *C.char, queryInfoBlob unsafe.Pointer, queryInfoLen C.int, length *C.int, errMsg **C.char) unsafe.Pointer {
+	id := int64(schemaID)
+	goExprStr := C.GoString(exprStr)
+	goVectorFieldName := C.GoString(vectorFieldName)
+
+	val, ok := schemaMap.Load(id)
+	if !ok {
+		*errMsg = C.CString("schema not found")
+		return nil
+	}
+	entry := val.(*schemaEntry)
+
+	if !entry.acquireRef() {
+		*errMsg = C.CString("schema has been unregistered")
+		return nil
+	}
+	defer entry.releaseRef()
+
+	// Parse QueryInfo from protobuf
+	queryInfo := &planpb.QueryInfo{}
+	if queryInfoLen > 0 {
+		queryInfoBytes := C.GoBytes(queryInfoBlob, queryInfoLen)
+		if err := proto.Unmarshal(queryInfoBytes, queryInfo); err != nil {
+			*errMsg = C.CString("failed to unmarshal query info: " + err.Error())
+			return nil
+		}
+	}
+
+	planNode, err := planparserv2.CreateSearchPlan(entry.helper, goExprStr, goVectorFieldName, queryInfo, nil, nil)
 	if err != nil {
 		*errMsg = C.CString(err.Error())
 		return nil

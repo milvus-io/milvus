@@ -16,7 +16,20 @@
 
 #include "BinaryArithOpEvalRangeExpr.h"
 
+#include <simdjson.h>
+#include <cstdint>
+#include <string_view>
+#include <variant>
+
+#include "common/Array.h"
+#include "common/Json.h"
+#include "common/Tracer.h"
+#include "fmt/core.h"
+#include "opentelemetry/trace/span.h"
+
 namespace milvus {
+class SkipIndex;
+
 namespace exec {
 
 void
@@ -148,6 +161,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
     auto arith_type = expr_->arith_op_type_;
     auto value = value_arg_.GetValue<ValueType>();
     auto right_operand = right_operand_arg_.GetValue<ValueType>();
+
+    // Validate divisor for division/modulo operations
+    if ((arith_type == proto::plan::ArithOpType::Div ||
+         arith_type == proto::plan::ArithOpType::Mod) &&
+        right_operand == 0) {
+        ThrowInfo(
+            ErrorCode::ExprInvalid,
+            "division or modulus by zero in JSON field arithmetic expression");
+    }
 
 #define BinaryArithRangeJSONCompare(cmp)                                \
     do {                                                                \
@@ -558,6 +580,15 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     auto arith_type = expr_->arith_op_type_;
     auto value = value_arg_.GetValue<ValueType>();
     auto right_operand = right_operand_arg_.GetValue<ValueType>();
+
+    // Validate divisor for division/modulo operations
+    if ((arith_type == proto::plan::ArithOpType::Div ||
+         arith_type == proto::plan::ArithOpType::Mod) &&
+        right_operand == 0) {
+        ThrowInfo(
+            ErrorCode::ExprInvalid,
+            "division or modulus by zero in Array field arithmetic expression");
+    }
 
 #define BinaryArithRangeArrayCompare(cmp)                       \
     do {                                                        \

@@ -11,11 +11,13 @@
 
 #pragma once
 
+#include <algorithm>
 #include <string>
-#include "common/EasyAssert.h"
-#include "common/FieldDataInterface.h"
-#include "tantivy-binding.h"
+#include <unordered_map>
+
+#include "common/Types.h"
 #include "fmt/core.h"
+#include "tantivy-binding.h"
 
 namespace milvus {
 

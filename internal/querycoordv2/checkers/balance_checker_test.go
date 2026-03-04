@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -45,6 +46,7 @@ func createMockPriorityQueue() *assign.PriorityQueue {
 func createTestBalanceChecker() *BalanceChecker {
 	metaInstance := &meta.Meta{
 		CollectionManager: meta.NewCollectionManager(nil),
+		ReplicaManager:    meta.NewReplicaManager(nil, nil),
 	}
 	targetMgr := meta.NewTargetManager(nil, nil)
 	nodeMgr := &session.NodeManager{}
@@ -421,7 +423,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_EmptyReplicas(t *testin
 	config := balanceConfig{}
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 
-	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, []int64{}, config)
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, []int64{}, config, false)
 
 	assert.Empty(t, segmentTasks)
 	assert.Empty(t, channelTasks)
@@ -491,7 +493,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_Success(t *testing.T) {
 	defer mockPrintPlans.UnPatch()
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
-	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config)
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false)
 
 	assert.Len(t, segmentTasks, 1)
 	assert.Len(t, channelTasks, 1)
@@ -510,10 +512,132 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NilReplica(t *testing.T
 	defer mockReplicaGet.UnPatch()
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
-	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config)
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false)
 
 	assert.Empty(t, segmentTasks)
 	assert.Empty(t, channelTasks)
+}
+
+// =============================================================================
+// LoadPriority Tests
+// =============================================================================
+
+func TestBalanceChecker_GenerateBalanceTasksFromReplicas_StoppingBalanceHighPriority(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	config := balanceConfig{
+		segmentTaskTimeout: 30 * time.Second,
+		channelTaskTimeout: 30 * time.Second,
+	}
+	replicaIDs := []int64{101}
+
+	// Create mock replica
+	mockReplica := &meta.Replica{}
+
+	// Mock ReplicaManager.Get
+	mockReplicaGet := mockey.Mock(mockey.GetMethod(checker.meta.ReplicaManager, "Get")).Return(mockReplica).Build()
+	defer mockReplicaGet.UnPatch()
+
+	// Create mock balance plans (without LoadPriority set, should be set by generateBalanceTasksFromReplicas)
+	segmentPlan := assign.SegmentAssignPlan{
+		Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1}},
+		Replica: mockReplica,
+		From:    1,
+		To:      2,
+	}
+
+	mockBalancer := mockey.Mock((*balance.BalancerFactory).GetBalancer).To(func(*balance.BalancerFactory) balance.Balance {
+		return balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil)
+	}).Build()
+	defer mockBalancer.UnPatch()
+
+	// Mock balancer.BalanceReplica
+	mockBalanceReplica := mockey.Mock((*balance.ScoreBasedBalancer).BalanceReplica).Return(
+		[]assign.SegmentAssignPlan{segmentPlan},
+		[]assign.ChannelAssignPlan{},
+	).Build()
+	defer mockBalanceReplica.UnPatch()
+
+	// Capture the plans passed to CreateSegmentTasksFromPlans to verify LoadPriority
+	var capturedPlans []assign.SegmentAssignPlan
+	mockCreateSegmentTasks := mockey.Mock(balance.CreateSegmentTasksFromPlans).To(
+		func(ctx context.Context, source task.Source, timeout time.Duration, plans []assign.SegmentAssignPlan) []task.Task {
+			capturedPlans = plans
+			return []task.Task{}
+		}).Build()
+	defer mockCreateSegmentTasks.UnPatch()
+
+	// Mock balance.PrintNewBalancePlans
+	mockPrintPlans := mockey.Mock(balance.PrintNewBalancePlans).Return().Build()
+	defer mockPrintPlans.UnPatch()
+
+	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
+	// Call with isStoppingBalance=true
+	checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, true)
+
+	// Verify LoadPriority is set to HIGH for stopping balance
+	assert.Len(t, capturedPlans, 1)
+	assert.Equal(t, commonpb.LoadPriority_HIGH, capturedPlans[0].LoadPriority,
+		"Stopping balance should use HIGH priority")
+}
+
+func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NormalBalanceLowPriority(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	config := balanceConfig{
+		segmentTaskTimeout: 30 * time.Second,
+		channelTaskTimeout: 30 * time.Second,
+	}
+	replicaIDs := []int64{101}
+
+	// Create mock replica
+	mockReplica := &meta.Replica{}
+
+	// Mock ReplicaManager.Get
+	mockReplicaGet := mockey.Mock(mockey.GetMethod(checker.meta.ReplicaManager, "Get")).Return(mockReplica).Build()
+	defer mockReplicaGet.UnPatch()
+
+	// Create mock balance plans (without LoadPriority set)
+	segmentPlan := assign.SegmentAssignPlan{
+		Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1}},
+		Replica: mockReplica,
+		From:    1,
+		To:      2,
+	}
+
+	mockBalancer := mockey.Mock((*balance.BalancerFactory).GetBalancer).To(func(*balance.BalancerFactory) balance.Balance {
+		return balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil)
+	}).Build()
+	defer mockBalancer.UnPatch()
+
+	// Mock balancer.BalanceReplica
+	mockBalanceReplica := mockey.Mock((*balance.ScoreBasedBalancer).BalanceReplica).Return(
+		[]assign.SegmentAssignPlan{segmentPlan},
+		[]assign.ChannelAssignPlan{},
+	).Build()
+	defer mockBalanceReplica.UnPatch()
+
+	// Capture the plans passed to CreateSegmentTasksFromPlans to verify LoadPriority
+	var capturedPlans []assign.SegmentAssignPlan
+	mockCreateSegmentTasks := mockey.Mock(balance.CreateSegmentTasksFromPlans).To(
+		func(ctx context.Context, source task.Source, timeout time.Duration, plans []assign.SegmentAssignPlan) []task.Task {
+			capturedPlans = plans
+			return []task.Task{}
+		}).Build()
+	defer mockCreateSegmentTasks.UnPatch()
+
+	// Mock balance.PrintNewBalancePlans
+	mockPrintPlans := mockey.Mock(balance.PrintNewBalancePlans).Return().Build()
+	defer mockPrintPlans.UnPatch()
+
+	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
+	// Call with isStoppingBalance=false
+	checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false)
+
+	// Verify LoadPriority is set to LOW for normal balance
+	assert.Len(t, capturedPlans, 1)
+	assert.Equal(t, commonpb.LoadPriority_LOW, capturedPlans[0].LoadPriority,
+		"Normal balance should use LOW priority")
 }
 
 // =============================================================================
@@ -592,6 +716,7 @@ func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *assign.PriorityQueue,
 				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
+				isStoppingBalance bool,
 			) (int, int) {
 				stoppingBalanceCalled = true
 				return 1, 0 // Return some tasks generated
@@ -638,6 +763,7 @@ func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *assign.PriorityQueue,
 				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
+				isStoppingBalance bool,
 			) (int, int) {
 				processQueueCalled = true
 				return 0, 0
@@ -694,6 +820,7 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *assign.PriorityQueue,
 				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
+				isStoppingBalance bool,
 			) (int, int) {
 				// Verify this is stopping balance by checking the function pointers
 				stoppingBalanceCalled = true
@@ -747,6 +874,7 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *assign.PriorityQueue,
 				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
+				isStoppingBalance bool,
 			) (int, int) {
 				callCount++
 				if callCount == 1 {
@@ -813,6 +941,7 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *assign.PriorityQueue,
 				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
+				isStoppingBalance bool,
 			) (int, int) {
 				normalBalanceCalled = true
 				return 0, 1 // Generate normal balance tasks
@@ -868,6 +997,7 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *assign.PriorityQueue,
 				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
+				isStoppingBalance bool,
 			) (int, int) {
 				normalBalanceCalled = true
 				return 0, 1
@@ -917,6 +1047,7 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 				getReplicasFunc func(context.Context, int64) []int64,
 				constructQueueFunc func(context.Context) *assign.PriorityQueue,
 				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
+				isStoppingBalance bool,
 			) (int, int) {
 				normalBalanceCalled = true
 				return 0, 1
@@ -986,7 +1117,7 @@ func TestBalanceChecker_ProcessBalanceQueue_Success(t *testing.T) {
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	segmentTasks, channelTasks := checker.processBalanceQueue(
-		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config, false,
 	)
 
 	assert.Equal(t, 3, segmentTasks)
@@ -1020,7 +1151,7 @@ func TestBalanceChecker_ProcessBalanceQueue_EmptyQueue(t *testing.T) {
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	segmentTasks, channelTasks := checker.processBalanceQueue(
-		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config, false,
 	)
 
 	assert.Equal(t, 0, segmentTasks)
@@ -1079,7 +1210,7 @@ func TestBalanceChecker_ProcessBalanceQueue_BatchSizeLimit(t *testing.T) {
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	segmentTasks, channelTasks := checker.processBalanceQueue(
-		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config, false,
 	)
 
 	// Should stop after first collection due to batch size limits
@@ -1128,7 +1259,7 @@ func TestBalanceChecker_ProcessBalanceQueue_MultiCollectionDisabled(t *testing.T
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	segmentTasks, channelTasks := checker.processBalanceQueue(
-		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config, false,
 	)
 
 	// Should stop after first collection due to multi-collection disabled
@@ -1165,7 +1296,7 @@ func TestBalanceChecker_ProcessBalanceQueue_NoReplicasToBalance(t *testing.T) {
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	segmentTasks, channelTasks := checker.processBalanceQueue(
-		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config, false,
 	)
 
 	assert.Equal(t, 0, segmentTasks)
@@ -1808,6 +1939,7 @@ func TestBalanceChecker_Check_TimeoutWarning(t *testing.T) {
 			getReplicasFunc func(ctx context.Context, collectionID int64) []int64,
 			constructQueueFunc func(ctx context.Context) *assign.PriorityQueue,
 			getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
+			isStoppingBalance bool,
 		) (int, int) {
 			time.Sleep(150 * time.Millisecond)
 			return 0, 0

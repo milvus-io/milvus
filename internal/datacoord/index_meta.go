@@ -266,8 +266,8 @@ func checkIdenticalJson(index *model.Index, req *indexpb.CreateIndexRequest) boo
 }
 
 func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
-	metaTypeParams := DeleteParams(fieldIndex.TypeParams, []string{common.MmapEnabledKey})
-	reqTypeParams := DeleteParams(req.TypeParams, []string{common.MmapEnabledKey})
+	metaTypeParams := DeleteParams(fieldIndex.TypeParams, []string{common.MmapEnabledKey, common.WarmupKey})
+	reqTypeParams := DeleteParams(req.TypeParams, []string{common.MmapEnabledKey, common.WarmupKey})
 	if len(metaTypeParams) != len(reqTypeParams) {
 		return false
 	}
@@ -1097,12 +1097,16 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 
 		for _, segIdx := range segIndexInfos.Values() {
 			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted {
+				indexVersion := segIdx.CurrentIndexVersion
+				if indexparamcheck.IsScalarIndexType(indexparamcheck.IndexType(segIdx.IndexType)) {
+					indexVersion = segIdx.CurrentScalarIndexVersion
+				}
 				ret[segID][segIdx.IndexID] = &indexpb.SegmentIndexState{
 					SegmentID:    segID,
 					State:        segIdx.IndexState,
 					FailReason:   segIdx.FailReason,
 					IndexName:    index.IndexName,
-					IndexVersion: segIdx.CurrentIndexVersion,
+					IndexVersion: indexVersion,
 				}
 			}
 		}

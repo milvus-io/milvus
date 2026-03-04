@@ -16,26 +16,44 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
-#include <vector>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <exception>
 #include <future>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
+#include "arrow/array/builder_base.h"
+#include "arrow/scalar.h"
+#include "arrow/type.h"
+#include "common/ArrowDataWrapper.h"
 #include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
+#include "common/FieldMeta.h"
 #include "common/LoadInfo.h"
-#include "knowhere/comp/index_param.h"
+#include "common/Types.h"
+#include "common/type_c.h"
+#include "milvus-storage/common/metadata.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/properties.h"
 #include "parquet/schema.h"
-#include "storage/Event.h"
-#include "storage/MemFileManagerImpl.h"
-#include "storage/PayloadStream.h"
-#include "storage/FileManager.h"
 #include "storage/BinlogReader.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
-#include "storage/Types.h"
-#include "milvus-storage/filesystem/fs.h"
+#include "storage/Event.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/PayloadReader.h"
+#include "storage/PayloadStream.h"
 #include "storage/ThreadPools.h"
-#include "milvus-storage/common/metadata.h"
+#include "storage/Types.h"
 
 namespace milvus::storage {
 
@@ -186,6 +204,27 @@ GetObjectData(
 
 // Helper function to wait for all futures and collect exceptions
 // This ensures all background threads complete before rethrowing exception
+inline void
+WaitAllFutures(std::vector<std::future<void>>& futures) {
+    std::exception_ptr first_exception = nullptr;
+
+    for (auto& future : futures) {
+        try {
+            future.get();  // return type is void
+        } catch (...) {
+            if (!first_exception) {
+                first_exception = std::current_exception();
+            }
+        }
+    }
+
+    if (first_exception) {
+        std::rethrow_exception(first_exception);
+    }
+}
+
+// Helper function to wait for all futures and collect exceptions
+// This ensures all background threads complete before rethrowing exception
 template <typename T>
 std::vector<T>
 WaitAllFutures(std::vector<std::future<T>> futures) {
@@ -211,6 +250,33 @@ WaitAllFutures(std::vector<std::future<T>> futures) {
     }
 
     return results;
+}
+
+// Process futures in order, invoking processor on each result as soon as it's
+// ready.  This reduces peak memory compared to WaitAllFutures because each
+// result can be consumed (and freed) before later futures resolve.
+// On exception, we continue waiting for all remaining futures to avoid
+// use-after-free on resources captured by background threads (see #46958).
+template <typename T, typename Processor>
+void
+ProcessFuturesInOrder(std::vector<std::future<T>>& futures,
+                      Processor&& processor) {
+    std::exception_ptr first_exception = nullptr;
+    for (auto& future : futures) {
+        try {
+            auto result = future.get();
+            if (!first_exception) {
+                processor(std::move(result));
+            }
+        } catch (...) {
+            if (!first_exception) {
+                first_exception = std::current_exception();
+            }
+        }
+    }
+    if (first_exception) {
+        std::rethrow_exception(first_exception);
+    }
 }
 
 std::vector<FieldDataPtr>

@@ -18,17 +18,19 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
+
 #include "common/EasyAssert.h"
-#include "common/FieldDataInterface.h"
 #include "common/OpContext.h"
+#include "common/Types.h"
 #include "common/Utils.h"
 #include "common/Vector.h"
+#include "common/protobuf_utils.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
-#include "exec/expression/function/FunctionFactory.h"
 #include "expr/ITypeExpr.h"
 #include "fmt/core.h"
 #include "segcore/SegmentInterface.h"

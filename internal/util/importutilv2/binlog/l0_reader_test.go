@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -38,16 +39,21 @@ import (
 func TestL0Reader_NewL0Reader(t *testing.T) {
 	ctx := context.Background()
 
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		DataType:     schemapb.DataType_VarChar,
+		IsPrimaryKey: true,
+	}
 	t.Run("normal", func(t *testing.T) {
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		r, err := NewL0Reader(ctx, cm, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64)
+		r, err := NewL0Reader(ctx, cm, nil, pkField, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64)
 		assert.NoError(t, err)
 		assert.NotNil(t, r)
 	})
 
 	t.Run("invalid path", func(t *testing.T) {
-		r, err := NewL0Reader(ctx, nil, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix", "mock-prefix2"}}, 100, 0, math.MaxUint64)
+		r, err := NewL0Reader(ctx, nil, nil, pkField, &internalpb.ImportFile{Paths: []string{"mock-prefix", "mock-prefix2"}}, 100, 0, math.MaxUint64)
 		assert.Error(t, err)
 		assert.Nil(t, r)
 	})
@@ -55,7 +61,7 @@ func TestL0Reader_NewL0Reader(t *testing.T) {
 	t.Run("list failed", func(t *testing.T) {
 		cm := mocks.NewChunkManager(t)
 		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
-		r, err := NewL0Reader(ctx, cm, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64)
+		r, err := NewL0Reader(ctx, cm, nil, pkField, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64)
 		assert.Error(t, err)
 		assert.Nil(t, r)
 	})
@@ -83,9 +89,14 @@ func TestL0Reader_Read(t *testing.T) {
 			}
 			return nil
 		})
-	cm.EXPECT().Read(mock.Anything, mock.Anything).Return(blob.Value, nil)
+	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{blob.Value}, nil)
 
-	r, err := NewL0Reader(ctx, cm, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64)
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		DataType:     schemapb.DataType_VarChar,
+		IsPrimaryKey: true,
+	}
+	r, err := NewL0Reader(ctx, cm, nil, pkField, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64)
 	assert.NoError(t, err)
 
 	res, err := r.Read()
@@ -123,11 +134,16 @@ func TestL0Reader_NoFilters(t *testing.T) {
 
 	// Mock ChunkManager.Read using interface
 	mockChunkManager := storage.NewLocalChunkManager()
-	mockRead := mockey.Mock((*storage.LocalChunkManager).Read).Return(blob.Value, nil).Build()
+	mockRead := mockey.Mock((*storage.LocalChunkManager).MultiRead).Return([][]byte{blob.Value}, nil).Build()
 	defer mockRead.UnPatch()
 
 	// Create reader without any filters
-	r, err := NewL0Reader(ctx, mockChunkManager, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64)
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		DataType:     schemapb.DataType_VarChar,
+		IsPrimaryKey: true,
+	}
+	r, err := NewL0Reader(ctx, mockChunkManager, nil, pkField, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100, 0, math.MaxUint64)
 	assert.NoError(t, err)
 
 	res, err := r.Read()

@@ -2,6 +2,7 @@ package resource
 
 import (
 	"reflect"
+	"sync/atomic"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -15,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var r *resourceImpl // singleton resource instance
+var r atomic.Pointer[resourceImpl] // singleton resource instance
 
 // optResourceInit is the option to initialize the resource.
 type optResourceInit func(r *resourceImpl)
@@ -64,19 +65,19 @@ func Init(opts ...optResourceInit) {
 	assertNotNil(newR.StreamingCatalog())
 	newR.streamingNodeManagerClient = manager.NewManagerClient(newR.etcdClient)
 	assertNotNil(newR.StreamingNodeManagerClient())
-	r = newR
+	r.Store(newR)
 }
 
 // Release release the streamingnode client
 func Release() {
-	if r.streamingNodeManagerClient != nil {
-		r.streamingNodeManagerClient.Close()
+	if res := r.Load(); res != nil && res.streamingNodeManagerClient != nil {
+		res.streamingNodeManagerClient.Close()
 	}
 }
 
 // Resource access the underlying singleton of resources.
 func Resource() *resourceImpl {
-	return r
+	return r.Load()
 }
 
 // resourceImpl is a basic resource dependency for streamingnode server.

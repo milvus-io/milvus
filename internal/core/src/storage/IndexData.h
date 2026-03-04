@@ -16,11 +16,15 @@
 
 #pragma once
 
-#include <string>
+#include <stdint.h>
 #include <memory>
+#include <optional>
 #include <vector>
 
+#include "common/type_c.h"
 #include "storage/DataCodec.h"
+#include "storage/PayloadReader.h"
+#include "storage/Types.h"
 
 namespace milvus::storage {
 

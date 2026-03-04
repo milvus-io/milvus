@@ -10,10 +10,28 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <stdlib.h>
+#include <string.h>
+#include <memory>
+#include <string>
 
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
+#include "segcore/Collection.h"
 #include "segcore/collection_c.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/c_api_test_utils.h"
+#include "test_utils/indexbuilder_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;

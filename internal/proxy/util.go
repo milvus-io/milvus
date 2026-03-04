@@ -630,6 +630,14 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
 		return err
 	}
+
+	// Validate warmup policy if specified in field TypeParams
+	if warmupPolicy, exist := common.GetWarmupPolicy(field.GetTypeParams()...); exist {
+		if err = common.ValidateWarmupPolicy(warmupPolicy); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid warmup policy for field %s: %s", field.Name, err.Error())
+		}
+	}
+
 	return nil
 }
 
@@ -678,12 +686,27 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	if field.GetNullable() {
 		return fmt.Errorf("nullable is not supported for fields in struct array now, fieldName = %s", field.Name)
 	}
+
+	// Validate warmup policy if specified in field TypeParams
+	if warmupPolicy, exist := common.GetWarmupPolicy(field.GetTypeParams()...); exist {
+		if err = common.ValidateWarmupPolicy(warmupPolicy); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid warmup policy for field %s: %s", field.Name, err.Error())
+		}
+	}
+
 	return nil
 }
 
 func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema, schema *schemapb.CollectionSchema) error {
 	if len(structArrayField.Fields) == 0 {
 		return fmt.Errorf("struct array field %s has no sub-fields", structArrayField.Name)
+	}
+
+	// Validate warmup policy if specified in struct field TypeParams
+	if warmupPolicy, exist := common.GetWarmupPolicy(structArrayField.GetTypeParams()...); exist {
+		if err := common.ValidateWarmupPolicy(warmupPolicy); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid warmup policy for struct field %s: %s", structArrayField.Name, err.Error())
+		}
 	}
 
 	for _, subField := range structArrayField.Fields {
@@ -1385,6 +1408,11 @@ func ValidateCollectionName(entity string) error {
 		return nil
 	}
 	return validateName(entity, "collection name")
+}
+
+// ValidateSnapshotName validates snapshot name using standard naming rules.
+func ValidateSnapshotName(snapshotName string) error {
+	return validateName(snapshotName, "snapshot name")
 }
 
 func ValidateObjectType(entity string) error {
@@ -2387,7 +2415,7 @@ func ErrWithLog(logger *log.MLogger, msg string, err error) error {
 	return wrapErr
 }
 
-func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, skipStaticFieldNameCheck bool) error {
 	for _, field := range insertMsg.FieldsData {
 		if field.GetFieldName() == common.MetaFieldName {
 			if !schema.EnableDynamicField {
@@ -2405,10 +2433,12 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 				if _, ok := jsonData[common.MetaFieldName]; ok {
 					return fmt.Errorf("cannot set json key to: %s", common.MetaFieldName)
 				}
-				for _, f := range schema.GetFields() {
-					if _, ok := jsonData[f.GetName()]; ok {
-						log.Info("dynamic field name include the static field name", zap.String("fieldName", f.GetName()))
-						return fmt.Errorf("dynamic field name cannot include the static field name: %s", f.GetName())
+				if !skipStaticFieldNameCheck {
+					for _, f := range schema.GetFields() {
+						if _, ok := jsonData[f.GetName()]; ok {
+							log.Info("dynamic field name include the static field name", zap.String("fieldName", f.GetName()))
+							return fmt.Errorf("dynamic field name cannot include the static field name: %s", f.GetName())
+						}
 					}
 				}
 			}
@@ -2418,11 +2448,15 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 	return nil
 }
 
-func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+// doCheckDynamicFieldData is the shared implementation for dynamic field validation.
+// When skipStaticFieldNameCheck is true, $meta keys matching static field names are
+// allowed — this is needed for partial updates after schema evolution, where $meta
+// may legitimately contain keys that now correspond to static columns.
+func doCheckDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, skipStaticFieldNameCheck bool) error {
 	for _, data := range insertMsg.FieldsData {
 		if data.IsDynamic {
 			data.FieldName = common.MetaFieldName
-			return verifyDynamicFieldData(schema, insertMsg)
+			return verifyDynamicFieldData(schema, insertMsg, skipStaticFieldNameCheck)
 		}
 	}
 	defaultData := make([][]byte, insertMsg.NRows())
@@ -2432,6 +2466,20 @@ func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 	dynamicData := autoGenDynamicFieldData(defaultData)
 	insertMsg.FieldsData = append(insertMsg.FieldsData, dynamicData)
 	return nil
+}
+
+func checkDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+	return doCheckDynamicFieldData(schema, insertMsg, false)
+}
+
+// checkDynamicFieldDataForPartialUpdate is a relaxed version of checkDynamicFieldData
+// for partial updates. After schema evolution, $meta may legitimately contain keys
+// matching static field names (e.g., a dynamic field "end_timestamp" that was later
+// added as a static column). This function validates JSON format and rejects the
+// reserved $meta key, but skips the static field name conflict check so that
+// existing dynamic field data is preserved.
+func checkDynamicFieldDataForPartialUpdate(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+	return doCheckDynamicFieldData(schema, insertMsg, true)
 }
 
 func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {

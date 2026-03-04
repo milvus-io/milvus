@@ -9,8 +9,19 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
+#include <stddef.h>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
 #include "common/BloomFilter.h"
+#include "common/TracerBase.h"
+#include "gtest/gtest.h"
 
 using namespace milvus;
 

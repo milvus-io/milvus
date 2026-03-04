@@ -317,7 +317,7 @@ proxy:
       bufSize: 512 # The maximum number of messages can be buffered in the timeTick message stream of the proxy when producing messages.
   maxNameLength: 255 # The maximum length of the name or alias that can be created in Milvus, including the collection name, collection alias, partition name, and field name.
   maxFieldNum: 64 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 64.
-  maxVectorFieldNum: 4 # The maximum number of vector fields that can be specified in a collection
+  maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
@@ -531,13 +531,6 @@ queryNode:
     growingMmapEnabled: false
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
-  lazyload:
-    enabled: false # Enable lazyload for loading data
-    waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
-    requestResourceTimeout: 5000 # max timeout in milliseconds for waiting request resource for lazy load, 5s by default
-    requestResourceRetryInterval: 2000 # retry interval in milliseconds for waiting request resource for lazy load, 2s by default
-    maxRetryTimes: 1 # max retry times for lazy load, 1 by default
-    maxEvictPerRetry: 1 # max evict count for lazy load, 1 by default
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   scheduler:
     receiveChanSize: 10240
@@ -684,6 +677,8 @@ dataCoord:
         deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
     expiry:
       tolerance: -1 # tolerant duration in hours for expiry data, negative value means no toleration and equivalent to zero
+    backfill:
+      triggerInterval: 20 # The time interval in seconds for trigger backfill compaction
     single:
       ratio:
         threshold: 0.2 # The ratio threshold of a segment to trigger a single compaction, default as 0.2
@@ -741,6 +736,7 @@ dataCoord:
     clusteringCompactionUsage: 65535 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
     mixCompactionUsage: 4 # slot usage of mix compaction task.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
+    backfillCompactionUsage: 1 # slot usage of backfill compaction task.
     indexTaskSlotUsage: 64 # slot usage of index task per 512mb
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
@@ -1035,6 +1031,9 @@ common:
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction
   localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
+  # Prefer IPv6 addresses when automatically selecting the local IP.
+  # If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.
+  preferIPv6: false
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
@@ -1297,9 +1296,9 @@ streaming:
     # The max interval of balance task trigger backoff, 5s by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     backoffMaxInterval: 5s
-    # The timeout of wal balancer operation, 30s by default.
+    # The timeout of wal balancer operation, 30m by default.
     # If the operation exceeds this timeout, it will be canceled.
-    operationTimeout: 30s
+    operationTimeout: 30m
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       # Whether to allow rebalance, true by default.
@@ -1457,6 +1456,10 @@ function:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable voyageai model service
         url:  # Your voyageai embedding url, Default is the official embedding url
+      yc:
+        credential:  # The name in the credential configuration item
+        enable: true # Whether to enable Yandex Cloud model service
+        url:  # Your Yandex Cloud text embedding url, Default is the official text embedding url
   rerank:
     model:
       providers:

@@ -11,16 +11,39 @@
 
 #include "SegmentInterface.h"
 
+#include <folly/ExceptionWrapper.h>
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <map>
+#include <ratio>
+#include <type_traits>
+#include <unordered_set>
 
+#include "NamedType/named_type_impl.hpp"
 #include "Utils.h"
+#include "bitset/bitset.h"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/OpContext.h"
+#include "common/QueryResult.h"
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
-#include "monitor/Monitor.h"
-#include "query/ExecPlanNodeVisitor.h"
+#include "common/Utils.h"
+#include "expr/ITypeExpr.h"
+#include "fmt/core.h"
 #include "futures/Future.h"
+#include "monitor/Monitor.h"
+#include "pb/schema.pb.h"
+#include "plan/PlanNode.h"
+#include "plan/PlanNodeIdGenerator.h"
+#include "prometheus/histogram.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/ConcurrentVector.h"
 
 namespace milvus::segcore {
 
@@ -98,7 +121,8 @@ SegmentInternalInterface::Search(
     Timestamp timestamp,
     const folly::CancellationToken& cancel_token,
     int32_t consistency_level,
-    Timestamp collection_ttl) const {
+    Timestamp collection_ttl,
+    int64_t entity_ttl_physical_time_us) const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
     check_search(plan);
@@ -107,7 +131,8 @@ SegmentInternalInterface::Search(
                                        placeholder_group,
                                        cancel_token,
                                        consistency_level,
-                                       collection_ttl);
+                                       collection_ttl,
+                                       entity_ttl_physical_time_us);
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;
@@ -122,12 +147,17 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    bool ignore_non_pk,
                                    const folly::CancellationToken& cancel_token,
                                    int32_t consistency_level,
-                                   Timestamp collection_ttl) const {
+                                   Timestamp collection_ttl,
+                                   int64_t entity_ttl_physical_time_us) const {
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("Retrieve", tracer::GetRootSpan(), true);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
-    query::ExecPlanNodeVisitor visitor(
-        *this, timestamp, cancel_token, consistency_level, collection_ttl);
+    query::ExecPlanNodeVisitor visitor(*this,
+                                       timestamp,
+                                       cancel_token,
+                                       consistency_level,
+                                       collection_ttl,
+                                       entity_ttl_physical_time_us);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
     results->set_has_more_result(retrieve_results.has_more_result);

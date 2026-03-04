@@ -9,22 +9,48 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/container/vector.hpp>
+#include <boost/filesystem/operations.hpp>
+#include <fmt/core.h>
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
-#include <functional>
-#include <boost/filesystem.hpp>
-#include <unordered_set>
+#include <nlohmann/json.hpp>
+#include <stdint.h>
+#include <stdlib.h>
+#include <iosfwd>
 #include <memory>
+#include <stdexcept>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
+#include "common/Array.h"
+#include "common/Consts.h"
+#include "common/FieldDataInterface.h"
 #include "common/Tracer.h"
-#include "index/BitmapIndex.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "storage/Util.h"
-#include "storage/InsertData.h"
-#include "indexbuilder/IndexFactory.h"
+#include "common/TracerBase.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
 #include "index/IndexFactory.h"
-#include "test_utils/indexbuilder_test_utils.h"
+#include "index/IndexInfo.h"
+#include "index/IndexStats.h"
 #include "index/Meta.h"
+#include "index/ScalarIndex.h"
+#include "indexbuilder/IndexCreatorBase.h"
+#include "indexbuilder/IndexFactory.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
+#include "storage/InsertData.h"
+#include "storage/PayloadReader.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
@@ -217,7 +243,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
         auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
-                                    "/tmp/test_array_bitmap",
+                                    TestLocalPath,
                                     collection_id,
                                     partition_id,
                                     segment_id,
@@ -293,7 +319,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         int64_t partition_id = 2;
         int64_t segment_id = 3;
         int64_t field_id = 101;
-        std::string root_path = "/tmp/test-bitmap-index/";
+        std::string root_path = TestLocalPath;
 
         storage::StorageConfig storage_config;
         storage_config.storage_type = "local";

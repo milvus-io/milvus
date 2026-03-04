@@ -1,5 +1,14 @@
 #include <unistd.h>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <utility>
+#include <vector>
+
 #include "RemoteInputStream.h"
+#include "arrow/io/interfaces.h"
+#include "arrow/result.h"
+#include "arrow/status.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 
@@ -41,9 +50,9 @@ RemoteInputStream::Read(int fd, size_t size) {
         ssize_t ret = ::write(fd, data.data(), read_size);
         AssertInfo(ret == static_cast<ssize_t>(read_size),
                    "Failed to write to file");
-        ::fsync(fd);
         rest_size -= read_size;
     }
+    ::fsync(fd);
     return size;
 }
 

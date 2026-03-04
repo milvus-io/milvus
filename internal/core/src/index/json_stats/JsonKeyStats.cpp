@@ -14,28 +14,59 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <boost/uuid/random_generator.hpp>
-#include <boost/uuid/uuid_io.hpp>
-
 #include <nlohmann/json.hpp>
+#include <string.h>
+#include <chrono>
+#include <cstdint>
+#include <exception>
+#include <filesystem>
+#include <initializer_list>
+#include <iosfwd>
+#include <unordered_set>
+#include <variant>
+
+#include "NamedType/named_type_impl.hpp"
+#include "NamedType/underlying_functionalities.hpp"
+#include "arrow/api.h"
+#include "boost/filesystem/operations.hpp"
+#include "bsoncxx/builder/basic/document.hpp"
+#include "bsoncxx/document/value.hpp"
+#include "bsoncxx/document/view.hpp"
+#include "cachinglayer/Manager.h"
+#include "cachinglayer/Translator.h"
+#include "common/Consts.h"
+#include "common/FieldDataInterface.h"
+#include "common/FieldMeta.h"
+#include "common/GroupChunk.h"
+#include "common/Json.h"
+#include "common/Tracer.h"
+#include "common/jsmn.h"
+#include "fmt/core.h"
+#include "index/Utils.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "index/json_stats/bson_builder.h"
-#include "index/InvertedIndexUtil.h"
-#include "index/Utils.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include "storage/MmapManager.h"
-#include "storage/Util.h"
-#include "common/bson_view.h"
-#include "mmap/ChunkedColumnGroup.h"
-#include "milvus-storage/format/parquet/file_reader.h"
+#include "index/json_stats/parquet_writer.h"
+#include "milvus-storage/common/config.h"
 #include "milvus-storage/common/constants.h"
-#include "segcore/storagev1translator/ChunkTranslator.h"
-#include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
-#include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "milvus-storage/common/metadata.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "mmap/ChunkedColumnGroup.h"
+#include "mmap/Types.h"
+#include "nlohmann/detail/iterators/iteration_proxy.hpp"
+#include "nlohmann/json_fwd.hpp"
+#include "parquet/metadata.h"
 #include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
-#include "cachinglayer/Manager.h"
-#include "segcore/Utils.h"
+#include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/FileManager.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/MemFileManagerImpl.h"
+#include "storage/MmapManager.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 
 namespace milvus::index {
 
@@ -931,7 +962,8 @@ JsonKeyStats::LoadShreddingMeta(
 
 void
 JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
-                              const std::vector<int64_t>& file_ids) {
+                              const std::vector<int64_t>& file_ids,
+                              const std::string& warmup_policy) {
     if (file_ids.empty()) {
         return;
     }
@@ -1016,7 +1048,8 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         enable_mmap,
         mmap_config.GetMmapPopulate(),
         milvus_field_ids.size(),
-        load_priority_);
+        load_priority_,
+        warmup_policy);
 
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
@@ -1041,7 +1074,8 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
 }
 
 void
-JsonKeyStats::LoadShreddingData(const std::vector<std::string>& index_files) {
+JsonKeyStats::LoadShreddingData(const std::vector<std::string>& index_files,
+                                const std::string& warmup_policy) {
     // sort files by column group id and file id
     auto sorted_files = SortByParquetPath(index_files);
 
@@ -1050,7 +1084,7 @@ JsonKeyStats::LoadShreddingData(const std::vector<std::string>& index_files) {
 
     // load shredding data
     for (const auto& [column_group_id, file_ids] : sorted_files) {
-        LoadColumnGroup(column_group_id, file_ids);
+        LoadColumnGroup(column_group_id, file_ids, warmup_policy);
     }
 }
 
@@ -1058,7 +1092,8 @@ void
 JsonKeyStats::LoadSharedKeyIndex(
     const std::vector<std::string>& shared_key_index_files,
     bool enable_mmap,
-    int64_t index_size) {
+    int64_t index_size,
+    const std::string& warmup_policy) {
     segcore::storagev1translator::BsonInvertedIndexLoadInfo load_info;
     load_info.enable_mmap = enable_mmap;
     load_info.segment_id = segment_id_;
@@ -1066,7 +1101,7 @@ JsonKeyStats::LoadSharedKeyIndex(
     load_info.index_files = shared_key_index_files;
     load_info.index_size = index_size;
     load_info.load_priority = load_priority_;
-
+    load_info.warmup_policy = warmup_policy;
     std::unique_ptr<cachinglayer::Translator<index::BsonInvertedIndex>>
         translator = std::make_unique<
             segcore::storagev1translator::BsonInvertedIndexTranslator>(
@@ -1145,7 +1180,8 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     }
 
     // load shredding data
-    LoadShreddingData(shredding_data_files);
+    LoadShreddingData(shredding_data_files,
+                      config.contains(WARMUP) ? config.at(WARMUP) : "");
 
     // get all index files size as shared key index size,
     // no accurate way to get the shared key index size,
@@ -1154,7 +1190,10 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         GetValueFromConfig<int64_t>(config, milvus::index::INDEX_SIZE)
             .value_or(0);
     // load shared key index
-    LoadSharedKeyIndex(shared_key_index_files, enable_mmap, index_size);
+    LoadSharedKeyIndex(shared_key_index_files,
+                       enable_mmap,
+                       index_size,
+                       config.contains(WARMUP) ? config.at(WARMUP) : "");
 }
 
 IndexStatsPtr

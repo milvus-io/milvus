@@ -16,14 +16,22 @@
 
 #pragma once
 
+#include <cstdint>
 #include <exception>
+#include <map>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "common/EasyAssert.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
 #include "expr/ITypeExpr.h"
-#include "pb/common.pb.h"
+#include "folly/FBVector.h"
 #include "pb/plan.pb.h"
 #include "segcore/SegmentInterface.h"
-#include "common/protobuf_utils.h"
 
 namespace milvus::rescores {
 class Scorer {

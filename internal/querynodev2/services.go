@@ -37,9 +37,9 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
-	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/internal/util/textmatch"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -537,6 +537,10 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	log.Info("load segments done...",
 		zap.Int64s("segments", lo.Map(loaded, func(s segments.Segment, _ int) int64 { return s.ID() })))
 
+	// Publish filesystem metrics after load task completion
+	// Use default filesystem (empty path) for load tasks
+	storagev2.PublishDefaultFilesystemMetrics()
+
 	return merr.Success(), nil
 }
 
@@ -741,10 +745,12 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	}
 	defer node.lifetime.Done()
 
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+	nodeIDStr := paramtable.GetStringNodeID()
+	collIDStr := strconv.FormatInt(req.GetReq().GetCollectionID(), 10)
+	metrics.QueryNodeSQCount.WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.TotalLabel, metrics.FromLeader, collIDStr).Inc()
 	defer func() {
 		if !merr.Ok(resp.GetStatus()) {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+			metrics.QueryNodeSQCount.WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.FailLabel, metrics.FromLeader, collIDStr).Inc()
 		}
 	}()
 
@@ -768,12 +774,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
 	}()
 
-	var task scheduler.Task
-	if paramtable.Get().QueryNodeCfg.UseStreamComputing.GetAsBool() {
-		task = tasks.NewStreamingSearchTask(searchCtx, collection, node.manager, req, node.serverID)
-	} else {
-		task = tasks.NewSearchTask(searchCtx, collection, node.manager, req, node.serverID)
-	}
+	task := tasks.NewSearchTask(searchCtx, collection, node.manager, req, node.serverID)
 
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to search channel", zap.Error(err))
@@ -788,14 +789,11 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		return resp, nil
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("search segments done, channel = %s, segmentIDs = %v",
-		channel,
-		req.GetSegmentIDs(),
-	))
+	tr.CtxElapse(ctx, "search segments done")
 
 	latency := tr.ElapseSpan()
-	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.SuccessLabel, metrics.FromLeader, collIDStr).Inc()
 
 	resp = task.SearchResult()
 	resp.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
@@ -1338,6 +1336,18 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				})
 			})
 		case querypb.SyncType_UpdateVersion:
+			// Version compatibility check: reject messages with inconsistent sealed segment fields
+			// In v2.6, SealedInTarget and SealedSegmentRowCount have consistent keys (same length)
+			// A mismatch indicates the message is from v2.5 which lacks SealedSegmentRowCount
+			if len(action.GetSealedInTarget()) != len(action.GetSealedSegmentRowCount()) {
+				log.Warn("Reject syncTargetVersion from older version Coordinator",
+					zap.String("channel", req.GetChannel()),
+					zap.Int("sealedInTarget", len(action.GetSealedInTarget())),
+					zap.Int("sealedSegmentRowCount", len(action.GetSealedSegmentRowCount())),
+				)
+				continue
+			}
+
 			log.Info("sync action",
 				zap.Int64("TargetVersion", action.GetTargetVersion()),
 				zap.Time("checkPoint", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())),
@@ -1679,6 +1689,14 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 		segment.DropIndex(ctx, indexID)
 	}
 
+	return merr.Success(), nil
+}
+
+func (node *QueryNode) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
+	defer node.updateDistributionModifyTS()
+	// UpdateIndex is currently a placeholder implementation
+	// The actual logic should handle AddIndex and DropIndex actions
+	// For now, return success to satisfy the interface
 	return merr.Success(), nil
 }
 

@@ -34,6 +34,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -53,8 +54,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
@@ -94,11 +93,6 @@ type Loader interface {
 		segment Segment,
 		info *querypb.SegmentLoadInfo,
 		version int64) error
-
-	LoadLazySegment(ctx context.Context,
-		segment Segment,
-		loadInfo *querypb.SegmentLoadInfo,
-	) error
 
 	LoadJSONIndex(ctx context.Context,
 		segment Segment,
@@ -276,16 +270,15 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	var err error
 	var requestResourceResult requestResourceResult
 
-	if !isLazyLoad(collection, segmentType) {
-		// Check memory & storage limit
-		// no need to check resource for lazy load here
-		requestResourceResult, err = loader.requestResource(ctx, infos...)
-		if err != nil {
-			log.Warn("request resource failed", zap.Error(err))
-			return nil, err
-		}
-		defer loader.freeRequestResource(requestResourceResult)
+	// Check memory & storage limit
+	// no need to check resource for lazy load here
+	requestResourceResult, err = loader.requestResource(ctx, infos...)
+	if err != nil {
+		log.Warn("request resource failed", zap.Error(err))
+		return nil, err
 	}
+	defer loader.freeRequestResource(requestResourceResult)
+
 	newSegments := typeutil.NewConcurrentMap[int64, Segment]()
 	loaded := typeutil.NewConcurrentMap[int64, Segment]()
 	defer func() {
@@ -354,9 +347,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		logger := log.With(zap.Int64("partitionID", partitionID),
 			zap.Int64("segmentID", segmentID),
 			zap.String("segmentType", loadInfo.GetLevel().String()))
-		metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadSegment").Inc()
+		metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadSegment").Inc()
 		defer func() {
-			metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadSegment").Dec()
+			metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadSegment").Dec()
 			if err != nil {
 				logger.Warn("load segment failed when load data into memory", zap.Error(err))
 			}
@@ -369,10 +362,8 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		if loadInfo.GetLevel() != datapb.SegmentLevel_L0 {
 			s := segment.(*LocalSegment)
 			// lazy load segment do not load segment at first time.
-			if !s.IsLazyLoad() {
-				if err = loader.LoadSegment(ctx, s, loadInfo); err != nil {
-					return errors.Wrap(err, "At LoadSegment")
-				}
+			if err = loader.LoadSegment(ctx, s, loadInfo); err != nil {
+				return errors.Wrap(err, "At LoadSegment")
 			}
 		}
 		if err = loader.loadDeltalogs(ctx, segment, loadInfo.GetDeltalogs()); err != nil {
@@ -397,7 +388,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		loaded.Insert(segmentID, segment)
 		loader.notifyLoadFinish(loadInfo)
 
-		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil
 	}
 
@@ -944,9 +935,6 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	collection := segment.GetCollection()
 	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
 	indexedFieldInfos, _, textIndexes, unindexedTextFields, jsonKeyStats := separateLoadInfoV2(loadInfo, collection.Schema())
-	if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
-		return err
-	}
 
 	log := log.Ctx(ctx).With(zap.Int64("segmentID", segment.ID()))
 	tr := timerecord.NewTimeRecorder("segmentLoader.loadSealedSegment")
@@ -956,13 +944,15 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		zap.Int64s("unindexed text fields", lo.Keys(unindexedTextFields)),
 		zap.Int64s("indexed json key fields", lo.Keys(jsonKeyStats)),
 	)
+	_, err = GetLoadPool().Submit(func() (any, error) {
+		if err = segment.Load(ctx); err != nil {
+			return struct{}{}, errors.Wrap(err, "At Load")
+		}
 
-	if err = segment.Load(ctx); err != nil {
-		return errors.Wrap(err, "At Load")
-	}
-
-	if err = segment.FinishLoad(); err != nil {
-		return errors.Wrap(err, "At FinishLoad")
+		return struct{}{}, nil
+	}).Await()
+	if err != nil {
+		return err
 	}
 
 	for _, indexInfo := range loadInfo.IndexInfos {
@@ -973,21 +963,6 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 			IndexInfo: indexInfo,
 			IsLoaded:  true,
 		})
-	}
-
-	// load text indexes.
-	for _, info := range textIndexes {
-		if err := segment.LoadTextIndex(ctx, info, schemaHelper); err != nil {
-			return err
-		}
-	}
-	loadTextIndexesSpan := tr.RecordSpan()
-
-	// create index for unindexed text fields.
-	for fieldID := range unindexedTextFields {
-		if err := segment.CreateTextIndex(ctx, fieldID); err != nil {
-			return err
-		}
 	}
 
 	for _, info := range jsonKeyStats {
@@ -1005,11 +980,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	}
 	patchEntryNumberSpan := tr.RecordSpan()
 	log.Info("Finish loading segment",
-		// zap.Duration("loadFieldsIndexSpan", loadFieldsIndexSpan),
-		// zap.Duration("complementScalarDataSpan", complementScalarDataSpan),
-		// zap.Duration("loadRawDataSpan", loadRawDataSpan),
 		zap.Duration("patchEntryNumberSpan", patchEntryNumberSpan),
-		zap.Duration("loadTextIndexesSpan", loadTextIndexesSpan),
 		zap.Duration("loadJsonKeyIndexSpan", loadJSONKeyIndexesSpan),
 	)
 	return nil
@@ -1055,10 +1026,11 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		if err := segment.Load(ctx); err != nil {
 			return err
 		}
-		if err := segment.FinishLoad(); err != nil {
-			return errors.Wrap(err, "At FinishLoad")
-		}
 	}
+
+	binlogSize := calculateSegmentMemorySize(segment.LoadInfo())
+	segment.manager.AddLoadedBinlogSize(binlogSize)
+	segment.binlogSize.Store(binlogSize)
 
 	// load statslog if it's growing segment
 	if segment.segmentType == SegmentTypeGrowing {
@@ -1080,55 +1052,6 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		}
 	}
 	return nil
-}
-
-func (loader *segmentLoader) LoadLazySegment(ctx context.Context,
-	segment Segment,
-	loadInfo *querypb.SegmentLoadInfo,
-) (err error) {
-	result, err := loader.requestResourceWithTimeout(ctx, loadInfo)
-	if err != nil {
-		log.Ctx(ctx).Warn("request resource failed", zap.Error(err))
-		return err
-	}
-	// NOTE: logical resource is not used for lazy load, so set it to zero
-	defer loader.freeRequestResource(result)
-
-	return loader.LoadSegment(ctx, segment, loadInfo)
-}
-
-// requestResourceWithTimeout requests memory & storage to load segments with a timeout and retry.
-func (loader *segmentLoader) requestResourceWithTimeout(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (requestResourceResult, error) {
-	retryInterval := paramtable.Get().QueryNodeCfg.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond)
-	timeoutStarted := false
-	for {
-		listener := loader.committedResourceNotifier.Listen(syncutil.VersionedListenAtLatest)
-
-		result, err := loader.requestResource(ctx, infos...)
-		if err == nil {
-			return result, nil
-		}
-
-		// start timeout if there's no committed resource in loading.
-		if !timeoutStarted && result.CommittedResource.IsZero() {
-			timeout := paramtable.Get().QueryNodeCfg.LazyLoadRequestResourceTimeout.GetAsDuration(time.Millisecond)
-			var cancel context.CancelFunc
-			// TODO: use context.WithTimeoutCause instead of contextutil.WithTimeoutCause in go1.21
-			ctx, cancel = contextutil.WithTimeoutCause(ctx, timeout, merr.ErrServiceResourceInsufficient)
-			defer cancel()
-			timeoutStarted = true
-		}
-
-		// TODO: use context.WithTimeoutCause instead of contextutil.WithTimeoutCause in go1.21
-		ctxWithRetryTimeout, cancelWithRetryTimeout := contextutil.WithTimeoutCause(ctx, retryInterval, errRetryTimerNotified)
-		err = listener.Wait(ctxWithRetryTimeout)
-		// if error is not caused by retry timeout, return it directly.
-		if err != nil && !errors.Is(err, errRetryTimerNotified) {
-			cancelWithRetryTimeout()
-			return requestResourceResult{}, err
-		}
-		cancelWithRetryTimeout()
-	}
 }
 
 func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBinlog, pkFieldID int64) ([]string, storage.StatsLogType) {
@@ -1369,46 +1292,20 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 	)
 	log.Info("loading delta...")
 
-	var blobs []*storage.Blob
-	var futures []*conc.Future[any]
+	var rowNums int64
+	valid := func(binlog *datapb.Binlog, _ int) bool {
+		// the segment has applied the delta logs, skip it
+		if binlog.GetTimestampTo() > 0 && // this field may be missed in legacy versions
+			binlog.GetTimestampTo() < segment.LastDeltaTimestamp() {
+			return false
+		}
+		return true
+	}
 	for _, deltaLog := range deltaLogs {
-		for _, bLog := range deltaLog.GetBinlogs() {
-			bLog := bLog
-			// the segment has applied the delta logs, skip it
-			if bLog.GetTimestampTo() > 0 && // this field may be missed in legacy versions
-				bLog.GetTimestampTo() < segment.LastDeltaTimestamp() {
-				continue
-			}
-			future := GetLoadPool().Submit(func() (any, error) {
-				value, err := loader.cm.Read(ctx, bLog.GetLogPath())
-				if err != nil {
-					return nil, err
-				}
-				blob := &storage.Blob{
-					Key:    bLog.GetLogPath(),
-					Value:  value,
-					RowNum: bLog.EntriesNum,
-				}
-				return blob, nil
-			})
-			futures = append(futures, future)
-		}
+		rowNums += lo.SumBy(lo.Filter(deltaLog.GetBinlogs(), valid), func(binlog *datapb.Binlog) int64 {
+			return binlog.GetEntriesNum()
+		})
 	}
-	for _, future := range futures {
-		blob, err := future.Await()
-		if err != nil {
-			return err
-		}
-		blobs = append(blobs, blob.(*storage.Blob))
-	}
-	if len(blobs) == 0 {
-		log.Info("there are no delta logs saved with segment, skip loading delete record")
-		return nil
-	}
-
-	rowNums := lo.SumBy(blobs, func(blob *storage.Blob) int64 {
-		return blob.RowNum
-	})
 
 	collection := loader.manager.Collection.Get(segment.Collection())
 
@@ -1419,20 +1316,50 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return err
 	}
 
-	reader, err := storage.CreateDeltalogReader(blobs)
-	if err != nil {
-		return err
-	}
-	defer reader.Close()
-	for {
-		dl, err := reader.NextValue()
-		if err != nil {
-			if err == io.EOF {
-				break
+	for _, deltalog := range deltaLogs {
+		err := func() error {
+			opts := []storage.RwOption{
+				storage.WithDownloader(
+					func(ctx context.Context, paths []string) ([][]byte, error) {
+						return loader.cm.MultiRead(ctx, paths)
+					},
+				),
 			}
-			return err
-		}
-		err = deltaData.Append((*dl).Pk, (*dl).Ts)
+			paths := lo.Map(lo.Filter(deltalog.Binlogs, valid), func(binlog *datapb.Binlog, _ int) string {
+				return binlog.GetLogPath()
+			})
+			reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
+			if err != nil {
+				return err
+			}
+			defer reader.Close()
+
+			for {
+				dl, err := reader.Next()
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+					return err
+				}
+
+				for i := 0; i < dl.Len(); i++ {
+					var pk storage.PrimaryKey
+					switch pkField.DataType {
+					case schemapb.DataType_Int64:
+						pk = storage.NewInt64PrimaryKey(dl.Column(0).(*array.Int64).Value(i))
+					case schemapb.DataType_VarChar:
+						pk = storage.NewVarCharPrimaryKey(dl.Column(0).(*array.String).Value(i))
+					}
+					ts := typeutil.Timestamp(dl.Column(1).(*array.Int64).Value(i))
+					err = deltaData.Append(pk, ts)
+					if err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}()
 		if err != nil {
 			return err
 		}
@@ -1979,14 +1906,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 					fieldIndexInfo.GetBuildID())
 			}
 
-			needWarmup := false
-			if isVectorType {
-				needWarmup = paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.GetValue() == "sync"
-			} else {
-				needWarmup = paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue() == "sync"
-			}
-
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				indexMemorySize += estimateResult.MaxMemoryCost
 				segDiskLoadingSize += estimateResult.MaxDiskCost
 			}
@@ -2037,7 +1957,6 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		var legacyNilSchema bool
 		mmapEnabled := true
 		isVectorType := true
-		needWarmup := false
 		hasIndex := true
 
 		for _, fieldID := range fieldIDs {
@@ -2062,11 +1981,6 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
 			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
-			if isVectorType {
-				needWarmup = needWarmup || paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.GetValue() == "sync"
-			} else {
-				needWarmup = needWarmup || paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue() == "sync"
-			}
 			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
 			containsTimestampField = containsTimestampField || DoubleMemorySystemField(fieldSchema.GetFieldID())
 			doubleMomoryDataField = doubleMomoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
@@ -2077,7 +1991,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 
 		if !hasIndex {
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
 				if interimIndexEnable {
 					segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
@@ -2088,11 +2002,11 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		if isVectorType {
 			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 			if mmapVectorField {
-				if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+				if !multiplyFactor.TieredEvictionEnabled {
 					segDiskLoadingSize += binlogSize
 				}
 			} else {
-				if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+				if !multiplyFactor.TieredEvictionEnabled {
 					segMemoryLoadingSize += binlogSize
 				}
 			}
@@ -2108,14 +2022,14 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 
 		if !mmapEnabled {
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				segMemoryLoadingSize += binlogSize
 				if doubleMomoryDataField {
 					segMemoryLoadingSize += binlogSize
 				}
 			}
 		} else {
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				segDiskLoadingSize += uint64(getBinlogDataMemorySize(fieldBinlog))
 			}
 		}
@@ -2148,14 +2062,13 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 	// PART 5: calculate size of json key stats data
 	jsonStatsMmapEnable := paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool()
-	needWarmup := paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue() == "sync"
 	for _, jsonKeyStats := range loadInfo.GetJsonKeyStatsLogs() {
 		if jsonStatsMmapEnable {
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				segDiskLoadingSize += uint64(float64(jsonKeyStats.GetMemorySize()) * multiplyFactor.jsonKeyStatsExpansionFactor)
 			}
 		} else {
-			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+			if !multiplyFactor.TieredEvictionEnabled {
 				segMemoryLoadingSize += uint64(float64(jsonKeyStats.GetMemorySize()) * multiplyFactor.jsonKeyStatsExpansionFactor)
 			}
 		}
@@ -2263,11 +2176,11 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 	defer loader.freeRequestResource(requestResourceResult)
 
 	log.Info("segment loader start to load index", zap.Int("segmentNumAfterFilter", len(infos)))
-	metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadIndex").Inc()
-	defer metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadIndex").Dec()
+	metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadIndex").Inc()
+	defer metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadIndex").Dec()
 
 	tr := timerecord.NewTimeRecorder("segmentLoader.LoadIndex")
-	defer metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	defer metrics.QueryNodeLoadIndexLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	for _, loadInfo := range infos {
 		for _, info := range loadInfo.GetIndexInfos() {
 			if len(info.GetIndexFilePaths()) == 0 {

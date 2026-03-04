@@ -117,6 +117,82 @@ func GenGeometryRow(i int) string {
 	return wktArray[i%6]
 }
 
+// NullableVarcharRow is a row struct for Int64VarcharSparseVec collections with nullable varchar.
+// A nil Varchar pointer maps to NULL in Milvus.
+type NullableVarcharRow struct {
+	Int64     int64                  `json:"int64,omitempty" milvus:"name:int64"`
+	Varchar   *string                `json:"varchar,omitempty" milvus:"name:varchar"`
+	SparseVec entity.SparseEmbedding `json:"sparseVec,omitempty" milvus:"name:sparseVec"`
+}
+
+// NullableScalarRow is a row struct with all nullable scalar pointer fields + floatVec.
+type NullableScalarRow struct {
+	Int64    int64     `json:"int64,omitempty" milvus:"name:int64"`
+	Bool     *bool     `json:"bool,omitempty" milvus:"name:bool"`
+	Int8     *int8     `json:"int8,omitempty" milvus:"name:int8"`
+	Int16    *int16    `json:"int16,omitempty" milvus:"name:int16"`
+	Int32    *int32    `json:"int32,omitempty" milvus:"name:int32"`
+	Float    *float32  `json:"float,omitempty" milvus:"name:float"`
+	Double   *float64  `json:"double,omitempty" milvus:"name:double"`
+	Varchar  *string   `json:"varchar,omitempty" milvus:"name:varchar"`
+	FloatVec []float32 `json:"floatVec,omitempty" milvus:"name:floatVec"`
+}
+
+// GenNullableVarcharSparseRows generates rows with nullable varchar using *string pointers.
+// When option.validData[i] is false, Varchar is nil (null).
+func GenNullableVarcharSparseRows(nb int, autoID bool, option GenDataOption) []interface{} {
+	start := option.start
+	rows := make([]interface{}, 0, nb)
+	for i := start; i < start+nb; i++ {
+		row := NullableVarcharRow{
+			SparseVec: common.GenSparseVector(2),
+		}
+		if !autoID {
+			row.Int64 = int64(i + 1)
+		}
+		idx := i - start
+		if option.validData != nil && idx < len(option.validData) && option.validData[idx] {
+			v := strconv.Itoa(i + 1)
+			row.Varchar = &v
+		}
+		rows = append(rows, &row)
+	}
+	return rows
+}
+
+// GenNullableScalarRows generates rows with all nullable scalar pointer fields.
+// When option.validData[i] is false, all nullable fields are nil (null).
+func GenNullableScalarRows(nb int, option GenDataOption) []interface{} {
+	start := option.start
+	dim := option.dim
+	rows := make([]interface{}, 0, nb)
+	for i := start; i < start+nb; i++ {
+		row := NullableScalarRow{
+			Int64:    int64(i + 1),
+			FloatVec: common.GenFloatVector(dim),
+		}
+		idx := i - start
+		if option.validData != nil && idx < len(option.validData) && option.validData[idx] {
+			bVal := (i%2 == 0)
+			i8Val := int8(i + 1)
+			i16Val := int16(i + 1)
+			i32Val := int32(i + 1)
+			fVal := float32(i + 1)
+			dVal := float64(i + 1)
+			vVal := strconv.Itoa(i + 1)
+			row.Bool = &bVal
+			row.Int8 = &i8Val
+			row.Int16 = &i16Val
+			row.Int32 = &i32Val
+			row.Float = &fVal
+			row.Double = &dVal
+			row.Varchar = &vVal
+		}
+		rows = append(rows, &row)
+	}
+	return rows
+}
+
 func GenInt64VecRows(nb int, enableDynamicField bool, autoID bool, option GenDataOption) []interface{} {
 	if option.validData != nil {
 		log.Fatal("GenInt64VecRows with valid data is not yet implemented")

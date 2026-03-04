@@ -25,6 +25,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -1661,4 +1664,253 @@ func TestPinReadableSegments_PartialResultNotEmpty(t *testing.T) {
 	// Before the fix, this would return 0 because segments were filtered by target version
 	// After the fix, this returns 2 because segments are filtered by query view's segment list
 	assert.Equal(t, 2, actualSealedCount, "Should return segments filtered by query view, not empty list")
+}
+
+// mockCandidate is a mock implementation of pkoracle.Candidate for testing BatchGet.
+type mockCandidate struct {
+	id        int64
+	partition int64
+	hits      []bool
+}
+
+func (m *mockCandidate) MayPkExist(lc *storage.LocationsCache) bool {
+	return true
+}
+
+func (m *mockCandidate) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	return m.hits
+}
+
+func (m *mockCandidate) ID() int64 {
+	return m.id
+}
+
+func (m *mockCandidate) Partition() int64 {
+	return m.partition
+}
+
+func (m *mockCandidate) Type() commonpb.SegmentState {
+	return commonpb.SegmentState_Sealed
+}
+
+func TestBatchGetFromSegments(t *testing.T) {
+	t.Run("basic_sealed_segments", func(t *testing.T) {
+		candidate1 := &mockCandidate{id: 1, partition: 1, hits: []bool{true, false, true}}
+		candidate2 := &mockCandidate{id: 2, partition: 1, hits: []bool{false, true, false}}
+
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 1, PartitionID: 1, Candidate: candidate1},
+					{SegmentID: 2, PartitionID: 1, Candidate: candidate2},
+				},
+			},
+		}
+		growing := []SegmentEntry{}
+
+		pks := []storage.PrimaryKey{
+			storage.NewInt64PrimaryKey(100),
+			storage.NewInt64PrimaryKey(200),
+			storage.NewInt64PrimaryKey(300),
+		}
+
+		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
+
+		assert.Len(t, result, 2)
+		assert.Equal(t, []bool{true, false, true}, result[1])
+		assert.Equal(t, []bool{false, true, false}, result[2])
+	})
+
+	t.Run("filter_by_partition", func(t *testing.T) {
+		candidate1 := &mockCandidate{id: 1, partition: 1, hits: []bool{true}}
+		candidate2 := &mockCandidate{id: 2, partition: 2, hits: []bool{false}}
+
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 1, PartitionID: 1, Candidate: candidate1},
+					{SegmentID: 2, PartitionID: 2, Candidate: candidate2},
+				},
+			},
+		}
+		growing := []SegmentEntry{}
+
+		pks := []storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}
+
+		// Filter by partition 1
+		result := BatchGetFromSegments(pks, 1, sealed, growing)
+		assert.Len(t, result, 1)
+		assert.Contains(t, result, int64(1))
+		assert.NotContains(t, result, int64(2))
+	})
+
+	t.Run("skip_offline_and_nil_candidates", func(t *testing.T) {
+		candidate1 := &mockCandidate{id: 1, partition: 1, hits: []bool{true}}
+
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 1, PartitionID: 1, Candidate: candidate1, Offline: true}, // offline
+					{SegmentID: 2, PartitionID: 1, Candidate: nil},                       // nil candidate
+				},
+			},
+		}
+		growing := []SegmentEntry{
+			{SegmentID: 10, PartitionID: 1, Candidate: nil}, // nil candidate in growing
+		}
+
+		pks := []storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}
+
+		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
+
+		// All should be skipped
+		assert.Empty(t, result)
+	})
+
+	t.Run("growing_segments", func(t *testing.T) {
+		growingCandidate := &mockCandidate{id: 10, partition: 1, hits: []bool{true, true}}
+
+		sealed := []SnapshotItem{}
+		growing := []SegmentEntry{
+			{SegmentID: 10, PartitionID: 1, Candidate: growingCandidate},
+		}
+
+		pks := []storage.PrimaryKey{
+			storage.NewInt64PrimaryKey(100),
+			storage.NewInt64PrimaryKey(200),
+		}
+
+		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
+
+		assert.Len(t, result, 1)
+		assert.Equal(t, []bool{true, true}, result[10])
+	})
+
+	t.Run("mixed_sealed_and_growing", func(t *testing.T) {
+		sealedCandidate := &mockCandidate{id: 1, partition: 1, hits: []bool{true, false}}
+		growingCandidate := &mockCandidate{id: 10, partition: 1, hits: []bool{false, true}}
+
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 1, PartitionID: 1, Candidate: sealedCandidate},
+				},
+			},
+		}
+		growing := []SegmentEntry{
+			{SegmentID: 10, PartitionID: 1, Candidate: growingCandidate},
+		}
+
+		pks := []storage.PrimaryKey{
+			storage.NewInt64PrimaryKey(100),
+			storage.NewInt64PrimaryKey(200),
+		}
+
+		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
+
+		assert.Len(t, result, 2)
+		assert.Equal(t, []bool{true, false}, result[1])
+		assert.Equal(t, []bool{false, true}, result[10])
+	})
+
+	t.Run("empty_segments", func(t *testing.T) {
+		sealed := []SnapshotItem{}
+		growing := []SegmentEntry{}
+
+		pks := []storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}
+
+		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
+
+		assert.Empty(t, result)
+	})
+
+	t.Run("multiple_nodes", func(t *testing.T) {
+		candidate1 := &mockCandidate{id: 1, partition: 1, hits: []bool{true}}
+		candidate2 := &mockCandidate{id: 2, partition: 1, hits: []bool{false}}
+
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 1, PartitionID: 1, Candidate: candidate1},
+				},
+			},
+			{
+				NodeID: 2,
+				Segments: []SegmentEntry{
+					{SegmentID: 2, PartitionID: 1, Candidate: candidate2},
+				},
+			},
+		}
+		growing := []SegmentEntry{}
+
+		pks := []storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}
+
+		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
+
+		assert.Len(t, result, 2)
+		assert.Equal(t, []bool{true}, result[1])
+		assert.Equal(t, []bool{false}, result[2])
+	})
+}
+
+func TestDistribution_SealedSegmentExistsOnNode(t *testing.T) {
+	t.Run("segment_exists_on_correct_node", func(t *testing.T) {
+		dist := NewDistribution("test-channel", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
+
+		dist.AddDistributions(
+			SegmentEntry{NodeID: 1, SegmentID: 100, PartitionID: 1, Version: 1},
+			SegmentEntry{NodeID: 2, SegmentID: 200, PartitionID: 1, Version: 1},
+		)
+
+		// Segment 100 exists on node 1
+		assert.True(t, dist.SealedSegmentExistsOnNode(100, 1))
+		// Segment 100 does not exist on node 2
+		assert.False(t, dist.SealedSegmentExistsOnNode(100, 2))
+		// Segment 200 exists on node 2
+		assert.True(t, dist.SealedSegmentExistsOnNode(200, 2))
+		// Segment 200 does not exist on node 1
+		assert.False(t, dist.SealedSegmentExistsOnNode(200, 1))
+	})
+
+	t.Run("segment_not_exists", func(t *testing.T) {
+		dist := NewDistribution("test-channel", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
+
+		dist.AddDistributions(
+			SegmentEntry{NodeID: 1, SegmentID: 100, PartitionID: 1, Version: 1},
+		)
+
+		// Non-existent segment
+		assert.False(t, dist.SealedSegmentExistsOnNode(999, 1))
+		assert.False(t, dist.SealedSegmentExistsOnNode(999, 2))
+	})
+
+	t.Run("empty_distribution", func(t *testing.T) {
+		dist := NewDistribution("test-channel", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
+
+		assert.False(t, dist.SealedSegmentExistsOnNode(100, 1))
+	})
+
+	t.Run("segment_migrated_to_different_node", func(t *testing.T) {
+		dist := NewDistribution("test-channel", NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion))
+
+		// Initial: segment 100 on node 1
+		dist.AddDistributions(
+			SegmentEntry{NodeID: 1, SegmentID: 100, PartitionID: 1, Version: 1},
+		)
+		assert.True(t, dist.SealedSegmentExistsOnNode(100, 1))
+		assert.False(t, dist.SealedSegmentExistsOnNode(100, 2))
+
+		// Migration: segment 100 moved to node 2 with higher version
+		dist.AddDistributions(
+			SegmentEntry{NodeID: 2, SegmentID: 100, PartitionID: 1, Version: 2},
+		)
+		// After migration, segment should be on node 2, not node 1
+		assert.False(t, dist.SealedSegmentExistsOnNode(100, 1))
+		assert.True(t, dist.SealedSegmentExistsOnNode(100, 2))
+	})
 }

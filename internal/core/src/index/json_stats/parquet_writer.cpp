@@ -15,13 +15,13 @@
 // limitations under the License.
 
 #include "index/json_stats/parquet_writer.h"
-#include <arrow/array/array_binary.h>
-#include <arrow/array/array_primitive.h>
+
 #include <arrow/array/builder_binary.h>
 #include <arrow/array/builder_primitive.h>
-#include <arrow/io/file.h>
-#include <parquet/arrow/writer.h>
-#include <parquet/exception.h>
+#include <exception>
+
+#include "arrow/array/builder_base.h"
+#include "milvus-storage/packed/writer.h"
 
 namespace milvus::index {
 
@@ -81,12 +81,13 @@ JsonStatsParquetWriter::WriteCurrentBatch() {
     }
 
     std::vector<std::shared_ptr<arrow::Array>> arrays;
+    arrays.reserve(builders_.size());
     for (auto& builder : builders_) {
         std::shared_ptr<arrow::Array> array;
         auto status = builder->Finish(&array);
         AssertInfo(
             status.ok(), "failed to finish builder: {}", status.ToString());
-        arrays.push_back(array);
+        arrays.push_back(std::move(array));
         builder->Reset();
     }
 
@@ -160,7 +161,7 @@ JsonStatsParquetWriter::AppendValue(const std::string& key,
             ErrorCode::UnexpectedError, "builder for key {} not found", key);
     }
 
-    auto builder = it->second;
+    auto& builder = it->second;
     auto ast = AppendDataToBuilder(value, builder);
     AssertInfo(ast.ok(), "failed to append data to builder");
 }
@@ -176,7 +177,7 @@ JsonStatsParquetWriter::AppendRow(
                       key);
         }
 
-        auto builder = it->second;
+        auto& builder = it->second;
         auto status = AppendDataToBuilder(value, builder);
         AssertInfo(status.ok(), "failed to append data to builder");
     }

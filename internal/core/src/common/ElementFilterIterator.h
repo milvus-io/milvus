@@ -16,21 +16,18 @@
 
 #pragma once
 
+#include <stdint.h>
 #include <deque>
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "common/QueryResult.h"
-#include "common/Vector.h"
+#include "exec/QueryContext.h"
 #include "exec/expression/Expr.h"
+#include "folly/FBVector.h"
 
 namespace milvus {
-
-// Forward declarations
-namespace exec {
-class ExecContext;
-class ExprSet;
-}  // namespace exec
 
 class ElementFilterIterator : public VectorIterator {
  public:

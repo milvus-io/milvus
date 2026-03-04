@@ -10,15 +10,23 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "common/FieldMeta.h"
-#include "common/SystemProperty.h"
-#include "common/Types.h"
-#include "common/protobuf_utils.h"
-#include "common/Common.h"
+
 #include <boost/lexical_cast.hpp>
+#include <ctype.h>
+#include <algorithm>
+#include <atomic>
+#include <istream>
 #include <optional>
 
 #include "Consts.h"
-#include "log/Log.h"
+#include "NamedType/named_type_impl.hpp"
+#include "boost/cstdint.hpp"
+#include "common/Common.h"
+#include "common/SystemProperty.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "fmt/core.h"
+#include "pb/common.pb.h"
 
 namespace milvus {
 TokenizerParams
@@ -132,7 +140,7 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
     auto field_id = FieldId(schema_proto.fieldid());
     auto name = FieldName(schema_proto.name());
     auto nullable = schema_proto.nullable();
-    if (field_id.get() < 100) {
+    if (field_id.get() < START_USER_FIELDID) {
         // system field id
         auto is_system =
             SystemProperty::Instance().SystemFieldVerify(name, field_id);
@@ -143,6 +151,7 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
 
     auto data_type = DataType(schema_proto.data_type());
     auto element_type = DataType(schema_proto.element_type());
+    auto external_field_mapping = schema_proto.external_field();
 
     if (data_type == DataType::VECTOR_ARRAY) {
         AssertInfo(element_type != DataType::NONE,
@@ -163,8 +172,13 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         AssertInfo(type_map.count("dim"), "dim not found");
         dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
 
-        return FieldMeta{
-            name, field_id, data_type, element_type, dim, std::nullopt};
+        return FieldMeta{name,
+                         field_id,
+                         data_type,
+                         element_type,
+                         dim,
+                         std::nullopt,
+                         external_field_mapping};
     }
 
     if (IsVectorDataType(data_type)) {
@@ -186,7 +200,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                              dim,
                              std::nullopt,
                              nullable,
-                             default_value};
+                             default_value,
+                             external_field_mapping};
         }
         auto metric_type = index_map.at("metric_type");
         return FieldMeta{name,
@@ -195,7 +210,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          dim,
                          metric_type,
                          nullable,
-                         default_value};
+                         default_value,
+                         external_field_mapping};
     }
 
     if (IsStringDataType(data_type)) {
@@ -229,7 +245,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          enable_match,
                          enable_analyzer,
                          type_map,
-                         default_value};
+                         default_value,
+                         external_field_mapping};
     }
 
     if (IsArrayDataType(data_type)) {
@@ -238,10 +255,16 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          data_type,
                          DataType(schema_proto.element_type()),
                          nullable,
-                         default_value};
+                         default_value,
+                         external_field_mapping};
     }
 
-    return FieldMeta{name, field_id, data_type, nullable, default_value};
+    return FieldMeta{name,
+                     field_id,
+                     data_type,
+                     nullable,
+                     default_value,
+                     external_field_mapping};
 }
 
 }  // namespace milvus

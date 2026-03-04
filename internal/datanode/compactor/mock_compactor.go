@@ -4,6 +4,8 @@ package compactor
 
 import (
 	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	indexpb "github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -330,6 +332,53 @@ func (_c *MockCompactor_GetSlotUsage_Call) Return(_a0 int64) *MockCompactor_GetS
 }
 
 func (_c *MockCompactor_GetSlotUsage_Call) RunAndReturn(run func() int64) *MockCompactor_GetSlotUsage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetStorageConfig provides a mock function with no fields
+func (_m *MockCompactor) GetStorageConfig() *indexpb.StorageConfig {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetStorageConfig")
+	}
+
+	var r0 *indexpb.StorageConfig
+	if rf, ok := ret.Get(0).(func() *indexpb.StorageConfig); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*indexpb.StorageConfig)
+		}
+	}
+
+	return r0
+}
+
+// MockCompactor_GetStorageConfig_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetStorageConfig'
+type MockCompactor_GetStorageConfig_Call struct {
+	*mock.Call
+}
+
+// GetStorageConfig is a helper method to define mock.On call
+func (_e *MockCompactor_Expecter) GetStorageConfig() *MockCompactor_GetStorageConfig_Call {
+	return &MockCompactor_GetStorageConfig_Call{Call: _e.mock.On("GetStorageConfig")}
+}
+
+func (_c *MockCompactor_GetStorageConfig_Call) Run(run func()) *MockCompactor_GetStorageConfig_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCompactor_GetStorageConfig_Call) Return(_a0 *indexpb.StorageConfig) *MockCompactor_GetStorageConfig_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactor_GetStorageConfig_Call) RunAndReturn(run func() *indexpb.StorageConfig) *MockCompactor_GetStorageConfig_Call {
 	_c.Call.Return(run)
 	return _c
 }

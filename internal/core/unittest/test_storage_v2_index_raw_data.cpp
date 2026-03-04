@@ -9,32 +9,49 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
-#include <boost/filesystem.hpp>
-
-#include "common/Consts.h"
-#include "storage/Util.h"
-#include "indexbuilder/IndexFactory.h"
-#include "index/VectorDiskIndex.h"
-#include "index/IndexFactory.h"
-#include "index/Meta.h"
-
-#include <folly/Conv.h>
+#include <arrow/api.h>
 #include <arrow/record_batch.h>
-#include <arrow/util/key_value_metadata.h>
-#include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <parquet/properties.h>
+#include <atomic>
 #include <cstdint>
-#include "common/FieldDataInterface.h"
-#include "common/Schema.h"
-#include "common/Types.h"
-#include "gtest/gtest.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/packed/writer.h"
-#include "test_utils/DataGen.h"
-#include "test_utils/storage_test_utils.h"
+#include <exception>
+#include <iostream>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "NamedType/named_type_impl.hpp"
+#include "common/Common.h"
+#include "common/Consts.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/IndexStats.h"
+#include "index/Meta.h"
+#include "index/ScalarIndexSort.h"
+#include "index/StringIndexMarisa.h"
+#include "index/VectorDiskIndex.h"
+#include "indexbuilder/IndexCreatorBase.h"
+#include "indexbuilder/IndexFactory.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/expected.h"
+#include "milvus-storage/common/config.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/packed/writer.h"
+#include "segcore/Collection.h"
+#include "storage/BinlogReader.h"
+#include "storage/ChunkManager.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/FileManager.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -51,7 +68,7 @@ class StorageV2IndexRawDataTest : public ::testing::Test {
  protected:
     storage::ChunkManagerPtr cm_;
     milvus_storage::ArrowFileSystemPtr fs_;
-    std::string path_ = "/tmp/test-inverted-index-storage-v2";
+    std::string path_ = TestLocalPath;
     int64_t collection_id = 1;
     int64_t partition_id = 2;
     int64_t segment_id = 3;
@@ -159,7 +176,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
                 storage::FileManagerContext(
                     field_data_meta, index_meta, cm_, fs_));
         auto res = file_manager->CacheRawDataToDisk<float>(config);
-        ASSERT_EQ(res, "/tmp/milvus/local_data/raw_datas/3/105/raw_data");
+        ASSERT_EQ(res, TestLocalPath + "raw_datas/3/105/raw_data");
     }
 
     {

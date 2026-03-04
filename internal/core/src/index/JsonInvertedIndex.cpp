@@ -10,19 +10,24 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "index/JsonInvertedIndex.h"
+
+#include <algorithm>
+#include <exception>
+#include <list>
+#include <optional>
 #include <string>
-#include <shared_mutex>
-#include <string_view>
-#include <type_traits>
-#include "common/EasyAssert.h"
-#include "common/FieldDataInterface.h"
+#include <utility>
+
+#include "boost/filesystem/path.hpp"
 #include "common/Json.h"
 #include "common/Types.h"
-#include "folly/FBVector.h"
-#include "log/Log.h"
-#include "common/JsonUtils.h"
-#include "simdjson/error.h"
 #include "index/JsonIndexBuilder.h"
+#include "index/Utils.h"
+#include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "pb/common.pb.h"
+#include "simdjson/error.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::index {
 

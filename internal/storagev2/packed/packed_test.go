@@ -25,6 +25,7 @@ import (
 	"golang.org/x/exp/rand"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -170,4 +171,39 @@ func randomString(length int) string {
 		result[i] = charset[rand.Intn(len(charset))]
 	}
 	return string(result)
+}
+
+func (suite *PackedTestSuite) TestFilesystemMetrics() {
+	// Get baseline metrics
+	beforeMetrics, err := storagev2.GetCachedFilesystemMetrics("")
+	suite.NoError(err)
+
+	// Write data
+	paths := []string{"/tmp/metrics_test"}
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID}}
+	pw, err := NewPackedWriter(paths, suite.schema, 10*1024*1024, 0, columnGroups, nil, nil)
+	suite.NoError(err)
+	for i := 0; i < 100; i++ {
+		err = pw.WriteRecordBatch(suite.rec)
+		suite.NoError(err)
+	}
+	err = pw.Close()
+	suite.NoError(err)
+
+	// Verify write metrics increased
+	afterWrite, err := storagev2.GetCachedFilesystemMetrics("")
+	suite.NoError(err)
+	suite.Greater(afterWrite.WriteBytes, beforeMetrics.WriteBytes, "write bytes should increase")
+
+	// Read data back
+	reader, err := NewPackedReader(paths, suite.schema, 10*1024*1024, nil, nil)
+	suite.NoError(err)
+	rr, err := reader.ReadNext()
+	suite.NoError(err)
+	rr.Release()
+
+	// Verify read metrics increased
+	afterRead, err := storagev2.GetCachedFilesystemMetrics("")
+	suite.NoError(err)
+	suite.Greater(afterRead.ReadBytes, afterWrite.ReadBytes, "read bytes should increase")
 }

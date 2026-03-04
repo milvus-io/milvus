@@ -417,7 +417,7 @@ func (suite *RetrieveSuite) TestRetrieveStreamSealed() {
 	server := client.CreateServer()
 
 	go func() {
-		segments, err := RetrieveStream(ctx, suite.manager, plan, req, server)
+		segments, err := RetrieveStream(ctx, suite.manager, plan, req, nil, server)
 		suite.NoError(err)
 		suite.manager.Segment.Unpin(segments)
 		server.FinishSend(err)
@@ -438,6 +438,107 @@ func (suite *RetrieveSuite) TestRetrieveStreamSealed() {
 		suite.NoError(err)
 
 		sum += len(result.Ids.GetIntId().GetData())
+	}
+}
+
+func (suite *RetrieveSuite) TestRetrieveStreamWithFilter() {
+	plan, err := mock_segcore.GenSimpleRetrievePlan(suite.collection.GetCCollection())
+	suite.NoError(err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create more sealed segments for testing
+	loader := NewLoader(ctx, suite.manager, suite.chunkManager)
+	for i := range 10 {
+		segID := int64(i + 2000)
+		msgLen := i + 1
+		binlogs, statslogs, err := mock_segcore.SaveBinLog(ctx,
+			suite.collectionID,
+			suite.partitionID,
+			segID,
+			msgLen,
+			suite.schema,
+			suite.chunkManager,
+		)
+		suite.Require().NoError(err)
+
+		loadInfo := &querypb.SegmentLoadInfo{
+			SegmentID:     segID,
+			CollectionID:  suite.collectionID,
+			PartitionID:   suite.partitionID,
+			NumOfRows:     int64(msgLen),
+			BinlogPaths:   binlogs,
+			Statslogs:     statslogs,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+			Level:         datapb.SegmentLevel_Legacy,
+		}
+
+		seg, err := NewSegment(ctx,
+			suite.collection,
+			suite.manager.Segment,
+			SegmentTypeSealed,
+			0,
+			loadInfo,
+		)
+		suite.Require().NoError(err)
+
+		bfs, err := loader.loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
+		suite.Require().NoError(err)
+		seg.SetBloomFilter(bfs)
+
+		for _, binlog := range binlogs {
+			err = seg.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLen), binlog)
+			suite.Require().NoError(err)
+		}
+
+		suite.manager.Segment.Put(ctx, SegmentTypeSealed, seg)
+	}
+
+	segIDs := []int64{2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009}
+
+	suite.Run("WithSparseFilter", func() {
+		// filter expression "int64Field == 5" should filter out segments without pk=5
+		exprStr := "int64Field == 5"
+		schemaHelper, _ := typeutil.CreateSchemaHelper(suite.schema)
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
+		suite.NoError(err)
+
+		req := &querypb.QueryRequest{
+			Req: &internalpb.RetrieveRequest{
+				CollectionID: suite.collectionID,
+				PartitionIDs: []int64{suite.partitionID},
+			},
+			SegmentIDs: segIDs,
+			Scope:      querypb.DataScope_Historical,
+		}
+
+		client := streamrpc.NewLocalQueryClient(ctx)
+		server := client.CreateServer()
+
+		var retrievedSegments []Segment
+		go func() {
+			retrievedSegments, err = RetrieveStream(ctx, suite.manager, plan, req, planNode, server)
+			suite.NoError(err)
+			server.FinishSend(err)
+		}()
+
+		// consume all results
+		for {
+			_, err := client.Recv()
+			if err == io.EOF {
+				break
+			}
+		}
+
+		// with sparse filter, only 5 segments (seg6-seg10) should be retrieved
+		suite.Len(retrievedSegments, 5)
+		suite.manager.Segment.Unpin(retrievedSegments)
+	})
+
+	// cleanup
+	for _, segID := range segIDs {
+		suite.manager.Segment.Remove(ctx, segID, querypb.DataScope_Historical)
 	}
 }
 

@@ -9,16 +9,60 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <algorithm>
+#include <cstdint>
+#include <iterator>
+#include <map>
+#include <memory>
+#include <random>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
+#include "common/EasyAssert.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/common_type_c.h"
+#include "common/protobuf_utils.h"
+#include "common/type_c.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/VectorIndex.h"
+#include "index/VectorMemIndex.h"
+#include "knowhere/binaryset.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/dataset.h"
+#include "knowhere/expected.h"
+#include "knowhere/index/index.h"
+#include "knowhere/index/index_factory.h"
+#include "knowhere/version.h"
+#include "pb/common.pb.h"
+#include "pb/plan.pb.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/Collection.h"
+#include "segcore/ReduceStructure.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/Types.h"
 #include "segcore/collection_c.h"
-#include "segcore/segment_c.h"
+#include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
-
-#include "test_utils/c_api_test_utils.h"
-#include "test_utils/storage_test_utils.h"
-#include "test_utils/cachinglayer_test_utils.h"
+#include "segcore/segment_c.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/PbHelper.h"
+#include "test_utils/c_api_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -52,56 +96,6 @@ generate_data(int N) {
                         ((const char*)&age) + sizeof(age));
     }
     return std::make_tuple(raw_data, timestamps, uids);
-}
-
-TEST(CApiTest, LoadIndexInfo) {
-    // generator index
-    constexpr auto TOPK = 10;
-
-    auto N = 1024 * 10;
-    auto [raw_data, timestamps, uids] = generate_data(N);
-    auto get_index_obj = knowhere::IndexFactory::Instance().Create<float>(
-        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    auto indexing = get_index_obj.value();
-    auto conf =
-        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                       {knowhere::meta::DIM, DIM},
-                       {knowhere::meta::TOPK, TOPK},
-                       {knowhere::indexparam::NLIST, 100},
-                       {knowhere::indexparam::NPROBE, 4}};
-
-    auto database = knowhere::GenDataSet(N, DIM, raw_data.data());
-    indexing.Train(database, conf);
-    indexing.Add(database, conf);
-    EXPECT_EQ(indexing.Count(), N);
-    EXPECT_EQ(indexing.Dim(), DIM);
-    knowhere::BinarySet binary_set;
-    indexing.Serialize(binary_set);
-    CBinarySet c_binary_set = (CBinarySet)&binary_set;
-
-    void* c_load_index_info = nullptr;
-    auto status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_param_key1 = "index_type";
-    std::string index_param_value1 = knowhere::IndexEnum::INDEX_FAISS_IVFSQ8;
-    status = AppendIndexParam(
-        c_load_index_info, index_param_key1.data(), index_param_value1.data());
-    std::string index_param_key2 = knowhere::meta::METRIC_TYPE;
-    std::string index_param_value2 = knowhere::metric::L2;
-    status = AppendIndexParam(
-        c_load_index_info, index_param_key2.data(), index_param_value2.data());
-    ASSERT_EQ(status.error_code, Success);
-    std::string field_name = "field0";
-    status = AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 0, CDataType::FloatVector, false, "");
-    ASSERT_EQ(status.error_code, Success);
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    status = AppendIndex(c_load_index_info, c_binary_set);
-    ASSERT_EQ(status.error_code, Success);
-    DeleteLoadIndexInfo(c_load_index_info);
 }
 
 TEST(CApiTest, LoadIndexSearch) {
@@ -259,29 +253,12 @@ Test_Indexing_Without_Predicate() {
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::L2;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, TraitType::c_data_type, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
     // load index for vec field, load raw data for scalar field
+    auto load_index_info =
+        CreateTestLoadIndexInfo(std::move(indexing), TraitType::data_type, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
-    sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
+    sealed_segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(sealed_segment.get(),
@@ -299,7 +276,6 @@ Test_Indexing_Without_Predicate() {
     ASSERT_EQ(search_result_on_raw_index_json.dump(1),
               search_result_on_bigIndex_json.dump(1));
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_smallIndex);
@@ -345,17 +321,6 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                             field_id: 100
-                                             query_info: <
-                                                 topk: 5
-                                                 round_decimal: -1
-                                                 metric_type: "L2"
-                                                 search_params: "{\"nprobe\": 10}"
-                                             >
-                                             placeholder_tag: "$0"
-                                          >)";
-
     // create place_holder_group
     int num_queries = 5;
     auto raw_group =
@@ -364,7 +329,9 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan = schema_handle.ParseSearch(
+        "", "fakevec", 5, "L2", R"({"nprobe": 10})", -1);
     status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -416,30 +383,12 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::L2;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
-
     // load index for vec field, load raw data for scalar field
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
-    sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
+    sealed_segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(sealed_segment.get(),
@@ -457,7 +406,6 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     ASSERT_EQ(search_result_on_raw_index_json.dump(1),
               search_result_on_bigIndex_json.dump(1));
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_smallIndex);
@@ -496,47 +444,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* raw_plan = R"(vector_anns: <
-                                field_id: 100
-                                predicates: <
-                                  binary_expr: <
-                                    op: LogicalAnd
-                                    left: <
-                                      unary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Int64
-                                        >
-                                        op: GreaterEqual
-                                        value: <
-                                          int64_val: 4200
-                                        >
-                                      >
-                                    >
-                                    right: <
-                                      unary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Int64
-                                        >
-                                        op: LessThan
-                                        value: <
-                                          int64_val: 4210
-                                        >
-                                      >
-                                    >
-                                  >
-                                >
-                                query_info: <
-                                  topk: 5
-                                  round_decimal: -1
-                                  metric_type: "L2"
-                                  search_params: "{\"nprobe\": 10}"
-                                >
-                                placeholder_tag: "$0"
-     >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-
     // create place_holder_group
     int num_queries = 10;
     auto raw_group =
@@ -545,6 +452,14 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("counter >= 4200 and counter < 4210",
+                                  "fakevec",
+                                  5,
+                                  "L2",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -595,30 +510,12 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::L2;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
-
     // load index for vec field, load raw data for scalar field
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
-    sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
+    sealed_segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(sealed_segment.get(),
@@ -636,7 +533,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
                   search_result_on_raw_index->distances_[offset]);
     }
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_smallIndex);
@@ -677,46 +573,6 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
         ASSERT_EQ(ins_res.error_code, Success);
     }
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                             field_id: 100
-                                             predicates: <
-                                               binary_expr: <
-                                                 op: LogicalAnd
-                                                 left: <
-                                                   unary_range_expr: <
-                                                     column_info: <
-                                                       field_id: 101
-                                                       data_type: Int64
-                                                     >
-                                                     op: GreaterEqual
-                                                     value: <
-                                                       int64_val: 4200
-                                                     >
-                                                   >
-                                                 >
-                                                 right: <
-                                                   unary_range_expr: <
-                                                     column_info: <
-                                                       field_id: 101
-                                                       data_type: Int64
-                                                     >
-                                                     op: LessThan
-                                                     value: <
-                                                       int64_val: 4210
-                                                     >
-                                                   >
-                                                 >
-                                               >
-                                             >
-                                             query_info: <
-                                               topk: 5
-                                               round_decimal: -1
-                                               metric_type: "L2"
-                                               search_params: "{\"nprobe\": 10}"
-                                             >
-                                             placeholder_tag: "$0"
-     >)";
-
     // create place_holder_group
     int num_queries = 10;
     auto raw_group =
@@ -725,7 +581,14 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan =
+        schema_handle.ParseSearch("counter >= 4200 and counter < 4210",
+                                  "fakevec",
+                                  5,
+                                  "L2",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -776,30 +639,12 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::L2;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
-
     // load index for vec field, load raw data for scalar field
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
-    sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
+    sealed_segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(sealed_segment.get(),
@@ -817,7 +662,6 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
                   search_result_on_raw_index->distances_[offset]);
     }
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_smallIndex);
@@ -856,41 +700,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* raw_plan = R"(vector_anns: <
-                                             field_id: 100
-                                             predicates: <
-                                               term_expr: <
-                                                 column_info: <
-                                                   field_id: 101
-                                                   data_type: Int64
-                                                 >
-                                                 values: <
-                                                   int64_val: 4200
-                                                 >
-                                                 values: <
-                                                   int64_val: 4201
-                                                 >
-                                                 values: <
-                                                   int64_val: 4202
-                                                 >
-                                                 values: <
-                                                   int64_val: 4203
-                                                 >
-                                                 values: <
-                                                   int64_val: 4204
-                                                 >
-                                               >
-                                             >
-                                             query_info: <
-                                               topk: 5
-                                               round_decimal: -1
-                                               metric_type: "L2"
-                                               search_params: "{\"nprobe\": 10}"
-                                             >
-                                             placeholder_tag: "$0"
-     >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-
     // create place_holder_group
     int num_queries = 5;
     auto raw_group =
@@ -899,6 +708,14 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("counter in [4200, 4201, 4202, 4203, 4204]",
+                                  "fakevec",
+                                  5,
+                                  "L2",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -949,30 +766,12 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::L2;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
-
     // load index for vec field, load raw data for scalar field
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
-    sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
+    sealed_segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(sealed_segment.get(),
@@ -990,7 +789,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
                   search_result_on_raw_index->distances_[offset]);
     }
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_smallIndex);
@@ -1029,41 +827,6 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* serialized_expr_plan = R"(
- vector_anns: <
-   field_id: 100
-   predicates: <
-     term_expr: <
-       column_info: <
-         field_id: 101
-         data_type: Int64
-       >
-       values: <
-         int64_val: 4200
-       >
-       values: <
-         int64_val: 4201
-       >
-       values: <
-         int64_val: 4202
-       >
-       values: <
-         int64_val: 4203
-       >
-       values: <
-         int64_val: 4204
-       >
-     >
-   >
-   query_info: <
-     topk: 5
-     round_decimal: -1
-     metric_type: "L2"
-     search_params: "{\"nprobe\": 10}"
-   >
-   placeholder_tag: "$0"
- >)";
-
     // create place_holder_group
     int num_queries = 5;
     auto raw_group =
@@ -1072,7 +835,14 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan =
+        schema_handle.ParseSearch("counter in [4200, 4201, 4202, 4203, 4204]",
+                                  "fakevec",
+                                  5,
+                                  "L2",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1123,30 +893,12 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::L2;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
-
     // load index for vec field, load raw data for scalar field
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
-    sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
+    sealed_segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(sealed_segment.get(),
@@ -1164,7 +916,6 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
                   search_result_on_raw_index->distances_[offset]);
     }
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_smallIndex);
@@ -1206,47 +957,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* raw_plan = R"(vector_anns: <
-                                             field_id: 100
-                                             predicates: <
-                                               binary_expr: <
-                                                 op: LogicalAnd
-                                                 left: <
-                                                   unary_range_expr: <
-                                                     column_info: <
-                                                       field_id: 101
-                                                       data_type: Int64
-                                                     >
-                                                     op: GreaterEqual
-                                                     value: <
-                                                       int64_val: 4200
-                                                     >
-                                                   >
-                                                 >
-                                                 right: <
-                                                   unary_range_expr: <
-                                                     column_info: <
-                                                       field_id: 101
-                                                       data_type: Int64
-                                                     >
-                                                     op: LessThan
-                                                     value: <
-                                                       int64_val: 4210
-                                                     >
-                                                   >
-                                                 >
-                                               >
-                                             >
-                                             query_info: <
-                                               topk: 5
-                                               round_decimal: -1
-                                               metric_type: "JACCARD"
-                                               search_params: "{\"nprobe\": 10}"
-                                             >
-                                             placeholder_tag: "$0"
-     >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-
     // create place_holder_group
     int num_queries = 5;
     auto raw_group = CreatePlaceholderGroupFromBlob<milvus::BinaryVector>(
@@ -1255,6 +965,14 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("counter >= 4200 and counter < 4210",
+                                  "fakevec",
+                                  5,
+                                  "JACCARD",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1306,30 +1024,12 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::JACCARD;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
-
     // load index for vec field, load raw data for scalar field
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_BINARY, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
-    sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
+    sealed_segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(sealed_segment.get(),
@@ -1347,7 +1047,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
                   search_result_on_raw_index->distances_[offset]);
     }
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_smallIndex);
@@ -1389,46 +1088,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                            field_id: 100
-                                            predicates: <
-                                              binary_expr: <
-                                                op: LogicalAnd
-                                                left: <
-                                                  unary_range_expr: <
-                                                    column_info: <
-                                                      field_id: 101
-                                                      data_type: Int64
-                                                    >
-                                                    op: GreaterEqual
-                                                    value: <
-                                                      int64_val: 4200
-                                                    >
-                                                  >
-                                                >
-                                                right: <
-                                                  unary_range_expr: <
-                                                    column_info: <
-                                                      field_id: 101
-                                                      data_type: Int64
-                                                    >
-                                                    op: LessThan
-                                                    value: <
-                                                      int64_val: 4210
-                                                    >
-                                                  >
-                                                >
-                                              >
-                                            >
-                                            query_info: <
-                                              topk: 5
-                                              round_decimal: -1
-                                              metric_type: "JACCARD"
-                                              search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0"
-                                        >)";
-
     // create place_holder_group
     int num_queries = 5;
     auto raw_group = CreatePlaceholderGroupFromBlob<milvus::BinaryVector>(
@@ -1437,7 +1096,14 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan =
+        schema_handle.ParseSearch("counter >= 4200 and counter < 4210",
+                                  "fakevec",
+                                  5,
+                                  "JACCARD",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1489,30 +1155,12 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::JACCARD;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
-
     // load index for vec field, load raw data for scalar field
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_BINARY, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
-    sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
+    sealed_segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(sealed_segment.get(),
@@ -1530,7 +1178,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                   search_result_on_raw_index->distances_[offset]);
     }
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_smallIndex);
@@ -1572,41 +1219,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* raw_plan = R"(vector_anns: <
-                                             field_id: 100
-                                             predicates: <
-                                               term_expr: <
-                                                 column_info: <
-                                                   field_id: 101
-                                                   data_type: Int64
-                                                 >
-                                                 values: <
-                                                   int64_val: 4200
-                                                 >
-                                                 values: <
-                                                   int64_val: 4201
-                                                 >
-                                                 values: <
-                                                   int64_val: 4202
-                                                 >
-                                                 values: <
-                                                   int64_val: 4203
-                                                 >
-                                                 values: <
-                                                   int64_val: 4204
-                                                 >
-                                               >
-                                             >
-                                             query_info: <
-                                               topk: 5
-                                               round_decimal: -1
-                                               metric_type: "JACCARD"
-                                               search_params: "{\"nprobe\": 10}"
-                                             >
-                                             placeholder_tag: "$0"
-     >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-
     // create place_holder_group
     int num_queries = 5;
     int topK = 5;
@@ -1616,6 +1228,14 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("counter in [4200, 4201, 4202, 4203, 4204]",
+                                  "fakevec",
+                                  5,
+                                  "JACCARD",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, plan_str.data(), plan_str.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1666,30 +1286,12 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::JACCARD;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
-
     // load index for vec field, load raw data for scalar field
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_BINARY, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
-    sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
+    sealed_segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(sealed_segment.get(),
@@ -1716,9 +1318,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
                                             slice_nqs.size());
     ASSERT_EQ(status.error_code, Success);
 
-    //    status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
-    //    ASSERT_EQ(status.error_code, Success);
-
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         ASSERT_EQ(search_result_on_bigIndex->topk_per_nq_prefix_sum_.size(),
@@ -1729,7 +1328,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
                   search_result_on_raw_index->distances_[i * TOPK]);
     }
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_smallIndex);
@@ -1772,40 +1370,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                            field_id: 100
-                                            predicates: <
-                                              term_expr: <
-                                                column_info: <
-                                                  field_id: 101
-                                                  data_type: Int64
-                                                >
-                                                values: <
-                                                  int64_val: 4200
-                                                >
-                                                values: <
-                                                  int64_val: 4201
-                                                >
-                                                values: <
-                                                  int64_val: 4202
-                                                >
-                                                values: <
-                                                  int64_val: 4203
-                                                >
-                                                values: <
-                                                  int64_val: 4204
-                                                >
-                                              >
-                                            >
-                                            query_info: <
-                                              topk: 5
-                                              round_decimal: -1
-                                              metric_type: "JACCARD"
-                                              search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0"
-                                        >)";
-
     // create place_holder_group
     int num_queries = 5;
     int topK = 5;
@@ -1815,7 +1379,14 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan =
+        schema_handle.ParseSearch("counter in [4200, 4201, 4202, 4203, 4204]",
+                                  "fakevec",
+                                  5,
+                                  "JACCARD",
+                                  R"({"nprobe": 10})",
+                                  -1);
     status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1866,30 +1437,12 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::JACCARD;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
-
     // load index for vec field, load raw data for scalar field
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_BINARY, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
-    sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
+    sealed_segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(sealed_segment.get(),
@@ -1926,7 +1479,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                   search_result_on_raw_index->distances_[i * TOPK]);
     }
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_smallIndex);

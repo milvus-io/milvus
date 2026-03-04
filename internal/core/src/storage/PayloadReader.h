@@ -16,12 +16,15 @@
 
 #pragma once
 
-#include <memory>
 #include <arrow/record_batch.h>
 #include <parquet/arrow/reader.h>
+#include <stdint.h>
+#include <memory>
 
+#include "common/EasyAssert.h"
 #include "common/FieldData.h"
-#include "storage/PayloadStream.h"
+#include "common/FieldDataInterface.h"
+#include "storage/Types.h"
 
 namespace milvus::storage {
 

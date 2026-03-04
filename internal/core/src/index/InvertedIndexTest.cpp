@@ -9,20 +9,59 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/algorithm/string/predicate.hpp>
+#include <boost/container/vector.hpp>
+#include <boost/cstdint.hpp>
+#include <boost/filesystem/operations.hpp>
+#include <fmt/core.h>
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <stdlib.h>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
-#include <boost/filesystem.hpp>
+#include <memory>
+#include <string>
+#include <tuple>
 #include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
 
+#include "bitset/bitset.h"
+#include "bitset/detail/proxy.h"
+#include "common/Consts.h"
+#include "common/FieldDataInterface.h"
 #include "common/Tracer.h"
-#include "index/InvertedIndexTantivy.h"
-#include "storage/Util.h"
-#include "storage/InsertData.h"
-#include "indexbuilder/IndexFactory.h"
+#include "common/TracerBase.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
 #include "index/IndexFactory.h"
-#include "test_utils/indexbuilder_test_utils.h"
+#include "index/IndexInfo.h"
+#include "index/IndexStats.h"
 #include "index/Meta.h"
+#include "index/ScalarIndex.h"
+#include "indexbuilder/IndexCreatorBase.h"
+#include "indexbuilder/IndexFactory.h"
+#include "knowhere/dataset.h"
+#include "pb/common.pb.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "segcore/Collection.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
+#include "storage/InsertData.h"
+#include "storage/PayloadReader.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -93,7 +132,7 @@ test_run() {
         }
     }
 
-    std::string root_path = "/tmp/test-inverted-index/";
+    std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
@@ -148,7 +187,8 @@ test_run() {
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
     auto get_binlog_path = [=](int64_t log_id) {
-        return fmt::format("{}/{}/{}/{}/{}",
+        return fmt::format("{}{}/{}/{}/{}/{}",
+                           TestLocalPath,
                            collection_id,
                            partition_id,
                            segment_id,
@@ -496,7 +536,7 @@ test_string() {
         default_value->set_string_data("20");
     }
 
-    std::string root_path = "/tmp/test-inverted-index/";
+    std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
@@ -542,7 +582,8 @@ test_string() {
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
     auto get_binlog_path = [=](int64_t log_id) {
-        return fmt::format("{}/{}/{}/{}/{}",
+        return fmt::format("{}{}/{}/{}/{}/{}",
+                           TestLocalPath,
                            collection_id,
                            partition_id,
                            segment_id,

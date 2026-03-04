@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
 type messageImpl struct {
@@ -39,10 +40,12 @@ func (m *messageImpl) MessageTypeWithVersion() MessageTypeWithVersion {
 }
 
 // Payload returns payload of current message.
+// If the message is encrypted, it will be decrypted with automatic retry for transient KMS errors.
 func (m *messageImpl) Payload() []byte {
 	if ch := m.cipherHeader(); ch != nil {
-		cipher := mustGetCipher()
-		decryptor, err := cipher.GetDecryptor(ch.EzId, ch.CollectionId, ch.SafeKey)
+		// Use getDecryptorWithRetry for resilient decryption with automatic retry
+		// for transient KMS key errors (e.g., temporarily invalid/revoked keys)
+		decryptor, err := getDecryptorWithRetry(ch.EzId, ch.CollectionId, ch.SafeKey)
 		if err != nil {
 			panic(fmt.Sprintf("can not get decryptor for message: %s", err))
 		}
@@ -63,6 +66,11 @@ func (m *messageImpl) Properties() RProperties {
 // IsPersisted returns true if the message is persisted.
 func (m *messageImpl) IsPersisted() bool {
 	return !m.properties.Exist(messageNotPersisteted)
+}
+
+// IsPChannelLevel returns true if the message is a pchannel-level message.
+func (m *messageImpl) IsPChannelLevel() bool {
+	return m.properties.Exist(messagePChannelLevel)
 }
 
 // IntoMessageProto converts the message to a protobuf message.
@@ -274,6 +282,11 @@ func (m *messageImpl) BarrierTimeTick() uint64 {
 		panic(fmt.Sprintf("there's a bug in the message codes, dirty barrier timetick %s in properties of message", value))
 	}
 	return tt
+}
+
+// PChannel returns the physical channel derived from VChannel.
+func (m *messageImpl) PChannel() string {
+	return funcutil.ToPhysicalChannel(m.VChannel())
 }
 
 // VChannel returns the vchannel of current message.

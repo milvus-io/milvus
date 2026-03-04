@@ -16,9 +16,14 @@
 
 #pragma once
 
+#include <cstdint>
+#include <sstream>
 #include <string>
 
+#include "common/EasyAssert.h"
 #include "common/Types.h"
+#include "fmt/core.h"
+#include "pb/schema.pb.h"
 
 namespace milvus::storage {
 

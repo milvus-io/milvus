@@ -10,12 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "index/JsonFlatIndex.h"
-#include "common/Types.h"
-#include "index/InvertedIndexUtil.h"
-#include "log/Log.h"
-#include "simdjson/builtin.h"
-#include "simdjson/padded_string.h"
+
+#include <simdjson.h>
+#include <string.h>
+
+#include "common/FieldDataInterface.h"
+#include "common/Json.h"
 #include "common/JsonUtils.h"
+#include "pb/schema.pb.h"
+#include "simdjson/dom/element.h"
+#include "simdjson/error.h"
+#include "simdjson/padded_string.h"
+
 namespace milvus::index {
 
 void
@@ -23,6 +29,9 @@ JsonFlatIndex::build_index_for_json(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     int64_t offset = 0;
     auto tokens = parse_json_pointer(nested_path_);
+    // Scratch buffer for nested JSON serialization - reused across iterations
+    // to avoid repeated heap allocations
+    simdjson::padded_string scratch_buffer(256);
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         for (int i = 0; i < n; i++) {
@@ -47,8 +56,23 @@ JsonFlatIndex::build_index_for_json(
                 if (err != simdjson::SUCCESS) {
                     wrapper_->add_json_array_data(nullptr, 0, offset++);
                 } else {
-                    auto str = simdjson::to_json_string(res.value()).value();
-                    Json subpath_json = Json(simdjson::padded_string(str));
+                    auto str_result = simdjson::to_json_string(res.value());
+                    if (str_result.error() != simdjson::SUCCESS) {
+                        wrapper_->add_json_array_data(nullptr, 0, offset++);
+                        continue;
+                    }
+                    std::string_view str = str_result.value();
+                    // Resize scratch buffer if needed (with some growth factor)
+                    // Need space for str.size() + 1 for null terminator
+                    if (scratch_buffer.size() < str.size() + 1) {
+                        scratch_buffer =
+                            simdjson::padded_string((str.size() + 1) * 2);
+                    }
+                    std::memcpy(scratch_buffer.data(), str.data(), str.size());
+                    // Add null terminator - required for C string FFI to Rust
+                    scratch_buffer.data()[str.size()] = '\0';
+                    // Create Json referencing scratch buffer (non-owning)
+                    Json subpath_json(scratch_buffer.data(), str.size());
                     wrapper_->add_json_data(&subpath_json, 1, offset++);
                 }
             }

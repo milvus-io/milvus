@@ -406,6 +406,42 @@ pull_request_rules:
         remove:
           - do-not-merge/missing-related-issue
           - do-not-merge/missing-related-pr
+          - do-not-merge/missing-design-doc
+
+  - name: Blocking PR if feat PR missing design doc
+    conditions:
+      - or: *BRANCHES
+      - or:
+          - 'title~=^feat:'
+          - label=kind/feature
+      - -title~=\[automated\]
+      # PR body does not contain design doc link
+      - -body~=https://github.com/milvus-io/milvus-design-docs/(blob|tree)/[^/]+/design_docs/
+    actions:
+      label:
+        add:
+          - do-not-merge/missing-design-doc
+      comment:
+        message: |
+          @{{author}} This is a feature PR (`feat:`). Please provide a design document.
+
+          **How to resolve:**
+          Link a design doc in the PR description:
+          ```
+          design doc: https://github.com/milvus-io/milvus-design-docs/blob/main/design_docs/your_design.md
+          ```
+
+          Design documents location: https://github.com/milvus-io/milvus-design-docs/tree/main/design_docs
+
+  - name: Dismiss block label if design doc is provided
+    conditions:
+      - or: *BRANCHES
+      - label=do-not-merge/missing-design-doc
+      - body~=https://github.com/milvus-io/milvus-design-docs/(blob|tree)/[^/]+/design_docs/
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-design-doc
 
   # ==========================================================================
   # PR FORMAT VALIDATION

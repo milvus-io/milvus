@@ -13,7 +13,6 @@
 
 #include <cstdint>
 #include <vector>
-#include <memory>
 
 namespace milvus {
 namespace minhash {

@@ -14,40 +14,68 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <arrow/api.h>
+#include <arrow/array/array_base.h>
+#include <arrow/array/builder_base.h>
+#include <arrow/array/builder_binary.h>
+#include <arrow/array/builder_nested.h>
+#include <arrow/array/builder_primitive.h>
+#include <arrow/filesystem/filesystem.h>
+#include <arrow/record_batch.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <parquet/properties.h>
+#include <stddef.h>
 #include <algorithm>
-#include <numeric>
-#include <vector>
+#include <cstdint>
+#include <iostream>
+#include <map>
 #include <memory>
+#include <numeric>
+#include <optional>
 #include <string>
 #include <unordered_map>
-#include <iostream>
+#include <vector>
 
-#include <arrow/record_batch.h>
-#include <arrow/array/builder_binary.h>
-#include <arrow/array/builder_primitive.h>
-
-#include "common/Schema.h"
-#include "common/Types.h"
-#include "common/VectorArray.h"
+#include "NamedType/named_type_impl.hpp"
 #include "common/Consts.h"
-#include "milvus-storage/packed/writer.h"
+#include "common/FieldMeta.h"
+#include "common/LoadInfo.h"
+#include "common/OpContext.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/IndexStats.h"
+#include "index/Meta.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/dataset.h"
+#include "knowhere/version.h"
+#include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/common/constants.h"
-#include "segcore/SegmentSealed.h"
+#include "milvus-storage/packed/writer.h"
+#include "pb/common.pb.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
-#include "segcore/Types.h"
-#include "test_utils/DataGen.h"
-#include "pb/schema.pb.h"
-#include "knowhere/comp/index_param.h"
-#include "index/IndexFactory.h"
-#include "index/VectorIndex.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/TimestampIndex.h"
+#include "storage/FileManager.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
 #include "storage/Util.h"
-#include "storage/ChunkManager.h"
+#include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
-#include "common/QueryResult.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -80,11 +108,6 @@ class TestVectorArrayStorageV2 : public testing::Test {
             segcore::SegcoreConfig::default_config(),
             true);
 
-        // Initialize file system
-        auto conf = milvus_storage::ArrowFileSystemConfig();
-        conf.storage_type = "local";
-        conf.root_path = "/tmp/test_vector_array_for_storage_v2";
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
 
@@ -217,6 +240,7 @@ class TestVectorArrayStorageV2 : public testing::Test {
                 std::vector<int64_t>(chunk_num_ * test_data_count_),
                 std::vector<int64_t>(chunk_num_ * test_data_count_ * 4),
                 false,
+                "",
                 std::vector<std::string>({paths[0]})});
         load_info.field_infos.emplace(
             int64_t(101),
@@ -226,6 +250,7 @@ class TestVectorArrayStorageV2 : public testing::Test {
                             std::vector<int64_t>(chunk_num_ * test_data_count_ *
                                                  10 * 4 * DIM),
                             false,
+                            "",
                             std::vector<std::string>({paths[1]})});
 
         load_info.storage_version = 2;
@@ -240,12 +265,9 @@ class TestVectorArrayStorageV2 : public testing::Test {
 
     void
     TearDown() override {
-        // Clean up test data directory
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
-        fs->DeleteDir("/tmp/test_vector_array_for_storage_v2");
-
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
+        fs->DeleteDir("test_data");
     }
 
  protected:
@@ -290,8 +312,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
         segment_id, vector_array_field_id.get(), index_build_id, index_version);
 
     // Create storage config pointing to the test data location
-    auto storage_config =
-        gen_local_storage_config("/tmp/test_vector_array_for_storage_v2");
+    auto storage_config = gen_local_storage_config(TestLocalPath);
     auto cm = CreateChunkManager(storage_config);
 
     // Create index using storage v2 config
@@ -398,8 +419,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
         segment_id, vector_array_field_id.get(), index_build_id, index_version);
 
     // Create storage config pointing to the test data location
-    auto storage_config =
-        gen_local_storage_config("/tmp/test_vector_array_for_storage_v2");
+    auto storage_config = gen_local_storage_config(TestLocalPath);
     auto cm = CreateChunkManager(storage_config);
 
     // Create index using storage v2 config
@@ -455,8 +475,9 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
         auto load_conf = generate_load_conf(
             knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::MAX_SIM_IP, 0);
         load_conf["index_files"] = index_files;
-        load_conf["mmap_filepath"] = "mmap/test_emb_list_index";
-        load_conf["emb_list_meta_file_path"] = "mmap/test_index_meta";
+        load_conf["mmap_filepath"] = TestLocalPath + "mmap/test_emb_list_index";
+        load_conf["emb_list_meta_file_path"] =
+            TestLocalPath + "mmap/test_index_meta";
         load_conf[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
         vec_index->Load(milvus::tracer::TraceContext{}, load_conf);

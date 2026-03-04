@@ -55,11 +55,27 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 
-	// hook related properties are not allowed to be altered.
+	// cipher related properties are not allowed to be altered.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Properties:     []*commonpb.KeyValuePair{{Key: common.EncryptionEnabledKey, Value: "1"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// cipher related properties are not allowed to be altered.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+
+	// cipher related properties are not allowed to be altered.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.EncryptionRootKeyKey, Value: "1"}},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 

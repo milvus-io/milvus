@@ -14,24 +14,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "index/VectorDiskIndex.h"
-
-#include "common/Tracer.h"
-#include "common/Utils.h"
-#include "config/ConfigKnowhere.h"
-#include "index/Meta.h"
-#include "index/Utils.h"
-#include "knowhere/cluster/cluster_factory.h"
-#include "knowhere/comp/time_recorder.h"
-#include "clustering/KmeansClustering.h"
-#include "segcore/SegcoreConfig.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include "storage/Util.h"
-#include "common/Consts.h"
-#include "common/RangeSearchHelper.h"
-#include "clustering/types.h"
-#include "clustering/file_utils.h"
+#include <string.h>
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <ctime>
+#include <iosfwd>
+#include <numeric>
 #include <random>
+#include <utility>
+
+#include "clustering/KmeansClustering.h"
+#include "clustering/file_utils.h"
+#include "common/Common.h"
+#include "common/Consts.h"
+#include "common/FieldDataInterface.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
+#include "knowhere/cluster/cluster.h"
+#include "knowhere/cluster/cluster_factory.h"
+#include "knowhere/cluster/cluster_node.h"
+#include "knowhere/comp/time_recorder.h"
+#include "knowhere/config.h"
+#include "knowhere/dataset.h"
+#include "knowhere/expected.h"
+#include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "pb/schema.pb.h"
 
 namespace milvus::clustering {
 

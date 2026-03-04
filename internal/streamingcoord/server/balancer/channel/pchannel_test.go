@@ -5,9 +5,67 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
+
+func TestPChannelAvailableInReplication(t *testing.T) {
+	// Default: available
+	pchannel := NewPChannelMeta("ch1", types.AccessModeRW)
+	assert.True(t, pchannel.AvailableInReplication())
+
+	// Explicitly unavailable
+	pchannel = newPChannelMetaWithAvailability("ch2", types.AccessModeRW, false)
+	assert.False(t, pchannel.AvailableInReplication())
+
+	// Explicitly available
+	pchannel = newPChannelMetaWithAvailability("ch3", types.AccessModeRW, true)
+	assert.True(t, pchannel.AvailableInReplication())
+
+	// From proto with nil config: defaults to available
+	pchannel = newPChannelMetaFromProto(&streamingpb.PChannelMeta{
+		Channel: &streamingpb.PChannelInfo{Name: "ch4", Term: 1},
+		State:   streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
+	}, nil)
+	assert.True(t, pchannel.AvailableInReplication())
+
+	// From proto with config that has no replication topology: available
+	noTopoConfig := replicateutil.MustNewConfigHelper("by-dev", &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "by-dev", Pchannels: []string{"ch5"}},
+		},
+	})
+	pchannel = newPChannelMetaFromProto(&streamingpb.PChannelMeta{
+		Channel: &streamingpb.PChannelInfo{Name: "ch5", Term: 1},
+		State:   streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
+	}, noTopoConfig)
+	assert.True(t, pchannel.AvailableInReplication())
+
+	// From proto with replication config, channel IN config: available
+	replicaConfig := replicateutil.MustNewConfigHelper("by-dev1", &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "by-dev1", Pchannels: []string{"ch6", "ch7"}},
+			{ClusterId: "by-dev2", Pchannels: []string{"ch6-s", "ch7-s"}},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "by-dev1", TargetClusterId: "by-dev2"},
+		},
+	})
+	pchannel = newPChannelMetaFromProto(&streamingpb.PChannelMeta{
+		Channel: &streamingpb.PChannelInfo{Name: "ch6", Term: 1},
+		State:   streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
+	}, replicaConfig)
+	assert.True(t, pchannel.AvailableInReplication())
+
+	// From proto with replication config, channel NOT in config: unavailable
+	pchannel = newPChannelMetaFromProto(&streamingpb.PChannelMeta{
+		Channel: &streamingpb.PChannelInfo{Name: "ch_new_not_in_config", Term: 1},
+		State:   streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
+	}, replicaConfig)
+	assert.False(t, pchannel.AvailableInReplication())
+}
 
 func TestPChannel(t *testing.T) {
 	ResetStaticPChannelStatsManager()
@@ -22,7 +80,7 @@ func TestPChannel(t *testing.T) {
 			ServerId: 123,
 		},
 		State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
-	})
+	}, nil)
 	assert.Equal(t, "test-channel", pchannel.Name())
 	assert.Equal(t, int64(1), pchannel.CurrentTerm())
 	assert.Equal(t, int64(123), pchannel.CurrentServerID())
@@ -54,7 +112,7 @@ func TestPChannel(t *testing.T) {
 		ServerID: 456,
 	}
 	assert.True(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, newServerID))
-	updatedChannelInfo := newPChannelMetaFromProto(mutablePChannel.IntoRawMeta())
+	updatedChannelInfo := newPChannelMetaFromProto(mutablePChannel.IntoRawMeta(), nil)
 
 	assert.Equal(t, "test-channel", pchannel.Name())
 	assert.Equal(t, int64(1), pchannel.CurrentTerm())
@@ -70,7 +128,7 @@ func TestPChannel(t *testing.T) {
 	mutablePChannel = updatedChannelInfo.CopyForWrite()
 
 	mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 789})
-	updatedChannelInfo = newPChannelMetaFromProto(mutablePChannel.IntoRawMeta())
+	updatedChannelInfo = newPChannelMetaFromProto(mutablePChannel.IntoRawMeta(), nil)
 	assert.Equal(t, "test-channel", updatedChannelInfo.Name())
 	assert.Equal(t, int64(3), updatedChannelInfo.CurrentTerm())
 	assert.Equal(t, int64(789), updatedChannelInfo.CurrentServerID())
@@ -84,7 +142,7 @@ func TestPChannel(t *testing.T) {
 	// Test AssignToServerDone
 	mutablePChannel = updatedChannelInfo.CopyForWrite()
 	mutablePChannel.AssignToServerDone()
-	updatedChannelInfo = newPChannelMetaFromProto(mutablePChannel.IntoRawMeta())
+	updatedChannelInfo = newPChannelMetaFromProto(mutablePChannel.IntoRawMeta(), nil)
 	assert.Equal(t, "test-channel", updatedChannelInfo.Name())
 	assert.Equal(t, int64(3), updatedChannelInfo.CurrentTerm())
 	assert.Equal(t, int64(789), updatedChannelInfo.CurrentServerID())
@@ -99,12 +157,12 @@ func TestPChannel(t *testing.T) {
 	// Test MarkAsUnavailable
 	mutablePChannel = updatedChannelInfo.CopyForWrite()
 	mutablePChannel.MarkAsUnavailable(2)
-	updatedChannelInfo = newPChannelMetaFromProto(mutablePChannel.IntoRawMeta())
+	updatedChannelInfo = newPChannelMetaFromProto(mutablePChannel.IntoRawMeta(), nil)
 	assert.True(t, updatedChannelInfo.IsAssigned())
 
 	mutablePChannel = updatedChannelInfo.CopyForWrite()
 	mutablePChannel.MarkAsUnavailable(3)
-	updatedChannelInfo = newPChannelMetaFromProto(mutablePChannel.IntoRawMeta())
+	updatedChannelInfo = newPChannelMetaFromProto(mutablePChannel.IntoRawMeta(), nil)
 	assert.False(t, updatedChannelInfo.IsAssigned())
 	assert.Equal(t, streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNAVAILABLE, updatedChannelInfo.State())
 

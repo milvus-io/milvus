@@ -22,7 +22,6 @@ import (
 	"math/rand"
 	"net"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -32,7 +31,6 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/examples/helloworld/helloworld"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
@@ -385,7 +383,7 @@ func TestClientBase_CheckGrpcError(t *testing.T) {
 	assert.True(t, reset)
 	assert.True(t, forceReset)
 
-	// test serverId mismatch
+	// test serverId mismatch (coord connection, isNode=false: should retry)
 	retry, reset, forceReset, _ = base.checkGrpcErr(ctx, status.Error(codes.Unknown, merr.ErrNodeNotMatch.Error()))
 	assert.True(t, retry)
 	assert.True(t, reset)
@@ -404,18 +402,18 @@ func TestClientBase_CheckGrpcError(t *testing.T) {
 	assert.False(t, forceReset)
 }
 
-type server struct {
-	helloworld.UnimplementedGreeterServer
+type mockRootCoordRetryServer struct {
+	rootcoordpb.UnimplementedRootCoordServer
 	reqCounter   uint
 	SuccessCount uint
 }
 
-func (s *server) SayHello(ctx context.Context, in *helloworld.HelloRequest) (*helloworld.HelloReply, error) {
-	log.Printf("Received: %s", in.Name)
+func (s *mockRootCoordRetryServer) GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
+	log.Printf("Received GetComponentStates")
 	s.reqCounter++
 	if s.reqCounter%s.SuccessCount == 0 {
 		log.Printf("success %d", s.reqCounter)
-		return &helloworld.HelloReply{Message: strings.ToUpper(in.Name)}, nil
+		return &milvuspb.ComponentStates{}, nil
 	}
 	return nil, status.Error(codes.Unavailable, "server: fail it")
 }
@@ -423,10 +421,10 @@ func (s *server) SayHello(ctx context.Context, in *helloworld.HelloRequest) (*he
 func TestClientBase_RetryPolicy(t *testing.T) {
 	// server
 	lis, err := net.Listen("tcp", "localhost:")
-	address := lis.Addr()
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		t.Fatalf("failed to listen: %v", err)
 	}
+	address := lis.Addr()
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second,
 		PermitWithoutStream: true,
@@ -441,12 +439,11 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 	)
-	helloworld.RegisterGreeterServer(s, &server{SuccessCount: uint(maxAttempts)})
+	rootcoordpb.RegisterRootCoordServer(s, &mockRootCoordRetryServer{SuccessCount: uint(maxAttempts)})
 	reflection.Register(s)
 	go func() {
-		if err := s.Serve(lis); err != nil {
-			log.Fatalf("failed to serve: %v", err)
-		}
+		// s.Stop() causes Serve to return; ignore the error
+		s.Serve(lis)
 	}()
 	defer s.Stop()
 
@@ -456,7 +453,7 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 		DialTimeout:            60 * time.Second,
 		KeepAliveTime:          60 * time.Second,
 		KeepAliveTimeout:       60 * time.Second,
-		RetryServiceNameConfig: "rootcoordpb.GetComponentStates",
+		RetryServiceNameConfig: "milvus.proto.rootcoord.RootCoord",
 		MaxAttempts:            maxAttempts,
 		InitialBackoff:         10.0,
 		MaxBackoff:             60.0,
@@ -485,10 +482,10 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 
 func TestClientBase_Compression(t *testing.T) {
 	lis, err := net.Listen("tcp", "localhost:")
-	address := lis.Addr()
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		t.Fatalf("failed to listen: %v", err)
 	}
+	address := lis.Addr()
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second,
 		PermitWithoutStream: true,
@@ -503,12 +500,11 @@ func TestClientBase_Compression(t *testing.T) {
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 	)
-	helloworld.RegisterGreeterServer(s, &server{SuccessCount: uint(1)})
+	rootcoordpb.RegisterRootCoordServer(s, &mockRootCoordRetryServer{SuccessCount: uint(1)})
 	reflection.Register(s)
 	go func() {
-		if err := s.Serve(lis); err != nil {
-			log.Fatalf("failed to serve: %v", err)
-		}
+		// s.Stop() causes Serve to return; ignore the error
+		s.Serve(lis)
 	}()
 	defer s.Stop()
 
@@ -518,7 +514,7 @@ func TestClientBase_Compression(t *testing.T) {
 		DialTimeout:            60 * time.Second,
 		KeepAliveTime:          60 * time.Second,
 		KeepAliveTimeout:       60 * time.Second,
-		RetryServiceNameConfig: "helloworld.Greeter",
+		RetryServiceNameConfig: "milvus.proto.rootcoord.RootCoord",
 		MaxAttempts:            maxAttempts,
 		InitialBackoff:         10.0,
 		MaxBackoff:             60.0,
@@ -587,4 +583,50 @@ func TestVerifySession(t *testing.T) {
 	base.role = typeutil.QueryNodeRole
 	err = base.verifySession(ctx)
 	assert.ErrorIs(t, err, merr.ErrNodeNotFound)
+}
+
+func TestClientBase_CheckGrpcError_ServerIDMismatch_Node(t *testing.T) {
+	base := ClientBase[*mockClient]{
+		isNode: true,
+	}
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
+
+	ctx := context.Background()
+
+	// Node connection: ServerIDMismatch should fast-fail (no retry) with reset+forceReset
+	retry, reset, forceReset, err := base.checkGrpcErr(ctx, status.Error(codes.Unknown, merr.ErrNodeNotMatch.Error()))
+	assert.False(t, retry)
+	assert.True(t, reset)
+	assert.True(t, forceReset)
+	assert.True(t, IsServerIDMismatchErr(err))
+}
+
+func TestClientBase_ServerIDMismatch_NodeFastFail(t *testing.T) {
+	// Test the full Call() path: ServerIDMismatch on a node connection
+	// should fail immediately without retrying.
+	callCount := 0
+	base := ClientBase[*mockClient]{
+		maxCancelError: 10,
+		MaxAttempts:    3,
+		isNode:         true,
+	}
+	base.SetGetAddrFunc(func() (string, error) {
+		return "", errors.New("mocked address error")
+	})
+	base.role = typeutil.QueryNodeRole
+	mockSession := sessionutil.NewMockSession(t)
+	base.sess = mockSession
+	base.grpcClientMtx.Lock()
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
+	base.grpcClientMtx.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, err := base.Call(ctx, func(client *mockClient) (any, error) {
+		callCount++
+		return struct{}{}, status.Error(codes.Unknown, merr.ErrNodeNotMatch.Error())
+	})
+	assert.True(t, IsServerIDMismatchErr(err))
+	// The caller should be invoked exactly once (no retries)
+	assert.Equal(t, 1, callCount)
 }

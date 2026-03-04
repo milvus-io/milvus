@@ -46,9 +46,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-const (
-	testOutputPath = "/tmp/milvus_test/test_parquet_reader"
-)
+var testOutputPath string
+
+func init() {
+	dir, _ := os.MkdirTemp("", "milvus_test_parquet_reader_*")
+	testOutputPath = dir
+}
 
 type ReaderSuite struct {
 	suite.Suite

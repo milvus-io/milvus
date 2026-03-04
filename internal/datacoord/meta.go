@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -97,12 +98,12 @@ type meta struct {
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
 
-	indexMeta                  *indexMeta
-	analyzeMeta                *analyzeMeta
-	partitionStatsMeta         *partitionStatsMeta
-	compactionTaskMeta         *compactionTaskMeta
-	statsTaskMeta              *statsTaskMeta
-	externalCollectionTaskMeta *externalCollectionTaskMeta
+	indexMeta                     *indexMeta
+	analyzeMeta                   *analyzeMeta
+	partitionStatsMeta            *partitionStatsMeta
+	compactionTaskMeta            *compactionTaskMeta
+	statsTaskMeta                 *statsTaskMeta
+	externalCollectionRefreshMeta *externalCollectionRefreshMeta
 
 	// File Resource Meta
 	resourceIDMap   map[int64]*internalpb.FileResourceInfo // id -> info
@@ -210,33 +211,33 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		return nil, err
 	}
 
-	// TODO: add external collection task meta
-	// ectm, err := newExternalCollectionTaskMeta(ctx, catalog)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	ecrm, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	if err != nil {
+		return nil, err
+	}
+
 	spm, err := newSnapshotMeta(ctx, catalog, chunkManager)
 	if err != nil {
 		return nil, err
 	}
 
 	mt := &meta{
-		ctx:                ctx,
-		catalog:            catalog,
-		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:           NewSegmentsInfo(),
-		channelCPs:         newChannelCps(),
-		indexMeta:          im,
-		analyzeMeta:        am,
-		chunkManager:       chunkManager,
-		partitionStatsMeta: psm,
-		compactionTaskMeta: ctm,
-		statsTaskMeta:      stm,
-		// externalCollectionTaskMeta: ectm,
-		resourceIDMap:   make(map[int64]*internalpb.FileResourceInfo),
-		resourceVersion: 0,
-		resourceLock:    lock.RWMutex{},
-		snapshotMeta:    spm,
+		ctx:                           ctx,
+		catalog:                       catalog,
+		collections:                   typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:                      NewSegmentsInfo(),
+		channelCPs:                    newChannelCps(),
+		indexMeta:                     im,
+		analyzeMeta:                   am,
+		chunkManager:                  chunkManager,
+		partitionStatsMeta:            psm,
+		compactionTaskMeta:            ctm,
+		statsTaskMeta:                 stm,
+		externalCollectionRefreshMeta: ecrm,
+		resourceIDMap:                 make(map[int64]*internalpb.FileResourceInfo),
+		resourceVersion:               0,
+		resourceLock:                  lock.RWMutex{},
+		snapshotMeta:                  spm,
 	}
 	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {
@@ -339,7 +340,7 @@ func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 		if pos.Timestamp != math.MaxUint64 {
 			// Should not be set as metric since it's a tombstone value.
 			ts, _ := tsoutil.ParseTS(pos.Timestamp)
-			metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
+			metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(paramtable.GetStringNodeID(), vChannel).
 				Set(float64(ts.Unix()))
 		}
 	}
@@ -1235,6 +1236,33 @@ func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 	}
 }
 
+func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update manifest version failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		if segment.ManifestPath == "" {
+			log.Ctx(context.TODO()).Warn("meta update: update manifest version failed - no manifest path",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		basePath, currentVer, err := packed.UnmarshalManfestPath(segment.ManifestPath)
+		if err != nil {
+			log.Ctx(context.TODO()).Warn("meta update: update manifest version failed - unmarshal error",
+				zap.Int64("segmentID", segmentID), zap.Error(err))
+			return false
+		}
+		if currentVer == manifestVersion {
+			return false
+		}
+		segment.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
+		return true
+	}
+}
+
 func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
@@ -1258,6 +1286,35 @@ func UpdateIsImporting(segmentID int64, isImporting bool) UpdateOperator {
 			return false
 		}
 		segment.IsImporting = isImporting
+		return true
+	}
+}
+
+// UpdateImportSegmentPosition updates the segment's StartPosition and DmlPosition
+// for import segments using actual timestamps from the imported data.
+// Unlike UpdateStartPosition/UpdateDmlPosition, this operator allows nil MsgID
+// since import segments don't have message queue positions.
+func UpdateImportSegmentPosition(segmentID int64, minTs, maxTs uint64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update import segment position failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		channelName := segment.GetInsertChannel()
+		// Use actual min timestamp for StartPosition
+		segment.StartPosition = &msgpb.MsgPosition{
+			ChannelName: channelName,
+			MsgID:       nil,
+			Timestamp:   minTs,
+		}
+		// Use actual max timestamp for DmlPosition
+		segment.DmlPosition = &msgpb.MsgPosition{
+			ChannelName: channelName,
+			MsgID:       nil,
+			Timestamp:   maxTs,
+		}
 		return true
 	}
 }
@@ -2030,7 +2087,7 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 			zap.ByteString("msgID", pos.GetMsgID()),
 			zap.Stringer("walName", pos.WALName),
 			zap.Time("time", ts))
-		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
+		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(paramtable.GetStringNodeID(), vChannel).
 			Set(float64(ts.Unix()))
 	}
 	return nil
@@ -2054,7 +2111,7 @@ func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string)
 
 	m.channelCPs.checkpoints[channel] = cp
 
-	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
+	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), channel)
 	return nil
 }
 
@@ -2084,7 +2141,7 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 			zap.Uint64("ts", pos.GetTimestamp()),
 			zap.Time("time", tsoutil.PhysicalTime(pos.GetTimestamp())))
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
-		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel).Set(float64(ts.Unix()))
+		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(paramtable.GetStringNodeID(), channel).Set(float64(ts.Unix()))
 	}
 	// broadcast the change of channel checkpoint for TruncateCollection op to drop segments
 	m.channelCPs.cond.UnsafeBroadcast()
@@ -2109,7 +2166,7 @@ func (m *meta) DropChannelCheckpoint(vChannel string) error {
 		return err
 	}
 	delete(m.channelCPs.checkpoints, vChannel)
-	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel)
+	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), vChannel)
 	log.Ctx(context.TODO()).Info("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
 	return nil
 }

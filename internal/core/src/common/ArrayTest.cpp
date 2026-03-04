@@ -9,10 +9,16 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
-#include <random>
+#include <stdint.h>
+#include <string>
+#include <string_view>
 
 #include "common/Array.h"
+#include "common/Types.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
 
 TEST(Array, TestConstructArray) {
     using namespace milvus;

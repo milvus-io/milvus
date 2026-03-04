@@ -11,10 +11,17 @@
 
 #pragma once
 
+#include <map>
+#include <string>
+#include <vector>
+
 #include "common/BitsetView.h"
 #include "common/FieldMeta.h"
-#include "common/QueryInfo.h"
 #include "common/OpContext.h"
+#include "common/QueryInfo.h"
+#include "common/Types.h"
+#include "knowhere/expected.h"
+#include "knowhere/index/index_node.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
 

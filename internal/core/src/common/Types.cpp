@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include "Types.h"
-#include "common/Exception.h"
+
 #include "common/EasyAssert.h"
 
 const RowTypePtr RowType::None = std::make_shared<const RowType>(

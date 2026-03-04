@@ -2,6 +2,8 @@ package dependency
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -37,11 +39,19 @@ type DefaultFactory struct {
 	msgStreamFactory    msgstream.Factory
 }
 
+// testRocksmqPath returns a unique temporary path for RocksMQ in tests.
+// This avoids RocksDB LOCK file conflicts when multiple test packages run in parallel.
+func testRocksmqPath() string {
+	dir, _ := os.MkdirTemp("", "milvus_ut_rocksmq_*")
+	return filepath.Join(dir, "rdb_data")
+}
+
 // Only for test
 func NewDefaultFactory(standAlone bool) *DefaultFactory {
+	params := paramtable.Get()
 	return &DefaultFactory{
 		standAlone:       standAlone,
-		msgStreamFactory: msgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
+		msgStreamFactory: msgstream.NewRocksmqFactory(testRocksmqPath(), &params.ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactory("local",
 			objectstorage.RootPath("/tmp/milvus")),
 	}
@@ -51,7 +61,7 @@ func NewDefaultFactory(standAlone bool) *DefaultFactory {
 func MockDefaultFactory(standAlone bool, params *paramtable.ComponentParam) *DefaultFactory {
 	return &DefaultFactory{
 		standAlone:          standAlone,
-		msgStreamFactory:    msgstream.NewRocksmqFactory("/tmp/milvus/rocksmq/", &paramtable.Get().ServiceParam),
+		msgStreamFactory:    msgstream.NewRocksmqFactory(testRocksmqPath(), &params.ServiceParam),
 		chunkManagerFactory: storage.NewChunkManagerFactoryWithParam(params),
 	}
 }

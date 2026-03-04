@@ -32,43 +32,37 @@ if [ -z "$TEST_CMD" ]; then
    TEST_CMD="go test" 
 fi
 
-TEST_CMD_WITH_ARGS=(
-    $TEST_CMD
-    "-gcflags=all=-N -l"
-    -race
-    -tags dynamic,test
-    -v
-    -failfast
-    -buildvcs=false
-    -coverpkg=./...
-    -coverprofile=profile.out
-    -covermode=atomic
-)
-
-function test_cmd() {
-    mapfile -t PKGS < <(go list -tags dynamic,test ./...)
-    for pkg in "${PKGS[@]}"; do
-        echo -e "-----------------------------------\nRunning test cases at $pkg ..." 
-        "${TEST_CMD_WITH_ARGS[@]}" "$pkg"
-        if [ -f profile.out ]; then
-            # Skip the per-profile header to keep a single global "mode:" line
-            # Skip the packages that are not covered by the test
-            sed '1{/^mode:/d}' profile.out | grep -vE '(planparserv2/generated|mocks)' >> "${FILE_COVERAGE_INFO}" || [ $? -eq 1 ] 
-            rm profile.out
-        fi
-        echo -e "-----------------------------------\n"
-    done
-}
+PARALLEL=${PARALLEL:-1}
 
 export MILVUS_UT_WITHOUT_KAFKA=1 # kafka is not available in the CI environment, so skip the kafka tests
 
 # starting the timer
 beginTime=$(date +%s)
-echo -e "=== Running go unittest ===\n\n"
+echo -e "=== Running go unittest (parallel=$PARALLEL) ===\n\n"
 
 for d in cmd/tools internal pkg client; do
-    pushd "$d" 
-    test_cmd 
+    pushd "$d"
+    PROFILE="profile_${d//\//_}.out"
+    echo -e "-----------------------------------\nRunning test cases under $d with -p $PARALLEL ..."
+
+    $TEST_CMD \
+        "-gcflags=all=-N -l" \
+        -race \
+        -tags dynamic,test \
+        -v \
+        -failfast \
+        -buildvcs=false \
+        -coverpkg=./... \
+        -coverprofile="$PROFILE" \
+        -covermode=atomic \
+        -p "$PARALLEL" \
+        ./...
+
+    if [ -f "$PROFILE" ]; then
+        sed '1{/^mode:/d}' "$PROFILE" | grep -vE '(planparserv2/generated|mocks)' >> "${FILE_COVERAGE_INFO}" || [ $? -eq 1 ]
+        rm "$PROFILE"
+    fi
+    echo -e "-----------------------------------\n"
     popd
 done
 

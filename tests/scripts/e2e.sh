@@ -85,8 +85,7 @@ fi
     if [[ "${MILVUS_CLIENT}" == "pymilvus" ]]; then
       # Better to run pytest under pytest workspace
       export MILVUS_PYTEST_WORKSPACE="/milvus/tests/python_client"
-      docker compose run --rm pytest /bin/bash -c "pytest -n ${PARALLEL_NUM} --host ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} \
-                                                   --html=\${CI_LOG_PATH}/report.html --self-contained-html ${@:-}"
+      docker compose run --rm pytest /bin/bash -c "pytest -n ${PARALLEL_NUM} --host ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} ${@:-}"
     fi
   fi
   popd

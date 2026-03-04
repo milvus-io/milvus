@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -66,6 +67,110 @@ func NewHandlersV2(proxyClient types.ProxyComponent) *HandlersV2 {
 		proxy:     proxyClient,
 		checkAuth: proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool(),
 	}
+}
+
+var routeToMethod = map[string]string{
+	"/v2/vectordb/collections/list":                 "ShowCollections",
+	"/v2/vectordb/collections/has":                  "HasCollection",
+	"/v2/vectordb/collections/describe":             "DescribeCollection",
+	"/v2/vectordb/collections/get_stats":            "GetCollectionStatistics",
+	"/v2/vectordb/collections/get_load_state":       "GetLoadState",
+	"/v2/vectordb/collections/create":               "CreateCollection",
+	"/v2/vectordb/collections/drop":                 "DropCollection",
+	"/v2/vectordb/collections/truncate":             "TruncateCollection",
+	"/v2/vectordb/collections/rename":               "RenameCollection",
+	"/v2/vectordb/collections/load":                 "LoadCollection",
+	"/v2/vectordb/collections/refresh_load":         "LoadCollection",
+	"/v2/vectordb/collections/release":              "ReleaseCollection",
+	"/v2/vectordb/collections/alter_properties":     "AlterCollection",
+	"/v2/vectordb/collections/add_function":         "AddCollectionFunction",
+	"/v2/vectordb/collections/alter_function":       "AlterCollectionFunction",
+	"/v2/vectordb/collections/drop_function":        "DropCollectionFunction",
+	"/v2/vectordb/collections/drop_properties":      "AlterCollection",
+	"/v2/vectordb/collections/compact":              "ManualCompaction",
+	"/v2/vectordb/collections/get_compaction_state": "GetCompactionState",
+	"/v2/vectordb/collections/flush":                "Flush",
+
+	"/v2/vectordb/collections/fields/alter_properties": "AlterCollectionField",
+	"/v2/vectordb/collections/fields/add":              "AddCollectionField",
+
+	"/v2/vectordb/databases/create":           "CreateDatabase",
+	"/v2/vectordb/databases/drop":             "DropDatabase",
+	"/v2/vectordb/databases/drop_properties":  "AlterDatabase",
+	"/v2/vectordb/databases/list":             "ListDatabases",
+	"/v2/vectordb/databases/describe":         "DescribeDatabase",
+	"/v2/vectordb/databases/alter":            "AlterDatabase",
+	"/v2/vectordb/databases/alter_properties": "AlterDatabase",
+
+	"/v2/vectordb/entities/query":           "Query",
+	"/v2/vectordb/entities/get":             "Query",
+	"/v2/vectordb/entities/delete":          "Delete",
+	"/v2/vectordb/entities/insert":          "Insert",
+	"/v2/vectordb/entities/upsert":          "Upsert",
+	"/v2/vectordb/entities/search":          "Search",
+	"/v2/vectordb/entities/advanced_search": "HybridSearch",
+	"/v2/vectordb/entities/hybrid_search":   "HybridSearch",
+
+	"/v2/vectordb/partitions/list":      "ShowPartitions",
+	"/v2/vectordb/partitions/has":       "HasPartition",
+	"/v2/vectordb/partitions/get_stats": "GetPartitionStatistics",
+	"/v2/vectordb/partitions/create":    "CreatePartition",
+	"/v2/vectordb/partitions/drop":      "DropPartition",
+	"/v2/vectordb/partitions/load":      "LoadPartitions",
+	"/v2/vectordb/partitions/release":   "ReleasePartitions",
+
+	"/v2/vectordb/users/list":            "ListCredUsers",
+	"/v2/vectordb/users/describe":        "SelectUser",
+	"/v2/vectordb/users/create":          "CreateCredential",
+	"/v2/vectordb/users/update_password": "UpdateCredential",
+	"/v2/vectordb/users/drop":            "DeleteCredential",
+	"/v2/vectordb/users/grant_role":      "OperateUserRole",
+	"/v2/vectordb/users/revoke_role":     "OperateUserRole",
+
+	"/v2/vectordb/roles/list":                "SelectRole",
+	"/v2/vectordb/roles/describe":            "SelectGrant",
+	"/v2/vectordb/roles/create":              "CreateRole",
+	"/v2/vectordb/roles/drop":                "DropRole",
+	"/v2/vectordb/roles/grant_privilege":     "OperatePrivilege",
+	"/v2/vectordb/roles/revoke_privilege":    "OperatePrivilege",
+	"/v2/vectordb/roles/grant_privilege_v2":  "OperatePrivilege",
+	"/v2/vectordb/roles/revoke_privilege_v2": "OperatePrivilege",
+
+	"/v2/vectordb/privilege_groups/create":                       "CreatePrivilegeGroup",
+	"/v2/vectordb/privilege_groups/drop":                         "DropPrivilegeGroup",
+	"/v2/vectordb/privilege_groups/list":                         "ListPrivilegeGroups",
+	"/v2/vectordb/privilege_groups/add_privileges_to_group":      "OperatePrivilegeGroup",
+	"/v2/vectordb/privilege_groups/remove_privileges_from_group": "OperatePrivilegeGroup",
+
+	"/v2/vectordb/indexes/list":             "DescribeIndex",
+	"/v2/vectordb/indexes/describe":         "DescribeIndex",
+	"/v2/vectordb/indexes/create":           "CreateIndex",
+	"/v2/vectordb/indexes/drop":             "DropIndex",
+	"/v2/vectordb/indexes/alter_properties": "AlterIndex",
+	"/v2/vectordb/indexes/drop_properties":  "AlterIndex",
+
+	"/v2/vectordb/aliases/list":     "ListAliases",
+	"/v2/vectordb/aliases/describe": "DescribeAlias",
+	"/v2/vectordb/aliases/create":   "CreateAlias",
+	"/v2/vectordb/aliases/drop":     "DropAlias",
+	"/v2/vectordb/aliases/alter":    "AlterAlias",
+
+	"/v2/vectordb/jobs/import/list":         "ListImports",
+	"/v2/vectordb/jobs/import/create":       "Import",
+	"/v2/vectordb/jobs/import/get_progress": "GetImportProgress",
+	"/v2/vectordb/jobs/import/describe":     "GetImportProgress",
+
+	"/v2/vectordb/resource_groups/create":           "CreateResourceGroup",
+	"/v2/vectordb/resource_groups/drop":             "DropResourceGroup",
+	"/v2/vectordb/resource_groups/alter":            "UpdateResourceGroups",
+	"/v2/vectordb/resource_groups/describe":         "DescribeResourceGroup",
+	"/v2/vectordb/resource_groups/list":             "ListResourceGroups",
+	"/v2/vectordb/resource_groups/transfer_replica": "TransferMaster",
+
+	"/v2/vectordb/segments/describe":    "GetSegmentsInfo",
+	"/v2/vectordb/quotacenter/describe": "GetQuotaMetrics",
+
+	"/v2/vectordb/common/run_analyzer": "RunAnalyzer",
 }
 
 func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
@@ -249,6 +354,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			return
 		}
 		dbName := ""
+		collectionName := ""
 		if req != nil {
 			if getter, ok := req.(requestutil.DBNameGetter); ok {
 				dbName = getter.GetDbName()
@@ -258,6 +364,9 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 				if dbName == "" {
 					dbName = DefaultDbName
 				}
+			}
+			if getter, ok := req.(requestutil.CollectionNameGetter); ok {
+				collectionName = getter.GetCollectionName()
 			}
 		}
 		innerCtx := gCtx.Request.Context()
@@ -270,7 +379,28 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		gCtx.Keys["traceID"] = traceID
 		log.Ctx(ctx).Debug("high level restful api, read parameters from request body, then start to handle.",
 			zap.Any("url", gCtx.Request.URL.Path))
-		v2(ctx, gCtx, req, dbName)
+
+		resp, err := v2(ctx, gCtx, req, dbName)
+		methodTag, ok := routeToMethod[gCtx.FullPath()]
+		if !ok {
+			return
+		}
+		metrics.ProxyFunctionCall.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			methodTag,
+			metrics.TotalLabel,
+			dbName,
+			collectionName,
+		).Inc()
+		label := requestutil.ParseMetricLabel(resp, err)
+		// set metrics for state code
+		metrics.ProxyFunctionCall.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			methodTag,
+			label,
+			dbName,
+			collectionName,
+		).Inc()
 	}
 }
 
@@ -1369,6 +1499,28 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 
+	// Check if search by primary keys or by vectors
+	hasIDs := len(httpReq.Ids) > 0
+	hasData := len(httpReq.Data) > 0
+
+	// Primary keys and query vectors are mutually exclusive
+	if hasIDs && hasData {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: "primary keys (ids) and query vectors (data) are mutually exclusive. Please provide either 'ids' or 'data', not both",
+		})
+		return nil, merr.ErrParameterInvalid
+	}
+
+	// At least one of ids or data must be provided
+	if !hasIDs && !hasData {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
+			HTTPReturnMessage: "either 'ids' (for primary key search) or 'data' (for vector search) must be provided",
+		})
+		return nil, merr.ErrMissingRequiredParameters
+	}
+
 	searchParams, err := generateSearchParams(httpReq.SearchParams)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, generate SearchParams failed", zap.Error(err))
@@ -1394,21 +1546,55 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		}
 	}
 
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: httpReq.AnnsField})
-	body, _ := c.Get(gin.BodyBytesKey)
-	placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField)
-	if err != nil {
-		log.Ctx(ctx).Warn("high level restful api, search with vector invalid", zap.Error(err))
-		HTTPAbortReturn(c, http.StatusOK, gin.H{
-			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
-			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
-		})
-		return nil, err
+	if hasIDs {
+		// Search by primary keys
+		primaryField, ok := getPrimaryField(collSchema)
+		if !ok {
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+				HTTPReturnMessage: "collection has no primary key field",
+			})
+			return nil, merr.ErrParameterInvalid
+		}
+
+		// Convert ids to schemapb.IDs
+		ids, err := convertIDsToSchemapbIDs(httpReq.Ids, primaryField)
+		if err != nil {
+			log.Ctx(ctx).Warn("high level restful api, convert ids to schemapb.IDs failed", zap.Error(err))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+				HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", error: " + err.Error(),
+			})
+			return nil, err
+		}
+
+		// Set Ids field using the oneof SearchInput field
+		req.SearchInput = &milvuspb.SearchRequest_Ids{
+			Ids: ids,
+		}
+		// Set anns_field in search params if provided
+		if httpReq.AnnsField != "" {
+			searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: httpReq.AnnsField})
+		}
+	} else {
+		// Search by vectors (existing logic)
+		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: httpReq.AnnsField})
+		body, _ := c.Get(gin.BodyBytesKey)
+		placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField)
+		if err != nil {
+			log.Ctx(ctx).Warn("high level restful api, search with vector invalid", zap.Error(err))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
+				HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
+			})
+			return nil, err
+		}
+		req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: placeholderGroup,
+		}
 	}
+
 	req.SearchParams = searchParams
-	req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
-		PlaceholderGroup: placeholderGroup,
-	}
 	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
@@ -1849,6 +2035,19 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Key:   common.MmapEnabledKey,
 			Value: fmt.Sprintf("%v", httpReq.Params[common.MmapEnabledKey]),
 		})
+	}
+	for _, key := range []string{
+		common.WarmupScalarFieldKey,
+		common.WarmupScalarIndexKey,
+		common.WarmupVectorFieldKey,
+		common.WarmupVectorIndexKey,
+	} {
+		if _, ok := httpReq.Params[key]; ok {
+			req.Properties = append(req.Properties, &commonpb.KeyValuePair{
+				Key:   key,
+				Value: fmt.Sprintf("%v", httpReq.Params[key]),
+			})
+		}
 	}
 
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateCollection", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
@@ -2528,6 +2727,7 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 			indexType := ""
 			mmapEnabled := ""
 			indexOffsetCacheEnabled := ""
+			warmup := ""
 			for _, pair := range indexDescription.Params {
 				switch pair.Key {
 				case common.MetricTypeKey:
@@ -2538,6 +2738,8 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 					mmapEnabled = pair.Value
 				case common.IndexOffsetCacheEnabledKey:
 					indexOffsetCacheEnabled = pair.Value
+				case common.WarmupKey:
+					warmup = pair.Value
 				}
 			}
 			indexInfo := map[string]any{
@@ -2547,6 +2749,7 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 				HTTPReturnIndexMetricType:      metricType,
 				HTTPMmapEnabledKey:             mmapEnabled,
 				HTTPIndexOffsetCacheEnabledKey: indexOffsetCacheEnabled,
+				HTTPWarmupKey:                  warmup,
 				HTTPReturnIndexTotalRows:       indexDescription.TotalRows,
 				HTTPReturnIndexPendingRows:     indexDescription.PendingIndexRows,
 				HTTPReturnIndexIndexedRows:     indexDescription.IndexedRows,

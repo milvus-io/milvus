@@ -181,15 +181,22 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
             int64_t last,
             Timestamp value);
 
+// Get the cache warmup policy for the given content type.
+// If warmup_policy is not empty, parse it and return the corresponding policy.
+// If warmup_policy is empty, fall back to the global config.
 CacheWarmupPolicy
-getCacheWarmupPolicy(bool is_vector, bool is_index, bool in_load_list = true);
+getCacheWarmupPolicy(const std::string& warmup_policy,
+                     bool is_vector,
+                     bool is_index,
+                     bool in_load_list = true);
 
 milvus::cachinglayer::CellDataType
 getCellDataType(bool is_vector, bool is_index);
 
 void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
-              milvus::segcore::LoadIndexInfo* load_index_info);
+              milvus::segcore::LoadIndexInfo* load_index_info,
+              milvus::OpContext* op_ctx = nullptr);
 
 /**
  * Convert Milvus timestamp to physical time in milliseconds.
@@ -214,4 +221,49 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
                        const segcore::SegmentInternalInterface* segment,
                        TargetBitmap& valid_view,
                        bool small_int_raw_type = false);
+
+/**
+ * @brief Check if an operation has been cancelled and throw if so.
+ *
+ * This is a helper function to reduce boilerplate cancellation checking code.
+ *
+ * @param op_ctx The operation context containing the cancellation token (can be nullptr)
+ * @param segment_id The segment ID for error message context
+ * @param operation Description of the operation being performed
+ * @throws SegcoreError with ErrorCode::FollyCancel if cancellation was requested
+ */
+inline void
+CheckCancellation(milvus::OpContext* op_ctx,
+                  int64_t segment_id,
+                  const std::string& operation) {
+    if (op_ctx && op_ctx->cancellation_token.isCancellationRequested()) {
+        throw SegcoreError(
+            ErrorCode::FollyCancel,
+            fmt::format("{} cancelled for segment {}", operation, segment_id));
+    }
+}
+
+/**
+ * @brief Check if an operation has been cancelled and throw if so (with field context).
+ *
+ * @param op_ctx The operation context containing the cancellation token (can be nullptr)
+ * @param segment_id The segment ID for error message context
+ * @param field_id The field ID for error message context
+ * @param operation Description of the operation being performed
+ * @throws SegcoreError with ErrorCode::FollyCancel if cancellation was requested
+ */
+inline void
+CheckCancellation(milvus::OpContext* op_ctx,
+                  int64_t segment_id,
+                  int64_t field_id,
+                  const std::string& operation) {
+    if (op_ctx && op_ctx->cancellation_token.isCancellationRequested()) {
+        throw SegcoreError(ErrorCode::FollyCancel,
+                           fmt::format("{} cancelled for segment {} field {}",
+                                       operation,
+                                       segment_id,
+                                       field_id));
+    }
+}
+
 }  // namespace milvus::segcore

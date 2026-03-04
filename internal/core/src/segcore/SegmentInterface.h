@@ -14,41 +14,58 @@
 #ifndef MILVUS_SEGCORE_SEGMENT_INTERFACE_H_
 #define MILVUS_SEGCORE_SEGMENT_INTERFACE_H_
 
+#include <simdjson.h>
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <string>
-#include <type_traits>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
-#include <index/ScalarIndex.h>
 
+#include "NamedType/underlying_functionalities.hpp"
+#include "boost/container/detail/std_fwd.hpp"
 #include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/Utils.h"
+#include "common/Array.h"
 #include "common/ArrayOffsets.h"
+#include "common/BitsetView.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
 #include "common/Json.h"
+#include "common/LoadInfo.h"
 #include "common/OpContext.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/SystemProperty.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
-#include "common/LoadInfo.h"
-#include "common/BitsetView.h"
-#include "common/QueryResult.h"
-#include "common/QueryInfo.h"
-#include "folly/SharedMutex.h"
+#include "common/VectorArray.h"
+#include "common/protobuf_utils.h"
 #include "common/type_c.h"
-#include "mmap/ChunkedColumnInterface.h"
+#include "folly/CancellationToken.h"
+#include "folly/FBVector.h"
+#include "geos_c.h"
 #include "index/Index.h"
-#include "index/JsonFlatIndex.h"
-#include "query/Plan.h"
-#include "pb/segcore.pb.h"
+#include "index/NgramInvertedIndex.h"
 #include "index/SkipIndex.h"
 #include "index/TextMatchIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
+#include "mmap/ChunkedColumnInterface.h"
+#include "parquet/statistics.h"
+#include "pb/plan.pb.h"
+#include "pb/segcore.pb.h"
+#include "query/PlanImpl.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
-#include "index/NgramInvertedIndex.h"
-#include "index/json_stats/JsonKeyStats.h"
 
 namespace milvus::segcore {
 
@@ -80,7 +97,8 @@ class SegmentInterface {
            Timestamp timestamp,
            const folly::CancellationToken& cancel_token,
            int32_t consistency_level,
-           Timestamp collection_ttl) const = 0;
+           Timestamp collection_ttl,
+           int64_t entity_ttl_physical_time_us = 0) const = 0;
 
     // Only used for test
     std::unique_ptr<SearchResult>
@@ -91,6 +109,7 @@ class SegmentInterface {
                       placeholder_group,
                       timestamp,
                       folly::CancellationToken(),
+                      0,
                       0,
                       0);
     }
@@ -103,7 +122,8 @@ class SegmentInterface {
              bool ignore_non_pk,
              const folly::CancellationToken& cancel_token,
              int32_t consistency_level,
-             Timestamp collection_ttl) const = 0;
+             Timestamp collection_ttl,
+             int64_t entity_ttl_physical_time_us = 0) const = 0;
 
     // Only used for test
     std::unique_ptr<proto::segcore::RetrieveResults>
@@ -118,6 +138,7 @@ class SegmentInterface {
                         limit_size,
                         ignore_non_pk,
                         folly::CancellationToken(),
+                        0,
                         0,
                         0);
     }
@@ -158,7 +179,8 @@ class SegmentInterface {
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) = 0;
 
     virtual void
-    LoadFieldData(const LoadFieldDataInfo& info) = 0;
+    LoadFieldData(const LoadFieldDataInfo& info,
+                  milvus::OpContext* op_ctx = nullptr) = 0;
 
     virtual int64_t
     get_segment_id() const = 0;
@@ -176,7 +198,7 @@ class SegmentInterface {
     is_nullable(FieldId field_id) const = 0;
 
     virtual void
-    CreateTextIndex(FieldId field_id) = 0;
+    CreateTextIndex(FieldId field_id, milvus::OpContext* op_ctx = nullptr) = 0;
 
     virtual PinWrapper<index::TextMatchIndex*>
     GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
@@ -206,7 +228,7 @@ class SegmentInterface {
     virtual void
     BulkGetJsonData(milvus::OpContext* op_ctx,
                     FieldId field_id,
-                    std::function<void(milvus::Json, size_t, bool)> fn,
+                    const std::function<void(milvus::Json, size_t, bool)>& fn,
                     const int64_t* offsets,
                     int64_t count) const = 0;
 
@@ -231,16 +253,12 @@ class SegmentInterface {
     virtual void
     Reopen(const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
 
-    // FinishLoad notifies the segment that all load operation are done
-    // currently it's used to sync field data list with updated schema.
-    virtual void
-    FinishLoad() = 0;
-
     virtual void
     SetLoadInfo(const milvus::proto::segcore::SegmentLoadInfo& load_info) = 0;
 
     virtual void
-    Load(milvus::tracer::TraceContext& trace_ctx) = 0;
+    Load(milvus::tracer::TraceContext& trace_ctx,
+         milvus::OpContext* op_ctx = nullptr) = 0;
 
     // Get IArrayOffsets for element-level filtering on array fields
     // Returns nullptr if the field doesn't have IArrayOffsets
@@ -362,7 +380,8 @@ class SegmentInternalInterface : public SegmentInterface {
            Timestamp timestamp,
            const folly::CancellationToken& cancel_token,
            int32_t consistency_level,
-           Timestamp collection_ttl) const override;
+           Timestamp collection_ttl,
+           int64_t entity_ttl_physical_time_us = 0) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
@@ -383,7 +402,8 @@ class SegmentInternalInterface : public SegmentInterface {
              bool ignore_non_pk,
              const folly::CancellationToken& cancel_token,
              int32_t consistency_level,
-             Timestamp collection_ttl) const override;
+             Timestamp collection_ttl,
+             int64_t entity_ttl_physical_time_us = 0) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,

@@ -65,6 +65,27 @@ ToString(ScalarIndexType type) {
     }
 }
 
+inline ScalarIndexType
+FromString(const std::string& type) {
+    if (type == "BITMAP") {
+        return ScalarIndexType::BITMAP;
+    } else if (type == "STLSORT" || type == "STL_SORT") {
+        return ScalarIndexType::STLSORT;
+    } else if (type == "MARISA" || type == "Trie" || type == "TRIE") {
+        return ScalarIndexType::MARISA;
+    } else if (type == "INVERTED") {
+        return ScalarIndexType::INVERTED;
+    } else if (type == "HYBRID") {
+        return ScalarIndexType::HYBRID;
+    } else if (type == "RTREE") {
+        return ScalarIndexType::RTREE;
+    } else if (type == "NGRAM") {
+        return ScalarIndexType::NGRAM;
+    } else {
+        return ScalarIndexType::NONE;
+    }
+}
+
 template <typename T>
 class ScalarIndex : public IndexBase {
  public:
@@ -117,12 +138,12 @@ class ScalarIndex : public IndexBase {
     NotIn(size_t n, const T* values) = 0;
 
     virtual const TargetBitmap
-    Range(T value, OpType op) = 0;
+    Range(const T& value, OpType op) = 0;
 
     virtual const TargetBitmap
-    Range(T lower_bound_value,
+    Range(const T& lower_bound_value,
           bool lb_inclusive,
-          T upper_bound_value,
+          const T& upper_bound_value,
           bool ub_inclusive) = 0;
 
     virtual std::optional<T>
@@ -151,8 +172,8 @@ class ScalarIndex : public IndexBase {
                index_type_ == milvus::index::ASCENDING_SORT;
     }
 
-    virtual bool
-    IsNestedIndex() const {
+    bool
+    IsNestedIndex() const override {
         return false;
     }
 

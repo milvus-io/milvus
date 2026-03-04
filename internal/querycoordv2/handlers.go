@@ -135,7 +135,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 			utils.ManualBalance,
 			collectionID,
 			plan.Replica,
-			replica.LoadPriority(),
+			commonpb.LoadPriority_LOW, // Manual balance is not urgent
 			actions...,
 		)
 		if err != nil {

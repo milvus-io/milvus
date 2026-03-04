@@ -15,33 +15,47 @@
 // limitations under the License.
 
 #include "index/IndexFactory.h"
-#include <cstdlib>
+
+#include <assert.h>
+#include <algorithm>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
+
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
-#include "common/FieldDataInterface.h"
+#include "common/JsonCastFunction.h"
 #include "common/JsonCastType.h"
 #include "common/Types.h"
-#include "index/Index.h"
-#include "index/JsonFlatIndex.h"
-#include "index/VectorMemIndex.h"
-#include "index/Utils.h"
-#include "index/Meta.h"
-#include "index/JsonInvertedIndex.h"
-#include "index/NgramInvertedIndex.h"
-#include "knowhere/utils.h"
-
-#include "index/VectorDiskIndex.h"
-#include "index/ScalarIndexSort.h"
-#include "index/StringIndexSort.h"
-#include "index/StringIndexMarisa.h"
-#include "index/BoolIndex.h"
-#include "index/InvertedIndexTantivy.h"
+#include "common/Utils.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
+#include "index/BitmapIndex.h"
 #include "index/HybridScalarIndex.h"
+#include "index/Index.h"
+#include "index/IndexInfo.h"
+#include "index/InvertedIndexTantivy.h"
+#include "index/JsonFlatIndex.h"
+#include "index/JsonInvertedIndex.h"
+#include "index/Meta.h"
+#include "index/NgramInvertedIndex.h"
 #include "index/RTreeIndex.h"
+#include "index/ScalarIndexSort.h"
+#include "index/StringIndexMarisa.h"
+#include "index/StringIndexSort.h"
+#include "index/Utils.h"
+#include "index/VectorDiskIndex.h"
+#include "index/VectorMemIndex.h"
 #include "knowhere/comp/knowhere_check.h"
+#include "knowhere/expected.h"
+#include "knowhere/index/index_static.h"
+#include "knowhere/operands.h"
+#include "knowhere/utils.h"
 #include "log/Log.h"
+#include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
+#include "storage/Types.h"
 
 namespace milvus::index {
 
@@ -538,8 +552,18 @@ IndexFactory::CreateNestedIndex(
     IndexType index_type,
     int32_t tantivy_index_version,
     const storage::FileManagerContext& file_manager_context) {
-    AssertInfo(index_type == INVERTED_INDEX_TYPE,
-               "Nested index only supports inverted index for now");
+    if (index_type == INVERTED_INDEX_TYPE) {
+        return CreateNestedIndexInverted(tantivy_index_version,
+                                         file_manager_context);
+    }
+
+    return CreateNestedIndexScalarIndexSort(file_manager_context);
+}
+
+IndexBasePtr
+IndexFactory::CreateNestedIndexInverted(
+    int32_t tantivy_index_version,
+    const storage::FileManagerContext& file_manager_context) {
     DataType element_type = static_cast<DataType>(
         file_manager_context.fieldDataMeta.field_schema.element_type());
     switch (element_type) {
@@ -572,6 +596,42 @@ IndexFactory::CreateNestedIndex(
         case DataType::VARCHAR:
             return std::make_unique<InvertedIndexTantivy<std::string>>(
                 tantivy_index_version, file_manager_context, false, true, true);
+        default:
+            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
+    }
+}
+
+IndexBasePtr
+IndexFactory::CreateNestedIndexScalarIndexSort(
+    const storage::FileManagerContext& file_manager_context) {
+    DataType element_type = static_cast<DataType>(
+        file_manager_context.fieldDataMeta.field_schema.element_type());
+    switch (element_type) {
+        case DataType::BOOL:
+            return std::make_unique<ScalarIndexSort<bool>>(file_manager_context,
+                                                           true);
+        case DataType::INT8:
+            return std::make_unique<ScalarIndexSort<int8_t>>(
+                file_manager_context, true);
+        case DataType::INT16:
+            return std::make_unique<ScalarIndexSort<int16_t>>(
+                file_manager_context, true);
+        case DataType::INT32:
+            return std::make_unique<ScalarIndexSort<int32_t>>(
+                file_manager_context, true);
+        case DataType::INT64:
+            return std::make_unique<ScalarIndexSort<int64_t>>(
+                file_manager_context, true);
+        case DataType::FLOAT:
+            return std::make_unique<ScalarIndexSort<float>>(
+                file_manager_context, true);
+        case DataType::DOUBLE:
+            return std::make_unique<ScalarIndexSort<double>>(
+                file_manager_context, true);
+        case DataType::STRING:
+        case DataType::VARCHAR:
+            return std::make_unique<StringIndexSort>(file_manager_context,
+                                                     true);
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type);
     }

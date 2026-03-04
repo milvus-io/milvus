@@ -30,27 +30,46 @@ set(PATH_VAR $ENV{PATH})
 set(ENV{PATH} ${HOME_VAR}/.cargo/bin:${PATH_VAR})
 message($ENV{PATH})
 
-add_custom_command(OUTPUT ls_cargo
-        COMMENT "ls cargo"
-        COMMAND ls ${HOME_VAR}/.cargo/bin/
-        )
-add_custom_target(ls_cargo_target DEPENDS ls_cargo)
-
-add_custom_command(OUTPUT compile_tantivy
+# Compile tantivy binding using cargo
+# The OUTPUT must be the actual file produced, so ninja/make knows how to generate it
+add_custom_command(
+        OUTPUT ${LIB_FILE}
         COMMENT "Compiling tantivy binding"
-        COMMAND TOKENIZER_PROTO=${TOKENIZER_PROTO} CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR} ${CARGO_CMD}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding)
-add_custom_target(tantivy_binding_target DEPENDS compile_tantivy ls_cargo_target)
+        COMMAND ${CMAKE_COMMAND} -E env
+                "PATH=${HOME_VAR}/.cargo/bin:${PATH_VAR}"
+                "TOKENIZER_PROTO=${TOKENIZER_PROTO}"
+                "CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+                ${CARGO_CMD}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding
+        VERBATIM
+)
 
-set(INSTALL_COMMAND
-        cp ${LIB_HEADER_FOLDER}/tantivy-binding.h ${TANTIVY_INCLUDE_DIR}/ &&
-        cp ${CMAKE_CURRENT_SOURCE_DIR}/*.h ${TANTIVY_INCLUDE_DIR}/ &&
-        cp ${LIB_FILE} ${TANTIVY_LIB_DIR}/)
-add_custom_command(OUTPUT install_tantivy
-        COMMENT "Install tantivy target ${LIB_FILE} to ${TANTIVY_LIB_DIR}"
-        COMMAND ${INSTALL_COMMAND}
-        )
-add_custom_target(install_tantivy_target DEPENDS install_tantivy tantivy_binding_target)
+# Set the installed library path
+set(INSTALLED_LIB_FILE "${TANTIVY_LIB_DIR}/${TANTIVY_NAME}")
+
+# Install tantivy library and headers to output directory
+# This custom command produces the installed library file
+add_custom_command(
+        OUTPUT ${INSTALLED_LIB_FILE}
+        COMMENT "Installing tantivy binding to ${TANTIVY_LIB_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${TANTIVY_LIB_DIR}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${TANTIVY_INCLUDE_DIR}
+        COMMAND ${CMAKE_COMMAND} -E copy ${LIB_FILE} ${TANTIVY_LIB_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy ${LIB_HEADER_FOLDER}/tantivy-binding.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-wrapper.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/rust-binding.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/rust-array.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/rust-hashmap.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/token-stream.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/phrase_match.h ${TANTIVY_INCLUDE_DIR}/
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/time_recorder.h ${TANTIVY_INCLUDE_DIR}/
+        DEPENDS ${LIB_FILE}
+        VERBATIM
+)
+
+# Create a target that other targets can depend on
+add_custom_target(install_tantivy_target DEPENDS ${INSTALLED_LIB_FILE})
 
 add_library(tantivy_binding STATIC IMPORTED)
 add_dependencies(tantivy_binding

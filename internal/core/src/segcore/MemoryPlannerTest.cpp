@@ -13,11 +13,16 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#include <gtest/gtest.h>
 #include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "gtest/gtest.h"
 #include "milvus-storage/common/metadata.h"
 #include "segcore/memory_planner.h"
-#include <gtest/gtest.h>
-#include <vector>
 
 using namespace milvus::segcore;
 

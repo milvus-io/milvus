@@ -14,7 +14,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <stdint.h>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "SumAggregateBase.h"
+#include "common/EasyAssert.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
+#include "exec/operator/query-agg/Aggregate.h"
+#include "glog/logging.h"
+#include "log/Log.h"
 
 namespace milvus {
 namespace exec {

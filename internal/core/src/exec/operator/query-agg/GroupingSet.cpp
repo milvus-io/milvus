@@ -15,8 +15,18 @@
 // limitations under the License.
 
 #include "GroupingSet.h"
+
+#include <cstddef>
+
+#include "common/BitUtil.h"
+#include "common/EasyAssert.h"
 #include "common/Utils.h"
-#include "SumAggregateBase.h"
+#include "exec/HashTable.h"
+#include "exec/VectorHasher.h"
+#include "exec/operator/query-agg/Aggregate.h"
+#include "exec/operator/query-agg/AggregateInfo.h"
+#include "exec/operator/query-agg/RowContainer.h"
+#include "folly/Range.h"
 
 namespace milvus {
 namespace exec {
@@ -126,8 +136,11 @@ GroupingSet::getOutput(milvus::RowVectorPtr& result) {
     if (isGlobal_) {
         return getGlobalAggregationOutput(result);
     }
-    AssertInfo(hash_table_ != nullptr,
-               "hash_table_ should not be nullptr for non-global aggregation");
+    // For non-global aggregation, if hash_table_ is null, it means no input data
+    // Return false directly without creating empty hash table
+    if (!hash_table_) {
+        return false;
+    }
     const auto& all_rows = hash_table_->rows()->allRows();
     if (!all_rows.empty()) {
         extractGroups(result);

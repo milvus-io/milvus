@@ -16,19 +16,45 @@
 
 #include "index/VectorDiskIndex.h"
 
+#include <math.h>
+#include <string.h>
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <exception>
+#include <iosfwd>
+#include <optional>
+#include <stdexcept>
+#include <string>
+
+#include "common/Consts.h"
+#include "common/OffsetMapping.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/RangeSearchHelper.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/Utils.h"
-#include "config/ConfigKnowhere.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/FileManager.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include "storage/Util.h"
-#include "common/Consts.h"
-#include "common/RangeSearchHelper.h"
-#include "indexbuilder/types.h"
-#include "filemanager/FileManager.h"
+#include "knowhere/binaryset.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/dataset.h"
+#include "knowhere/index/index_factory.h"
 #include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "opentelemetry/trace/span.h"
+#include "opentelemetry/trace/tracer.h"
+#include "pb/common.pb.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 
 namespace milvus::index {
 

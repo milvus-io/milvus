@@ -10,10 +10,19 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include <pb/schema.pb.h>
 #include <index/BoolIndex.h>
-#include "test_utils/indexbuilder_test_utils.h"
+#include <pb/schema.pb.h>
+#include <cstddef>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "bitset/bitset.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/ScalarIndexSort.h"
 #include "test_utils/AssertUtils.h"
+#include "test_utils/indexbuilder_test_utils.h"
 
 class BoolIndexTest : public ::testing::Test {
  protected:

@@ -15,15 +15,16 @@
 extern "C" {
 #endif
 
-#include <stdbool.h>
-#include <stdlib.h>
 #include <stdint.h>
+#include <stdbool.h>
 
+#include "common/common_type_c.h"
 #include "common/type_c.h"
-#include "futures/future_c.h"
-#include "segcore/plan_c.h"
-#include "segcore/load_index_c.h"
+#include "futures/future_c_types.h"
+#include "segcore/collection_c.h"
 #include "segcore/load_field_data_c.h"
+#include "segcore/load_index_c.h"
+#include "segcore/plan_c.h"
 
 typedef void* CSearchResult;
 typedef CProto CRetrieveResult;
@@ -66,8 +67,43 @@ NewSegmentWithLoadInfo(CCollection collection,
  * @param c_segment: segment handle indicate which segment to load
  * @return CStatus indicating success or failure
  */
+/**
+ * @brief Opaque handle to a cancellation source for load operations
+ */
+typedef void* CLoadCancellationSource;
+
+/**
+ * @brief Create a new cancellation source for load operations
+ * @return Handle to the cancellation source
+ */
+CLoadCancellationSource
+NewLoadCancellationSource();
+
+/**
+ * @brief Request cancellation through the source
+ * @param source: The cancellation source handle
+ */
+void
+CancelLoadCancellationSource(CLoadCancellationSource source);
+
+/**
+ * @brief Release the cancellation source
+ * @param source: The cancellation source handle to release
+ */
+void
+ReleaseLoadCancellationSource(CLoadCancellationSource source);
+
+/**
+ * @brief Load segment with cancellation support
+ * @param c_trace: tracing context param
+ * @param c_segment: segment handle indicate which segment to load
+ * @param source: cancellation source for cancelling the load operation (can be NULL)
+ * @return CStatus indicating success or failure
+ */
 CStatus
-SegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment);
+SegmentLoad(CTraceContext c_trace,
+            CSegmentInterface c_segment,
+            CLoadCancellationSource source);
 
 /**
  * @brief Reopen an existing segment with updated load information
@@ -106,7 +142,8 @@ AsyncSearch(CTraceContext c_trace,
             CPlaceholderGroup c_placeholder_group,
             uint64_t timestamp,
             int32_t consistency_level,
-            uint64_t collection_ttl);
+            uint64_t collection_ttl,
+            uint64_t entity_ttl_physical_time_us);
 
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);
@@ -119,7 +156,8 @@ AsyncRetrieve(CTraceContext c_trace,
               int64_t limit_size,
               bool ignore_non_pk,
               int32_t consistency_level,
-              uint64_t collection_ttl);
+              uint64_t collection_ttl,
+              uint64_t entity_ttl_physical_time_us);
 
 CFuture*  // Future<CRetrieveResult>
 AsyncRetrieveByOffsets(CTraceContext c_trace,
@@ -173,15 +211,11 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment,
                          CLoadIndexInfo c_load_index_info);
 
 CStatus
-LoadTextIndex(CSegmentInterface c_segment,
-              const uint8_t* serialized_load_text_index_info,
-              const uint64_t len);
-
-CStatus
 LoadJsonKeyIndex(CTraceContext c_trace,
                  CSegmentInterface c_segment,
                  const uint8_t* serialied_load_json_key_index_info,
-                 const uint64_t len);
+                 const uint64_t len,
+                 CLoadCancellationSource source);
 
 CStatus
 UpdateFieldRawDataSize(CSegmentInterface c_segment,
@@ -202,10 +236,6 @@ DropSealedSegmentJSONIndex(CSegmentInterface c_segment,
                            int64_t field_id,
                            const char* nested_path);
 
-CStatus
-AddFieldDataInfoForSealed(CSegmentInterface c_segment,
-                          CLoadFieldDataInfo c_load_field_data_info);
-
 //////////////////////////////    interfaces for SegmentInterface    //////////////////////////////
 CStatus
 ExistPk(CSegmentInterface c_segment,
@@ -222,12 +252,6 @@ Delete(CSegmentInterface c_segment,
 
 void
 RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id);
-
-CStatus
-CreateTextIndex(CSegmentInterface c_segment, int64_t field_id);
-
-CStatus
-FinishLoad(CSegmentInterface c_segment);
 
 CStatus
 ExprResCacheEraseSegment(int64_t segment_id);

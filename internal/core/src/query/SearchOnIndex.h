@@ -12,10 +12,11 @@
 #pragma once
 
 #include "common/BitsetView.h"
-#include "query/SubSearchResult.h"
-#include "query/helper.h"
+#include "common/OpContext.h"
 #include "common/QueryInfo.h"
+#include "common/QueryResult.h"
 #include "index/VectorIndex.h"
+#include "query/helper.h"
 
 namespace milvus::query {
 

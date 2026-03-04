@@ -10,7 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 #pragma once
 
+#include <stdint.h>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "SimpleNumericAggregate.h"
+#include "common/EasyAssert.h"
+#include "common/Types.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
+#include "fmt/core.h"
+#include "folly/Range.h"
 
 namespace milvus {
 namespace exec {

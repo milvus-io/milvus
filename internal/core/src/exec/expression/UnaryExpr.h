@@ -35,6 +35,7 @@
 #include "common/bson_view.h"
 #include "index/json_stats/bson_inverted.h"
 #include "cachinglayer/CacheSlot.h"
+#include "index/NgramInvertedIndex.h"
 
 namespace milvus {
 namespace exec {
@@ -825,6 +826,32 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         return expr_->column_.data_type_;
     }
 
+    int64_t
+    GetActiveCount() const {
+        return active_count_;
+    }
+
+    // Check if ngram index can be used (index exists + literal is valid + no offset input)
+    bool
+    CanUseNgramIndex() const override;
+
+    // Execute ngram Phase1 only (index query), ANDs result into candidates
+    // Requires: CanUseNgramIndex() == true
+    // Requires: candidates must be non-empty (caller initializes with all-true,
+    //           then ANDs with pre_filter/offset_input before calling)
+    void
+    ExecuteNgramPhase1(TargetBitmap& candidates);
+
+    // Execute ngram Phase2 (post-filter verification) on candidate bitset
+    // - segment_offset: starting position in segment
+    // - batch_size: number of rows to process
+    // - candidates: bitmap of size batch_size
+    // Requires: CanUseNgramIndex() == true
+    void
+    ExecuteNgramPhase2(TargetBitmap& candidates,
+                       int64_t segment_offset,
+                       int64_t batch_size);
+
  private:
     template <typename T>
     VectorPtr
@@ -881,8 +908,11 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecTextMatch();
 
+    // Check if ngram index exists
     bool
-    CanUseNgramIndex() const override;
+    HasNgramIndex() const {
+        return pinned_ngram_index_.get() != nullptr;
+    }
 
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);

@@ -99,6 +99,24 @@ func (c *CCollection) IndexMeta() *segcorepb.CollectionIndexMeta {
 	return c.indexMeta
 }
 
+func (c *CCollection) UpdateIndexMeta(meta *segcorepb.CollectionIndexMeta) error {
+	if meta == nil {
+		return nil
+	}
+
+	indexMetaBlob, err := proto.Marshal(meta)
+	if err != nil {
+		return err
+	}
+
+	status := C.SetIndexMeta(c.ptr, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return err
+	}
+	c.indexMeta = meta
+	return nil
+}
+
 func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint64) error {
 	if sch == nil {
 		return merr.WrapErrServiceInternal("update collection schema with nil")

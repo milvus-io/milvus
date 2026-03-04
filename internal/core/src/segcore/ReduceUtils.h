@@ -11,8 +11,11 @@
 
 #pragma once
 
-#include "pb/schema.pb.h"
+#include <memory>
+#include <vector>
+
 #include "common/Types.h"
+#include "pb/schema.pb.h"
 #include "query/PlanImpl.h"
 
 namespace milvus::segcore {

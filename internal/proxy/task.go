@@ -81,6 +81,7 @@ const (
 	SearchIterLastBoundKey = "search_iter_last_bound"
 	SearchIterIdKey        = "search_iter_id"
 	QueryGroupByFieldsKey  = "group_by_fields"
+	OrderByFieldsKey       = "order_by_fields"
 
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"
@@ -496,6 +497,20 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	_, err = common.GetCollectionTTL(t.GetProperties())
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("collection ttl property value not valid, parse error: %s", err.Error())
+	}
+
+	// Validate warmup policy for all warmup keys
+	if hasWarmupProp(t.GetProperties()...) {
+		for _, prop := range t.GetProperties() {
+			if common.IsFieldWarmupKey(prop.GetKey()) {
+				return merr.WrapErrParameterInvalidMsg("warmup key '%s' is only allowed at field level, use warmup.scalarField/warmup.scalarIndex/warmup.vectorField/warmup.vectorIndex at collection level", prop.GetKey())
+			}
+			if common.IsCollectionWarmupKey(prop.GetKey()) {
+				if err := common.ValidateWarmupPolicy(prop.GetValue()); err != nil {
+					return merr.WrapErrParameterInvalidMsg("invalid warmup value for key %s: %s", prop.GetKey(), err.Error())
+				}
+			}
+		}
 	}
 
 	// validate clustering key
@@ -1319,9 +1334,9 @@ func hasTTLFieldProp(props ...*commonpb.KeyValuePair) bool {
 	return false
 }
 
-func hasLazyLoadProp(props ...*commonpb.KeyValuePair) bool {
+func hasWarmupProp(props ...*commonpb.KeyValuePair) bool {
 	for _, p := range props {
-		if p.GetKey() == common.LazyLoadEnableKey {
+		if common.IsWarmupKey(p.GetKey()) {
 			return true
 		}
 	}
@@ -1330,7 +1345,7 @@ func hasLazyLoadProp(props ...*commonpb.KeyValuePair) bool {
 
 func hasPropInDeletekeys(keys []string) string {
 	for _, key := range keys {
-		if key == common.MmapEnabledKey || key == common.LazyLoadEnableKey {
+		if key == common.MmapEnabledKey || common.IsWarmupKey(key) {
 			return key
 		}
 	}
@@ -1380,13 +1395,21 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	t.CollectionID = collectionID
 
 	if len(t.GetProperties()) > 0 {
-		if hasMmapProp(t.Properties...) || hasLazyLoadProp(t.Properties...) {
+		hasMmap := hasMmapProp(t.Properties...)
+		hasWarmup := hasWarmupProp(t.Properties...)
+		if hasMmap || hasWarmup {
 			loaded, err := isCollectionLoaded(ctx, t.mixCoord, t.CollectionID)
 			if err != nil {
 				return err
 			}
 			if loaded {
-				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+				// keeping the original error msg here for compatibility
+				if hasMmap {
+					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+				}
+				if hasWarmup {
+					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter warmup properties if collection loaded")
+				}
 			}
 		}
 
@@ -1422,6 +1445,20 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		}
 		if hasTTLField && hasTTLProp(collSchema.GetProperties()...) {
 			return merr.WrapErrParameterInvalidMsg("collection TTL is already set, cannot be set ttl field")
+		}
+
+		// Validate warmup policy for all warmup keys
+		if hasWarmupProp(t.Properties...) {
+			for _, prop := range t.Properties {
+				if common.IsFieldWarmupKey(prop.GetKey()) {
+					return merr.WrapErrParameterInvalidMsg("warmup key '%s' is only allowed at field level, use warmup.scalarField/warmup.scalarIndex/warmup.vectorField/warmup.vectorIndex at collection level", prop.GetKey())
+				}
+				if common.IsCollectionWarmupKey(prop.GetKey()) {
+					if err := common.ValidateWarmupPolicy(prop.GetValue()); err != nil {
+						return merr.WrapErrParameterInvalidMsg("invalid warmup value for key %s: %s", prop.GetKey(), err.Error())
+					}
+				}
+			}
 		}
 	} else if len(t.GetDeleteKeys()) > 0 {
 		key := hasPropInDeletekeys(t.DeleteKeys)
@@ -1566,10 +1603,20 @@ var allowedAlterProps = []string{
 	common.MmapEnabledKey,
 	common.MaxCapacityKey,
 	common.FieldDescriptionKey,
+	common.WarmupKey,
+	common.WarmupScalarFieldKey,
+	common.WarmupScalarIndexKey,
+	common.WarmupVectorFieldKey,
+	common.WarmupVectorIndexKey,
 }
 
 var allowedDropProps = []string{
 	common.MmapEnabledKey,
+	common.WarmupKey,
+	common.WarmupScalarFieldKey,
+	common.WarmupScalarIndexKey,
+	common.WarmupVectorFieldKey,
+	common.WarmupVectorIndexKey,
 }
 
 func IsKeyAllowAlter(key string) bool {
@@ -1652,6 +1699,18 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter collection field properties if collection loaded")
 			}
 
+		case common.WarmupKey:
+			loaded, err := isCollectionLoadedFn()
+			if err != nil {
+				return err
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter warmup if collection loaded")
+			}
+			if err := common.ValidateWarmupPolicy(prop.Value); err != nil {
+				return merr.WrapErrParameterInvalidMsg(err.Error())
+			}
+
 		case common.MaxLengthKey:
 			IsStringType := false
 			fieldName := ""
@@ -1705,7 +1764,7 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			return merr.WrapErrParameterInvalidMsg("%s is not allowed to drop in collection field param", key)
 		}
 
-		if updatedKey == common.MmapEnabledKey {
+		if updatedKey == common.MmapEnabledKey || common.IsFieldWarmupKey(updatedKey) {
 			loaded, err := isCollectionLoadedFn()
 			if err != nil {
 				return err

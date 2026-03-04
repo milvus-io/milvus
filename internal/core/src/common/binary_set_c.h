@@ -19,9 +19,8 @@ extern "C" {
 #endif
 
 #include <stdint.h>
-#include <stdlib.h>
 
-#include "common/type_c.h"
+#include "common/common_type_c.h"
 
 typedef void* CBinarySet;
 

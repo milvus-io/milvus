@@ -18,7 +18,6 @@ package delegator
 
 import (
 	"context"
-	"fmt"
 	"runtime"
 	"time"
 
@@ -188,8 +187,14 @@ func (sd *shardDelegator) getLevel0Deltalogs(partitionID int64) []*datapb.FieldB
 }
 
 func (sd *shardDelegator) forwardStreamingByBF(ctx context.Context, deleteData []*DeleteData) {
+	offlineSegments := typeutil.NewConcurrentSet[int64]()
+
+	// Pin segments first to protect candidates from being released during BF check
+	sealed, growing, version := sd.distribution.PinOnlineSegments()
+
 	start := time.Now()
-	retMap := sd.applyBFInParallel(deleteData, segments.GetBFApplyPool())
+	// Pass pinned segments to ensure consistency between BF check and delete application
+	retMap := sd.applyBFInParallel(deleteData, segments.GetBFApplyPool(), sealed, growing)
 	// segment => delete data
 	delRecords := make(map[int64]DeleteData)
 	retMap.Range(func(key int, value *BatchApplyRet) bool {
@@ -213,10 +218,6 @@ func (sd *shardDelegator) forwardStreamingByBF(ctx context.Context, deleteData [
 		return true
 	})
 	bfCost := time.Since(start)
-
-	offlineSegments := typeutil.NewConcurrentSet[int64]()
-
-	sealed, growing, version := sd.distribution.PinOnlineSegments()
 
 	start = time.Now()
 	eg, ctx := errgroup.WithContext(context.Background())
@@ -269,8 +270,8 @@ func (sd *shardDelegator) forwardStreamingByBF(ctx context.Context, deleteData [
 		sd.markSegmentOffline(offlineSegIDs...)
 	}
 
-	metrics.QueryNodeApplyBFCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(bfCost.Milliseconds()))
-	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(forwardDeleteCost.Milliseconds()))
+	metrics.QueryNodeApplyBFCost.WithLabelValues("ProcessDelete", paramtable.GetStringNodeID()).Observe(float64(bfCost.Milliseconds()))
+	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", paramtable.GetStringNodeID()).Observe(float64(forwardDeleteCost.Milliseconds()))
 }
 
 func (sd *shardDelegator) forwardStreamingDirect(ctx context.Context, deleteData []*DeleteData) {
@@ -347,7 +348,7 @@ func (sd *shardDelegator) forwardStreamingDirect(ctx context.Context, deleteData
 		sd.markSegmentOffline(offlineSegIDs...)
 	}
 
-	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(forwardDeleteCost.Milliseconds()))
+	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", paramtable.GetStringNodeID()).Observe(float64(forwardDeleteCost.Milliseconds()))
 }
 
 // applyDeleteBatch handles delete record and apply them to corresponding workers in batch.

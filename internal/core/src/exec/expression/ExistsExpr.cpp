@@ -15,12 +15,28 @@
 // limitations under the License.
 
 #include "ExistsExpr.h"
+
+#include <set>
+
+#include "bitset/bitset.h"
+#include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/Vector.h"
+#include "common/bson_view.h"
+#include "common/type_c.h"
+#include "exec/expression/EvalCtx.h"
+#include "folly/FBVector.h"
+#include "index/Index.h"
+#include "index/JsonFlatIndex.h"
 #include "index/JsonInvertedIndex.h"
 #include "index/json_stats/JsonKeyStats.h"
+#include "index/json_stats/utils.h"
+#include "opentelemetry/trace/span.h"
+#include "segcore/SegmentInterface.h"
+#include "segcore/SegmentSealed.h"
 
 namespace milvus {
 namespace exec {
@@ -32,7 +48,6 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     span.GetSpan()->SetAttribute("data_type",
                                  static_cast<int>(expr_->column_.data_type_));
 
-    context.set_apply_valid_data_after_flip(false);
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     auto data_type = expr_->column_.data_type_;
@@ -164,7 +179,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
                 offset = (offsets) ? offsets[i] : i;
             }
             if (valid_data != nullptr && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
+                res[i] = false;
                 continue;
             }
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {

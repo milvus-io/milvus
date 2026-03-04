@@ -16,25 +16,34 @@
 
 #pragma once
 
+#include <stdint.h>
+#include <algorithm>
+#include <cstddef>
+#include <exception>
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
-#include "nlohmann/json.hpp"
 #include "ankerl/unordered_dense.h"
+#include "arrow/array/array_binary.h"
+#include "arrow/record_batch.h"
 #include "arrow/type_fwd.h"
-#include "arrow/array/array_primitive.h"
-#include "parquet/statistics.h"
+#include "cachinglayer/Utils.h"
 #include "common/BloomFilter.h"
 #include "common/Chunk.h"
 #include "common/Consts.h"
 #include "common/Types.h"
-#include "common/FieldDataInterface.h"
 #include "index/Utils.h"
 #include "index/skipindex_stats/utils.h"
+#include "nlohmann/json.hpp"
+#include "nlohmann/json_fwd.hpp"
+#include "parquet/statistics.h"
 
 namespace milvus::index {
 

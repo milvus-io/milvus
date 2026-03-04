@@ -125,6 +125,14 @@ class AsyncMilvusClientWrapper:
         return await self.async_milvus_client.release_collection(collection_name, timeout, **kwargs)
 
     @logger_interceptor()
+    async def truncate_collection(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.truncate_collection(collection_name, timeout, **kwargs)
+    
+    @logger_interceptor()
+    async def list_persistent_segments(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.list_persistent_segments(collection_name, timeout, **kwargs)
+
+    @logger_interceptor()
     async def create_index(self, collection_name: str, index_params, timeout: Optional[float] = None,
                            **kwargs):
         return await self.async_milvus_client.create_index(collection_name, index_params, timeout, **kwargs)

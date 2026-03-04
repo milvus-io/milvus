@@ -258,6 +258,8 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	// exclude the mmap.enable param, because it will be conflicted with the index's mmap.enable param
 	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
+	// exclude the warmup policy param also, similar to mmap.enable param
+	typeParams = DeleteParams(typeParams, []string{common.WarmupKey})
 	index := &model.Index{
 		CollectionID:    req.GetCollectionID(),
 		FieldID:         req.GetFieldID(),
@@ -1092,18 +1094,19 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 					}
 					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
 						&indexpb.IndexFilePathInfo{
-							SegmentID:           segID,
-							FieldID:             s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
-							IndexID:             segIdx.IndexID,
-							BuildID:             segIdx.BuildID,
-							IndexName:           indexName,
-							IndexParams:         indexParams,
-							IndexFilePaths:      indexFilePaths,
-							SerializedSize:      segIdx.IndexSerializedSize,
-							MemSize:             segIdx.IndexMemSize,
-							IndexVersion:        segIdx.IndexVersion,
-							NumRows:             segIdx.NumRows,
-							CurrentIndexVersion: segIdx.CurrentIndexVersion,
+							SegmentID:                 segID,
+							FieldID:                   s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
+							IndexID:                   segIdx.IndexID,
+							BuildID:                   segIdx.BuildID,
+							IndexName:                 indexName,
+							IndexParams:               indexParams,
+							IndexFilePaths:            indexFilePaths,
+							SerializedSize:            segIdx.IndexSerializedSize,
+							MemSize:                   segIdx.IndexMemSize,
+							IndexVersion:              segIdx.IndexVersion,
+							NumRows:                   segIdx.NumRows,
+							CurrentIndexVersion:       segIdx.CurrentIndexVersion,
+							CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
 						})
 				}
 			}

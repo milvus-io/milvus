@@ -9,12 +9,19 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <queue>
-#include <vector>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <limits>
+#include <queue>
+#include <utility>
+#include <vector>
 
-#include "common/Utils.h"
+#include "common/EasyAssert.h"
 #include "common/RangeSearchHelper.h"
+#include "common/Types.h"
+#include "common/Utils.h"
 
 namespace milvus {
 

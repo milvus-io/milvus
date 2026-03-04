@@ -185,3 +185,42 @@ func TestScalarAutoIndexParams_build(t *testing.T) {
 		assert.Equal(t, "INVERTED", CParams.AutoIndexConfig.ScalarBoolIndexType.GetValue())
 	})
 }
+
+func TestGetIndexParam_DefaultValue(t *testing.T) {
+	paramItem := GetIndexParam()
+
+	t.Run("default value is valid JSON", func(t *testing.T) {
+		var params map[string]any
+		err := json.Unmarshal([]byte(paramItem.DefaultValue), &params)
+		assert.NoError(t, err, "DefaultValue should be valid JSON")
+	})
+
+	t.Run("default value contains required fields", func(t *testing.T) {
+		var params map[string]any
+		err := json.Unmarshal([]byte(paramItem.DefaultValue), &params)
+		assert.NoError(t, err)
+
+		assert.Contains(t, params, IndexTypeKey, "DefaultValue should contain index_type")
+		assert.Contains(t, params, MetricTypeKey, "DefaultValue should contain metric_type")
+	})
+
+	t.Run("default value can be parsed by config", func(t *testing.T) {
+		mgr := config.NewManager()
+		mgr.SetConfig(paramItem.Key, paramItem.DefaultValue)
+
+		p := &AutoIndexConfig{
+			IndexParams: ParamItem{
+				Key:       paramItem.Key,
+				Formatter: GetBuildParamFormatter(FloatVectorDefaultMetricType, paramItem.Key),
+			},
+		}
+
+		assert.NotPanics(t, func() {
+			p.IndexParams.Init(mgr)
+		}, "DefaultValue should be parseable without panic")
+
+		jsonMap := p.IndexParams.GetAsJSONMap()
+		assert.NotEmpty(t, jsonMap[IndexTypeKey], "index_type should not be empty")
+		assert.NotEmpty(t, jsonMap[MetricTypeKey], "metric_type should not be empty")
+	})
+}

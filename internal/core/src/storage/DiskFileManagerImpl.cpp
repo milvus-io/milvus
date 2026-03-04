@@ -14,42 +14,59 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <sys/fcntl.h>
+#include <cxxabi.h>
+#include <string.h>
 #include <algorithm>
-#include <boost/filesystem.hpp>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <exception>
+#include <filesystem>
+#include <future>
+#include <iosfwd>
 #include <memory>
-#include <mutex>
 #include <optional>
-#include <type_traits>
+#include <stdexcept>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "arrow/api.h"
+#include "arrow/filesystem/filesystem.h"
+#include "boost/filesystem/path.hpp"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
-#include "common/File.h"
-#include "common/Slice.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
-#include "index/Utils.h"
+#include "common/VectorArray.h"
+#include "common/VectorTrait.h"
+#include "filemanager/FileManager.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
 #include "index/Meta.h"
+#include "index/Utils.h"
+#include "knowhere/sparse_utils.h"
 #include "log/Log.h"
-
+#include "milvus-storage/filesystem/fs.h"
+#include "nlohmann/json.hpp"
+#include "storage/ChunkManager.h"
+#include "storage/DataCodec.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
-#include "storage/IndexData.h"
+#include "storage/FileWriter.h"
+#include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "storage/RemoteInputStream.h"
+#include "storage/RemoteOutputStream.h"
+#include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
-#include "storage/FileWriter.h"
-
-#include "storage/RemoteOutputStream.h"
-#include "storage/RemoteInputStream.h"
 
 namespace milvus::storage {
 DiskFileManagerImpl::DiskFileManagerImpl(
@@ -352,7 +369,7 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         } catch (const std::logic_error& e) {
             auto err_message = fmt::format(
                 "invalided index file path:{}, error:{}", file_path, e.what());
-            LOG_ERROR(err_message);
+            LOG_ERROR("{}", err_message);
             throw std::logic_error(err_message);
         }
     }
@@ -388,13 +405,12 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
                     GetObjectData(rcm_.get(),
                                   batch_remote_files,
                                   milvus::PriorityForLoad(priority));
-                // Wait for all futures to ensure all threads complete
-                auto chunk_codecs =
-                    storage::WaitAllFutures(std::move(index_chunks_futures));
-                for (auto& chunk_codec : chunk_codecs) {
-                    file_writer.Write(chunk_codec->PayloadData(),
-                                      chunk_codec->PayloadSize());
-                }
+                storage::ProcessFuturesInOrder(
+                    index_chunks_futures,
+                    [&](std::unique_ptr<DataCodec> chunk_codec) {
+                        file_writer.Write(chunk_codec->PayloadData(),
+                                          chunk_codec->PayloadSize());
+                    });
                 batch_remote_files.clear();
             };
 
@@ -541,39 +557,38 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
 
     auto FetchRawData = [&]() {
         auto field_datas = GetObjectData(rcm_.get(), batch_files);
-        // Wait for all futures to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(std::move(field_datas));
-        int batch_size = batch_files.size();
-        for (int i = 0; i < batch_size; i++) {
-            auto field_data = codecs[i]->GetFieldData();
-            num_rows += uint32_t(field_data->get_valid_rows());
+        storage::ProcessFuturesInOrder(
+            field_datas, [&](std::unique_ptr<DataCodec> codec) {
+                auto field_data = codec->GetFieldData();
+                num_rows += uint32_t(field_data->get_valid_rows());
 
-            if (valid_data_path.has_value() && field_data->IsNullable()) {
-                nullable = true;
-                auto rows = field_data->get_num_rows();
-                if (rows > 0) {
-                    auto new_size = (total_num_rows + rows + 7) / 8;
-                    if (new_size > static_cast<int64_t>(valid_bitmap.size())) {
-                        valid_bitmap.resize(new_size, 0);
-                    }
-                    for (int64_t i = 0; i < rows; ++i) {
-                        if (field_data->is_valid(i)) {
-                            set_bit(valid_bitmap, total_num_rows + i);
+                if (valid_data_path.has_value() && field_data->IsNullable()) {
+                    nullable = true;
+                    auto rows = field_data->get_num_rows();
+                    if (rows > 0) {
+                        auto new_size = (total_num_rows + rows + 7) / 8;
+                        if (new_size >
+                            static_cast<int64_t>(valid_bitmap.size())) {
+                            valid_bitmap.resize(new_size, 0);
                         }
+                        for (int64_t i = 0; i < rows; ++i) {
+                            if (field_data->is_valid(i)) {
+                                set_bit(valid_bitmap, total_num_rows + i);
+                            }
+                        }
+                        total_num_rows += rows;
                     }
-                    total_num_rows += rows;
                 }
-            }
 
-            cache_raw_data_to_disk_common<DataType>(
-                field_data,
-                local_chunk_manager,
-                local_data_path,
-                file_created,
-                dim,
-                write_offset,
-                is_vector_array ? &offsets : nullptr);
-        }
+                cache_raw_data_to_disk_common<DataType>(
+                    field_data,
+                    local_chunk_manager,
+                    local_data_path,
+                    file_created,
+                    dim,
+                    write_offset,
+                    is_vector_array ? &offsets : nullptr);
+            });
     };
 
     auto parallel_degree =

@@ -70,10 +70,8 @@ cd ${ROOT}/tests/python_client
 # Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-  timeout "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME}\
-    --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup ${@:-}
+  timeout "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} --dist loadgroup ${@:-}
 else
-  pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME}\
-    --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup ${@:-}
+  pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} --dist loadgroup ${@:-}
 fi
 
