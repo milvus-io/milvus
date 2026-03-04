@@ -190,7 +190,8 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 
 	// VALIDATION 1: Force promote requires empty cluster and topology fields
 	// The configuration will be constructed from the current cluster's existing meta
-	if config.Clusters != nil || config.CrossClusterTopology != nil {
+	// Use len() instead of != nil because empty slices (from client builder) are not nil
+	if len(config.GetClusters()) > 0 || len(config.GetCrossClusterTopology()) > 0 {
 		return nil, status.NewInvaildArgument(
 			"force promote requires empty cluster and topology fields; it promotes the cluster to primary automatically")
 	}
