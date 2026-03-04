@@ -168,18 +168,12 @@ ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
         std::unordered_map<std::string,
                            std::shared_ptr<milvus::exec::BaseConfig>>(),
         entity_ttl_physical_time_us);
-    auto row = ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
-    AssertInfo(row != nullptr,
-               "ExecuteTask returned null row vector for query expression");
-    AssertInfo(
-        row->childrens().size() == 1,
-        "query expr operator's result vector's children size not equal one");
-    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(row->childrens()[0]);
-    AssertInfo(col_vec != nullptr, "failed to cast to ColumnVector");
-    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
-    BitsetType query_view(view);
-    query_view.flip();
-    return query_view;
+    auto bitset =
+        ExecPlanNodeVisitor::ExecuteTask(plan_fragment, query_context);
+
+    // For test case, bitset 1 indicates true but executor is verse
+    bitset.flip();
+    return bitset;
 }
 
 }  // namespace milvus::query
