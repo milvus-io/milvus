@@ -43,6 +43,7 @@
 #include "exec/operator/RandomSampleNode.h"
 #include "exec/operator/RescoresNode.h"
 #include "exec/operator/SearchGroupByNode.h"
+#include "exec/operator/ComputeProjectNode.h"
 #include "exec/operator/VectorSearchNode.h"
 #include "exec/operator/QueryOrderByNode.h"
 #include "fmt/core.h"
@@ -145,6 +146,11 @@ DriverFactory::CreateDriver(
             tracer::AddEvent("create_operator: ElementFilterBitsNode");
             operators.push_back(std::make_unique<PhyElementFilterBitsNode>(
                 id, ctx.get(), node));
+        } else if (auto computeProjectNode = std::dynamic_pointer_cast<
+                       const plan::ComputeProjectNode>(plannode)) {
+            tracer::AddEvent("create_operator: ComputeProjectNode");
+            operators.push_back(std::make_unique<PhyComputeProjectNode>(
+                id, ctx.get(), computeProjectNode));
         } else {
             ThrowInfo(ErrorCode::UnexpectedError, "Unknown plan node type");
         }

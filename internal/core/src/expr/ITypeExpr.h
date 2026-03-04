@@ -278,6 +278,17 @@ class FieldAccessTypeExpr : public ITypeExpr {
           is_input_column_(true) {
     }
 
+    FieldAccessTypeExpr(DataType type,
+                        const std::string& name,
+                        FieldId fieldId,
+                        std::vector<std::string> nested_path)
+        : ITypeExpr{type},
+          name_(name),
+          field_id_(fieldId),
+          is_input_column_(true),
+          nested_path_(std::move(nested_path)) {
+    }
+
     FieldAccessTypeExpr(DataType type, FieldId fieldId)
         : ITypeExpr{type},
           name_(""),
@@ -304,6 +315,21 @@ class FieldAccessTypeExpr : public ITypeExpr {
         return name_;
     }
 
+    const std::vector<std::string>&
+    nested_path() const {
+        return nested_path_;
+    }
+
+    bool
+    has_nested_path() const {
+        return !nested_path_.empty();
+    }
+
+    FieldId
+    field_id() const {
+        return field_id_;
+    }
+
     std::string
     ToString() const override {
         if (inputs_.empty()) {
@@ -318,6 +344,7 @@ class FieldAccessTypeExpr : public ITypeExpr {
     std::string name_;
     const FieldId field_id_;
     bool is_input_column_;
+    std::vector<std::string> nested_path_;
 };
 
 using FieldAccessTypeExprPtr = std::shared_ptr<const FieldAccessTypeExpr>;

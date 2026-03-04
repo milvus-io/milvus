@@ -328,11 +328,40 @@ enum AggregateOp {
   avg = 2;
   min = 3;
   max = 4;
+  count_distinct = 5;
 }
 
 message Aggregate {
   AggregateOp op = 1;
   int64 field_id = 2;
+  repeated string nested_path = 3;  // JSON sub-path for aggregating on JSON fields (e.g. ["commit", "author"])
+}
+
+// AggregateNode: GROUP BY keys + aggregate functions only.
+// Follows the standard relational algebra pattern (Substrait/Calcite/DataFusion).
+// Post-aggregation projection and sorting are separate nodes.
+message AggregateNode {
+  repeated Aggregate group_by = 1;       // GROUP BY keys (field_id + nested_path)
+  repeated Aggregate aggregates = 2;     // aggregate functions (op + field_id + nested_path)
+}
+
+message ProjectNode {
+  repeated ProjectItem items = 1;
+}
+
+message ProjectItem {
+  string function_name = 1;             // operation: "div", "mul", "add", "sub", "cast", or "" for passthrough
+  repeated string args = 2;             // references to input fields or literals
+  string alias = 3;                     // output column name
+}
+
+message SortNode {
+  repeated SortItem items = 1;
+}
+
+message SortItem {
+  string field = 1;                     // field name or alias reference
+  bool desc = 2;                        // true = DESC, false = ASC
 }
 
 // OrderByField specifies a single field for ORDER BY sorting
@@ -349,6 +378,9 @@ message QueryPlanNode {
   repeated int64 group_by_field_ids = 4;
   repeated Aggregate aggregates = 5;
   repeated OrderByField order_by_fields = 6;  // ORDER BY specifications
+  AggregateNode aggregate_node = 7;
+  SortNode sort_node = 8;
+  ProjectNode project_node = 9;
 };
 
 enum FunctionType{

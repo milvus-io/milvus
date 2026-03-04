@@ -300,6 +300,16 @@ type QueryReqV2 struct {
 func (req *QueryReqV2) GetDbName() string         { return req.DbName }
 func (req *QueryReqV2) GetCollectionName() string { return req.CollectionName }
 
+type SqlQueryReqV2 struct {
+	DbName           string            `json:"dbName"`
+	Sql              string            `json:"sql" binding:"required"`
+	Params           map[string]string `json:"params"`
+	SearchParams     map[string]string `json:"searchParams"`
+	ConsistencyLevel string            `json:"consistencyLevel"`
+}
+
+func (req *SqlQueryReqV2) GetDbName() string { return req.DbName }
+
 type CollectionIDReq struct {
 	DbName           string      `json:"dbName"`
 	CollectionName   string      `json:"collectionName" binding:"required"`

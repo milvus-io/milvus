@@ -1590,6 +1590,19 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
                 1, dataType, false, std::move(vec));
             break;
         }
+        case milvus::DataType::JSON: {
+            FixedVector<Json> vec(count);
+            segment->bulk_subscript(op_ctx,
+                                    fieldId,
+                                    dataType,
+                                    seg_offsets,
+                                    count,
+                                    vec.data(),
+                                    valid_view);
+            ret = std::make_shared<FieldDataImpl<Json, true>>(
+                1, dataType, false, std::move(vec));
+            break;
+        }
         default: {
             ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported data type {}", dataType));

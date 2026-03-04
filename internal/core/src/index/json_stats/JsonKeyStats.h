@@ -426,6 +426,17 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         return JSONType::UNKNOWN;
     }
 
+    // Get the raw shredding column interface by field name.
+    // Used by ProjectNode to read pre-extracted values for GROUP BY.
+    std::shared_ptr<milvus::ChunkedColumnInterface>
+    GetShreddingColumnByName(const std::string& field_name) {
+        auto it = shredding_columns_.find(field_name);
+        if (it != shredding_columns_.end()) {
+            return it->second;
+        }
+        return nullptr;
+    }
+
  private:
     void
     CollectSingleJsonStatsInfo(const char* json_str,

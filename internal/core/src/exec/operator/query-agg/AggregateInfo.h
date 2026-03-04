@@ -30,6 +30,9 @@ struct AggregateInfo {
     /// Indices of the input columns in the input RowVector.
     std::vector<column_index_t> input_column_idxes_;
 
+    /// JSON nested paths per input column (empty vector if not JSON sub-field).
+    std::vector<std::vector<std::string>> input_nested_paths_;
+
     /// Index of the result column in the output RowVector.
     column_index_t output_;
 };

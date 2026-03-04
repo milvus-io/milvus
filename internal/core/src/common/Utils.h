@@ -488,6 +488,7 @@ inline const char* const KMin = "min";
 inline const char* const KMax = "max";
 inline const char* const KCount = "count";
 inline const char* const KAvg = "avg";
+inline const char* const KCountDistinct = "count_distinct";
 
 inline DataType
 GetAggResultType(std::string func_name, DataType input_type) {
@@ -556,7 +557,7 @@ GetAggResultType(std::string func_name, DataType input_type) {
             }
         }
     }
-    if (func_name == KCount) {
+    if (func_name == KCount || func_name == KCountDistinct) {
         return DataType::INT64;
     }
     ThrowInfo(OpTypeInvalid, "Unsupported func type:{}", func_name);

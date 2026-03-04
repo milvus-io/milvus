@@ -27,11 +27,12 @@ import (
 // OrderByField defines a single sort key for ORDER BY operations.
 // This is the shared type used across proxy, delegator, and querynode levels.
 type OrderByField struct {
-	FieldID    int64
-	FieldName  string
-	Ascending  bool // true = ASC (default), false = DESC
-	NullsFirst bool // true = NULLS FIRST, false = NULLS LAST
-	DataType   schemapb.DataType
+	FieldID      int64
+	FieldName    string
+	Ascending    bool // true = ASC (default), false = DESC
+	NullsFirst   bool // true = NULLS FIRST, false = NULLS LAST
+	DataType     schemapb.DataType
+	IsAggregate  bool // true when ORDER BY references an aggregate result, not a group key
 }
 
 // String returns a human-readable representation

@@ -302,7 +302,7 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 else
   # compile and build
   if [ "$CMAKE_GENERATOR" = "Ninja" ]; then
-    ninja -j ${jobs} install || exit 1
+    ninja -j 4 install || exit 1
   else
     make -j ${jobs} install || exit 1
   fi

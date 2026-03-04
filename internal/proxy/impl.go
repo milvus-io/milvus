@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/sqlparser"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
@@ -4018,6 +4019,103 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		log.Ctx(ctx).Debug("Count result", zap.String("result", string(r)))
 	}
 	return res, nil
+}
+
+// SqlQuery executes a SQL query and returns tabular results.
+// It parses SQL into SqlComponents, converts to a standard QueryRequest,
+// and delegates to the existing query pipeline.
+func (node *Proxy) SqlQuery(ctx context.Context, request *milvuspb.SqlQueryRequest) (*milvuspb.SqlQueryResults, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.SqlQueryResults{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-SqlQuery")
+	defer sp.End()
+
+	// 1. Parse SQL → SqlComponents
+	comp, err := sqlparser.ExtractSqlComponents(request.GetSql())
+	if err != nil {
+		return &milvuspb.SqlQueryResults{
+			Status: merr.Status(fmt.Errorf("SQL parse error: %w", err)),
+		}, nil
+	}
+
+	switch comp.QueryType {
+	case sqlparser.QueryTypeQuery:
+		// 2. Build plan directly from SQL IR and execute via sqlQueryTask
+		sqt := &sqlQueryTask{
+			ctx:        ctx,
+			Condition:  NewTaskCondition(ctx),
+			sqlRequest: request,
+			comp:       comp,
+			RetrieveRequest: &internalpb.RetrieveRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				),
+				ReqID:            paramtable.GetNodeID(),
+				ConsistencyLevel: request.GetConsistencyLevel(),
+			},
+			mixCoord:       node.mixCoord,
+			lb:             node.lbPolicy,
+			shardclientMgr: node.shardMgr,
+		}
+
+		if err := node.sched.dqQueue.Enqueue(sqt); err != nil {
+			return &milvuspb.SqlQueryResults{
+				Status: merr.Status(err),
+			}, nil
+		}
+
+		if err := sqt.WaitToFinish(); err != nil {
+			return &milvuspb.SqlQueryResults{
+				Status: merr.Status(err),
+			}, nil
+		}
+
+		log.Ctx(ctx).Debug("SqlQuery done",
+			zap.String("sql", request.GetSql()),
+			zap.String("collection", comp.Collection),
+		)
+		return sqt.result, nil
+
+	case sqlparser.QueryTypeSearch, sqlparser.QueryTypeHybrid:
+		// Convert SQL vector search to SearchRequest and delegate to existing search pipeline
+		searchReq, err := sqlComponentsToSearchRequest(comp, request)
+		if err != nil {
+			return &milvuspb.SqlQueryResults{
+				Status: merr.Status(fmt.Errorf("SQL search conversion error: %w", err)),
+			}, nil
+		}
+
+		searchRes, _, _, _, searchErr := node.search(ctx, searchReq, false, false)
+		if searchErr != nil {
+			return &milvuspb.SqlQueryResults{
+				Status: merr.Status(searchErr),
+			}, nil
+		}
+		if searchRes.GetStatus().GetCode() != 0 {
+			return &milvuspb.SqlQueryResults{
+				Status: searchRes.GetStatus(),
+			}, nil
+		}
+
+		// Convert SearchResults to SqlQueryResults
+		sqlResult := searchResultsToSqlResults(searchRes, comp)
+
+		log.Ctx(ctx).Debug("SqlQuery search done",
+			zap.String("sql", request.GetSql()),
+			zap.String("collection", comp.Collection),
+		)
+		return sqlResult, nil
+
+	default:
+		return &milvuspb.SqlQueryResults{
+			Status: merr.Status(fmt.Errorf("unsupported SQL query type")),
+		}, nil
+	}
 }
 
 // CreateAlias create alias for collection, then you can search the collection with alias.

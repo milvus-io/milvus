@@ -20,8 +20,9 @@ const (
 
 var (
 	// Define the regular expression pattern once to avoid repeated concatenation.
+	// The parameter capture allows: word chars, *, and JSON path syntax like data["key"]["sub"]
 	aggregationTypes   = kSum + `|` + kCount + `|` + kAvg + `|` + kMin + `|` + kMax
-	aggregationPattern = regexp.MustCompile(`(?i)^(` + aggregationTypes + `)\s*\(\s*([\w\*]*)\s*\)$`)
+	aggregationPattern = regexp.MustCompile(`(?i)^(` + aggregationTypes + `)\s*\(\s*([\w\*\[\]"]*)\s*\)$`)
 )
 
 // MatchAggregationExpression return isAgg, operator name, operator parameter

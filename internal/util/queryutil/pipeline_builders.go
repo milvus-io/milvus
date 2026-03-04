@@ -109,12 +109,14 @@ func ComputeGroupByOrderPositions(
 	positions := make([]int, len(orderByFields))
 	for i, obf := range orderByFields {
 		found := false
-		// Check group columns
-		for j, gid := range groupByFieldIDs {
-			if obf.FieldID == gid {
-				positions[i] = j
-				found = true
-				break
+		// Check group columns (skip if ORDER BY explicitly targets an aggregate)
+		if !obf.IsAggregate {
+			for j, gid := range groupByFieldIDs {
+				if obf.FieldID == gid {
+					positions[i] = j
+					found = true
+					break
+				}
 			}
 		}
 		if found {

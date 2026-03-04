@@ -510,6 +510,12 @@ class RowVector : public BaseVector {
     }
 
     void
+    setChild(int index, VectorPtr value) {
+        assert(index < children_values_.size());
+        children_values_[index] = std::move(value);
+    }
+
+    void
     resize(vector_size_t new_size, bool setNotNull = true) override;
 
     VectorPtr

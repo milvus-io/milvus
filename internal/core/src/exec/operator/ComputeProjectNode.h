@@ -20,11 +20,16 @@
 
 namespace milvus {
 namespace exec {
-class PhyProjectNode : public Operator {
+
+// PhyComputeProjectNode: physical operator for post-aggregation computed projections.
+// Evaluates expressions like extract(hour, timestamp), div(value, 1000), etc.
+// on each input row and produces computed output columns.
+class PhyComputeProjectNode : public Operator {
  public:
-    PhyProjectNode(int32_t operator_id,
-                   DriverContext* ctx,
-                   const std::shared_ptr<const plan::ProjectNode>& projectNode);
+    PhyComputeProjectNode(
+        int32_t operator_id,
+        DriverContext* ctx,
+        const std::shared_ptr<const plan::ComputeProjectNode>& projectNode);
 
     bool
     IsFilter() const override {
@@ -33,7 +38,7 @@ class PhyProjectNode : public Operator {
 
     bool
     NeedInput() const override {
-        return true;
+        return !is_finished_;
     }
 
     void
@@ -42,18 +47,9 @@ class PhyProjectNode : public Operator {
     RowVectorPtr
     GetOutput() override;
 
-    // ProjectNode is a stateless pass-through operator: it transforms input
-    // rows on the fly and holds no accumulated state across batches.
-    // It is finished when either:
-    //   - is_finished_: it has processed its single input batch and produced
-    //     output (normal completion after GetOutput succeeds).
-    //   - no_more_input_: the upstream operator has no data at all (e.g.,
-    //     empty segment with active_count=0). In this case GetOutput is never
-    //     called with valid input, so is_finished_ is never set. But since
-    //     no future input can arrive, the operator is logically done.
     bool
     IsFinished() override {
-        return is_finished_ || no_more_input_;
+        return is_finished_;
     }
 
     BlockingReason
@@ -63,15 +59,15 @@ class PhyProjectNode : public Operator {
 
     std::string
     ToString() const override {
-        return "Project Operator";
+        return "ComputeProject Operator";
     }
 
  private:
-    const segcore::SegmentInternalInterface* segment_;
     bool is_finished_{false};
-    const std::vector<FieldId> fields_to_project_;
-    const std::vector<std::vector<std::string>> nested_paths_;
-    OpContext* op_context_;
+    std::vector<plan::ComputeProjectNode::ProjectItem> project_items_;
+    RowTypePtr input_type_;  // Column name→index mapping from upstream
+    RowVectorPtr output_;
 };
+
 }  // namespace exec
 }  // namespace milvus

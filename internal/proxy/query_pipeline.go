@@ -277,6 +277,20 @@ func newReduceByGroupsOperator(
 
 		reducedFieldDatas := reducedRes.GetFieldDatas()
 		fieldCount := outputMap.Count()
+		fmt.Printf("[reduceByGroups] reducedFieldCount=%d, outputMapCount=%d, numResults=%d\n",
+			len(reducedFieldDatas), fieldCount, len(results))
+		for ii, fd := range reducedFieldDatas {
+			var rowCount int
+			switch fd.GetType() {
+			case schemapb.DataType_VarChar:
+				rowCount = len(fd.GetScalars().GetStringData().GetData())
+			case schemapb.DataType_Double:
+				rowCount = len(fd.GetScalars().GetDoubleData().GetData())
+			case schemapb.DataType_Int64:
+				rowCount = len(fd.GetScalars().GetLongData().GetData())
+			}
+			fmt.Printf("[reducedField] idx=%d name=%q type=%s rows=%d\n", ii, fd.GetFieldName(), fd.GetType().String(), rowCount)
+		}
 		reOrganizedFieldDatas := make([]*schemapb.FieldData, fieldCount)
 
 		for i := 0; i < fieldCount; i++ {

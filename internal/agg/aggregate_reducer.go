@@ -216,13 +216,19 @@ func (reducer *GroupAggReducer) validateAggregationResults(results []*Aggregatio
 	// Build expected types for each column
 	expectedTypes := make([]schemapb.DataType, 0, expectedColumnCount)
 
-	// Add types for grouping keys
+	// Add types for grouping keys.
+	// JSON fields with nested_path are extracted as VARCHAR by segcore's ProjectNode,
+	// so we expect VARCHAR (not JSON) for JSON group-by keys.
 	for _, fieldID := range reducer.groupByFieldIds {
 		field, err := helper.GetFieldFromID(fieldID)
 		if err != nil {
 			return fmt.Errorf("failed to get field schema for groupBy fieldID %d: %w", fieldID, err)
 		}
-		expectedTypes = append(expectedTypes, field.GetDataType())
+		fieldType := field.GetDataType()
+		if fieldType == schemapb.DataType_JSON {
+			fieldType = schemapb.DataType_VarChar
+		}
+		expectedTypes = append(expectedTypes, fieldType)
 	}
 
 	// Add types for aggregates
@@ -236,7 +242,13 @@ func (reducer *GroupAggReducer) validateAggregationResults(results []*Aggregatio
 			if err != nil {
 				return fmt.Errorf("failed to get field schema for aggregate fieldID %d: %w", agg.GetFieldId(), err)
 			}
-			expectedType, err = getAggregateResultType(agg.GetOp(), field.GetDataType())
+			// JSON fields with nested_path are extracted as DOUBLE by segcore's ProjectNode,
+			// so the effective input type for aggregation is DOUBLE, not JSON.
+			fieldType := field.GetDataType()
+			if fieldType == schemapb.DataType_JSON && len(agg.GetNestedPath()) > 0 {
+				fieldType = schemapb.DataType_Double
+			}
+			expectedType, err = getAggregateResultType(agg.GetOp(), fieldType)
 			if err != nil {
 				return fmt.Errorf("failed to get aggregate result type for aggregate fieldID %d: %w", agg.GetFieldId(), err)
 			}

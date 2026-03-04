@@ -32,9 +32,25 @@ class VectorHasher {
         : channel_type_(data_type), channel_idx_(column_idx) {
     }
 
+    VectorHasher(DataType data_type,
+                 column_index_t column_idx,
+                 std::vector<std::string> nested_path)
+        : channel_type_(data_type),
+          channel_idx_(column_idx),
+          nested_path_(std::move(nested_path)) {
+    }
+
     static std::unique_ptr<VectorHasher>
     create(DataType data_type, column_index_t col_idx) {
         return std::make_unique<VectorHasher>(data_type, col_idx);
+    }
+
+    static std::unique_ptr<VectorHasher>
+    create(DataType data_type,
+           column_index_t col_idx,
+           std::vector<std::string> nested_path) {
+        return std::make_unique<VectorHasher>(
+            data_type, col_idx, std::move(nested_path));
     }
 
     column_index_t
@@ -82,10 +98,21 @@ class VectorHasher {
         return column_data_;
     }
 
+    const std::vector<std::string>&
+    nested_path() const {
+        return nested_path_;
+    }
+
+    bool
+    has_nested_path() const {
+        return !nested_path_.empty();
+    }
+
  private:
     const column_index_t channel_idx_;
     const DataType channel_type_;
     ColumnVectorPtr column_data_;
+    std::vector<std::string> nested_path_;
 };
 
 std::vector<std::unique_ptr<VectorHasher>>

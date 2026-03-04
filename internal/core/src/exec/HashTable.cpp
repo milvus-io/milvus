@@ -20,12 +20,16 @@
 #include <memory>
 #include <new>
 
+#include "common/Json.h"
 #include "common/SimdUtil.h"
+#include "exec/JsonFieldUtils.h"
 #include "exec/VectorHasher.h"
 #include "fmt/format.h"
+#include "log/Log.h"
 
 namespace milvus {
 namespace exec {
+
 void
 BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
                                     const RowVectorPtr& input) {
@@ -39,6 +43,12 @@ BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
             std::dynamic_pointer_cast<ColumnVector>(input->child(column_idx));
         AssertInfo(column_ptr != nullptr,
                    "Failed to get column vector from row vector input");
+
+        // For JSON sub-field grouping, extract the nested value as VARCHAR
+        if (hasher->has_nested_path()) {
+            column_ptr = ExtractJsonSubField(column_ptr, hasher->nested_path());
+        }
+
         hashers[i]->setColumnData(column_ptr);
     }
     lookup.reset(input->size());

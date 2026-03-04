@@ -215,6 +215,10 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 			OutputFields: []string{DefaultOutputFields},
 		}
 	}, wrapperTraceLog(h.query))), true))
+	// SQL Query
+	router.POST(EntityCategory+SqlQueryAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+		return &SqlQueryReqV2{}
+	}, wrapperTraceLog(h.sqlQuery))), true))
 	// Get
 	router.POST(EntityCategory+GetAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionIDReq{
@@ -1057,6 +1061,57 @@ func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, any
 // copy from internal/proxy/task_query.go
 func matchCountRule(outputs []string) bool {
 	return len(outputs) == 1 && strings.ToLower(strings.TrimSpace(outputs[0])) == "count(*)"
+}
+
+func (h *HandlersV2) sqlQuery(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*SqlQueryReqV2)
+	grpcReq := &milvuspb.SqlQueryRequest{
+		Sql:          httpReq.Sql,
+		DbName:       dbName,
+		Params:       httpReq.Params,
+		SearchParams: httpReq.SearchParams,
+	}
+
+	if httpReq.ConsistencyLevel != "" {
+		cl, _, err := convertConsistencyLevel(httpReq.ConsistencyLevel)
+		if err != nil {
+			log.Ctx(ctx).Warn("high level restful api, sql_query with consistency_level invalid", zap.Error(err))
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: "invalid consistencyLevel: " + err.Error(),
+			})
+			return nil, err
+		}
+		grpcReq.ConsistencyLevel = cl
+	}
+
+	c.Set(ContextRequest, grpcReq)
+
+	resp, err := wrapperProxyWithLimit(ctx, c, grpcReq, h.checkAuth, false,
+		"/milvus.proto.milvus.MilvusService/SqlQuery", true, h.proxy,
+		func(reqCtx context.Context, req any) (interface{}, error) {
+			return h.proxy.SqlQuery(reqCtx, req.(*milvuspb.SqlQueryRequest))
+		})
+	if err == nil {
+		sqlResp := resp.(*milvuspb.SqlQueryResults)
+		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
+		outputData, err := buildQueryResp(int64(0), sqlResp.GetColumnNames(),
+			sqlResp.GetFieldsData(), nil, nil, allowJS, nil)
+		if err != nil {
+			log.Ctx(ctx).Warn("high level restful api, fail to deal with sql_query result", zap.Error(err))
+			HTTPReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
+				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
+			})
+		} else {
+			HTTPReturnStream(c, http.StatusOK, gin.H{
+				HTTPReturnCode: merr.Code(nil),
+				HTTPReturnData: outputData,
+				HTTPReturnCost: proxy.GetCostValue(sqlResp.GetStatus()),
+			})
+		}
+	}
+	return resp, err
 }
 
 func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {

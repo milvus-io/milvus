@@ -172,6 +172,8 @@ getAggregateOpName(planpb::AggregateOp op) {
             return "min";
         case planpb::max:
             return "max";
+        case planpb::count_distinct:
+            return "count_distinct";
         default:
             ThrowInfo(OpTypeInvalid, "Unknown op type for aggregation");
     }
@@ -288,7 +290,8 @@ BuildProjectAndAggregationNodes(
     std::vector<plan::AggregationNode::Aggregate> aggregates,
     std::vector<FieldId> project_id_list,
     std::vector<std::string> project_name_list,
-    std::vector<milvus::DataType> project_type_list) {
+    std::vector<milvus::DataType> project_type_list,
+    std::vector<std::vector<std::string>> project_nested_paths) {
     plan::PlanNodePtr plannode = sources.empty() ? nullptr : sources[0];
 
     // Always build ProjectNode when aggregation is present.
@@ -303,6 +306,7 @@ BuildProjectAndAggregationNodes(
             std::move(project_field_id_list),
             std::move(project_name_list),
             std::move(project_type_list),
+            std::move(project_nested_paths),
             sources);
     }
 
@@ -445,6 +449,232 @@ BuildOrderByNode(const proto::plan::QueryPlanNode& query,
         std::move(sorting_orders),
         query.limit(),
         sources);
+}
+
+// Helper function to process group_by from AggregateNode proto (field 6).
+// Unlike ProcessGroupByFields which reads flat field IDs, this reads
+// Aggregate messages that carry nested_path for JSON sub-field grouping.
+void
+ProcessAggregateNodeGroupBy(
+    const proto::plan::AggregateNode& agg_node,
+    const SchemaPtr& schema,
+    std::vector<expr::FieldAccessTypeExprPtr>& groupingKeys,
+    std::vector<FieldId>& project_id_list,
+    std::vector<std::string>& project_name_list,
+    std::vector<milvus::DataType>& project_type_list,
+    std::vector<std::vector<std::string>>& project_nested_paths,
+    std::set<std::string>& seen_virtual_columns) {
+    auto group_by_count = agg_node.group_by_size();
+    groupingKeys.reserve(group_by_count);
+
+    auto insert_project_field_if_not_exist = [&](FieldId field_id,
+                                                 const std::string& field_name,
+                                                 milvus::DataType field_type) {
+        if (std::count(project_id_list.begin(),
+                       project_id_list.end(),
+                       field_id) == 0) {
+            project_id_list.emplace_back(field_id);
+            project_name_list.emplace_back(field_name);
+            project_type_list.emplace_back(field_type);
+            project_nested_paths.emplace_back(std::vector<std::string>{});
+        }
+    };
+
+    for (int i = 0; i < group_by_count; i++) {
+        auto& gb = agg_node.group_by(i);
+        auto input_field_id = gb.field_id();
+        AssertInfo(input_field_id > 0,
+                   "input field_id for group_by must be positive, but is:{}",
+                   input_field_id);
+        auto field_id = FieldId(input_field_id);
+        auto field_type = schema->GetFieldType(field_id);
+        auto field_name = schema->GetFieldName(field_id);
+
+        std::vector<std::string> nested_path;
+        for (int j = 0; j < gb.nested_path_size(); j++) {
+            nested_path.push_back(gb.nested_path(j));
+        }
+
+        if (field_type == DataType::JSON && !nested_path.empty()) {
+            // JSON + nested_path: expand into a virtual column.
+            // GROUP BY keys are extracted as VARCHAR.
+            auto effective_type = DataType::VARCHAR;
+            std::string joined;
+            for (size_t k = 0; k < nested_path.size(); k++) {
+                if (k > 0)
+                    joined += "/";
+                joined += nested_path[k];
+            }
+            auto virtual_name = field_name + "/" + joined;
+            auto dedup_key =
+                std::to_string(field_id.get()) + "/" + joined + "/" +
+                std::to_string(static_cast<int>(effective_type));
+
+            if (seen_virtual_columns.find(dedup_key) ==
+                seen_virtual_columns.end()) {
+                seen_virtual_columns.insert(dedup_key);
+                project_id_list.emplace_back(field_id);
+                project_name_list.emplace_back(virtual_name);
+                project_type_list.emplace_back(effective_type);
+                project_nested_paths.emplace_back(nested_path);
+            }
+
+            // FieldAccessTypeExpr WITHOUT nested_path — ProjectNode
+            // handles extraction, so GroupingSet sees a flat column.
+            groupingKeys.emplace_back(
+                std::make_shared<const expr::FieldAccessTypeExpr>(
+                    effective_type, virtual_name, field_id));
+        } else {
+            // Non-JSON field: keep original behaviour.
+            groupingKeys.emplace_back(
+                std::make_shared<const expr::FieldAccessTypeExpr>(
+                    field_type, field_name, field_id, std::move(nested_path)));
+            insert_project_field_if_not_exist(
+                field_id, field_name, field_type);
+        }
+    }
+}
+
+// Helper function to process aggregates from AggregateNode proto (field 6).
+// Similar to ProcessAggregates but reads from AggregateNode.aggregates
+// which may carry nested_path for JSON sub-field aggregation.
+void
+ProcessAggregateNodeAggregates(
+    const proto::plan::AggregateNode& agg_node,
+    const SchemaPtr& schema,
+    std::vector<plan::AggregationNode::Aggregate>& aggregates,
+    std::vector<std::string>& agg_names,
+    std::vector<FieldId>& project_id_list,
+    std::vector<std::string>& project_name_list,
+    std::vector<milvus::DataType>& project_type_list,
+    std::vector<std::vector<std::string>>& project_nested_paths,
+    std::set<std::string>& seen_virtual_columns) {
+    auto agg_count = agg_node.aggregates_size();
+    aggregates.reserve(agg_count);
+    agg_names.reserve(agg_count);
+
+    auto insert_project_field_if_not_exist = [&](FieldId field_id,
+                                                 const std::string& field_name,
+                                                 milvus::DataType field_type) {
+        if (std::count(project_id_list.begin(),
+                       project_id_list.end(),
+                       field_id) == 0) {
+            project_id_list.emplace_back(field_id);
+            project_name_list.emplace_back(field_name);
+            project_type_list.emplace_back(field_type);
+            project_nested_paths.emplace_back(std::vector<std::string>{});
+        }
+    };
+
+    for (int i = 0; i < agg_count; i++) {
+        auto& aggregate = agg_node.aggregates(i);
+        auto agg_name = getAggregateOpName(aggregate.op());
+        agg_names.emplace_back(agg_name);
+        auto input_agg_field_id = aggregate.field_id();
+
+        if (input_agg_field_id == 0) {
+            // count(*) does not need input project columns
+            auto call = std::make_shared<const expr::CallExpr>(
+                agg_name, std::vector<expr::TypedExprPtr>{}, nullptr);
+            aggregates.emplace_back(plan::AggregationNode::Aggregate{call});
+            aggregates.back().resultType_ =
+                GetAggResultType(agg_name, DataType::NONE);
+        } else {
+            AssertInfo(input_agg_field_id > 0,
+                       "input field_id to aggregate must be "
+                       "positive or zero, but is:{}",
+                       input_agg_field_id);
+            auto field_id = FieldId(input_agg_field_id);
+            auto field_type = schema->GetFieldType(field_id);
+            auto field_name = schema->GetFieldName(field_id);
+
+            std::vector<std::string> nested_path;
+            for (int j = 0; j < aggregate.nested_path_size(); j++) {
+                nested_path.push_back(aggregate.nested_path(j));
+            }
+
+            if (field_type == DataType::JSON && !nested_path.empty()) {
+                // JSON + nested_path: expand into a virtual column.
+                // Aggregate inputs are extracted as DOUBLE.
+                auto effective_type = DataType::DOUBLE;
+                std::string joined;
+                for (size_t k = 0; k < nested_path.size(); k++) {
+                    if (k > 0)
+                        joined += "/";
+                    joined += nested_path[k];
+                }
+                auto virtual_name = field_name + "/" + joined;
+                auto dedup_key =
+                    std::to_string(field_id.get()) + "/" + joined + "/" +
+                    std::to_string(static_cast<int>(effective_type));
+
+                if (seen_virtual_columns.find(dedup_key) ==
+                    seen_virtual_columns.end()) {
+                    seen_virtual_columns.insert(dedup_key);
+                    project_id_list.emplace_back(field_id);
+                    project_name_list.emplace_back(virtual_name);
+                    project_type_list.emplace_back(effective_type);
+                    project_nested_paths.emplace_back(nested_path);
+                }
+
+                // FieldAccessTypeExpr WITHOUT nested_path — ProjectNode
+                // handles extraction, so populateTempVectors sees a
+                // flat column.
+                auto agg_input =
+                    std::make_shared<const expr::FieldAccessTypeExpr>(
+                        effective_type, virtual_name, field_id);
+                auto call = std::make_shared<const expr::CallExpr>(
+                    agg_name,
+                    std::vector<expr::TypedExprPtr>{agg_input},
+                    nullptr);
+                aggregates.emplace_back(
+                    plan::AggregationNode::Aggregate(call));
+                aggregates.back().rawInputTypes_.emplace_back(effective_type);
+                aggregates.back().resultType_ =
+                    GetAggResultType(agg_name, effective_type);
+            } else {
+                // Non-JSON field: keep original behaviour.
+                auto agg_input =
+                    std::make_shared<const expr::FieldAccessTypeExpr>(
+                        field_type,
+                        field_name,
+                        field_id,
+                        std::move(nested_path));
+                auto call = std::make_shared<const expr::CallExpr>(
+                    agg_name,
+                    std::vector<expr::TypedExprPtr>{agg_input},
+                    nullptr);
+                aggregates.emplace_back(
+                    plan::AggregationNode::Aggregate(call));
+                aggregates.back().rawInputTypes_.emplace_back(field_type);
+                aggregates.back().resultType_ =
+                    GetAggResultType(agg_name, field_type);
+                insert_project_field_if_not_exist(
+                    field_id, field_name, field_type);
+            }
+        }
+    }
+}
+
+// Helper function to build ComputeProjectNode from proto ProjectNode.
+plan::PlanNodePtr
+BuildComputeProjectPlanNode(
+    const proto::plan::ProjectNode& project_proto,
+    const std::vector<plan::PlanNodePtr>& sources) {
+    std::vector<plan::ComputeProjectNode::ProjectItem> items;
+    items.reserve(project_proto.items_size());
+    for (int i = 0; i < project_proto.items_size(); i++) {
+        auto& item = project_proto.items(i);
+        std::vector<std::string> args;
+        args.reserve(item.args_size());
+        for (int j = 0; j < item.args_size(); j++) {
+            args.push_back(item.args(j));
+        }
+        items.push_back(plan::ComputeProjectNode::ProjectItem{
+            item.function_name(), std::move(args), item.alias()});
+    }
+    return std::make_shared<plan::ComputeProjectNode>(
+        milvus::plan::GetNextPlanNodeId(), std::move(items), sources);
 }
 }  // namespace
 
@@ -708,33 +938,61 @@ ProtoParser::RetrievePlanNodeFromProto(
             sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
         }
 
-        // 4. Build ProjectNode and AggregationNode if needed
-        auto group_by_field_count = query.group_by_field_ids_size();
-        auto agg_functions_count = query.aggregates_size();
+        // 4. Build ProjectNode and AggregationNode if needed.
+        // Prefer aggregate_node (field 6) over legacy fields 4+5 when
+        // present, since it carries nested_path support.
+        bool has_agg_node = query.has_aggregate_node();
+        auto group_by_field_count =
+            has_agg_node ? query.aggregate_node().group_by_size()
+                         : query.group_by_field_ids_size();
+        auto agg_functions_count =
+            has_agg_node ? query.aggregate_node().aggregates_size()
+                         : query.aggregates_size();
         if (group_by_field_count > 0 || agg_functions_count > 0) {
             std::vector<FieldId> project_id_list;
             std::vector<std::string> project_name_list;
             std::vector<milvus::DataType> project_type_list;
+            std::vector<std::vector<std::string>> project_nested_paths;
+            std::set<std::string> seen_virtual_columns;
             std::vector<expr::FieldAccessTypeExprPtr> groupingKeys;
             std::vector<plan::AggregationNode::Aggregate> aggregates;
             std::vector<std::string> agg_names;
 
-            // Process group_by fields
-            ProcessGroupByFields(query,
-                                 schema,
-                                 groupingKeys,
-                                 project_id_list,
-                                 project_name_list,
-                                 project_type_list);
-
-            // Process aggregates
-            ProcessAggregates(query,
-                              schema,
-                              aggregates,
-                              agg_names,
-                              project_id_list,
-                              project_name_list,
-                              project_type_list);
+            if (has_agg_node) {
+                auto& agg_node = query.aggregate_node();
+                ProcessAggregateNodeGroupBy(agg_node,
+                                            schema,
+                                            groupingKeys,
+                                            project_id_list,
+                                            project_name_list,
+                                            project_type_list,
+                                            project_nested_paths,
+                                            seen_virtual_columns);
+                ProcessAggregateNodeAggregates(agg_node,
+                                               schema,
+                                               aggregates,
+                                               agg_names,
+                                               project_id_list,
+                                               project_name_list,
+                                               project_type_list,
+                                               project_nested_paths,
+                                               seen_virtual_columns);
+            } else {
+                ProcessGroupByFields(query,
+                                     schema,
+                                     groupingKeys,
+                                     project_id_list,
+                                     project_name_list,
+                                     project_type_list);
+                ProcessAggregates(query,
+                                  schema,
+                                  aggregates,
+                                  agg_names,
+                                  project_id_list,
+                                  project_name_list,
+                                  project_type_list);
+                project_nested_paths.resize(project_id_list.size());
+            }
 
             // Build ProjectNode and AggregationNode
             plannode =
@@ -745,7 +1003,16 @@ ProtoParser::RetrievePlanNodeFromProto(
                                                 std::move(aggregates),
                                                 std::move(project_id_list),
                                                 std::move(project_name_list),
-                                                std::move(project_type_list));
+                                                std::move(project_type_list),
+                                                std::move(project_nested_paths));
+            sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+        }
+
+        // 4b. Build ComputeProjectNode if project_node (field 8) is present
+        if (query.has_project_node() &&
+            query.project_node().items_size() > 0) {
+            plannode =
+                BuildComputeProjectPlanNode(query.project_node(), sources);
             sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
         }
 

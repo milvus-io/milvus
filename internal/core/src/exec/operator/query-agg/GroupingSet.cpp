@@ -17,16 +17,20 @@
 #include "GroupingSet.h"
 
 #include <cstddef>
+#include <cstdlib>
 
 #include "common/BitUtil.h"
 #include "common/EasyAssert.h"
+#include "common/Json.h"
 #include "common/Utils.h"
 #include "exec/HashTable.h"
+#include "exec/JsonFieldUtils.h"
 #include "exec/VectorHasher.h"
 #include "exec/operator/query-agg/Aggregate.h"
 #include "exec/operator/query-agg/AggregateInfo.h"
 #include "exec/operator/query-agg/RowContainer.h"
 #include "folly/Range.h"
+#include "log/Log.h"
 #include "segcore/SegcoreConfig.h"
 
 namespace milvus {
@@ -217,9 +221,20 @@ void
 GroupingSet::populateTempVectors(int32_t aggregateIndex,
                                  const milvus::RowVectorPtr& input) {
     const auto& channel_idxes = aggregates_[aggregateIndex].input_column_idxes_;
-    tempVectors_.resize(channel_idxes.size());
-    for (auto i = 0; i < channel_idxes.size(); i++) {
-        tempVectors_[i] = input->child(channel_idxes[i]);
+    const auto& nested_paths = aggregates_[aggregateIndex].input_nested_paths_;
+    if (channel_idxes.empty() && input->childrens().size() == 1) {
+        tempVectors_.resize(1);
+        tempVectors_[0] = input->child(0);
+    } else {
+        tempVectors_.resize(channel_idxes.size());
+        for (auto i = 0; i < channel_idxes.size(); i++) {
+            auto col = input->child(channel_idxes[i]);
+            // Extract JSON sub-field as double for numeric aggregation
+            if (i < nested_paths.size() && !nested_paths[i].empty()) {
+                col = ExtractJsonSubFieldAsDouble(col, nested_paths[i]);
+            }
+            tempVectors_[i] = col;
+        }
     }
 }
 
