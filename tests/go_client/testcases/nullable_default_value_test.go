@@ -442,7 +442,6 @@ func TestNullableDefault(t *testing.T) {
 
 // create collection with default value and insert with column / nullableColumn
 func TestDefaultValueDefault(t *testing.T) {
-	t.Skip("set defaultValue and insert with default column gets unexpected error, waiting for fix")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -848,7 +847,6 @@ func TestNullableQuery(t *testing.T) {
 
 // test insert with part/all/not default value -> query check
 func TestDefaultValueQuery(t *testing.T) {
-	t.Skip("set defaultValue and insert with default column gets unexpected error, waiting for fix")
 	for _, nullable := range [2]bool{false, true} {
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 		mc := hp.CreateDefaultMilvusClient(ctx, t)

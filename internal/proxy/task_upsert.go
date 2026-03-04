@@ -308,11 +308,16 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		fieldData.FieldId = fieldSchema.GetFieldID()
 		fieldData.FieldName = fieldName
 
-		// compatible with different nullable data format from sdk
+		// compatible with different nullable/default_value data format from sdk
 		if len(fieldData.GetValidData()) != 0 {
-			err := FillWithNullValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+			var err error
+			if fieldSchema.GetDefaultValue() != nil {
+				err = FillWithDefaultValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+			} else {
+				err = FillWithNullValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+			}
 			if err != nil {
-				log.Info("unify null field data format failed", zap.Error(err))
+				log.Info("unify field data format failed", zap.Error(err))
 				return err
 			}
 		}
