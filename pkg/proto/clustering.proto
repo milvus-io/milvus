@@ -22,6 +22,7 @@ message StorageConfig {
   string sslCACert = 14;
   string GcpCredentialJSON = 15;
   uint32 max_connections = 16;
+  string ssl_tls_min_version = 17;
 }
 
 message InsertFiles {

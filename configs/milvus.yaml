@@ -118,6 +118,11 @@ minio:
   useSSL: false # Switch value to control if to access the MinIO or S3 service through SSL.
   ssl:
     tlsCACert: /path/to/public.crt # path to your CACert file
+    # TLS minimum version for MinIO/S3 SSL connections.
+    # Optional values: "default", "1.0", "1.1", "1.2", "1.3".
+    # When set to "default", the SDK/runtime default is used (typically TLS 1.2).
+    # We recommend using version 1.2 and above.
+    tlsMinVersion: default
   # Name of the bucket where Milvus stores data in MinIO or S3.
   # Milvus 2.0.0 does not support storing data in multiple buckets.
   # Bucket with this name will be created if it does not exist. If the bucket already exists and is accessible, it will be used directly. Otherwise, there will be an error.

@@ -79,11 +79,20 @@ func NewMinioClient(address string, opts *minio.Options) (*minio.Client, error) 
 		return minio.New(address, opts)
 	}
 	// opts.Creds == nil, assume using IAM
-	transport, err := NewWrapHTTPTransport(opts.Secure)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create default transport")
+	// If a transport was already set (e.g., with custom TLS config), use it as backend;
+	// otherwise create a new default transport.
+	var backend transport
+	if opts.Transport != nil {
+		backend = opts.Transport
+	} else {
+		defaultTr, err := minio.DefaultTransport(opts.Secure)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create default transport")
+		}
+		backend = defaultTr
 	}
-	opts.Transport = transport
+	tokenSrc := google.ComputeTokenSource("")
+	opts.Transport = &WrapHTTPTransport{tokenSrc: tokenSrc, backend: backend}
 	opts.Creds = credentials.NewStaticV2("", "", "")
 	return minio.New(address, opts)
 }
