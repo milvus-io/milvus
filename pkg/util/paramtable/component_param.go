@@ -4718,10 +4718,11 @@ type dataCoordConfig struct {
 	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
 	CopySegmentJobTimeout           ParamItem `refreshable:"true"`
 
-	ExternalCollectionCheckInterval ParamItem `refreshable:"true"`
-	ExternalCollectionJobTimeout    ParamItem `refreshable:"true"`
-	ExternalCollectionJobRetention  ParamItem `refreshable:"true"`
-	ExternalCollectionDropRatioWarn ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
+	ExternalCollectionCheckInterval    ParamItem `refreshable:"true"`
+	ExternalCollectionJobTimeout       ParamItem `refreshable:"true"`
+	ExternalCollectionJobRetention     ParamItem `refreshable:"true"`
+	ExternalCollectionDropRatioWarn    ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
+	ExternalCollectionPreAllocSegments ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -5879,6 +5880,15 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.ExternalCollectionDropRatioWarn.Init(base.mgr)
 
+	p.ExternalCollectionPreAllocSegments = ParamItem{
+		Key:          "dataCoord.externalCollectionPreAllocSegments",
+		Version:      "2.6.8",
+		Doc:          "The number of segment IDs to pre-allocate for each external collection refresh task.",
+		DefaultValue: "1000",
+		PanicIfEmpty: false,
+	}
+	p.ExternalCollectionPreAllocSegments.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -6182,6 +6192,9 @@ type dataNodeConfig struct {
 
 	WorkerSlotUnit      ParamItem `refreshable:"true"`
 	StandaloneSlotRatio ParamItem `refreshable:"false"`
+
+	// external collection
+	ExternalCollectionTargetRowsPerSegment ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -6650,6 +6663,15 @@ if this parameter <= 0, will set it as 10`,
 		Doc:          "Offline task slot ratio in standalone mode",
 	}
 	p.StandaloneSlotRatio.Init(base.mgr)
+
+	p.ExternalCollectionTargetRowsPerSegment = ParamItem{
+		Key:          "dataNode.externalCollection.targetRowsPerSegment",
+		Version:      "2.6.0",
+		DefaultValue: "1000000",
+		Doc:          "Target number of rows per segment for external collections",
+		Export:       false,
+	}
+	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
 }
 
 type streamingConfig struct {
