@@ -273,7 +273,7 @@ PhyIterativeFilterNode::GetOutput() {
     milvus::monitor::internal_core_search_latency_iterative_filter.Observe(
         scalar_cost / 1000);
 
-    if (!is_native_supported_) {
+    if (!is_native_supported_ && tracer::IsTraceEnabled()) {
         tracer::AddEvent(fmt::format("total_processed: {}, matched: {}",
                                      need_process_rows_,
                                      need_process_rows_ - bitset.count()));

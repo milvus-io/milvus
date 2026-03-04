@@ -214,7 +214,9 @@ PhyRescoresNode::GetOutput() {
     milvus::monitor::internal_core_search_latency_rescore.Observe(scalar_cost /
                                                                   1000);
 
-    tracer::AddEvent(fmt::format("rescored_count: {}", offsets.size()));
+    if (tracer::IsTraceEnabled()) {
+        tracer::AddEvent(fmt::format("rescored_count: {}", offsets.size()));
+    }
     return input_;
 };
 

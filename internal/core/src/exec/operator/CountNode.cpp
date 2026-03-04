@@ -67,7 +67,9 @@ PhyCountNode::GetOutput() {
         std::move(*(wrap_num_entities(cnt, view.size()))));
     is_finished_ = true;
 
-    tracer::AddEvent(fmt::format("count_result: {}", cnt));
+    if (tracer::IsTraceEnabled()) {
+        tracer::AddEvent(fmt::format("count_result: {}", cnt));
+    }
     return input_;
 }
 
