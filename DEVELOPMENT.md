@@ -79,7 +79,7 @@ The following specification (either physical or virtual machine resources) is re
 
 | Platform | Compiler | Supported Versions |
 |----------|----------|-------------------|
-| macOS | LLVM/Clang | 15, 16, 17, 18 |
+| macOS | LLVM/Clang | 15, 16, 17 |
 | Linux | GCC | 11, 12, 13, 14 |
 
 **Tool Requirements:**
@@ -480,7 +480,7 @@ A: This is a known issue on macOS 15+. Try using a newer version of LLVM:
 brew install llvm@17
 ```
 
-The build scripts will automatically detect and use LLVM 14-18.
+The build scripts will automatically detect and use LLVM 15-17.
 
 ---
 

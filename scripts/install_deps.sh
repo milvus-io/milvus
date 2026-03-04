@@ -25,7 +25,7 @@
 #   - Amazon Linux 2023
 #
 # Compiler requirements:
-#   - macOS: LLVM/Clang 15-18
+#   - macOS: LLVM/Clang 15-17
 #   - Linux: GCC 11-14
 #
 # Usage:

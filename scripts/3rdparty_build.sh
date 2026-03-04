@@ -91,7 +91,7 @@ fi
 # Ensure conan version matches the required version (1.66.0)
 # CI Docker images may have an older version pre-installed
 REQUIRED_CONAN_VERSION="1.66.0"
-CURRENT_CONAN_VERSION=$(conan --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' || echo "0.0.0")
+CURRENT_CONAN_VERSION=$(conan --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
 if [[ "${CURRENT_CONAN_VERSION}" != "${REQUIRED_CONAN_VERSION}" ]]; then
     echo "Conan version mismatch: ${CURRENT_CONAN_VERSION} != ${REQUIRED_CONAN_VERSION}, upgrading..."
     pip3 install conan==${REQUIRED_CONAN_VERSION} 2>/dev/null || pip install conan==${REQUIRED_CONAN_VERSION}
