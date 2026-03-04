@@ -18,14 +18,17 @@ package external
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type UpdateExternalTaskSuite struct {
@@ -163,11 +166,92 @@ func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_Empty() {
 }
 
 func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_SingleFragment() {
-	s.T().Skip("Skip test that requires CGO FFI calls")
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := &datapb.UpdateExternalCollectionRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+	}
+
+	task := NewUpdateExternalTask(ctx, cancel, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &ExternalSpec{Format: "parquet"}
+
+	m := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m.UnPatch()
+
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 500},
+	}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.NoError(err)
+	s.Len(result, 1)
+	s.Equal(int64(500), result[0].GetNumOfRows())
 }
 
 func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_MultipleFragments() {
-	s.T().Skip("Skip test that requires CGO FFI calls")
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := &datapb.UpdateExternalCollectionRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+	}
+
+	task := NewUpdateExternalTask(ctx, cancel, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &ExternalSpec{Format: "parquet"}
+
+	m := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m.UnPatch()
+
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 300000},
+		{FragmentID: 2, RowCount: 400000},
+		{FragmentID: 3, RowCount: 500000},
+		{FragmentID: 4, RowCount: 600000},
+		{FragmentID: 5, RowCount: 200000},
+	}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.NoError(err)
+
+	// Verify total rows are preserved
+	var totalRows int64
+	for _, seg := range result {
+		totalRows += seg.GetNumOfRows()
+	}
+	s.Equal(int64(2000000), totalRows)
+
+	// Verify segments are reasonably balanced
+	if len(result) > 1 {
+		var minRows, maxRows int64 = result[0].GetNumOfRows(), result[0].GetNumOfRows()
+		for _, seg := range result {
+			if seg.GetNumOfRows() < minRows {
+				minRows = seg.GetNumOfRows()
+			}
+			if seg.GetNumOfRows() > maxRows {
+				maxRows = seg.GetNumOfRows()
+			}
+		}
+		// The difference between max and min should be reasonable
+		avgFragmentSize := int64(2000000 / 5)
+		s.Less(maxRows-minRows, avgFragmentSize*2)
+	}
 }
 
 func (s *UpdateExternalTaskSuite) TestPreExecuteContextCanceled() {
@@ -245,7 +329,7 @@ func (s *UpdateExternalTaskSuite) TestOrganizeSegments_AllFragmentsExist() {
 	s.Len(result, 2)
 
 	// Verify kept/new tracking
-	s.Equal([]int64{1, 2}, task.GetKeptSegmentIDs())
+	s.ElementsMatch([]int64{1, 2}, task.GetKeptSegmentIDs())
 	s.Empty(task.GetNewSegments())
 }
 
@@ -287,7 +371,7 @@ func (s *UpdateExternalTaskSuite) TestOrganizeSegments_PartialFragmentRemoved() 
 	// S1 and S3 should be kept, S2 should be invalidated
 	// No new segments because there are no orphan fragments (all new fragments match kept segments)
 	s.Len(result, 2)
-	s.Equal([]int64{1, 3}, task.GetKeptSegmentIDs())
+	s.ElementsMatch([]int64{1, 3}, task.GetKeptSegmentIDs())
 	s.Empty(task.GetNewSegments(), "No orphan fragments to create new segments from")
 }
 

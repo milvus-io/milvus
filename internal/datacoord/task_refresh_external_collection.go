@@ -361,10 +361,9 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	log.Info("collected current segments", zap.Int("segmentCount", len(currentSegments)))
 
 	// Pre-allocate segment IDs for data mapping
-	// Use a default of 1000 segments per collection refresh task
-	const defaultPreAllocCount int64 = 1000
+	preAllocCount := paramtable.Get().DataCoordCfg.ExternalCollectionPreAllocSegments.GetAsInt64()
 
-	idBegin, idEnd, err := t.allocator.AllocN(defaultPreAllocCount)
+	idBegin, idEnd, err := t.allocator.AllocN(preAllocCount)
 	if err != nil {
 		log.Warn("failed to batch allocate segment IDs", zap.Error(err))
 		return
@@ -397,7 +396,7 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		StorageConfig:          createStorageConfig(),
 		Schema:                 collInfo.Schema,
 		PreAllocatedSegmentIds: idRange,
-		NumSegmentsExpected:    defaultPreAllocCount,
+		NumSegmentsExpected:    preAllocCount,
 	}
 
 	// Submit task to worker via unified task system
