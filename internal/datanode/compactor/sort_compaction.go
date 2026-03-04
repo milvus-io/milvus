@@ -342,6 +342,8 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "flush").Observe(float64(flushCost.Milliseconds()))
 	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "compress").Observe(float64(compressCost.Milliseconds()))
 
+	isNamespaceSorted := t.plan.GetSchema().GetEnableNamespace()
+	isSorted := !isNamespaceSorted
 	res := []*datapb.CompactionSegment{
 		{
 			PlanID:              t.GetPlanID(),
@@ -351,7 +353,8 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			Field2StatslogPaths: statsLogs,
 			Bm25Logs:            bm25StatsLogs,
 			Channel:             t.GetChannelName(),
-			IsSorted:            true,
+			IsSorted:            isSorted,
+			IsSortedByNamespace: isNamespaceSorted,
 			StorageVersion:      t.storageVersion,
 			Manifest:            manifest,
 			ExpirQuantiles:      expirQuantiles,

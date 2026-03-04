@@ -203,11 +203,9 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	if Params.CommonCfg.EnableNamespace.GetAsBool() {
-		err = addNamespaceData(it.schema, it.insertMsg)
-		if err != nil {
-			return err
-		}
+	err = addNamespaceData(it.schema, it.insertMsg)
+	if err != nil {
+		return err
 	}
 
 	err = checkAndFlattenStructFieldData(it.schema, it.insertMsg)

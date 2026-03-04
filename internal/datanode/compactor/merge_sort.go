@@ -145,8 +145,10 @@ func mergeSortMultipleSegments(ctx context.Context,
 	}
 
 	res := writer.GetCompactionSegments()
+	isNamespaceSorted := plan.GetSchema().GetEnableNamespace()
 	for _, seg := range res {
-		seg.IsSorted = true
+		seg.IsSorted = !isNamespaceSorted
+		seg.IsSortedByNamespace = isNamespaceSorted
 	}
 
 	var (
