@@ -3298,7 +3298,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                                      : mmap_config.GetScalarFieldEnableMmap();
     auto use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
 
-    auto chunk_reader_result = reader_->get_chunk_reader(index);
+    auto needed_columns = std::make_shared<std::vector<std::string>>();
+    needed_columns->reserve(milvus_field_ids.size());
+    for (const auto& fid : milvus_field_ids) {
+        needed_columns->push_back(std::to_string(fid.get()));
+    }
+    auto chunk_reader_result = reader_->get_chunk_reader(index, needed_columns);
     AssertInfo(chunk_reader_result.ok(),
                "get chunk reader failed, segment {}, column group index {}, "
                "status msg: {}",

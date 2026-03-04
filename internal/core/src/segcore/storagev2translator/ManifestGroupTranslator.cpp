@@ -315,11 +315,11 @@ ManifestGroupTranslator::load_group_chunk(
             continue;
         }
         auto it = field_metas_.find(fid);
-        // Workaround for projection push-down missing for chunk reader
-        // change back to assertion after supported
-        if (it == field_metas_.end()) {
-            continue;
-        }
+        AssertInfo(
+            it != field_metas_.end(),
+            "[StorageV2] translator {} field id {} not found in field_metas",
+            key_,
+            fid.get());
         const auto& field_meta = it->second;
 
         // Merge arrays from all tables for this field
