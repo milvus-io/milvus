@@ -76,6 +76,7 @@ class PhyFilterBitsNode : public Operator {
     QueryContext* query_context_;
     int64_t num_processed_rows_;
     int64_t need_process_rows_;
+    bool is_always_true_{false};
 };
 }  // namespace exec
 }  // namespace milvus
