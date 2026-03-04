@@ -201,19 +201,15 @@ Task::Next(ContinueFuture* future) {
             auto result = drivers_[i]->Next(blocking_state);
 
             if (result) {
-                if (tracer::IsTraceEnabled()) {
-                    tracer::AddEvent(
-                        fmt::format("driver_result_produced: driver_id={}, rows={}",
-                                    i,
-                                    result->childrens()[0]->size()));
-                }
+                tracer::AddEvent(
+                    fmt::format("driver_result_produced: driver_id={}, rows={}",
+                                i,
+                                result->childrens()[0]->size()));
                 return result;
             }
 
             if (blocking_state) {
-                if (tracer::IsTraceEnabled()) {
-                    tracer::AddEvent(fmt::format("driver_{}_blocked", i));
-                }
+                tracer::AddEvent(fmt::format("driver_{}_blocked", i));
                 futures[i] = blocking_state->future();
             }
 
@@ -222,11 +218,9 @@ Task::Next(ContinueFuture* future) {
             }
         }
 
-        if (tracer::IsTraceEnabled()) {
-            tracer::AddEvent(fmt::format("iteration: runnable={}, blocked={}",
-                                         runnable_drivers,
-                                         blocked_drivers));
-        }
+        tracer::AddEvent(fmt::format("iteration: runnable={}, blocked={}",
+                                     runnable_drivers,
+                                     blocked_drivers));
 
         if (runnable_drivers == 0) {
             if (blocked_drivers > 0) {

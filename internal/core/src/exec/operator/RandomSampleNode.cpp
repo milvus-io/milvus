@@ -110,10 +110,8 @@ PhyRandomSampleNode::GetOutput() {
         return nullptr;
     }
 
-    if (tracer::IsTraceEnabled()) {
-        tracer::AddEvent(fmt::format(
-            "sample_factor: {}, active_count: {}", factor_, active_count_));
-    }
+    tracer::AddEvent(fmt::format(
+        "sample_factor: {}, active_count: {}", factor_, active_count_));
 
     std::chrono::high_resolution_clock::time_point start =
         std::chrono::high_resolution_clock::now();
@@ -185,11 +183,9 @@ PhyRandomSampleNode::GetOutput() {
         TargetBitmapView result_data(result_col->GetRawData(),
                                      result_col->size());
         auto sampled_count = result_col->size() - result_data.count();
-        if (tracer::IsTraceEnabled()) {
-            tracer::AddEvent(fmt::format("sampled_count: {}, total_count: {}",
-                                         sampled_count,
-                                         active_count_));
-        }
+        tracer::AddEvent(fmt::format("sampled_count: {}, total_count: {}",
+                                     sampled_count,
+                                     active_count_));
     }
 
     is_finished_ = true;

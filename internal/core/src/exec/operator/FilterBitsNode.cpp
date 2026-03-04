@@ -84,9 +84,7 @@ PhyFilterBitsNode::GetOutput() {
 
     tracer::AutoSpan span(
         "PhyFilterBitsNode::Execute", tracer::GetRootSpan(), true);
-    if (tracer::IsTraceEnabled()) {
-        tracer::AddEvent(fmt::format("input_rows: {}", need_process_rows_));
-    }
+    tracer::AddEvent(fmt::format("input_rows: {}", need_process_rows_));
 
     std::chrono::high_resolution_clock::time_point scalar_start =
         std::chrono::high_resolution_clock::now();

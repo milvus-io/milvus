@@ -105,18 +105,14 @@ PhyMvccNode::GetOutput() {
         is_finished_ = true;
 
         auto output_rows = active_count_ - data.count();
-        if (tracer::IsTraceEnabled()) {
-            tracer::AddEvent(fmt::format(
-                "output_rows: {}, filtered: {}", output_rows, data.count()));
-        }
+        tracer::AddEvent(fmt::format(
+            "output_rows: {}, filtered: {}", output_rows, data.count()));
         return std::make_shared<RowVector>(
             std::vector<VectorPtr>{col_input});
     }
 
     // ── Level 3: default path (has filter / growing / TTL) ────────
-    if (tracer::IsTraceEnabled()) {
-        tracer::AddEvent(fmt::format("input_rows: {}", active_count_));
-    }
+    tracer::AddEvent(fmt::format("input_rows: {}", active_count_));
     auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
                                            TargetBitmap(active_count_),
                                            TargetBitmap(active_count_))
@@ -129,10 +125,8 @@ PhyMvccNode::GetOutput() {
     is_finished_ = true;
 
     auto output_rows = active_count_ - data.count();
-    if (tracer::IsTraceEnabled()) {
-        tracer::AddEvent(fmt::format(
-            "output_rows: {}, filtered: {}", output_rows, data.count()));
-    }
+    tracer::AddEvent(fmt::format(
+        "output_rows: {}, filtered: {}", output_rows, data.count()));
 
     return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
 }
