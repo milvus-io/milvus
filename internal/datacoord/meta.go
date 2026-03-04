@@ -163,8 +163,38 @@ type dbInfo struct {
 	Properties []*commonpb.KeyValuePair
 }
 
+// showCollectionIDs retrieves all collection IDs from RootCoord with retry on ErrServiceUnimplemented.
+func showCollectionIDs(ctx context.Context, broker broker.Broker) ([]int64, error) {
+	var (
+		err  error
+		resp *rootcoordpb.ShowCollectionIDsResponse
+	)
+	retryErr := retry.Handle(ctx, func() (bool, error) {
+		resp, err = broker.ShowCollectionIDs(ctx)
+		if errors.Is(err, merr.ErrServiceUnimplemented) {
+			return true, err
+		}
+		return false, err
+	})
+	if retryErr != nil {
+		return nil, retryErr
+	}
+
+	collectionIDs := make([]int64, 0, 4096)
+	for _, collections := range resp.GetDbCollections() {
+		collectionIDs = append(collectionIDs, collections.GetCollectionIDs()...)
+	}
+	return collectionIDs, nil
+}
+
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, broker broker.Broker) (*meta, error) {
+	// Fetch collection IDs first so both reloadFromKV and indexMeta can use them for per-collection loading.
+	collectionIDs, err := showCollectionIDs(ctx, broker)
+	if err != nil {
+		return nil, err
+	}
+
 	var (
 		im  *indexMeta
 		am  *analyzeMeta
@@ -189,7 +219,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 
 	g.Go(func() error {
 		var err error
-		im, err = newIndexMeta(ctx, catalog)
+		im, err = newIndexMeta(ctx, catalog, collectionIDs)
 		return err
 	})
 
@@ -220,7 +250,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// reloadFromKV (ListSegments, ListChannelCheckpoint) runs in parallel with sub-meta loading.
 	// It only uses mt.catalog/mt.segments/mt.channelCPs, which are independent of sub-metas.
 	g.Go(func() error {
-		return mt.reloadFromKV(ctx, broker)
+		return mt.reloadFromKV(ctx, collectionIDs)
 	})
 
 	if err := g.Wait(); err != nil {
@@ -238,30 +268,8 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 }
 
 // reloadFromKV loads meta from KV storage
-func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
+func (m *meta) reloadFromKV(ctx context.Context, collectionIDs []int64) error {
 	record := timerecord.NewTimeRecorder("datacoord")
-
-	var (
-		err  error
-		resp *rootcoordpb.ShowCollectionIDsResponse
-	)
-	// retry on un implemented for compatibility
-	retryErr := retry.Handle(ctx, func() (bool, error) {
-		resp, err = broker.ShowCollectionIDs(m.ctx)
-		if errors.Is(err, merr.ErrServiceUnimplemented) {
-			return true, err
-		}
-		return false, err
-	})
-	if retryErr != nil {
-		return retryErr
-	}
-	log.Ctx(ctx).Info("datacoord show collections done", zap.Duration("dur", record.RecordSpan()))
-
-	collectionIDs := make([]int64, 0, 4096)
-	for _, collections := range resp.GetDbCollections() {
-		collectionIDs = append(collectionIDs, collections.GetCollectionIDs()...)
-	}
 
 	pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
 	defer pool.Release()
@@ -279,8 +287,7 @@ func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 			return nil, nil
 		}))
 	}
-	err = conc.AwaitAll(futures...)
-	if err != nil {
+	if err := conc.AwaitAll(futures...); err != nil {
 		return err
 	}
 

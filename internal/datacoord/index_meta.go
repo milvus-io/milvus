@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
@@ -130,7 +131,7 @@ func (m *segmentBuildInfo) GetTaskStats() []*metricsinfo.IndexTaskStats {
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
-func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*indexMeta, error) {
+func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog, collectionIDs []int64) (*indexMeta, error) {
 	mt := &indexMeta{
 		ctx:              ctx,
 		catalog:          catalog,
@@ -139,7 +140,7 @@ func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*ind
 		segmentBuildInfo: newSegmentIndexBuildInfo(),
 		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 	}
-	err := mt.reloadFromKV()
+	err := mt.reloadFromKV(collectionIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +148,7 @@ func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*ind
 }
 
 // reloadFromKV loads meta from KV storage
-func (m *indexMeta) reloadFromKV() error {
+func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 	record := timerecord.NewTimeRecorder("indexMeta-reloadFromKV")
 
 	// Parallel load and process: ListIndexes and ListSegmentIndexes have no dependency,
@@ -165,19 +166,34 @@ func (m *indexMeta) reloadFromKV() error {
 		return nil
 	})
 	g.Go(func() error {
-		segmentIndexes, err := m.catalog.ListSegmentIndexes(m.ctx)
-		if err != nil {
-			log.Error("indexMeta reloadFromKV load segment indexes fail", zap.Error(err))
+		pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
+		defer pool.Release()
+		futures := make([]*conc.Future[any], 0, len(collectionIDs))
+		collectionSegIdxes := make([][]*model.SegmentIndex, len(collectionIDs))
+		for i, collID := range collectionIDs {
+			i, collID := i, collID
+			futures = append(futures, pool.Submit(func() (any, error) {
+				segIdxes, err := m.catalog.ListSegmentIndexes(m.ctx, collID)
+				if err != nil {
+					return nil, err
+				}
+				collectionSegIdxes[i] = segIdxes
+				return nil, nil
+			}))
+		}
+		if err := conc.AwaitAll(futures...); err != nil {
 			return err
 		}
-		for _, segIdx := range segmentIndexes {
-			if segIdx.IndexMemSize == 0 {
-				segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
+		for _, segIdxes := range collectionSegIdxes {
+			for _, segIdx := range segIdxes {
+				if segIdx.IndexMemSize == 0 {
+					segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
+				}
+				m.updateSegmentIndex(segIdx)
+				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
+				metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+					fmt.Sprintf("%d", segIdx.CollectionID)).Add(float64(segIdx.IndexSerializedSize))
 			}
-			m.updateSegmentIndex(segIdx)
-			metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
-			metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-				fmt.Sprintf("%d", segIdx.CollectionID)).Add(float64(segIdx.IndexSerializedSize))
 		}
 		return nil
 	})
