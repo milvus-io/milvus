@@ -24,6 +24,7 @@ import "C"
 
 import (
 	"fmt"
+	"strings"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -53,6 +54,20 @@ func WriteFile(
 		return fmt.Errorf("failed to get filesystem: %w", err)
 	}
 	defer C.loon_filesystem_destroy(fsHandle)
+
+	// Local filesystem requires parent directories to exist before writing.
+	// Object stores (S3/MinIO/GCS) don't have real directories.
+	if storageConfig.GetStorageType() == "local" {
+		if idx := strings.LastIndex(filePath, "/"); idx > 0 {
+			dir := filePath[:idx]
+			cDir := C.CString(dir)
+			defer C.free(unsafe.Pointer(cDir))
+			result = C.loon_filesystem_create_dir(fsHandle, cDir, C.uint32_t(len(dir)), true)
+			if err := HandleLoonFFIResult(result); err != nil {
+				return fmt.Errorf("failed to create parent directory %q: %w", dir, err)
+			}
+		}
+	}
 
 	// Write file atomically
 	var dataPtr *C.uint8_t
