@@ -69,7 +69,7 @@ The following specification (either physical or virtual machine resources) is re
 |----------|----------|--------------|-------|
 | macOS | 12, 13, 14, 15 | Intel (x86_64), Apple Silicon (arm64) | Requires Homebrew |
 | Ubuntu | 20.04, 22.04, 24.04 | x86_64, arm64 | |
-| Rocky Linux | 8, 9 | x86_64, arm64 | RHEL compatible |
+| Rocky Linux | 9 | x86_64, arm64 | RHEL compatible |
 | Amazon Linux | 2023 | x86_64, arm64 | |
 | CentOS | 7 (legacy) | x86_64 | EOL, use Rocky Linux instead |
 
@@ -79,8 +79,8 @@ The following specification (either physical or virtual machine resources) is re
 
 | Platform | Compiler | Supported Versions |
 |----------|----------|-------------------|
-| macOS | LLVM/Clang | 14, 15, 16, 17, 18 |
-| Linux | GCC | 9, 10, 11, 12, 13, 14 |
+| macOS | LLVM/Clang | 15, 16, 17, 18 |
+| Linux | GCC | 11, 12, 13, 14 |
 
 **Tool Requirements:**
 
@@ -172,7 +172,7 @@ Milvus uses Conan to manage third-party dependencies for c++.
 Install Conan:
 
 ```shell
-pip install conan==1.64.1
+pip install conan==1.66.0
 ```
 
 Note: Conan version 2.x is not currently supported, please use version 1.64.1.

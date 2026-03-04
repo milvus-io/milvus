@@ -26,6 +26,10 @@ if [ -f "/etc/profile.d/devtoolset-11.sh" ]; then
   source "/etc/profile.d/devtoolset-11.sh"
 fi
 
+if [ -f "/opt/rh/gcc-toolset-11/enable" ]; then
+  source "/opt/rh/gcc-toolset-11/enable"
+fi
+
 if [ -f "/etc/profile.d/llvm-toolset-11.sh" ]; then
   source "/etc/profile.d/llvm-toolset-11.sh"
 fi

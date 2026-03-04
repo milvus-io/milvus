@@ -9,14 +9,21 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM amazonlinux:2023
+FROM rockylinux/rockylinux:9
 
 ARG TARGETARCH
 
-RUN dnf install -y wget g++ gcc gdb libatomic libstdc++-static ninja-build git make zip unzip tar which \
-    autoconf automake python3 python3-pip perl-FindBin texinfo \
-    pkg-config libuuid-devel libaio perl-IPC-Cmd perl-Digest-SHA libasan openblas-devel tzdata && \
-    rm -rf /var/cache/yum/*
+# Rocky 9 ships with GCC 11 and Python 3.9 by default.
+# Enable CRB (CodeReady Builder) repo for openblas-devel, texinfo, etc.
+RUN dnf install -y dnf-plugins-core epel-release && \
+    dnf config-manager --set-enabled crb && \
+    dnf install -y \
+        wget g++ gcc gdb libatomic libstdc++-static ninja-build git make zip unzip tar which \
+        autoconf automake python3 python3-pip perl-FindBin texinfo ccache \
+        pkg-config libuuid-devel libaio libaio-devel perl-IPC-Cmd perl-Digest-SHA \
+        libasan openblas-devel tzdata libtool && \
+    rm -rf /var/cache/dnf/* && \
+    for f in /usr/include/openblas/*.h; do ln -sf "$f" /usr/include/$(basename "$f"); done
 
 ENV GOPATH /go
 ENV GOROOT /usr/local/go
@@ -27,17 +34,10 @@ RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.12.linux-$TARG
     go clean --modcache && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
 
-RUN pip3 install conan==1.66.0
+RUN pip3 install conan==1.64.1
 
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
-
-RUN mkdir /tmp/ccache && cd /tmp/ccache &&\
-    wget https://dl.fedoraproject.org/pub/epel/9/Everything/`uname -m`/Packages/h/hiredis-1.0.2-2.el9.`uname -m`.rpm &&\
-    wget https://dl.fedoraproject.org/pub/epel/9/Everything/`uname -m`/Packages/c/ccache-4.5.1-2.el9.`uname -m`.rpm &&\
-    rpm -i hiredis-1.0.2-2.el9.`uname -m`.rpm ccache-4.5.1-2.el9.`uname -m`.rpm &&\
-    rm -rf /tmp/ccache
-
 
 # refer: https://code.visualstudio.com/docs/remote/containers-advanced#_avoiding-extension-reinstalls-on-container-rebuild
 RUN mkdir -p /home/milvus/.vscode-server/extensions \
