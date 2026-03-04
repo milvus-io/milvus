@@ -30,6 +30,32 @@
 
 namespace milvus {
 namespace exec {
+// Binary search to find insert position for sorted order
+// Used by iterative filter and element filter nodes
+template <bool large_is_better>
+inline size_t
+find_binsert_position(const std::vector<float>& distances,
+                      size_t lo,
+                      size_t hi,
+                      float dist) {
+    while (lo < hi) {
+        size_t mid = lo + ((hi - lo) >> 1);
+        if constexpr (large_is_better) {
+            if (distances[mid] < dist) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        } else {
+            if (distances[mid] > dist) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+    }
+    return lo;
+}
 
 static bool
 UseVectorIterator(const SearchInfo& search_info) {
@@ -118,6 +144,12 @@ sort_search_result(milvus::SearchResult& result, bool large_is_better) {
     new_distances.reserve(size);
     new_seg_offsets.reserve(size);
 
+    bool has_element_indices = !result.element_indices_.empty();
+    std::vector<int32_t> new_element_indices;
+    if (has_element_indices) {
+        new_element_indices.reserve(size);
+    }
+
     std::vector<size_t> idx(topk);
 
     for (size_t start = 0; start < size; start += topk) {
@@ -141,11 +173,17 @@ sort_search_result(milvus::SearchResult& result, bool large_is_better) {
         for (auto i : idx) {
             new_distances.push_back(result.distances_[i]);
             new_seg_offsets.push_back(result.seg_offsets_[i]);
+            if (has_element_indices) {
+                new_element_indices.push_back(result.element_indices_[i]);
+            }
         }
     }
 
     result.distances_ = new_distances;
     result.seg_offsets_ = new_seg_offsets;
+    if (has_element_indices) {
+        result.element_indices_ = new_element_indices;
+    }
 }
 
 }  // namespace exec

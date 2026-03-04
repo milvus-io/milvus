@@ -370,6 +370,54 @@ func (x *JsonKeyStats) GetJsonKeyStatsDataFormat() int64 {
 	return 0
 }
 
+// Element indices for a single document in element-level query
+type ElementIndices struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Indices []int32 `protobuf:"varint,1,rep,packed,name=indices,proto3" json:"indices,omitempty"`
+}
+
+func (x *ElementIndices) Reset() {
+	*x = ElementIndices{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_segcore_proto_msgTypes[4]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ElementIndices) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ElementIndices) ProtoMessage() {}
+
+func (x *ElementIndices) ProtoReflect() protoreflect.Message {
+	mi := &file_segcore_proto_msgTypes[4]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ElementIndices.ProtoReflect.Descriptor instead.
+func (*ElementIndices) Descriptor() ([]byte, []int) {
+	return file_segcore_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ElementIndices) GetIndices() []int32 {
+	if x != nil {
+		return x.Indices
+	}
+	return nil
+}
+
 type RetrieveResults struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -382,12 +430,17 @@ type RetrieveResults struct {
 	HasMoreResult      bool                  `protobuf:"varint,5,opt,name=has_more_result,json=hasMoreResult,proto3" json:"has_more_result,omitempty"`
 	ScannedRemoteBytes int64                 `protobuf:"varint,6,opt,name=scanned_remote_bytes,json=scannedRemoteBytes,proto3" json:"scanned_remote_bytes,omitempty"`
 	ScannedTotalBytes  int64                 `protobuf:"varint,7,opt,name=scanned_total_bytes,json=scannedTotalBytes,proto3" json:"scanned_total_bytes,omitempty"`
+	// Element-level query support
+	ElementLevel bool `protobuf:"varint,8,opt,name=element_level,json=elementLevel,proto3" json:"element_level,omitempty"`
+	// Element indices per document (aligned with offset array)
+	// element_indices[i] contains all matching element indices for offset[i]
+	ElementIndices []*ElementIndices `protobuf:"bytes,9,rep,name=element_indices,json=elementIndices,proto3" json:"element_indices,omitempty"`
 }
 
 func (x *RetrieveResults) Reset() {
 	*x = RetrieveResults{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_segcore_proto_msgTypes[4]
+		mi := &file_segcore_proto_msgTypes[5]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -400,7 +453,7 @@ func (x *RetrieveResults) String() string {
 func (*RetrieveResults) ProtoMessage() {}
 
 func (x *RetrieveResults) ProtoReflect() protoreflect.Message {
-	mi := &file_segcore_proto_msgTypes[4]
+	mi := &file_segcore_proto_msgTypes[5]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -413,7 +466,7 @@ func (x *RetrieveResults) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetrieveResults.ProtoReflect.Descriptor instead.
 func (*RetrieveResults) Descriptor() ([]byte, []int) {
-	return file_segcore_proto_rawDescGZIP(), []int{4}
+	return file_segcore_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RetrieveResults) GetIds() *schemapb.IDs {
@@ -465,6 +518,20 @@ func (x *RetrieveResults) GetScannedTotalBytes() int64 {
 	return 0
 }
 
+func (x *RetrieveResults) GetElementLevel() bool {
+	if x != nil {
+		return x.ElementLevel
+	}
+	return false
+}
+
+func (x *RetrieveResults) GetElementIndices() []*ElementIndices {
+	if x != nil {
+		return x.ElementIndices
+	}
+	return nil
+}
+
 type LoadFieldMeta struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -478,7 +545,7 @@ type LoadFieldMeta struct {
 func (x *LoadFieldMeta) Reset() {
 	*x = LoadFieldMeta{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_segcore_proto_msgTypes[5]
+		mi := &file_segcore_proto_msgTypes[6]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -491,7 +558,7 @@ func (x *LoadFieldMeta) String() string {
 func (*LoadFieldMeta) ProtoMessage() {}
 
 func (x *LoadFieldMeta) ProtoReflect() protoreflect.Message {
-	mi := &file_segcore_proto_msgTypes[5]
+	mi := &file_segcore_proto_msgTypes[6]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -504,7 +571,7 @@ func (x *LoadFieldMeta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadFieldMeta.ProtoReflect.Descriptor instead.
 func (*LoadFieldMeta) Descriptor() ([]byte, []int) {
-	return file_segcore_proto_rawDescGZIP(), []int{5}
+	return file_segcore_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *LoadFieldMeta) GetMinTimestamp() int64 {
@@ -541,7 +608,7 @@ type LoadSegmentMeta struct {
 func (x *LoadSegmentMeta) Reset() {
 	*x = LoadSegmentMeta{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_segcore_proto_msgTypes[6]
+		mi := &file_segcore_proto_msgTypes[7]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -554,7 +621,7 @@ func (x *LoadSegmentMeta) String() string {
 func (*LoadSegmentMeta) ProtoMessage() {}
 
 func (x *LoadSegmentMeta) ProtoReflect() protoreflect.Message {
-	mi := &file_segcore_proto_msgTypes[6]
+	mi := &file_segcore_proto_msgTypes[7]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -567,7 +634,7 @@ func (x *LoadSegmentMeta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadSegmentMeta.ProtoReflect.Descriptor instead.
 func (*LoadSegmentMeta) Descriptor() ([]byte, []int) {
-	return file_segcore_proto_rawDescGZIP(), []int{6}
+	return file_segcore_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *LoadSegmentMeta) GetMetas() []*LoadFieldMeta {
@@ -596,7 +663,7 @@ type InsertRecord struct {
 func (x *InsertRecord) Reset() {
 	*x = InsertRecord{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_segcore_proto_msgTypes[7]
+		mi := &file_segcore_proto_msgTypes[8]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -609,7 +676,7 @@ func (x *InsertRecord) String() string {
 func (*InsertRecord) ProtoMessage() {}
 
 func (x *InsertRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_segcore_proto_msgTypes[7]
+	mi := &file_segcore_proto_msgTypes[8]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -622,7 +689,7 @@ func (x *InsertRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InsertRecord.ProtoReflect.Descriptor instead.
 func (*InsertRecord) Descriptor() ([]byte, []int) {
-	return file_segcore_proto_rawDescGZIP(), []int{7}
+	return file_segcore_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *InsertRecord) GetFieldsData() []*schemapb.FieldData {
@@ -657,7 +724,7 @@ type FieldIndexMeta struct {
 func (x *FieldIndexMeta) Reset() {
 	*x = FieldIndexMeta{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_segcore_proto_msgTypes[8]
+		mi := &file_segcore_proto_msgTypes[9]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -670,7 +737,7 @@ func (x *FieldIndexMeta) String() string {
 func (*FieldIndexMeta) ProtoMessage() {}
 
 func (x *FieldIndexMeta) ProtoReflect() protoreflect.Message {
-	mi := &file_segcore_proto_msgTypes[8]
+	mi := &file_segcore_proto_msgTypes[9]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -683,7 +750,7 @@ func (x *FieldIndexMeta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FieldIndexMeta.ProtoReflect.Descriptor instead.
 func (*FieldIndexMeta) Descriptor() ([]byte, []int) {
-	return file_segcore_proto_rawDescGZIP(), []int{8}
+	return file_segcore_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *FieldIndexMeta) GetFieldID() int64 {
@@ -754,7 +821,7 @@ type CollectionIndexMeta struct {
 func (x *CollectionIndexMeta) Reset() {
 	*x = CollectionIndexMeta{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_segcore_proto_msgTypes[9]
+		mi := &file_segcore_proto_msgTypes[10]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -767,7 +834,7 @@ func (x *CollectionIndexMeta) String() string {
 func (*CollectionIndexMeta) ProtoMessage() {}
 
 func (x *CollectionIndexMeta) ProtoReflect() protoreflect.Message {
-	mi := &file_segcore_proto_msgTypes[9]
+	mi := &file_segcore_proto_msgTypes[10]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -780,7 +847,7 @@ func (x *CollectionIndexMeta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectionIndexMeta.ProtoReflect.Descriptor instead.
 func (*CollectionIndexMeta) Descriptor() ([]byte, []int) {
-	return file_segcore_proto_rawDescGZIP(), []int{9}
+	return file_segcore_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CollectionIndexMeta) GetMaxIndexRowCount() int64 {
@@ -822,7 +889,7 @@ type FieldIndexInfo struct {
 func (x *FieldIndexInfo) Reset() {
 	*x = FieldIndexInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_segcore_proto_msgTypes[10]
+		mi := &file_segcore_proto_msgTypes[11]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -835,7 +902,7 @@ func (x *FieldIndexInfo) String() string {
 func (*FieldIndexInfo) ProtoMessage() {}
 
 func (x *FieldIndexInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_segcore_proto_msgTypes[10]
+	mi := &file_segcore_proto_msgTypes[11]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -848,7 +915,7 @@ func (x *FieldIndexInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FieldIndexInfo.ProtoReflect.Descriptor instead.
 func (*FieldIndexInfo) Descriptor() ([]byte, []int) {
-	return file_segcore_proto_rawDescGZIP(), []int{10}
+	return file_segcore_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *FieldIndexInfo) GetFieldID() int64 {
@@ -976,7 +1043,7 @@ type SegmentLoadInfo struct {
 func (x *SegmentLoadInfo) Reset() {
 	*x = SegmentLoadInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_segcore_proto_msgTypes[11]
+		mi := &file_segcore_proto_msgTypes[12]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -989,7 +1056,7 @@ func (x *SegmentLoadInfo) String() string {
 func (*SegmentLoadInfo) ProtoMessage() {}
 
 func (x *SegmentLoadInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_segcore_proto_msgTypes[11]
+	mi := &file_segcore_proto_msgTypes[12]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1002,7 +1069,7 @@ func (x *SegmentLoadInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentLoadInfo.ProtoReflect.Descriptor instead.
 func (*SegmentLoadInfo) Descriptor() ([]byte, []int) {
-	return file_segcore_proto_rawDescGZIP(), []int{11}
+	return file_segcore_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SegmentLoadInfo) GetSegmentID() int64 {
@@ -1212,28 +1279,38 @@ var file_segcore_proto_rawDesc = []byte{
 	0x0a, 0x1a, 0x6a, 0x73, 0x6f, 0x6e, 0x5f, 0x6b, 0x65, 0x79, 0x5f, 0x73, 0x74, 0x61, 0x74, 0x73,
 	0x5f, 0x64, 0x61, 0x74, 0x61, 0x5f, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x18, 0x07, 0x20, 0x01,
 	0x28, 0x03, 0x52, 0x16, 0x6a, 0x73, 0x6f, 0x6e, 0x4b, 0x65, 0x79, 0x53, 0x74, 0x61, 0x74, 0x73,
-	0x44, 0x61, 0x74, 0x61, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x22, 0xce, 0x02, 0x0a, 0x0f, 0x52,
-	0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x12, 0x2a,
-	0x0a, 0x03, 0x69, 0x64, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x18, 0x2e, 0x6d, 0x69,
-	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x6d,
-	0x61, 0x2e, 0x49, 0x44, 0x73, 0x52, 0x03, 0x69, 0x64, 0x73, 0x12, 0x16, 0x0a, 0x06, 0x6f, 0x66,
-	0x66, 0x73, 0x65, 0x74, 0x18, 0x02, 0x20, 0x03, 0x28, 0x03, 0x52, 0x06, 0x6f, 0x66, 0x66, 0x73,
-	0x65, 0x74, 0x12, 0x3f, 0x0a, 0x0b, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x73, 0x5f, 0x64, 0x61, 0x74,
-	0x61, 0x18, 0x03, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x1e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
-	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x2e, 0x46, 0x69,
-	0x65, 0x6c, 0x64, 0x44, 0x61, 0x74, 0x61, 0x52, 0x0a, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x73, 0x44,
-	0x61, 0x74, 0x61, 0x12, 0x2c, 0x0a, 0x12, 0x61, 0x6c, 0x6c, 0x5f, 0x72, 0x65, 0x74, 0x72, 0x69,
-	0x65, 0x76, 0x65, 0x5f, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x18, 0x04, 0x20, 0x01, 0x28, 0x03, 0x52,
-	0x10, 0x61, 0x6c, 0x6c, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x43, 0x6f, 0x75, 0x6e,
-	0x74, 0x12, 0x26, 0x0a, 0x0f, 0x68, 0x61, 0x73, 0x5f, 0x6d, 0x6f, 0x72, 0x65, 0x5f, 0x72, 0x65,
-	0x73, 0x75, 0x6c, 0x74, 0x18, 0x05, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0d, 0x68, 0x61, 0x73, 0x4d,
-	0x6f, 0x72, 0x65, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x12, 0x30, 0x0a, 0x14, 0x73, 0x63, 0x61,
-	0x6e, 0x6e, 0x65, 0x64, 0x5f, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x5f, 0x62, 0x79, 0x74, 0x65,
-	0x73, 0x18, 0x06, 0x20, 0x01, 0x28, 0x03, 0x52, 0x12, 0x73, 0x63, 0x61, 0x6e, 0x6e, 0x65, 0x64,
-	0x52, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x42, 0x79, 0x74, 0x65, 0x73, 0x12, 0x2e, 0x0a, 0x13, 0x73,
-	0x63, 0x61, 0x6e, 0x6e, 0x65, 0x64, 0x5f, 0x74, 0x6f, 0x74, 0x61, 0x6c, 0x5f, 0x62, 0x79, 0x74,
-	0x65, 0x73, 0x18, 0x07, 0x20, 0x01, 0x28, 0x03, 0x52, 0x11, 0x73, 0x63, 0x61, 0x6e, 0x6e, 0x65,
-	0x64, 0x54, 0x6f, 0x74, 0x61, 0x6c, 0x42, 0x79, 0x74, 0x65, 0x73, 0x22, 0x76, 0x0a, 0x0d, 0x4c,
+	0x44, 0x61, 0x74, 0x61, 0x46, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x22, 0x2a, 0x0a, 0x0e, 0x45, 0x6c,
+	0x65, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x6e, 0x64, 0x69, 0x63, 0x65, 0x73, 0x12, 0x18, 0x0a, 0x07,
+	0x69, 0x6e, 0x64, 0x69, 0x63, 0x65, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x05, 0x52, 0x07, 0x69,
+	0x6e, 0x64, 0x69, 0x63, 0x65, 0x73, 0x22, 0xc2, 0x03, 0x0a, 0x0f, 0x52, 0x65, 0x74, 0x72, 0x69,
+	0x65, 0x76, 0x65, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x12, 0x2a, 0x0a, 0x03, 0x69, 0x64,
+	0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x18, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x2e, 0x49, 0x44,
+	0x73, 0x52, 0x03, 0x69, 0x64, 0x73, 0x12, 0x16, 0x0a, 0x06, 0x6f, 0x66, 0x66, 0x73, 0x65, 0x74,
+	0x18, 0x02, 0x20, 0x03, 0x28, 0x03, 0x52, 0x06, 0x6f, 0x66, 0x66, 0x73, 0x65, 0x74, 0x12, 0x3f,
+	0x0a, 0x0b, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x73, 0x5f, 0x64, 0x61, 0x74, 0x61, 0x18, 0x03, 0x20,
+	0x03, 0x28, 0x0b, 0x32, 0x1e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x73, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x2e, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x44,
+	0x61, 0x74, 0x61, 0x52, 0x0a, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x73, 0x44, 0x61, 0x74, 0x61, 0x12,
+	0x2c, 0x0a, 0x12, 0x61, 0x6c, 0x6c, 0x5f, 0x72, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x5f,
+	0x63, 0x6f, 0x75, 0x6e, 0x74, 0x18, 0x04, 0x20, 0x01, 0x28, 0x03, 0x52, 0x10, 0x61, 0x6c, 0x6c,
+	0x52, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x43, 0x6f, 0x75, 0x6e, 0x74, 0x12, 0x26, 0x0a,
+	0x0f, 0x68, 0x61, 0x73, 0x5f, 0x6d, 0x6f, 0x72, 0x65, 0x5f, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74,
+	0x18, 0x05, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0d, 0x68, 0x61, 0x73, 0x4d, 0x6f, 0x72, 0x65, 0x52,
+	0x65, 0x73, 0x75, 0x6c, 0x74, 0x12, 0x30, 0x0a, 0x14, 0x73, 0x63, 0x61, 0x6e, 0x6e, 0x65, 0x64,
+	0x5f, 0x72, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x5f, 0x62, 0x79, 0x74, 0x65, 0x73, 0x18, 0x06, 0x20,
+	0x01, 0x28, 0x03, 0x52, 0x12, 0x73, 0x63, 0x61, 0x6e, 0x6e, 0x65, 0x64, 0x52, 0x65, 0x6d, 0x6f,
+	0x74, 0x65, 0x42, 0x79, 0x74, 0x65, 0x73, 0x12, 0x2e, 0x0a, 0x13, 0x73, 0x63, 0x61, 0x6e, 0x6e,
+	0x65, 0x64, 0x5f, 0x74, 0x6f, 0x74, 0x61, 0x6c, 0x5f, 0x62, 0x79, 0x74, 0x65, 0x73, 0x18, 0x07,
+	0x20, 0x01, 0x28, 0x03, 0x52, 0x11, 0x73, 0x63, 0x61, 0x6e, 0x6e, 0x65, 0x64, 0x54, 0x6f, 0x74,
+	0x61, 0x6c, 0x42, 0x79, 0x74, 0x65, 0x73, 0x12, 0x23, 0x0a, 0x0d, 0x65, 0x6c, 0x65, 0x6d, 0x65,
+	0x6e, 0x74, 0x5f, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x18, 0x08, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0c,
+	0x65, 0x6c, 0x65, 0x6d, 0x65, 0x6e, 0x74, 0x4c, 0x65, 0x76, 0x65, 0x6c, 0x12, 0x4d, 0x0a, 0x0f,
+	0x65, 0x6c, 0x65, 0x6d, 0x65, 0x6e, 0x74, 0x5f, 0x69, 0x6e, 0x64, 0x69, 0x63, 0x65, 0x73, 0x18,
+	0x09, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x73, 0x65, 0x67, 0x63, 0x6f, 0x72, 0x65, 0x2e, 0x45, 0x6c, 0x65,
+	0x6d, 0x65, 0x6e, 0x74, 0x49, 0x6e, 0x64, 0x69, 0x63, 0x65, 0x73, 0x52, 0x0e, 0x65, 0x6c, 0x65,
+	0x6d, 0x65, 0x6e, 0x74, 0x49, 0x6e, 0x64, 0x69, 0x63, 0x65, 0x73, 0x22, 0x76, 0x0a, 0x0d, 0x4c,
 	0x6f, 0x61, 0x64, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x4d, 0x65, 0x74, 0x61, 0x12, 0x23, 0x0a, 0x0d,
 	0x6d, 0x69, 0x6e, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70, 0x18, 0x01, 0x20,
 	0x01, 0x28, 0x03, 0x52, 0x0c, 0x6d, 0x69, 0x6e, 0x54, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d,
@@ -1420,53 +1497,55 @@ func file_segcore_proto_rawDescGZIP() []byte {
 	return file_segcore_proto_rawDescData
 }
 
-var file_segcore_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_segcore_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_segcore_proto_goTypes = []interface{}{
 	(*Binlog)(nil),                // 0: milvus.proto.segcore.Binlog
 	(*FieldBinlog)(nil),           // 1: milvus.proto.segcore.FieldBinlog
 	(*TextIndexStats)(nil),        // 2: milvus.proto.segcore.TextIndexStats
 	(*JsonKeyStats)(nil),          // 3: milvus.proto.segcore.JsonKeyStats
-	(*RetrieveResults)(nil),       // 4: milvus.proto.segcore.RetrieveResults
-	(*LoadFieldMeta)(nil),         // 5: milvus.proto.segcore.LoadFieldMeta
-	(*LoadSegmentMeta)(nil),       // 6: milvus.proto.segcore.LoadSegmentMeta
-	(*InsertRecord)(nil),          // 7: milvus.proto.segcore.InsertRecord
-	(*FieldIndexMeta)(nil),        // 8: milvus.proto.segcore.FieldIndexMeta
-	(*CollectionIndexMeta)(nil),   // 9: milvus.proto.segcore.CollectionIndexMeta
-	(*FieldIndexInfo)(nil),        // 10: milvus.proto.segcore.FieldIndexInfo
-	(*SegmentLoadInfo)(nil),       // 11: milvus.proto.segcore.SegmentLoadInfo
-	nil,                           // 12: milvus.proto.segcore.SegmentLoadInfo.TextStatsLogsEntry
-	nil,                           // 13: milvus.proto.segcore.SegmentLoadInfo.JsonKeyStatsLogsEntry
-	(*schemapb.IDs)(nil),          // 14: milvus.proto.schema.IDs
-	(*schemapb.FieldData)(nil),    // 15: milvus.proto.schema.FieldData
-	(*commonpb.KeyValuePair)(nil), // 16: milvus.proto.common.KeyValuePair
-	(commonpb.LoadPriority)(0),    // 17: milvus.proto.common.LoadPriority
+	(*ElementIndices)(nil),        // 4: milvus.proto.segcore.ElementIndices
+	(*RetrieveResults)(nil),       // 5: milvus.proto.segcore.RetrieveResults
+	(*LoadFieldMeta)(nil),         // 6: milvus.proto.segcore.LoadFieldMeta
+	(*LoadSegmentMeta)(nil),       // 7: milvus.proto.segcore.LoadSegmentMeta
+	(*InsertRecord)(nil),          // 8: milvus.proto.segcore.InsertRecord
+	(*FieldIndexMeta)(nil),        // 9: milvus.proto.segcore.FieldIndexMeta
+	(*CollectionIndexMeta)(nil),   // 10: milvus.proto.segcore.CollectionIndexMeta
+	(*FieldIndexInfo)(nil),        // 11: milvus.proto.segcore.FieldIndexInfo
+	(*SegmentLoadInfo)(nil),       // 12: milvus.proto.segcore.SegmentLoadInfo
+	nil,                           // 13: milvus.proto.segcore.SegmentLoadInfo.TextStatsLogsEntry
+	nil,                           // 14: milvus.proto.segcore.SegmentLoadInfo.JsonKeyStatsLogsEntry
+	(*schemapb.IDs)(nil),          // 15: milvus.proto.schema.IDs
+	(*schemapb.FieldData)(nil),    // 16: milvus.proto.schema.FieldData
+	(*commonpb.KeyValuePair)(nil), // 17: milvus.proto.common.KeyValuePair
+	(commonpb.LoadPriority)(0),    // 18: milvus.proto.common.LoadPriority
 }
 var file_segcore_proto_depIdxs = []int32{
 	0,  // 0: milvus.proto.segcore.FieldBinlog.binlogs:type_name -> milvus.proto.segcore.Binlog
-	14, // 1: milvus.proto.segcore.RetrieveResults.ids:type_name -> milvus.proto.schema.IDs
-	15, // 2: milvus.proto.segcore.RetrieveResults.fields_data:type_name -> milvus.proto.schema.FieldData
-	5,  // 3: milvus.proto.segcore.LoadSegmentMeta.metas:type_name -> milvus.proto.segcore.LoadFieldMeta
-	15, // 4: milvus.proto.segcore.InsertRecord.fields_data:type_name -> milvus.proto.schema.FieldData
-	16, // 5: milvus.proto.segcore.FieldIndexMeta.type_params:type_name -> milvus.proto.common.KeyValuePair
-	16, // 6: milvus.proto.segcore.FieldIndexMeta.index_params:type_name -> milvus.proto.common.KeyValuePair
-	16, // 7: milvus.proto.segcore.FieldIndexMeta.user_index_params:type_name -> milvus.proto.common.KeyValuePair
-	8,  // 8: milvus.proto.segcore.CollectionIndexMeta.index_metas:type_name -> milvus.proto.segcore.FieldIndexMeta
-	16, // 9: milvus.proto.segcore.FieldIndexInfo.index_params:type_name -> milvus.proto.common.KeyValuePair
-	1,  // 10: milvus.proto.segcore.SegmentLoadInfo.binlog_paths:type_name -> milvus.proto.segcore.FieldBinlog
-	1,  // 11: milvus.proto.segcore.SegmentLoadInfo.statslogs:type_name -> milvus.proto.segcore.FieldBinlog
-	1,  // 12: milvus.proto.segcore.SegmentLoadInfo.deltalogs:type_name -> milvus.proto.segcore.FieldBinlog
-	10, // 13: milvus.proto.segcore.SegmentLoadInfo.index_infos:type_name -> milvus.proto.segcore.FieldIndexInfo
-	12, // 14: milvus.proto.segcore.SegmentLoadInfo.textStatsLogs:type_name -> milvus.proto.segcore.SegmentLoadInfo.TextStatsLogsEntry
-	1,  // 15: milvus.proto.segcore.SegmentLoadInfo.bm25logs:type_name -> milvus.proto.segcore.FieldBinlog
-	13, // 16: milvus.proto.segcore.SegmentLoadInfo.jsonKeyStatsLogs:type_name -> milvus.proto.segcore.SegmentLoadInfo.JsonKeyStatsLogsEntry
-	17, // 17: milvus.proto.segcore.SegmentLoadInfo.priority:type_name -> milvus.proto.common.LoadPriority
-	2,  // 18: milvus.proto.segcore.SegmentLoadInfo.TextStatsLogsEntry.value:type_name -> milvus.proto.segcore.TextIndexStats
-	3,  // 19: milvus.proto.segcore.SegmentLoadInfo.JsonKeyStatsLogsEntry.value:type_name -> milvus.proto.segcore.JsonKeyStats
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	15, // 1: milvus.proto.segcore.RetrieveResults.ids:type_name -> milvus.proto.schema.IDs
+	16, // 2: milvus.proto.segcore.RetrieveResults.fields_data:type_name -> milvus.proto.schema.FieldData
+	4,  // 3: milvus.proto.segcore.RetrieveResults.element_indices:type_name -> milvus.proto.segcore.ElementIndices
+	6,  // 4: milvus.proto.segcore.LoadSegmentMeta.metas:type_name -> milvus.proto.segcore.LoadFieldMeta
+	16, // 5: milvus.proto.segcore.InsertRecord.fields_data:type_name -> milvus.proto.schema.FieldData
+	17, // 6: milvus.proto.segcore.FieldIndexMeta.type_params:type_name -> milvus.proto.common.KeyValuePair
+	17, // 7: milvus.proto.segcore.FieldIndexMeta.index_params:type_name -> milvus.proto.common.KeyValuePair
+	17, // 8: milvus.proto.segcore.FieldIndexMeta.user_index_params:type_name -> milvus.proto.common.KeyValuePair
+	9,  // 9: milvus.proto.segcore.CollectionIndexMeta.index_metas:type_name -> milvus.proto.segcore.FieldIndexMeta
+	17, // 10: milvus.proto.segcore.FieldIndexInfo.index_params:type_name -> milvus.proto.common.KeyValuePair
+	1,  // 11: milvus.proto.segcore.SegmentLoadInfo.binlog_paths:type_name -> milvus.proto.segcore.FieldBinlog
+	1,  // 12: milvus.proto.segcore.SegmentLoadInfo.statslogs:type_name -> milvus.proto.segcore.FieldBinlog
+	1,  // 13: milvus.proto.segcore.SegmentLoadInfo.deltalogs:type_name -> milvus.proto.segcore.FieldBinlog
+	11, // 14: milvus.proto.segcore.SegmentLoadInfo.index_infos:type_name -> milvus.proto.segcore.FieldIndexInfo
+	13, // 15: milvus.proto.segcore.SegmentLoadInfo.textStatsLogs:type_name -> milvus.proto.segcore.SegmentLoadInfo.TextStatsLogsEntry
+	1,  // 16: milvus.proto.segcore.SegmentLoadInfo.bm25logs:type_name -> milvus.proto.segcore.FieldBinlog
+	14, // 17: milvus.proto.segcore.SegmentLoadInfo.jsonKeyStatsLogs:type_name -> milvus.proto.segcore.SegmentLoadInfo.JsonKeyStatsLogsEntry
+	18, // 18: milvus.proto.segcore.SegmentLoadInfo.priority:type_name -> milvus.proto.common.LoadPriority
+	2,  // 19: milvus.proto.segcore.SegmentLoadInfo.TextStatsLogsEntry.value:type_name -> milvus.proto.segcore.TextIndexStats
+	3,  // 20: milvus.proto.segcore.SegmentLoadInfo.JsonKeyStatsLogsEntry.value:type_name -> milvus.proto.segcore.JsonKeyStats
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_segcore_proto_init() }
@@ -1524,7 +1603,7 @@ func file_segcore_proto_init() {
 			}
 		}
 		file_segcore_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RetrieveResults); i {
+			switch v := v.(*ElementIndices); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1536,7 +1615,7 @@ func file_segcore_proto_init() {
 			}
 		}
 		file_segcore_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LoadFieldMeta); i {
+			switch v := v.(*RetrieveResults); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1548,7 +1627,7 @@ func file_segcore_proto_init() {
 			}
 		}
 		file_segcore_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LoadSegmentMeta); i {
+			switch v := v.(*LoadFieldMeta); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1560,7 +1639,7 @@ func file_segcore_proto_init() {
 			}
 		}
 		file_segcore_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*InsertRecord); i {
+			switch v := v.(*LoadSegmentMeta); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1572,7 +1651,7 @@ func file_segcore_proto_init() {
 			}
 		}
 		file_segcore_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*FieldIndexMeta); i {
+			switch v := v.(*InsertRecord); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1584,7 +1663,7 @@ func file_segcore_proto_init() {
 			}
 		}
 		file_segcore_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CollectionIndexMeta); i {
+			switch v := v.(*FieldIndexMeta); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1596,7 +1675,7 @@ func file_segcore_proto_init() {
 			}
 		}
 		file_segcore_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*FieldIndexInfo); i {
+			switch v := v.(*CollectionIndexMeta); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1608,6 +1687,18 @@ func file_segcore_proto_init() {
 			}
 		}
 		file_segcore_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*FieldIndexInfo); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_segcore_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*SegmentLoadInfo); i {
 			case 0:
 				return &v.state
@@ -1626,7 +1717,7 @@ func file_segcore_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_segcore_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
