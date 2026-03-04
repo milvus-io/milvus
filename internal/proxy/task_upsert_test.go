@@ -1916,59 +1916,10 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 	})
 }
 
-func TestInsertPreExecute_FilterFunctionOutputFields(t *testing.T) {
+func TestInsertPreExecute_FilterBM25AndMinHashOutputFields(t *testing.T) {
 	paramtable.Init()
 
-	// Schema with BM25 and MinHash functions
-	schema := newSchemaInfo(&schemapb.CollectionSchema{
-		Name:   "test_filter_func_output",
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
-			{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "2000"}}},
-			{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
-			{FieldID: 103, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
-			{FieldID: 104, Name: "mh", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "512"}}},
-		},
-		Functions: []*schemapb.FunctionSchema{
-			{
-				Name:             "bm25",
-				Type:             schemapb.FunctionType_BM25,
-				InputFieldIds:    []int64{101},
-				InputFieldNames:  []string{"text"},
-				OutputFieldIds:   []int64{103},
-				OutputFieldNames: []string{"sparse"},
-			},
-			{
-				Name:             "minhash",
-				Type:             schemapb.FunctionType_MinHash,
-				InputFieldIds:    []int64{101},
-				InputFieldNames:  []string{"text"},
-				OutputFieldIds:   []int64{104},
-				OutputFieldNames: []string{"mh"},
-			},
-		},
-	})
-
 	numRows := 2
-	fieldsData := []*schemapb.FieldData{
-		{
-			FieldName: "text", FieldId: 101, Type: schemapb.DataType_VarChar,
-			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello", "world"}}}}},
-		},
-		{
-			FieldName: "vec", FieldId: 102, Type: schemapb.DataType_FloatVector,
-			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 4, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, numRows*4)}}}},
-		},
-		{
-			FieldName: "sparse", FieldId: 103, Type: schemapb.DataType_SparseFloatVector,
-			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Data: &schemapb.VectorField_SparseFloatVector{}}},
-		},
-		{
-			FieldName: "mh", FieldId: 104, Type: schemapb.DataType_BinaryVector,
-			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 512, Data: &schemapb.VectorField_BinaryVector{BinaryVector: make([]byte, numRows*512/8)}}},
-		},
-	}
 
 	getFieldNames := func(data []*schemapb.FieldData) []string {
 		names := make([]string, 0, len(data))
@@ -1978,27 +1929,73 @@ func TestInsertPreExecute_FilterFunctionOutputFields(t *testing.T) {
 		return names
 	}
 
-	t.Run("partial update filters all function output fields", func(t *testing.T) {
+	t.Run("partial update filters BM25 and MinHash output fields", func(t *testing.T) {
 		m := mockey.Mock(common.AllocAutoID).Return(int64(1000), int64(1000+numRows), nil).Build()
 		defer m.UnPatch()
 
-		copiedData := make([]*schemapb.FieldData, len(fieldsData))
-		copy(copiedData, fieldsData)
+		schema := newSchemaInfo(&schemapb.CollectionSchema{
+			Name:   "test_filter_bm25_minhash",
+			AutoID: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "2000"}}},
+				{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+				{FieldID: 103, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+				{FieldID: 104, Name: "mh", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "512"}}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldIds:    []int64{101},
+					InputFieldNames:  []string{"text"},
+					OutputFieldIds:   []int64{103},
+					OutputFieldNames: []string{"sparse"},
+				},
+				{
+					Name:             "minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldIds:    []int64{101},
+					InputFieldNames:  []string{"text"},
+					OutputFieldIds:   []int64{104},
+					OutputFieldNames: []string{"mh"},
+				},
+			},
+		})
+
+		fieldsData := []*schemapb.FieldData{
+			{
+				FieldName: "text", FieldId: 101, Type: schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello", "world"}}}}},
+			},
+			{
+				FieldName: "vec", FieldId: 102, Type: schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 4, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, numRows*4)}}}},
+			},
+			{
+				FieldName: "sparse", FieldId: 103, Type: schemapb.DataType_SparseFloatVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Data: &schemapb.VectorField_SparseFloatVector{}}},
+			},
+			{
+				FieldName: "mh", FieldId: 104, Type: schemapb.DataType_BinaryVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 512, Data: &schemapb.VectorField_BinaryVector{BinaryVector: make([]byte, numRows*512/8)}}},
+			},
+		}
 
 		task := &upsertTask{
 			ctx:         context.Background(),
 			schema:      schema,
 			idAllocator: &allocator.IDAllocator{},
 			req: &milvuspb.UpsertRequest{
-				CollectionName: "test_filter_func_output",
+				CollectionName: "test_filter_bm25_minhash",
 				PartialUpdate:  true,
 			},
 			upsertMsg: &msgstream.UpsertMsg{
 				InsertMsg: &msgstream.InsertMsg{
 					InsertRequest: &msgpb.InsertRequest{
-						CollectionName: "test_filter_func_output",
+						CollectionName: "test_filter_bm25_minhash",
 						Version:        msgpb.InsertDataVersion_ColumnBased,
-						FieldsData:     copiedData,
+						FieldsData:     fieldsData,
 						NumRows:        uint64(numRows),
 						PartitionName:  Params.CommonCfg.DefaultPartitionName.GetValue(),
 					},
@@ -2009,12 +2006,78 @@ func TestInsertPreExecute_FilterFunctionOutputFields(t *testing.T) {
 
 		_ = task.insertPreExecute(context.Background())
 
-		// Verify: sparse and mh (function outputs) should be filtered out
 		remainingFields := getFieldNames(task.upsertMsg.InsertMsg.GetFieldsData())
 		assert.NotContains(t, remainingFields, "sparse")
 		assert.NotContains(t, remainingFields, "mh")
 		assert.Contains(t, remainingFields, "text")
 		assert.Contains(t, remainingFields, "vec")
+	})
+
+	t.Run("partial update preserves non-BM25/MinHash function output fields", func(t *testing.T) {
+		m := mockey.Mock(common.AllocAutoID).Return(int64(1000), int64(1000+numRows), nil).Build()
+		defer m.UnPatch()
+
+		// Schema with a text embedding function (non-BM25/MinHash)
+		schema := newSchemaInfo(&schemapb.CollectionSchema{
+			Name:   "test_preserve_embedding",
+			AutoID: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "2000"}}},
+				{FieldID: 102, Name: "embedding", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_embedding",
+					Type:             schemapb.FunctionType_TextEmbedding,
+					InputFieldIds:    []int64{101},
+					InputFieldNames:  []string{"text"},
+					OutputFieldIds:   []int64{102},
+					OutputFieldNames: []string{"embedding"},
+				},
+			},
+		})
+
+		fieldsData := []*schemapb.FieldData{
+			{
+				FieldName: "text", FieldId: 101, Type: schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello", "world"}}}}},
+			},
+			{
+				FieldName: "embedding", FieldId: 102, Type: schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 4, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, numRows*4)}}}},
+			},
+		}
+
+		task := &upsertTask{
+			ctx:         context.Background(),
+			schema:      schema,
+			idAllocator: &allocator.IDAllocator{},
+			req: &milvuspb.UpsertRequest{
+				CollectionName: "test_preserve_embedding",
+				PartialUpdate:  true,
+			},
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &msgstream.InsertMsg{
+					InsertRequest: &msgpb.InsertRequest{
+						CollectionName: "test_preserve_embedding",
+						Version:        msgpb.InsertDataVersion_ColumnBased,
+						FieldsData:     fieldsData,
+						NumRows:        uint64(numRows),
+						PartitionName:  Params.CommonCfg.DefaultPartitionName.GetValue(),
+					},
+				},
+			},
+			result: &milvuspb.MutationResult{},
+		}
+
+		_ = task.insertPreExecute(context.Background())
+
+		// embedding (text embedding output) should NOT be filtered
+		remainingFields := getFieldNames(task.upsertMsg.InsertMsg.GetFieldsData())
+		assert.Contains(t, remainingFields, "text")
+		assert.Contains(t, remainingFields, "embedding")
+		assert.Len(t, remainingFields, 2)
 	})
 
 	t.Run("partial update with no functions keeps all fields", func(t *testing.T) {
