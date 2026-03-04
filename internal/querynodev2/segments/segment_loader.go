@@ -882,7 +882,7 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 		}
 	}
 
-	textIndexedInfo, jsonKeyIndexInfo, err := packed.NewStatsResolverFromLoadInfo(loadInfo).TextAndJsonIndexStats()
+	textIndexedInfo, jsonKeyIndexInfo, err := packed.NewStatsResolverFromLoadInfo(loadInfo).TextAndJSONIndexStats()
 	if err != nil {
 		log.Warn("failed to load text/json stats from manifest",
 			zap.String("manifestPath", loadInfo.GetManifestPath()), zap.Error(err))

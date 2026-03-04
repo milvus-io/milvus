@@ -193,7 +193,7 @@ func TestStatsResolverLegacy(t *testing.T) {
 		WithStatslogs(statslogs).
 		WithBM25Logs(bm25Logs).
 		WithTextStatsLogs(textStats).
-		WithJsonKeyStats(jsonStats)
+		WithJSONKeyStats(jsonStats)
 
 	t.Run("isManifest", func(t *testing.T) {
 		assert.False(t, resolver.isManifest())
@@ -229,8 +229,8 @@ func TestStatsResolverLegacy(t *testing.T) {
 		assert.Equal(t, []string{"bm25/50/10"}, paths[50])
 	})
 
-	t.Run("TextAndJsonIndexStats", func(t *testing.T) {
-		text, json, err := resolver.TextAndJsonIndexStats()
+	t.Run("TextAndJSONIndexStats", func(t *testing.T) {
+		text, json, err := resolver.TextAndJSONIndexStats()
 		assert.NoError(t, err)
 		assert.Equal(t, textStats, text)
 		assert.Equal(t, jsonStats, json)

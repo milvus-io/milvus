@@ -102,7 +102,7 @@ func (r *StatsResolver) WithTextStatsLogs(t map[int64]*datapb.TextIndexStats) *S
 	return r
 }
 
-func (r *StatsResolver) WithJsonKeyStats(j map[int64]*datapb.JsonKeyStats) *StatsResolver {
+func (r *StatsResolver) WithJSONKeyStats(j map[int64]*datapb.JsonKeyStats) *StatsResolver {
 	r.jsonKeyStats = j
 	return r
 }
@@ -213,10 +213,10 @@ func (r *StatsResolver) BM25StatsPaths() (map[int64][]string, error) {
 	return result, nil
 }
 
-// TextAndJsonIndexStats returns text index and JSON key stats.
+// TextAndJSONIndexStats returns text index and JSON key stats.
 // For manifest: parsed from manifest metadata (highest version wins per field).
-// For legacy: returns the WithTextStatsLogs/WithJsonKeyStats maps directly.
-func (r *StatsResolver) TextAndJsonIndexStats() (
+// For legacy: returns the WithTextStatsLogs/WithJSONKeyStats maps directly.
+func (r *StatsResolver) TextAndJSONIndexStats() (
 	map[int64]*datapb.TextIndexStats, map[int64]*datapb.JsonKeyStats, error,
 ) {
 	if !r.isManifest() {

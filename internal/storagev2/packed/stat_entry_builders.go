@@ -58,8 +58,8 @@ func TextIndexStatEntries(textStats map[int64]*datapb.TextIndexStats, scalarInde
 	return entries
 }
 
-// JsonKeyStatEntries builds StatEntry slice from JSON key stats.
-func JsonKeyStatEntries(jsonStats map[int64]*datapb.JsonKeyStats) []StatEntry {
+// JSONKeyStatEntries builds StatEntry slice from JSON key stats.
+func JSONKeyStatEntries(jsonStats map[int64]*datapb.JsonKeyStats) []StatEntry {
 	entries := make([]StatEntry, 0, len(jsonStats))
 	for fieldID, js := range jsonStats {
 		entries = append(entries, StatEntry{

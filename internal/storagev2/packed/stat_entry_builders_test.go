@@ -95,7 +95,7 @@ func TestTextIndexStatEntries(t *testing.T) {
 	assert.Equal(t, "3", e.Metadata["current_scalar_index_version"])
 }
 
-func TestJsonKeyStatEntries(t *testing.T) {
+func TestJSONKeyStatEntries(t *testing.T) {
 	jsonStats := map[int64]*datapb.JsonKeyStats{
 		20: {
 			FieldID:                20,
@@ -107,7 +107,7 @@ func TestJsonKeyStatEntries(t *testing.T) {
 			JsonKeyStatsDataFormat: 2,
 		},
 	}
-	entries := JsonKeyStatEntries(jsonStats)
+	entries := JSONKeyStatEntries(jsonStats)
 	assert.Len(t, entries, 1)
 	e := entries[0]
 	assert.Equal(t, "json_key_index.20", e.Key)

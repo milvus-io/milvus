@@ -739,7 +739,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 
 	// When manifest_path is set, register JSON key stats in manifest
 	if st.manifestPath != "" && len(jsonKeyIndexStats) > 0 {
-		statEntries := packed.JsonKeyStatEntries(jsonKeyIndexStats)
+		statEntries := packed.JSONKeyStatEntries(jsonKeyIndexStats)
 		newManifest, err := packed.AddStatsToManifest(
 			st.manifestPath, st.req.GetStorageConfig(), statEntries)
 		if err != nil {
