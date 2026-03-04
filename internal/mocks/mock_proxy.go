@@ -4252,6 +4252,65 @@ func (_c *MockProxy_GetReplicas_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
+// GetReplicateConfiguration provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetReplicateConfiguration(_a0 context.Context, _a1 *milvuspb.GetReplicateConfigurationRequest) (*milvuspb.GetReplicateConfigurationResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReplicateConfiguration")
+	}
+
+	var r0 *milvuspb.GetReplicateConfigurationResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetReplicateConfigurationRequest) (*milvuspb.GetReplicateConfigurationResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetReplicateConfigurationRequest) *milvuspb.GetReplicateConfigurationResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetReplicateConfigurationResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetReplicateConfigurationRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_GetReplicateConfiguration_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReplicateConfiguration'
+type MockProxy_GetReplicateConfiguration_Call struct {
+	*mock.Call
+}
+
+// GetReplicateConfiguration is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetReplicateConfigurationRequest
+func (_e *MockProxy_Expecter) GetReplicateConfiguration(_a0 interface{}, _a1 interface{}) *MockProxy_GetReplicateConfiguration_Call {
+	return &MockProxy_GetReplicateConfiguration_Call{Call: _e.mock.On("GetReplicateConfiguration", _a0, _a1)}
+}
+
+func (_c *MockProxy_GetReplicateConfiguration_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetReplicateConfigurationRequest)) *MockProxy_GetReplicateConfiguration_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetReplicateConfigurationRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_GetReplicateConfiguration_Call) Return(_a0 *milvuspb.GetReplicateConfigurationResponse, _a1 error) *MockProxy_GetReplicateConfiguration_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_GetReplicateConfiguration_Call) RunAndReturn(run func(context.Context, *milvuspb.GetReplicateConfigurationRequest) (*milvuspb.GetReplicateConfigurationResponse, error)) *MockProxy_GetReplicateConfiguration_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetReplicateInfo provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) GetReplicateInfo(_a0 context.Context, _a1 *milvuspb.GetReplicateInfoRequest) (*milvuspb.GetReplicateInfoResponse, error) {
 	ret := _m.Called(_a0, _a1)
