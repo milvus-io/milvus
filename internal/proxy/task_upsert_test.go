@@ -1915,3 +1915,172 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 		})
 	})
 }
+
+func TestUpsertTask_queryPreExecute_DefaultValueWithValidData(t *testing.T) {
+	// Schema with a non-nullable field that has DefaultValue
+	schema := newSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_default_value_upsert",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+			{
+				FieldID: 102, Name: "default_col", DataType: schemapb.DataType_VarChar,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_StringData{StringData: "default_val"},
+				},
+			},
+		},
+	})
+
+	// Upsert 3 rows; default_col in compressed format: 2 actual values, row 3 uses default
+	upsertData := []*schemapb.FieldData{
+		{
+			FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}},
+		},
+		{
+			FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{100, 200, 300}}}}},
+		},
+		{
+			FieldName: "default_col", FieldId: 102, Type: schemapb.DataType_VarChar,
+			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "b"}}}}},
+			ValidData: []bool{true, true, false},
+		},
+	}
+
+	// Query result: existing records for PKs 1, 2
+	mockQueryResult := &milvuspb.QueryResults{
+		Status: merr.Success(),
+		FieldsData: []*schemapb.FieldData{
+			{
+				FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}},
+			},
+			{
+				FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{10, 20}}}}},
+			},
+			{
+				FieldName: "default_col", FieldId: 102, Type: schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"old1", "old2"}}}}},
+			},
+		},
+	}
+
+	task := &upsertTask{
+		ctx:    context.Background(),
+		schema: schema,
+		req: &milvuspb.UpsertRequest{
+			FieldsData: upsertData,
+			NumRows:    3,
+		},
+		upsertMsg: &msgstream.UpsertMsg{
+			InsertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					FieldsData: upsertData,
+					NumRows:    3,
+					Version:    msgpb.InsertDataVersion_ColumnBased,
+				},
+			},
+		},
+		node: &Proxy{},
+	}
+
+	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
+	defer mockRetrieve.UnPatch()
+
+	err := task.queryPreExecute(context.Background())
+	assert.NoError(t, err)
+
+	// Verify default_col was expanded: "a", "b", "default_val"
+	var defaultColField *schemapb.FieldData
+	for _, f := range task.insertFieldData {
+		if f.GetFieldName() == "default_col" {
+			defaultColField = f
+			break
+		}
+	}
+	assert.NotNil(t, defaultColField)
+	assert.Equal(t, []string{"a", "b", "default_val"}, defaultColField.GetScalars().GetStringData().GetData())
+}
+
+func TestUpsertTask_queryPreExecute_DefaultValueError(t *testing.T) {
+	// Schema with a non-nullable field that has DefaultValue
+	schema := newSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_default_value_error",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+			{
+				FieldID: 102, Name: "default_col", DataType: schemapb.DataType_VarChar,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_StringData{StringData: "default_val"},
+				},
+			},
+		},
+	})
+
+	// Upsert 3 rows; default_col has ValidData with wrong length (2 instead of 3)
+	upsertData := []*schemapb.FieldData{
+		{
+			FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}},
+		},
+		{
+			FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{100, 200, 300}}}}},
+		},
+		{
+			// ValidData length (2) doesn't match numRows (3) → FillWithDefaultValue returns error
+			FieldName: "default_col", FieldId: 102, Type: schemapb.DataType_VarChar,
+			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}}}},
+			ValidData: []bool{true, false},
+		},
+	}
+
+	// Query result: existing records for PKs 1, 2
+	mockQueryResult := &milvuspb.QueryResults{
+		Status: merr.Success(),
+		FieldsData: []*schemapb.FieldData{
+			{
+				FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}},
+			},
+			{
+				FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{10, 20}}}}},
+			},
+			{
+				FieldName: "default_col", FieldId: 102, Type: schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"old1", "old2"}}}}},
+			},
+		},
+	}
+
+	task := &upsertTask{
+		ctx:    context.Background(),
+		schema: schema,
+		req: &milvuspb.UpsertRequest{
+			FieldsData: upsertData,
+			NumRows:    3,
+		},
+		upsertMsg: &msgstream.UpsertMsg{
+			InsertMsg: &msgstream.InsertMsg{
+				InsertRequest: &msgpb.InsertRequest{
+					FieldsData: upsertData,
+					NumRows:    3,
+					Version:    msgpb.InsertDataVersion_ColumnBased,
+				},
+			},
+		},
+		node: &Proxy{},
+	}
+
+	mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
+	defer mockRetrieve.UnPatch()
+
+	err := task.queryPreExecute(context.Background())
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
