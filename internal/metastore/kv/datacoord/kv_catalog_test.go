@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -2221,5 +2222,286 @@ func TestCatalog_ExternalCollectionRefresh(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(tasks))
 		assert.Equal(t, int64(54321), tasks[0].TaskId)
+	})
+}
+
+func TestCatalog_DataView(t *testing.T) {
+	t.Run("TestSaveAndListDataViews", func(t *testing.T) {
+		view1 := &viewpb.DataViewOfCollection{
+			CollectionId: 100,
+			DataVersion: &viewpb.DataVersion{
+				StreamingVersion: 1,
+				CompactVersion:   2,
+			},
+		}
+		view2 := &viewpb.DataViewOfCollection{
+			CollectionId: 100,
+			DataVersion: &viewpb.DataVersion{
+				StreamingVersion: 3,
+				CompactVersion:   4,
+			},
+		}
+		view3 := &viewpb.DataViewOfCollection{
+			CollectionId: 200,
+			DataVersion: &viewpb.DataVersion{
+				StreamingVersion: 5,
+				CompactVersion:   6,
+			},
+		}
+
+		// Test Save
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(3)
+		kc := &Catalog{MetaKv: txn}
+
+		assert.NoError(t, kc.SaveDataView(context.Background(), 100, view1))
+		assert.NoError(t, kc.SaveDataView(context.Background(), 100, view2))
+		assert.NoError(t, kc.SaveDataView(context.Background(), 200, view3))
+
+		// Test List
+		value1, err := proto.Marshal(view1)
+		assert.NoError(t, err)
+		value2, err := proto.Marshal(view2)
+		assert.NoError(t, err)
+		value3, err := proto.Marshal(view3)
+		assert.NoError(t, err)
+
+		key1 := buildDataViewKey(100, 1, 2)
+		key2 := buildDataViewKey(100, 3, 4)
+		key3 := buildDataViewKey(200, 5, 6)
+
+		txn2 := mocks.NewMetaKv(t)
+		txn2.EXPECT().WalkWithPrefix(mock.Anything, DataViewPrefix, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+				if err := f([]byte(key1), value1); err != nil {
+					return err
+				}
+				if err := f([]byte(key2), value2); err != nil {
+					return err
+				}
+				return f([]byte(key3), value3)
+			}).Times(1)
+		kc2 := &Catalog{MetaKv: txn2, paginationSize: 100}
+
+		views, err := kc2.ListDataViews(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(views))
+		assert.Equal(t, 2, len(views[100]))
+		assert.Equal(t, 1, len(views[200]))
+		assert.Equal(t, int64(1), views[100][0].GetDataVersion().GetStreamingVersion())
+		assert.Equal(t, int64(2), views[100][0].GetDataVersion().GetCompactVersion())
+		assert.Equal(t, int64(3), views[100][1].GetDataVersion().GetStreamingVersion())
+		assert.Equal(t, int64(5), views[200][0].GetDataVersion().GetStreamingVersion())
+	})
+
+	t.Run("TestSaveDataView_Error", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("save error")).Times(1)
+		kc := &Catalog{MetaKv: txn}
+
+		view := &viewpb.DataViewOfCollection{
+			CollectionId: 100,
+			DataVersion: &viewpb.DataVersion{
+				StreamingVersion: 1,
+				CompactVersion:   2,
+			},
+		}
+		err := kc.SaveDataView(context.Background(), 100, view)
+		assert.Error(t, err)
+	})
+
+	t.Run("TestListDataViews_WalkError", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, DataViewPrefix, mock.Anything, mock.Anything).Return(errors.New("walk error")).Times(1)
+		kc := &Catalog{MetaKv: txn, paginationSize: 100}
+
+		views, err := kc.ListDataViews(context.Background())
+		assert.Error(t, err)
+		assert.Nil(t, views)
+	})
+
+	t.Run("TestListDataViews_UnmarshalError", func(t *testing.T) {
+		key := buildDataViewKey(100, 1, 2)
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, DataViewPrefix, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+				return f([]byte(key), []byte("invalid"))
+			}).Times(1)
+		kc := &Catalog{MetaKv: txn, paginationSize: 100}
+
+		views, err := kc.ListDataViews(context.Background())
+		assert.Error(t, err)
+		assert.Nil(t, views)
+	})
+
+	t.Run("TestListDataViews_InvalidKeyFormat", func(t *testing.T) {
+		view := &viewpb.DataViewOfCollection{
+			CollectionId: 100,
+			DataVersion: &viewpb.DataVersion{
+				StreamingVersion: 1,
+				CompactVersion:   2,
+			},
+		}
+		value, err := proto.Marshal(view)
+		assert.NoError(t, err)
+
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, DataViewPrefix, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+				return f([]byte("a/b"), value)
+			}).Times(1)
+		kc := &Catalog{MetaKv: txn, paginationSize: 100}
+
+		views, err := kc.ListDataViews(context.Background())
+		assert.Error(t, err)
+		assert.Nil(t, views)
+	})
+
+	t.Run("TestListDataViews_InvalidCollectionID", func(t *testing.T) {
+		view := &viewpb.DataViewOfCollection{
+			CollectionId: 100,
+			DataVersion: &viewpb.DataVersion{
+				StreamingVersion: 1,
+				CompactVersion:   2,
+			},
+		}
+		value, err := proto.Marshal(view)
+		assert.NoError(t, err)
+
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, DataViewPrefix, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, _ string, _ int, f func([]byte, []byte) error) error {
+				return f([]byte(DataViewPrefix+"/not_a_number/1/2"), value)
+			}).Times(1)
+		kc := &Catalog{MetaKv: txn, paginationSize: 100}
+
+		views, err := kc.ListDataViews(context.Background())
+		assert.Error(t, err)
+		assert.Nil(t, views)
+	})
+
+	t.Run("TestDropDataView", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().Remove(mock.Anything, buildDataViewKey(100, 1, 2)).Return(nil).Times(1)
+		kc := &Catalog{MetaKv: txn}
+
+		version := &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2}
+		err := kc.DropDataView(context.Background(), 100, version)
+		assert.NoError(t, err)
+	})
+
+	t.Run("TestDropDataView_Error", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("remove error")).Times(1)
+		kc := &Catalog{MetaKv: txn}
+
+		version := &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2}
+		err := kc.DropDataView(context.Background(), 100, version)
+		assert.Error(t, err)
+	})
+
+	t.Run("TestDropDataViewsByCollection", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().RemoveWithPrefix(mock.Anything, buildDataViewCollectionPrefix(100)).Return(nil).Times(1)
+		kc := &Catalog{MetaKv: txn}
+
+		err := kc.DropDataViewsByCollection(context.Background(), 100)
+		assert.NoError(t, err)
+	})
+
+	t.Run("TestDropDataViewsByCollection_Error", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(errors.New("remove error")).Times(1)
+		kc := &Catalog{MetaKv: txn}
+
+		err := kc.DropDataViewsByCollection(context.Background(), 100)
+		assert.Error(t, err)
+	})
+
+	t.Run("TestAlterSegmentsAndSaveDataView", func(t *testing.T) {
+		var savedKvs map[string]string
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string]string) error {
+			savedKvs = m
+			return nil
+		})
+
+		catalog := NewCatalog(metakv, rootPath, "")
+		seg := &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Flushed,
+		}
+		view := &viewpb.DataViewOfCollection{
+			CollectionId: 100,
+			DataVersion: &viewpb.DataVersion{
+				StreamingVersion: 3,
+				CompactVersion:   1,
+			},
+		}
+		err := catalog.AlterSegmentsAndSaveDataView(context.TODO(), []*datapb.SegmentInfo{seg}, 100, view)
+		assert.NoError(t, err)
+
+		// Verify both segment KV and DataView KV are in the same batch
+		segKey := buildSegmentPath(seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID())
+		assert.Contains(t, savedKvs, segKey)
+		dvKey := buildDataViewKey(100, 3, 1)
+		assert.Contains(t, savedKvs, dvKey)
+
+		// Verify DataView value is correct
+		var decoded viewpb.DataViewOfCollection
+		assert.NoError(t, proto.Unmarshal([]byte(savedKvs[dvKey]), &decoded))
+		assert.Equal(t, int64(100), decoded.GetCollectionId())
+		assert.Equal(t, int64(3), decoded.GetDataVersion().GetStreamingVersion())
+		assert.Equal(t, int64(1), decoded.GetDataVersion().GetCompactVersion())
+	})
+
+	t.Run("TestAlterSegmentsAndSaveDataView_NilView", func(t *testing.T) {
+		var savedKvs map[string]string
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string]string) error {
+			savedKvs = m
+			return nil
+		})
+
+		catalog := NewCatalog(metakv, rootPath, "")
+		seg := &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Flushed,
+		}
+		err := catalog.AlterSegmentsAndSaveDataView(context.TODO(), []*datapb.SegmentInfo{seg}, 100, nil)
+		assert.NoError(t, err)
+
+		// Only segment KV, no DataView KV
+		segKey := buildSegmentPath(seg.GetCollectionID(), seg.GetPartitionID(), seg.GetID())
+		assert.Contains(t, savedKvs, segKey)
+		for k := range savedKvs {
+			assert.False(t, strings.HasPrefix(k, DataViewPrefix), "should not contain DataView key when view is nil")
+		}
+	})
+
+	t.Run("TestAlterSegmentsAndSaveDataView_SaveError", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("save error"))
+
+		catalog := NewCatalog(metakv, rootPath, "")
+		seg := &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Flushed,
+		}
+		view := &viewpb.DataViewOfCollection{
+			CollectionId: 100,
+			DataVersion: &viewpb.DataVersion{
+				StreamingVersion: 1,
+				CompactVersion:   1,
+			},
+		}
+		err := catalog.AlterSegmentsAndSaveDataView(context.TODO(), []*datapb.SegmentInfo{seg}, 100, view)
+		assert.Error(t, err)
 	})
 }
