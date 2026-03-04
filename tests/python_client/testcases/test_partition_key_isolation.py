@@ -83,7 +83,8 @@ class TestPartitionKeyIsolation(TestcaseBase):
         log.info(f"collection {collection_name} loaded, num_entities: {num}")
         all_df = pd.concat(all_data)
         collection.compact()
-        collection.wait_for_compaction_completed()
+        if collection.compaction_id > 0:
+            collection.wait_for_compaction_completed()
         t0 = time.time()
         collection.create_index("emb", index_params=index_params)
         index_list = utility.list_indexes(collection_name=collection_name)
@@ -97,7 +98,8 @@ class TestPartitionKeyIsolation(TestcaseBase):
         tt = time.time() - t0
         log.info(f"create index cost time {tt}")
         collection.compact()
-        collection.wait_for_compaction_completed()
+        if collection.compaction_id > 0:
+            collection.wait_for_compaction_completed()
         t0 = time.time()
         collection.load()
         log.info(f"load collection cost time {time.time() - t0}")
@@ -179,7 +181,8 @@ class TestPartitionKeyIsolation(TestcaseBase):
             log.info(f"generate test data {batch_size} cost time {time.time() - t0}")
             collection.insert(df)
         collection.compact()
-        collection.wait_for_compaction_completed()
+        if collection.compaction_id > 0:
+            collection.wait_for_compaction_completed()
         t0 = time.time()
         collection.create_index("emb", index_params=index_params)
         index_list = utility.list_indexes(collection_name=collection_name)
@@ -193,7 +196,8 @@ class TestPartitionKeyIsolation(TestcaseBase):
         tt = time.time() - t0
         log.info(f"create index cost time {tt}")
         collection.compact()
-        collection.wait_for_compaction_completed()
+        if collection.compaction_id > 0:
+            collection.wait_for_compaction_completed()
         t0 = time.time()
         collection.load()
         log.info(f"load collection cost time {time.time() - t0}")
@@ -318,7 +322,8 @@ class TestPartitionKeyIsolation(TestcaseBase):
             log.info(f"generate test data {batch_size} cost time {time.time() - t0}")
             collection.insert(df)
         collection.compact()
-        collection.wait_for_compaction_completed()
+        if collection.compaction_id > 0:
+            collection.wait_for_compaction_completed()
         t0 = time.time()
         collection.create_index("emb", index_params=index_params)
         index_list = utility.list_indexes(collection_name=collection_name)
