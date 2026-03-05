@@ -134,26 +134,21 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::ARRAY: {
             if (expr_->vals_.size() == 0) {
-                SetNotUseIndex();
                 result = ExecVisitorImplTemplateArray<bool>(context);
                 break;
             }
             auto type = expr_->vals_[0].val_case();
             switch (type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal:
-                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<bool>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
-                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<int64_t>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
-                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<double>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
-                    SetNotUseIndex();
                     result = ExecVisitorImplTemplateArray<std::string>(context);
                     break;
                 default:
@@ -258,7 +253,8 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
     if (expr_->is_in_field_) {
         return ExecTermJsonVariableInField<ValueType>(context);
     } else {
-        if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+        // use_index_ is already determined during initialization by DetermineUseIndex()
+        if (use_index_ && !has_offset_input_) {
             // we create double index for json int64 field for now
             using GetType =
                 std::conditional_t<std::is_same_v<ValueType, int64_t>,
@@ -874,7 +870,8 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
 template <typename T>
 VectorPtr
 PhyTermFilterExpr::ExecVisitorImpl(EvalCtx& context) {
-    if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+    // use_index_ is already determined during initialization by DetermineUseIndex()
+    if (use_index_ && !has_offset_input_) {
         return ExecVisitorImplForIndex<T>();
     } else {
         return ExecVisitorImplForData<T>(context);
@@ -1069,6 +1066,29 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+void
+PhyTermFilterExpr::DetermineUseIndex() {
+    // check base condition first
+    if (!SegmentExpr::CanUseIndex()) {
+        use_index_ = false;
+        return;
+    }
+
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+
+    // for ARRAY type, don't use index
+    if (data_type == DataType::ARRAY) {
+        use_index_ = false;
+        return;
+    }
+
+    // for other types (including JSON), use index
+    use_index_ = true;
 }
 
 }  //namespace exec

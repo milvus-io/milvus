@@ -91,6 +91,14 @@ PhyFilterBitsNode::GetOutput() {
 
     TargetBitmap bitset;
     TargetBitmap valid_bitset;
+
+    // optimization: if all expressions can be executed at once,
+    // set batch size to execute all at once for better performance.
+    if (exprs_->CanExecuteAllAtOnce()) {
+        tracer::AddEvent("expr_execute_all_at_once");
+        exprs_->SetExecuteAllAtOnce();
+    }
+
     while (num_processed_rows_ < need_process_rows_) {
         exprs_->Eval(0, 1, true, eval_ctx, results_);
 

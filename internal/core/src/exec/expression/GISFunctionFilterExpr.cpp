@@ -191,17 +191,20 @@ namespace exec {
                real_batch_size);                                             \
     return res_vec;
 
-bool
-PhyGISFunctionFilterExpr::CanUseIndex(
-    proto::plan::GISFunctionFilterExpr_GISOp op) const {
+void
+PhyGISFunctionFilterExpr::DetermineUseIndex() {
+    // check base condition first
     if (!SegmentExpr::CanUseIndex()) {
-        return false;
+        use_index_ = false;
+        return;
     }
-    switch (op) {
+    // STIsValid operation cannot use index
+    switch (expr_->op_) {
         case proto::plan::GISFunctionFilterExpr_GISOp_STIsValid:
-            return false;
+            use_index_ = false;
+            break;
         default:
-            return true;
+            use_index_ = true;
     }
 }
 
@@ -210,7 +213,8 @@ PhyGISFunctionFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     AssertInfo(expr_->column_.data_type_ == DataType::GEOMETRY,
                "unsupported data type: {}",
                expr_->column_.data_type_);
-    if (CanUseIndex(expr_->op_)) {
+    // use_index_ is already determined during initialization by DetermineUseIndex()
+    if (use_index_) {
         result = EvalForIndexSegment();
     } else {
         result = EvalForDataSegment();

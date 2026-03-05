@@ -90,12 +90,14 @@ class Expr {
 
     virtual void
     Eval(EvalCtx& context, VectorPtr& result) {
+        ThrowInfo(ErrorCode::NotImplemented, "not implemented");
     }
 
     // Only move cursor to next batch
     // but not do real eval for optimization
     virtual void
     MoveCursor() {
+        ThrowInfo(ErrorCode::NotImplemented, "not implemented");
     }
 
     void
@@ -111,6 +113,21 @@ class Expr {
     virtual std::string
     ToString() const {
         ThrowInfo(ErrorCode::NotImplemented, "not implemented");
+    }
+
+    // check if this expression can be executed all at once without batch iteration.
+    virtual bool
+    CanExecuteAllAtOnce() const {
+        return false;
+    }
+
+    // set batch size to active count to execute all at once.
+    // should only be called when CanExecuteAllAtOnce() returns true.
+    virtual void
+    SetExecuteAllAtOnce() {
+        for (auto& input : inputs_) {
+            input->SetExecuteAllAtOnce();
+        }
     }
 
     virtual bool
@@ -303,11 +320,8 @@ class SegmentExpr : public Expr {
 
     void
     MoveCursor() override {
-        // when we specify input, do not maintain states
         if (!has_offset_input_) {
-            // CanUseIndex excludes ngram index and this is true even ngram index is used as ExecNgramMatch
-            // uses data cursor.
-            if (SegmentExpr::CanUseIndex()) {
+            if (use_index_) {
                 MoveCursorForIndex();
                 if (segment_->HasFieldData(field_id_)) {
                     MoveCursorForData();
@@ -334,17 +348,14 @@ class SegmentExpr : public Expr {
 
     int64_t
     GetNextBatchSize() {
-        auto current_chunk = SegmentExpr::CanUseIndex() && use_index_
-                                 ? current_index_chunk_
-                                 : current_data_chunk_;
-        auto current_chunk_pos = SegmentExpr::CanUseIndex() && use_index_
-                                     ? current_index_chunk_pos_
-                                     : current_data_chunk_pos_;
+        auto current_chunk =
+            use_index_ ? current_index_chunk_ : current_data_chunk_;
+        auto current_chunk_pos =
+            use_index_ ? current_index_chunk_pos_ : current_data_chunk_pos_;
         auto current_rows = 0;
         if (segment_->is_chunked()) {
             current_rows =
-                SegmentExpr::CanUseIndex() && use_index_ &&
-                        segment_->type() == SegmentType::Sealed
+                use_index_ && segment_->type() == SegmentType::Sealed
                     ? current_chunk_pos
                     : segment_->num_rows_until_chunk(field_id_, current_chunk) +
                           current_chunk_pos;
@@ -600,7 +611,7 @@ class SegmentExpr : public Expr {
         int64_t processed_size = 0;
 
         // index reverse lookup
-        if (SegmentExpr::CanUseIndex() && num_data_chunk_ == 0) {
+        if (use_index_ && num_data_chunk_ == 0) {
             return ProcessIndexLookupByOffsets<T>(
                 func, skip_func, input, res, valid_res, values...);
         }
@@ -2060,6 +2071,31 @@ class SegmentExpr : public Expr {
         return false;
     };
 
+    // check if this expression can be executed all at once without batch iteration.
+    // conditions:
+    // 1. use_index_ is true (determined during initialization by DetermineUseIndex())
+    // 2. or using offset input (has_offset_input_ is true)
+    // Note: use_index_ is set by DetermineUseIndex() which is called in subclass constructors.
+    bool
+    CanExecuteAllAtOnce() const override {
+        return use_index_ || has_offset_input_;
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        batch_size_ = active_count_;
+    }
+
+    // determine whether to use index for this expression.
+    // this method is called during initialization by subclass constructors.
+    // subclasses should override this method to implement their own logic.
+    // after this method returns, use_index_ should be correctly set.
+    virtual void
+    DetermineUseIndex() {
+        // default implementation: use index if CanUseIndex() returns true
+        use_index_ = CanUseIndex();
+    }
+
  protected:
     const segcore::SegmentInternalInterface* segment_;
     const FieldId field_id_;
@@ -2073,9 +2109,9 @@ class SegmentExpr : public Expr {
     bool allow_any_json_cast_type_{false};
     bool is_json_contains_{false};
     bool is_data_mode_{false};
-    // sometimes need to skip index and using raw data
-    // default true means use index as much as possible
-    bool use_index_{true};
+    // whether to use index for this expression, determined by DetermineUseIndex()
+    // default false, subclass constructors should call DetermineUseIndex() to set
+    bool use_index_{false};
     // used for reducing cache miss latency in tiered storage
     bool prefetched_{false};
     std::vector<PinWrapper<const index::IndexBase*>> pinned_index_{};
@@ -2177,6 +2213,27 @@ class ExprSet {
     const std::shared_ptr<Expr>&
     expr(int32_t index) const {
         return exprs_[index];
+    }
+
+    // check if all expressions can be executed all at once without batch iteration.
+    // only if all expressions support this optimization.
+    bool
+    CanExecuteAllAtOnce() const {
+        for (const auto& expr : exprs_) {
+            if (!expr->CanExecuteAllAtOnce()) {
+                return false;
+            }
+        }
+        return !exprs_.empty();
+    }
+
+    // set batch size to active count to execute all at once.
+    // propagates to all expressions in the set.
+    void
+    SetExecuteAllAtOnce() {
+        for (auto& expr : exprs_) {
+            expr->SetExecuteAllAtOnce();
+        }
     }
 
  private:
