@@ -16,7 +16,6 @@ default_primary_key_field_name = ct.default_primary_key_field_name
 default_vector_field_name = ct.default_vector_field_name
 default_int32_field_name = ct.default_int32_field_name
 default_search_exp = "id >= 0"
-ENTITY_TTL_QUERY_COLLECTION = "test_entity_ttl_query" + cf.gen_unique_str("_")
 
 class TestMilvusClientTTL(TestMilvusClientV2Base):
     """ Test case of Time To Live """
@@ -348,6 +347,36 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
 
 # ==================== Entity TTL Tests ==================== #
 class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
+
+    def _create_ttl_collection(self, client, collection_name, extra_fields=None,
+                               properties=None, ttl_nullable=True, **kwargs):
+        """Create a collection with standard TTL schema (pk + ttl + vector + index)."""
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=ttl_nullable)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        for field in (extra_fields or []):
+            schema.add_field(**field)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
+        if properties is None:
+            properties = {"ttl_field": "ttl", "timezone": "UTC"}
+        self.create_collection(client, collection_name, schema=schema, properties=properties,
+                               consistency_level="Strong", index_params=index_params, **kwargs)
+
+    def _wait_until_count(self, client, collection_name, expected_count, timeout=30, interval=2):
+        """Poll until query count(*) equals expected_count or timeout is reached."""
+        for _ in range(timeout // interval):
+            res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                             consistency_level=CONSISTENCY_STRONG)[0]
+            if res[0].get('count(*)') == expected_count:
+                return
+            time.sleep(interval)
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == expected_count, \
+            f"Expected count {expected_count}, got {res[0].get('count(*)')} after {timeout}s"
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_collection_with_entity_ttl_field(self):
         """
@@ -411,7 +440,6 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.skip("BUG #47416")
-    # BUG #47416
     def test_alter_remove_entity_ttl_field(self):
         """
         target: test removing ttl_field from collection
@@ -531,13 +559,9 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
         assert res[0].get('count(*)') == nb
 
-        # Wait for TTL to expire
-        log.info(f"Waiting {ttl_seconds + 5} seconds for data to expire...")
-        time.sleep(ttl_seconds + 5)
-
-        # Verify data is expired
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
-        assert res[0].get('count(*)') == 0
+        # Wait for TTL to expire (poll until count reaches 0)
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=0)
 
         self.drop_collection(client, collection_name)
 
@@ -563,18 +587,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self.create_database(client, db_name, properties={"timezone": "UTC"})
         self.using_database(client, db_name)
 
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
-
-        # Create collection with ttl_field
-        properties = {"ttl_field": "ttl"}
-        self.create_collection(client, collection_name, schema=schema,
-                               properties=properties, consistency_level="Strong", index_params=index_params)
+        self._create_ttl_collection(client, collection_name, properties={"ttl_field": "ttl"})
 
         # Insert data with future timestamp (10 seconds from now in UTC)
         ttl_timestamp = datetime.now(timezone.utc) + timedelta(seconds=10)
@@ -600,13 +613,9 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
         assert res[0].get('count(*)') == nb
 
-        # Wait for TTL to expire
-        log.info("Waiting for data to expire...")
-        time.sleep(15)
-
-        # Verify data expires based on original UTC timestamp
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
-        assert res[0].get('count(*)') == 0
+        # Wait for TTL to expire (poll until count reaches 0)
+        time.sleep(10)
+        self._wait_until_count(client, collection_name, expected_count=0)
 
         # Cleanup
         self.drop_collection(client, collection_name)
@@ -630,18 +639,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         nb = 100
         ttl_seconds = 8
 
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
-
-        # Create collection with ttl_field
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema, 
-                               properties=properties, consistency_level="Strong", index_params=index_params)
+        self._create_ttl_collection(client, collection_name)
 
         # Insert data with future ttl
         ttl_timestamp = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
@@ -656,13 +654,9 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
         assert res[0].get('count(*)') == nb
 
-        # Wait for TTL to expire
-        log.info(f"Waiting {ttl_seconds + 5} seconds for data to expire...")
-        time.sleep(ttl_seconds + 5)
-
-        # Verify data is invisible
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
-        assert res[0].get('count(*)') == 0
+        # Wait for TTL to expire (poll until count reaches 0)
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=0)
 
         self.drop_collection(client, collection_name)
 
@@ -680,18 +674,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         nb = 100
 
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
-
-        # Create collection with ttl_field
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema, 
-                        properties=properties, consistency_level="Strong", index_params=index_params)
+        self._create_ttl_collection(client, collection_name)
 
         # Insert data with past ttl (already expired)
         ttl_timestamp = datetime.now(timezone.utc) - timedelta(seconds=60)
@@ -711,42 +694,55 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_with_null_entity_ttl(self):
         """
-        target: test inserting data with NULL ttl (never expires)
+        target: test inserting data with NULL ttl (never expires) persists through
+                flush, compaction, and release/reload
         method:
             1. Create collection with ttl_field (nullable=True)
-            2. Insert data with ttl = NULL
-            3. Verify data remains visible after significant time
-        expected: Data with NULL ttl never expires
+            2. Insert NULL ttl data + short TTL data
+            3. Wait for short TTL data to expire
+            4. Verify NULL data survives after flush, compact, release/reload
+        expected: Data with NULL ttl never expires and persists through all operations
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        nb = 100
+        nb = 50
+        ttl_seconds = 8
 
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
+        self._create_ttl_collection(client, collection_name)
 
-        # Create collection with ttl_field
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema, 
-                               properties=properties, consistency_level="Strong", index_params=index_params)
-
-        # Insert data with NULL ttl
-        vectors = cf.gen_vectors(nb, dim=default_dim)
-        rows = [{default_primary_key_field_name: i, "ttl": None, default_vector_field_name: list(vectors[i])} for i in range(nb)]
+        # Insert NULL ttl data (never expires) + short TTL data
+        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        vectors = cf.gen_vectors(nb * 2, dim=default_dim)
+        rows = []
+        for i in range(nb * 2):
+            ttl_value = None if i < nb else future_ttl
+            rows.append({default_primary_key_field_name: i, "ttl": ttl_value,
+                         default_vector_field_name: list(vectors[i])})
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
-        # Verify data is visible
+        # Verify all data visible before expiry
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        assert res[0].get('count(*)') == nb * 2
+
+        # Wait for short TTL data to expire
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=nb)
+
+        # Flush and verify NULL data persists
+        self.flush(client, collection_name)
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
         assert res[0].get('count(*)') == nb
 
-        # Wait a bit and verify data is still visible
+        # Compact and verify NULL data persists
+        self.compact(client, collection_name)
         time.sleep(3)
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        assert res[0].get('count(*)') == nb
+
+        # Release and reload, verify NULL data persists
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
         assert res[0].get('count(*)') == nb
 
@@ -772,18 +768,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         nb = 90  # 30 for each category
         ttl_seconds = 8
 
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
-
-        # Create collection with ttl_field
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema, 
-                               properties=properties, consistency_level="Strong", index_params=index_params)
+        self._create_ttl_collection(client, collection_name)
 
         # Prepare ttl values
         future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
@@ -808,13 +793,9 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
         assert res[0].get('count(*)') == 60
 
-        # Wait for future data to expire
-        log.info(f"Waiting {ttl_seconds + 5} seconds for future data to expire...")
-        time.sleep(ttl_seconds + 5)
-
-        # Verify only NULL data remains (30)
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
-        assert res[0].get('count(*)') == 30
+        # Wait for future data to expire (poll until only NULL data remains)
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=30)
 
         self.drop_collection(client, collection_name)
 
@@ -835,18 +816,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         nb = 50
         ttl_seconds = 10
 
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-
-        # Create collection with ttl_field
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
-        self.create_collection(client, collection_name, schema=schema,
-                               properties=properties, index_params=index_params)
+        self._create_ttl_collection(client, collection_name)
 
         # Insert data with future ttl
         ttl_timestamp = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
@@ -866,13 +836,9 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
         assert res[0].get('count(*)') == nb
 
-        # Wait for original ttl to expire
-        log.info(f"Waiting {ttl_seconds + 5} seconds for data to expire...")
-        time.sleep(ttl_seconds + 5)
-
-        # Verify data expires at original ttl time
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
-        assert res[0].get('count(*)') == 0
+        # Wait for original ttl to expire (poll until count reaches 0)
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=0)
 
         self.drop_collection(client, collection_name)
 
@@ -894,18 +860,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         nb = 50
         original_ttl_seconds = 8
 
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
-
-        # Create collection with ttl_field
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema,
-                               properties=properties, consistency_level="Strong", index_params=index_params)
+        self._create_ttl_collection(client, collection_name)
 
         # Insert data with original TTL (8s)
         original_ttl = (datetime.now(timezone.utc) + timedelta(seconds=original_ttl_seconds)).isoformat()
@@ -929,11 +884,8 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         log.info(f"Count after original TTL expired: {res[0].get('count(*)')}")
         assert res[0].get('count(*)') == nb
 
-        # Wait past extended TTL (with buffer for CI)
-        time.sleep(10)
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
-                         consistency_level=CONSISTENCY_STRONG)[0]
-        assert res[0].get('count(*)') == 0
+        # Wait past extended TTL (poll until count reaches 0)
+        self._wait_until_count(client, collection_name, expected_count=0)
 
         self.drop_collection(client, collection_name)
 
@@ -954,18 +906,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         nb = 50
         short_ttl_seconds = 8
 
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
-
-        # Create collection with ttl_field
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema,
-                               properties=properties, consistency_level="Strong", index_params=index_params)
+        self._create_ttl_collection(client, collection_name)
 
         # Insert data with long TTL (60s)
         long_ttl = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()
@@ -986,14 +927,9 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
                         default_vector_field_name: list(vectors[i])} for i in range(nb)]
         self.upsert(client, collection_name, upsert_rows)
 
-        # Wait for short TTL to expire
-        log.info(f"Waiting {short_ttl_seconds + 5} seconds for shortened TTL to expire...")
-        time.sleep(short_ttl_seconds + 5)
-
-        # Verify data expired at the shorter deadline
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
-                         consistency_level=CONSISTENCY_STRONG)[0]
-        assert res[0].get('count(*)') == 0
+        # Wait for short TTL to expire (poll until count reaches 0)
+        time.sleep(short_ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=0)
 
         self.drop_collection(client, collection_name)
 
@@ -1015,18 +951,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         nb = 100
         ttl_seconds = 10
 
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
-
-        # Create collection with ttl_field
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema,
-                               properties=properties, consistency_level="Strong", index_params=index_params)
+        self._create_ttl_collection(client, collection_name)
 
         # Insert data with future ttl
         ttl_timestamp = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
@@ -1050,14 +975,9 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
                          consistency_level=CONSISTENCY_STRONG)[0]
         assert res[0].get('count(*)') == nb
 
-        # Wait for TTL to expire
-        log.info(f"Waiting {ttl_seconds + 5} seconds for data to expire after reload...")
-        time.sleep(ttl_seconds + 5)
-
-        # Verify data is invisible after TTL expires
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
-                         consistency_level=CONSISTENCY_STRONG)[0]
-        assert res[0].get('count(*)') == 0
+        # Wait for TTL to expire (poll until count reaches 0)
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=0)
 
         self.drop_collection(client, collection_name)
 
@@ -1078,18 +998,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         nb = 100
         ttl_seconds = 60
 
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
-
-        # Create collection with ttl_field
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema,
-                               properties=properties, consistency_level="Strong", index_params=index_params)
+        self._create_ttl_collection(client, collection_name)
 
         # Insert data with long TTL
         ttl_timestamp = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
@@ -1146,18 +1055,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         nb = 30
         ttl_seconds = 8
 
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
-
-        # Create collection with ttl_field
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema,
-                               properties=properties, consistency_level="Strong", index_params=index_params)
+        self._create_ttl_collection(client, collection_name)
 
         # Insert data with explicit timezone offset (+08:00)
         now_utc = datetime.now(timezone.utc)
@@ -1187,13 +1085,9 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
         assert res[0].get('count(*)') == nb
 
-        # Wait for TTL to expire
-        log.info(f"Waiting {ttl_seconds + 5} seconds for data to expire...")
-        time.sleep(ttl_seconds + 5)
-
-        # Verify all data expired regardless of timestamp format
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
-        assert res[0].get('count(*)') == 0
+        # Wait for TTL to expire (poll until count reaches 0)
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=0)
 
         self.drop_collection(client, collection_name)
 
@@ -1219,18 +1113,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         nb = 100
         ttl_seconds = 8
 
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
-
-        # Create collection with ttl_field
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema,
-                               properties=properties, consistency_level="Strong", index_params=index_params)
+        self._create_ttl_collection(client, collection_name)
 
         # Insert first batch with short TTL
         ttl_str = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
@@ -1245,9 +1128,9 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
                          consistency_level=CONSISTENCY_STRONG)[0]
         assert res[0].get('count(*)') == nb
 
-        # Wait for TTL to expire
-        log.info(f"Waiting {ttl_seconds + 5} seconds for first batch to expire...")
-        time.sleep(ttl_seconds + 5)
+        # Wait for TTL to expire (poll until count reaches 0)
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=0)
 
         # Verify first batch is gone
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
@@ -1294,188 +1177,409 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-
-@pytest.mark.xdist_group("TestMilvusClientEntityTTLQuery")
-class TestMilvusClientEntityTTLQuery(TestMilvusClientV2Base):
-    """
-    Entity TTL Query Tests - Using shared collection to reduce time cost
-    """
-    collection_name = ENTITY_TTL_QUERY_COLLECTION
-    nb = 500
-    dim = default_dim
-    ttl_seconds = 10
-    vectors = None
-    _ttl_expired = False
-
-    @pytest.fixture(scope="class", autouse=True)
-    def prepare_data(self, request):
-        """
-        Prepare shared collection with entity ttl data for query tests
-        """
-        client = self._client()
-        collection_name = self.collection_name
-        nb = self.nb
-        ttl_seconds = self.ttl_seconds
-
-        if client.has_collection(collection_name):
-            client.drop_collection(collection_name)
-
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field("varchar_field", DataType.VARCHAR, max_length=100, nullable=True)
-
-        # Create collection with ttl_field (force_teardown=False to keep shared collection across tests)
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema, properties=properties, force_teardown=False)
-
-        # Create index and load
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
-        self.create_index(client, collection_name, index_params=index_params)
-        self.load_collection(client, collection_name)
-
-        # Insert data with mixed ttl
-        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
-        past_ttl = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
-
-        vectors = cf.gen_vectors(nb, dim=default_dim)
-        rows = []
-        for i in range(nb):
-            if i < 200:
-                ttl_value = future_ttl  # Will expire in 10 seconds
-            elif i < 400:
-                ttl_value = past_ttl  # Already expired
-            else:
-                ttl_value = None  # Never expires
-            rows.append({
-                default_primary_key_field_name: i,
-                "ttl": ttl_value,
-                default_vector_field_name: list(vectors[i]),
-                "varchar_field": f"text_{i}"
-            })
-
-        self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)
-
-        # Verify data before expiry inside fixture where execution order is guaranteed
-        # Future (200) + NULL (100) = 300 visible; past (200) already expired
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
-                         consistency_level=CONSISTENCY_STRONG)[0]
-        assert res[0].get('count(*)') == 300, \
-            f"Expected 300 visible rows before TTL expiry, got {res[0].get('count(*)')}"
-
-        # Store generated vectors on class (other attributes are already class-level)
-        TestMilvusClientEntityTTLQuery.vectors = vectors
-        TestMilvusClientEntityTTLQuery._ttl_expired = False
-
-        def teardown():
-            try:
-                if self.has_collection(self._client(), collection_name):
-                    self.drop_collection(self._client(), collection_name)
-            except Exception:
-                pass
-        request.addfinalizer(teardown)
-
-    def _wait_for_ttl_expire(self):
-        if TestMilvusClientEntityTTLQuery._ttl_expired:
-            return
-        log.info(f"Waiting {self.ttl_seconds + 5} seconds for data to expire...")
-        time.sleep(self.ttl_seconds + 5)
-        TestMilvusClientEntityTTLQuery._ttl_expired = True
-
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_filter_expired_entity_data(self):
         """
         target: test query automatically filters expired data after TTL expiry
         method:
-            1. Wait for ttl to expire (pre-expiry count verified in prepare_data fixture)
-            2. Query and verify only NULL data remains (100)
+            1. Create collection with ttl_field, insert mixed TTL data
+            2. Verify count before expiry (future + NULL = visible)
+            3. Wait for TTL to expire
+            4. Query and verify only NULL data remains
         expected: Query automatically filters expired data
         """
         client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 300
+        ttl_seconds = 8
 
-        # Wait for ttl to expire
-        self._wait_for_ttl_expire()
+        self._create_ttl_collection(client, collection_name)
 
-        # Query after expiration - should only get NULL data (100)
-        res = self.query(client, self.collection_name, filter="", output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
-        assert res[0].get('count(*)') == 100
+        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        past_ttl = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+        vectors = cf.gen_vectors(nb, dim=default_dim)
+        rows = []
+        for i in range(nb):
+            if i < 100:
+                ttl_value = future_ttl
+            elif i < 200:
+                ttl_value = past_ttl
+            else:
+                ttl_value = None
+            rows.append({default_primary_key_field_name: i, "ttl": ttl_value,
+                         default_vector_field_name: list(vectors[i])})
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
 
+        # Before expiry: future (100) + NULL (100) = 200 visible; past (100) already expired
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        assert res[0].get('count(*)') == 200
+
+        # Wait for TTL to expire (poll until only NULL data remains)
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=100)
+
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_filter_expired_entity_data(self):
         """
         target: test search filters expired data when filter expression is present
         method:
-            1. Perform vector search with a filter expression
-            2. Verify search results only contain non-expired data
+            1. Create collection with ttl_field, insert future TTL + NULL TTL data
+            2. Wait for TTL to expire
+            3. Search with filter and verify only NULL TTL data is returned
         expected: Search results do not include expired data
         """
         client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 200
+        ttl_seconds = 8
 
-        self._wait_for_ttl_expire()
+        self._create_ttl_collection(client, collection_name)
 
-        # Search with filter - TTL filtering is applied when a filter expression is present
-        search_vectors = cf.gen_vectors(1, dim=self.dim)
-        res = self.search(client, self.collection_name, search_vectors, anns_field='vector',
+        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        vectors = cf.gen_vectors(nb, dim=default_dim)
+        rows = []
+        for i in range(nb):
+            if i < 100:
+                ttl_value = future_ttl
+            else:
+                ttl_value = None
+            rows.append({default_primary_key_field_name: i, "ttl": ttl_value,
+                         default_vector_field_name: list(vectors[i])})
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Wait for TTL to expire (poll until only NULL data remains)
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=100)
+
+        search_vectors = cf.gen_vectors(1, dim=default_dim)
+        res = self.search(client, collection_name, search_vectors, anns_field=default_vector_field_name,
                          search_params={}, limit=10, filter="id >= 0",
                          consistency_level=CONSISTENCY_STRONG)[0]
 
-        # Should get results from NULL data only
         assert len(res[0]) > 0
         for hit in res[0]:
-            # All results should be from id >= 400 (NULL ttl data)
-            assert hit['id'] >= 400
+            assert hit['id'] >= 100
+
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_without_filter_expired_entity_data(self):
         """
         target: test search without filter also filters expired data
         method:
-            1. Wait for TTL to expire
-            2. Perform vector search without any filter expression
-            3. Verify search results only contain non-expired (NULL ttl) data
+            1. Create collection with ttl_field, insert future TTL + NULL TTL data
+            2. Wait for TTL to expire
+            3. Search without filter and verify only NULL TTL data is returned
         expected: TTL filtering is applied regardless of whether a filter expression
                   is present. Search without filter should not return expired entities.
         """
         client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 200
+        ttl_seconds = 8
 
-        self._wait_for_ttl_expire()
+        self._create_ttl_collection(client, collection_name)
 
-        search_vectors = cf.gen_vectors(1, dim=self.dim)
-        res = self.search(client, self.collection_name, search_vectors, anns_field='vector',
+        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        vectors = cf.gen_vectors(nb, dim=default_dim)
+        rows = []
+        for i in range(nb):
+            if i < 100:
+                ttl_value = future_ttl
+            else:
+                ttl_value = None
+            rows.append({default_primary_key_field_name: i, "ttl": ttl_value,
+                         default_vector_field_name: list(vectors[i])})
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Wait for TTL to expire (poll until only NULL data remains)
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=100)
+
+        search_vectors = cf.gen_vectors(1, dim=default_dim)
+        res = self.search(client, collection_name, search_vectors, anns_field=default_vector_field_name,
                          search_params={}, limit=10,
                          consistency_level=CONSISTENCY_STRONG)[0]
 
         assert len(res[0]) > 0
         for hit in res[0]:
-            # All results should be from id >= 400 (NULL ttl data that never expires)
-            assert hit['id'] >= 400, \
-                f"Search without filter returned expired entity id={hit['id']} (expected only id >= 400)"
+            assert hit['id'] >= 100, \
+                f"Search without filter returned expired entity id={hit['id']} (expected only id >= 100)"
+
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_output_entity_ttl_field(self):
         """
         target: test query can output ttl field values
         method:
-            1. Query with output_fields including ttl
-            2. Verify ttl values are returned correctly
+            1. Create collection with ttl_field, insert data with NULL ttl
+            2. Query with output_fields including ttl
+            3. Verify ttl values are returned correctly
         expected: ttl field values are returned in query results
         """
         client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 10
 
-        # Query with ttl field in output
-        res = self.query(client, self.collection_name, filter="id >= 400 and id < 405",
-                        output_fields=[default_primary_key_field_name, "ttl", "varchar_field"], consistency_level=CONSISTENCY_STRONG)[0]
+        self._create_ttl_collection(client, collection_name, extra_fields=[
+            {"field_name": "varchar_field", "datatype": DataType.VARCHAR, "max_length": 100, "nullable": True}
+        ])
+
+        vectors = cf.gen_vectors(nb, dim=default_dim)
+        rows = [{default_primary_key_field_name: i, "ttl": None,
+                 default_vector_field_name: list(vectors[i]),
+                 "varchar_field": f"text_{i}"} for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        res = self.query(client, collection_name, filter=f"id >= 0 and id < 5",
+                        output_fields=[default_primary_key_field_name, "ttl", "varchar_field"],
+                        consistency_level=CONSISTENCY_STRONG)[0]
 
         assert len(res) == 5
         for row in res:
             assert default_primary_key_field_name in row
             assert "ttl" in row
-            assert row["ttl"] is None  # NULL ttl data
+            assert row["ttl"] is None
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_entity_ttl_compaction_reclaims_space(self):
+        """
+        target: test that compaction physically removes expired TTL data and reclaims space
+        method:
+            1. Create collection with ttl_field, insert data with short TTL
+            2. Record row_count from collection stats before expiry
+            3. Wait for TTL to expire, then trigger compaction
+            4. Verify row_count decreases after compaction completes
+        expected: Compaction physically deletes expired data and reduces row_count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 200
+        ttl_seconds = 8
+
+        self._create_ttl_collection(client, collection_name)
+
+        # Insert data with short TTL
+        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        vectors = cf.gen_vectors(nb, dim=default_dim)
+        rows = [{default_primary_key_field_name: i, "ttl": future_ttl,
+                 default_vector_field_name: list(vectors[i])} for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Record row_count before expiry
+        stats_before = self.get_collection_stats(client, collection_name)[0]
+        row_count_before = stats_before.get("row_count", 0)
+        log.info(f"Row count before expiry: {row_count_before}")
+
+        # Wait for TTL to expire
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=0)
+
+        # Trigger compaction and wait for it to complete
+        self.compact(client, collection_name)
+        time.sleep(10)
+
+        # Verify row_count decreases after compaction
+        stats_after = self.get_collection_stats(client, collection_name)[0]
+        row_count_after = stats_after.get("row_count", 0)
+        log.info(f"Row count after compaction: {row_count_after}")
+        assert row_count_after < row_count_before, \
+            f"Expected row_count to decrease after compaction, before={row_count_before}, after={row_count_after}"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_entity_ttl_with_partitions(self):
+        """
+        target: test entity TTL works independently across different partitions
+        method:
+            1. Create collection with ttl_field and two partitions
+            2. Insert short TTL data into partition_a, long TTL data into partition_b
+            3. Wait for short TTL to expire
+            4. Verify partition_a data expired, partition_b data still visible
+        expected: TTL expiration is per-entity and works correctly across partitions
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 50
+        short_ttl_seconds = 8
+
+        self._create_ttl_collection(client, collection_name)
+        self.create_partition(client, collection_name, "partition_a")
+        self.create_partition(client, collection_name, "partition_b")
+
+        # Insert short TTL data into partition_a
+        short_ttl = (datetime.now(timezone.utc) + timedelta(seconds=short_ttl_seconds)).isoformat()
+        vectors_a = cf.gen_vectors(nb, dim=default_dim)
+        rows_a = [{default_primary_key_field_name: i, "ttl": short_ttl,
+                   default_vector_field_name: list(vectors_a[i])} for i in range(nb)]
+        self.insert(client, collection_name, rows_a, partition_name="partition_a")
+
+        # Insert long TTL data into partition_b
+        long_ttl = (datetime.now(timezone.utc) + timedelta(seconds=300)).isoformat()
+        vectors_b = cf.gen_vectors(nb, dim=default_dim)
+        rows_b = [{default_primary_key_field_name: nb + i, "ttl": long_ttl,
+                   default_vector_field_name: list(vectors_b[i])} for i in range(nb)]
+        self.insert(client, collection_name, rows_b, partition_name="partition_b")
+        self.flush(client, collection_name)
+
+        # Verify both partitions have data
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         partition_names=["partition_a"])[0]
+        assert res[0].get('count(*)') == nb
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         partition_names=["partition_b"])[0]
+        assert res[0].get('count(*)') == nb
+
+        # Wait for short TTL to expire
+        time.sleep(short_ttl_seconds)
+        # Poll on total count: partition_a expired (0) + partition_b alive (nb) = nb
+        self._wait_until_count(client, collection_name, expected_count=nb)
+
+        # Verify partition_a data expired
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         partition_names=["partition_a"])[0]
+        assert res[0].get('count(*)') == 0
+
+        # Verify partition_b data still visible
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         partition_names=["partition_b"])[0]
+        assert res[0].get('count(*)') == nb
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_entity_ttl_with_dynamic_field(self):
+        """
+        target: test entity TTL works with enable_dynamic_field=True and dynamic fields
+                are properly cleaned up on expiry
+        method:
+            1. Create collection with ttl_field and enable_dynamic_field=True
+            2. Insert short TTL data with dynamic fields + NULL TTL data with dynamic fields
+            3. Verify dynamic fields are queryable before expiry
+            4. Wait for short TTL to expire
+            5. Verify expired rows (including their dynamic fields) are gone
+            6. Verify surviving NULL TTL rows still have correct dynamic fields
+        expected: TTL works correctly with dynamic fields; expired entities and their
+                  dynamic field data are fully removed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 50
+        ttl_seconds = 8
+
+        # Create schema with dynamic field enabled
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
+        properties = {"ttl_field": "ttl", "timezone": "UTC"}
+        self.create_collection(client, collection_name, schema=schema, properties=properties,
+                               consistency_level="Strong", index_params=index_params)
+
+        # Insert short TTL data (id 0~49) with dynamic fields
+        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        vectors = cf.gen_vectors(nb * 2, dim=default_dim)
+        rows = []
+        for i in range(nb):
+            rows.append({default_primary_key_field_name: i, "ttl": future_ttl,
+                         default_vector_field_name: list(vectors[i]),
+                         "dynamic_str": f"expire_{i}", "dynamic_int": i})
+        # Insert NULL TTL data (id 50~99) with dynamic fields
+        for i in range(nb, nb * 2):
+            rows.append({default_primary_key_field_name: i, "ttl": None,
+                         default_vector_field_name: list(vectors[i]),
+                         "dynamic_str": f"keep_{i}", "dynamic_int": i * 10})
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Verify dynamic fields are queryable before expiry
+        res = self.query(client, collection_name, filter="id < 5",
+                         output_fields=[default_primary_key_field_name, "dynamic_str", "dynamic_int"])[0]
+        assert len(res) == 5
+        for row in res:
+            assert row["dynamic_str"].startswith("expire_")
+
+        # Wait for short TTL to expire
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=nb)
+
+        # Verify surviving NULL TTL rows still have correct dynamic fields
+        res = self.query(client, collection_name, filter=f"id >= {nb} and id < {nb + 5}",
+                         output_fields=[default_primary_key_field_name, "dynamic_str", "dynamic_int"])[0]
+        assert len(res) == 5
+        for row in res:
+            assert row["dynamic_str"].startswith("keep_")
+            assert row["dynamic_int"] == row[default_primary_key_field_name] * 10
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_entity_ttl_with_query_iterator(self):
+        """
+        target: test query iterator filters expired TTL data
+        method:
+            1. Create collection with ttl_field
+            2. Insert short TTL data + NULL TTL data
+            3. Wait for short TTL to expire
+            4. Use query_iterator to traverse all data
+            5. Verify iterator only returns non-expired (NULL TTL) data
+        expected: Query iterator respects TTL filtering, expired entities are not yielded
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 50
+        ttl_seconds = 8
+
+        self._create_ttl_collection(client, collection_name)
+
+        # Insert short TTL data (id 0~49) + NULL TTL data (id 50~99)
+        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        vectors = cf.gen_vectors(nb * 2, dim=default_dim)
+        rows = []
+        for i in range(nb * 2):
+            ttl_value = future_ttl if i < nb else None
+            rows.append({default_primary_key_field_name: i, "ttl": ttl_value,
+                         default_vector_field_name: list(vectors[i])})
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Wait for short TTL to expire
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=nb)
+
+        # Use query_iterator to traverse all remaining data
+        iterator = self.query_iterator(client, collection_name, batch_size=10,
+                                       output_fields=[default_primary_key_field_name, "ttl"])[0]
+        iterated_ids = []
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            for row in batch:
+                iterated_ids.append(row[default_primary_key_field_name])
+        iterator.close()
+
+        # Verify iterator only returned NULL TTL data (id >= 50)
+        assert len(iterated_ids) == nb, \
+            f"Expected {nb} rows from iterator, got {len(iterated_ids)}"
+        for pk in iterated_ids:
+            assert pk >= nb, \
+                f"Iterator returned expired entity id={pk} (expected only id >= {nb})"
+
+        self.drop_collection(client, collection_name)
 
 
 class TestMilvusClientEntityTTLInvalid(TestMilvusClientV2Base):
