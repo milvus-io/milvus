@@ -1314,6 +1314,32 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_without_filter_expired_entity_data(self):
+        """
+        target: test search without filter also filters expired data
+        method:
+            1. Wait for TTL to expire
+            2. Perform vector search without any filter expression
+            3. Verify search results only contain non-expired (NULL ttl) data
+        expected: TTL filtering is applied regardless of whether a filter expression
+                  is present. Search without filter should not return expired entities.
+        """
+        client = self._client()
+
+        self._wait_for_ttl_expire()
+
+        search_vectors = cf.gen_vectors(1, dim=self.dim)
+        res = self.search(client, self.collection_name, search_vectors, anns_field='vector',
+                         search_params={}, limit=10,
+                         consistency_level=CONSISTENCY_STRONG)[0]
+
+        assert len(res[0]) > 0
+        for hit in res[0]:
+            # All results should be from id >= 400 (NULL ttl data that never expires)
+            assert hit['id'] >= 400, \
+                f"Search without filter returned expired entity id={hit['id']} (expected only id >= 400)"
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_output_entity_ttl_field(self):
         """
