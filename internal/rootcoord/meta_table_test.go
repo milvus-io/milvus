@@ -1194,8 +1194,8 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 			mock.Anything, // model.Collection
 			mock.AnythingOfType("uint64"),
 		).Return(nil)
-		catalog.On("DeleteGrantByCollectionName",
-			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		catalog.On("DeleteGrantByCollectionID",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
@@ -1217,15 +1217,15 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 }
 
 func TestMetaTable_RemoveCollection_GrantDeleteBestEffort(t *testing.T) {
-	// When DeleteGrantByCollectionName fails, RemoveCollection should still succeed (best-effort)
+	// When DeleteGrantByCollectionID fails, RemoveCollection should still succeed (best-effort)
 	catalog := mocks.NewRootCoordCatalog(t)
 	catalog.On("DropCollection",
 		mock.Anything,
 		mock.Anything,
 		mock.AnythingOfType("uint64"),
 	).Return(nil)
-	catalog.On("DeleteGrantByCollectionName",
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+	catalog.On("DeleteGrantByCollectionID",
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 	).Return(errors.New("grant delete failed"))
 
 	meta := &MetaTable{
@@ -1251,8 +1251,8 @@ func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {
 		catalog.On("AlterCollection",
 			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		).Return(nil)
-		catalog.On("DeleteGrantByCollectionName",
-			mock.Anything, mock.Anything, "testdb", "collection",
+		catalog.On("DeleteGrantByCollectionID",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		).Return(nil)
 
 		meta := &MetaTable{
@@ -1273,17 +1273,17 @@ func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {
 		ctx := context.Background()
 		err := meta.DropCollection(ctx, 100, 9999)
 		assert.NoError(t, err)
-		catalog.AssertCalled(t, "DeleteGrantByCollectionName", mock.Anything, mock.Anything, "testdb", "collection")
+		catalog.AssertCalled(t, "DeleteGrantByCollectionID", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("grant cleanup best-effort on drop", func(t *testing.T) {
-		// When DeleteGrantByCollectionName fails, DropCollection should still succeed
+		// When DeleteGrantByCollectionID fails, DropCollection should still succeed
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("AlterCollection",
 			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		).Return(nil)
-		catalog.On("DeleteGrantByCollectionName",
-			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		catalog.On("DeleteGrantByCollectionID",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 		).Return(errors.New("grant delete failed"))
 
 		meta := &MetaTable{

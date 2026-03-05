@@ -70,9 +70,10 @@ type RootCoordCatalog interface {
 	// Returns the specific user if enitity is provided
 	// Returns RoleInfo inside each UserResult if includeRoleInfo is True
 	ListUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error)
-	// AlterGrant  grants or revokes a grant of a role to an object, according to the operateType.
-	// Please make sure entity and operateType are valid before calling this API
-	AlterGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
+	// AlterGrant grants or revokes a grant of a role to an object, according to the operateType.
+	// For Collection object type, dbID and collectionID should be the actual IDs; for other types, pass 0.
+	// When both IDs are provided, dual-write is performed (ID-based + name-based keys) for rollback safety.
+	AlterGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType, dbID int64, collectionID int64) error
 	// DeleteGrant deletes all the grant for a role.
 	// Please make sure the role.Name isn't empty before call this API.
 	DeleteGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error
@@ -84,10 +85,14 @@ type RootCoordCatalog interface {
 	// For example []string{"user1/role1"}
 	ListUserRole(ctx context.Context, tenant string) ([]string, error)
 
-	// DeleteGrantByCollectionName deletes all grants for a specific collection.
-	DeleteGrantByCollectionName(ctx context.Context, tenant string, dbName string, collectionName string) error
-	// MigrateGrantCollectionName migrates all grants from oldName to newName when a collection is renamed.
-	MigrateGrantCollectionName(ctx context.Context, tenant string, oldDBName string, oldName string, newDBName string, newName string) error
+	// DeleteGrantByCollectionID deletes all grants (both ID-based and name-based dual-write keys)
+	// for a specific collection by its ID and name.
+	DeleteGrantByCollectionID(ctx context.Context, tenant string, collectionID int64, dbName string, collectionName string) error
+	// MigrateGrantsToEntityID performs a one-time additive migration of name-based grants to ID-based grants during upgrade.
+	// New ID-based keys are created alongside existing name-based keys for rollback safety.
+	MigrateGrantsToEntityID(ctx context.Context, tenant string,
+		collectionNameToID func(dbName, collName string) (int64, error),
+		dbNameToID func(dbName string) (int64, error)) error
 
 	ListCredentialsWithPasswd(ctx context.Context) (map[string]string, error)
 	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)

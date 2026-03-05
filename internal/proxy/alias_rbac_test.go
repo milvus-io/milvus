@@ -544,9 +544,8 @@ func TestAlterAliasTask_ResolvesCollectionAlias(t *testing.T) {
 	assert.Equal(t, "real_collection", task.CollectionName)
 }
 
-func TestCreateAliasTask_ResolvesEvenWhenRBACFlagDisabled(t *testing.T) {
-	// Alias resolution in CreateAlias/AlterAlias is unconditional (for correctness),
-	// independent of the RBAC feature flag.
+func TestCreateAliasTask_AlwaysResolvesAlias(t *testing.T) {
+	// Alias resolution in CreateAlias/AlterAlias is unconditional (for correctness).
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -565,8 +564,6 @@ func TestCreateAliasTask_ResolvesEvenWhenRBACFlagDisabled(t *testing.T) {
 	defer func() { globalMetaCache = oldCache }()
 
 	paramtable.Init()
-	paramtable.Get().Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "false")
-	defer paramtable.Get().Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
 
 	task := &CreateAliasTask{
 		Condition: NewTaskCondition(ctx),
@@ -582,7 +579,7 @@ func TestCreateAliasTask_ResolvesEvenWhenRBACFlagDisabled(t *testing.T) {
 
 	err := task.PreExecute(ctx)
 	assert.NoError(t, err)
-	// CollectionName should be resolved even when RBAC flag is disabled
+	// CollectionName should always be resolved from alias to real collection
 	assert.Equal(t, "real_collection", task.CollectionName)
 }
 
