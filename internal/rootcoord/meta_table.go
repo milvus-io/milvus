@@ -698,6 +698,12 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		return err
 	}
 
+	tenant := Params.CommonCfg.ClusterName.GetValue()
+	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, tenant, coll.DBName, coll.Name); err != nil {
+		log.Ctx(ctx).Warn("failed to delete grants for dropped collection, skipping",
+			zap.String("dbName", coll.DBName), zap.String("collectionName", coll.Name), zap.Error(err))
+	}
+
 	allNames := common.CloneStringList(aliases)
 	allNames = append(allNames, coll.Name)
 
@@ -1030,6 +1036,15 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	} else {
 		if err := mt.catalog.AlterCollectionDB(ctx1, oldColl, newColl, newColl.UpdateTimestamp); err != nil {
 			return err
+		}
+	}
+
+	if oldColl.Name != newColl.Name || oldColl.DBName != newColl.DBName {
+		tenant := Params.CommonCfg.ClusterName.GetValue()
+		if err := mt.catalog.MigrateGrantCollectionName(ctx1, tenant, oldColl.DBName, oldColl.Name, newColl.DBName, newColl.Name); err != nil {
+			log.Ctx(ctx).Warn("failed to migrate grants for renamed collection, skipping",
+				zap.String("oldDBName", oldColl.DBName), zap.String("oldName", oldColl.Name),
+				zap.String("newDBName", newColl.DBName), zap.String("newName", newColl.Name), zap.Error(err))
 		}
 	}
 
