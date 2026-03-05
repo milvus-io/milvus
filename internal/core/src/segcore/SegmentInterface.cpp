@@ -462,49 +462,6 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
     }
 }
 
-void
-SegmentInternalInterface::timestamp_filter(BitsetType& bitset,
-                                           Timestamp timestamp) const {
-    auto& timestamps = get_timestamps();
-    auto cnt = bitset.size();
-    if (timestamps[cnt - 1] <= timestamp) {
-        // no need to filter out anything.
-        return;
-    }
-
-    auto pilot = upper_bound(timestamps, 0, cnt, timestamp);
-    // offset bigger than pilot should be filtered out.
-    auto offset = pilot;
-    while (offset < cnt) {
-        bitset[offset] = false;
-
-        const auto next_offset = bitset.find_next(offset);
-        if (!next_offset.has_value()) {
-            return;
-        }
-        offset = next_offset.value();
-    }
-}
-
-void
-SegmentInternalInterface::timestamp_filter(BitsetType& bitset,
-                                           const std::vector<int64_t>& offsets,
-                                           Timestamp timestamp) const {
-    auto& timestamps = get_timestamps();
-    auto cnt = bitset.size();
-    if (timestamps[cnt - 1] <= timestamp) {
-        // no need to filter out anything.
-        return;
-    }
-
-    // point query, faster than binary search.
-    for (auto& offset : offsets) {
-        if (timestamps[offset] > timestamp) {
-            bitset.set(offset, true);
-        }
-    }
-}
-
 const SkipIndex&
 SegmentInternalInterface::GetSkipIndex() const {
     return skip_index_;
