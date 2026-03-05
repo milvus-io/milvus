@@ -1459,70 +1459,64 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_entity_ttl_with_dynamic_field(self):
+    def test_entity_ttl_switch_ttl_field(self):
         """
-        target: test entity TTL works with enable_dynamic_field=True and dynamic fields
-                are properly cleaned up on expiry
+        target: test switching ttl_field from one TIMESTAMPTZ field to another
         method:
-            1. Create collection with ttl_field and enable_dynamic_field=True
-            2. Insert short TTL data with dynamic fields + NULL TTL data with dynamic fields
-            3. Verify dynamic fields are queryable before expiry
-            4. Wait for short TTL to expire
-            5. Verify expired rows (including their dynamic fields) are gone
-            6. Verify surviving NULL TTL rows still have correct dynamic fields
-        expected: TTL works correctly with dynamic fields; expired entities and their
-                  dynamic field data are fully removed
+            1. Create collection with two TIMESTAMPTZ fields (ttl, ttl_dynamic),
+               set ttl as ttl_field
+            2. Insert data where ttl = far future (won't expire), ttl_dynamic = short TTL
+            3. Verify data does NOT expire based on ttl_dynamic (not the active ttl_field)
+            4. Switch ttl_field to ttl_dynamic via alter_collection_properties
+            5. Verify data now expires based on ttl_dynamic
+        expected: Expiration behavior follows the currently active ttl_field;
+                  switching ttl_field changes which field controls expiry
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         nb = 50
-        ttl_seconds = 8
+        short_ttl_seconds = 8
 
-        # Create schema with dynamic field enabled
-        schema = self.create_schema(client, enable_dynamic_field=True)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", metric_type="L2", nlist=128)
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema, properties=properties,
-                               consistency_level="Strong", index_params=index_params)
+        # Create schema with two TIMESTAMPTZ fields
+        self._create_ttl_collection(client, collection_name, extra_fields=[
+            {"field_name": "ttl_dynamic", "datatype": DataType.TIMESTAMPTZ, "nullable": True}
+        ])
 
-        # Insert short TTL data (id 0~49) with dynamic fields
-        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
-        vectors = cf.gen_vectors(nb * 2, dim=default_dim)
-        rows = []
-        for i in range(nb):
-            rows.append({default_primary_key_field_name: i, "ttl": future_ttl,
-                         default_vector_field_name: list(vectors[i]),
-                         "dynamic_str": f"expire_{i}", "dynamic_int": i})
-        # Insert NULL TTL data (id 50~99) with dynamic fields
-        for i in range(nb, nb * 2):
-            rows.append({default_primary_key_field_name: i, "ttl": None,
-                         default_vector_field_name: list(vectors[i]),
-                         "dynamic_str": f"keep_{i}", "dynamic_int": i * 10})
+        # ttl = far future (won't expire under original ttl_field)
+        # ttl_dynamic = short TTL (will expire if switched to)
+        far_future = (datetime.now(timezone.utc) + timedelta(seconds=300)).isoformat()
+        short_ttl = (datetime.now(timezone.utc) + timedelta(seconds=short_ttl_seconds)).isoformat()
+        vectors = cf.gen_vectors(nb, dim=default_dim)
+        rows = [{default_primary_key_field_name: i, "ttl": far_future,
+                 "ttl_dynamic": short_ttl,
+                 default_vector_field_name: list(vectors[i])} for i in range(nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
-        # Verify dynamic fields are queryable before expiry
-        res = self.query(client, collection_name, filter="id < 5",
-                         output_fields=[default_primary_key_field_name, "dynamic_str", "dynamic_int"])[0]
-        assert len(res) == 5
-        for row in res:
-            assert row["dynamic_str"].startswith("expire_")
+        # Verify all data is visible (ttl_field=ttl, ttl is far future)
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        assert res[0].get('count(*)') == nb
 
-        # Wait for short TTL to expire
-        time.sleep(ttl_seconds)
-        self._wait_until_count(client, collection_name, expected_count=nb)
+        # Wait past short_ttl_seconds — data should still be alive because
+        # the active ttl_field is "ttl" (far future), not "ttl_dynamic"
+        time.sleep(short_ttl_seconds + 3)
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        assert res[0].get('count(*)') == nb, \
+            "Data should NOT expire based on inactive ttl_dynamic field"
 
-        # Verify surviving NULL TTL rows still have correct dynamic fields
-        res = self.query(client, collection_name, filter=f"id >= {nb} and id < {nb + 5}",
-                         output_fields=[default_primary_key_field_name, "dynamic_str", "dynamic_int"])[0]
-        assert len(res) == 5
-        for row in res:
-            assert row["dynamic_str"].startswith("keep_")
-            assert row["dynamic_int"] == row[default_primary_key_field_name] * 10
+        # Switch ttl_field to ttl_dynamic
+        self.alter_collection_properties(client, collection_name,
+                                         properties={"ttl_field": "ttl_dynamic"})
+
+        # Verify ttl_field is updated
+        collection_info = self.describe_collection(client, collection_name)[0]
+        assert collection_info['properties'].get("ttl_field") == "ttl_dynamic"
+
+        # Query immediately — ttl_dynamic timestamps are already past,
+        # data should become invisible right after switching
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        assert res[0].get('count(*)') == 0, \
+            f"Expected 0 after switching ttl_field to ttl_dynamic (already expired), got {res[0].get('count(*)')}"
 
         self.drop_collection(client, collection_name)
 
