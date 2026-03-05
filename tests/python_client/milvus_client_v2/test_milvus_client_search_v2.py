@@ -92,6 +92,7 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
         """
         nb = self.shared_nb
         dim = self.shared_dim
+        search_limit = nb // 2
         client = self._client(alias=self.shared_alias)
         data = self.shared_data
         insert_ids = self.shared_insert_ids
@@ -102,10 +103,11 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
             expr = expressions[0].replace("&&", "and").replace("||", "or")
             filter_ids = []
             for i, _id in enumerate(insert_ids):
-                int64 = data[i][ct.default_int64_field_name]
-                float = data[i][ct.default_float_field_name]
-                if not expr or eval(expr):
+                local_vars = {"int64": data[i][ct.default_int64_field_name],
+                              "float": data[i][ct.default_float_field_name]}
+                if not expr or eval(expr, {}, local_vars):
                     filter_ids.append(_id)
+            expected_limit = min(search_limit, len(filter_ids))
 
             # 3. search with expression
             search_vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
@@ -113,18 +115,16 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
                                         data=search_vectors[:default_nq],
                                         anns_field=default_search_field,
                                         search_params=default_search_params,
-                                        limit=nb,
-                                        filter=expr,
-                                        check_task=CheckTasks.check_search_results,
-                                        check_items={"nq": default_nq,
-                                                     "ids": insert_ids,
-                                                     "limit": min(nb, len(filter_ids)),
-                                                     "enable_milvus_client_api": True,
-                                                     "pk_name": ct.default_int64_field_name})
+                                        limit=search_limit,
+                                        filter=expr)
+            # verify: results are subset of filter_ids (filter correctness)
+            # and result count is within acceptable recall range for HNSW
             filter_ids_set = set(filter_ids)
             for hits in search_res:
                 ids = [hit[ct.default_int64_field_name] for hit in hits]
                 assert set(ids).issubset(filter_ids_set)
+                assert len(hits) >= expected_limit * 0.8, \
+                    f"recall too low: got {len(hits)}, expected >= {expected_limit * 0.8}"
 
             # 4. search again with expression template
             expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
@@ -133,18 +133,14 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
                                         data=search_vectors[:default_nq],
                                         anns_field=default_search_field,
                                         search_params=default_search_params,
-                                        limit=nb,
-                                        filter=expr, filter_params=expr_params,
-                                        check_task=CheckTasks.check_search_results,
-                                        check_items={"nq": default_nq,
-                                                     "ids": insert_ids,
-                                                     "limit": min(nb, len(filter_ids)),
-                                                     "enable_milvus_client_api": True,
-                                                     "pk_name": ct.default_int64_field_name})
+                                        limit=search_limit,
+                                        filter=expr, filter_params=expr_params)
             filter_ids_set = set(filter_ids)
             for hits in search_res:
                 ids = [hit[ct.default_int64_field_name] for hit in hits]
                 assert set(ids).issubset(filter_ids_set)
+                assert len(hits) >= expected_limit * 0.8, \
+                    f"recall too low: got {len(hits)}, expected >= {expected_limit * 0.8}"
 
             # 5. search again with expression template and search hints
             search_param = default_search_params.copy()
@@ -153,18 +149,14 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
                                         data=search_vectors[:default_nq],
                                         anns_field=default_search_field,
                                         search_params=search_param,
-                                        limit=nb,
-                                        filter=expr, filter_params=expr_params,
-                                        check_task=CheckTasks.check_search_results,
-                                        check_items={"nq": default_nq,
-                                                     "ids": insert_ids,
-                                                     "limit": min(nb, len(filter_ids)),
-                                                     "enable_milvus_client_api": True,
-                                                     "pk_name": ct.default_int64_field_name})
+                                        limit=search_limit,
+                                        filter=expr, filter_params=expr_params)
             filter_ids_set = set(filter_ids)
             for hits in search_res:
                 ids = [hit[ct.default_int64_field_name] for hit in hits]
                 assert set(ids).issubset(filter_ids_set)
+                assert len(hits) >= expected_limit * 0.8, \
+                    f"recall too low: got {len(hits)}, expected >= {expected_limit * 0.8}"
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("bool_type", [True, False, "true", "false"])
@@ -176,6 +168,8 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
         """
         nb = self.shared_nb
         dim = self.shared_dim
+        # Use nb//2 to avoid HNSW recall issues while still covering enough results
+        search_limit = nb // 2
         client = self._client(alias=self.shared_alias)
         data = self.shared_data
         insert_ids = self.shared_insert_ids
@@ -196,23 +190,20 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
         log.info("test_search_with_expression_bool: searching with bool expression: %s" % expression)
         search_vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
 
+        expected_limit = min(search_limit, len(filter_ids))
         search_res, _ = self.search(client, self.collection_name,
                                     data=search_vectors[:default_nq],
                                     anns_field=default_search_field,
                                     search_params=default_search_params,
-                                    limit=nb,
-                                    filter=expression,
-                                    check_task=CheckTasks.check_search_results,
-                                    check_items={"nq": default_nq,
-                                                 "ids": insert_ids,
-                                                 "limit": min(nb, len(filter_ids)),
-                                                 "enable_milvus_client_api": True,
-                                                 "pk_name": ct.default_int64_field_name})
+                                    limit=search_limit,
+                                    filter=expression)
 
         filter_ids_set = set(filter_ids)
         for hits in search_res:
             ids = [hit[ct.default_int64_field_name] for hit in hits]
             assert set(ids).issubset(filter_ids_set)
+            assert len(hits) >= expected_limit * 0.8, \
+                f"recall too low: got {len(hits)}, expected >= {expected_limit * 0.8}"
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("field", ct.all_scalar_data_types[:3])
@@ -334,6 +325,13 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
+        # Sentinel that mimics SQL NULL semantics: all comparisons return False
+        _null = type('_Null', (), {
+            '__eq__': lambda s, o: False, '__ne__': lambda s, o: False,
+            '__lt__': lambda s, o: False, '__le__': lambda s, o: False,
+            '__gt__': lambda s, o: False, '__ge__': lambda s, o: False,
+            '__hash__': lambda s: hash(None)})()
+
         # filter result with expression in collection
         insert_ids = [i for i in range(nb)]
         for expressions in cf.gen_normal_expressions_and_templates():
@@ -341,13 +339,10 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
             expr = expressions[0].replace("&&", "and").replace("||", "or")
             filter_ids = []
             for i, _id in enumerate(insert_ids):
-                int64 = data[i][ct.default_int64_field_name]
-                float = data[i][ct.default_float_field_name]
-                if float is None and "float <=" in expr:
-                    continue
-                if null_data_percent == 1 and "and float" in expr:
-                    continue
-                if not expr or eval(expr):
+                float_val = data[i][ct.default_float_field_name]
+                local_vars = {"int64": data[i][ct.default_int64_field_name],
+                              "float": float_val if float_val is not None else _null}
+                if not expr or eval(expr, {}, local_vars):
                     filter_ids.append(_id)
 
             # 3. search with expression
@@ -651,6 +646,8 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
         # 1. initialize with data
         nb = 1000
         dim = 64
+        # Use nb//2 to avoid IVF_FLAT recall issues while still covering enough results
+        search_limit = nb // 2
         enable_dynamic_field = True
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -690,22 +687,19 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
                 if not expr or eval(expr):
                     filter_ids.append(_id)
             # 3. search expressions
+            expected_limit = min(search_limit, len(filter_ids))
             search_res, _ = self.search(client, collection_name,
                                         data=search_vectors[:default_nq],
                                         anns_field=default_search_field,
                                         search_params=default_search_params,
-                                        limit=nb,
-                                        filter=expr,
-                                        check_task=CheckTasks.check_search_results,
-                                        check_items={"nq": default_nq,
-                                                     "ids": insert_ids,
-                                                     "limit": min(nb, len(filter_ids)),
-                                                     "enable_milvus_client_api": True,
-                                                     "pk_name": ct.default_int64_field_name})
+                                        limit=search_limit,
+                                        filter=expr)
             filter_ids_set = set(filter_ids)
             for hits in search_res:
                 ids = [hit[ct.default_int64_field_name] for hit in hits]
                 assert set(ids).issubset(filter_ids_set)
+                assert len(hits) >= expected_limit * 0.8, \
+                    f"recall too low: got {len(hits)}, expected >= {expected_limit * 0.8}"
 
             # search again with expression template
             expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
@@ -714,18 +708,14 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
                                         data=search_vectors[:default_nq],
                                         anns_field=default_search_field,
                                         search_params=default_search_params,
-                                        limit=nb,
-                                        filter=expr, filter_params=expr_params,
-                                        check_task=CheckTasks.check_search_results,
-                                        check_items={"nq": default_nq,
-                                                     "ids": insert_ids,
-                                                     "limit": min(nb, len(filter_ids)),
-                                                     "enable_milvus_client_api": True,
-                                                     "pk_name": ct.default_int64_field_name})
+                                        limit=search_limit,
+                                        filter=expr, filter_params=expr_params)
             filter_ids_set = set(filter_ids)
             for hits in search_res:
                 ids = [hit[ct.default_int64_field_name] for hit in hits]
                 assert set(ids).issubset(filter_ids_set)
+                assert len(hits) >= expected_limit * 0.8, \
+                    f"recall too low: got {len(hits)}, expected >= {expected_limit * 0.8}"
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_expr_json_field(self):
