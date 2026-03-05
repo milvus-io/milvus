@@ -23,12 +23,14 @@
 #include "common/Json.h"
 #include "common/JsonCastType.h"
 #include "common/Tracer.h"
+#include "common/ScopedTimer.h"
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "common/bson_view.h"
 #include "common/type_c.h"
 #include "exec/expression/EvalCtx.h"
 #include "folly/FBVector.h"
+#include "monitor/Monitor.h"
 #include "index/Index.h"
 #include "index/JsonFlatIndex.h"
 #include "index/JsonInvertedIndex.h"
@@ -56,6 +58,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
     switch (data_type) {
         case DataType::JSON: {
+            span.GetSpan()->SetAttribute("json_filter_expr_type", "exists");
             if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
                 result = EvalJsonExistsForIndex();
             } else {
@@ -141,8 +144,16 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
     FieldId field_id = expr_->column_.field_id_;
     if (CanUseJsonStats(context, field_id, expr_->column_.nested_path_) &&
         !has_offset_input_) {
+        milvus::ScopedTimer timer("exists_json_by_stats", [this](double us) {
+            json_filter_stats_latency_us_ += us;
+        });
         return EvalJsonExistsForDataSegmentByStats();
     }
+
+    milvus::ScopedTimer timer("exists_json_bruteforce", [this](double us) {
+        json_filter_bruteforce_latency_us_ += us;
+    });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -231,23 +242,36 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
 
         // process shredding data, for exists, we only need to check the fields
         // that start with the given prefix which contains the given pointer
-        auto shredding_fields = index->GetShreddingFieldsWithPrefix(pointer);
-        for (const auto& field : shredding_fields) {
-            TargetBitmap temp_valid(active_count_, true);
-            TargetBitmapView temp_valid_view(temp_valid);
-            index->ExecutorForGettingValid(op_ctx_, field, temp_valid_view);
-            res_view |= temp_valid_view;
+        {
+            milvus::ScopedTimer timer(
+                "exists_json_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
+
+            auto shredding_fields =
+                index->GetShreddingFieldsWithPrefix(pointer);
+            for (const auto& field : shredding_fields) {
+                TargetBitmap temp_valid(active_count_, true);
+                TargetBitmapView temp_valid_view(temp_valid);
+                index->ExecutorForGettingValid(op_ctx_, field, temp_valid_view);
+                res_view |= temp_valid_view;
+            }
         }
 
         // process shared data, need to check if the value is empty
         // which match the semantics of exists in Json.h
-        index->ExecuteForSharedData(
-            op_ctx_,
-            bson_index_,
-            pointer,
-            [&](BsonView bson, uint32_t row_id, uint32_t offset) {
-                res_view[row_id] = !bson.IsBsonValueEmpty(offset);
-            });
+        {
+            milvus::ScopedTimer timer(
+                "exists_json_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+
+            index->ExecuteForSharedData(
+                op_ctx_,
+                bson_index_,
+                pointer,
+                [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+                    res_view[row_id] = !bson.IsBsonValueEmpty(offset);
+                });
+        }
     }
 
     TargetBitmap result;
