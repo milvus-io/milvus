@@ -3518,11 +3518,14 @@ func TestDeleteGrantByCollectionName(t *testing.T) {
 			[]string{"gid1", "gid2", "gid3", "gid4"},
 			nil)
 
-		// Single atomic prefix-based removal for both grantee and granteeID keys
+		// Prefix deletion for granteeID keys (have sub-keys)
 		gid1Key := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "gid1/")
 		gid2Key := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "gid2/")
 		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
-			[]string{gid1Key, gid2Key, key1, key2}).Return(nil)
+			[]string{gid1Key, gid2Key}).Return(nil)
+		// Exact deletion for grantee keys (leaf keys, no sub-keys)
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
+			[]string{key1, key2}).Return(nil)
 
 		err := c.DeleteGrantByCollectionName(ctx, tenant, "default", "col1")
 		assert.NoError(t, err)
@@ -3541,7 +3544,9 @@ func TestDeleteGrantByCollectionName(t *testing.T) {
 
 		gid1Key := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "gid1/")
 		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
-			[]string{gid1Key, key1}).Return(nil)
+			[]string{gid1Key}).Return(nil)
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
+			[]string{key1}).Return(nil)
 
 		err := c.DeleteGrantByCollectionName(ctx, tenant, "default", "col1")
 		assert.NoError(t, err)
@@ -3558,7 +3563,26 @@ func TestDeleteGrantByCollectionName(t *testing.T) {
 
 		gid1Key := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "gid1/")
 		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
-			[]string{gid1Key, key1}).Return(errors.New("remove error"))
+			[]string{gid1Key}).Return(errors.New("remove error"))
+
+		err := c.DeleteGrantByCollectionName(ctx, tenant, "default", "col1")
+		assert.Error(t, err)
+	})
+
+	t.Run("MultiSaveAndRemove error", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+		granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+
+		key1 := granteeKey + "/role1/Collection/default.col1"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1}, []string{"gid1"}, nil)
+
+		gid1Key := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "gid1/")
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
+			[]string{gid1Key}).Return(nil)
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
+			[]string{key1}).Return(errors.New("remove error"))
 
 		err := c.DeleteGrantByCollectionName(ctx, tenant, "default", "col1")
 		assert.Error(t, err)

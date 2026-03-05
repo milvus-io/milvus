@@ -1455,15 +1455,27 @@ func (kc *Catalog) DeleteGrantByCollectionName(ctx context.Context, tenant strin
 		return nil
 	}
 
-	// Combine both exact grantee keys and granteeID prefix keys into a single
-	// prefix-based removal to ensure atomicity. Using exact grantee keys as
-	// prefixes is safe since they are leaf keys with no sub-keys.
-	allPrefixKeys := append(prefixRemoveKeys, exactRemoveKeys...)
-	if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, nil, allPrefixKeys); err != nil {
-		log.Ctx(ctx).Warn("fail to remove grant entries for collection",
-			zap.String("dbName", dbName), zap.String("collectionName", collectionName), zap.Error(err))
+	// Use prefix deletion for granteeID keys (which have sub-keys underneath).
+	if len(prefixRemoveKeys) > 0 {
+		if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, nil, prefixRemoveKeys); err != nil {
+			log.Ctx(ctx).Warn("fail to remove granteeID entries for collection",
+				zap.String("dbName", dbName), zap.String("collectionName", collectionName), zap.Error(err))
+			return err
+		}
 	}
-	return err
+
+	// Use exact deletion for grantee keys (leaf keys with no sub-keys).
+	// Avoid MultiSaveAndRemoveWithPrefix here to prevent accidentally matching
+	// keys like col1_backup when removing col1.
+	if len(exactRemoveKeys) > 0 {
+		if err = kc.Txn.MultiSaveAndRemove(ctx, nil, exactRemoveKeys); err != nil {
+			log.Ctx(ctx).Warn("fail to remove grantee entries for collection",
+				zap.String("dbName", dbName), zap.String("collectionName", collectionName), zap.Error(err))
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string, oldDBName string, oldName string, newDBName string, newName string) error {
