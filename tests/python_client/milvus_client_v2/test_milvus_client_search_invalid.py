@@ -482,6 +482,90 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 999, "err_msg": "type must be number"})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expr", [
+        "int64 / 0 > 0",
+        "int64 / 0 == 1",
+        "float / 0 == 1.0",
+        "int64 % 0 == 1",
+        "int64 % 0 != 0",
+        "json_field['number'] / 0 > 0",
+        "json_field['number'] % 0 == 1",
+    ])
+    def test_search_filter_division_by_zero(self, expr):
+        """
+        target: test search with division/modulo by zero in filter expression (issue #47285)
+        method: search with filter containing division or modulo by zero on int64/float/json fields
+        expected: raise error with 'by zero' message instead of crashing server (SIGFPE)
+        """
+        client = self._client(alias=self.shared_alias)
+        log.info(f"test_search_filter_division_by_zero: searching with expr: {expr}")
+        self.search(client, self.collection_name,
+                    data=vectors[:default_nq], anns_field=default_search_field,
+                    search_params=default_search_params, limit=default_limit,
+                    filter=expr,
+                    check_task=CheckTasks.err_res,
+                    check_items={"err_code": 999, "err_msg": "by zero"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expr", [
+        "int64 / 0 > 0",
+        "int64 % 0 == 1",
+    ])
+    def test_query_filter_division_by_zero(self, expr):
+        """
+        target: test query with division/modulo by zero in filter expression (issue #47285)
+        method: query with filter containing division or modulo by zero
+        expected: raise error with 'by zero' message instead of crashing server (SIGFPE)
+        """
+        client = self._client(alias=self.shared_alias)
+        log.info(f"test_query_filter_division_by_zero: querying with expr: {expr}")
+        self.query(client, self.collection_name,
+                   filter=expr,
+                   check_task=CheckTasks.err_res,
+                   check_items={"err_code": 999, "err_msg": "by zero"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expr,expr_params", [
+        ("int64 / {d} > 0", {"d": 0}),
+        ("int64 % {d} == 1", {"d": 0}),
+        ("float / {d} == 1.0", {"d": 0}),
+    ])
+    def test_search_filter_division_by_zero_with_expr_params(self, expr, expr_params):
+        """
+        target: test search with division/modulo by zero via expr_params (issue #47285)
+        method: search with parameterized filter where divisor is zero
+        expected: raise error with 'by zero' message instead of crashing server (SIGFPE)
+        """
+        client = self._client(alias=self.shared_alias)
+        log.info(f"test_search_filter_division_by_zero_with_expr_params: "
+                 f"searching with expr: {expr}, params: {expr_params}")
+        self.search(client, self.collection_name,
+                    data=vectors[:default_nq], anns_field=default_search_field,
+                    search_params=default_search_params, limit=default_limit,
+                    filter=expr, filter_params=expr_params,
+                    check_task=CheckTasks.err_res,
+                    check_items={"err_code": 999, "err_msg": "by zero"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("expr", [
+        "int64 / 2 >= 0",
+        "int64 % 3 == 1",
+        "float / 2.0 < 1000",
+    ])
+    def test_search_filter_division_by_nonzero(self, expr):
+        """
+        target: test search with valid division/modulo expressions still works (issue #47285)
+        method: search with filter containing division or modulo by non-zero values
+        expected: search succeeds without error
+        """
+        client = self._client(alias=self.shared_alias)
+        log.info(f"test_search_filter_division_by_nonzero: searching with expr: {expr}")
+        self.search(client, self.collection_name,
+                    data=vectors[:default_nq], anns_field=default_search_field,
+                    search_params=default_search_params, limit=default_limit,
+                    filter=expr)
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("invalid_range_filter", [[0.1], "str"])
     def test_range_search_invalid_range_filter(self, invalid_range_filter):
