@@ -38,7 +38,6 @@ func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb
 		if !shouldApplyLocallyOnNonPrimary(err, message.MessageTypeAlterResourceGroup) {
 			return err
 		}
-		err = nil
 	}
 	if broadcaster != nil {
 		defer broadcaster.Close()
@@ -77,7 +76,6 @@ func (s *Server) broadcastUpdateResourceGroups(ctx context.Context, req *querypb
 		if !shouldApplyLocallyOnNonPrimary(err, message.MessageTypeAlterResourceGroup) {
 			return err
 		}
-		err = nil
 	}
 	if broadcaster != nil {
 		defer broadcaster.Close()
@@ -107,7 +105,6 @@ func (s *Server) broadcastTransferNode(ctx context.Context, req *milvuspb.Transf
 		if !shouldApplyLocallyOnNonPrimary(err, message.MessageTypeAlterResourceGroup) {
 			return err
 		}
-		err = nil
 	}
 	if broadcaster != nil {
 		defer broadcaster.Close()
