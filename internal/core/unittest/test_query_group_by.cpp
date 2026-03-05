@@ -466,10 +466,21 @@ TEST_P(QueryAggTest, CountAggTest) {
 
 TEST_P(QueryAggTest, GlobalCountAggTest) {
     std::vector<milvus::plan::PlanNodePtr> sources;
-    //set up mvcc_node + agg_node: global aggregation no need project column
+    // MvccNode -> ProjectNode (empty fields) -> AggNode
+    // ProjectNode is always created in production (PlanProto.cpp),
+    // so tests should match that code path.
     PlanNodePtr mvcc_node = std::make_shared<milvus::plan::MvccNode>(
         milvus::plan::GetNextPlanNodeId(), sources);
     sources = std::vector<milvus::plan::PlanNodePtr>{mvcc_node};
+
+    PlanNodePtr project_node = std::make_shared<milvus::plan::ProjectNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<FieldId>{},
+        std::vector<std::string>{},
+        std::vector<DataType>{},
+        sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{project_node};
+
     std::string agg_name = "count";
     std::vector<plan::AggregationNode::Aggregate> aggregates;
     //  count(*)
@@ -520,6 +531,17 @@ TEST_P(QueryAggTest, GlobalCountEmptyTest) {
         milvus::plan::GetNextPlanNodeId(), always_false_expr, sources);
     sources = std::vector<milvus::plan::PlanNodePtr>{filter_node};
 
+    // ProjectNode with empty field list to consume the filter bitmap,
+    // matching the production code path (PlanProto.cpp always creates
+    // ProjectNode when aggregation is present).
+    PlanNodePtr project_node = std::make_shared<milvus::plan::ProjectNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<FieldId>{},
+        std::vector<std::string>{},
+        std::vector<DataType>{},
+        sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{project_node};
+
     std::string agg_name = "count";
     std::vector<plan::AggregationNode::Aggregate> aggregates;
     //  count(*)
@@ -550,6 +572,142 @@ TEST_P(QueryAggTest, GlobalCountEmptyTest) {
     auto actual_count = field_data.scalars().long_data().data(0);
     EXPECT_EQ(0, actual_count);
     // count(*) will get zero if no valid input into agg node
+}
+
+// Regression test for #47509: count(*) returns wrong result when queried
+// together with count(nullable_field) in global aggregation (no GROUP BY).
+// Before fix, populateTempVectors had a buggy special case that passed the
+// nullable field column to count(*), making count(*) == count(field).
+TEST_P(QueryAggTest, GlobalCountStarWithCountField) {
+    auto nullable = GetParam();
+    std::vector<milvus::plan::PlanNodePtr> sources;
+
+    // MvccNode
+    PlanNodePtr mvcc_node = std::make_shared<milvus::plan::MvccNode>(
+        milvus::plan::GetNextPlanNodeId(), sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{mvcc_node};
+
+    // ProjectNode with double field (for count(double))
+    auto double_id = field_map_[double_field];
+    PlanNodePtr project_node = std::make_shared<milvus::plan::ProjectNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<FieldId>{double_id},
+        std::vector<std::string>{double_field},
+        std::vector<DataType>{DataType::DOUBLE},
+        sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{project_node};
+
+    // Global aggregation: count(*), count(double)
+    std::string agg_name = "count";
+    std::vector<plan::AggregationNode::Aggregate> aggregates;
+    // count(*)
+    {
+        auto call = std::make_shared<const expr::CallExpr>(
+            agg_name, std::vector<expr::TypedExprPtr>{}, nullptr);
+        aggregates.emplace_back(plan::AggregationNode::Aggregate{call});
+        aggregates.back().resultType_ =
+            GetAggResultType(agg_name, DataType::NONE);
+    }
+    // count(double)
+    {
+        auto agg_input = std::make_shared<expr::FieldAccessTypeExpr>(
+            DataType::DOUBLE, double_field, double_id);
+        auto call = std::make_shared<const expr::CallExpr>(
+            agg_name, std::vector<expr::TypedExprPtr>{agg_input}, nullptr);
+        aggregates.emplace_back(plan::AggregationNode::Aggregate{call});
+        aggregates.back().rawInputTypes_.emplace_back(DataType::DOUBLE);
+        aggregates.back().resultType_ =
+            GetAggResultType(agg_name, DataType::DOUBLE);
+    }
+
+    PlanNodePtr agg_node = std::make_shared<plan::AggregationNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<expr::FieldAccessTypeExprPtr>{},
+        std::vector<std::string>{agg_name, agg_name},
+        std::move(aggregates),
+        sources);
+
+    auto retrieve_plan = createRetrievePlan(schema_, agg_node, num_rows_);
+    auto retrieve_results = segment_->Retrieve(nullptr,
+                                               retrieve_plan.get(),
+                                               MAX_TIMESTAMP,
+                                               DEFAULT_MAX_OUTPUT_SIZE,
+                                               false);
+
+    ASSERT_EQ(retrieve_results->fields_data_size(), 2);
+    auto count_star =
+        retrieve_results->fields_data(0).scalars().long_data().data(0);
+    auto count_double =
+        retrieve_results->fields_data(1).scalars().long_data().data(0);
+
+    std::cout << "GlobalCountStarWithCountField: count(*)=" << count_star
+              << " count(double)=" << count_double << " nullable=" << nullable
+              << std::endl;
+
+    // count(*) must equal total rows regardless of nullable
+    EXPECT_EQ(count_star, num_rows_);
+
+    if (nullable) {
+        // count(nullable_field) should be less than count(*)
+        EXPECT_LT(count_double, count_star);
+        EXPECT_GT(count_double, 0);
+    } else {
+        EXPECT_EQ(count_double, num_rows_);
+    }
+}
+
+// Test ProjectNode with empty field list: when only count(*) is requested,
+// ProjectNode has no fields to project but must still correctly report the
+// row count via resize(selected_count).
+TEST_P(QueryAggTest, CountStarOnlyGlobalWithProjectNode) {
+    std::vector<milvus::plan::PlanNodePtr> sources;
+
+    // MvccNode
+    PlanNodePtr mvcc_node = std::make_shared<milvus::plan::MvccNode>(
+        milvus::plan::GetNextPlanNodeId(), sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{mvcc_node};
+
+    // Empty ProjectNode (no fields projected)
+    PlanNodePtr project_node = std::make_shared<milvus::plan::ProjectNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<FieldId>{},
+        std::vector<std::string>{},
+        std::vector<DataType>{},
+        sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{project_node};
+
+    // Global count(*)
+    std::string agg_name = "count";
+    std::vector<plan::AggregationNode::Aggregate> aggregates;
+    {
+        auto call = std::make_shared<const expr::CallExpr>(
+            agg_name, std::vector<expr::TypedExprPtr>{}, nullptr);
+        aggregates.emplace_back(plan::AggregationNode::Aggregate{call});
+        aggregates.back().resultType_ =
+            GetAggResultType(agg_name, DataType::NONE);
+    }
+
+    PlanNodePtr agg_node = std::make_shared<plan::AggregationNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<expr::FieldAccessTypeExprPtr>{},
+        std::vector<std::string>{agg_name},
+        std::move(aggregates),
+        sources);
+
+    auto retrieve_plan = createRetrievePlan(schema_, agg_node, num_rows_);
+    auto retrieve_results = segment_->Retrieve(nullptr,
+                                               retrieve_plan.get(),
+                                               MAX_TIMESTAMP,
+                                               DEFAULT_MAX_OUTPUT_SIZE,
+                                               false);
+
+    ASSERT_EQ(retrieve_results->fields_data_size(), 1);
+    auto& field_data = retrieve_results->fields_data(0);
+    ASSERT_EQ(field_data.scalars().long_data().data_size(), 1);
+    auto actual_count = field_data.scalars().long_data().data(0);
+    std::cout << "CountStarOnlyGlobalWithProjectNode: count=" << actual_count
+              << std::endl;
+    EXPECT_EQ(num_rows_, actual_count);
 }
 
 // Test aggregation through segment->Retrieve() API to cover

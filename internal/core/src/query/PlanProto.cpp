@@ -336,8 +336,11 @@ BuildProjectAndAggregationNodes(
     std::vector<milvus::DataType> project_type_list) {
     plan::PlanNodePtr plannode = sources.empty() ? nullptr : sources[0];
 
-    // Build ProjectNode if needed
-    if (!project_id_list.empty()) {
+    // Always build ProjectNode when aggregation is present.
+    // ProjectNode consumes the MVCC bitmap from upstream and materializes
+    // filtered rows, so AggregationNode always receives input where
+    // size() == number of existing rows (needed for count(*)).
+    {
         auto project_field_id_list = std::vector<FieldId>(
             project_id_list.begin(), project_id_list.end());
         plannode = std::make_shared<plan::ProjectNode>(
