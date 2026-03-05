@@ -334,6 +334,15 @@ class SegmentExpr : public Expr {
         } else {
             current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
         }
+        // OPT-K: When single index chunk at position 0, return all
+        // remaining rows so ProcessIndexChunks fast path and caller
+        // assertions stay consistent.
+        if (SegmentExpr::CanUseIndex() && use_index_ &&
+            num_index_chunk_ == 1 && current_index_chunk_ == 0 &&
+            current_index_chunk_pos_ == 0) {
+            return active_count_ - current_rows;
+        }
+
         return current_rows + batch_size_ >= active_count_
                    ? active_count_ - current_rows
                    : batch_size_;
