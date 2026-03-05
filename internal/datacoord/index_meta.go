@@ -189,12 +189,33 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 				if segIdx.IndexMemSize == 0 {
 					segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
 				}
-				m.updateSegmentIndex(segIdx)
-				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
-				metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-					fmt.Sprintf("%d", segIdx.CollectionID)).Add(float64(segIdx.IndexSerializedSize))
+				// Bypass updateSegmentIndex: LRU writes are too expensive during recovery.
+				indexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
+				if ok {
+					indexes.Insert(segIdx.IndexID, segIdx)
+				} else {
+					indexes = typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+					indexes.Insert(segIdx.IndexID, segIdx)
+					m.segmentIndexes.Insert(segIdx.SegmentID, indexes)
+				}
+				m.segmentBuildInfo.buildID2SegmentIndex.Insert(segIdx.BuildID, segIdx)
 			}
 		}
+
+		// Update Prometheus metrics asynchronously to avoid blocking recovery.
+		go func() {
+			storedSizeByCollection := make(map[int64]float64)
+			for _, segIdxes := range collectionSegIdxes {
+				for _, segIdx := range segIdxes {
+					metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
+					storedSizeByCollection[segIdx.CollectionID] += float64(segIdx.IndexSerializedSize)
+				}
+			}
+			for collID, size := range storedSizeByCollection {
+				metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+					fmt.Sprintf("%d", collID)).Add(size)
+			}
+		}()
 		return nil
 	})
 	if err := g.Wait(); err != nil {
@@ -215,7 +236,6 @@ func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	indexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
 		indexes.Insert(segIdx.IndexID, segIdx)
-		m.segmentIndexes.Insert(segIdx.SegmentID, indexes)
 	} else {
 		indexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 		indexes.Insert(segIdx.IndexID, segIdx)
