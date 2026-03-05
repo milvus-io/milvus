@@ -371,6 +371,17 @@ SegmentInternalInterface::get_real_count() const {
         milvus::plan::GetNextPlanNodeId());
     sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
 
+    // ProjectNode consumes the MVCC bitmap and materializes valid rows.
+    // Without it, AggregationNode would see input->size() == total rows
+    // instead of the actual valid row count after MVCC filtering.
+    plannode = std::make_shared<milvus::plan::ProjectNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<FieldId>{},
+        std::vector<std::string>{},
+        std::vector<DataType>{},
+        sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
     std::string agg_name = "count";
     std::vector<plan::AggregationNode::Aggregate> aggregates;
     {

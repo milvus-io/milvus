@@ -174,13 +174,11 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="Bug: GROUP BY requires limit when filter is empty. Tracked in issue #47329")
     def test_basic_group_by_count_no_filter_no_limit(self):
         """
         target: test the most basic GROUP BY with COUNT without any filter or limit
         method: query with only group_by_fields and output_fields, no filter/limit parameters
         expected: should return all groups with correct count values
-        Note: Currently fails with 'empty expression should be used with limit' (issue #47329)
         """
         client = self._client()
 
@@ -778,30 +776,118 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         log.info("test_count_star_vs_count_field passed")
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_count_star_with_group_by_error(self):
+    def test_count_star_and_count_field_together(self):
         """
-        target: test error when using count(*) with GROUP BY
-        method: query with group_by_fields=["c1"], output_fields=["c1", "count(*)"]
-        expected: raise error indicating count(*) not allowed with pagination/GROUP BY
-        Note: Milvus original count(*) feature does not support GROUP BY.
-              For grouped counting, use count(field) instead.
+        target: test count(*) and count(nullable_field) in the same output_fields
+        method: query with output_fields=["count(*)", "count(c2)"] in a single request
+        expected: count(*) returns total rows, count(c2) returns non-NULL rows
+        Note: Regression test for https://github.com/milvus-io/milvus/issues/47509
+              When queried together, count(*) was incorrectly returning the same
+              value as count(nullable_field) instead of total row count.
         """
         client = self._client()
 
-        # count(*) with GROUP BY should fail
-        error = {ct.err_code: 1100, ct.err_msg: "count entities with pagination is not allowed"}
-        self.query(
+        # Query count(*) and count(nullable_field) together in a single request
+        results_together, _ = self.query(
+            client,
+            self.collection_name,
+            filter="",
+            group_by_fields=[],
+            output_fields=["count(*)", "count(c2)"]
+        )
+        count_star = results_together[0]["count(*)"]
+        count_field = results_together[0]["count(c2)"]
+
+        expected_total = len(self.datas)  # 3000
+        expected_non_null = self.datas[self.c2_field_name].count()
+
+        # count(*) must return total entities, not non-NULL count
+        assert count_star == expected_total, \
+            f"count(*) should equal total entities when queried together: {count_star} != {expected_total}"
+
+        # count(c2) must return non-NULL count
+        assert count_field == expected_non_null, \
+            f"count(c2) should exclude NULL when queried together: {count_field} != {expected_non_null}"
+
+        # count(*) must be greater than count(nullable_field)
+        assert count_star > count_field, \
+            f"count(*) should be greater than count(nullable_field): {count_star} <= {count_field}"
+
+        log.info(f"Together: count(*) = {count_star}, count(c2) = {count_field}")
+        log.info("test_count_star_and_count_field_together passed")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_count_star_with_group_by(self):
+        """
+        target: test count(*) works with GROUP BY after fix for #47326
+        method: query with group_by_fields=["c1"], output_fields=["c1", "count(*)"], limit=100
+        expected: returns correct count per group (count(*) includes NULL values)
+        """
+        client = self._client()
+
+        # count(*) with GROUP BY + limit should now succeed
+        results, _ = self.query(
             client,
             self.collection_name,
             filter="",
             limit=100,
             group_by_fields=[self.c1_field_name],
-            output_fields=[self.c1_field_name, "count(*)"],
-            check_task=CheckTasks.err_res,
-            check_items=error
+            output_fields=[self.c1_field_name, "count(*)"]
         )
 
-        log.info("test_count_star_with_group_by_error passed")
+        # Should return 7 groups (unique values of c1)
+        assert len(results) == 7, f"Expected 7 groups, got {len(results)}"
+
+        # Verify count(*) for each group against pandas ground truth
+        ground_truth = self.datas.groupby(self.c1_field_name).size().reset_index(name='count_star')
+        for result in results:
+            c1_value = result[self.c1_field_name]
+            expected_count = int(ground_truth[ground_truth[self.c1_field_name] == c1_value].iloc[0]['count_star'])
+            assert result["count(*)"] == expected_count, \
+                f"count(*) mismatch for c1={c1_value}: {result['count(*)']} != {expected_count}"
+
+        log.info("test_count_star_with_group_by passed")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_count_star_and_count_field_with_group_by(self):
+        """
+        target: test count(*) and count(nullable_field) together with GROUP BY
+        method: query with group_by + output_fields=["c1", "count(*)", "count(c2)"]
+        expected: count(*) >= count(c2) for each group (c2 is nullable)
+        Note: Regression test combining #47509 and #47326 fixes
+        """
+        client = self._client()
+
+        results, _ = self.query(
+            client,
+            self.collection_name,
+            filter="",
+            limit=100,
+            group_by_fields=[self.c1_field_name],
+            output_fields=[self.c1_field_name, "count(*)", "count(c2)"]
+        )
+
+        assert len(results) == 7, f"Expected 7 groups, got {len(results)}"
+
+        # Ground truth from pandas
+        ground_truth = self.datas.groupby(self.c1_field_name).agg(
+            count_star=(self.c1_field_name, 'size'),
+            count_c2=(self.c2_field_name, 'count')
+        ).reset_index()
+
+        for result in results:
+            c1_value = result[self.c1_field_name]
+            gt = ground_truth[ground_truth[self.c1_field_name] == c1_value].iloc[0]
+
+            assert result["count(*)"] == int(gt["count_star"]), \
+                f"count(*) mismatch for c1={c1_value}: {result['count(*)']} != {gt['count_star']}"
+            assert result["count(c2)"] == int(gt["count_c2"]), \
+                f"count(c2) mismatch for c1={c1_value}: {result['count(c2)']} != {gt['count_c2']}"
+            # count(*) must be >= count(nullable_field)
+            assert result["count(*)"] >= result["count(c2)"], \
+                f"count(*) should be >= count(c2) for c1={c1_value}"
+
+        log.info("test_count_star_and_count_field_with_group_by passed")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_aggregation_function_case_insensitive(self):

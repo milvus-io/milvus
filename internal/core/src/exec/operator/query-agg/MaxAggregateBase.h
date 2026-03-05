@@ -62,6 +62,7 @@ class MaxAggregateBase
 
     void
     addSingleGroupRawInput(char* group,
+                           int64_t numRows,
                            const std::vector<VectorPtr>& input) override {
         BaseAggregate::template updateOneGroup<TAccumulator>(
             group, input[0], &updateSingleValue<TAccumulator>);
@@ -165,6 +166,7 @@ class MaxStringAggregate final : public Aggregate {
     // as this method stores pointers to strings in the input vector.
     void
     addSingleGroupRawInput(char* group,
+                           int64_t numRows,
                            const std::vector<VectorPtr>& input) override {
         AssertInfo(input.size() == 1,
                    "max aggregate expects exactly one input column");
