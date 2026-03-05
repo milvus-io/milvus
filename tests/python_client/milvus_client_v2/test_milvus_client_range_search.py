@@ -968,8 +968,7 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="COSINE",
-                      params={"M": 32, "efConstruction": 360})
+        idx.add_index(field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="COSINE")
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
@@ -1684,7 +1683,7 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("nq", [2, 500])
     @pytest.mark.parametrize("null_data_percent", [0.5, 1])
-    def test_range_search_concurrent_multi_threads(self, nq, null_data_percent):
+    def test_range_search_concurrent_multi_threads_nullable(self, nq, null_data_percent):
         """
         target: test concurrent range search with multi-processes (with nullable fields)
         method: search with 10 processes, each process uses dependent connection
@@ -1841,14 +1840,13 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="COSINE",
-                      params={"M": 32, "efConstruction": 360})
+        idx.add_index(field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="COSINE")
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
         # 2. search for original data after load
         search_vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": -1,
+        range_search_params = {"metric_type": "COSINE", "params": {"radius": -1,
                                                                    "range_filter": 1}}
         self.search(client, collection_name,
                     data=search_vectors[:nq],
@@ -1905,14 +1903,13 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="COSINE",
-                      params={"M": 32, "efConstruction": 360})
+        idx.add_index(field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="COSINE")
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
         # 2. search for original data after load
         search_vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": -1,
+        range_search_params = {"metric_type": "COSINE", "params": {"radius": -1,
                                                                    "range_filter": 1}}
         self.search(client, collection_name,
                     data=search_vectors[:nq],
@@ -1975,15 +1972,14 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         idx = self.prepare_index_params(client)[0]
-        idx.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="COSINE",
-                      params={"M": 32, "efConstruction": 360})
+        idx.add_index(field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="COSINE")
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
         # 2. search for original data after load
         search_vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         range_search_params = {"metric_type": "COSINE", "params": {
-            "nprobe": 10, "radius": -1, "range_filter": 1}}
+            "radius": -1, "range_filter": 1}}
         self.search(client, collection_name,
                     data=search_vectors[:nq],
                     anns_field=default_search_field,
@@ -2001,11 +1997,12 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
         data_new = cf.gen_row_data_by_schema(nb=nb_new, schema=schema, start=nb_old)
         self.insert(client, collection_name, data=data_new)
 
-        self.search(client, collection_name,
+        search_res, _ = self.search(client, collection_name,
                     data=search_vectors[:nq],
                     anns_field=default_search_field,
                     search_params=range_search_params,
                     limit=limit,
                     filter=default_search_exp,
                     consistency_level="Eventually")
+        assert len(search_res) == nq
 

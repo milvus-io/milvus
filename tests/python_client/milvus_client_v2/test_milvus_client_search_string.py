@@ -364,19 +364,14 @@ class TestSearchStringVarcharPK(TestMilvusClientV2Base):
             if not expression_eval or eval(expression_eval):
                 filter_ids.append(item[ct.default_string_field_name])
 
-        # 3. search with expression
+        # 3. search with expression (AUTOINDEX/HNSW may not return all matches, use subset check)
         log.info("test_search_with_expression: searching with expression: %s" % expression)
         search_res, _ = self.search(client, self.collection_name,
                                     data=vectors[:default_nq],
                                     anns_field=default_search_field,
                                     search_params=default_search_params,
                                     limit=nb,
-                                    filter=expression,
-                                    check_task=CheckTasks.check_search_results,
-                                    check_items={"nq": default_nq,
-                                                 "pk_name": ct.default_string_field_name,
-                                                 "limit": min(nb, len(filter_ids)),
-                                                 "enable_milvus_client_api": True})
+                                    filter=expression)
 
         filter_ids_set = set(filter_ids)
         for hits in search_res:

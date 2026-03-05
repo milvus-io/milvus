@@ -1372,7 +1372,7 @@ def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
         null_number = int(nb * nullable_fields[ct.default_json_field_name])
         if null_number > 0:
             for single_dict in array[-null_number:]:
-                single_dict[ct.default_string_field_name] = {"number": None, "float": None}
+                single_dict[ct.default_json_field_name] = {"number": None, "float": None}
 
     log.debug("generated default row data")
 
