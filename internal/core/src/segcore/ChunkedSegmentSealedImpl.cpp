@@ -459,10 +459,9 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto insert_files = info.insert_files;
             storage::SortByPath(insert_files);
-            auto parallel_degree = static_cast<uint64_t>(
-                DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-            field_data_info.arrow_reader_channel->set_capacity(parallel_degree *
-                                                               2);
+            // field_data_info.arrow_reader_channel cannot have capacity
+            // othersize deadlock could happen if result count is greater than cap
+            // since this branch handles system only, we shall leave channel without cap for quick fix
             LoadArrowReaderFromRemote(insert_files,
                                       field_data_info.arrow_reader_channel,
                                       load_info.load_priority);
