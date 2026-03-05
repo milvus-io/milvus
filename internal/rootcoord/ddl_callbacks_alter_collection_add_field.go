@@ -29,7 +29,7 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	defer broadcaster.Close()
 
 	// check if the collection is created.
-	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}

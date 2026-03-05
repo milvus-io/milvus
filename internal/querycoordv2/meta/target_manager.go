@@ -153,15 +153,14 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 		return err
 	}
 
-	partitions := mgr.meta.GetPartitionsByCollection(ctx, collectionID)
-	partitionIDs := lo.Map(partitions, func(partition *Partition, i int) int64 {
-		return partition.PartitionID
-	})
-
-	segments := make(map[int64]*datapb.SegmentInfo, 0)
-	partitionSet := typeutil.NewUniqueSet(partitionIDs...)
+	partitionIDs := mgr.meta.GetPartitionIDsByCollection(ctx, collectionID)
+	segments := make(map[int64]*datapb.SegmentInfo, len(segmentInfos))
+	partitionSet := make(map[int64]struct{}, len(partitionIDs))
+	for _, partitionID := range partitionIDs {
+		partitionSet[partitionID] = struct{}{}
+	}
 	for _, segmentInfo := range segmentInfos {
-		if partitionSet.Contain(segmentInfo.GetPartitionID()) || segmentInfo.GetPartitionID() == common.AllPartitionsID {
+		if _, ok := partitionSet[segmentInfo.GetPartitionID()]; ok || segmentInfo.GetPartitionID() == common.AllPartitionsID {
 			segments[segmentInfo.GetID()] = segmentInfo
 		}
 	}

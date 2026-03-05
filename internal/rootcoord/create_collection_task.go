@@ -598,7 +598,7 @@ func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) e
 	}
 
 	// Check if the collection already exists.
-	existedCollInfo, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
+	existedCollInfo, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err == nil {
 		newCollInfo := newCollectionModel(t.header, t.body, 0)
 		if equal := existedCollInfo.Equal(*newCollInfo); !equal {

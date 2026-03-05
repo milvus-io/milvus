@@ -70,7 +70,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	defer broadcaster.Close()
 
 	// check if the collection exists
-	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
@@ -194,7 +194,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 	}
 	defer broadcaster.Close()
 
-	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
@@ -271,7 +271,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 
 // getCacheExpireForCollection gets the cache expirations for collection.
 func (c *Core) getCacheExpireForCollection(ctx context.Context, dbName string, collectionNameOrAlias string) (*message.CacheExpirations, error) {
-	coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionNameOrAlias, typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionNameOrAlias, typeutil.MaxTimestamp, false)
 	if err != nil {
 		return nil, err
 	}
