@@ -36,7 +36,6 @@ func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.D
 		if !shouldApplyLocallyOnNonPrimary(err, message.MessageTypeDropResourceGroup) {
 			return err
 		}
-		err = nil
 	}
 	if broadcaster != nil {
 		defer broadcaster.Close()
