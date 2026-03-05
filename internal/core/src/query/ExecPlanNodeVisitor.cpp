@@ -310,6 +310,20 @@ ExecPlanNodeVisitor::setupRetrieveResult(
     RetrieveResult& tmp_retrieve_result,
     const segcore::SegmentInternalInterface* segment) {
     if (result == nullptr) {
+        // Return empty field_data arrays with correct schema (0 rows, N columns)
+        // to ensure result structure matches the expected output type.
+        auto output_type = node.plannodes_->output_type();
+        if (output_type && output_type->column_count() > 0) {
+            auto column_count = output_type->column_count();
+            tmp_retrieve_result.field_data_.resize(column_count);
+            for (size_t i = 0; i < column_count; i++) {
+                DataArray data_array;
+                auto col_type = output_type->column_type(i);
+                milvus::segcore::CreateScalarDataArray(
+                    data_array, 0, col_type, col_type, false);
+                tmp_retrieve_result.field_data_[i] = std::move(data_array);
+            }
+        }
         retrieve_result_opt_ = std::move(tmp_retrieve_result);
         return;
     }
