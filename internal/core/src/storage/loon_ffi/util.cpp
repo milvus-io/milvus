@@ -116,6 +116,13 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     keys.emplace_back(PROPERTY_FS_MAX_CONNECTIONS);
     values.emplace_back(max_connections_str.c_str());
 
+    if (c_storage_config.tls_min_version != nullptr &&
+        std::string(c_storage_config.tls_min_version).length() > 0 &&
+        std::string(c_storage_config.tls_min_version) != "default") {
+        keys.emplace_back(PROPERTY_FS_TLS_MIN_VERSION);
+        values.emplace_back(c_storage_config.tls_min_version);
+    }
+
     // Create Properties using FFI
     auto properties = std::make_shared<LoonProperties>();
     LoonFFIResult result = loon_properties_create(
@@ -221,6 +228,14 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         PROPERTY_FS_MAX_CONNECTIONS,
         std::to_string(c_storage_config.max_connections).c_str());
 
+    if (c_storage_config.tls_min_version != nullptr &&
+        std::string(c_storage_config.tls_min_version).length() > 0 &&
+        std::string(c_storage_config.tls_min_version) != "default") {
+        milvus_storage::api::SetValue(*properties_map,
+                                      PROPERTY_FS_TLS_MIN_VERSION,
+                                      c_storage_config.tls_min_version);
+    }
+
     return properties_map;
 }
 
@@ -256,7 +271,8 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config) {
                           config.requestTimeoutMs,
                           config.gcp_credential_json.c_str(),
                           false,  // this field does not exist in StorageConfig
-                          config.max_connections};
+                          config.max_connections,
+                          config.tls_min_version.c_str()};
 }
 
 std::shared_ptr<milvus_storage::api::Manifest>
