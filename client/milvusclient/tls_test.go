@@ -137,3 +137,41 @@ func TestBuildTLSConfig(t *testing.T) {
 		assert.Contains(t, err.Error(), "both clientPemPath and clientKeyPath must be set")
 	})
 }
+
+func TestWithTLSConfig(t *testing.T) {
+	t.Run("sets tlsConfig and enables TLS auth", func(t *testing.T) {
+		caPem, clientPem, clientKey := generateTestCerts(t)
+		tlsConfig, err := BuildTLSConfig(caPem, clientPem, clientKey)
+		require.NoError(t, err)
+
+		config := &ClientConfig{
+			Address: "localhost:19530",
+		}
+		assert.False(t, config.EnableTLSAuth)
+		assert.Nil(t, config.tlsConfig)
+
+		result := config.WithTLSConfig(tlsConfig)
+
+		assert.True(t, config.EnableTLSAuth)
+		assert.NotNil(t, config.tlsConfig)
+		assert.Same(t, config, result) // Returns self for chaining
+	})
+
+	t.Run("chained with other config", func(t *testing.T) {
+		caPem, _, _ := generateTestCerts(t)
+		tlsConfig, err := BuildTLSConfig(caPem, "", "")
+		require.NoError(t, err)
+
+		config := (&ClientConfig{
+			Address:  "localhost:19530",
+			Username: "root",
+			Password: "milvus",
+		}).WithTLSConfig(tlsConfig)
+
+		assert.Equal(t, "localhost:19530", config.Address)
+		assert.Equal(t, "root", config.Username)
+		assert.Equal(t, "milvus", config.Password)
+		assert.True(t, config.EnableTLSAuth)
+		assert.NotNil(t, config.tlsConfig)
+	})
+}

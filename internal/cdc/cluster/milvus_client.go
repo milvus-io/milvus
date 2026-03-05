@@ -55,7 +55,7 @@ func NewMilvusClient(ctx context.Context, cluster *commonpb.MilvusCluster) (Milv
 		return nil, errors.Wrap(err, "failed to build CDC TLS config")
 	}
 	if tlsConfig != nil {
-		config.TLSConfig = tlsConfig
+		config.WithTLSConfig(tlsConfig)
 	}
 
 	cli, err := milvusclient.New(ctx, config)
