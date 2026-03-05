@@ -1023,12 +1023,16 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	bm25Fields := typeutil.NewSet[string](GetBM25FunctionOutputFields(it.schema.CollectionSchema)...)
+	bm25Fields := GetBM25FunctionOutputFields(it.schema.CollectionSchema)
+	minHashFields := GetMinHashFunctionOutputFields(it.schema.CollectionSchema)
+	fieldsToFilter := typeutil.NewSet[string](append(bm25Fields, minHashFields...)...)
 	if it.req.PartialUpdate {
-		// remove the old bm25 fields
+		// remove old BM25 and MinHash function output fields, which will be regenerated downstream
+		// Note: do NOT filter other function outputs (e.g. text embedding) as they are generated
+		// by genFunctionFields and expected by validateFieldDataColumns
 		ret := make([]*schemapb.FieldData, 0)
 		for _, fieldData := range it.upsertMsg.InsertMsg.GetFieldsData() {
-			if bm25Fields.Contain(fieldData.GetFieldName()) {
+			if fieldsToFilter.Contain(fieldData.GetFieldName()) {
 				continue
 			}
 			ret = append(ret, fieldData)
