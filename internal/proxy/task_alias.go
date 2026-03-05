@@ -99,6 +99,14 @@ func (t *CreateAliasTask) PreExecute(ctx context.Context) error {
 	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
+
+	// Always resolve CollectionName in case the user passed an alias instead of the real name.
+	// This is needed for correctness: rootcoord's CheckIfAliasCreatable only checks mt.names,
+	// so passing an alias as CollectionName would fail.
+	dbName := t.GetDbName()
+	if resolved, err := resolveCollectionAlias(ctx, dbName, collName); err == nil {
+		t.CollectionName = resolved
+	}
 	return nil
 }
 
@@ -255,6 +263,13 @@ func (t *AlterAliasTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// Always resolve CollectionName in case the user passed an alias instead of the real name.
+	// This is needed for correctness: rootcoord's CheckIfAliasAlterable only checks mt.names,
+	// so passing an alias as CollectionName would fail.
+	dbName := t.GetDbName()
+	if resolved, err := resolveCollectionAlias(ctx, dbName, collName); err == nil {
+		t.CollectionName = resolved
+	}
 	return nil
 }
 
@@ -393,6 +408,12 @@ func (a *ListAliasesTask) PreExecute(ctx context.Context) error {
 	if len(a.GetCollectionName()) > 0 {
 		if err := validateCollectionName(a.GetCollectionName()); err != nil {
 			return err
+		}
+		// Resolve CollectionName in case the user passed an alias instead of the real name.
+		// rootcoord filters by collection name in mt.names, so an alias would return no results.
+		dbName := a.GetDbName()
+		if resolved, err := resolveCollectionAlias(ctx, dbName, a.GetCollectionName()); err == nil {
+			a.CollectionName = resolved
 		}
 	}
 	return nil
