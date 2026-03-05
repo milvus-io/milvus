@@ -3399,7 +3399,7 @@ func TestMigrateGrantCollectionName(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("migrates matching grants", func(t *testing.T) {
+	t.Run("migrates matching grants with grantee id recomputation", func(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock, nil)
 		granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
@@ -3417,10 +3417,35 @@ func TestMigrateGrantCollectionName(t *testing.T) {
 			fmt.Sprintf("role1/Collection/%s", funcutil.CombineObjectName("default", "new_col")))
 		newKey2 := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
 			fmt.Sprintf("role2/Collection/%s", funcutil.CombineObjectName("default", "new_col")))
+		newIdStr1 := crypto.MD5(newKey1)
+		newIdStr2 := crypto.MD5(newKey2)
+
+		// Mock loading GranteeIDPrefix entries for each old idStr
+		oldGranteeIDKey1 := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "gid1/")
+		oldIDEntry1 := oldGranteeIDKey1 + "Insert"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldGranteeIDKey1).Return(
+			[]string{oldIDEntry1}, []string{"root"}, nil)
+
+		oldGranteeIDKey2 := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "gid2/")
+		oldIDEntry2a := oldGranteeIDKey2 + "Insert"
+		oldIDEntry2b := oldGranteeIDKey2 + "Query"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldGranteeIDKey2).Return(
+			[]string{oldIDEntry2a, oldIDEntry2b}, []string{"root", "admin"}, nil)
+
+		newIDKey1 := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant,
+			fmt.Sprintf("%s/Insert", newIdStr1))
+		newIDKey2a := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant,
+			fmt.Sprintf("%s/Insert", newIdStr2))
+		newIDKey2b := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant,
+			fmt.Sprintf("%s/Query", newIdStr2))
 
 		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
-			map[string]string{newKey1: "gid1", newKey2: "gid2"},
-			[]string{key1, key2}).Return(nil)
+			map[string]string{
+				newKey1:   newIdStr1,
+				newKey2:   newIdStr2,
+				newIDKey1: "root", newIDKey2a: "root", newIDKey2b: "admin",
+			},
+			[]string{key1, oldIDEntry1, key2, oldIDEntry2a, oldIDEntry2b}).Return(nil)
 
 		err := c.MigrateGrantCollectionName(ctx, tenant, "default", "old_col", "default", "new_col")
 		assert.NoError(t, err)
@@ -3437,9 +3462,15 @@ func TestMigrateGrantCollectionName(t *testing.T) {
 
 		newKey1 := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
 			fmt.Sprintf("role1/Collection/%s", funcutil.CombineObjectName("db2", "col2")))
+		newIdStr1 := crypto.MD5(newKey1)
+
+		// Mock loading GranteeIDPrefix entries for old idStr
+		oldGranteeIDKey1 := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "gid1/")
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldGranteeIDKey1).Return(
+			nil, nil, nil)
 
 		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
-			map[string]string{newKey1: "gid1"},
+			map[string]string{newKey1: newIdStr1},
 			[]string{key1}).Return(nil)
 
 		err := c.MigrateGrantCollectionName(ctx, tenant, "db1", "col1", "db2", "col2")
@@ -3454,6 +3485,10 @@ func TestMigrateGrantCollectionName(t *testing.T) {
 		key1 := granteeKey + "/role1/Collection/default.old_col"
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
 			[]string{key1}, []string{"gid1"}, nil)
+
+		oldGranteeIDKey1 := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "gid1/")
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldGranteeIDKey1).Return(
+			nil, nil, nil)
 
 		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
 			Return(errors.New("save error"))
