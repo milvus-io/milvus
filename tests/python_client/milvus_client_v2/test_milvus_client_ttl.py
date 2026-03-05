@@ -16,7 +16,6 @@ default_primary_key_field_name = ct.default_primary_key_field_name
 default_vector_field_name = ct.default_vector_field_name
 default_int32_field_name = ct.default_int32_field_name
 default_search_exp = "id >= 0"
-ENTITY_TTL_QUERY_COLLECTION = "test_entity_ttl_query" + cf.gen_unique_str("_")
 
 class TestMilvusClientTTL(TestMilvusClientV2Base):
     """ Test case of Time To Live """
@@ -1319,26 +1318,47 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         """
         target: test search without filter also filters expired data
         method:
-            1. Wait for TTL to expire
-            2. Perform vector search without any filter expression
-            3. Verify search results only contain non-expired (NULL ttl) data
+            1. Create collection with ttl_field, insert future TTL + NULL TTL data
+            2. Wait for TTL to expire
+            3. Search without filter and verify only NULL TTL data is returned
         expected: TTL filtering is applied regardless of whether a filter expression
                   is present. Search without filter should not return expired entities.
         """
         client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 200
+        ttl_seconds = 8
 
-        self._wait_for_ttl_expire()
+        self._create_ttl_collection(client, collection_name)
 
-        search_vectors = cf.gen_vectors(1, dim=self.dim)
-        res = self.search(client, self.collection_name, search_vectors, anns_field='vector',
+        future_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        vectors = cf.gen_vectors(nb, dim=default_dim)
+        rows = []
+        for i in range(nb):
+            if i < 100:
+                ttl_value = future_ttl
+            else:
+                ttl_value = None
+            rows.append({default_primary_key_field_name: i, "ttl": ttl_value,
+                         default_vector_field_name: list(vectors[i])})
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Wait for TTL to expire (poll until only NULL data remains)
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=100)
+
+        search_vectors = cf.gen_vectors(1, dim=default_dim)
+        res = self.search(client, collection_name, search_vectors, anns_field=default_vector_field_name,
                          search_params={}, limit=10,
                          consistency_level=CONSISTENCY_STRONG)[0]
 
         assert len(res[0]) > 0
         for hit in res[0]:
-            # All results should be from id >= 400 (NULL ttl data that never expires)
-            assert hit['id'] >= 400, \
-                f"Search without filter returned expired entity id={hit['id']} (expected only id >= 400)"
+            assert hit['id'] >= 100, \
+                f"Search without filter returned expired entity id={hit['id']} (expected only id >= 100)"
+
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_output_entity_ttl_field(self):
