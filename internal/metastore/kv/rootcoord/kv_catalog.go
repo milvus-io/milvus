@@ -1499,12 +1499,33 @@ func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string
 		}
 		grantDB, grantObj := funcutil.SplitObjectName(grantInfos[2])
 		if grantObj == oldName && grantDB == oldDBName {
-			// Build new key with new collection name
+			oldIdStr := values[i]
+
+			// Build new key with new collection name and recompute idStr
+			// to avoid sharing permission space with a future collection
+			// that reuses the old name.
 			newObjName := funcutil.CombineObjectName(newDBName, newName)
 			newKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
 				fmt.Sprintf("%s/%s/%s", grantInfos[0], grantInfos[1], newObjName))
-			saves[newKey] = values[i]
+			newIdStr := crypto.MD5(newKey)
+			saves[newKey] = newIdStr
 			removeKeys = append(removeKeys, key)
+
+			// Migrate GranteeIDPrefix entries from oldIdStr to newIdStr
+			oldGranteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, oldIdStr+"/")
+			idKeys, idValues, loadErr := kc.Txn.LoadWithPrefix(ctx, oldGranteeIDKey)
+			if loadErr != nil {
+				log.Ctx(ctx).Warn("fail to load grantee id entries for migration",
+					zap.String("key", oldGranteeIDKey), zap.Error(loadErr))
+				continue
+			}
+			for j, idKey := range idKeys {
+				privilegeName := idKey[len(oldGranteeIDKey):]
+				newIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant,
+					fmt.Sprintf("%s/%s", newIdStr, privilegeName))
+				saves[newIDKey] = idValues[j]
+				removeKeys = append(removeKeys, idKey)
+			}
 		}
 	}
 
