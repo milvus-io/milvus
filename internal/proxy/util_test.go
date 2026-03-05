@@ -3385,6 +3385,71 @@ func TestComputeRecall(t *testing.T) {
 		err := computeRecall(result1, gt)
 		assert.Error(t, err)
 	})
+
+	t.Run("empty result with nil ids", func(t *testing.T) {
+		result := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Topks:      []int64{0, 0},
+		}
+		gt := &schemapb.SearchResultData{
+			NumQueries: 2,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+					},
+				},
+			},
+			Scores: []float32{1.0, 0.9, 0.8, 0.7, 0.6, 1.0, 0.9, 0.8, 0.7, 0.6},
+			Topks:  []int64{5, 5},
+		}
+
+		err := computeRecall(result, gt)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(result.Recalls))
+		assert.Equal(t, float32(0), result.Recalls[0])
+		assert.Equal(t, float32(0), result.Recalls[1])
+	})
+
+	t.Run("empty gt with nil ids", func(t *testing.T) {
+		result := &schemapb.SearchResultData{
+			NumQueries: 1,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{1, 2, 3},
+					},
+				},
+			},
+			Scores: []float32{1.0, 0.9, 0.8},
+			Topks:  []int64{3},
+		}
+		gt := &schemapb.SearchResultData{
+			NumQueries: 1,
+			Topks:      []int64{0},
+		}
+
+		err := computeRecall(result, gt)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(result.Recalls))
+		assert.Equal(t, float32(0), result.Recalls[0])
+	})
+
+	t.Run("both empty results", func(t *testing.T) {
+		result := &schemapb.SearchResultData{
+			NumQueries: 1,
+			Topks:      []int64{0},
+		}
+		gt := &schemapb.SearchResultData{
+			NumQueries: 1,
+			Topks:      []int64{0},
+		}
+
+		err := computeRecall(result, gt)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(result.Recalls))
+		assert.Equal(t, float32(0), result.Recalls[0])
+	})
 }
 
 func TestCheckVarcharFormat(t *testing.T) {
