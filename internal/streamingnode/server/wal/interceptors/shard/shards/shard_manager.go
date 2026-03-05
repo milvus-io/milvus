@@ -16,19 +16,22 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 var (
-	ErrCollectionExists   = errors.New("collection exists")
-	ErrCollectionNotFound = errors.New("collection not found")
-	ErrPartitionExists    = errors.New("partition exists")
-	ErrPartitionNotFound  = errors.New("partition not found")
-	ErrSegmentExists      = errors.New("segment exists")
-	ErrSegmentNotFound    = errors.New("segment not found")
-	ErrSegmentOnGrowing   = errors.New("segment on growing")
-	ErrFencedAssign       = errors.New("fenced assign")
+	ErrCollectionExists                = errors.New("collection exists")
+	ErrCollectionNotFound              = errors.New("collection not found")
+	ErrCollectionSchemaNotFound        = errors.New("collection schema not found")
+	ErrCollectionSchemaVersionNotMatch = errors.New("collection schema version not match")
+	ErrPartitionExists                 = errors.New("partition exists")
+	ErrPartitionNotFound               = errors.New("partition not found")
+	ErrSegmentExists                   = errors.New("segment exists")
+	ErrSegmentNotFound                 = errors.New("segment not found")
+	ErrSegmentOnGrowing                = errors.New("segment on growing")
+	ErrFencedAssign                    = errors.New("fenced assign")
 
 	ErrTimeTickTooOld    = errors.New("time tick is too old")
 	ErrWaitForNewSegment = errors.New("wait for new segment")
@@ -159,9 +162,15 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 		}
 		// add all partitions id into the collection info.
 		currentPartition[common.AllPartitionsID] = struct{}{}
+		// Only keep the latest schema, as shard_interceptor only needs the current write view
+		var latestSchema *streamingpb.CollectionSchemaOfVChannel
+		if len(vchannelInfo.CollectionInfo.Schemas) > 0 {
+			latestSchema = vchannelInfo.CollectionInfo.Schemas[len(vchannelInfo.CollectionInfo.Schemas)-1]
+		}
 		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = &CollectionInfo{
 			VChannel:     vchannelInfo.Vchannel,
 			PartitionIDs: currentPartition,
+			Schema:       latestSchema,
 		}
 	}
 	return collectionInfoMap
@@ -187,6 +196,7 @@ type shardManagerImpl struct {
 type CollectionInfo struct {
 	VChannel     string
 	PartitionIDs map[int64]struct{}
+	Schema       *streamingpb.CollectionSchemaOfVChannel
 }
 
 func (m *shardManagerImpl) Channel() types.PChannelInfo {
@@ -215,6 +225,7 @@ func newCollectionInfo(vchannel string, partitionIDs []int64) *CollectionInfo {
 	info := &CollectionInfo{
 		VChannel:     vchannel,
 		PartitionIDs: make(map[int64]struct{}, len(partitionIDs)),
+		Schema:       nil, // Schema will be set when collection is created or altered
 	}
 	for _, partitionID := range partitionIDs {
 		info.PartitionIDs[partitionID] = struct{}{}

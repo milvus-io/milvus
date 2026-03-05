@@ -1958,7 +1958,7 @@ func TestServer_GetFlushAllState(t *testing.T) {
 		defer mockShowCollections.UnPatch()
 
 		// Mock DescribeCollectionInternal
-		mockDescribeCollection := mockey.Mock(mockey.GetMethod(server.broker, "DescribeCollectionInternal")).To(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+		mockDescribeCollection := mockey.Mock(mockey.GetMethod(server.broker, "DescribeCollectionInternal")).To(func(ctx context.Context, collectionID int64, startPositionTimestamp uint64) (*milvuspb.DescribeCollectionResponse, error) {
 			if collectionID == 100 {
 				return &milvuspb.DescribeCollectionResponse{
 					Status:              merr.Success(),
@@ -2486,7 +2486,7 @@ func TestServer_StartBroadcastRestoreSnapshot_IndexValidation(t *testing.T) {
 
 		// Mock broker methods
 		mockDescribe := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeCollectionInternal")).To(
-			func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+			func(_ *broker.MockBroker, ctx context.Context, collectionID int64, startPositionTimestamp uint64) (*milvuspb.DescribeCollectionResponse, error) {
 				return &milvuspb.DescribeCollectionResponse{
 					Status:         merr.Success(),
 					CollectionID:   collectionID,
@@ -2554,7 +2554,7 @@ func TestServer_StartBroadcastRestoreSnapshot_IndexValidation(t *testing.T) {
 
 		// Mock broker methods
 		mockDescribe := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeCollectionInternal")).To(
-			func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+			func(_ *broker.MockBroker, ctx context.Context, collectionID int64, startPositionTimestamp uint64) (*milvuspb.DescribeCollectionResponse, error) {
 				return &milvuspb.DescribeCollectionResponse{
 					Status:         merr.Success(),
 					CollectionID:   collectionID,

@@ -687,7 +687,7 @@ func (sm *snapshotManager) RestoreIndexes(
 	snapshotName string,
 ) error {
 	// Get collection info for dbId
-	coll, err := sm.broker.DescribeCollectionInternal(ctx, collectionID)
+	coll, err := sm.broker.DescribeCollectionInternal(ctx, collectionID, typeutil.MaxTimestamp)
 	if err != nil {
 		return fmt.Errorf("failed to describe collection %d: %w", collectionID, err)
 	}

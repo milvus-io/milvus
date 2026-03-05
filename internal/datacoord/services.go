@@ -302,7 +302,6 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 	if req.GetCollectionId() == 0 || req.GetPartitionId() == 0 || req.GetVchannel() == "" || req.GetSegmentId() == 0 {
 		return &datapb.AllocSegmentResponse{Status: merr.Status(merr.ErrParameterInvalid)}, nil
 	}
-
 	// Alloc new growing segment and return the segment info.
 	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(
 		ctx,
@@ -313,6 +312,7 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 			ChannelName:          req.GetVchannel(),
 			StorageVersion:       req.GetStorageVersion(),
 			IsCreatedByStreaming: req.GetIsCreatedByStreaming(),
+			SchemaVersion:        req.GetSchemaVersion(),
 		},
 	)
 	if err != nil {
@@ -414,6 +414,39 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	}
 	nums := s.meta.GetNumRowsOfCollection(ctx, req.CollectionID)
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
+
+	// Calculate schema version consistency proportion
+	collection := s.meta.GetCollection(req.CollectionID)
+	if collection != nil && collection.Schema != nil {
+		collectionSchemaVersion := collection.Schema.GetVersion()
+		segments := s.meta.SelectSegments(ctx, WithCollection(req.CollectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
+			return isSegmentHealthy(si)
+		}))
+
+		var proportion float64
+		if len(segments) > 0 {
+			consistentCount := 0
+			for _, segment := range segments {
+				if segment.GetSchemaVersion() == collectionSchemaVersion {
+					consistentCount++
+				}
+			}
+			proportion = float64(consistentCount) / float64(len(segments)) * 100.0
+			log.Info("calculated schema version consistency proportion",
+				zap.Int32("collectionSchemaVersion", collectionSchemaVersion),
+				zap.Int("totalSegments", len(segments)),
+				zap.Int("consistentSegments", consistentCount),
+				zap.Float64("proportion", proportion))
+		} else {
+			// No segments, set proportion to 100% (all segments are consistent by default)
+			proportion = 100.0
+		}
+		resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{
+			Key:   common.SchemaVersionConsistencyProportionKey,
+			Value: fmt.Sprintf("%.2f", proportion),
+		})
+	}
+
 	log.Info("success to get collection statistics", zap.Any("response", resp))
 	return resp, nil
 }
@@ -796,7 +829,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		}, nil
 	}
 
-	dresp, err := s.broker.DescribeCollectionInternal(s.ctx, collectionID)
+	dresp, err := s.broker.DescribeCollectionInternal(s.ctx, collectionID, typeutil.MaxTimestamp)
 	if err != nil {
 		log.Error("get collection info from rootcoord failed",
 			zap.Error(err))
@@ -1493,7 +1526,7 @@ OUTER:
 		}
 
 		for _, collectionID := range showColRsp.GetCollectionIds() {
-			describeColRsp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+			describeColRsp, err := s.broker.DescribeCollectionInternal(ctx, collectionID, typeutil.MaxTimestamp)
 			if err != nil {
 				log.Warn("failed to DescribeCollectionInternal", zap.Int64("collectionID", collectionID), zap.Error(err))
 				resp.Status = merr.Status(err)
@@ -2009,7 +2042,7 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	}
 
 	// Start broadcast with collection lock (also validates collection existence)
-	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
+	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId(), typeutil.MaxTimestamp)
 	if err != nil {
 		log.Warn("CreateSnapshot failed to describe collection", zap.Error(err))
 		return merr.Status(err), nil

@@ -1954,7 +1954,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 			CollectionNames: []string{"coll1"},
 			CollectionIds:   []int64{1000},
 		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("describe collection failed, mocked"))
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("describe collection failed, mocked"))
 		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
 		assert.Error(t, err)
 	})
@@ -1972,7 +1972,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 			CollectionNames: []string{"coll1"},
 			CollectionIds:   []int64{1000},
 		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{}, nil)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{}, nil)
 		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(nil, errors.New("show partitions failed, mocked"))
 		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
 		assert.Error(t, err)
@@ -1991,7 +1991,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 			CollectionNames: []string{"coll1"},
 			CollectionIds:   []int64{1000},
 		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 			CollectionID: 1000,
 		}, nil)
 		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil)

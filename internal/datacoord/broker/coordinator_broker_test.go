@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type BrokerSuite struct {
@@ -73,7 +74,7 @@ func (s *BrokerSuite) TestDescribeCollectionInternal() {
 			}, nil
 		})
 
-		resp, err := s.broker.DescribeCollectionInternal(context.Background(), collID)
+		resp, err := s.broker.DescribeCollectionInternal(context.Background(), collID, typeutil.MaxTimestamp)
 		s.NoError(err)
 		s.Equal(collID, resp.GetCollectionID())
 		s.Equal("test_collection", resp.GetCollectionName())
@@ -91,7 +92,7 @@ func (s *BrokerSuite) TestDescribeCollectionInternal() {
 			return nil, errors.New("mocked")
 		})
 
-		_, err := s.broker.DescribeCollectionInternal(context.Background(), collID)
+		_, err := s.broker.DescribeCollectionInternal(context.Background(), collID, typeutil.MaxTimestamp)
 		s.Error(err)
 
 		s.TearDownTest()
@@ -406,7 +407,7 @@ func (s *BrokerSuite) TestDescribeCollectionInternal_StatusError() {
 			}, nil
 		})
 
-		resp, err := s.broker.DescribeCollectionInternal(context.Background(), collID)
+		resp, err := s.broker.DescribeCollectionInternal(context.Background(), collID, typeutil.MaxTimestamp)
 		s.Error(err)
 		s.Nil(resp)
 

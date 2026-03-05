@@ -72,7 +72,10 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 		Functions:          model.MarshalFunctionModels(coll.Functions),
 		EnableDynamicField: coll.EnableDynamicField,
 		Properties:         coll.Properties,
+		DbName:             coll.DBName,
+		FileResourceIds:    coll.FileResourceIds,
 		Version:            coll.SchemaVersion + 1,
+		DoPhysicalBackfill: false,
 	}
 	schema.Fields = append(schema.Fields, fieldSchema)
 

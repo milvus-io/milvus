@@ -710,7 +710,7 @@ func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID
 // - Collection cloning to different database/cluster
 func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error) {
 	// get coll info
-	resp, err := h.s.broker.DescribeCollectionInternal(ctx, collectionID)
+	resp, err := h.s.broker.DescribeCollectionInternal(ctx, collectionID, typeutil.MaxTimestamp)
 	if err != nil {
 		return nil, err
 	}
