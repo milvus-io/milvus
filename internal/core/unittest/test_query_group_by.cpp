@@ -1051,3 +1051,165 @@ TEST(CountAggregateTest, NullCountMatchesValidAt) {
             << "Mismatch at size=" << size;
     }
 }
+
+// Regression test for #47316: GROUP BY aggregation with empty result set
+// When filter matches zero rows, outputRowCount() must handle null lookup_
+// and setupRetrieveResult must return empty field_data arrays with correct schema.
+TEST_P(QueryAggTest, GroupByEmptyResultSet) {
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    PlanNodePtr mvcc_node = std::make_shared<milvus::plan::MvccNode>(
+        milvus::plan::GetNextPlanNodeId(), sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{mvcc_node};
+
+    // FilterBitsNode with always-false expression to filter out all rows
+    auto str_id = field_map_[string_field];
+    expr::ColumnInfo column_info(str_id, DataType::VARCHAR);
+    auto always_false_expr = std::make_shared<expr::TermFilterExpr>(
+        column_info, std::vector<proto::plan::GenericValue>{});
+    PlanNodePtr filter_node = std::make_shared<milvus::plan::FilterBitsNode>(
+        milvus::plan::GetNextPlanNodeId(), always_false_expr, sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{filter_node};
+
+    // ProjectNode with the grouping key field
+    auto int16_id = field_map_[int16_field];
+    PlanNodePtr project_node = std::make_shared<milvus::plan::ProjectNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<FieldId>{int16_id},
+        std::vector<std::string>{int16_field},
+        std::vector<DataType>{DataType::INT16},
+        sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{project_node};
+
+    // AggregationNode: GROUP BY int16, count(*)
+    std::vector<expr::FieldAccessTypeExprPtr> groupingKeys;
+    groupingKeys.emplace_back(std::make_shared<const expr::FieldAccessTypeExpr>(
+        DataType::INT16, int16_field, int16_id));
+    std::string agg_name = "count";
+    std::vector<plan::AggregationNode::Aggregate> aggregates;
+    {
+        auto call = std::make_shared<const expr::CallExpr>(
+            agg_name, std::vector<expr::TypedExprPtr>{}, nullptr);
+        aggregates.emplace_back(plan::AggregationNode::Aggregate{call});
+        aggregates.back().resultType_ =
+            GetAggResultType(agg_name, DataType::NONE);
+    }
+    PlanNodePtr agg_node = std::make_shared<plan::AggregationNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::move(groupingKeys),
+        std::vector<std::string>{agg_name},
+        std::move(aggregates),
+        sources);
+
+    auto retrieve_plan = createRetrievePlan(schema_, agg_node, num_rows_);
+    auto retrieve_results = segment_->Retrieve(nullptr,
+                                               retrieve_plan.get(),
+                                               MAX_TIMESTAMP,
+                                               DEFAULT_MAX_OUTPUT_SIZE,
+                                               false);
+
+    // Should return 2 empty field_data arrays (grouping key + count),
+    // not crash or return 0 field_data arrays.
+    ASSERT_EQ(retrieve_results->fields_data_size(), 2);
+    EXPECT_EQ(retrieve_results->fields_data(0).scalars().int_data().data_size(),
+              0);
+    EXPECT_EQ(
+        retrieve_results->fields_data(1).scalars().long_data().data_size(), 0);
+}
+
+// Regression test for #47316: GROUP BY with multiple aggregates and empty result
+TEST_P(QueryAggTest, GroupByEmptyResultMultipleAggs) {
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    PlanNodePtr mvcc_node = std::make_shared<milvus::plan::MvccNode>(
+        milvus::plan::GetNextPlanNodeId(), sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{mvcc_node};
+
+    // Always-false filter
+    auto str_id = field_map_[string_field];
+    expr::ColumnInfo column_info(str_id, DataType::VARCHAR);
+    auto always_false_expr = std::make_shared<expr::TermFilterExpr>(
+        column_info, std::vector<proto::plan::GenericValue>{});
+    PlanNodePtr filter_node = std::make_shared<milvus::plan::FilterBitsNode>(
+        milvus::plan::GetNextPlanNodeId(), always_false_expr, sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{filter_node};
+
+    // ProjectNode: group key (string) + agg input (int64, double)
+    auto int64_id = field_map_[int64_field];
+    auto double_id = field_map_[double_field];
+    PlanNodePtr project_node = std::make_shared<milvus::plan::ProjectNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<FieldId>{str_id, int64_id, double_id},
+        std::vector<std::string>{string_field, int64_field, double_field},
+        std::vector<DataType>{
+            DataType::VARCHAR, DataType::INT64, DataType::DOUBLE},
+        sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{project_node};
+
+    // AggregationNode: GROUP BY string, count(*), sum(int64), max(double)
+    std::vector<expr::FieldAccessTypeExprPtr> groupingKeys;
+    groupingKeys.emplace_back(std::make_shared<const expr::FieldAccessTypeExpr>(
+        DataType::VARCHAR, string_field, str_id));
+
+    std::vector<plan::AggregationNode::Aggregate> aggregates;
+    std::vector<std::string> agg_names;
+
+    // count(*)
+    {
+        auto call = std::make_shared<const expr::CallExpr>(
+            "count", std::vector<expr::TypedExprPtr>{}, nullptr);
+        aggregates.emplace_back(plan::AggregationNode::Aggregate{call});
+        aggregates.back().resultType_ =
+            GetAggResultType("count", DataType::NONE);
+        agg_names.push_back("count");
+    }
+    // sum(int64)
+    {
+        auto agg_input = std::make_shared<expr::FieldAccessTypeExpr>(
+            DataType::INT64, int64_field, int64_id);
+        auto call = std::make_shared<const expr::CallExpr>(
+            "sum", std::vector<expr::TypedExprPtr>{agg_input}, nullptr);
+        aggregates.emplace_back(plan::AggregationNode::Aggregate{call});
+        aggregates.back().rawInputTypes_.emplace_back(DataType::INT64);
+        aggregates.back().resultType_ =
+            GetAggResultType("sum", DataType::INT64);
+        agg_names.push_back("sum");
+    }
+    // max(double)
+    {
+        auto agg_input = std::make_shared<expr::FieldAccessTypeExpr>(
+            DataType::DOUBLE, double_field, double_id);
+        auto call = std::make_shared<const expr::CallExpr>(
+            "max", std::vector<expr::TypedExprPtr>{agg_input}, nullptr);
+        aggregates.emplace_back(plan::AggregationNode::Aggregate{call});
+        aggregates.back().rawInputTypes_.emplace_back(DataType::DOUBLE);
+        aggregates.back().resultType_ =
+            GetAggResultType("max", DataType::DOUBLE);
+        agg_names.push_back("max");
+    }
+
+    PlanNodePtr agg_node = std::make_shared<plan::AggregationNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::move(groupingKeys),
+        std::move(agg_names),
+        std::move(aggregates),
+        sources);
+
+    auto retrieve_plan = createRetrievePlan(schema_, agg_node, num_rows_);
+    auto retrieve_results = segment_->Retrieve(nullptr,
+                                               retrieve_plan.get(),
+                                               MAX_TIMESTAMP,
+                                               DEFAULT_MAX_OUTPUT_SIZE,
+                                               false);
+
+    // 4 columns: string (group key) + count + sum + max, all empty
+    ASSERT_EQ(retrieve_results->fields_data_size(), 4);
+    EXPECT_EQ(
+        retrieve_results->fields_data(0).scalars().string_data().data_size(),
+        0);
+    EXPECT_EQ(
+        retrieve_results->fields_data(1).scalars().long_data().data_size(), 0);
+    EXPECT_EQ(
+        retrieve_results->fields_data(2).scalars().long_data().data_size(), 0);
+    EXPECT_EQ(
+        retrieve_results->fields_data(3).scalars().double_data().data_size(),
+        0);
+}

@@ -596,7 +596,6 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         log.info("test_avg_return_type passed")
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="Skipped due to Milvus crash bug, tracked in issue #47316")
     def test_empty_result_aggregation(self):
         """
         target: test aggregation when filter matches no rows
