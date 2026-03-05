@@ -197,7 +197,7 @@ class TestSearchArrayShared(TestMilvusClientV2Base):
         self.create_collection(client, self.collection_name, schema=schema, force_teardown=False)
 
         # Insert data with custom string_field_value
-        self.string_field_value = [[str(j) for j in range(i, i + 3)] for i in range(ct.default_nb)]
+        self.__class__.string_field_value = [[str(j) for j in range(i, i + 3)] for i in range(ct.default_nb)]
         data = cf.gen_array_dataframe_data()
         data[ct.default_string_array_field_name] = self.string_field_value
         self.insert(client, self.collection_name, data=data.to_dict(orient='records'))
