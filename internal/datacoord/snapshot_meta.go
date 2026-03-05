@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -509,6 +511,28 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) e
 
 	log.Info("snapshot deleted successfully", zap.Int64("snapshotID", snapshot.GetId()))
 	return nil
+}
+
+// updateMetrics reports snapshot inventory gauge grouped by (collectionID, dbName).
+// The getDBName callback resolves collection ID to database name, keeping snapshotMeta
+// decoupled from the broader meta layer.
+func (sm *snapshotMeta) updateMetrics(getDBName func(collectionID int64) string) {
+	type collDBKey struct {
+		collectionID string
+		dbName       string
+	}
+	counts := make(map[collDBKey]int)
+
+	sm.snapshotID2Info.Range(func(_ int64, info *datapb.SnapshotInfo) bool {
+		collIDStr := strconv.FormatInt(info.GetCollectionId(), 10)
+		counts[collDBKey{collIDStr, getDBName(info.GetCollectionId())}]++
+		return true
+	})
+
+	metrics.DataCoordSnapshotTotal.Reset()
+	for key, count := range counts {
+		metrics.DataCoordSnapshotTotal.WithLabelValues(key.collectionID, key.dbName).Set(float64(count))
+	}
 }
 
 // ListSnapshots returns snapshot names filtered by collection and/or partition.
