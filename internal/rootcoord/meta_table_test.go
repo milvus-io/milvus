@@ -1194,6 +1194,9 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 			mock.Anything, // model.Collection
 			mock.AnythingOfType("uint64"),
 		).Return(nil)
+		catalog.On("DeleteGrantByCollectionName",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
 			names:   newNameDb(),
@@ -1211,6 +1214,34 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 		err := meta.RemoveCollection(ctx, 100, 9999)
 		assert.NoError(t, err)
 	})
+}
+
+func TestMetaTable_RemoveCollection_GrantDeleteBestEffort(t *testing.T) {
+	// When DeleteGrantByCollectionName fails, RemoveCollection should still succeed (best-effort)
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.On("DropCollection",
+		mock.Anything,
+		mock.Anything,
+		mock.AnythingOfType("uint64"),
+	).Return(nil)
+	catalog.On("DeleteGrantByCollectionName",
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+	).Return(errors.New("grant delete failed"))
+
+	meta := &MetaTable{
+		catalog: catalog,
+		names:   newNameDb(),
+		aliases: newNameDb(),
+		collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			100: {Name: "collection", State: pb.CollectionState_CollectionDropping},
+		},
+	}
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+	meta.names.insert("", "collection", 100)
+	ctx := context.Background()
+	err := meta.RemoveCollection(ctx, 100, 9999)
+	assert.NoError(t, err)
 }
 
 func TestMetaTable_RemovePartition(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -16,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
@@ -296,5 +298,20 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
 		return errors.Wrap(err, "failed to broadcast altered collection")
 	}
+
+	// If the collection was renamed or moved to a different DB, grants were migrated
+	// in MetaTable.AlterCollection. Refresh the RBAC policy cache on all proxies so
+	// they pick up the new grant keys.
+	for _, path := range header.UpdateMask.GetPaths() {
+		if path == message.FieldMaskCollectionName || path == message.FieldMaskDB {
+			if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+				OpType: int32(typeutil.CacheRefresh),
+			}); err != nil {
+				log.Ctx(ctx).Warn("failed to refresh RBAC policy cache after collection rename, skipping", zap.Error(err))
+			}
+			break
+		}
+	}
+
 	return c.ExpireCaches(ctx, header)
 }

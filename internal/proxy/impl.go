@@ -146,6 +146,12 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
 				}
 			}
+			// Invalidate alias cache for alias operations
+			if msgType == commonpb.MsgType_CreateAlias || msgType == commonpb.MsgType_AlterAlias || msgType == commonpb.MsgType_DropAlias {
+				if collectionName != "" {
+					globalMetaCache.RemoveAlias(ctx, request.GetDbName(), collectionName)
+				}
+			}
 			log.Info("complete to invalidate collection meta cache with collection name", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
 			// All the request from query use collectionID
