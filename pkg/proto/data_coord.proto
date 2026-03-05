@@ -1566,6 +1566,7 @@ message SnapshotMetadata {
   repeated StorageV2SegmentManifest storagev2_manifest_list = 6;
   repeated int64 segment_ids = 7;
   repeated int64 index_ids = 8;
+  repeated int64 build_ids = 9;
 }
 
 message RestoreSnapshotInfo {
