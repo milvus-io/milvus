@@ -275,10 +275,15 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
                                    round_decimal=round_decimal)
 
         abs_tol = pow(10, 1 - round_decimal)
-        for i in range(tmp_limit):
-            dis_expect = round(res[0][i]["distance"], round_decimal)
-            dis_actual = res_round[0][i]["distance"]
-            assert math.isclose(dis_actual, dis_expect, rel_tol=0, abs_tol=abs_tol)
+        # Build pk→distance map from unrounded results and match by entity pk
+        pk = ct.default_int64_field_name
+        dist_map = {res[0][i][pk]: res[0][i]["distance"] for i in range(tmp_limit)}
+        for i in range(len(res_round[0])):
+            _id = res_round[0][i][pk]
+            if _id in dist_map:
+                dis_expect = round(dist_map[_id], round_decimal)
+                dis_actual = res_round[0][i]["distance"]
+                assert math.isclose(dis_actual, dis_expect, rel_tol=0, abs_tol=abs_tol)
 
 
 class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
@@ -290,8 +295,8 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("null_data_percent", [0.5, 1])
-    def test_search_with_expression(self, null_data_percent):
+    @pytest.mark.parametrize("null_data_percent", [0, 0.5, 1])
+    def test_search_with_expression_nullable(self, null_data_percent):
         """
         target: test search with different expressions
         method: test search with different expressions
@@ -406,7 +411,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("bool_type", [True, False, "true", "false"])
-    @pytest.mark.parametrize("null_data_percent", [0.5, 1])
+    @pytest.mark.parametrize("null_data_percent", [0, 0.5, 1])
     def test_search_with_expression_bool(self, bool_type, null_data_percent):
         """
         target: test search with different bool expressions
@@ -591,8 +596,6 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
         expected: searched successfully with correct limit(topK)
         """
         enable_dynamic_field = True
-        if not enable_dynamic_field:
-            pytest.skip("not allowed")
         # 1. initialize with data
         nb = 100
         dim = ct.default_dim
@@ -682,9 +685,8 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
             expr = expressions[0].replace("&&", "and").replace("||", "or")
             filter_ids = []
             for i, _id in enumerate(insert_ids):
-                exec(
-                    f"{default_float_field_name} = data[i][f'{default_float_field_name}']")
-                if not expr or eval(expr):
+                local_vars = {default_float_field_name: data[i][default_float_field_name]}
+                if not expr or eval(expr, {}, local_vars):
                     filter_ids.append(_id)
             # 3. search expressions
             expected_limit = min(search_limit, len(filter_ids))
@@ -1011,8 +1013,8 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("field", ct.all_scalar_data_types[:3])
-    @pytest.mark.parametrize("null_data_percent", [0.5, 1])
-    def test_search_expression_different_data_type(self, field, null_data_percent):
+    @pytest.mark.parametrize("null_data_percent", [0, 0.5, 1])
+    def test_search_expression_different_data_type_nullable(self, field, null_data_percent):
         """
         target: test search expression using different supported data types
         method: search using different supported data types
@@ -1100,11 +1102,9 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
         self.flush(client, collection_name)
 
         filter_ids = []
-        for idx, _id in enumerate(insert_ids):
-            filter_ids.append((idx, _id))
-        filter_id_list = []
-        for item in filter_ids:
-            filter_id_list.extend(item)
+        for i in range(nb):
+            if data[i]["int64_1"] <= data[i]["int64_2"]:
+                filter_ids.append(data[i]["int64_1"])
 
         # 3. create index and load
         idx = self.prepare_index_params(client)[0]
@@ -1128,7 +1128,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
                                           "limit": default_limit,
                                           "enable_milvus_client_api": True,
                                           "pk_name": "int64_1"})
-        filter_ids_set = set(filter_id_list)
+        filter_ids_set = set(filter_ids)
         for hits in res:
             ids = [hit["int64_1"] for hit in hits]
             assert set(ids).issubset(filter_ids_set)

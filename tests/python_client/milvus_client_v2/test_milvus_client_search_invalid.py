@@ -590,6 +590,16 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
 class TestSearchInvalidIndependent(TestMilvusClientV2Base):
     """ Test case of search interface """
 
+    def _create_standard_schema(self, client, dim=default_dim):
+        """Create a standard schema: int64(PK), float, varchar(65535), json, float_vector(dim)."""
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        return schema
+
     """
     ******************************************************************
     #  The followings are invalid cases
@@ -606,12 +616,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 1. initialize with data
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
         idx = self.prepare_index_params(client)[0]
         idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE")
@@ -645,12 +650,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 1. initialize without data
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
 
         # 2. Drop collection
@@ -679,12 +679,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 1. initialize with data
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
 
         data = cf.gen_row_data_by_schema(nb=2000, schema=schema)
@@ -726,12 +721,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 1. initialize with data
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
 
         data = cf.gen_row_data_by_schema(nb=3000, schema=schema)
@@ -1013,12 +1003,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 1. initialize without data
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
         idx = self.prepare_index_params(client)[0]
         idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE")
@@ -1050,12 +1035,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 1. initialize with data
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
 
         # create partition and insert data
@@ -1173,12 +1153,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 1. initialize without data
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
 
         par_name = "search_partition_0"
@@ -1226,12 +1201,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 1. initialize with data
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
 
         # create partition and insert data
@@ -1273,12 +1243,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 1. initialize with data
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
 
         # 2. create index
@@ -1309,12 +1274,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # initialize with data
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
         data = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, data=data)
@@ -1367,6 +1327,8 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 3. search with exception
         _, search_binary_vectors = cf.gen_binary_vectors(3000, default_dim)
         wrong_search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
+        # err_code 65535: BIN_IVF_FLAT now returns metric type mismatch at search time
+        # (previously returned 1100 during index/collection migration)
         self.search(client, collection_name,
                     data=search_binary_vectors[:default_nq],
                     anns_field=ct.default_binary_vec_field_name,
@@ -1487,12 +1449,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 1. create a collection and insert data
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
         data = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, data=data)
@@ -1529,12 +1486,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 1. create a collection
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
         data = cf.gen_row_data_by_schema(nb=10, schema=schema)
         self.insert(client, collection_name, data=data)
@@ -1569,12 +1521,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 1. initialize with data
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
         data = cf.gen_row_data_by_schema(nb=100, schema=schema)
         self.insert(client, collection_name, data=data)
@@ -1609,12 +1556,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         # 1. initialize with data
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
         data = cf.gen_row_data_by_schema(nb=100, schema=schema)
         self.insert(client, collection_name, data=data)
@@ -1691,12 +1633,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
-        schema.add_field(ct.default_json_field_name, DataType.JSON)
-        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
         data = cf.gen_row_data_by_schema(nb=2000, schema=schema)
         self.insert(client, collection_name, data=data)
