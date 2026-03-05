@@ -611,7 +611,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequ
 		log.Warn("Search failed")
 		return nil, err
 	}
-	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(paramtable.GetStringNodeID(), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Debug("search segment done")
 	return result, nil
 }
@@ -631,7 +631,7 @@ func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan,
 		log.Warn("Retrieve failed")
 		return nil, err
 	}
-	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(paramtable.GetStringNodeID(),
 		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return result, nil
 }
@@ -677,7 +677,7 @@ func (s *LocalSegment) retrieveByOffsets(ctx context.Context, plan *segcore.Retr
 		log.Warn("RetrieveByOffsets failed")
 		return nil, err
 	}
-	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(paramtable.GetStringNodeID(),
 		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return result, nil
 }
@@ -724,7 +724,7 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
-				fmt.Sprint(paramtable.GetNodeID()),
+				paramtable.GetStringNodeID(),
 				"Insert",
 				"Sync",
 			).Observe(float64(time.Since(start).Milliseconds()))
@@ -780,7 +780,7 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys storage.PrimaryKe
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
-				fmt.Sprint(paramtable.GetNodeID()),
+				paramtable.GetStringNodeID(),
 				"Delete",
 				"Sync",
 			).Observe(float64(time.Since(start).Milliseconds()))
@@ -843,7 +843,7 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
-				fmt.Sprint(paramtable.GetNodeID()),
+				paramtable.GetStringNodeID(),
 				"LoadFieldData",
 				"Sync",
 			).Observe(float64(time.Since(start).Milliseconds()))
@@ -914,7 +914,7 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 		start := time.Now()
 		defer func() {
 			metrics.QueryNodeCGOCallLatency.WithLabelValues(
-				fmt.Sprint(paramtable.GetNodeID()),
+				paramtable.GetStringNodeID(),
 				"LoadDeletedRecord",
 				"Sync",
 			).Observe(float64(time.Since(start).Milliseconds()))

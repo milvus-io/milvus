@@ -3358,6 +3358,7 @@ type queryNodeConfig struct {
 	IoPoolSize                  ParamItem `refreshable:"false"`
 	DeltaDataExpansionRate      ParamItem `refreshable:"true"`
 	JSONKeyStatsExpansionFactor ParamItem `refreshable:"true"`
+	TextIndexExpansionFactor    ParamItem `refreshable:"true"`
 	DiskSizeFetchInterval       ParamItem `refreshable:"false"`
 
 	// schedule task policy.
@@ -4359,6 +4360,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.JSONKeyStatsExpansionFactor.Init(base.mgr)
 
+	p.TextIndexExpansionFactor = ParamItem{
+		Key:          "querynode.textIndexExpansionFactor",
+		Version:      "2.6.8",
+		DefaultValue: "1.0",
+		Doc:          "the expansion factor for text match index memory size estimation during segment loading",
+	}
+	p.TextIndexExpansionFactor.Init(base.mgr)
+
 	p.DiskSizeFetchInterval = ParamItem{
 		Key:          "querynode.diskSizeFetchInterval",
 		Version:      "2.5.0",
@@ -4718,10 +4727,11 @@ type dataCoordConfig struct {
 	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
 	CopySegmentJobTimeout           ParamItem `refreshable:"true"`
 
-	ExternalCollectionCheckInterval ParamItem `refreshable:"true"`
-	ExternalCollectionJobTimeout    ParamItem `refreshable:"true"`
-	ExternalCollectionJobRetention  ParamItem `refreshable:"true"`
-	ExternalCollectionDropRatioWarn ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
+	ExternalCollectionCheckInterval    ParamItem `refreshable:"true"`
+	ExternalCollectionJobTimeout       ParamItem `refreshable:"true"`
+	ExternalCollectionJobRetention     ParamItem `refreshable:"true"`
+	ExternalCollectionDropRatioWarn    ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
+	ExternalCollectionPreAllocSegments ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -5879,6 +5889,15 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.ExternalCollectionDropRatioWarn.Init(base.mgr)
 
+	p.ExternalCollectionPreAllocSegments = ParamItem{
+		Key:          "dataCoord.externalCollectionPreAllocSegments",
+		Version:      "2.6.8",
+		Doc:          "The number of segment IDs to pre-allocate for each external collection refresh task.",
+		DefaultValue: "1000",
+		PanicIfEmpty: false,
+	}
+	p.ExternalCollectionPreAllocSegments.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -6182,6 +6201,9 @@ type dataNodeConfig struct {
 
 	WorkerSlotUnit      ParamItem `refreshable:"true"`
 	StandaloneSlotRatio ParamItem `refreshable:"false"`
+
+	// external collection
+	ExternalCollectionTargetRowsPerSegment ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -6650,6 +6672,15 @@ if this parameter <= 0, will set it as 10`,
 		Doc:          "Offline task slot ratio in standalone mode",
 	}
 	p.StandaloneSlotRatio.Init(base.mgr)
+
+	p.ExternalCollectionTargetRowsPerSegment = ParamItem{
+		Key:          "dataNode.externalCollection.targetRowsPerSegment",
+		Version:      "2.6.0",
+		DefaultValue: "1000000",
+		Doc:          "Target number of rows per segment for external collections",
+		Export:       false,
+	}
+	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
 }
 
 type streamingConfig struct {
@@ -6713,6 +6744,12 @@ type streamingConfig struct {
 	// Empty TimeTick Filtering configration
 	DelegatorEmptyTimeTickMaxFilterInterval ParamItem `refreshable:"true"`
 	FlushEmptyTimeTickMaxFilterInterval     ParamItem `refreshable:"true"`
+
+	// Replication configuration
+	ReplicationUseLocalReplicaConfig ParamItem `refreshable:"true"`
+
+	// Replication filtering configuration
+	ReplicationSkipMessageTypes ParamItem `refreshable:"false"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -6776,9 +6813,9 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 	p.WALBalancerOperationTimeout = ParamItem{
 		Key:     "streaming.walBalancer.operationTimeout",
 		Version: "2.6.0",
-		Doc: `The timeout of wal balancer operation, 30s by default.
+		Doc: `The timeout of wal balancer operation, 30m by default.
 If the operation exceeds this timeout, it will be canceled.`,
-		DefaultValue: "30s",
+		DefaultValue: "30m",
 		Export:       true,
 	}
 	p.WALBalancerOperationTimeout.Init(base.mgr)
@@ -7102,6 +7139,24 @@ so we set 1 second here as a threshold.`,
 		Export:       false,
 	}
 	p.FlushEmptyTimeTickMaxFilterInterval.Init(base.mgr)
+
+	p.ReplicationUseLocalReplicaConfig = ParamItem{
+		Key:          "streaming.replication.useLocalReplicaConfig",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "when true, the secondary CDC cluster uses its own cluster-level replica/resource-group config instead of the primary's config for replicated AlterLoadConfig messages",
+		Export:       false,
+	}
+	p.ReplicationUseLocalReplicaConfig.Init(base.mgr)
+
+	p.ReplicationSkipMessageTypes = ParamItem{
+		Key:          "streaming.replication.skipMessageTypes",
+		Version:      "2.6.11",
+		Doc:          `Comma-separated list of message type names to skip when replicating to a secondary cluster. Messages of these types will be ignored by the secondary's replicate stream server.`,
+		DefaultValue: "AlterResourceGroup,DropResourceGroup",
+		Export:       false,
+	}
+	p.ReplicationSkipMessageTypes.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

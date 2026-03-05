@@ -32,7 +32,7 @@ class MilvusConan(ConanFile):
         "prometheus-cpp/1.1.0#ea9b101cb785943adb40ad82eda7856c",
         "re2/20230301#f8efaf45f98d0193cd0b2ea08b6b4060",
         "folly/2023.10.30.08@milvus/dev#81d7729cd4013a1b708af3340a3b04d9",
-        "google-cloud-cpp/2.5.0@milvus/2.4#c5591ab30b26b53ea6068af6f07128d3",
+        "google-cloud-cpp/2.28.0#cf2bffe2264488b6c1153fae2a8db095",
         "opentelemetry-cpp/1.8.1.1@milvus/2.4#7345034855d593047826b0c74d9a0ced",
         "librdkafka/1.9.1#e24dcbb0a1684dcf5a56d8d0692ceef3",
         "abseil/20230125.3#dad7cc4c83bbd44c1f1cc9cc4d97ac88",

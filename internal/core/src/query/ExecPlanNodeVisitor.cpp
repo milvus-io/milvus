@@ -279,14 +279,19 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     auto plan = plan::PlanFragment(node.plannodes_);
 
     // Set query context
-    auto query_context =
-        std::make_shared<milvus::exec::QueryContext>(DEAFULT_QUERY_ID,
-                                                     segment,
-                                                     active_count,
-                                                     timestamp_,
-                                                     collection_ttl_timestamp_,
-                                                     consistency_level_,
-                                                     node.plan_options_);
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID,
+        segment,
+        active_count,
+        timestamp_,
+        collection_ttl_timestamp_,
+        consistency_level_,
+        node.plan_options_,
+        std::make_shared<milvus::exec::QueryConfig>(),
+        nullptr,
+        std::unordered_map<std::string,
+                           std::shared_ptr<milvus::exec::BaseConfig>>(),
+        entity_ttl_physical_time_us_);
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
@@ -373,14 +378,19 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
     auto plan = plan::PlanFragment(node.plannodes_);
 
     // Set query context
-    auto query_context =
-        std::make_shared<milvus::exec::QueryContext>(DEAFULT_QUERY_ID,
-                                                     segment,
-                                                     active_count,
-                                                     timestamp_,
-                                                     collection_ttl_timestamp_,
-                                                     consistency_level_,
-                                                     node.plan_options_);
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        DEAFULT_QUERY_ID,
+        segment,
+        active_count,
+        timestamp_,
+        collection_ttl_timestamp_,
+        consistency_level_,
+        node.plan_options_,
+        std::make_shared<milvus::exec::QueryConfig>(),
+        nullptr,
+        std::unordered_map<std::string,
+                           std::shared_ptr<milvus::exec::BaseConfig>>(),
+        entity_ttl_physical_time_us_);
 
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);

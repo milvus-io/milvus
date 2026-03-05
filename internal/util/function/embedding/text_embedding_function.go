@@ -48,6 +48,7 @@ const (
 	cohereProvider       string = "cohere"
 	siliconflowProvider  string = "siliconflow"
 	teiProvider          string = "tei"
+	ycProvider           string = "yc"
 	zillizProvider       string = "zilliz"
 	arkProvider          string = "ark"
 )
@@ -137,13 +138,15 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 		embP, newProviderErr = NewSiliconflowEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials, extraInfo)
 	case teiProvider:
 		embP, newProviderErr = NewTEIEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials, extraInfo)
+	case ycProvider:
+		embP, newProviderErr = NewYCEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials, extraInfo)
 	case zillizProvider:
 		conf := paramtable.Get().FunctionCfg.ZillizProviders.GetValue()
 		embP, newProviderErr = NewZillizEmbeddingProvider(base.outputFields[0], functionSchema, conf, extraInfo)
 	case arkProvider:
 		embP, newProviderErr = NewArkEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials, extraInfo)
 	default:
-		return nil, fmt.Errorf("Unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider, zillizProvider, arkProvider)
+		return nil, fmt.Errorf("Unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider, ycProvider, zillizProvider, arkProvider)
 	}
 
 	if newProviderErr != nil {

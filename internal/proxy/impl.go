@@ -6566,7 +6566,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	method := "ImportV2"
 	tr := timerecord.NewTimeRecorder(method)
 	log.Info(rpcReceived(method))
-	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	nodeID := paramtable.GetStringNodeID()
 
 	it := &importTask{
 		ctx:       ctx,
@@ -6617,7 +6617,7 @@ func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImp
 	tr := timerecord.NewTimeRecorder(method)
 	log.Info(rpcReceived(method))
 
-	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	nodeID := paramtable.GetStringNodeID()
 	resp, err := node.mixCoord.GetImportProgress(ctx, req)
 	if resp.GetStatus().GetCode() != 0 || err != nil {
 		log.Warn("get import progress failed", zap.String("reason", resp.GetStatus().GetReason()), zap.Error(err))
@@ -6644,7 +6644,7 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 	tr := timerecord.NewTimeRecorder(method)
 	log.Info(rpcReceived(method))
 
-	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	nodeID := paramtable.GetStringNodeID()
 
 	var (
 		err          error

@@ -1330,17 +1330,8 @@ func TestCatalog_CreateCollection(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("failed to save collection", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockSave(errors.New("error mock Save")))
-		kc := NewCatalog(nil, mockSnapshot)
-		ctx := context.Background()
-		coll := &model.Collection{State: pb.CollectionState_CollectionCreated}
-		err := kc.CreateCollection(ctx, coll, 100)
-		assert.Error(t, err)
-	})
-
-	t.Run("succeed to save collection but failed to save other keys", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockSave(nil), withMockMultiSave(errors.New("error mock MultiSave")))
+	t.Run("failed to save fields", func(t *testing.T) {
+		mockSnapshot := newMockSnapshot(t, withMockMultiSave(errors.New("error mock MultiSave")))
 		kc := NewCatalog(nil, mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1353,8 +1344,31 @@ func TestCatalog_CreateCollection(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("succeed to save fields but failed to save collection key", func(t *testing.T) {
+		mockSnapshot := newMockSnapshot(t, withMockMultiSave(nil), withMockSave(errors.New("error mock Save")))
+		kc := NewCatalog(nil, mockSnapshot)
+		ctx := context.Background()
+		coll := &model.Collection{
+			Partitions: []*model.Partition{
+				{PartitionName: "test"},
+			},
+			State: pb.CollectionState_CollectionCreated,
+		}
+		err := kc.CreateCollection(ctx, coll, 100)
+		assert.Error(t, err)
+	})
+
+	t.Run("no fields or partitions, only collection key", func(t *testing.T) {
+		mockSnapshot := newMockSnapshot(t, withMockSave(nil))
+		kc := NewCatalog(nil, mockSnapshot)
+		ctx := context.Background()
+		coll := &model.Collection{State: pb.CollectionState_CollectionCreated}
+		err := kc.CreateCollection(ctx, coll, 100)
+		assert.NoError(t, err)
+	})
+
 	t.Run("normal case", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockSave(nil), withMockMultiSave(nil))
+		mockSnapshot := newMockSnapshot(t, withMockMultiSave(nil), withMockSave(nil))
 		kc := NewCatalog(nil, mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1368,7 +1382,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 	})
 
 	t.Run("create collection with function and struct array field", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockSave(nil), withMockMultiSave(nil))
+		mockSnapshot := newMockSnapshot(t, withMockMultiSave(nil), withMockSave(nil))
 		kc := NewCatalog(nil, mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{

@@ -714,7 +714,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
 	s.compactionInspector.removeTasksByChannel(channel)
-	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
+	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), channel)
 	s.meta.MarkChannelCheckpointDropped(ctx, channel)
 
 	// no compaction triggered in Drop procedure

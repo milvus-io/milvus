@@ -2,7 +2,6 @@ package coordinator
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -111,7 +110,7 @@ func (s *mixCoordImpl) Register() error {
 	log := log.Ctx(s.ctx)
 	s.session.Register()
 	afterRegister := func() {
-		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.MixCoordRole).Inc()
+		metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.MixCoordRole).Inc()
 		log.Info("MixCoord Register Finished")
 	}
 	go func() {

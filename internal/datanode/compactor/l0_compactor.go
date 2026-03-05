@@ -18,7 +18,6 @@ package compactor
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"sync"
 
@@ -166,7 +165,7 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 		Type:     t.plan.GetType(),
 	}
 
-	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).
+	metrics.DataNodeCompactionLatency.WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String()).
 		Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	log.Info("L0 compaction finished", zap.Duration("elapse", t.tr.ElapseSpan()))
 

@@ -412,7 +412,7 @@ func (mgr *segmentManager) Put(ctx context.Context, segmentType SegmentType, seg
 
 		eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Segment %d[%d] loaded", segment.ID(), segment.Collection())))
 		metrics.QueryNodeNumSegments.WithLabelValues(
-			fmt.Sprint(paramtable.GetNodeID()),
+			paramtable.GetStringNodeID(),
 			fmt.Sprint(segment.Collection()),
 			segment.Type().String(),
 			segment.Level().String(),
@@ -737,7 +737,7 @@ func (mgr *segmentManager) release(ctx context.Context, segment Segment) {
 	segment.Release(ctx)
 
 	metrics.QueryNodeNumSegments.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
+		paramtable.GetStringNodeID(),
 		fmt.Sprint(segment.Collection()),
 		segment.Type().String(),
 		segment.Level().String(),

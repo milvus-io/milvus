@@ -340,7 +340,7 @@ func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 		if pos.Timestamp != math.MaxUint64 {
 			// Should not be set as metric since it's a tombstone value.
 			ts, _ := tsoutil.ParseTS(pos.Timestamp)
-			metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
+			metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(paramtable.GetStringNodeID(), vChannel).
 				Set(float64(ts.Unix()))
 		}
 	}
@@ -2087,7 +2087,7 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 			zap.ByteString("msgID", pos.GetMsgID()),
 			zap.Stringer("walName", pos.WALName),
 			zap.Time("time", ts))
-		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
+		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(paramtable.GetStringNodeID(), vChannel).
 			Set(float64(ts.Unix()))
 	}
 	return nil
@@ -2111,7 +2111,7 @@ func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string)
 
 	m.channelCPs.checkpoints[channel] = cp
 
-	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
+	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), channel)
 	return nil
 }
 
@@ -2141,7 +2141,7 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 			zap.Uint64("ts", pos.GetTimestamp()),
 			zap.Time("time", tsoutil.PhysicalTime(pos.GetTimestamp())))
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
-		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel).Set(float64(ts.Unix()))
+		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(paramtable.GetStringNodeID(), channel).Set(float64(ts.Unix()))
 	}
 	// broadcast the change of channel checkpoint for TruncateCollection op to drop segments
 	m.channelCPs.cond.UnsafeBroadcast()
@@ -2166,7 +2166,7 @@ func (m *meta) DropChannelCheckpoint(vChannel string) error {
 		return err
 	}
 	delete(m.channelCPs.checkpoints, vChannel)
-	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel)
+	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), vChannel)
 	log.Ctx(context.TODO()).Info("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
 	return nil
 }

@@ -97,7 +97,8 @@ class SegmentInterface {
            Timestamp timestamp,
            const folly::CancellationToken& cancel_token,
            int32_t consistency_level,
-           Timestamp collection_ttl) const = 0;
+           Timestamp collection_ttl,
+           int64_t entity_ttl_physical_time_us = 0) const = 0;
 
     // Only used for test
     std::unique_ptr<SearchResult>
@@ -108,6 +109,7 @@ class SegmentInterface {
                       placeholder_group,
                       timestamp,
                       folly::CancellationToken(),
+                      0,
                       0,
                       0);
     }
@@ -120,7 +122,8 @@ class SegmentInterface {
              bool ignore_non_pk,
              const folly::CancellationToken& cancel_token,
              int32_t consistency_level,
-             Timestamp collection_ttl) const = 0;
+             Timestamp collection_ttl,
+             int64_t entity_ttl_physical_time_us = 0) const = 0;
 
     // Only used for test
     std::unique_ptr<proto::segcore::RetrieveResults>
@@ -135,6 +138,7 @@ class SegmentInterface {
                         limit_size,
                         ignore_non_pk,
                         folly::CancellationToken(),
+                        0,
                         0,
                         0);
     }
@@ -376,7 +380,8 @@ class SegmentInternalInterface : public SegmentInterface {
            Timestamp timestamp,
            const folly::CancellationToken& cancel_token,
            int32_t consistency_level,
-           Timestamp collection_ttl) const override;
+           Timestamp collection_ttl,
+           int64_t entity_ttl_physical_time_us = 0) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
@@ -397,7 +402,8 @@ class SegmentInternalInterface : public SegmentInterface {
              bool ignore_non_pk,
              const folly::CancellationToken& cancel_token,
              int32_t consistency_level,
-             Timestamp collection_ttl) const override;
+             Timestamp collection_ttl,
+             int64_t entity_ttl_physical_time_us = 0) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,

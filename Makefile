@@ -90,6 +90,11 @@ INSTALL_PROTOC_GEN_GO_GRPC := $(findstring $(PROTOC_GEN_GO_GRPC_VERSION),$(PROTO
 
 index_engine = knowhere
 
+# Ensure git works inside containers where .git is owned by a different user.
+# Must use git config --global because git's ownership check runs before
+# both -c options and GIT_CONFIG_COUNT env vars are processed.
+$(shell git config --global --add safe.directory '*' 2>/dev/null)
+
 export GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -v '^HEAD$$' || echo "$${GITHUB_REF_NAME:-$${BRANCH_NAME:-unknown}}")
 GIT_BRANCH_SAFE=$(shell echo "$(GIT_BRANCH)" | tr '/' '-')
 
@@ -250,14 +255,12 @@ BUILD_DATE = $(shell date -u +%Y%m%d)
 MILVUS_VERSION := $(shell tag=$$(git describe --exact-match --tags 2>/dev/null) && echo "$$tag" | sed 's/^v//' || echo "$(GIT_BRANCH_SAFE)-$(BUILD_DATE)-$(GIT_COMMIT)")
 
 print-build-info:
-	$(shell git config --global --add safe.directory '*')
 	@echo "Build Tag: $(BUILD_TAGS)"
 	@echo "Build Time: $(BUILD_TIME)"
 	@echo "Git Commit: $(GIT_COMMIT)"
 	@echo "Go Version: $(GO_VERSION)"
 
 print-gpu-build-info:
-	$(shell git config --global --add safe.directory '*')
 	@echo "Build Tag: $(BUILD_TAGS_GPU)"
 	@echo "Build Time: $(BUILD_TIME)"
 	@echo "Git Commit: $(GIT_COMMIT)"
@@ -411,7 +414,7 @@ plan-parser-so:
 		GO111MODULE=on $(GO) build -buildmode=c-shared -o $(PWD)/internal/core/output/lib/libmilvus-planparser.so $(PWD)/internal/parser/planparserv2/cwrapper/wrapper.go && \
 		mv $(PWD)/internal/core/output/lib/libmilvus-planparser.h $(PWD)/internal/core/output/include/libmilvus-planparser.h && \
 		cp $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.h $(PWD)/internal/core/output/include/ && \
-		g++ -std=c++17 -shared -fPIC -o $(PWD)/internal/core/output/lib/libmilvus-planparser-cpp.so $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.cpp \
+		$${CXX:-g++} -std=c++17 -shared -fPIC -o $(PWD)/internal/core/output/lib/libmilvus-planparser-cpp.so $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.cpp \
 			-I$(PWD)/internal/core/output/include \
 			-L$(PWD)/internal/core/output/lib -lmilvus-planparser \
 			$(planparser_rpath_flag)

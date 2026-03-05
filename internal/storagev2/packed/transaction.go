@@ -113,12 +113,72 @@ func AddDeltaLogsToManifest(
 	return newManifestPath, nil
 }
 
+// GetDeltaLogPathsFromManifest extracts delta log file paths from a Loon manifest.
+// It opens a transaction, reads the manifest's delta_logs section, converts relative
+// paths to absolute paths, and returns them.
+func GetDeltaLogPathsFromManifest(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+) ([]string, error) {
+	basePath, version, err := UnmarshalManfestPath(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse manifest path: %w", err)
+	}
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create properties: %w", err)
+	}
+	defer C.loon_properties_free(cProperties)
+
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+
+	var cTransactionHandle C.LoonTransactionHandle
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), 1, &cTransactionHandle)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer C.loon_transaction_destroy(cTransactionHandle)
+
+	var cManifest *C.LoonManifest
+	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifest)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return nil, fmt.Errorf("failed to get manifest: %w", err)
+	}
+	defer C.loon_manifest_destroy(cManifest)
+
+	numDeltaLogs := int(cManifest.delta_logs.num_delta_logs)
+	if numDeltaLogs == 0 {
+		return nil, nil
+	}
+
+	// The C loon library resolves relative paths to absolute via ToAbsolute
+	// (prepending basePath/_delta/ and normalizing). The returned paths are
+	// already absolute and can be used directly.
+	cPaths := unsafe.Slice(cManifest.delta_logs.delta_log_paths, numDeltaLogs)
+	paths := make([]string, 0, numDeltaLogs)
+	for _, cPath := range cPaths {
+		paths = append(paths, C.GoString(cPath))
+	}
+
+	log.Debug("GetDeltaLogPathsFromManifest",
+		zap.String("manifestPath", manifestPath),
+		zap.Int("numDeltaLogs", numDeltaLogs),
+		zap.Strings("paths", paths))
+
+	return paths, nil
+}
+
 // toRelativePath converts a full path to a path relative to the base path.
 // The deltalog path format is: {rootPath}/delta_log/{collectionID}/{partitionID}/{segmentID}/{logID}
 // The basePath format is: {rootPath}/insert_log/{collectionID}/{partitionID}/{segmentID}
-// We need to return the relative path from basePath, e.g., "../../../delta_log/..."
+//
+// The C loon library stores delta log paths relative to basePath/_delta/ (the kDeltaPath convention).
+// When deserializing, it prepends basePath/_delta/ to the relative path and normalizes.
+// So we need baseDepth + 1 levels of "../" (the +1 accounts for the _delta/ subdirectory).
 func toRelativePath(fullPath, basePath, rootPath string) string {
-	// If fullPath starts with rootPath, make it relative to basePath
+	// If fullPath starts with rootPath, make it relative to basePath/_delta/
 	if strings.HasPrefix(fullPath, rootPath) {
 		// Get the path relative to rootPath for both
 		fullRel := strings.TrimPrefix(fullPath, rootPath)
@@ -127,8 +187,9 @@ func toRelativePath(fullPath, basePath, rootPath string) string {
 		baseRel := strings.TrimPrefix(basePath, rootPath)
 		baseRel = strings.TrimPrefix(baseRel, "/")
 
-		// Count the depth of basePath to know how many "../" we need
-		baseDepth := len(strings.Split(baseRel, "/"))
+		// Count the depth of basePath to know how many "../" we need.
+		// Add 1 for the _delta/ subdirectory that C prepends during deserialization.
+		baseDepth := len(strings.Split(baseRel, "/")) + 1
 
 		// Build the relative path: go up baseDepth levels, then down to fullRel
 		var parts []string

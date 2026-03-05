@@ -42,12 +42,14 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -171,6 +173,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	alloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	targetSegmentID := t.plan.GetPreAllocatedSegmentIDs().GetBegin()
 
+	phaseStart := time.Now()
 	srw, err := storage.NewBinlogRecordWriter(ctx,
 		t.collectionID,
 		t.partitionID,
@@ -191,7 +194,9 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
 	}
+	initWriterCost := time.Since(phaseStart)
 
+	phaseStart = time.Now()
 	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, t.plan.SegmentBinlogs[0],
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
@@ -199,6 +204,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		log.Warn("load deletePKs failed", zap.Error(err))
 		return nil, err
 	}
+	loadDeltaCost := time.Since(phaseStart)
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 
 	entityFilter := compaction.NewEntityFilter(deletePKs, t.plan.GetCollectionTtl(), t.currentTime)
@@ -234,6 +240,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		log.Warn("sort task only support int64 and varchar pk field")
 	}
 
+	phaseStart = time.Now()
 	var rr storage.RecordReader
 	// use manifest reader if manifest presents
 	if t.manifest != "" {
@@ -256,16 +263,25 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		return nil, err
 	}
 	defer rr.Close()
+	initReaderCost := time.Since(phaseStart)
+
 	rrs := []storage.RecordReader{rr}
-	numValidRows, err := storage.Sort(t.compactionParams.BinLogMaxSize, t.plan.GetSchema(), rrs, srw, predicate, t.sortByFieldIDs)
+	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, t.plan.GetSchema(), rrs, srw, predicate, t.sortByFieldIDs)
 	if err != nil {
 		log.Warn("sort failed", zap.Error(err))
 		return nil, err
 	}
+	if sortTimings == nil {
+		sortTimings = &storage.SortTimings{}
+	}
+
+	phaseStart = time.Now()
 	if err := srw.Close(); err != nil {
 		return nil, err
 	}
+	flushCost := time.Since(phaseStart)
 
+	phaseStart = time.Now()
 	binlogs, stats, bm25stats, manifest, expirQuantiles := srw.GetLogs()
 	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
@@ -281,6 +297,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	if err := binlog.CompressFieldBinlogs(bm25StatsLogs); err != nil {
 		return nil, err
 	}
+	compressCost := time.Since(phaseStart)
 
 	debug.FreeOSMemory()
 
@@ -300,7 +317,30 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		zap.Int("valid rows", numValidRows),
 		zap.Int("deleted rows", entityFilter.GetDeletedCount()),
 		zap.Int("expired rows", entityFilter.GetExpiredCount()),
+		zap.Int("deltaLogCount", len(t.plan.SegmentBinlogs[0].GetDeltalogs())),
+		zap.Int("deletePKCount", len(deletePKs)),
+		zap.Bool("useManifest", t.manifest != ""),
+		zap.Duration("initWriterCost", initWriterCost),
+		zap.Duration("loadDeltaCost", loadDeltaCost),
+		zap.Duration("initReaderCost", initReaderCost),
+		zap.Int("sortBatches", sortTimings.NumBatches),
+		zap.Duration("sortReadCost", sortTimings.ReadCost),
+		zap.Duration("sortSortCost", sortTimings.SortCost),
+		zap.Duration("sortWriteCost", sortTimings.WriteCost),
+		zap.Duration("flushCost", flushCost),
+		zap.Duration("compressCost", compressCost),
 		zap.Duration("total elapse", time.Since(sortStartTime)))
+
+	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	compType := t.plan.GetType().String()
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "init_writer").Observe(float64(initWriterCost.Milliseconds()))
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "load_delta").Observe(float64(loadDeltaCost.Milliseconds()))
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "init_reader").Observe(float64(initReaderCost.Milliseconds()))
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "sort_read").Observe(float64(sortTimings.ReadCost.Milliseconds()))
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "sort_sort").Observe(float64(sortTimings.SortCost.Milliseconds()))
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "sort_write").Observe(float64(sortTimings.WriteCost.Milliseconds()))
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "flush").Observe(float64(flushCost.Milliseconds()))
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "compress").Observe(float64(compressCost.Milliseconds()))
 
 	res := []*datapb.CompactionSegment{
 		{
@@ -352,6 +392,7 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	log.Info("compact start")
 
+	stepStart := time.Now()
 	res, err := t.sortSegment(ctx)
 	if err != nil {
 		log.Warn("failed to sort segment",
@@ -361,14 +402,17 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			State:  datapb.CompactionTaskState_failed,
 		}, nil
 	}
+	sortSegmentCost := time.Since(stepStart)
 	targetSegemntID := res.GetSegments()[0].GetSegmentID()
 	insertLogs := res.GetSegments()[0].GetInsertLogs()
 	if len(insertLogs) == 0 || res.GetSegments()[0].GetNumOfRows() == 0 {
 		log.Info("compact done, but target segment is zero num rows",
 			zap.Int64("targetSegmentID", targetSegemntID),
+			zap.Duration("sortSegmentCost", sortSegmentCost),
 			zap.Duration("compact cost", time.Since(compactStart)))
 		return res, nil
 	}
+	stepStart = time.Now()
 	textStatsLogs, err := t.createTextIndex(ctx,
 		t.collectionID, t.partitionID, targetSegemntID, t.GetPlanID(),
 		res.GetSegments()[0].GetInsertLogs())
@@ -380,9 +424,19 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			State:  datapb.CompactionTaskState_failed,
 		}, nil
 	}
+	createTextIndexCost := time.Since(stepStart)
 	res.Segments[0].TextStatsLogs = textStatsLogs
+
+	totalCost := time.Since(compactStart)
 	log.Info("compact done", zap.Int64("targetSegmentID", targetSegemntID),
-		zap.Duration("compact cost", time.Since(compactStart)))
+		zap.Duration("sortSegmentCost", sortSegmentCost),
+		zap.Duration("createTextIndexCost", createTextIndexCost),
+		zap.Duration("compact cost", totalCost))
+
+	nodeID := fmt.Sprint(paramtable.GetNodeID())
+	compType := t.plan.GetType().String()
+	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "create_text_index").Observe(float64(createTextIndexCost.Milliseconds()))
+	metrics.DataNodeCompactionLatency.WithLabelValues(nodeID, compType).Observe(float64(totalCost.Milliseconds()))
 	return res, nil
 }
 

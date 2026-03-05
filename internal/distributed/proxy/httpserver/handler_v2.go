@@ -2036,6 +2036,19 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Value: fmt.Sprintf("%v", httpReq.Params[common.MmapEnabledKey]),
 		})
 	}
+	for _, key := range []string{
+		common.WarmupScalarFieldKey,
+		common.WarmupScalarIndexKey,
+		common.WarmupVectorFieldKey,
+		common.WarmupVectorIndexKey,
+	} {
+		if _, ok := httpReq.Params[key]; ok {
+			req.Properties = append(req.Properties, &commonpb.KeyValuePair{
+				Key:   key,
+				Value: fmt.Sprintf("%v", httpReq.Params[key]),
+			})
+		}
+	}
 
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CreateCollection", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateCollection(reqCtx, req.(*milvuspb.CreateCollectionRequest))
@@ -2714,6 +2727,7 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 			indexType := ""
 			mmapEnabled := ""
 			indexOffsetCacheEnabled := ""
+			warmup := ""
 			for _, pair := range indexDescription.Params {
 				switch pair.Key {
 				case common.MetricTypeKey:
@@ -2724,6 +2738,8 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 					mmapEnabled = pair.Value
 				case common.IndexOffsetCacheEnabledKey:
 					indexOffsetCacheEnabled = pair.Value
+				case common.WarmupKey:
+					warmup = pair.Value
 				}
 			}
 			indexInfo := map[string]any{
@@ -2733,6 +2749,7 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 				HTTPReturnIndexMetricType:      metricType,
 				HTTPMmapEnabledKey:             mmapEnabled,
 				HTTPIndexOffsetCacheEnabledKey: indexOffsetCacheEnabled,
+				HTTPWarmupKey:                  warmup,
 				HTTPReturnIndexTotalRows:       indexDescription.TotalRows,
 				HTTPReturnIndexPendingRows:     indexDescription.PendingIndexRows,
 				HTTPReturnIndexIndexedRows:     indexDescription.IndexedRows,

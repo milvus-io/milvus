@@ -551,7 +551,7 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, database, collectionNam
 	method := "GetCollectionID"
 	collInfo, ok := m.getCollection(database, collectionName, 0)
 	if !ok {
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
+		metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheMissLabel).Inc()
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 
 		collInfo, err := m.UpdateByName(ctx, database, collectionName)
@@ -559,10 +559,10 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, database, collectionNam
 			return UniqueID(0), err
 		}
 
-		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(paramtable.GetStringNodeID(), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return collInfo.collID, nil
 	}
-	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
+	metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheHitLabel).Inc()
 
 	return collInfo.collID, nil
 }
@@ -573,7 +573,7 @@ func (m *MetaCache) GetCollectionName(ctx context.Context, database string, coll
 	collInfo, ok := m.getCollection(database, "", collectionID)
 
 	if !ok {
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
+		metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheMissLabel).Inc()
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 
 		collInfo, err := m.UpdateByID(ctx, database, collectionID)
@@ -581,10 +581,10 @@ func (m *MetaCache) GetCollectionName(ctx context.Context, database string, coll
 			return "", err
 		}
 
-		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(paramtable.GetStringNodeID(), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return collInfo.schema.Name, nil
 	}
-	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
+	metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheHitLabel).Inc()
 
 	return collInfo.schema.Name, nil
 }
@@ -598,25 +598,25 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, coll
 	// Why use collectionID? Because the collectionID is not always provided in the proxy.
 	if !ok || (collectionID != 0 && collInfo.collID != collectionID) {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
+		metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheMissLabel).Inc()
 
 		if collectionID == 0 {
 			collInfo, err := m.UpdateByName(ctx, database, collectionName)
 			if err != nil {
 				return nil, err
 			}
-			metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+			metrics.ProxyUpdateCacheLatency.WithLabelValues(paramtable.GetStringNodeID(), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 			return collInfo, nil
 		}
 		collInfo, err := m.UpdateByID(ctx, database, collectionID)
 		if err != nil {
 			return nil, err
 		}
-		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(paramtable.GetStringNodeID(), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return collInfo, nil
 	}
 
-	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
+	metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheHitLabel).Inc()
 	return collInfo, nil
 }
 
@@ -626,19 +626,19 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectio
 	method := "GetCollectionSchema"
 	if !ok {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
+		metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheMissLabel).Inc()
 
 		collInfo, err := m.UpdateByName(ctx, database, collectionName)
 		if err != nil {
 			return nil, err
 		}
-		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(paramtable.GetStringNodeID(), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		log.Ctx(ctx).Debug("Reload collection from root coordinator ",
 			zap.String("collectionName", collectionName),
 			zap.Int64("time (milliseconds) take ", tr.ElapseSpan().Milliseconds()))
 		return collInfo.schema, nil
 	}
-	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
+	metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheHitLabel).Inc()
 
 	return collInfo.schema, nil
 }
@@ -715,14 +715,14 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 
 	if !ok {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
+		metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheMissLabel).Inc()
 
 		collInfo, err := m.UpdateByName(ctx, database, collectionName)
 		if err != nil {
 			return nil, err
 		}
 
-		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(paramtable.GetStringNodeID(), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return collInfo.partInfo, nil
 	}
 	return collInfo.partInfo, nil

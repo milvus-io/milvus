@@ -91,9 +91,9 @@ func (m *manager) Add(collectionID UniqueID, channel string) (Pipeline, error) {
 	}
 
 	m.channel2Pipeline[channel] = newPipeLine
-	metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
-	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
-	metrics.QueryNodeWatchDmlChannelLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.QueryNodeNumFlowGraphs.WithLabelValues(paramtable.GetStringNodeID()).Inc()
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(paramtable.GetStringNodeID()).Inc()
+	metrics.QueryNodeWatchDmlChannelLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return newPipeLine, nil
 }
 
@@ -125,8 +125,8 @@ func (m *manager) Remove(channels ...string) {
 			log.Warn("pipeline to be removed doesn't existed", zap.String("channel", channel))
 		}
 	}
-	metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
-	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
+	metrics.QueryNodeNumFlowGraphs.WithLabelValues(paramtable.GetStringNodeID()).Dec()
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(paramtable.GetStringNodeID()).Dec()
 }
 
 // Start pipeline by channel

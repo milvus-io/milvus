@@ -14,7 +14,7 @@
 # Update milvus-storage_VERSION for the first occurrence
 milvus_add_pkg_config("milvus-storage")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( milvus-storage_VERSION f372333)
+set( milvus-storage_VERSION 2955b08)
 set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
@@ -67,6 +67,20 @@ if ( NOT milvus-storage_POPULATED )
                 "Install with: brew install aws-sdk-cpp")
         endif()
         find_package(AWSSDK REQUIRED COMPONENTS core s3 identity-management)
+
+        # aws-sdk-cpp 1.11.750 had a packaging bug: the core CMakeLists.txt
+        # was missing the install() rule for pagination headers, so
+        # Paginator.h is absent from the installation even though the STS
+        # module's STSPaginationBase.h references it.  Homebrew backported
+        # the fix (commit 175e803) with rebuild 1.  Fail early with a clear
+        # message so developers know to reinstall.
+        if(NOT EXISTS "${_HOMEBREW_PREFIX}/include/aws/core/utils/pagination/Paginator.h")
+            message(FATAL_ERROR
+                "aws/core/utils/pagination/Paginator.h is missing from "
+                "Homebrew's aws-sdk-cpp installation.  This is a known "
+                "packaging bug in aws-sdk-cpp 1.11.750.  "
+                "Fix with:  brew reinstall aws-sdk-cpp")
+        endif()
 
         if(NOT TARGET AWS::aws-sdk-cpp-identity-management)
             add_library(AWS::aws-sdk-cpp-identity-management INTERFACE IMPORTED)

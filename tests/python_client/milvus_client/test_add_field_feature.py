@@ -9,6 +9,7 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import DataType
 from utils.util_log import test_log as log
+from pymilvus import AnnSearchRequest, RRFRanker
 from pymilvus.orm.types import CONSISTENCY_STRONG
 import numpy as np
 
@@ -206,6 +207,24 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                                  "limit": ct.default_limit,
                                  "pk_name": pk_name})
 
+        # hybrid search on original + new nullable vector fields (issue #47873)
+        reqs = [
+            AnnSearchRequest(
+                data=cf.gen_vectors(1, dim),
+                anns_field=vec_field_name,
+                param={"metric_type": "COSINE"}, limit=ct.default_limit
+            ),
+            AnnSearchRequest(
+                data=cf.gen_vectors(1, dim),
+                anns_field=new_vec_field_name,
+                param={"metric_type": "COSINE"}, limit=ct.default_limit
+            ),
+        ]
+        self.hybrid_search(client, collection_name, reqs=reqs, ranker=RRFRanker(), limit=ct.default_limit,
+                           check_task=CheckTasks.check_search_results,
+                           check_items={"enable_milvus_client_api": True,
+                                        "nq": 1, "limit": ct.default_limit, "pk_name": pk_name})
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("index_type", ["HNSW", "IVF_FLAT", "IVF_SQ8", "IVF_RABITQ", "AUTOINDEX", "DISKANN"])
     def test_milvus_client_add_vector_field_build_index_before_insert(self, index_type):
@@ -309,7 +328,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         # 4. insert new field after add field
         rows_new = [
             {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_string_field_name: str(i), default_new_field_name: random.randint(1, 1000)}
+             default_string_field_name: str(i), default_new_field_name: random.randint(default_value + 1, 1000)}
             for i in range(10 * default_nb, 11 * default_nb)]
         self.insert(client, collection_name, rows_new)
         # 5. compact

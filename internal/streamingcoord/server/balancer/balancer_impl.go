@@ -56,7 +56,7 @@ func RecoverBalancer(
 		policy:                 policy,
 		reqCh:                  make(chan *request, 5),
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
-		freezeNodes:            typeutil.NewSet[int64](),
+		freezeNodes:            typeutil.NewConcurrentSet[int64](),
 	}
 	b.SetLogger(logger)
 	ready260Future, err := b.checkIfAllNodeGreaterThan260AndWatch(ctx)
@@ -79,7 +79,7 @@ type balancerImpl struct {
 	policy                 Policy                                // policy is the balance policy, TODO: should be dynamic in future.
 	reqCh                  chan *request                         // reqCh is the request channel, send the operation to background task.
 	backgroundTaskNotifier *syncutil.AsyncTaskNotifier[struct{}] // backgroundTaskNotifier is used to conmunicate with the background task.
-	freezeNodes            typeutil.Set[int64]                   // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
+	freezeNodes            *typeutil.ConcurrentSet[int64]        // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
 
 	fileResourceChecker FileResourceChecker
 	checkerMu           sync.RWMutex
@@ -117,8 +117,21 @@ func (b *balancerImpl) ReplicateRole() replicateutil.Role {
 }
 
 // GetAllStreamingNodes fetches all streaming node info.
+// Filter out frozen nodes to prevent downstream consumers (e.g., ReplicaObserver)
+// from treating frozen nodes as available.
 func (b *balancerImpl) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
-	return resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
+	nodes, err := resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make(map[int64]*types.StreamingNodeInfo, len(nodes))
+	for nodeID, info := range nodes {
+		if !b.freezeNodes.Contain(nodeID) {
+			filtered[nodeID] = info
+		}
+	}
+	return filtered, nil
 }
 
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
@@ -537,12 +550,13 @@ func (b *balancerImpl) fetchStreamingNodeStatus(ctx context.Context) (map[int64]
 	}
 
 	// clean up the freeze node that has been removed from session.
-	for serverID := range b.freezeNodes {
+	b.freezeNodes.Range(func(serverID int64) bool {
 		if _, ok := nodeStatus[serverID]; !ok {
 			b.Logger().Info("freeze node has been removed from session", zap.Int64("serverID", serverID))
 			b.freezeNodes.Remove(serverID)
 		}
-	}
+		return true
+	})
 	return nodeStatus, nil
 }
 

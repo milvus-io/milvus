@@ -316,7 +316,7 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	}
 
 	metrics.DataNodeCompactionLatency.
-		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).
+		WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String()).
 		Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	log.Info("Clustering compaction finished", zap.Duration("elapse", t.tr.ElapseSpan()), zap.Int64("flushTimes", t.flushCount.Load()))
 	// clear the buffer cache

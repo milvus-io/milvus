@@ -2072,6 +2072,124 @@ class TestInsertOperation(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("sparse_format", ["csr_matrix", "csr_array"])
+    def test_milvus_client_insert_sparse_vector_scipy(self, sparse_format):
+        """
+        target: test insert and search sparse vectors using scipy.sparse csr format directly
+        method: insert sparse vectors as scipy.sparse csr matrices per row, then search with csr query
+        expected: insert and search succeed with correct results
+        """
+        from scipy import sparse as sp
+
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 1000
+        dim = 10000
+
+        # 1. Create schema with sparse vector field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_sparse_vec_field_name, DataType.SPARSE_FLOAT_VECTOR)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(ct.default_sparse_vec_field_name, index_type="SPARSE_INVERTED_INDEX",
+                               metric_type="IP")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        # 2. Build scipy.sparse constructor
+        sparse_cls = getattr(sp, sparse_format)
+
+        # 3. Generate sparse data as scipy.sparse csr single-row matrices per row
+        rng = np.random.default_rng(seed=19530)
+        rows = []
+        for i in range(nb):
+            nnz = rng.integers(20, 30)
+            indices = sorted(rng.choice(dim, size=nnz, replace=False))
+            values = rng.random(nnz).astype(np.float32)
+            row_sparse = sparse_cls((values, indices, [0, nnz]), shape=(1, dim))
+            rows.append({
+                ct.default_int64_field_name: i,
+                ct.default_sparse_vec_field_name: row_sparse
+            })
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # 4. Search with scipy.sparse query vector
+        q_nnz = 25
+        q_indices = sorted(rng.choice(dim, size=q_nnz, replace=False))
+        q_values = rng.random(q_nnz).astype(np.float32)
+        query_sparse = sparse_cls((q_values, q_indices, [0, q_nnz]), shape=(1, dim))
+        self.search(client, collection_name, data=[query_sparse],
+                    anns_field=ct.default_sparse_vec_field_name, limit=default_limit,
+                    search_params={"metric_type": "IP"},
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": 1, "limit": default_limit,
+                                 "pk_name": ct.default_int64_field_name})
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("sparse_format", ["csc_matrix", "coo_matrix", "dok_matrix",
+                                                "lil_matrix", "coo_array"])
+    def test_milvus_client_insert_sparse_vector_scipy_to_csr(self, sparse_format):
+        """
+        target: test insert sparse vectors created in non-csr scipy.sparse formats via .tocsr() conversion
+        method: create sparse data in various scipy formats, convert to csr, insert and search
+        expected: insert and search succeed after converting to csr
+        """
+        from scipy import sparse as sp
+
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 1000
+        dim = 10000
+
+        # 1. Create schema with sparse vector field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_sparse_vec_field_name, DataType.SPARSE_FLOAT_VECTOR)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(ct.default_sparse_vec_field_name, index_type="SPARSE_INVERTED_INDEX",
+                               metric_type="IP")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        # 2. Build scipy.sparse constructor for the non-csr format
+        sparse_cls = getattr(sp, sparse_format)
+
+        # 3. Generate sparse data: create in target format, then .tocsr() for insert
+        #    Non-csr formats lack .indices/.data attributes required by pymilvus per-row path
+        rng = np.random.default_rng(seed=19530)
+        rows = []
+        for i in range(nb):
+            nnz = rng.integers(20, 30)
+            indices = sorted(rng.choice(dim, size=nnz, replace=False))
+            values = rng.random(nnz).astype(np.float32)
+            row_sparse = sparse_cls(sp.csr_matrix((values, indices, [0, nnz]), shape=(1, dim))).tocsr()
+            rows.append({
+                ct.default_int64_field_name: i,
+                ct.default_sparse_vec_field_name: row_sparse
+            })
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # 4. Search with scipy.sparse csr query vector
+        q_nnz = 25
+        q_indices = sorted(rng.choice(dim, size=q_nnz, replace=False))
+        q_values = rng.random(q_nnz).astype(np.float32)
+        query_sparse = sp.csr_matrix((q_values, q_indices, [0, q_nnz]), shape=(1, dim))
+        self.search(client, collection_name, data=[query_sparse],
+                    anns_field=ct.default_sparse_vec_field_name, limit=default_limit,
+                    search_params={"metric_type": "IP"},
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": 1, "limit": default_limit,
+                                 "pk_name": ct.default_int64_field_name})
+
+        self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientInsertString(TestMilvusClientV2Base):
     """

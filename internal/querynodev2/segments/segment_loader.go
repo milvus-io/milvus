@@ -155,6 +155,7 @@ type resourceEstimateFactor struct {
 	tempSegmentIndexFactor          float64
 	deltaDataExpansionFactor        float64
 	jsonKeyStatsExpansionFactor     float64
+	textIndexExpansionFactor        float64
 	TieredEvictionEnabled           bool
 	TieredEvictableMemoryCacheRatio float64
 	TieredEvictableDiskCacheRatio   float64
@@ -347,9 +348,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		logger := log.With(zap.Int64("partitionID", partitionID),
 			zap.Int64("segmentID", segmentID),
 			zap.String("segmentType", loadInfo.GetLevel().String()))
-		metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadSegment").Inc()
+		metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadSegment").Inc()
 		defer func() {
-			metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadSegment").Dec()
+			metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadSegment").Dec()
 			if err != nil {
 				logger.Warn("load segment failed when load data into memory", zap.Error(err))
 			}
@@ -388,7 +389,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		loaded.Insert(segmentID, segment)
 		loader.notifyLoadFinish(loadInfo)
 
-		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil
 	}
 
@@ -1497,6 +1498,7 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 	// so we need to estimate the final resource usage of the segments
 	finalFactor := resourceEstimateFactor{
 		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		textIndexExpansionFactor:        paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
 		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
 		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
 		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
@@ -1580,6 +1582,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		tempSegmentIndexFactor:      paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
 		deltaDataExpansionFactor:    paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
 		jsonKeyStatsExpansionFactor: paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.GetAsFloat(),
+		textIndexExpansionFactor:    paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
 		TieredEvictionEnabled:       paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
 	}
 	maxSegmentSize := uint64(0)
@@ -1841,6 +1844,18 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		segmentInevictableMemorySize += uint64(float64(memSize) * expansionFactor)
 	}
 
+	// PART 5: calculate logical resource usage of text index stats data
+	// Text match indexes are evictable (support_eviction=true in caching layer).
+	// Text match index mmap is driven by scalar_field_enable_mmap (same as raw scalar data).
+	textIndexMmapEnable := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+	for _, textStats := range loadInfo.GetTextStatsLogs() {
+		if textIndexMmapEnable {
+			segmentEvictableDiskSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+		} else {
+			segmentEvictableMemorySize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+		}
+	}
+
 	log.Debug("estimate logical resoure usage result",
 		zap.Int64("segmentID", loadInfo.GetSegmentID()),
 		zap.Uint64("segmentInevictableMemorySize", segmentInevictableMemorySize),
@@ -2084,6 +2099,25 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		structArrayOffsetsSize += 4*rowCount + 4*rowCount*10
 	}
 
+	// PART 7: calculate size of text index stats data
+	// text index data is managed by the caching layer when tiered eviction is enabled,
+	// so it only needs to be included when tiered eviction is disabled.
+	// Text match index mmap is driven by scalar_field_enable_mmap (same as raw scalar data).
+	// memory_size = sum of Tantivy index file sizes (same value as C++ ByteSize() after load),
+	// so 1.0x is the baseline; textIndexExpansionFactor allows tuning if needed.
+	textIndexMmapEnable := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+	for _, textStats := range loadInfo.GetTextStatsLogs() {
+		if textIndexMmapEnable {
+			if !multiplyFactor.TieredEvictionEnabled {
+				segDiskLoadingSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+			}
+		} else {
+			if !multiplyFactor.TieredEvictionEnabled {
+				segMemoryLoadingSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+			}
+		}
+	}
+
 	return &ResourceUsage{
 		MemorySize:         segMemoryLoadingSize + indexMemorySize + structArrayOffsetsSize,
 		DiskSize:           segDiskLoadingSize,
@@ -2176,11 +2210,11 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 	defer loader.freeRequestResource(requestResourceResult)
 
 	log.Info("segment loader start to load index", zap.Int("segmentNumAfterFilter", len(infos)))
-	metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadIndex").Inc()
-	defer metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadIndex").Dec()
+	metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadIndex").Inc()
+	defer metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(paramtable.GetStringNodeID(), "LoadIndex").Dec()
 
 	tr := timerecord.NewTimeRecorder("segmentLoader.LoadIndex")
-	defer metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	defer metrics.QueryNodeLoadIndexLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	for _, loadInfo := range infos {
 		for _, info := range loadInfo.GetIndexInfos() {
 			if len(info.GetIndexFilePaths()) == 0 {

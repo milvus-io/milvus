@@ -415,8 +415,8 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	log.Info("compact done", zap.Duration("compact elapse", time.Since(compactStart)), zap.Any("res", res))
 
-	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
-	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))
+	metrics.DataNodeCompactionLatency.WithLabelValues(paramtable.GetStringNodeID(), t.plan.GetType().String()).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
+	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(durInQueue.Milliseconds()))
 
 	planResult := &datapb.CompactionPlanResult{
 		State:    datapb.CompactionTaskState_completed,

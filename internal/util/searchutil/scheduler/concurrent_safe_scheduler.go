@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-	"fmt"
 	"sync"
 
 	"go.uber.org/atomic"
@@ -68,7 +67,7 @@ func (s *scheduler) Add(task Task) (err error) {
 	errCh := make(chan error, 1)
 
 	// TODO: add operation should be fast, is UnsolveLen metric unnesscery?
-	metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
+	metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(paramtable.GetStringNodeID()).Inc()
 
 	// start a new in queue span and send task to add chan
 	s.receiveChan <- addTaskReq{
@@ -77,7 +76,7 @@ func (s *scheduler) Add(task Task) (err error) {
 	}
 	err = <-errCh
 
-	metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
+	metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(paramtable.GetStringNodeID()).Dec()
 	return
 }
 
@@ -237,13 +236,13 @@ func (s *scheduler) exec() {
 
 		s.getPool(t).Submit(func() (any, error) {
 			// Update concurrency metric and notify task done.
-			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
+			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Inc()
 			collector.Counter.Inc(metricsinfo.ExecuteQueueType)
 
 			err := t.Execute()
 
 			// Update all metric after task finished.
-			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
+			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Dec()
 			collector.Counter.Dec(metricsinfo.ExecuteQueueType)
 
 			// Notify task done.
@@ -285,7 +284,7 @@ func (s *scheduler) setupReadyLenMetric() {
 	// Update the ReadyQueue counter for quota.
 	collector.Counter.Set(metricsinfo.ReadyQueueType, waitingTaskCount)
 	// Record the waiting task length of policy as ready task metric.
-	metrics.QueryNodeReadTaskReadyLen.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(waitingTaskCount))
+	metrics.QueryNodeReadTaskReadyLen.WithLabelValues(paramtable.GetStringNodeID()).Set(float64(waitingTaskCount))
 }
 
 // scheduler counter implement, concurrent safe.

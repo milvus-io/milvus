@@ -739,4 +739,5 @@ message ReplicatePChannelMeta {
     string target_channel_name          = 2;
     common.MilvusCluster target_cluster = 3;
     common.ReplicateCheckpoint initialized_checkpoint = 4;
+    bool skip_get_replicate_checkpoint  = 5;
 }
