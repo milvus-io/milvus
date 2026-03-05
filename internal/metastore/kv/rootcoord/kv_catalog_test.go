@@ -103,7 +103,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 	t.Run("load collection with prefix fail", func(t *testing.T) {
 		kv := mocks.NewSnapShotKV(t)
 		ts := uint64(1)
-		kv.On("LoadWithPrefix", mock.Anything, CollectionMetaPrefix, ts).
+		kv.On("LoadWithPrefix", mock.Anything, getDatabasePrefix(util.NonDBID), ts).
 			Return(nil, nil, targetErr)
 
 		kc := NewCatalog(nil, kv)
@@ -118,7 +118,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 
 		bColl, err := proto.Marshal(coll2)
 		assert.NoError(t, err)
-		kv.On("LoadWithPrefix", mock.Anything, CollectionMetaPrefix, ts).
+		kv.On("LoadWithPrefix", mock.Anything, getDatabasePrefix(util.NonDBID), ts).
 			Return([]string{"key"}, []string{string(bColl)}, nil)
 		kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, targetErr)
 		kc := NewCatalog(nil, kv)
@@ -134,7 +134,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 
 		bColl, err := proto.Marshal(coll2)
 		assert.NoError(t, err)
-		kv.On("LoadWithPrefix", mock.Anything, CollectionMetaPrefix, ts).
+		kv.On("LoadWithPrefix", mock.Anything, getDatabasePrefix(util.NonDBID), ts).
 			Return([]string{"key"}, []string{string(bColl)}, nil)
 
 		partitionMeta := &pb.PartitionInfo{}
@@ -165,7 +165,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 
 		bColl, err := proto.Marshal(coll1)
 		assert.NoError(t, err)
-		kv.On("LoadWithPrefix", mock.Anything, CollectionMetaPrefix, ts).
+		kv.On("LoadWithPrefix", mock.Anything, getDatabasePrefix(util.NonDBID), ts).
 			Return([]string{"key"}, []string{string(bColl)}, nil)
 		kv.On("MultiSaveAndRemove", mock.Anything, mock.Anything, mock.Anything, ts).Return(nil)
 		kc := NewCatalog(nil, kv)
@@ -239,7 +239,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 		aColl, err := proto.Marshal(coll3)
 		assert.NoError(t, err)
 
-		kv.On("LoadWithPrefix", mock.Anything, CollectionMetaPrefix, ts).
+		kv.On("LoadWithPrefix", mock.Anything, getDatabasePrefix(util.NonDBID), ts).
 			Return([]string{"key", "key2"}, []string{string(bColl), string(aColl)}, nil)
 
 		partitionMeta := &pb.PartitionInfo{}
@@ -1887,7 +1887,7 @@ func TestRBAC_Role(t *testing.T) {
 			return funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, fmt.Sprintf("%s/%s", username, rolename))
 		}
 
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "")).Return(
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "")+"/").Return(
 			[]string{getRoleMappingKey("user1", validName), getRoleMappingKey("user2", validName), getRoleMappingKey("user3", "role3")},
 			[]string{},
 			nil,
@@ -2098,7 +2098,7 @@ func TestRBAC_Role(t *testing.T) {
 
 		// Returns keys for CredentialPrefix
 		var loadCredentialPrefixReturn atomic.Bool
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, CredentialPrefix).Call.Return(
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, CredentialPrefix+"/").Call.Return(
 			func(ctx context.Context, key string) []string {
 				if loadCredentialPrefixReturn.Load() {
 					return []string{
@@ -3067,7 +3067,7 @@ func TestRBAC_PrivilegeGroup(t *testing.T) {
 			c      = NewCatalog(kvmock, nil)
 		)
 
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, PrivilegeGroupPrefix).Return(
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, PrivilegeGroupPrefix+"/").Return(
 			[]string{key1, key2},
 			[]string{string(v1), string(v2)},
 			nil,
@@ -3332,7 +3332,7 @@ func TestCatalog_FileResource(t *testing.T) {
 		value, err := proto.Marshal(resource)
 		assert.NoError(t, err)
 
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return(
+			kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix+"/").Return(
 			[]string{BuildFileResourceKey(1)},
 			[]string{string(value)},
 			nil,
@@ -3361,7 +3361,7 @@ func TestCatalog_FileResource(t *testing.T) {
 		value, err := proto.Marshal(resource)
 		assert.NoError(t, err)
 
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return(
+			kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix+"/").Return(
 			[]string{BuildFileResourceKey(2)},
 			[]string{string(value)},
 			nil,
@@ -3378,7 +3378,7 @@ func TestCatalog_FileResource(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock, nil)
 
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return(nil, nil, mockErr)
+			kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix+"/").Return(nil, nil, mockErr)
 
 		resources, version, err := c.ListFileResource(ctx)
 		assert.Error(t, err)
@@ -3390,7 +3390,7 @@ func TestCatalog_FileResource(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock, nil)
 
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return([]string{}, []string{}, nil)
+			kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix+"/").Return([]string{}, []string{}, nil)
 		kvmock.EXPECT().Has(mock.Anything, FileResourceVersionKey).Return(false, mockErr)
 
 		resources, version, err := c.ListFileResource(ctx)
@@ -3403,7 +3403,7 @@ func TestCatalog_FileResource(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock, nil)
 
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return([]string{}, []string{}, nil)
+			kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix+"/").Return([]string{}, []string{}, nil)
 		kvmock.EXPECT().Has(mock.Anything, FileResourceVersionKey).Return(true, nil)
 		kvmock.EXPECT().Load(mock.Anything, FileResourceVersionKey).Return("", mockErr)
 
@@ -3417,7 +3417,7 @@ func TestCatalog_FileResource(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock, nil)
 
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return([]string{}, []string{}, nil)
+			kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix+"/").Return([]string{}, []string{}, nil)
 		kvmock.EXPECT().Has(mock.Anything, FileResourceVersionKey).Return(true, nil)
 		kvmock.EXPECT().Load(mock.Anything, FileResourceVersionKey).Return("invalid_version", nil)
 
@@ -3431,7 +3431,7 @@ func TestCatalog_FileResource(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock, nil)
 
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return(
+			kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix+"/").Return(
 			[]string{BuildFileResourceKey(1)},
 			[]string{"invalid_proto_data"},
 			nil,
@@ -3448,7 +3448,7 @@ func TestCatalog_FileResource(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock, nil)
 
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return([]string{}, []string{}, nil)
+			kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix+"/").Return([]string{}, []string{}, nil)
 		kvmock.EXPECT().Has(mock.Anything, FileResourceVersionKey).Return(false, nil)
 
 		resources, version, err := c.ListFileResource(ctx)
@@ -3474,7 +3474,7 @@ func TestCatalog_FileResource(t *testing.T) {
 		value1, _ := proto.Marshal(resource1)
 		value2, _ := proto.Marshal(resource2)
 
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix).Return(
+			kvmock.EXPECT().LoadWithPrefix(mock.Anything, FileResourceMetaPrefix+"/").Return(
 			[]string{BuildFileResourceKey(1), BuildFileResourceKey(2)},
 			[]string{string(value1), string(value2)},
 			nil,

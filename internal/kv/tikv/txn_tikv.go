@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"path"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -37,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -127,7 +127,7 @@ func (kv *txnTiKV) Close() {
 
 // GetPath returns the path of the key/prefix.
 func (kv *txnTiKV) GetPath(key string) string {
-	return path.Join(kv.rootPath, key)
+	return util.GetPath(kv.rootPath, key)
 }
 
 // Log if error is not nil. We use error pointer as in most cases this function
@@ -142,7 +142,7 @@ func logWarnOnFailure(err *error, msg string, fields ...zap.Field) {
 // Has returns if a key exists.
 func (kv *txnTiKV) Has(ctx context.Context, key string) (bool, error) {
 	start := time.Now()
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
@@ -171,7 +171,7 @@ func rollbackOnFailure(err *error, txn *transaction.KVTxn) {
 // HasPrefix returns if a key prefix exists.
 func (kv *txnTiKV) HasPrefix(ctx context.Context, prefix string) (bool, error) {
 	start := time.Now()
-	prefix = path.Join(kv.rootPath, prefix)
+	prefix = kv.GetPath(prefix)
 
 	var loggingErr error
 	defer logWarnOnFailure(&loggingErr, "txnTiKV HasPrefix() error", zap.String("prefix", prefix))
@@ -201,7 +201,7 @@ func (kv *txnTiKV) HasPrefix(ctx context.Context, prefix string) (bool, error) {
 // Load returns value of the key.
 func (kv *txnTiKV) Load(ctx context.Context, key string) (string, error) {
 	start := time.Now()
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
@@ -224,7 +224,7 @@ func (kv *txnTiKV) Load(ctx context.Context, key string) (string, error) {
 func batchConvertFromString(prefix string, keys []string) [][]byte {
 	output := make([][]byte, len(keys))
 	for i := 0; i < len(keys); i++ {
-		keys[i] = path.Join(prefix, keys[i])
+		keys[i] = util.GetPath(prefix, keys[i])
 		output[i] = []byte(keys[i])
 	}
 	return output
@@ -275,7 +275,7 @@ func (kv *txnTiKV) MultiLoad(ctx context.Context, keys []string) ([]string, erro
 // LoadWithPrefix returns all the keys and values for the given key prefix.
 func (kv *txnTiKV) LoadWithPrefix(ctx context.Context, prefix string) ([]string, []string, error) {
 	start := time.Now()
-	prefix = path.Join(kv.rootPath, prefix)
+	prefix = kv.GetPath(prefix)
 
 	var loggingErr error
 	defer logWarnOnFailure(&loggingErr, "txnTiKV LoadWithPrefix() error", zap.String("prefix", prefix))
@@ -314,7 +314,7 @@ func (kv *txnTiKV) LoadWithPrefix(ctx context.Context, prefix string) ([]string,
 
 // Save saves the input key-value pair.
 func (kv *txnTiKV) Save(ctx context.Context, key, value string) error {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
@@ -344,7 +344,7 @@ func (kv *txnTiKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 	defer rollbackOnFailure(&loggingErr, txn)
 
 	for key, value := range kvs {
-		key = path.Join(kv.rootPath, key)
+		key = kv.GetPath(key)
 		// Check if value is empty or taking reserved EmptyValue
 		byteValue, err := convertEmptyStringToByte(value)
 		if err != nil {
@@ -369,7 +369,7 @@ func (kv *txnTiKV) MultiSave(ctx context.Context, kvs map[string]string) error {
 
 // Remove removes the input key.
 func (kv *txnTiKV) Remove(ctx context.Context, key string) error {
-	key = path.Join(kv.rootPath, key)
+	key = kv.GetPath(key)
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
@@ -399,7 +399,7 @@ func (kv *txnTiKV) MultiRemove(ctx context.Context, keys []string) error {
 	defer rollbackOnFailure(&loggingErr, txn)
 
 	for _, key := range keys {
-		key = path.Join(kv.rootPath, key)
+		key = kv.GetPath(key)
 		err = txn.Delete([]byte(key))
 		if err != nil {
 			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to delete %s for MultiRemove", key))
@@ -419,7 +419,7 @@ func (kv *txnTiKV) MultiRemove(ctx context.Context, keys []string) error {
 // RemoveWithPrefix removes the keys for the given prefix.
 func (kv *txnTiKV) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	start := time.Now()
-	prefix = path.Join(kv.rootPath, prefix)
+	prefix = kv.GetPath(prefix)
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
 	defer cancel()
 
@@ -456,7 +456,7 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 	defer rollbackOnFailure(&loggingErr, txn)
 
 	for _, pred := range preds {
-		key := path.Join(kv.rootPath, pred.Key())
+		key := kv.GetPath(pred.Key())
 		val, err := txn.Get(ctx, []byte(key))
 		if err != nil {
 			loggingErr = errors.Wrap(err, fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()))
@@ -474,7 +474,7 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 	removals = removeKeys.Complement(saveKeys).Collect()
 
 	for _, key := range removals {
-		key = path.Join(kv.rootPath, key)
+		key = kv.GetPath(key)
 		if err = txn.Delete([]byte(key)); err != nil {
 			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to delete %s for MultiSaveAndRemove", key))
 			return loggingErr
@@ -482,7 +482,7 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 	}
 
 	for key, value := range saves {
-		key = path.Join(kv.rootPath, key)
+		key = kv.GetPath(key)
 		// Check if value is empty or taking reserved EmptyValue
 		byteValue, err := convertEmptyStringToByte(value)
 		if err != nil {
@@ -524,7 +524,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 	defer rollbackOnFailure(&loggingErr, txn)
 
 	for _, pred := range preds {
-		key := path.Join(kv.rootPath, pred.Key())
+		key := kv.GetPath(pred.Key())
 		val, err := txn.Get(ctx, []byte(key))
 		if err != nil {
 			loggingErr = errors.Wrap(err, fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()))
@@ -538,7 +538,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 
 	// Remove keys with prefix
 	for _, prefix := range removals {
-		prefix = path.Join(kv.rootPath, prefix)
+		prefix = kv.GetPath(prefix)
 		// Get the start and end keys for the prefix range
 		startKey := []byte(prefix)
 		endKey := tikv.PrefixNextKey([]byte(prefix))
@@ -570,7 +570,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 
 	// Save key-value pairs
 	for key, value := range saves {
-		key = path.Join(kv.rootPath, key)
+		key = kv.GetPath(key)
 		// Check if value is empty or taking reserved EmptyValue
 		byteValue, err := convertEmptyStringToByte(value)
 		if err != nil {
@@ -596,7 +596,7 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 // WalkWithPrefix visits each kv with input prefix and apply given fn to it.
 func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error {
 	start := time.Now()
-	prefix = path.Join(kv.rootPath, prefix)
+	prefix = kv.GetPath(prefix)
 
 	var loggingErr error
 	defer logWarnOnFailure(&loggingErr, "txnTiKV WalkWithPagination error", zap.String("prefix", prefix))

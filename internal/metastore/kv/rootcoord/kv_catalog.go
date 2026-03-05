@@ -107,9 +107,9 @@ func BuildAliasKeyWithDB(dbID int64, aliasName string) string {
 
 func BuildAliasPrefixWithDB(dbID int64) string {
 	if dbID == util.NonDBID {
-		return AliasMetaPrefix
+		return AliasMetaPrefix + "/"
 	}
-	return fmt.Sprintf("%s/%s/%d", DatabaseMetaPrefix, Aliases, dbID)
+	return fmt.Sprintf("%s/%s/%d/", DatabaseMetaPrefix, Aliases, dbID)
 }
 
 // since SnapshotKV may save both snapshot key and the original key if the original key is newest
@@ -153,7 +153,7 @@ func (kc *Catalog) DropDatabase(ctx context.Context, dbID int64, ts typeutil.Tim
 }
 
 func (kc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error) {
-	_, vals, err := kc.Snapshot.LoadWithPrefix(ctx, DBInfoMetaPrefix, ts)
+	_, vals, err := kc.Snapshot.LoadWithPrefix(ctx, util.GetPrefixPath(DBInfoMetaPrefix), ts)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +365,7 @@ func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Creden
 }
 
 func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Partition, error) {
-	prefix := BuildPartitionPrefix(collectionID)
+	prefix := util.GetPrefixPath(BuildPartitionPrefix(collectionID))
 	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, prefix, ts)
 	if err != nil {
 		return nil, err
@@ -383,7 +383,7 @@ func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID type
 }
 
 func (kc *Catalog) batchListPartitionsAfter210(ctx context.Context, ts typeutil.Timestamp) (map[int64][]*model.Partition, error) {
-	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, PartitionMetaPrefix, ts)
+	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, util.GetPrefixPath(PartitionMetaPrefix), ts)
 	if err != nil {
 		return nil, err
 	}
@@ -409,7 +409,7 @@ func fieldVersionAfter210(collMeta *pb.CollectionInfo) bool {
 }
 
 func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Field, error) {
-	prefix := BuildFieldPrefix(collectionID)
+	prefix := util.GetPrefixPath(BuildFieldPrefix(collectionID))
 	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, prefix, ts)
 	if err != nil {
 		return nil, err
@@ -427,7 +427,7 @@ func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil
 }
 
 func (kc *Catalog) batchListFieldsAfter210(ctx context.Context, ts typeutil.Timestamp) (map[int64][]*model.Field, error) {
-	keys, values, err := kc.Snapshot.LoadWithPrefix(ctx, FieldMetaPrefix, ts)
+	keys, values, err := kc.Snapshot.LoadWithPrefix(ctx, util.GetPrefixPath(FieldMetaPrefix), ts)
 	if err != nil {
 		return nil, err
 	}
@@ -453,7 +453,7 @@ func (kc *Catalog) batchListFieldsAfter210(ctx context.Context, ts typeutil.Time
 }
 
 func (kc *Catalog) listStructArrayFieldsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.StructArrayField, error) {
-	prefix := BuildStructArrayFieldPrefix(collectionID)
+	prefix := util.GetPrefixPath(BuildStructArrayFieldPrefix(collectionID))
 	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, prefix, ts)
 	if err != nil {
 		return nil, err
@@ -471,7 +471,7 @@ func (kc *Catalog) listStructArrayFieldsAfter210(ctx context.Context, collection
 }
 
 func (kc *Catalog) listFunctions(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Function, error) {
-	prefix := BuildFunctionPrefix(collectionID)
+	prefix := util.GetPrefixPath(BuildFunctionPrefix(collectionID))
 	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, prefix, ts)
 	if err != nil {
 		return nil, err
@@ -489,7 +489,7 @@ func (kc *Catalog) listFunctions(ctx context.Context, collectionID typeutil.Uniq
 }
 
 func (kc *Catalog) batchListFunctions(ctx context.Context, ts typeutil.Timestamp) (map[int64][]*model.Function, error) {
-	keys, values, err := kc.Snapshot.LoadWithPrefix(ctx, FunctionMetaPrefix, ts)
+	keys, values, err := kc.Snapshot.LoadWithPrefix(ctx, util.GetPrefixPath(FunctionMetaPrefix), ts)
 	if err != nil {
 		return nil, err
 	}
@@ -955,7 +955,7 @@ func (kc *Catalog) fixDefaultDBIDConsistency(ctx context.Context, collMeta *pb.C
 }
 
 func (kc *Catalog) listAliasesBefore210(ctx context.Context, ts typeutil.Timestamp) ([]*model.Alias, error) {
-	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, CollectionAliasMetaPrefix210, ts)
+	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, CollectionAliasMetaPrefix210+"/", ts)
 	if err != nil {
 		return nil, err
 	}
@@ -1035,7 +1035,7 @@ func (kc *Catalog) ListCredentials(ctx context.Context) ([]string, error) {
 }
 
 func (kc *Catalog) ListCredentialsWithPasswd(ctx context.Context) (map[string]string, error) {
-	keys, values, err := kc.Txn.LoadWithPrefix(ctx, CredentialPrefix)
+	keys, values, err := kc.Txn.LoadWithPrefix(ctx, CredentialPrefix+"/")
 	if err != nil {
 		log.Ctx(ctx).Error("list all credential usernames fail", zap.String("prefix", CredentialPrefix), zap.Error(err))
 		return nil, err
@@ -1120,7 +1120,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 
 	roleToUsers := make(map[string][]string)
 	if includeUserInfo {
-		roleMappingKey := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "")
+		roleMappingKey := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "") + "/"
 		keys, _, err := kc.Txn.LoadWithPrefix(ctx, roleMappingKey)
 		if err != nil {
 			log.Ctx(ctx).Error("fail to load role mappings", zap.String("key", roleMappingKey), zap.Error(err))
@@ -1128,7 +1128,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 		}
 
 		for _, key := range keys {
-			roleMappingInfos := typeutil.AfterN(key, roleMappingKey+"/", "/")
+			roleMappingInfos := typeutil.AfterN(key, roleMappingKey, "/")
 			if len(roleMappingInfos) != 2 {
 				log.Ctx(ctx).Warn("invalid role mapping key", zap.String("string", key), zap.String("sub_string", roleMappingKey))
 				continue
@@ -1151,14 +1151,14 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 	}
 
 	if entity == nil {
-		roleKey := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, "")
+		roleKey := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, "") + "/"
 		keys, _, err := kc.Txn.LoadWithPrefix(ctx, roleKey)
 		if err != nil {
 			log.Ctx(ctx).Error("fail to load roles", zap.String("key", roleKey), zap.Error(err))
 			return results, err
 		}
 		for _, key := range keys {
-			infoArr := typeutil.AfterN(key, roleKey+"/", "/")
+			infoArr := typeutil.AfterN(key, roleKey, "/")
 			if len(infoArr) != 1 || len(infoArr[0]) == 0 {
 				log.Ctx(ctx).Warn("invalid role key", zap.String("string", key), zap.String("sub_string", roleKey))
 				continue
@@ -1550,7 +1550,7 @@ func (kc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvusp
 
 func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
 	var grants []*milvuspb.GrantEntity
-	granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+	granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "") + "/"
 	keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeKey)
 	if err != nil {
 		log.Ctx(ctx).Error("fail to load all grant privilege entities", zap.String("key", granteeKey), zap.Error(err))
@@ -1558,19 +1558,19 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 	}
 
 	for i, key := range keys {
-		grantInfos := typeutil.AfterN(key, granteeKey+"/", "/")
+		grantInfos := typeutil.AfterN(key, granteeKey, "/")
 		if len(grantInfos) != 3 {
 			log.Ctx(ctx).Warn("invalid grantee key", zap.String("string", key), zap.String("sub_string", granteeKey))
 			continue
 		}
-		granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, values[i])
+		granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, values[i]) + "/"
 		idKeys, _, err := kc.Txn.LoadWithPrefix(ctx, granteeIDKey)
 		if err != nil {
 			log.Ctx(ctx).Error("fail to load the grantee ids", zap.String("key", granteeIDKey), zap.Error(err))
 			return []*milvuspb.GrantEntity{}, err
 		}
 		for _, idKey := range idKeys {
-			granteeIDInfos := typeutil.AfterN(idKey, granteeIDKey+"/", "/")
+			granteeIDInfos := typeutil.AfterN(idKey, granteeIDKey, "/")
 			if len(granteeIDInfos) != 1 {
 				log.Ctx(ctx).Warn("invalid grantee id", zap.String("string", idKey), zap.String("sub_string", granteeIDKey))
 				continue
@@ -1599,7 +1599,7 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 
 func (kc *Catalog) ListUserRole(ctx context.Context, tenant string) ([]string, error) {
 	var userRoles []string
-	k := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "")
+	k := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "") + "/"
 	keys, _, err := kc.Txn.LoadWithPrefix(ctx, k)
 	if err != nil {
 		log.Ctx(ctx).Error("fail to load all user-role mappings", zap.String("key", k), zap.Error(err))
@@ -1607,7 +1607,7 @@ func (kc *Catalog) ListUserRole(ctx context.Context, tenant string) ([]string, e
 	}
 
 	for _, key := range keys {
-		userRolesInfos := typeutil.AfterN(key, k+"/", "/")
+		userRolesInfos := typeutil.AfterN(key, k, "/")
 		if len(userRolesInfos) != 2 {
 			log.Ctx(ctx).Warn("invalid user-role key", zap.String("string", key), zap.String("sub_string", k))
 			continue
@@ -1773,7 +1773,7 @@ func (kc *Catalog) SavePrivilegeGroup(ctx context.Context, data *milvuspb.Privil
 }
 
 func (kc *Catalog) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
-	_, vals, err := kc.Txn.LoadWithPrefix(ctx, PrivilegeGroupPrefix)
+	_, vals, err := kc.Txn.LoadWithPrefix(ctx, PrivilegeGroupPrefix+"/")
 	if err != nil {
 		log.Ctx(ctx).Error("failed to list privilege groups", zap.String("prefix", PrivilegeGroupPrefix), zap.Error(err))
 		return nil, err
@@ -1820,7 +1820,7 @@ func (kc *Catalog) RemoveFileResource(ctx context.Context, resourceID int64, ver
 }
 
 func (kc *Catalog) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error) {
-	_, values, err := kc.Txn.LoadWithPrefix(ctx, FileResourceMetaPrefix)
+	_, values, err := kc.Txn.LoadWithPrefix(ctx, FileResourceMetaPrefix+"/")
 	if err != nil {
 		return nil, 0, err
 	}
