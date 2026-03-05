@@ -40,15 +40,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-var Params = paramtable.Get()
-
-func TestMain(m *testing.M) {
-	paramtable.Init()
-	code := m.Run()
-	os.Exit(code)
-}
-
 var (
+	Params    = paramtable.Get()
 	indexName = "idx"
 	IndexID   = 1
 	index     = model.Index{
@@ -64,6 +57,12 @@ var (
 const (
 	testDb = 1000
 )
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	code := m.Run()
+	os.Exit(code)
+}
 
 func TestCatalog_ListCollections(t *testing.T) {
 	ctx := context.Background()
@@ -112,7 +111,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 	t.Run("load collection with prefix fail", func(t *testing.T) {
 		kv := mocks.NewTxnKV(t)
 		ts := uint64(1)
-		kv.On("LoadWithPrefix", mock.Anything, getDatabasePrefix(util.NonDBID)).
+		kv.On("LoadWithPrefix", mock.Anything, CollectionMetaPrefix+"/").
 			Return(nil, nil, targetErr)
 
 		kc := NewCatalog(kv)
@@ -127,7 +126,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 
 		bColl, err := proto.Marshal(coll2)
 		assert.NoError(t, err)
-		kv.On("LoadWithPrefix", mock.Anything, getDatabasePrefix(util.NonDBID)).
+		kv.On("LoadWithPrefix", mock.Anything, CollectionMetaPrefix+"/").
 			Return([]string{"key"}, []string{string(bColl)}, nil)
 		kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, targetErr)
 		kc := NewCatalog(kv)
@@ -143,7 +142,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 
 		bColl, err := proto.Marshal(coll2)
 		assert.NoError(t, err)
-		kv.On("LoadWithPrefix", mock.Anything, getDatabasePrefix(util.NonDBID)).
+		kv.On("LoadWithPrefix", mock.Anything, CollectionMetaPrefix+"/").
 			Return([]string{"key"}, []string{string(bColl)}, nil)
 
 		partitionMeta := &pb.PartitionInfo{}
@@ -189,7 +188,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 
 		bColl, err := proto.Marshal(coll1)
 		assert.NoError(t, err)
-		kv.On("LoadWithPrefix", mock.Anything, getDatabasePrefix(util.NonDBID)).
+		kv.On("LoadWithPrefix", mock.Anything, CollectionMetaPrefix+"/").
 			Return([]string{"key"}, []string{string(bColl)}, nil)
 		kv.On("MultiSaveAndRemove", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		kc := NewCatalog(kv)
@@ -263,7 +262,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 		aColl, err := proto.Marshal(coll3)
 		assert.NoError(t, err)
 
-		kv.On("LoadWithPrefix", mock.Anything, getDatabasePrefix(util.NonDBID)).
+		kv.On("LoadWithPrefix", mock.Anything, CollectionMetaPrefix+"/").
 			Return([]string{"key", "key2"}, []string{string(bColl), string(aColl)}, nil)
 
 		partitionMeta := &pb.PartitionInfo{}
@@ -356,7 +355,7 @@ func TestCatalog_loadCollection(t *testing.T) {
 		assert.NoError(t, err)
 		kv := mocks.NewTxnKV(t)
 		kv.EXPECT().Load(mock.Anything, mock.Anything).Return(string(value), nil)
-		kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		kc := NewCatalog(kv).(*Catalog)
 		got, err := kc.loadCollection(ctx, util.NonDBID, 1, 0)
 		assert.NoError(t, err)
@@ -1004,7 +1003,9 @@ func Test_batchMultiSaveAndRemove(t *testing.T) {
 		snapshot.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, kvs map[string]string) error {
 			return nil
 		})
-		snapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("error mock MultiSaveAndRemove"))
+		snapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+			return errors.New("error mock MultiSaveAndRemove")
+		})
 		saves := map[string]string{"k": "v"}
 		removals := []string{"prefix1", "prefix2"}
 		err := batchMultiSaveAndRemove(context.TODO(), snapshot, paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt(), saves, removals)
@@ -1016,7 +1017,11 @@ func Test_batchMultiSaveAndRemove(t *testing.T) {
 			log.Info("multi save", zap.Any("len", len(kvs)), zap.Any("saves", kvs))
 			return nil
 		})
-		snapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		snapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+			log.Info("multi save and remove with prefix", zap.Any("len of saves", len(saves)), zap.Any("len of removals", len(removals)),
+				zap.Any("saves", saves), zap.Any("removals", removals))
+			return nil
+		})
 		n := 400
 		saves := map[string]string{}
 		removals := make([]string, 0, n)
@@ -1197,8 +1202,8 @@ func TestCatalog_AlterCollection(t *testing.T) {
 func TestCatalog_AlterCollectionDB(t *testing.T) {
 	snapshot := mocks.NewTxnKV(t)
 	kvs := map[string]string{}
-	snapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
-		for k, v := range saves {
+	snapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, saveKvs map[string]string, _ []string, _ ...predicates.Predicate) error {
+		for k, v := range saveKvs {
 			kvs[k] = v
 		}
 		return nil
@@ -2265,202 +2270,373 @@ func TestRBAC_Grant(t *testing.T) {
 		validRole       = "role1"
 		invalidRole     = "role2"
 		keyNotExistRole = "role3"
-		errorSaveRole   = "role100"
 
-		validUser   = "user1"
-		invalidUser = "user2"
+		validUser = "user1"
 
-		validPrivilege        = "write"
-		invalidPrivilege      = "wal"
-		keyNotExistPrivilege  = "read"
-		keyNotExistPrivilege2 = "read2"
+		validPrivilege       = "write"
+		invalidPrivilege     = "wal"
+		keyNotExistPrivilege = "read"
 	)
 	t.Run("test AlterGrant", func(t *testing.T) {
-		var (
-			kvmock = mocks.NewTxnKV(t)
-			c      = NewCatalog(kvmock)
-		)
-
-		validRoleKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, validRole, object, objName)
-		validRoleValue := crypto.MD5(validRoleKey)
-
-		invalidRoleKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, objName)
-		invalidRoleKeyWithDb := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
-
-		keyNotExistRoleKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, objName)
-		keyNotExistRoleKeyWithDb := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
-		keyNotExistRoleValueWithDb := crypto.MD5(keyNotExistRoleKeyWithDb)
-
-		errorSaveRoleKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, errorSaveRole, object, objName)
-		errorSaveRoleKeyWithDb := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, errorSaveRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
-
-		// Mock return in kv_catalog.go:AlterGrant:L815
-		kvmock.EXPECT().Load(mock.Anything, validRoleKey).Call.
-			Return(func(ctx context.Context, key string) string { return validRoleValue }, nil)
-
-		kvmock.EXPECT().Load(mock.Anything, invalidRoleKey).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return fmt.Errorf("mock load error, key=%s", key)
-			})
-		kvmock.EXPECT().Load(mock.Anything, invalidRoleKeyWithDb).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return fmt.Errorf("mock load error, key=%s", key)
-			})
-		kvmock.EXPECT().Load(mock.Anything, keyNotExistRoleKey).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return merr.WrapErrIoKeyNotFound(key)
-			})
-		kvmock.EXPECT().Load(mock.Anything, keyNotExistRoleKeyWithDb).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return merr.WrapErrIoKeyNotFound(key)
-			})
-		kvmock.EXPECT().Load(mock.Anything, errorSaveRoleKey).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return merr.WrapErrIoKeyNotFound(key)
-			})
-		kvmock.EXPECT().Load(mock.Anything, errorSaveRoleKeyWithDb).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return merr.WrapErrIoKeyNotFound(key)
-			})
-		kvmock.EXPECT().Save(mock.Anything, keyNotExistRoleKeyWithDb, mock.Anything).Return(nil)
-		kvmock.EXPECT().Save(mock.Anything, errorSaveRoleKeyWithDb, mock.Anything).Return(errors.New("mock save error role"))
-
-		validPrivilegeKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, validRoleValue, validPrivilege)
-		invalidPrivilegeKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, validRoleValue, invalidPrivilege)
-		keyNotExistPrivilegeKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, validRoleValue, keyNotExistPrivilege)
-		keyNotExistPrivilegeKey2WithDb := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, keyNotExistRoleValueWithDb, keyNotExistPrivilege2)
-
-		// Mock return in kv_catalog.go:AlterGrant:L838
-		kvmock.EXPECT().Load(mock.Anything, validPrivilegeKey).Call.Return("", nil)
-		kvmock.EXPECT().Load(mock.Anything, invalidPrivilegeKey).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return fmt.Errorf("mock load error, key=%s", key)
-			})
-		kvmock.EXPECT().Load(mock.Anything, keyNotExistPrivilegeKey).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return merr.WrapErrIoKeyNotFound(key)
-			})
-		kvmock.EXPECT().Load(mock.Anything, keyNotExistPrivilegeKey2WithDb).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return merr.WrapErrIoKeyNotFound(key)
-			})
-		kvmock.EXPECT().Load(mock.Anything, mock.Anything).Call.Return("", nil)
-
-		t.Run("test Grant", func(t *testing.T) {
-			kvmock.EXPECT().Save(mock.Anything, mock.Anything, validUser).Return(nil)
-			kvmock.EXPECT().Save(mock.Anything, mock.Anything, invalidUser).Return(errors.New("mock save invalid user"))
-
-			tests := []struct {
-				isValid bool
-
-				userName      string
-				roleName      string
-				privilegeName string
-
-				ignorable   bool
-				description string
-			}{
-				// exist role
-				{false, validUser, validRole, invalidPrivilege, false, "grant exist Role with error Privilege"},
-				{false, validUser, validRole, validPrivilege, true, "grant exist Role with exist Privilege, ignorable"},
-				{false, invalidUser, validRole, keyNotExistPrivilege, false, "grant exist Role with not exist Privilege with invalid user"},
-				{true, validUser, validRole, keyNotExistPrivilege, true, "grant exist Role with not exist Privilege with valid user"},
-				// error role
-				{false, validUser, invalidRole, invalidPrivilege, false, "grant invalid role with invalid privilege"},
-				{false, validUser, invalidRole, validPrivilege, false, "grant invalid role with valid privilege"},
-				{false, validUser, invalidRole, keyNotExistPrivilege, false, "grant invalid role with not exist privilege"},
-				{false, validUser, errorSaveRole, keyNotExistPrivilege, false, "grant error role with not exist privilege"},
-				// not exist role
-				{false, validUser, keyNotExistRole, validPrivilege, true, "grant not exist role with exist privilege"},
-				{true, validUser, keyNotExistRole, keyNotExistPrivilege2, false, "grant not exist role with not exist privilege"},
+		makeEntity := func(roleName, privilegeName string) *milvuspb.GrantEntity {
+			return &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: roleName},
+				Object:     &milvuspb.ObjectEntity{Name: object},
+				ObjectName: objName,
+				DbName:     util.DefaultDBName,
+				Grantor: &milvuspb.GrantorEntity{
+					User:      &milvuspb.UserEntity{Name: validUser},
+					Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
+				},
 			}
+		}
 
-			for _, test := range tests {
-				t.Run(test.description, func(t *testing.T) {
-					err := c.AlterGrant(ctx, tenant, &milvuspb.GrantEntity{
-						Role:       &milvuspb.RoleEntity{Name: test.roleName},
-						Object:     &milvuspb.ObjectEntity{Name: object},
-						ObjectName: objName,
-						DbName:     util.DefaultDBName,
-						Grantor: &milvuspb.GrantorEntity{
-							User:      &milvuspb.UserEntity{Name: test.userName},
-							Privilege: &milvuspb.PrivilegeEntity{Name: test.privilegeName},
-						},
-					}, milvuspb.OperatePrivilegeType_Grant)
+		t.Run("grant: role load hard error", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return("", fmt.Errorf("mock load error"))
+			// Legacy fallback also fails
+			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, objName)).Return("", fmt.Errorf("mock load error"))
 
-					if test.isValid {
-						assert.NoError(t, err)
-					} else {
-						assert.Error(t, err)
-						_, ok := err.(*common.IgnorableError)
-						if test.ignorable {
-							assert.True(t, ok)
-						} else {
-							assert.False(t, ok)
-						}
-					}
-				})
-			}
+			err := c.AlterGrant(ctx, tenant, makeEntity(invalidRole, validPrivilege), milvuspb.OperatePrivilegeType_Grant, 0, 0)
+			assert.Error(t, err)
+			assert.False(t, common.IsIgnorableError(err))
 		})
 
-		t.Run("test Revoke", func(t *testing.T) {
-			invalidPrivilegeRemove := "p-remove"
-			invalidPrivilegeRemoveKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, validRoleValue, invalidPrivilegeRemove)
+		t.Run("grant: privilege already exists returns ignorable", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, validRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			granteeID := "gid-valid"
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return(granteeID, nil)
+			privKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, granteeID, validPrivilege)
+			kvmock.EXPECT().Load(mock.Anything, privKey).Return("user1", nil) // already exists
+			// No MultiSaveAndRemove expected (no saves/removes)
 
-			kvmock.EXPECT().Load(mock.Anything, invalidPrivilegeRemoveKey).Call.Return("", nil)
-			kvmock.EXPECT().Remove(mock.Anything, invalidPrivilegeRemoveKey).Return(errors.New("mock remove error"))
-			kvmock.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
-			tests := []struct {
-				isValid bool
+			err := c.AlterGrant(ctx, tenant, makeEntity(validRole, validPrivilege), milvuspb.OperatePrivilegeType_Grant, 0, 0)
+			assert.Error(t, err)
+			assert.True(t, common.IsIgnorableError(err))
+		})
 
-				userName      string
-				roleName      string
-				privilegeName string
+		t.Run("grant: privilege load hard error", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, validRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			granteeID := "gid-valid"
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return(granteeID, nil)
+			privKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, granteeID, invalidPrivilege)
+			kvmock.EXPECT().Load(mock.Anything, privKey).Return("", fmt.Errorf("mock privilege load error"))
 
-				ignorable   bool
-				description string
-			}{
-				// invalid role
-				{false, validUser, invalidRole, validPrivilege, false, "invalid role"},
-				{false, validUser, invalidRole, invalidPrivilege, false, "invalid role, invalid privilege"},
-				{false, validUser, invalidRole, keyNotExistPrivilege, false, "invalid role, not exist privilege"},
-				// not exist role
-				{false, validUser, keyNotExistRole, validPrivilege, true, "not exist role with exist privilege"},
-				// exist role
-				{false, validUser, validRole, invalidPrivilege, false, "exist role with invalid privilege"},
-				{false, validUser, validRole, keyNotExistPrivilege, true, "exist role with not exist privilege"},
-				{true, validUser, validRole, validPrivilege, false, "exist role with exist privilege success to remove"},
-				{false, validUser, validRole, invalidPrivilegeRemove, false, "exist role with exist privilege fail to remove"},
-			}
+			err := c.AlterGrant(ctx, tenant, makeEntity(validRole, invalidPrivilege), milvuspb.OperatePrivilegeType_Grant, 0, 0)
+			assert.Error(t, err)
+			assert.False(t, common.IsIgnorableError(err))
+		})
 
-			for _, test := range tests {
-				t.Run(test.description, func(t *testing.T) {
-					err := c.AlterGrant(ctx, tenant, &milvuspb.GrantEntity{
-						Role:       &milvuspb.RoleEntity{Name: test.roleName},
-						Object:     &milvuspb.ObjectEntity{Name: object},
-						ObjectName: objName,
-						DbName:     util.DefaultDBName,
-						Grantor: &milvuspb.GrantorEntity{
-							User:      &milvuspb.UserEntity{Name: test.userName},
-							Privilege: &milvuspb.PrivilegeEntity{Name: test.privilegeName},
-						},
-					}, milvuspb.OperatePrivilegeType_Revoke)
+		t.Run("grant: new role + new privilege atomically saved", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return("", merr.WrapErrIoKeyNotFound(granteeKey))
+			// Legacy fallback
+			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, objName)).Return("", merr.WrapErrIoKeyNotFound(""))
 
-					if test.isValid {
-						assert.NoError(t, err)
-					} else {
-						assert.Error(t, err)
-						_, ok := err.(*common.IgnorableError)
-						if test.ignorable {
-							assert.True(t, ok)
-						} else {
-							assert.False(t, ok)
-						}
-					}
-				})
-			}
+			newGranteeID := crypto.MD5(granteeKey)
+			privKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, newGranteeID, keyNotExistPrivilege)
+			kvmock.EXPECT().Load(mock.Anything, privKey).Return("", merr.WrapErrIoKeyNotFound(privKey))
+
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
+				map[string]string{granteeKey: newGranteeID, privKey: validUser},
+				([]string)(nil)).Return(nil)
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(keyNotExistRole, keyNotExistPrivilege), milvuspb.OperatePrivilegeType_Grant, 0, 0)
+			assert.NoError(t, err)
+		})
+
+		t.Run("revoke: role not found returns ignorable", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return("", merr.WrapErrIoKeyNotFound(granteeKey))
+			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, objName)).Return("", merr.WrapErrIoKeyNotFound(""))
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(keyNotExistRole, validPrivilege), milvuspb.OperatePrivilegeType_Revoke, 0, 0)
+			assert.Error(t, err)
+			assert.True(t, common.IsIgnorableError(err))
+		})
+
+		t.Run("revoke: privilege not found returns ignorable", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, validRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			granteeID := "gid-valid"
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return(granteeID, nil)
+			privKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, granteeID, keyNotExistPrivilege)
+			kvmock.EXPECT().Load(mock.Anything, privKey).Return("", merr.WrapErrIoKeyNotFound(privKey))
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(validRole, keyNotExistPrivilege), milvuspb.OperatePrivilegeType_Revoke, 0, 0)
+			assert.Error(t, err)
+			assert.True(t, common.IsIgnorableError(err))
+		})
+
+		t.Run("revoke: exist privilege atomically removed", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, validRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			granteeID := "gid-valid"
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return(granteeID, nil)
+			privKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, granteeID, validPrivilege)
+			kvmock.EXPECT().Load(mock.Anything, privKey).Return("user1", nil) // exists
+
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
+				map[string]string{},
+				[]string{privKey}).Return(nil)
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(validRole, validPrivilege), milvuspb.OperatePrivilegeType_Revoke, 0, 0)
+			assert.NoError(t, err)
+		})
+
+		t.Run("revoke: role load hard error", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return("", fmt.Errorf("mock load error"))
+			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, objName)).Return("", fmt.Errorf("mock load error"))
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(invalidRole, validPrivilege), milvuspb.OperatePrivilegeType_Revoke, 0, 0)
+			assert.Error(t, err)
+			assert.False(t, common.IsIgnorableError(err))
 		})
 	})
+
+	t.Run("test AlterGrant dual-write atomic", func(t *testing.T) {
+		var (
+			role            = "admin"
+			object          = "Collection"
+			collName        = "myCol"
+			dbName          = util.DefaultDBName
+			privilege       = "Insert"
+			grantor         = "root"
+			dbID      int64 = 1
+			colID     int64 = 100
+		)
+
+		idDBPart := funcutil.FormatDatabaseID(dbID)     // "dbID:1"
+		idColPart := funcutil.FormatCollectionID(colID) // "colID:100"
+
+		// Primary key: ID-based
+		primaryKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, funcutil.CombineObjectName(idDBPart, idColPart))
+		primaryGranteeID := crypto.MD5(primaryKey)
+
+		// Secondary key: name-based
+		nameKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, funcutil.CombineObjectName(dbName, collName))
+		nameGranteeID := crypto.MD5(nameKey)
+
+		primaryIDKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, primaryGranteeID, privilege)
+		nameIDKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, nameGranteeID, privilege)
+
+		makeEntity := func() *milvuspb.GrantEntity {
+			return &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: role},
+				Object:     &milvuspb.ObjectEntity{Name: object},
+				ObjectName: collName,
+				DbName:     dbName,
+				Grantor: &milvuspb.GrantorEntity{
+					User:      &milvuspb.UserEntity{Name: grantor},
+					Privilege: &milvuspb.PrivilegeEntity{Name: privilege},
+				},
+			}
+		}
+
+		t.Run("grant atomically writes both ID-based and name-based keys", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+
+			// Primary key: not found → create new grantee (collected in saves)
+			kvmock.EXPECT().Load(mock.Anything, primaryKey).
+				Return("", merr.WrapErrIoKeyNotFound(primaryKey)).Once()
+			// Primary privilege: not found → save (collected in saves)
+			kvmock.EXPECT().Load(mock.Anything, primaryIDKey).
+				Return("", merr.WrapErrIoKeyNotFound(primaryIDKey)).Once()
+
+			// Secondary (name-based): not found → create new grantee (collected in saves)
+			kvmock.EXPECT().Load(mock.Anything, nameKey).
+				Return("", merr.WrapErrIoKeyNotFound(nameKey)).Once()
+			// Legacy fallback: also not found
+			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, collName)).
+				Return("", merr.WrapErrIoKeyNotFound("")).Once()
+			// Secondary privilege: not found → save (collected in saves)
+			kvmock.EXPECT().Load(mock.Anything, nameIDKey).
+				Return("", merr.WrapErrIoKeyNotFound(nameIDKey)).Once()
+
+			// All saves happen atomically in one MultiSaveAndRemove
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
+				map[string]string{
+					primaryKey:   primaryGranteeID,
+					primaryIDKey: grantor,
+					nameKey:      nameGranteeID,
+					nameIDKey:    grantor,
+				},
+				([]string)(nil)).Return(nil).Once()
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Grant, dbID, colID)
+			assert.NoError(t, err)
+		})
+
+		t.Run("grant both exist returns ignorable, no writes", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+
+			// Primary: exists → ignorable
+			kvmock.EXPECT().Load(mock.Anything, primaryKey).Return(primaryGranteeID, nil).Once()
+			kvmock.EXPECT().Load(mock.Anything, primaryIDKey).Return(grantor, nil).Once()
+
+			// Secondary: also exists → ignorable
+			kvmock.EXPECT().Load(mock.Anything, nameKey).Return(nameGranteeID, nil).Once()
+			kvmock.EXPECT().Load(mock.Anything, nameIDKey).Return(grantor, nil).Once()
+
+			// No MultiSaveAndRemove call expected (no saves/removes)
+			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Grant, dbID, colID)
+			assert.Error(t, err)
+			assert.True(t, common.IsIgnorableError(err))
+		})
+
+		t.Run("revoke atomically removes both ID-based and name-based keys", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+
+			// Primary: exists → collect remove
+			kvmock.EXPECT().Load(mock.Anything, primaryKey).Return(primaryGranteeID, nil).Once()
+			kvmock.EXPECT().Load(mock.Anything, primaryIDKey).Return(grantor, nil).Once()
+
+			// Secondary: exists → collect remove
+			kvmock.EXPECT().Load(mock.Anything, nameKey).Return(nameGranteeID, nil).Once()
+			kvmock.EXPECT().Load(mock.Anything, nameIDKey).Return(grantor, nil).Once()
+
+			// Atomic remove of both keys
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
+				map[string]string{},
+				mock.MatchedBy(func(removes []string) bool {
+					return len(removes) == 2
+				})).Return(nil).Once()
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Revoke, dbID, colID)
+			assert.NoError(t, err)
+		})
+
+		t.Run("revoke primary not found, secondary removed atomically", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+
+			// Primary: not found → ignorable
+			kvmock.EXPECT().Load(mock.Anything, primaryKey).
+				Return("", merr.WrapErrIoKeyNotFound(primaryKey)).Once()
+
+			// Secondary: exists → collect remove
+			kvmock.EXPECT().Load(mock.Anything, nameKey).Return(nameGranteeID, nil).Once()
+			kvmock.EXPECT().Load(mock.Anything, nameIDKey).Return(grantor, nil).Once()
+
+			// Atomic remove of secondary key only
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
+				map[string]string{},
+				[]string{nameIDKey}).Return(nil).Once()
+
+			// Returns nil (not IgnorableError) because actual changes were committed —
+			// the caller must broadcast the cache update.
+			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Revoke, dbID, colID)
+			assert.NoError(t, err)
+		})
+
+		t.Run("revoke primary hard error stops immediately", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+
+			kvmock.EXPECT().Load(mock.Anything, primaryKey).
+				Return("", errors.New("etcd unavailable")).Once()
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Revoke, dbID, colID)
+			assert.Error(t, err)
+			assert.False(t, common.IsIgnorableError(err))
+			assert.Contains(t, err.Error(), "etcd unavailable")
+		})
+
+		t.Run("grant secondary hard error propagated", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+
+			// Primary: success (collected in saves)
+			kvmock.EXPECT().Load(mock.Anything, primaryKey).
+				Return("", merr.WrapErrIoKeyNotFound(primaryKey)).Once()
+			kvmock.EXPECT().Load(mock.Anything, primaryIDKey).
+				Return("", merr.WrapErrIoKeyNotFound(primaryIDKey)).Once()
+
+			// Secondary: hard error on Load
+			kvmock.EXPECT().Load(mock.Anything, nameKey).
+				Return("", errors.New("etcd write timeout")).Once()
+			// Legacy fallback also fails
+			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, collName)).
+				Return("", errors.New("etcd write timeout")).Once()
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Grant, dbID, colID)
+			assert.Error(t, err)
+			assert.False(t, common.IsIgnorableError(err))
+		})
+
+		t.Run("non-dual-write atomically writes single key", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+
+			nameOnlyKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, funcutil.CombineObjectName(dbName, collName))
+			nameOnlyGranteeID := crypto.MD5(nameOnlyKey)
+			nameOnlyIDKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, nameOnlyGranteeID, privilege)
+
+			kvmock.EXPECT().Load(mock.Anything, nameOnlyKey).
+				Return("", merr.WrapErrIoKeyNotFound(nameOnlyKey)).Once()
+			// Legacy fallback
+			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, collName)).
+				Return("", merr.WrapErrIoKeyNotFound("")).Once()
+			kvmock.EXPECT().Load(mock.Anything, nameOnlyIDKey).
+				Return("", merr.WrapErrIoKeyNotFound(nameOnlyIDKey)).Once()
+
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
+				map[string]string{
+					nameOnlyKey:   nameOnlyGranteeID,
+					nameOnlyIDKey: grantor,
+				},
+				([]string)(nil)).Return(nil).Once()
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Grant, 0, 0)
+			assert.NoError(t, err)
+		})
+
+		t.Run("MultiSaveAndRemove failure returns error", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock)
+
+			// Primary: new key
+			kvmock.EXPECT().Load(mock.Anything, primaryKey).
+				Return("", merr.WrapErrIoKeyNotFound(primaryKey)).Once()
+			kvmock.EXPECT().Load(mock.Anything, primaryIDKey).
+				Return("", merr.WrapErrIoKeyNotFound(primaryIDKey)).Once()
+			// Secondary: new key
+			kvmock.EXPECT().Load(mock.Anything, nameKey).
+				Return("", merr.WrapErrIoKeyNotFound(nameKey)).Once()
+			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, collName)).
+				Return("", merr.WrapErrIoKeyNotFound("")).Once()
+			kvmock.EXPECT().Load(mock.Anything, nameIDKey).
+				Return("", merr.WrapErrIoKeyNotFound(nameIDKey)).Once()
+
+			// Atomic commit fails
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+				Return(errors.New("etcd commit failed")).Once()
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Grant, dbID, colID)
+			assert.Error(t, err)
+			assert.False(t, common.IsIgnorableError(err))
+			assert.Contains(t, err.Error(), "etcd commit failed")
+		})
+	})
+
 	t.Run("test DeleteGrant", func(t *testing.T) {
 		var (
 			kvmock = mocks.NewTxnKV(t)
@@ -2759,7 +2935,7 @@ func TestRBAC_Backup(t *testing.T) {
 			User:      &milvuspb.UserEntity{Name: "user1"},
 			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
 		},
-	}, milvuspb.OperatePrivilegeType_Grant)
+	}, milvuspb.OperatePrivilegeType_Grant, 0, 0)
 	c.AlterCredential(ctx, &model.Credential{
 		Username:          "user1",
 		EncryptedPassword: "passwd",
@@ -2855,17 +3031,7 @@ func TestRBAC_Restore(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, roles, 1)
 	assert.Equal(t, "role1", roles[0].Role.Name)
-	// check grant
-	grants, err := c.ListGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
-		Role:   roles[0].Role,
-		DbName: util.AnyWord,
-	})
-	assert.NoError(t, err)
-	assert.Len(t, grants, 1)
-	assert.Equal(t, "obj_name1", grants[0].ObjectName)
-	assert.Equal(t, "role1", grants[0].Role.Name)
-	assert.Equal(t, "user1", grants[0].Grantor.User.Name)
-	assert.Equal(t, "Load", grants[0].Grantor.Privilege.Name)
+	// Note: grants are now handled by MetaTable.RestoreRBAC, not the catalog directly
 	// check privilege group
 	privGroups, err := c.ListPrivilegeGroups(ctx)
 	assert.NoError(t, err)
@@ -2924,17 +3090,7 @@ func TestRBAC_Restore(t *testing.T) {
 	roles, err = c.ListRole(ctx, util.DefaultTenant, nil, false)
 	assert.NoError(t, err)
 	assert.Len(t, roles, 2)
-	// check grant
-	grants, err = c.ListGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
-		Role:   &milvuspb.RoleEntity{Name: "role2"},
-		DbName: util.AnyWord,
-	})
-	assert.NoError(t, err)
-	assert.Len(t, grants, 1)
-	assert.Equal(t, "obj_name2", grants[0].ObjectName)
-	assert.Equal(t, "role2", grants[0].Role.Name)
-	assert.Equal(t, "user2", grants[0].Grantor.User.Name)
-	assert.Equal(t, "Load", grants[0].Grantor.Privilege.Name)
+	// Note: grants are now handled by MetaTable.RestoreRBAC, not the catalog directly
 	// check privilege group
 	privGroups, err = c.ListPrivilegeGroups(ctx)
 	assert.NoError(t, err)
@@ -3287,10 +3443,11 @@ func TestRBACPrefixMatch(t *testing.T) {
 		granteeIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "grantee_abc")
 
 		// Mock: return only grantee_abc's privileges (not grantee_abc123's)
+		// Use correct store-format privilege names (PrivilegeXxx)
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeIDPrefix).Return(
 			[]string{
-				granteeIDPrefix + "Insert",
-				granteeIDPrefix + "Delete",
+				granteeIDPrefix + "PrivilegeInsert",
+				granteeIDPrefix + "PrivilegeDelete",
 			},
 			[]string{"user1", "user2"},
 			nil,
@@ -3310,8 +3467,8 @@ func TestRBACPrefixMatch(t *testing.T) {
 		for _, g := range grants {
 			privileges = append(privileges, g.GetGrantor().GetPrivilege().GetName())
 		}
-		assert.Contains(t, privileges, util.PrivilegeNameForAPI("Insert"))
-		assert.Contains(t, privileges, util.PrivilegeNameForAPI("Delete"))
+		assert.Contains(t, privileges, util.PrivilegeNameForAPI("PrivilegeInsert"))
+		assert.Contains(t, privileges, util.PrivilegeNameForAPI("PrivilegeDelete"))
 	})
 }
 
@@ -3546,7 +3703,7 @@ func TestCatalog_FileResource(t *testing.T) {
 	})
 }
 
-func TestDeleteGrantByCollectionName(t *testing.T) {
+func TestDeleteGrantByCollectionID(t *testing.T) {
 	ctx := context.Background()
 	tenant := util.DefaultTenant
 
@@ -3556,7 +3713,7 @@ func TestDeleteGrantByCollectionName(t *testing.T) {
 		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(nil, nil, errors.New("load error"))
 
-		err := c.DeleteGrantByCollectionName(ctx, tenant, "default", "col1")
+		err := c.DeleteGrantByCollectionID(ctx, tenant, 1, "default", "col1")
 		assert.Error(t, err)
 	})
 
@@ -3566,11 +3723,11 @@ func TestDeleteGrantByCollectionName(t *testing.T) {
 		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 
 		// Only a grant for a different collection
-		key1 := granteeKey + "role1/Collection/default.other_col"
+		key1 := granteeKey + "role1/Collection/default.colID:2"
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
 			[]string{key1}, []string{"granteeID1"}, nil)
 
-		err := c.DeleteGrantByCollectionName(ctx, tenant, "default", "col1")
+		err := c.DeleteGrantByCollectionID(ctx, tenant, 1, "default", "col1")
 		assert.NoError(t, err)
 	})
 
@@ -3579,10 +3736,10 @@ func TestDeleteGrantByCollectionName(t *testing.T) {
 		c := NewCatalog(kvmock)
 		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 
-		key1 := granteeKey + "role1/Collection/default.col1"
-		key2 := granteeKey + "role2/Collection/default.col1"
-		key3 := granteeKey + "role1/Collection/default.other_col"
-		key4 := granteeKey + "role1/Global/default.col1" // different objectType
+		key1 := granteeKey + "role1/Collection/default.colID:1"
+		key2 := granteeKey + "role2/Collection/default.colID:1"
+		key3 := granteeKey + "role1/Collection/default.colID:2"
+		key4 := granteeKey + "role1/Global/default.colID:1" // different objectType
 
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
 			[]string{key1, key2, key3, key4},
@@ -3598,52 +3755,55 @@ func TestDeleteGrantByCollectionName(t *testing.T) {
 		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
 			[]string{key1, key2}).Return(nil)
 
-		err := c.DeleteGrantByCollectionName(ctx, tenant, "default", "col1")
+		err := c.DeleteGrantByCollectionID(ctx, tenant, 1, "default", "col1")
 		assert.NoError(t, err)
 	})
 
-	t.Run("handles old format without db prefix", func(t *testing.T) {
+	t.Run("deletes grants across all db prefixes", func(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock)
 		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 
-		// Old format: objectName without "." is treated as default db
-		key1 := granteeKey + "role1/Collection/col1"
-
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
-			[]string{key1}, []string{"gid1"}, nil)
-
-		gid1Key := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
-		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
-			[]string{gid1Key}).Return(nil)
-		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
-			[]string{key1}).Return(nil)
-
-		err := c.DeleteGrantByCollectionName(ctx, tenant, "default", "col1")
-		assert.NoError(t, err)
-	})
-
-	t.Run("skips wildcard dbName grants on drop", func(t *testing.T) {
-		kvmock := mocks.NewTxnKV(t)
-		c := NewCatalog(kvmock)
-		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
-
-		// Wildcard grant *.col1 should NOT be deleted when dropping db1.col1,
-		// because it may also protect col1 in other databases.
-		key1 := granteeKey + "role1/Collection/*.col1"
-		key2 := granteeKey + "role1/Collection/default.col1"
+		// Both wildcard and specific db grants for the same collection ID
+		// should be deleted by DeleteGrantByCollectionID.
+		key1 := granteeKey + "role1/Collection/*.colID:1"
+		key2 := granteeKey + "role1/Collection/default.colID:1"
 
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
 			[]string{key1, key2}, []string{"gid1", "gid2"}, nil)
 
-		// Only key2 (default.col1) should be deleted, not key1 (*.col1)
+		// Both keys should be deleted
+		gid1Key := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
 		gid2Key := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid2")
 		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
-			[]string{gid2Key}).Return(nil)
+			[]string{gid1Key, gid2Key}).Return(nil)
 		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
-			[]string{key2}).Return(nil)
+			[]string{key1, key2}).Return(nil)
 
-		err := c.DeleteGrantByCollectionName(ctx, tenant, "default", "col1")
+		err := c.DeleteGrantByCollectionID(ctx, tenant, 1, "default", "col1")
+		assert.NoError(t, err)
+	})
+
+	t.Run("deletes both ID-based and name-based dual-write keys", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		// Both dual-write formats for the same collection
+		key1 := granteeKey + "role1/Collection/dbID:1.colID:1" // ID-based
+		key2 := granteeKey + "role1/Collection/default.col1"   // name-based
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1, key2}, []string{"gid1", "gid2"}, nil)
+
+		gid1Key := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
+		gid2Key := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid2")
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
+			[]string{gid1Key, gid2Key}).Return(nil)
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
+			[]string{key1, key2}).Return(nil)
+
+		err := c.DeleteGrantByCollectionID(ctx, tenant, 1, "default", "col1")
 		assert.NoError(t, err)
 	})
 
@@ -3654,38 +3814,21 @@ func TestDeleteGrantByCollectionName(t *testing.T) {
 
 		// Simulate etcd returning keys WITH rootPath prefix (as real etcd does)
 		rootPath := "by-dev/meta/"
-		key1 := rootPath + granteeKey + "role1/Collection/default.col1"
+		key1 := rootPath + granteeKey + "role1/Collection/default.colID:1"
 
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
 			[]string{key1}, []string{"gid1"}, nil)
 
 		// The logical key (without rootPath) should be used for deletion
-		logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", "default.col1")
+		logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", "default.colID:1")
 		gid1Key := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
 		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
 			[]string{gid1Key}).Return(nil)
 		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
 			[]string{logicalKey}).Return(nil)
 
-		err := c.DeleteGrantByCollectionName(ctx, tenant, "default", "col1")
+		err := c.DeleteGrantByCollectionID(ctx, tenant, 1, "default", "col1")
 		assert.NoError(t, err)
-	})
-
-	t.Run("MultiSaveAndRemoveWithPrefix error", func(t *testing.T) {
-		kvmock := mocks.NewTxnKV(t)
-		c := NewCatalog(kvmock)
-		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
-
-		key1 := granteeKey + "role1/Collection/default.col1"
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
-			[]string{key1}, []string{"gid1"}, nil)
-
-		gid1Key := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
-		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
-			[]string{gid1Key}).Return(errors.New("remove error"))
-
-		err := c.DeleteGrantByCollectionName(ctx, tenant, "default", "col1")
-		assert.Error(t, err)
 	})
 
 	t.Run("MultiSaveAndRemove error", func(t *testing.T) {
@@ -3693,22 +3836,468 @@ func TestDeleteGrantByCollectionName(t *testing.T) {
 		c := NewCatalog(kvmock)
 		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 
-		key1 := granteeKey + "role1/Collection/default.col1"
+		logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", "default.colID:1")
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
-			[]string{key1}, []string{"gid1"}, nil)
+			[]string{granteeKey + "role1/Collection/default.colID:1"}, []string{"gid1"}, nil)
 
+		// Exact keys deleted first; error stops before prefix deletion
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
+			[]string{logicalKey}).Return(errors.New("remove error"))
+
+		err := c.DeleteGrantByCollectionID(ctx, tenant, 1, "default", "col1")
+		assert.Error(t, err)
+	})
+
+	t.Run("MultiSaveAndRemoveWithPrefix error", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", "default.colID:1")
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{granteeKey + "role1/Collection/default.colID:1"}, []string{"gid1"}, nil)
+
+		// Exact keys deleted first (success), then prefix deletion fails
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
+			[]string{logicalKey}).Return(nil)
 		gid1Key := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
 		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
-			[]string{gid1Key}).Return(nil)
-		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
-			[]string{key1}).Return(errors.New("remove error"))
+			[]string{gid1Key}).Return(errors.New("remove error"))
 
-		err := c.DeleteGrantByCollectionName(ctx, tenant, "default", "col1")
+		err := c.DeleteGrantByCollectionID(ctx, tenant, 1, "default", "col1")
 		assert.Error(t, err)
 	})
 }
 
-func TestMigrateGrantCollectionName(t *testing.T) {
+func TestMigrateGrantsToEntityID(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+
+	collectionNameToID := func(dbName, collName string) (int64, error) {
+		if dbName == "default" && collName == "col1" {
+			return 100, nil
+		}
+		if dbName == "db1" && collName == "col1" {
+			return 200, nil
+		}
+		return 0, merr.WrapErrCollectionNotFound(collName)
+	}
+
+	dbNameToID := func(dbName string) (int64, error) {
+		if dbName == "default" {
+			return 1, nil
+		}
+		if dbName == "db1" {
+			return 2, nil
+		}
+		return 0, merr.WrapErrDatabaseNotFound(dbName)
+	}
+
+	t.Run("already migrated runs reconciliation", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("done", nil)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+		// No grants → reconciliation is a no-op
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(nil, nil, nil)
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("load error", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("", merr.WrapErrIoKeyNotFound(GrantMigrationToIDKeyPrefix))
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(nil, nil, errors.New("load error"))
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.Error(t, err)
+	})
+
+	t.Run("migration flag check fails with non-key-not-found error", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("", errors.New("etcd unavailable"))
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "etcd unavailable")
+	})
+
+	t.Run("no name-based grants to migrate", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("", merr.WrapErrIoKeyNotFound(GrantMigrationToIDKeyPrefix))
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		// Already ID-based grant (both dbID and colID) - should be skipped
+		key1 := granteeKey + "role1/Collection/dbID:1.colID:100"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1}, []string{"gid1"}, nil)
+
+		kvmock.EXPECT().Save(mock.Anything, GrantMigrationToIDKeyPrefix, "done").Return(nil)
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("additive migration: creates ID-based keys while keeping name-based", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("", merr.WrapErrIoKeyNotFound(GrantMigrationToIDKeyPrefix))
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		key1 := granteeKey + "role1/Collection/default.col1"
+		key2 := granteeKey + "role1/Collection/dbID:1.colID:100" // already ID-based, skip
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1, key2},
+			[]string{"gid1", "gid2"},
+			nil)
+
+		// The old grantee-id sub-keys for gid1
+		oldIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
+		oldIDKey := oldIDPrefix + "PrivilegeLoad"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldIDPrefix).Return(
+			[]string{oldIDKey}, []string{"user1"}, nil)
+
+		// Build expected new key with dbID:1.colID:100 format
+		newGranteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix,
+			"role1", "Collection", funcutil.CombineObjectName("dbID:1", "colID:100"))
+		newID := crypto.MD5(newGranteeKey)
+		newIDKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, newID, "PrivilegeLoad")
+
+		// Additive: only saves new keys, no removeKeys (old name-based key1 is kept)
+		kvmock.EXPECT().MultiSave(mock.Anything,
+			map[string]string{newGranteeKey: newID, newIDKey: "user1"}).Return(nil)
+		kvmock.EXPECT().Save(mock.Anything, GrantMigrationToIDKeyPrefix, "done").Return(nil)
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("removes stale grants for non-existent collections", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("", merr.WrapErrIoKeyNotFound(GrantMigrationToIDKeyPrefix))
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		// Collection "gone_col" does not exist in collectionNameToID
+		key1 := granteeKey + "role1/Collection/default.gone_col"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1}, []string{"gid1"}, nil)
+
+		oldIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
+			[]string{oldIDPrefix}).Return(nil)
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything,
+			[]string{key1}).Return(nil)
+		kvmock.EXPECT().Save(mock.Anything, GrantMigrationToIDKeyPrefix, "done").Return(nil)
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("removes stale grants for non-existent database", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("", merr.WrapErrIoKeyNotFound(GrantMigrationToIDKeyPrefix))
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		// Database "gone_db" does not exist in dbNameToID
+		key1 := granteeKey + "role1/Collection/gone_db.col1"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1}, []string{"gid1"}, nil)
+
+		oldIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
+			[]string{oldIDPrefix}).Return(nil)
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything,
+			[]string{key1}).Return(nil)
+		kvmock.EXPECT().Save(mock.Anything, GrantMigrationToIDKeyPrefix, "done").Return(nil)
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("save error", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("", merr.WrapErrIoKeyNotFound(GrantMigrationToIDKeyPrefix))
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		key1 := granteeKey + "role1/Collection/default.col1"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1}, []string{"gid1"}, nil)
+
+		oldIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldIDPrefix).Return(nil, nil, nil)
+
+		kvmock.EXPECT().MultiSave(mock.Anything, mock.Anything).
+			Return(errors.New("save error"))
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.Error(t, err)
+	})
+
+	t.Run("wildcard grant migration: migrates dbName only", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("", merr.WrapErrIoKeyNotFound(GrantMigrationToIDKeyPrefix))
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		// Wildcard grant: default.* should be migrated to dbID:1.*
+		key1 := granteeKey + "role1/Collection/default.*"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1}, []string{"gid1"}, nil)
+
+		// The old grantee-id sub-keys for gid1
+		oldIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
+		oldIDKey := oldIDPrefix + "PrivilegeLoad"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldIDPrefix).Return(
+			[]string{oldIDKey}, []string{"user1"}, nil)
+
+		// Build expected new key with dbID:1.* format (only dbName migrated, objectName stays *)
+		newGranteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", funcutil.CombineObjectName("dbID:1", "*"))
+		newID := crypto.MD5(newGranteeKey)
+		newIDKey := fmt.Sprintf("%s/%s/PrivilegeLoad", GranteeIDPrefix, newID)
+
+		kvmock.EXPECT().MultiSave(mock.Anything,
+			map[string]string{newGranteeKey: newID, newIDKey: "user1"}).Return(nil)
+		kvmock.EXPECT().Save(mock.Anything, GrantMigrationToIDKeyPrefix, "done").Return(nil)
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("wildcard grant already ID-based: skipped", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("", merr.WrapErrIoKeyNotFound(GrantMigrationToIDKeyPrefix))
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		// Already ID-based wildcard grant: dbID:1.* should be skipped
+		key1 := granteeKey + "role1/Collection/dbID:1.*"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1}, []string{"gid1"}, nil)
+
+		kvmock.EXPECT().Save(mock.Anything, GrantMigrationToIDKeyPrefix, "done").Return(nil)
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("wildcard grant with non-existent db: removes stale grant", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("", merr.WrapErrIoKeyNotFound(GrantMigrationToIDKeyPrefix))
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		// Wildcard grant for non-existent database
+		key1 := granteeKey + "role1/Collection/gone_db.*"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1}, []string{"gid1"}, nil)
+
+		oldIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
+			[]string{oldIDPrefix}).Return(nil)
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything,
+			[]string{key1}).Return(nil)
+		kvmock.EXPECT().Save(mock.Anything, GrantMigrationToIDKeyPrefix, "done").Return(nil)
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("all-database wildcard grant (star.star) skipped", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("", merr.WrapErrIoKeyNotFound(GrantMigrationToIDKeyPrefix))
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		// All-database wildcard grant: *.* should be skipped entirely (no migration, no removal)
+		key1 := granteeKey + "role1/Collection/*.*"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1}, []string{"gid1"}, nil)
+
+		kvmock.EXPECT().Save(mock.Anything, GrantMigrationToIDKeyPrefix, "done").Return(nil)
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.NoError(t, err)
+	})
+}
+
+func TestReconcileOrphanedIDGrants(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+	paramtable.Init()
+
+	collectionNameToID := func(dbName, collName string) (int64, error) {
+		if dbName == "default" && collName == "col1" {
+			return 100, nil
+		}
+		return 0, merr.WrapErrCollectionNotFound(collName)
+	}
+
+	dbNameToID := func(dbName string) (int64, error) {
+		if dbName == "default" {
+			return 1, nil
+		}
+		return 0, merr.WrapErrDatabaseNotFound(dbName)
+	}
+
+	// Helper: all reconciliation tests go through MigrateGrantsToEntityID with flag already set.
+	migrate := func(t *testing.T, kvmock *mocks.TxnKV) error {
+		c := NewCatalog(kvmock)
+		return c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+	}
+
+	// rootPath simulates the etcd rootPath prefix that LoadWithPrefix returns in production.
+	// This ensures suffix-based comparison works even when keys have rootPath.
+	rootPath := "by-dev/meta/"
+
+	t.Run("no backfill: both name-based and ID-based keys exist", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("done", nil)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		nameKey := rootPath + granteeKey + "role1/Collection/default.col1"
+		idKey := rootPath + fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection",
+			funcutil.CombineObjectName(funcutil.FormatDatabaseID(1), funcutil.FormatCollectionID(100)))
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{nameKey, idKey}, []string{"gid1", "gid2"}, nil)
+
+		assert.NoError(t, migrate(t, kvmock))
+	})
+
+	// Legitimate post-rename shape: name-based was removed by
+	// DeleteStaleNameBasedGrant, leaving only the ID-based pointer. Reconcile
+	// MUST NOT delete the ID-based key — it is the live grant. Previously a
+	// buggy orphan-cleanup phase would treat this as an orphan and silently
+	// drop the grant on the next restart.
+	t.Run("post-rename ID-only grant survives reconcile", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("done", nil)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		// Only the ID-based pointer for col1 (collectionID=100) remains;
+		// the name-based pointer `default.col1` was cleaned up during rename.
+		idOnlyKey := rootPath + fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection",
+			funcutil.CombineObjectName(funcutil.FormatDatabaseID(1), funcutil.FormatCollectionID(100)))
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{idOnlyKey}, []string{"gid-live"}, nil)
+
+		// No deletes, no saves — reconcile is a no-op for live post-rename grants.
+		assert.NoError(t, migrate(t, kvmock))
+	})
+
+	// A wildcard ID-based grant on a specific database without a name-based
+	// counterpart is also legitimate (same post-rename / admin-cleanup shape).
+	t.Run("ID-only wildcard grant survives reconcile", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("done", nil)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		idOnlyKey := rootPath + fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection",
+			funcutil.CombineObjectName(funcutil.FormatDatabaseID(1), util.AnyWord))
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{idOnlyKey}, []string{"gid-wild"}, nil)
+
+		assert.NoError(t, migrate(t, kvmock))
+	})
+
+	t.Run("load error propagated", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("done", nil)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(nil, nil, errors.New("etcd down"))
+
+		assert.Error(t, migrate(t, kvmock))
+	})
+
+	t.Run("non-Collection grants are ignored by reconcile", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("done", nil)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		globalKey := rootPath + granteeKey + "role1/Global/*.*"
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{globalKey}, []string{"gid1"}, nil)
+
+		assert.NoError(t, migrate(t, kvmock))
+	})
+
+	// Rollback+re-upgrade scenario: migration flag is already set (from the v2
+	// initial upgrade), but while the cluster was rolled back to v1, new grants
+	// were written as name-based only. On re-upgrade to v2, reconcile must
+	// backfill the missing ID-based keys, otherwise those grants would be
+	// invisible to v2's ID-based enforcement path.
+	t.Run("rollback: name-based grant with no ID-based counterpart is backfilled", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("done", nil)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		// Only a name-based grant exists (created during rollback window)
+		nameKey := rootPath + granteeKey + "role1/Collection/default.col1"
+		oldGID := "old-gid"
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{nameKey}, []string{oldGID}, nil)
+
+		// Backfill must load the existing grantee-id sub-keys to copy them
+		// under the new (ID-based) grantee ID.
+		oldIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, oldGID)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldIDPrefix).Return(
+			[]string{oldIDPrefix + "PrivilegeLoad"}, []string{"user1"}, nil)
+
+		// Expected backfilled new grantee key + new grantee-id sub-key
+		newGranteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection",
+			funcutil.CombineObjectName(funcutil.FormatDatabaseID(1), funcutil.FormatCollectionID(100)))
+		newID := crypto.MD5(newGranteeKey)
+		newIDKey := fmt.Sprintf("%s/%s/PrivilegeLoad", GranteeIDPrefix, newID)
+
+		kvmock.EXPECT().MultiSave(mock.Anything, map[string]string{
+			newGranteeKey: newID,
+			newIDKey:      "user1",
+		}).Return(nil)
+
+		assert.NoError(t, migrate(t, kvmock))
+	})
+
+	// When a grant has both name-based and ID-based keys (the normal dual-write
+	// state after v2 was first installed), reconcile should NOT re-do the
+	// backfill — it would be redundant and re-load sub-keys unnecessarily.
+	t.Run("rollback: no backfill when ID-based counterpart already exists", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKeyPrefix).Return("done", nil)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		nameKey := rootPath + granteeKey + "role1/Collection/default.col1"
+		idKey := rootPath + fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection",
+			funcutil.CombineObjectName(funcutil.FormatDatabaseID(1), funcutil.FormatCollectionID(100)))
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{nameKey, idKey}, []string{"gid1", "gid2"}, nil)
+
+		// No LoadWithPrefix for grantee-id sub-keys, no MultiSave: nothing to backfill.
+		assert.NoError(t, migrate(t, kvmock))
+	})
+}
+
+// TestDeleteGrantByDatabaseID verifies that DeleteGrantByDatabaseID removes
+// every grant pointer keyed under the dropped database — both name-based
+// ({dbName}.col / {dbName}.*) and ID-based (dbID:X.colID:Y / dbID:X.*) — and
+// their corresponding grantee-id sub-keys, while leaving grants for OTHER
+// databases and non-Collection grants untouched. This is used by DropDatabase
+// to keep the RBAC catalog in sync with the dropped database, symmetric with
+// DeleteGrantByCollectionID for DropCollection.
+func TestDeleteGrantByDatabaseID(t *testing.T) {
 	ctx := context.Background()
 	tenant := util.DefaultTenant
 
@@ -3718,144 +4307,213 @@ func TestMigrateGrantCollectionName(t *testing.T) {
 		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(nil, nil, errors.New("load error"))
 
-		err := c.MigrateGrantCollectionName(ctx, tenant, "default", "old_col", "default", "new_col")
+		err := c.DeleteGrantByDatabaseID(ctx, tenant, 1, "default")
 		assert.Error(t, err)
 	})
 
-	t.Run("no matching grants", func(t *testing.T) {
+	t.Run("no matching grants: nothing to delete", func(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock)
 		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 
-		key1 := granteeKey + "role1/Collection/default.other_col"
+		// Grants for a different database
+		key1 := granteeKey + "role1/Collection/otherdb.col1"
+		key2 := granteeKey + "role1/Collection/dbID:2.colID:200"
+		key3 := granteeKey + "role1/Global/*.*" // wrong object type
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
-			[]string{key1}, []string{"gid1"}, nil)
+			[]string{key1, key2, key3},
+			[]string{"gid1", "gid2", "gid3"}, nil)
 
-		err := c.MigrateGrantCollectionName(ctx, tenant, "default", "old_col", "default", "new_col")
+		err := c.DeleteGrantByDatabaseID(ctx, tenant, 1, "default")
 		assert.NoError(t, err)
 	})
 
-	t.Run("migrates matching grants with grantee id recomputation", func(t *testing.T) {
+	t.Run("deletes name-based and ID-based grants for the dropped database", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		// Grants under "default" (dbID=1) that must be cleaned up
+		nameKey := granteeKey + "role1/Collection/default.col1"
+		nameWildcardKey := granteeKey + "role1/Collection/default.*"
+		idKey := granteeKey + "role1/Collection/dbID:1.colID:100"
+		idWildcardKey := granteeKey + "role1/Collection/dbID:1.*"
+
+		// Grants that must NOT be deleted
+		otherNameKey := granteeKey + "role1/Collection/otherdb.col1"
+		otherIDKey := granteeKey + "role1/Collection/dbID:2.colID:200"
+		globalKey := granteeKey + "role1/Global/*.*"
+		allDbWildcardKey := granteeKey + "role1/Collection/*.*" // *.* is not tied to a db
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{nameKey, nameWildcardKey, idKey, idWildcardKey, otherNameKey, otherIDKey, globalKey, allDbWildcardKey},
+			[]string{"gid1", "gid2", "gid3", "gid4", "gid5", "gid6", "gid7", "gid8"}, nil)
+
+		// Expected logical keys for deletion (without rootPath prefix)
+		toDelete := []string{
+			fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", "default.col1"),
+			fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", "default.*"),
+			fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", "dbID:1.colID:100"),
+			fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", "dbID:1.*"),
+		}
+		gidPrefixes := []string{
+			funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1"),
+			funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid2"),
+			funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid3"),
+			funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid4"),
+		}
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil), toDelete).Return(nil)
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil), gidPrefixes).Return(nil)
+
+		err := c.DeleteGrantByDatabaseID(ctx, tenant, 1, "default")
+		assert.NoError(t, err)
+	})
+
+	t.Run("handles rootPath prefix in etcd keys", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		rootPath := "by-dev/meta/"
+		etcdKey := rootPath + granteeKey + "role1/Collection/default.col1"
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{etcdKey}, []string{"gid1"}, nil)
+
+		logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", "default.col1")
+		gid1Prefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
+			[]string{logicalKey}).Return(nil)
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
+			[]string{gid1Prefix}).Return(nil)
+
+		err := c.DeleteGrantByDatabaseID(ctx, tenant, 1, "default")
+		assert.NoError(t, err)
+	})
+}
+
+// TestDeleteStaleNameBasedGrant verifies that DeleteStaleNameBasedGrant only
+// removes name-based grant pointer keys matching the exact (dbName, collName)
+// pair, leaving ID-based keys and unrelated name-based keys untouched. This is
+// used by RenameCollection to clean up stale pointers after a rename, which
+// otherwise could cause a privilege leak if the old name is reused.
+func TestDeleteStaleNameBasedGrant(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+
+	t.Run("load error", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(nil, nil, errors.New("load error"))
+
+		err := c.DeleteStaleNameBasedGrant(ctx, tenant, "default", "old_col")
+		assert.Error(t, err)
+	})
+
+	t.Run("no matching stale key: nothing to delete", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		// ID-based key and a different collection's name-based key
+		idKey := granteeKey + "role1/Collection/dbID:1.colID:100"
+		otherNameKey := granteeKey + "role1/Collection/default.other_col"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{idKey, otherNameKey},
+			[]string{"gid1", "gid2"}, nil)
+
+		// No delete calls expected — neither key matches "default.old_col"
+		err := c.DeleteStaleNameBasedGrant(ctx, tenant, "default", "old_col")
+		assert.NoError(t, err)
+	})
+
+	t.Run("deletes matching name-based stale key only, leaves ID-based key intact", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock)
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
+
+		// Both name-based (stale after rename) and ID-based keys exist
+		staleNameKey := granteeKey + "role1/Collection/default.old_col"
+		idKey := granteeKey + "role1/Collection/dbID:1.colID:100"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{staleNameKey, idKey},
+			[]string{"gid1", "gid2"}, nil)
+
+		// Only the name-based stale key is deleted; ID-based key remains
+		staleLogicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", "default.old_col")
+		gid1Key := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
+			[]string{staleLogicalKey}).Return(nil)
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
+			[]string{gid1Key}).Return(nil)
+
+		err := c.DeleteStaleNameBasedGrant(ctx, tenant, "default", "old_col")
+		assert.NoError(t, err)
+	})
+
+	t.Run("deletes multiple stale keys across roles for the same name", func(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock)
 		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 
 		key1 := granteeKey + "role1/Collection/default.old_col"
 		key2 := granteeKey + "role2/Collection/default.old_col"
-		key3 := granteeKey + "role1/Collection/default.other_col"
-
+		key3 := granteeKey + "role1/Collection/default.other_col" // should NOT be deleted
+		key4 := granteeKey + "role1/Global/default.old_col"       // wrong object type, should NOT be deleted
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
-			[]string{key1, key2, key3},
-			[]string{"gid1", "gid2", "gid3"},
-			nil)
+			[]string{key1, key2, key3, key4},
+			[]string{"gid1", "gid2", "gid3", "gid4"}, nil)
 
-		newKey1 := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix,
-			"role1", "Collection", funcutil.CombineObjectName("default", "new_col"))
-		newKey2 := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix,
-			"role2", "Collection", funcutil.CombineObjectName("default", "new_col"))
-		newIdStr1 := crypto.MD5(newKey1)
-		newIdStr2 := crypto.MD5(newKey2)
+		logicalKey1 := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", "default.old_col")
+		logicalKey2 := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role2", "Collection", "default.old_col")
+		gid1Key := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
+		gid2Key := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid2")
 
-		// Mock loading GranteeIDPrefix entries for each old idStr
-		oldGranteeIDKey1 := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
-		oldIDEntry1 := oldGranteeIDKey1 + "Insert"
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldGranteeIDKey1).Return(
-			[]string{oldIDEntry1}, []string{"root"}, nil)
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
+			[]string{logicalKey1, logicalKey2}).Return(nil)
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
+			[]string{gid1Key, gid2Key}).Return(nil)
 
-		oldGranteeIDKey2 := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid2")
-		oldIDEntry2a := oldGranteeIDKey2 + "Insert"
-		oldIDEntry2b := oldGranteeIDKey2 + "Query"
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldGranteeIDKey2).Return(
-			[]string{oldIDEntry2a, oldIDEntry2b}, []string{"root", "admin"}, nil)
-
-		newIDKey1 := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, newIdStr1, "Insert")
-		newIDKey2a := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, newIdStr2, "Insert")
-		newIDKey2b := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, newIdStr2, "Query")
-
-		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
-			map[string]string{
-				newKey1:   newIdStr1,
-				newKey2:   newIdStr2,
-				newIDKey1: "root", newIDKey2a: "root", newIDKey2b: "admin",
-			},
-			[]string{key1, oldIDEntry1, key2, oldIDEntry2a, oldIDEntry2b}).Return(nil)
-
-		err := c.MigrateGrantCollectionName(ctx, tenant, "default", "old_col", "default", "new_col")
+		err := c.DeleteStaleNameBasedGrant(ctx, tenant, "default", "old_col")
 		assert.NoError(t, err)
 	})
 
-	t.Run("cross-db rename", func(t *testing.T) {
+	t.Run("ignores ID-based key even if its suffix matches dbName.collName pattern", func(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock)
 		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 
-		key1 := granteeKey + "role1/Collection/db1.col1"
+		// Edge case: a key that happens to contain "old_col" but is ID-based
+		idKey := granteeKey + "role1/Collection/dbID:1.colID:old_col"
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
-			[]string{key1}, []string{"gid1"}, nil)
+			[]string{idKey}, []string{"gid1"}, nil)
 
-		newKey1 := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix,
-			"role1", "Collection", funcutil.CombineObjectName("db2", "col2"))
-		newIdStr1 := crypto.MD5(newKey1)
-
-		// Mock loading GranteeIDPrefix entries for old idStr
-		oldGranteeIDKey1 := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldGranteeIDKey1).Return(
-			nil, nil, nil)
-
-		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
-			map[string]string{newKey1: newIdStr1},
-			[]string{key1}).Return(nil)
-
-		err := c.MigrateGrantCollectionName(ctx, tenant, "db1", "col1", "db2", "col2")
+		// No delete — an ID-based key (with dbID: prefix) must not be touched
+		err := c.DeleteStaleNameBasedGrant(ctx, tenant, "default", "old_col")
 		assert.NoError(t, err)
 	})
 
-	t.Run("skips wildcard dbName grants on rename", func(t *testing.T) {
+	t.Run("handles rootPath prefix in etcd keys", func(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock)
 		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 
-		// Wildcard grant *.old_col should NOT be migrated when renaming db1.old_col,
-		// because it may also apply to old_col in other databases.
-		key1 := granteeKey + "role1/Collection/*.old_col"
-		key2 := granteeKey + "role1/Collection/default.old_col"
+		// Simulate real etcd returning keys with rootPath prefix
+		rootPath := "by-dev/meta/"
+		etcdKey := rootPath + granteeKey + "role1/Collection/default.old_col"
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
-			[]string{key1, key2}, []string{"gid1", "gid2"}, nil)
+			[]string{etcdKey}, []string{"gid1"}, nil)
 
-		// Only key2 (default.old_col) should be migrated
-		oldGranteeIDKey2 := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid2")
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldGranteeIDKey2).Return(
-			nil, nil, nil)
+		// The deletion must use the logical key (without rootPath)
+		logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", "default.old_col")
+		gid1Key := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, (map[string]string)(nil),
+			[]string{logicalKey}).Return(nil)
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
+			[]string{gid1Key}).Return(nil)
 
-		newKey2 := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix,
-			"role1", "Collection", funcutil.CombineObjectName("default", "new_col"))
-		newIdStr2 := crypto.MD5(newKey2)
-
-		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
-			map[string]string{newKey2: newIdStr2},
-			[]string{key2}).Return(nil)
-
-		err := c.MigrateGrantCollectionName(ctx, tenant, "default", "old_col", "default", "new_col")
+		err := c.DeleteStaleNameBasedGrant(ctx, tenant, "default", "old_col")
 		assert.NoError(t, err)
-	})
-
-	t.Run("save error", func(t *testing.T) {
-		kvmock := mocks.NewTxnKV(t)
-		c := NewCatalog(kvmock)
-		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
-
-		key1 := granteeKey + "role1/Collection/default.old_col"
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
-			[]string{key1}, []string{"gid1"}, nil)
-
-		oldGranteeIDKey1 := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
-		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldGranteeIDKey1).Return(
-			nil, nil, nil)
-
-		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
-			Return(errors.New("save error"))
-
-		err := c.MigrateGrantCollectionName(ctx, tenant, "default", "old_col", "default", "new_col")
-		assert.Error(t, err)
 	})
 }

@@ -56,6 +56,9 @@ func InitEmptyGlobalCache() {
 	mixcoord := mocks.NewMockMixCoordClient(emptyMock)
 	mixcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("collection not found"))
 	mixcoord.EXPECT().DescribeAlias(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("alias not found"))
+	// DescribeDatabase returns error intentionally — ID-based privilege enforcement falls back to
+	// name-based matching, which is the expected behavior for tests using this empty cache.
+	mixcoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("database not found"))
 	globalMetaCache, err = NewMetaCache(mixcoord)
 	if err != nil {
 		panic(err)

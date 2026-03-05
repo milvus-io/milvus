@@ -72,18 +72,6 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	objectName := funcutil.GetObjectName(req, objectNameIndex)
 	dbName := GetCurDBNameFromContextOrDefault(ctx)
 
-	// Resolve alias to actual collection name for RBAC checks
-	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
-		if objectName != util.AnyWord && objectName != "" {
-			if actualCollectionName, resolveErr := resolveCollectionAlias(ctx, dbName, objectName); resolveErr != nil {
-				log.RatedWarn(60, "failed to resolve collection alias for RBAC, using original name",
-					zap.String("objectName", objectName), zap.String("dbName", dbName), zap.Error(resolveErr))
-			} else {
-				objectName = actualCollectionName
-			}
-		}
-	}
-
 	if isCurUserObject(objectType, username, objectName) {
 		return ctx, nil
 	}
@@ -95,25 +83,6 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	objectNameIndexs := privilegeExt.ObjectNameIndexs
 	objectNames := funcutil.GetObjectNames(req, objectNameIndexs)
 
-	// Resolve aliases for operations that refer to multiple resources
-	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndexs != 0 && len(objectNames) > 0 {
-		resolvedNames := make([]string, 0, len(objectNames))
-		for _, name := range objectNames {
-			if name == util.AnyWord || name == "" {
-				resolvedNames = append(resolvedNames, name)
-				continue
-			}
-			if actualName, resolveErr := resolveCollectionAlias(ctx, dbName, name); resolveErr != nil {
-				log.RatedWarn(60, "failed to resolve collection alias for RBAC, using original name",
-					zap.String("objectName", name), zap.String("dbName", dbName), zap.Error(resolveErr))
-				resolvedNames = append(resolvedNames, name)
-			} else {
-				resolvedNames = append(resolvedNames, actualName)
-			}
-		}
-		objectNames = resolvedNames
-	}
-
 	objectPrivilege := privilegeExt.ObjectPrivilege.String()
 
 	log = log.With(zap.String("username", username), zap.Strings("role_names", roleNames),
@@ -122,24 +91,60 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		zap.Int32("object_index", objectNameIndex), zap.String("object_name", objectName),
 		zap.Int32("object_indexs", objectNameIndexs), zap.Strings("object_names", objectNames))
 
+	// Pre-resolve IDs and aliases once before the role loop (hot path optimization).
+	isCollectionType := objectType == commonpb.ObjectType_Collection.String()
+	idDBStr := "" // pre-resolved ID-based database string, empty if unresolvable
+	if isCollectionType && dbName != "" && dbName != util.AnyWord {
+		if dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, dbName); err == nil {
+			idDBStr = funcutil.FormatDatabaseID(dbInfo.dbID)
+		}
+	}
+
+	// policyResourceForObj returns the ID-based resource string for enforcement.
+	// New proxy uses pure ID-based enforcement for Collection type;
+	// non-Collection types (Global, User) remain name-based.
+	policyResourceForObj := func(objName string) string {
+		if isCollectionType && idDBStr != "" {
+			// Wildcard (*) keeps objName as-is; specific collections resolve to colID
+			if objName == util.AnyWord || objName == "" {
+				return funcutil.PolicyForResource(idDBStr, objectType, objName)
+			}
+			if colID, err := globalMetaCache.GetCollectionID(ctx, dbName, objName); err == nil {
+				return funcutil.PolicyForResource(idDBStr, objectType, funcutil.FormatCollectionID(colID))
+			}
+			// Collection resolution failed — fall back to name-based with alias resolution
+			resolvedName := objName
+			if actual, resolveErr := resolveCollectionAlias(ctx, dbName, objName); resolveErr == nil {
+				resolvedName = actual
+			}
+			return funcutil.PolicyForResource(dbName, objectType, resolvedName)
+		}
+		resolvedName := objName
+		if isCollectionType {
+			if actual, resolveErr := resolveCollectionAlias(ctx, dbName, objName); resolveErr == nil {
+				resolvedName = actual
+			}
+		}
+		return funcutil.PolicyForResource(dbName, objectType, resolvedName)
+	}
+
 	e := privilege.GetEnforcer()
 	for _, roleName := range roleNames {
-		permitFunc := func(objectName string) (bool, error) {
-			object := funcutil.PolicyForResource(dbName, objectType, objectName)
-			isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
+		permitFunc := func(objName string) (bool, error) {
+			resource := policyResourceForObj(objName)
+			isPermit, cached, version := privilege.GetResultCache(roleName, resource, objectPrivilege)
 			if cached {
 				return isPermit, nil
 			}
-			isPermit, err := e.Enforce(roleName, object, objectPrivilege)
+			isPermit, err := e.Enforce(roleName, resource, objectPrivilege)
 			if err != nil {
 				return false, err
 			}
-			privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
+			privilege.SetResultCache(roleName, resource, objectPrivilege, isPermit, version)
 			return isPermit, nil
 		}
 
 		if objectNameIndex != 0 {
-			// handle the api which refers one resource
 			permitObject, err := permitFunc(objectName)
 			if err != nil {
 				log.Warn("fail to execute permit func", zap.String("name", objectName), zap.Error(err))
@@ -151,7 +156,6 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		}
 
 		if objectNameIndexs != 0 {
-			// handle the api which refers many resources
 			permitObjects := true
 			for _, name := range objectNames {
 				p, err := permitFunc(name)
@@ -200,7 +204,7 @@ func isSelectMyRoleGrants(req interface{}, roleNames []string) bool {
 	return funcutil.SliceContain(roleNames, roleName)
 }
 
-// resolveCollectionAlias resolves an alias to its actual collection name
+// resolveCollectionAlias resolves an alias to its actual collection name.
 func resolveCollectionAlias(ctx context.Context, dbName, nameOrAlias string) (string, error) {
 	cache := globalMetaCache
 	if cache == nil {

@@ -3,6 +3,7 @@ package funcutil
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -113,6 +114,9 @@ func GetObjectNames(m interface{}, index int32) []string {
 	return res
 }
 
+// PolicyForPrivilege builds a Casbin policy string for one privilege grant.
+// dbName is the database identifier — it may be a human-readable name (e.g. "default")
+// or an ID-based key (e.g. "dbID:1"). The caller is responsible for formatting.
 func PolicyForPrivilege(roleName string, objectType string, objectName string, privilege string, dbName string) string {
 	return fmt.Sprintf(`{"PType":"p","V0":"%s","V1":"%s","V2":"%s"}`, roleName, PolicyForResource(dbName, objectType, objectName), privilege)
 }
@@ -124,28 +128,75 @@ func PolicyForPrivileges(grants []*milvuspb.GrantEntity) string {
 }
 
 func PrivilegesForPolicy(policy string) []string {
+	if policy == "" {
+		return nil
+	}
 	return strings.Split(policy, "|")
 }
 
-func PolicyForResource(dbName string, objectType string, objectName string) string {
-	return fmt.Sprintf("%s-%s", objectType, CombineObjectName(dbName, objectName))
+// PolicyForResource builds the resource part of a Casbin policy string.
+// dbPart is the database identifier — it may be a human-readable name (e.g. "default")
+// or an ID-based key (e.g. "dbID:1"). The caller is responsible for formatting.
+func PolicyForResource(dbPart string, objectType string, objectName string) string {
+	return fmt.Sprintf("%s-%s", objectType, CombineObjectName(dbPart, objectName))
 }
 
-func CombineObjectName(dbName string, objectName string) string {
-	if dbName == "" {
-		dbName = util.DefaultDBName
+// dbPart can be a name ("default") or an ID-based string ("dbID:1").
+func CombineObjectName(dbPart string, objectName string) string {
+	if dbPart == "" {
+		dbPart = util.DefaultDBName
 	}
-	return fmt.Sprintf("%s.%s", dbName, objectName)
+	return fmt.Sprintf("%s.%s", dbPart, objectName)
 }
 
 func SplitObjectName(objectName string) (string, string) {
 	if !strings.Contains(objectName, ".") {
 		return util.DefaultDBName, objectName
 	}
-	names := strings.Split(objectName, ".")
+	names := strings.SplitN(objectName, ".", 2)
 	return names[0], names[1]
 }
 
 func PolicyCheckerWithRole(policy, roleName string) bool {
 	return strings.Contains(policy, fmt.Sprintf(`"V0":"%s"`, roleName))
+}
+
+const collectionIDPrefix = "colID:"
+
+// FormatCollectionID returns the ID-based object name format "colID:12345".
+func FormatCollectionID(collectionID int64) string {
+	return fmt.Sprintf("%s%d", collectionIDPrefix, collectionID)
+}
+
+// IsIDBasedObjectName checks whether objectName uses the ID-based format "colID:xxx".
+func IsIDBasedObjectName(objectName string) bool {
+	return strings.HasPrefix(objectName, collectionIDPrefix)
+}
+
+// ExtractCollectionID parses the collection ID from an ID-based object name "colID:12345".
+func ExtractCollectionID(objectName string) (int64, error) {
+	if !IsIDBasedObjectName(objectName) {
+		return 0, errors.Newf("objectName %q is not ID-based", objectName)
+	}
+	return strconv.ParseInt(objectName[len(collectionIDPrefix):], 10, 64)
+}
+
+const databaseIDPrefix = "dbID:"
+
+// FormatDatabaseID returns the ID-based database name format "dbID:123".
+func FormatDatabaseID(dbID int64) string {
+	return fmt.Sprintf("%s%d", databaseIDPrefix, dbID)
+}
+
+// IsIDBasedDBName checks whether dbName uses the ID-based format "dbID:xxx".
+func IsIDBasedDBName(dbName string) bool {
+	return strings.HasPrefix(dbName, databaseIDPrefix)
+}
+
+// ExtractDatabaseID parses the database ID from an ID-based database name "dbID:123".
+func ExtractDatabaseID(dbName string) (int64, error) {
+	if !IsIDBasedDBName(dbName) {
+		return 0, errors.Newf("dbName %q is not ID-based", dbName)
+	}
+	return strconv.ParseInt(dbName[len(databaseIDPrefix):], 10, 64)
 }

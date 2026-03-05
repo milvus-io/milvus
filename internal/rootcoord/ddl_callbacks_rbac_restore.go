@@ -20,9 +20,11 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -53,13 +55,26 @@ func (c *Core) broadcastRestoreRBACV2(ctx context.Context, req *milvuspb.Restore
 
 func (c *DDLCallback) restoreRBACV2AckCallback(ctx context.Context, result message.BroadcastResultRestoreRBACMessageV2) error {
 	meta := result.Message.MustBody().RbacMeta
-	if err := c.meta.RestoreRBAC(ctx, util.DefaultTenant, meta); err != nil {
-		return errors.Wrap(err, "failed to restore rbac meta data")
+	restoreErr := c.meta.RestoreRBAC(ctx, util.DefaultTenant, meta)
+	// On partial skip, on-disk state is already consistent and all non-skipped
+	// grants have been applied — the proxy cache still needs to be refreshed
+	// so the persisted grants take effect. Surface the skip error to the caller
+	// afterwards so they can decide whether to retry.
+	partialSkip := IsRestoreRBACPartialSkip(restoreErr)
+	if restoreErr != nil && !partialSkip {
+		return errors.Wrap(restoreErr, "failed to restore rbac meta data")
 	}
 	if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 		OpType: int32(typeutil.CacheRefresh),
 	}); err != nil {
+		if partialSkip {
+			log.Ctx(ctx).Warn("restore rbac partially skipped and failed to refresh policy cache",
+				zap.Error(restoreErr), zap.Error(err))
+		}
 		return errors.Wrap(err, "failed to refresh policy info cache")
+	}
+	if partialSkip {
+		return errors.Wrap(restoreErr, "rbac restore partially applied")
 	}
 	return nil
 }

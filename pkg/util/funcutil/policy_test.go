@@ -79,3 +79,55 @@ func Test_PolicyCheckerWithRole(t *testing.T) {
 	assert.True(t, PolicyCheckerWithRole(a, "admin"))
 	assert.False(t, PolicyCheckerWithRole(b, "admin"))
 }
+
+func Test_CollectionIDFormat(t *testing.T) {
+	assert.Equal(t, "colID:12345", FormatCollectionID(12345))
+	assert.True(t, IsIDBasedObjectName("colID:12345"))
+	assert.False(t, IsIDBasedObjectName("myCollection"))
+	assert.False(t, IsIDBasedObjectName(""))
+
+	id, err := ExtractCollectionID("colID:12345")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(12345), id)
+
+	_, err = ExtractCollectionID("myCollection")
+	assert.Error(t, err)
+}
+
+func Test_DatabaseIDFormat(t *testing.T) {
+	assert.Equal(t, "dbID:1", FormatDatabaseID(1))
+	assert.Equal(t, "dbID:999", FormatDatabaseID(999))
+	assert.True(t, IsIDBasedDBName("dbID:1"))
+	assert.True(t, IsIDBasedDBName("dbID:999"))
+	assert.False(t, IsIDBasedDBName("default"))
+	assert.False(t, IsIDBasedDBName(""))
+	assert.False(t, IsIDBasedDBName("colID:1"))
+
+	id, err := ExtractDatabaseID("dbID:1")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), id)
+
+	id, err = ExtractDatabaseID("dbID:999")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(999), id)
+
+	_, err = ExtractDatabaseID("default")
+	assert.Error(t, err)
+}
+
+func Test_SplitObjectNameWithIDFormat(t *testing.T) {
+	// ID-based format: dbID:1.colID:12345
+	db, obj := SplitObjectName("dbID:1.colID:12345")
+	assert.Equal(t, "dbID:1", db)
+	assert.Equal(t, "colID:12345", obj)
+
+	// Name-based format: default.myCol
+	db, obj = SplitObjectName("default.myCol")
+	assert.Equal(t, "default", db)
+	assert.Equal(t, "myCol", obj)
+
+	// Wildcard: default.*
+	db, obj = SplitObjectName("default.*")
+	assert.Equal(t, "default", db)
+	assert.Equal(t, "*", obj)
+}

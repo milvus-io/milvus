@@ -54,6 +54,10 @@ const (
 	// GranteeIDPrefix prefix for mapping among privilege and grantor
 	GranteeIDPrefix = ComponentPrefix + CommonCredentialPrefix + "/grantee-id"
 
+	// GrantMigrationToIDKeyPrefix is the base key for the grant migration flag.
+	// Use grantMigrationToIDKey(tenant) for the tenant-scoped version.
+	GrantMigrationToIDKeyPrefix = ComponentPrefix + CommonCredentialPrefix + "/grant-migration-to-id-done"
+
 	// PrivilegeGroupPrefix prefix for privilege group
 	PrivilegeGroupPrefix = ComponentPrefix + "/privilege-group"
 

@@ -21,12 +21,15 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivilegeRequest) error {
@@ -57,6 +60,38 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 		// set up object name if it is global object type and not built in privilege group
 		if in.Entity.Object.Name == commonpb.ObjectType_Global.String() && !util.IsBuiltinPrivilegeGroup(in.Entity.Grantor.Privilege.Name) {
 			in.Entity.ObjectName = util.AnyWord
+		}
+	}
+
+	// Validate collection existence before broadcasting to prevent ack callback
+	// retry loops when granting privileges on non-existent collections.
+	//
+	// Grant: hard error — no point granting on a collection that doesn't exist.
+	//
+	// Revoke: idempotent no-op. DropCollection already invokes
+	// DeleteGrantByCollectionID which removes both the persisted ID-based grant
+	// and refreshes the proxy privilege cache, so after a legitimate drop there
+	// is nothing left to revoke. A revoke on a collection that never existed is
+	// also a no-op. Skip the broadcast entirely rather than returning an error;
+	// this matches MetaTable.OperatePrivilege which also treats Revoke-on-missing
+	// as an IgnorableError at the meta layer.
+	//
+	// NOTE: this lookup and the lookup inside MetaTable.OperatePrivilege /
+	// convertGrantsToIDBased are separate and technically subject to TOCTOU if a
+	// DDL happens between them. A full fix requires carrying the pre-resolved
+	// dbID/collectionID in the broadcast message header (proto change) so the
+	// ack callback can skip re-lookup. Tracked for a follow-up PR.
+	if in.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
+		in.Entity.ObjectName != util.AnyWord && in.Entity.ObjectName != "" {
+		collID := c.meta.GetCollectionID(ctx, in.Entity.DbName, in.Entity.ObjectName)
+		if collID == InvalidCollectionID {
+			if in.Type == milvuspb.OperatePrivilegeType_Revoke {
+				log.Ctx(ctx).Info("skip revoke preflight for non-existent collection",
+					zap.String("db", in.Entity.DbName),
+					zap.String("collection", in.Entity.ObjectName))
+				return nil
+			}
+			return merr.WrapErrCollectionNotFound(in.Entity.ObjectName)
 		}
 	}
 
