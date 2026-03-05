@@ -1024,11 +1024,12 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	bm25Fields := typeutil.NewSet[string](GetBM25FunctionOutputFields(it.schema.CollectionSchema)...)
+	minHashFields := typeutil.NewSet[string](GetMinHashFunctionOutputFields(it.schema.CollectionSchema)...)
 	if it.req.PartialUpdate {
-		// remove the old bm25 fields
+		// remove the old bm25 and minhash function output fields
 		ret := make([]*schemapb.FieldData, 0)
 		for _, fieldData := range it.upsertMsg.InsertMsg.GetFieldsData() {
-			if bm25Fields.Contain(fieldData.GetFieldName()) {
+			if bm25Fields.Contain(fieldData.GetFieldName()) || minHashFields.Contain(fieldData.GetFieldName()) {
 				continue
 			}
 			ret = append(ret, fieldData)
