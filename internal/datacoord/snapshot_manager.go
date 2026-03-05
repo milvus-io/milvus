@@ -61,7 +61,7 @@ type StartBroadcasterFunc func(ctx context.Context, collectionID int64, snapshot
 type RollbackFunc func(ctx context.Context, dbName, collectionName string) error
 
 // ValidateResourcesFunc validates that all required resources exist.
-// Used by RestoreSnapshot to validate partitions and indexes after creation.
+// Used by RestoreSnapshot to validate snapshot, collection, partitions, and indexes.
 type ValidateResourcesFunc func(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error
 
 // ============================================================================
@@ -151,8 +151,8 @@ type SnapshotManager interface {
 	// Restore operations
 
 	// RestoreSnapshot orchestrates the complete snapshot restoration process.
-	// It reads snapshot data, creates collection/partitions/indexes, validates resources,
-	// and broadcasts the restore message.
+	// It reads snapshot data, creates collection/partitions/indexes, acquires a broadcast lock,
+	// validates resources under the lock, and broadcasts the restore message.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
@@ -510,8 +510,8 @@ func (sm *snapshotManager) validateCMEKCompatibility(
 }
 
 // RestoreSnapshot orchestrates the complete snapshot restoration process.
-// It reads snapshot data, creates collection/partitions/indexes, validates resources,
-// and broadcasts the restore message.
+// It reads snapshot data, creates collection/partitions/indexes, acquires a broadcast lock,
+// validates resources under the lock, and broadcasts the restore message.
 func (sm *snapshotManager) RestoreSnapshot(
 	ctx context.Context,
 	snapshotName string,
@@ -561,16 +561,7 @@ func (sm *snapshotManager) RestoreSnapshot(
 	}
 	log.Info("indexes restored", zap.Int("indexCount", len(snapshotData.Indexes)))
 
-	// Phase 4: Validate resources
-	if err := validateResources(ctx, collectionID, snapshotData); err != nil {
-		log.Error("resource validation failed, rolling back", zap.Error(err))
-		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
-			log.Error("rollback failed", zap.Error(rollbackErr))
-		}
-		return 0, fmt.Errorf("resource validation failed: %w", err)
-	}
-
-	// Phase 5: Pre-allocate job ID and broadcast restore message
+	// Phase 4: Pre-allocate job ID and broadcast restore message
 	// Pre-allocating jobID ensures idempotency when WAL is replayed after restart
 	jobID, err := sm.allocator.AllocID(ctx)
 	if err != nil {
@@ -591,7 +582,25 @@ func (sm *snapshotManager) RestoreSnapshot(
 		}
 		return 0, fmt.Errorf("failed to start broadcaster for restore message: %w", err)
 	}
-	defer restoreBroadcaster.Close()
+	defer func() {
+		if restoreBroadcaster != nil {
+			restoreBroadcaster.Close()
+		}
+	}()
+
+	// Validate resources while holding broadcast lock to prevent concurrent
+	// modifications between validation and message broadcast (TOCTOU race).
+	if err := validateResources(ctx, collectionID, snapshotData); err != nil {
+		log.Error("resource validation failed, rolling back", zap.Error(err))
+		// Release broadcast lock before rollback: rollback calls DropCollection
+		// which requires its own WAL broadcast lock on the same collection.
+		restoreBroadcaster.Close()
+		restoreBroadcaster = nil
+		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
+			log.Error("rollback failed", zap.Error(rollbackErr))
+		}
+		return 0, fmt.Errorf("resource validation failed: %w", err)
+	}
 
 	msg := message.NewRestoreSnapshotMessageBuilderV2().
 		WithHeader(&message.RestoreSnapshotMessageHeader{
@@ -605,6 +614,10 @@ func (sm *snapshotManager) RestoreSnapshot(
 
 	if _, err := restoreBroadcaster.Broadcast(ctx, msg); err != nil {
 		log.Error("failed to broadcast restore message, rolling back", zap.Error(err))
+		// Release broadcast lock before rollback: rollback calls DropCollection
+		// which requires its own WAL broadcast lock on the same collection.
+		restoreBroadcaster.Close()
+		restoreBroadcaster = nil
 		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
 			log.Error("rollback failed", zap.Error(rollbackErr))
 		}

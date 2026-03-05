@@ -31,8 +31,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -958,8 +963,206 @@ func TestSnapshotManager_BuildChannelMapping_GetChannelsError(t *testing.T) {
 }
 
 // --- Test RestoreSnapshot ---
-// TODO: Add tests for new DataCoord-driven RestoreSnapshot flow
-// The new flow requires mocking: CreateCollection, CreatePartition, ShowCollections, etc.
+
+func TestRestoreSnapshot_ValidationFailsCloseBroadcasterBeforeRollback(t *testing.T) {
+	ctx := context.Background()
+
+	// Track call order
+	var callOrder []string
+
+	// Mock ReadSnapshotData
+	m1 := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(&SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1"},
+		Segments:     []*datapb.SegmentDescription{},
+		Indexes:      nil,
+	}, nil).Build()
+	defer m1.UnPatch()
+
+	// Mock validateCMEKCompatibility
+	m2 := mockey.Mock((*snapshotManager).validateCMEKCompatibility).Return(nil).Build()
+	defer m2.UnPatch()
+
+	// Mock RestoreCollection
+	m3 := mockey.Mock((*snapshotManager).RestoreCollection).Return(int64(200), nil).Build()
+	defer m3.UnPatch()
+
+	// Mock RestoreIndexes
+	m4 := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
+	defer m4.UnPatch()
+
+	mockAlloc := allocator.NewMockAllocator(t)
+	mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(999), nil)
+
+	sm := &snapshotManager{
+		allocator: mockAlloc,
+	}
+
+	// Mock broadcaster that tracks Close calls
+	closeCalled := 0
+	mockBroadcaster := &mockBroadcastAPI{
+		closeFn: func() {
+			closeCalled++
+			callOrder = append(callOrder, "close")
+		},
+	}
+
+	startBroadcaster := func(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
+		callOrder = append(callOrder, "start_broadcaster")
+		return mockBroadcaster, nil
+	}
+
+	rollbackCalled := false
+	rollback := func(ctx context.Context, dbName, collName string) error {
+		rollbackCalled = true
+		callOrder = append(callOrder, "rollback")
+		return nil
+	}
+
+	validateResources := func(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error {
+		callOrder = append(callOrder, "validate")
+		return errors.New("partition missing")
+	}
+
+	// Execute
+	jobID, err := sm.RestoreSnapshot(ctx, "snap1", "target_coll", "default",
+		startBroadcaster, rollback, validateResources)
+
+	// Verify
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), jobID)
+	assert.Contains(t, err.Error(), "resource validation failed")
+	assert.True(t, rollbackCalled)
+
+	// Key assertion: Close must happen BEFORE rollback
+	assert.Equal(t, []string{"start_broadcaster", "validate", "close", "rollback"}, callOrder)
+
+	// Close called exactly once (not double-closed by defer)
+	assert.Equal(t, 1, closeCalled)
+}
+
+func TestRestoreSnapshot_ValidationFailsRollbackAlsoFails(t *testing.T) {
+	ctx := context.Background()
+
+	m1 := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(&SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1"},
+		Segments:     []*datapb.SegmentDescription{},
+	}, nil).Build()
+	defer m1.UnPatch()
+
+	m2 := mockey.Mock((*snapshotManager).validateCMEKCompatibility).Return(nil).Build()
+	defer m2.UnPatch()
+
+	m3 := mockey.Mock((*snapshotManager).RestoreCollection).Return(int64(200), nil).Build()
+	defer m3.UnPatch()
+
+	m4 := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
+	defer m4.UnPatch()
+
+	mockAlloc := allocator.NewMockAllocator(t)
+	mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(999), nil)
+
+	sm := &snapshotManager{allocator: mockAlloc}
+
+	closeCalled := 0
+	mockBcast := &mockBroadcastAPI{closeFn: func() { closeCalled++ }}
+
+	startBroadcaster := func(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
+		return mockBcast, nil
+	}
+	rollback := func(ctx context.Context, dbName, collName string) error {
+		return errors.New("rollback failed too")
+	}
+	validateResources := func(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error {
+		return errors.New("validation error")
+	}
+
+	jobID, err := sm.RestoreSnapshot(ctx, "snap1", "target", "default",
+		startBroadcaster, rollback, validateResources)
+
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), jobID)
+	assert.Contains(t, err.Error(), "resource validation failed")
+	// Broadcaster closed once despite rollback also failing
+	assert.Equal(t, 1, closeCalled)
+}
+
+func TestRestoreSnapshot_ValidationPassesThenBroadcastSucceeds(t *testing.T) {
+	ctx := context.Background()
+
+	m1 := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(&SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1"},
+		Segments:     []*datapb.SegmentDescription{},
+	}, nil).Build()
+	defer m1.UnPatch()
+
+	m2 := mockey.Mock((*snapshotManager).validateCMEKCompatibility).Return(nil).Build()
+	defer m2.UnPatch()
+
+	m3 := mockey.Mock((*snapshotManager).RestoreCollection).Return(int64(200), nil).Build()
+	defer m3.UnPatch()
+
+	m4 := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
+	defer m4.UnPatch()
+
+	mockAlloc := allocator.NewMockAllocator(t)
+	mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(999), nil)
+
+	sm := &snapshotManager{allocator: mockAlloc}
+
+	closeCalled := 0
+	broadcastCalled := false
+	mockBcast := &mockBroadcastAPI{
+		closeFn:     func() { closeCalled++ },
+		broadcastFn: func() { broadcastCalled = true },
+	}
+
+	startBroadcaster := func(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
+		return mockBcast, nil
+	}
+	rollback := func(ctx context.Context, dbName, collName string) error {
+		t.Fatal("rollback should not be called on success")
+		return nil
+	}
+	validateResources := func(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error {
+		return nil // validation passes
+	}
+
+	// Mock streaming.WAL().ControlChannel() since Broadcast builds a message using it
+	mockWAL := mock_streaming.NewMockWALAccesser(t)
+	mockWAL.EXPECT().ControlChannel().Return("control_channel")
+	streaming.SetWALForTest(mockWAL)
+
+	jobID, err := sm.RestoreSnapshot(ctx, "snap1", "target", "default",
+		startBroadcaster, rollback, validateResources)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(999), jobID)
+	assert.True(t, broadcastCalled)
+	// Close called once by defer (normal cleanup)
+	assert.Equal(t, 1, closeCalled)
+}
+
+// mockBroadcastAPI implements broadcaster.BroadcastAPI for testing.
+type mockBroadcastAPI struct {
+	closeFn     func()
+	broadcastFn func()
+}
+
+func (m *mockBroadcastAPI) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	if m.broadcastFn != nil {
+		m.broadcastFn()
+	}
+	return &types.BroadcastAppendResult{}, nil
+}
+
+func (m *mockBroadcastAPI) Close() {
+	if m.closeFn != nil {
+		m.closeFn()
+	}
+}
+
+// Ensure mockBroadcastAPI satisfies the broadcaster.BroadcastAPI interface.
+var _ broadcaster.BroadcastAPI = (*mockBroadcastAPI)(nil)
 
 // --- Test NewSnapshotManager ---
 
