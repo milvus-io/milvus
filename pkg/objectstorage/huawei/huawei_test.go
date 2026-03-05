@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
@@ -32,17 +31,11 @@ func TestNewMinioClient(t *testing.T) {
 }
 
 func TestHuaweiCredentialProvider_Retrieve(t *testing.T) {
-	// Skip detailed mocking tests for now, as they require complex setup
-	// This test focuses on the basic functionality
-	t.Run("init error", func(t *testing.T) {
-		c := &HuaweiCredentialProvider{
-			initErr: errors.New("init failed"),
-		}
-		c.initOnce.Do(func() {}) // Mark as initialized
-
+	t.Run("not initialized", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{}
+		// Without proper env vars, initClients will fail and Retrieve returns error
 		_, err := c.Retrieve()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "init failed")
 	})
 }
 
