@@ -104,6 +104,20 @@ PhyFilterBitsNode::GetOutput() {
                 std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
             if (col_vec->IsBitmap()) {
                 auto col_vec_size = col_vec->size();
+                // OPT-K: If expression returned full-segment result
+                // (e.g., from index fast path), take it directly and
+                // skip remaining loop iterations.
+                if (col_vec_size == need_process_rows_ &&
+                    bitset.size() == 0) {
+                    TargetBitmapView view(col_vec->GetRawData(),
+                                          col_vec_size);
+                    bitset.append(view);
+                    TargetBitmapView valid_view(
+                        col_vec->GetValidRawData(), col_vec_size);
+                    valid_bitset.append(valid_view);
+                    num_processed_rows_ = need_process_rows_;
+                    break;
+                }
                 TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
                 bitset.append(view);
                 TargetBitmapView valid_view(col_vec->GetValidRawData(),
