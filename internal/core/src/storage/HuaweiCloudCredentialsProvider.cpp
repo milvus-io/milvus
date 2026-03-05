@@ -155,14 +155,21 @@ HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider::Reload() {
             m_region, m_providerId, m_token, m_roleArn, m_sessionName};
 
     auto result = m_client->GetAssumeRoleWithWebIdentityCredentials(request);
+    const auto& creds = result.creds;
+    if (creds.GetAWSAccessKeyId().empty() || creds.GetAWSSecretKey().empty() ||
+        creds.GetSessionToken().empty()) {
+        LOG_WARN(
+            "HuaweiCloud credential provider: STS returned incomplete "
+            "credentials (missing ak/sk/token), keeping existing credentials");
+        return;
+    }
+    auto maskedAk = creds.GetAWSAccessKeyId().substr(0, 4) + "***";
     AWS_LOGSTREAM_DEBUG(
         STS_ASSUME_ROLE_WEB_IDENTITY_LOG_TAG,
         "Successfully retrieved credentials with AWS_ACCESS_KEY: "
-            << result.creds.GetAWSAccessKeyId()
-            << ", expiration_count_diff_ms: "
-            << (result.creds.GetExpiration() - Aws::Utils::DateTime::Now())
-                   .count());
-    m_credentials = result.creds;
+            << maskedAk << ", expiration_count_diff_ms: "
+            << (creds.GetExpiration() - Aws::Utils::DateTime::Now()).count());
+    m_credentials = creds;
 }
 
 bool

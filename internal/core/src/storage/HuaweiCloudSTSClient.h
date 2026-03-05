@@ -57,7 +57,7 @@ class AWS_CORE_API HuaweiCloudSTSCredentialsClient
     std::shared_ptr<Aws::Http::HttpClient> m_httpClient;
 
     struct STSCallResult {
-        bool success;
+        bool success{false};
         Aws::Auth::AWSCredentials credentials;
         Aws::String errorMessage;
     };
