@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "TimestampData.h"
 #include "TimestampIndex.h"
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
@@ -426,12 +427,10 @@ class OffsetOrderedArray : public OffsetMap {
 
 class InsertRecordSealed {
  public:
-    InsertRecordSealed(const Schema& schema,
-                       const int64_t size_per_chunk,
-                       const storage::MmapChunkDescriptorPtr
-                       /* mmap_descriptor */
-                       = nullptr)
-        : timestamps_(size_per_chunk) {
+    InsertRecordSealed(
+        const Schema& schema,
+        const int64_t size_per_chunk,
+        const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr) {
         std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
         // for sealed segment, only pk field is added.
         for (auto& field : schema) {
@@ -596,22 +595,39 @@ class InsertRecordSealed {
         estimated_memory_size_ += pk2offset_->memory_size();
     }
 
+    // Pin mode: zero-copy from column chunks (StorageV2, single or multi-chunk)
     void
-    init_timestamps(const std::vector<Timestamp>& timestamps,
-                    const TimestampIndex& timestamp_index) {
+    init_timestamps_from_column(
+        std::shared_ptr<ChunkedColumnInterface> column,
+        std::vector<cachinglayer::PinWrapper<Chunk*>> pins,
+        TimestampIndex timestamp_index) {
         std::lock_guard lck(shared_mutex_);
-        timestamps_.set_data_raw(0, timestamps.data(), timestamps.size());
+        timestamps_.InitFromPinnedChunks(std::move(column), std::move(pins));
         timestamp_index_ = std::move(timestamp_index);
-        AssertInfo(timestamps_.num_chunk() == 1,
-                   "num chunk not equal to 1 for sealed segment");
-        size_t memory_size = timestamps.size() * sizeof(Timestamp) +
-                             timestamp_index_.memory_size();
+        // Pin mode: timestamp data is managed by the column group,
+        // only charge the index metadata memory.
+        size_t ts_index_size = timestamp_index_.memory_size();
         cachinglayer::Manager::GetInstance().ChargeLoadedResource(
-            {static_cast<int64_t>(memory_size), 0});
-        estimated_memory_size_ += memory_size;
+            {static_cast<int64_t>(ts_index_size), 0});
+        estimated_memory_size_ += ts_index_size;
     }
 
-    const ConcurrentVector<Timestamp>&
+    // Own mode: takes ownership of timestamp data (StorageV1 / multi-chunk)
+    void
+    init_timestamps_from_owned(std::vector<Timestamp> data,
+                               TimestampIndex timestamp_index) {
+        std::lock_guard lck(shared_mutex_);
+        size_t count = data.size();
+        timestamps_.InitFromOwnedData(std::move(data));
+        timestamp_index_ = std::move(timestamp_index);
+        size_t ts_data_size = count * sizeof(Timestamp);
+        size_t ts_index_size = timestamp_index_.memory_size();
+        cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+            {static_cast<int64_t>(ts_data_size + ts_index_size), 0});
+        estimated_memory_size_ += ts_data_size + ts_index_size;
+    }
+
+    const TimestampData&
     timestamps() const {
         return timestamps_;
     }
@@ -633,7 +649,7 @@ class InsertRecordSealed {
     }
 
  public:
-    ConcurrentVector<Timestamp> timestamps_;
+    TimestampData timestamps_;
     std::atomic<int64_t> reserved = 0;
     // used for timestamps index of sealed segment
     TimestampIndex timestamp_index_;

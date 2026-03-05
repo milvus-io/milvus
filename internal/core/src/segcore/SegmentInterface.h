@@ -534,32 +534,6 @@ class SegmentInternalInterface : public SegmentInterface {
     search_ids(BitsetType& bitset, const IdArray& id_array) const = 0;
 
     /**
-     * Apply timestamp filtering on bitset, the query can't see an entity whose
-     * timestamp is bigger than the timestamp of query.
-     *
-     * @param bitset The final bitset after scalar filtering and delta filtering,
-     *  `false` means that the entity will be filtered out.
-     * @param timestamp The timestamp of query.
-     */
-    void
-    timestamp_filter(BitsetType& bitset, Timestamp timestamp) const;
-
-    /**
-     * Apply timestamp filtering on bitset, the query can't see an entity whose
-     * timestamp is bigger than the timestamp of query. The passed offsets are
-     * all candidate entities.
-     *
-     * @param bitset The final bitset after scalar filtering and delta filtering,
-     *  `true` means that the entity will be filtered out.
-     * @param offsets The segment offsets of all candidates.
-     * @param timestamp The timestamp of query.
-     */
-    void
-    timestamp_filter(BitsetType& bitset,
-                     const std::vector<int64_t>& offsets,
-                     Timestamp timestamp) const;
-
-    /**
      * Sort all candidates in ascending order, and then return the limit smallest.
      * Bitset is used to check if the candidate will be filtered out. `false_filtered_out`
      * determines how to filter out candidates. If `false_filtered_out` is true, we will
