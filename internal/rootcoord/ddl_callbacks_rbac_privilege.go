@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivilegeRequest) error {
@@ -57,6 +58,17 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 		// set up object name if it is global object type and not built in privilege group
 		if in.Entity.Object.Name == commonpb.ObjectType_Global.String() && !util.IsBuiltinPrivilegeGroup(in.Entity.Grantor.Privilege.Name) {
 			in.Entity.ObjectName = util.AnyWord
+		}
+	}
+
+	// Validate collection existence before broadcasting to prevent ack callback
+	// retry loops when granting privileges on non-existent collections.
+	if in.Type == milvuspb.OperatePrivilegeType_Grant &&
+		in.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
+		in.Entity.ObjectName != util.AnyWord && in.Entity.ObjectName != "" {
+		collID := c.meta.GetCollectionID(ctx, in.Entity.DbName, in.Entity.ObjectName)
+		if collID == InvalidCollectionID {
+			return merr.WrapErrCollectionNotFound(in.Entity.ObjectName)
 		}
 	}
 

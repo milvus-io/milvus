@@ -142,10 +142,64 @@ func SplitObjectName(objectName string) (string, string) {
 	if !strings.Contains(objectName, ".") {
 		return util.DefaultDBName, objectName
 	}
-	names := strings.Split(objectName, ".")
+	names := strings.SplitN(objectName, ".", 2)
 	return names[0], names[1]
 }
 
 func PolicyCheckerWithRole(policy, roleName string) bool {
 	return strings.Contains(policy, fmt.Sprintf(`"V0":"%s"`, roleName))
+}
+
+const collectionIDPrefix = "colID:"
+
+// FormatCollectionID returns the ID-based object name format "colID:12345".
+func FormatCollectionID(collectionID int64) string {
+	return fmt.Sprintf("%s%d", collectionIDPrefix, collectionID)
+}
+
+// IsIDBasedObjectName checks whether objectName uses the ID-based format "colID:xxx".
+func IsIDBasedObjectName(objectName string) bool {
+	return strings.HasPrefix(objectName, collectionIDPrefix)
+}
+
+// ExtractCollectionID parses the collection ID from an ID-based object name "colID:12345".
+func ExtractCollectionID(objectName string) (int64, error) {
+	if !IsIDBasedObjectName(objectName) {
+		return 0, errors.Newf("objectName %q is not ID-based", objectName)
+	}
+	var id int64
+	_, err := fmt.Sscanf(objectName[len(collectionIDPrefix):], "%d", &id)
+	return id, err
+}
+
+// PolicyForResourceByID constructs an ID-based resource string "Collection-default.colID:12345".
+func PolicyForResourceByID(dbName string, objectType string, collectionID int64) string {
+	return PolicyForResource(dbName, objectType, FormatCollectionID(collectionID))
+}
+
+// PolicyForPrivilegeByID constructs an ID-based policy JSON string.
+func PolicyForPrivilegeByID(roleName string, dbName string, objectType string, collectionID int64, privilege string) string {
+	return PolicyForPrivilege(roleName, objectType, FormatCollectionID(collectionID), privilege, dbName)
+}
+
+const databaseIDPrefix = "dbID:"
+
+// FormatDatabaseID returns the ID-based database name format "dbID:123".
+func FormatDatabaseID(dbID int64) string {
+	return fmt.Sprintf("%s%d", databaseIDPrefix, dbID)
+}
+
+// IsIDBasedDBName checks whether dbName uses the ID-based format "dbID:xxx".
+func IsIDBasedDBName(dbName string) bool {
+	return strings.HasPrefix(dbName, databaseIDPrefix)
+}
+
+// ExtractDatabaseID parses the database ID from an ID-based database name "dbID:123".
+func ExtractDatabaseID(dbName string) (int64, error) {
+	if !IsIDBasedDBName(dbName) {
+		return 0, errors.Newf("dbName %q is not ID-based", dbName)
+	}
+	var id int64
+	_, err := fmt.Sscanf(dbName[len(databaseIDPrefix):], "%d", &id)
+	return id, err
 }

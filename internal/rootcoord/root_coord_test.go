@@ -1606,6 +1606,7 @@ func TestCore_InitRBAC(t *testing.T) {
 		c := newTestCore(withHealthyCode(), withMeta(meta))
 		meta.EXPECT().CreateRole(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
 		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(3)
+		meta.EXPECT().MigrateGrantsToEntityID(mock.Anything).Return(nil).Once()
 
 		Params.Save(Params.RoleCfg.Enabled.Key, "false")
 		Params.Save(Params.CommonCfg.EnablePublicPrivilege.Key, "true")
@@ -1625,6 +1626,7 @@ func TestCore_InitRBAC(t *testing.T) {
 		c := newTestCore(withHealthyCode(), withMeta(meta))
 		meta.EXPECT().CreateRole(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(3)
 		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		meta.EXPECT().MigrateGrantsToEntityID(mock.Anything).Return(nil).Once()
 
 		Params.Save(Params.RoleCfg.Enabled.Key, "true")
 		Params.Save(Params.RoleCfg.Roles.Key, builtinRoles)
@@ -1646,6 +1648,7 @@ func TestCore_InitRBAC(t *testing.T) {
 		c := newTestCore(withHealthyCode(), withMeta(meta))
 		meta.EXPECT().CreateRole(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(3)
 		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		meta.EXPECT().MigrateGrantsToEntityID(mock.Anything).Return(nil).Once()
 
 		Params.Save(Params.RoleCfg.Enabled.Key, "true")
 		Params.Save(Params.RoleCfg.Roles.Key, builtinRoles)
