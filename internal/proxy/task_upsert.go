@@ -1133,6 +1133,20 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	}
 
 	if it.req.GetPartialUpdate() {
+		// Ensure ValidData is set on user-provided $meta before queryPreExecute merge logic.
+		// Without this, AppendFieldDataByColumn won't propagate ValidData for insert rows,
+		// causing length mismatch in FillWithDefaultValue later.
+		for _, fd := range it.upsertMsg.InsertMsg.GetFieldsData() {
+			if fd.GetIsDynamic() && len(fd.GetValidData()) == 0 {
+				nRows := int(it.upsertMsg.InsertMsg.NRows())
+				validData := make([]bool, nRows)
+				for i := range validData {
+					validData[i] = true
+				}
+				fd.ValidData = validData
+				break
+			}
+		}
 		err = it.queryPreExecute(ctx)
 		if err != nil {
 			log.Warn("Fail to queryPreExecute", zap.Error(err))
