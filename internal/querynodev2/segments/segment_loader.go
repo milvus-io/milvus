@@ -29,7 +29,6 @@ import (
 	"io"
 	"math"
 	"path"
-	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -310,7 +309,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			s.Release(context.Background())
 			return true
 		})
-		debug.FreeOSMemory()
 	}()
 
 	for _, info := range infos {
@@ -1060,10 +1058,6 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		return err
 	}
 	pkField := GetPkField(collection.Schema())
-
-	// TODO(xige-16): Optimize the data loading process and reduce data copying
-	// for now, there will be multiple copies in the process of data loading into segCore
-	defer debug.FreeOSMemory()
 
 	if segment.Type() == SegmentTypeSealed {
 		if err := loader.loadSealedSegment(ctx, loadInfo, segment); err != nil {

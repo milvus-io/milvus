@@ -906,93 +906,21 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
-	nodeIDLabel := fmt.Sprint(nodeID)
-	collectionIDLabel := fmt.Sprint(collectionID)
-	QueryNodeConsumerMsgCount.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-
-	QueryNodeConsumeTimeTickLag.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-	QueryNodeNumEntities.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-	QueryNodeEntitiesSize.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-	QueryNodeNumSegments.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-
-	QueryNodeSQCount.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-
-	QueryNodePartialResultCount.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-
-	QueryNodeSearchHitSegmentNum.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-
-	QueryNodeSegmentPruneRatio.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-
-	QueryNodeSegmentPruneBias.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-
-	QueryNodeSegmentPruneLatency.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-
-	QueryNodeEntitiesSize.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
-
-	QueryNodeLevelZeroSize.
-		DeletePartialMatch(
-			prometheus.Labels{
-				nodeIDLabelName:       nodeIDLabel,
-				collectionIDLabelName: collectionIDLabel,
-			})
+	// Reuse a single labels map to avoid 13+ allocations; DeletePartialMatch does not mutate it.
+	labels := prometheus.Labels{
+		nodeIDLabelName:       fmt.Sprint(nodeID),
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	}
+	QueryNodeConsumerMsgCount.DeletePartialMatch(labels)
+	QueryNodeConsumeTimeTickLag.DeletePartialMatch(labels)
+	QueryNodeNumEntities.DeletePartialMatch(labels)
+	QueryNodeEntitiesSize.DeletePartialMatch(labels)
+	QueryNodeNumSegments.DeletePartialMatch(labels)
+	QueryNodeSQCount.DeletePartialMatch(labels)
+	QueryNodePartialResultCount.DeletePartialMatch(labels)
+	QueryNodeSearchHitSegmentNum.DeletePartialMatch(labels)
+	QueryNodeSegmentPruneRatio.DeletePartialMatch(labels)
+	QueryNodeSegmentPruneBias.DeletePartialMatch(labels)
+	QueryNodeSegmentPruneLatency.DeletePartialMatch(labels)
+	QueryNodeLevelZeroSize.DeletePartialMatch(labels)
 }
