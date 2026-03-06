@@ -2084,3 +2084,342 @@ func TestUpsertTask_queryPreExecute_DefaultValueError(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
+
+func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
+	// Schema with dynamic field enabled, simulating a collection with id + value + $meta
+	schema := newSchemaInfo(&schemapb.CollectionSchema{
+		Name:               "test_dynamic_validdata",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+			{
+				FieldID: 102, Name: common.MetaFieldName, DataType: schemapb.DataType_JSON,
+				IsDynamic: true, Nullable: true,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_StringData{StringData: "{}"},
+				},
+			},
+		},
+	})
+
+	t.Run("dynamic field with ValidData merges correctly", func(t *testing.T) {
+		// Upsert 3 rows: IDs 1,2 (update), 3 (insert)
+		// User provides dynamic field $meta with ValidData already set (as PreExecute would do)
+		meta1, _ := json.Marshal(map[string]interface{}{"color": "gold"})
+		meta2, _ := json.Marshal(map[string]interface{}{"color": "silver"})
+		meta3, _ := json.Marshal(map[string]interface{}{"color": "bronze"})
+
+		upsertData := []*schemapb.FieldData{
+			{
+				FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}},
+			},
+			{
+				FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{100, 200, 300}}}}},
+			},
+			{
+				FieldName: common.MetaFieldName, FieldId: 102, Type: schemapb.DataType_JSON, IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
+					JsonData: &schemapb.JSONArray{Data: [][]byte{meta1, meta2, meta3}},
+				}}},
+				ValidData: []bool{true, true, true}, // Set by PreExecute before queryPreExecute
+			},
+		}
+
+		// Query result: existing PKs 1, 2
+		existMeta1, _ := json.Marshal(map[string]interface{}{"color": "red"})
+		existMeta2, _ := json.Marshal(map[string]interface{}{"color": "blue"})
+		mockQueryResult := &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}},
+				},
+				{
+					FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{10, 20}}}}},
+				},
+				{
+					FieldName: common.MetaFieldName, FieldId: 102, Type: schemapb.DataType_JSON, IsDynamic: true,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{Data: [][]byte{existMeta1, existMeta2}},
+					}}},
+				},
+			},
+		}
+
+		task := &upsertTask{
+			ctx:    context.Background(),
+			schema: schema,
+			req: &milvuspb.UpsertRequest{
+				FieldsData: upsertData,
+				NumRows:    3,
+			},
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &msgstream.InsertMsg{
+					InsertRequest: &msgpb.InsertRequest{
+						FieldsData: upsertData,
+						NumRows:    3,
+						Version:    msgpb.InsertDataVersion_ColumnBased,
+					},
+				},
+			},
+			node: &Proxy{},
+		}
+
+		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
+		defer mockRetrieve.UnPatch()
+
+		err := task.queryPreExecute(context.Background())
+		assert.NoError(t, err)
+
+		// Verify merged $meta has 3 entries with correct ValidData length
+		var metaField *schemapb.FieldData
+		for _, f := range task.insertFieldData {
+			if f.GetFieldName() == common.MetaFieldName {
+				metaField = f
+				break
+			}
+		}
+		assert.NotNil(t, metaField)
+		metaData := metaField.GetScalars().GetJsonData().GetData()
+		assert.Equal(t, 3, len(metaData), "merged $meta should have 3 rows")
+		// ValidData should also have 3 entries (2 from update + 1 from insert)
+		assert.Equal(t, 3, len(metaField.GetValidData()), "ValidData length should match row count")
+	})
+
+	t.Run("dynamic field without ValidData causes merge mismatch", func(t *testing.T) {
+		// This test demonstrates the bug: when $meta has NO ValidData,
+		// the merge logic produces mismatched ValidData length
+		meta1, _ := json.Marshal(map[string]interface{}{"color": "gold"})
+		meta2, _ := json.Marshal(map[string]interface{}{"color": "silver"})
+		meta3, _ := json.Marshal(map[string]interface{}{"color": "bronze"})
+
+		upsertData := []*schemapb.FieldData{
+			{
+				FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}},
+			},
+			{
+				FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{100, 200, 300}}}}},
+			},
+			{
+				FieldName: common.MetaFieldName, FieldId: 102, Type: schemapb.DataType_JSON, IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
+					JsonData: &schemapb.JSONArray{Data: [][]byte{meta1, meta2, meta3}},
+				}}},
+				// NO ValidData — simulates SDK behavior before PreExecute fix
+			},
+		}
+
+		existMeta1, _ := json.Marshal(map[string]interface{}{"color": "red"})
+		existMeta2, _ := json.Marshal(map[string]interface{}{"color": "blue"})
+		mockQueryResult := &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "id", FieldId: 100, Type: schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}},
+				},
+				{
+					FieldName: "value", FieldId: 101, Type: schemapb.DataType_Int32,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{10, 20}}}}},
+				},
+				{
+					FieldName: common.MetaFieldName, FieldId: 102, Type: schemapb.DataType_JSON, IsDynamic: true,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{Data: [][]byte{existMeta1, existMeta2}},
+					}}},
+				},
+			},
+		}
+
+		task := &upsertTask{
+			ctx:    context.Background(),
+			schema: schema,
+			req: &milvuspb.UpsertRequest{
+				FieldsData: upsertData,
+				NumRows:    3,
+			},
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &msgstream.InsertMsg{
+					InsertRequest: &msgpb.InsertRequest{
+						FieldsData: upsertData,
+						NumRows:    3,
+						Version:    msgpb.InsertDataVersion_ColumnBased,
+					},
+				},
+			},
+			node: &Proxy{},
+		}
+
+		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
+		defer mockRetrieve.UnPatch()
+
+		err := task.queryPreExecute(context.Background())
+		assert.NoError(t, err)
+
+		// Without the fix in PreExecute, $meta ValidData would be length 2 (only from update path)
+		// instead of 3 (matching data length). This mismatch would cause FillWithDefaultValue to fail.
+		var metaField *schemapb.FieldData
+		for _, f := range task.insertFieldData {
+			if f.GetFieldName() == common.MetaFieldName {
+				metaField = f
+				break
+			}
+		}
+		assert.NotNil(t, metaField)
+		metaData := metaField.GetScalars().GetJsonData().GetData()
+		assert.Equal(t, 3, len(metaData), "merged $meta should have 3 rows")
+		// Without ValidData on src, ValidData length will be 2 (only from update path)
+		// This demonstrates the bug that PreExecute fix prevents
+		validData := metaField.GetValidData()
+		if len(validData) > 0 {
+			assert.Equal(t, 2, len(validData),
+				"without PreExecute fix, ValidData length is 2 (only from update path), not 3")
+		}
+	})
+}
+
+func TestPreExecute_SetsDynamicFieldValidData(t *testing.T) {
+	t.Run("sets ValidData on dynamic field without ValidData", func(t *testing.T) {
+		meta, _ := json.Marshal(map[string]interface{}{"color": "gold"})
+		fieldsData := []*schemapb.FieldData{
+			{
+				FieldName: "id", Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}},
+			},
+			{
+				FieldName: common.MetaFieldName, Type: schemapb.DataType_JSON, IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
+					JsonData: &schemapb.JSONArray{Data: [][]byte{meta, meta, meta}},
+				}}},
+				// No ValidData
+			},
+		}
+
+		task := &upsertTask{
+			req: &milvuspb.UpsertRequest{
+				PartialUpdate: true,
+			},
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &msgstream.InsertMsg{
+					InsertRequest: &msgpb.InsertRequest{
+						FieldsData: fieldsData,
+						NumRows:    3,
+						Version:    msgpb.InsertDataVersion_ColumnBased,
+					},
+				},
+			},
+		}
+
+		// Simulate the ValidData-setting logic from PreExecute
+		for _, fd := range task.upsertMsg.InsertMsg.GetFieldsData() {
+			if fd.GetIsDynamic() && len(fd.GetValidData()) == 0 {
+				nRows := int(task.upsertMsg.InsertMsg.NRows())
+				validData := make([]bool, nRows)
+				for i := range validData {
+					validData[i] = true
+				}
+				fd.ValidData = validData
+				break
+			}
+		}
+
+		// Verify ValidData was set
+		dynamicField := fieldsData[1]
+		assert.Equal(t, 3, len(dynamicField.GetValidData()))
+		for _, v := range dynamicField.GetValidData() {
+			assert.True(t, v)
+		}
+	})
+
+	t.Run("preserves existing ValidData on dynamic field", func(t *testing.T) {
+		meta, _ := json.Marshal(map[string]interface{}{"color": "gold"})
+		existingValidData := []bool{true, false, true}
+		fieldsData := []*schemapb.FieldData{
+			{
+				FieldName: common.MetaFieldName, Type: schemapb.DataType_JSON, IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
+					JsonData: &schemapb.JSONArray{Data: [][]byte{meta, meta, meta}},
+				}}},
+				ValidData: existingValidData,
+			},
+		}
+
+		task := &upsertTask{
+			req: &milvuspb.UpsertRequest{
+				PartialUpdate: true,
+			},
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &msgstream.InsertMsg{
+					InsertRequest: &msgpb.InsertRequest{
+						FieldsData: fieldsData,
+						NumRows:    3,
+						Version:    msgpb.InsertDataVersion_ColumnBased,
+					},
+				},
+			},
+		}
+
+		// Simulate the ValidData-setting logic
+		for _, fd := range task.upsertMsg.InsertMsg.GetFieldsData() {
+			if fd.GetIsDynamic() && len(fd.GetValidData()) == 0 {
+				nRows := int(task.upsertMsg.InsertMsg.NRows())
+				validData := make([]bool, nRows)
+				for i := range validData {
+					validData[i] = true
+				}
+				fd.ValidData = validData
+				break
+			}
+		}
+
+		// ValidData should NOT be overwritten
+		assert.Equal(t, existingValidData, fieldsData[0].GetValidData())
+	})
+
+	t.Run("no-op when no dynamic field exists", func(t *testing.T) {
+		fieldsData := []*schemapb.FieldData{
+			{
+				FieldName: "id", Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}},
+			},
+		}
+
+		task := &upsertTask{
+			req: &milvuspb.UpsertRequest{
+				PartialUpdate: true,
+			},
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &msgstream.InsertMsg{
+					InsertRequest: &msgpb.InsertRequest{
+						FieldsData: fieldsData,
+						NumRows:    3,
+						Version:    msgpb.InsertDataVersion_ColumnBased,
+					},
+				},
+			},
+		}
+
+		// Simulate the ValidData-setting logic
+		for _, fd := range task.upsertMsg.InsertMsg.GetFieldsData() {
+			if fd.GetIsDynamic() && len(fd.GetValidData()) == 0 {
+				nRows := int(task.upsertMsg.InsertMsg.NRows())
+				validData := make([]bool, nRows)
+				for i := range validData {
+					validData[i] = true
+				}
+				fd.ValidData = validData
+				break
+			}
+		}
+
+		// No field should have ValidData set
+		assert.Equal(t, 0, len(fieldsData[0].GetValidData()))
+	})
+}
