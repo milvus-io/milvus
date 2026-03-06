@@ -1,4 +1,6 @@
+mod arabic_normalization_filter;
 mod cn_char_filter;
+mod decimal_digit_filter;
 mod decompounder_filter;
 mod filter;
 mod regex_filter;
@@ -9,7 +11,9 @@ pub mod stop_words;
 mod synonym_filter;
 mod util;
 
+pub(crate) use arabic_normalization_filter::ArabicNormalizationFilter;
 pub(crate) use cn_char_filter::{CnAlphaNumOnlyFilter, CnCharOnlyFilter};
+pub(crate) use decimal_digit_filter::DecimalDigitFilter;
 use regex_filter::RegexFilter;
 use remove_punct_filter::RemovePunctFilter;
 use synonym_filter::SynonymFilter;

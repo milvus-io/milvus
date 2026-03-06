@@ -108,6 +108,8 @@ impl<'a> AnalyzerBuilder<'a> {
                 &mut self.helper,
             )),
             "english" => Ok(english_analyzer(self.get_stop_words_option()?)),
+            "arabic" => Ok(arabic_analyzer(self.get_stop_words_option()?)),
+            "thai" => Ok(thai_analyzer(self.get_stop_words_option()?)),
             other_ => Err(TantivyBindingError::InternalError(format!(
                 "unknown build-in analyzer type: {}",
                 other_
@@ -237,6 +239,94 @@ mod tests {
         }
 
         print!("test tokens :{:?}\n", results)
+    }
+
+    #[test]
+    fn test_arabic_analyzer() {
+        let params = r#"{
+            "type": "arabic"
+        }"#;
+
+        let tokenizer = create_analyzer(&params.to_string(), "");
+        assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
+
+        let mut binding = tokenizer.unwrap();
+        // "الكتاب" (the book) with diacritics + Arabic-Indic digits
+        let mut stream = binding.token_stream("كِتَابٌ عـــربي ١٢٣");
+
+        let mut results = Vec::<String>::new();
+        while stream.advance() {
+            let token = stream.token();
+            results.push(token.text.clone());
+        }
+
+        // Verify diacritics removed, tatweel removed, digits converted
+        assert!(!results.is_empty(), "Should produce tokens");
+        // "١٢٣" should become "123"
+        assert!(
+            results.contains(&"123".to_string()),
+            "Arabic-Indic digits should be converted: {:?}",
+            results
+        );
+        // Tatweel should be removed from "عـــربي"
+        assert!(
+            results.iter().all(|t| !t.contains('\u{0640}')),
+            "Tatweel should be removed: {:?}",
+            results
+        );
+
+        print!("test arabic analyzer tokens: {:?}\n", results);
+    }
+
+    #[test]
+    fn test_arabic_analyzer_with_custom_stop_words() {
+        let params = r#"{
+            "type": "arabic",
+            "stop_words": ["كتاب"]
+        }"#;
+
+        let tokenizer = create_analyzer(&params.to_string(), "");
+        assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
+    }
+
+    #[test]
+    fn test_thai_analyzer() {
+        let params = r#"{
+            "type": "thai"
+        }"#;
+
+        let tokenizer = create_analyzer(&params.to_string(), "");
+        assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
+
+        let mut binding = tokenizer.unwrap();
+        let mut stream = binding.token_stream("การทดสอบภาษาไทย ๑๒๓");
+
+        let mut results = Vec::<String>::new();
+        while stream.advance() {
+            let token = stream.token();
+            results.push(token.text.clone());
+        }
+
+        assert!(!results.is_empty(), "Should produce tokens");
+        // Thai digits should be converted
+        assert!(
+            results.contains(&"123".to_string()),
+            "Thai digits should be converted: {:?}",
+            results
+        );
+
+        print!("test thai analyzer tokens: {:?}\n", results);
+    }
+
+    #[test]
+    fn test_thai_analyzer_with_custom_stop_words() {
+        let params = r#"{
+            "type": "thai",
+            "stop_words": ["ทดสอบ"]
+        }"#;
+
+        let tokenizer = create_analyzer(&params.to_string(), "");
+        assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
     }
 
     #[test]
