@@ -1,87 +1,35 @@
-import numpy as np
-from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
-from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
-from pymilvus import (
-    FieldSchema, CollectionSchema, DataType,
-    Collection
-)
-from common.constants import *
-from utils.util_pymilvus import *
+import pytest
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
-from utils.util_log import test_log as log
-from base.client_base import TestcaseBase
-import heapq
-from time import sleep
-from decimal import Decimal, getcontext
-import decimal
-import multiprocessing
-import numbers
-import random
-import math
-import numpy
-import threading
-import pytest
-import pandas as pd
-from faker import Faker
-
-Faker.seed(19530)
-fake_en = Faker("en_US")
-fake_zh = Faker("zh_CN")
-
-# patch faker to generate text with specific distribution
-cf.patch_faker_text(fake_en, cf.en_vocabularies_distribution)
-cf.patch_faker_text(fake_zh, cf.zh_vocabularies_distribution)
-
-pd.set_option("expand_frame_repr", False)
+from base.client_v2_base import TestMilvusClientV2Base
 
 prefix = "search_collection"
-search_num = 10
-max_dim = ct.max_dim
-min_dim = ct.min_dim
-epsilon = ct.epsilon
-hybrid_search_epsilon = 0.01
-gracefulTime = ct.gracefulTime
 default_nb = ct.default_nb
-default_nb_medium = ct.default_nb_medium
 default_nq = ct.default_nq
 default_dim = ct.default_dim
 default_limit = ct.default_limit
-max_limit = ct.max_limit
-default_search_exp = "int64 >= 0"
-default_search_string_exp = "varchar >= \"0\""
-default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
-default_invaild_string_exp = "varchar >= 0"
-default_json_search_exp = "json_field[\"number\"] >= 0"
-perfix_expr = 'varchar like "0%"'
-default_search_field = ct.default_float_vec_field_name
-default_search_params = ct.default_search_params
-default_int64_field_name = ct.default_int64_field_name
-default_float_field_name = ct.default_float_field_name
-default_bool_field_name = ct.default_bool_field_name
-default_string_field_name = ct.default_string_field_name
-default_json_field_name = ct.default_json_field_name
-default_index_params = ct.default_index
-vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-uid = "test_search"
-nq = 1
-epsilon = 0.001
-field_name = default_float_vec_field_name
-binary_field_name = default_binary_vec_field_name
-search_param = {"nprobe": 1}
-entity = gen_entities(1, is_normal=True)
-entities = gen_entities(default_nb, is_normal=True)
-raw_vectors, binary_entities = gen_binary_entities(default_nb)
-default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
-index_name1 = cf.gen_unique_str("float")
-index_name2 = cf.gen_unique_str("varhar")
-half_nb = ct.default_nb // 2
-max_hybrid_search_req_num = ct.max_hybrid_search_req_num
 
 
-class TestSparseSearch(TestcaseBase):
-    """ Add some test cases for the sparse vector """
+def _sparse_column_to_rows(data, nb):
+    """Convert column-oriented sparse data to row-oriented dicts for Client V2 insert.
+
+    ``data`` is [int64_list, float_list, varchar_list, sparse_vector_list]
+    returned by ``cf.gen_default_list_sparse_data``.
+    """
+    rows = []
+    for i in range(nb):
+        rows.append({
+            ct.default_int64_field_name: data[0][i],
+            ct.default_float_field_name: data[1][i],
+            ct.default_string_field_name: data[2][i],
+            ct.default_sparse_vec_field_name: data[3][i],
+        })
+    return rows
+
+
+class TestSparseSearchIndependent(TestMilvusClientV2Base):
+    """ Test cases for sparse vector search using Client V2 API """
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index", ct.all_index_types[10:12])
@@ -92,36 +40,60 @@ class TestSparseSearch(TestcaseBase):
         method: create connection, collection, insert and search
         expected: search successfully
         """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        nb = 3000
+
+        # create collection with sparse schema
         schema = cf.gen_default_sparse_schema(auto_id=False)
-        collection_w = self.init_collection_wrap(c_name, schema=schema)
-        data = cf.gen_default_list_sparse_data(nb=3000)
-        collection_w.insert(data)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # insert data (convert column-oriented to rows)
+        data = cf.gen_default_list_sparse_data(nb=nb)
+        rows = _sparse_column_to_rows(data, nb)
+        self.insert(client, collection_name, data=rows)
+
+        # create sparse index
         params = cf.get_index_params_params(index)
         params.update({"inverted_index_algo": inverted_index_algo})
-        index_params = {"index_type": index, "metric_type": "IP", "params": params}
-        collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
-        collection_w.load()
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_sparse_vec_field_name,
+                      index_type=index, metric_type="IP", params=params)
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
 
+        # search
         _params = cf.get_search_params_params(index)
         _params.update({"dim_max_score_ratio": 1.05})
-        search_params = {"params": _params}
-        collection_w.search(data[-1][0:default_nq], ct.default_sparse_vec_field_name,
-                            search_params, default_limit,
-                            output_fields=[ct.default_sparse_vec_field_name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": default_limit,
-                                         "output_fields": [ct.default_sparse_vec_field_name]})
+        search_params = {"metric_type": "IP", "params": _params}
+        self.search(client, collection_name,
+                    data=data[-1][0:default_nq],
+                    anns_field=ct.default_sparse_vec_field_name,
+                    search_params=search_params,
+                    limit=default_limit,
+                    output_fields=[ct.default_sparse_vec_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": default_nq,
+                                 "limit": default_limit,
+                                 "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "output_fields": [ct.default_sparse_vec_field_name]})
+
+        # search with filter
         expr = "int64 < 100 "
-        collection_w.search(data[-1][0:default_nq], ct.default_sparse_vec_field_name,
-                            search_params, default_limit,
-                            expr=expr, output_fields=[ct.default_sparse_vec_field_name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": default_limit,
-                                         "output_fields": [ct.default_sparse_vec_field_name]})
+        self.search(client, collection_name,
+                    data=data[-1][0:default_nq],
+                    anns_field=ct.default_sparse_vec_field_name,
+                    search_params=search_params,
+                    limit=default_limit,
+                    filter=expr,
+                    output_fields=[ct.default_sparse_vec_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": default_nq,
+                                 "limit": default_limit,
+                                 "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "output_fields": [ct.default_sparse_vec_field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.all_index_types[10:12])
@@ -132,22 +104,38 @@ class TestSparseSearch(TestcaseBase):
         method: create connection, collection, insert and hybrid search
         expected: search successfully
         """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_sparse_schema(auto_id=False)
-        collection_w = self.init_collection_wrap(c_name, schema=schema)
-        data = cf.gen_default_list_sparse_data(dim=dim)
-        collection_w.insert(data)
-        params = cf.get_index_params_params(index)
-        index_params = {"index_type": index, "metric_type": "IP", "params": params}
-        collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        nb = default_nb
 
-        collection_w.load()
-        collection_w.search(data[-1][0:default_nq], ct.default_sparse_vec_field_name,
-                            ct.default_sparse_search_params, limit=1,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": 1})
+        # create collection with sparse schema
+        schema = cf.gen_default_sparse_schema(auto_id=False)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # insert data
+        data = cf.gen_default_list_sparse_data(dim=dim)
+        rows = _sparse_column_to_rows(data, nb)
+        self.insert(client, collection_name, data=rows)
+
+        # create sparse index
+        params = cf.get_index_params_params(index)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_sparse_vec_field_name,
+                      index_type=index, metric_type="IP", params=params)
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
+
+        # search
+        self.search(client, collection_name,
+                    data=data[-1][0:default_nq],
+                    anns_field=ct.default_sparse_vec_field_name,
+                    search_params=ct.default_sparse_search_params,
+                    limit=1,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": default_nq,
+                                 "limit": 1,
+                                 "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.all_index_types[10:12])
@@ -155,45 +143,69 @@ class TestSparseSearch(TestcaseBase):
     def test_sparse_index_enable_mmap_search(self, index, inverted_index_algo):
         """
         target: verify that the sparse indexes of sparse vectors can be searched properly after turning on mmap
-        method: create connection, collection, enable mmap,  insert and search
-        expected: search successfully , query result is correct
+        method: create connection, collection, enable mmap, insert and search
+        expected: search successfully, query result is correct
         """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_sparse_schema(auto_id=False)
-        collection_w = self.init_collection_wrap(c_name, schema=schema)
-
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
         first_nb = 3000
-        data = cf.gen_default_list_sparse_data(nb=first_nb, start=0)
-        collection_w.insert(data)
 
+        # create collection with sparse schema
+        schema = cf.gen_default_sparse_schema(auto_id=False)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # insert first batch
+        data = cf.gen_default_list_sparse_data(nb=first_nb, start=0)
+        rows = _sparse_column_to_rows(data, first_nb)
+        self.insert(client, collection_name, data=rows)
+
+        # create sparse index
         params = cf.get_index_params_params(index)
         params.update({"inverted_index_algo": inverted_index_algo})
-        index_params = {"index_type": index, "metric_type": "IP", "params": params}
-        collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_sparse_vec_field_name,
+                      index_type=index, metric_type="IP", params=params)
+        self.create_index(client, collection_name, index_params=idx)
 
-        collection_w.set_properties({'mmap.enabled': True})
-        pro = collection_w.describe()[0].get("properties")
-        assert pro["mmap.enabled"] == 'True'
-        collection_w.alter_index(index, {'mmap.enabled': True})
-        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
-        data2 = cf.gen_default_list_sparse_data(nb=2000, start=first_nb)  # id shall be continuous
-        all_data = []  # combine 2 insert datas for next checking
-        for i in range(len(data2)):
-            all_data.append(data[i] + data2[i])
-        collection_w.insert(data2)
-        collection_w.flush()
-        collection_w.load()
-        collection_w.search(data[-1][0:default_nq], ct.default_sparse_vec_field_name,
-                            ct.default_sparse_search_params, default_limit,
-                            output_fields=[ct.default_sparse_vec_field_name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": default_limit,
-                                         "output_fields": [ct.default_sparse_vec_field_name]})
+        # enable mmap on collection
+        self.alter_collection_properties(client, collection_name, properties={'mmap.enabled': True})
+        desc, _ = self.describe_collection(client, collection_name)
+        assert desc.get("properties", {}).get("mmap.enabled") == 'True'
+
+        # enable mmap on index (index name defaults to field name in Client V2)
+        self.alter_index_properties(client, collection_name,
+                                    index_name=ct.default_sparse_vec_field_name,
+                                    properties={'mmap.enabled': True})
+        index_info, _ = self.describe_index(client, collection_name,
+                                            index_name=ct.default_sparse_vec_field_name)
+        assert index_info.get("mmap.enabled") == 'True'
+
+        # insert second batch
+        second_nb = 2000
+        data2 = cf.gen_default_list_sparse_data(nb=second_nb, start=first_nb)
+        rows2 = _sparse_column_to_rows(data2, second_nb)
+        self.insert(client, collection_name, data=rows2)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        # search
+        self.search(client, collection_name,
+                    data=data[-1][0:default_nq],
+                    anns_field=ct.default_sparse_vec_field_name,
+                    search_params=ct.default_sparse_search_params,
+                    limit=default_limit,
+                    output_fields=[ct.default_sparse_vec_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": default_nq,
+                                 "limit": default_limit,
+                                 "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "output_fields": [ct.default_sparse_vec_field_name]})
+
+        # query to verify data
         expr_id_list = [0, 1, 10, 100]
         term_expr = f'{ct.default_int64_field_name} in {expr_id_list}'
-        res = collection_w.query(term_expr)[0]
+        res, _ = self.query(client, collection_name, filter=term_expr)
         assert len(res) == 4
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -205,35 +217,61 @@ class TestSparseSearch(TestcaseBase):
         method: create a sparse index by adjusting the ratio parameter.
         expected: search successfully
         """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        nb = 4000
+
+        # create collection with sparse schema
         schema = cf.gen_default_sparse_schema(auto_id=False)
-        collection_w = self.init_collection_wrap(c_name, schema=schema)
-        data = cf.gen_default_list_sparse_data(nb=4000)
-        collection_w.insert(data)
-        collection_w.flush()
-        params = {"index_type": index, "metric_type": "IP", "params": {"drop_ratio_build": drop_ratio_build}}
-        collection_w.create_index(ct.default_sparse_vec_field_name, params, index_name=index)
-        collection_w.load()
-        assert collection_w.has_index(index_name=index)[0] is True
+        self.create_collection(client, collection_name, schema=schema)
+
+        # insert data
+        data = cf.gen_default_list_sparse_data(nb=nb)
+        rows = _sparse_column_to_rows(data, nb)
+        self.insert(client, collection_name, data=rows)
+        self.flush(client, collection_name)
+
+        # create sparse index with drop_ratio_build
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_sparse_vec_field_name,
+                      index_type=index, metric_type="IP",
+                      params={"drop_ratio_build": drop_ratio_build})
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
+
+        # verify index exists (list_indexes returns field names in Client V2)
+        indexes, _ = self.list_indexes(client, collection_name)
+        assert ct.default_sparse_vec_field_name in indexes
+
+        # search with valid dim_max_score_ratio values
         _params = {"drop_ratio_search": 0.2}
         for dim_max_score_ratio in [0.5, 0.99, 1, 1.3]:
             _params.update({"dim_max_score_ratio": dim_max_score_ratio})
             search_params = {"metric_type": "IP", "params": _params}
-            collection_w.search(data[-1][0:default_nq], ct.default_sparse_vec_field_name,
-                                search_params, default_limit,
-                                check_task=CheckTasks.check_search_results,
-                                check_items={"nq": default_nq,
-                                             "limit": default_limit})
+            self.search(client, collection_name,
+                        data=data[-1][0:default_nq],
+                        anns_field=ct.default_sparse_vec_field_name,
+                        search_params=search_params,
+                        limit=default_limit,
+                        check_task=CheckTasks.check_search_results,
+                        check_items={"nq": default_nq,
+                                     "limit": default_limit,
+                                     "enable_milvus_client_api": True,
+                                     "pk_name": ct.default_int64_field_name})
+
+        # search with invalid dim_max_score_ratio values
         error = {ct.err_code: 999,
                  ct.err_msg: "should be in range [0.500000, 1.300000]"}
         for invalid_ratio in [0.49, 1.4]:
             _params.update({"dim_max_score_ratio": invalid_ratio})
             search_params = {"metric_type": "IP", "params": _params}
-            collection_w.search(data[-1][0:default_nq], ct.default_sparse_vec_field_name,
-                                search_params, default_limit,
-                                check_task=CheckTasks.err_res,
-                                check_items=error)
+            self.search(client, collection_name,
+                        data=data[-1][0:default_nq],
+                        anns_field=ct.default_sparse_vec_field_name,
+                        search_params=search_params,
+                        limit=default_limit,
+                        check_task=CheckTasks.err_res,
+                        check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.all_index_types[10:12])
@@ -243,26 +281,41 @@ class TestSparseSearch(TestcaseBase):
         method: create sparse vectors and search
         expected: normal search
         """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_sparse_schema()
-        collection_w = self.init_collection_wrap(c_name, schema=schema)
-        data = cf.gen_default_list_sparse_data(nb=4000)
-        collection_w.insert(data)
-        params = cf.get_index_params_params(index)
-        index_params = {"index_type": index, "metric_type": "IP", "params": params}
-        collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        nb = 4000
 
-        collection_w.load()
+        # create collection with sparse schema (auto_id default)
+        schema = cf.gen_default_sparse_schema()
+        self.create_collection(client, collection_name, schema=schema)
+
+        # insert data
+        data = cf.gen_default_list_sparse_data(nb=nb)
+        rows = _sparse_column_to_rows(data, nb)
+        self.insert(client, collection_name, data=rows)
+
+        # create sparse index
+        params = cf.get_index_params_params(index)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_sparse_vec_field_name,
+                      index_type=index, metric_type="IP", params=params)
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
+
+        # search with specific output_fields
         d = cf.gen_default_list_sparse_data(nb=10)
-        collection_w.search(d[-1][0:default_nq], ct.default_sparse_vec_field_name,
-                            ct.default_sparse_search_params, default_limit,
-                            output_fields=["float", "sparse_vector"],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": default_limit,
-                                         "output_fields": ["float", "sparse_vector"]
-                                         })
+        self.search(client, collection_name,
+                    data=d[-1][0:default_nq],
+                    anns_field=ct.default_sparse_vec_field_name,
+                    search_params=ct.default_sparse_search_params,
+                    limit=default_limit,
+                    output_fields=["float", "sparse_vector"],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": default_nq,
+                                 "limit": default_limit,
+                                 "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "output_fields": ["float", "sparse_vector"]})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.all_index_types[10:12])
@@ -273,20 +326,35 @@ class TestSparseSearch(TestcaseBase):
         method: create sparse vectors and search iterator
         expected: normal search
         """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        nb = 4000
+
+        # create collection with sparse schema (auto_id default)
         schema = cf.gen_default_sparse_schema()
-        collection_w = self.init_collection_wrap(c_name, schema=schema)
-        data = cf.gen_default_list_sparse_data(nb=4000)
-        collection_w.insert(data)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # insert data
+        data = cf.gen_default_list_sparse_data(nb=nb)
+        rows = _sparse_column_to_rows(data, nb)
+        self.insert(client, collection_name, data=rows)
+
+        # create sparse index
         params = cf.get_index_params_params(index)
         params.update({"inverted_index_algo": inverted_index_algo})
-        index_params = {"index_type": index, "metric_type": "IP", "params": params}
-        collection_w.create_index(ct.default_sparse_vec_field_name, index_params, index_name=index)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_sparse_vec_field_name,
+                      index_type=index, metric_type="IP", params=params)
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
 
-        collection_w.load()
+        # search iterator
         batch_size = 100
-        collection_w.search_iterator(data[-1][0:1], ct.default_sparse_vec_field_name,
-                                     ct.default_sparse_search_params, limit=500, batch_size=batch_size,
-                                     check_task=CheckTasks.check_search_iterator,
-                                     check_items={"batch_size": batch_size})
+        self.search_iterator(client, collection_name,
+                             data=data[-1][0:1],
+                             batch_size=batch_size,
+                             limit=500,
+                             anns_field=ct.default_sparse_vec_field_name,
+                             search_params=ct.default_sparse_search_params,
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"batch_size": batch_size})
