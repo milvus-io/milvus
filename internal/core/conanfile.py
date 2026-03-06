@@ -1,98 +1,96 @@
-from conans import ConanFile
+from conan import ConanFile
+from conan.tools.cmake import CMakeDeps, CMakeToolchain
+from conan.tools.files import copy
+import os
 
 
 class MilvusConan(ConanFile):
-    keep_imports = True
     settings = "os", "compiler", "build_type", "arch"
     requires = (
-        "rocksdb/6.29.5@milvus/dev#b1842a53ddff60240c5282a3da498ba1",
-        "boost/1.83.0@",
-        "onetbb/2021.9.0#4a223ff1b4025d02f31b65aedf5e7f4a",
-        "nlohmann_json/3.11.3#ffb9e9236619f1c883e36662f944345d",
-        "zstd/1.5.5#34e9debe03bf0964834a09dfbc31a5dd",
-        "lz4/1.9.4#c5afb86edd69ac0df30e3a9e192e43db",
-        "snappy/1.1.9#0519333fef284acd04806243de7d3070",
-        "arrow/17.0.0@milvus/dev-2.6#7af258a853e20887f9969f713110aac8",
-        "openssl/3.1.2#02594c4c0a6e2b4feb3cd15119993597",
-        "googleapis/cci.20221108#65604e1b3b9a6b363044da625b201a2a",
-        "gtest/1.13.0#f9548be18a41ccc6367efcb8146e92be",
-        "benchmark/1.7.0#459f3bb1a64400a886ba43047576df3c",
-        "protobuf/3.21.4#fd372371d994b8585742ca42c12337f9",
-        "yaml-cpp/0.7.0#9c87b3998de893cf2e5a08ad09a7a6e0",
-        "marisa/0.2.6#68446854f5a420672d21f21191f8e5af",
-        "zlib/1.2.13#df233e6bed99052f285331b9f54d9070",
-        "libcurl/7.86.0#bbc887fae3341b3cb776c601f814df05",
-        "glog/0.6.0#d22ebf9111fed68de86b0fa6bf6f9c3f",
-        "fmt/9.1.0#95259249fb7ef8c6b5674a40b00abba3",
-        "gflags/2.2.2#b15c28c567c7ade7449cf994168a559f",
-        "double-conversion/3.2.1#640e35791a4bac95b0545e2f54b7aceb",
-        "libsodium/cci.20220430#7429a9e5351cc67bea3537229921714d",
-        "xsimd/9.0.1#ac9fd02a381698c4e08c5c4ca03b73e1",
-        "xz_utils/5.4.0#a6d90890193dc851fa0d470163271c7a",
-        "prometheus-cpp/1.1.0#ea9b101cb785943adb40ad82eda7856c",
-        "re2/20230301#f8efaf45f98d0193cd0b2ea08b6b4060",
-        "folly/2023.10.30.08@milvus/dev#81d7729cd4013a1b708af3340a3b04d9",
-        "google-cloud-cpp/2.28.0#cf2bffe2264488b6c1153fae2a8db095",
-        "opentelemetry-cpp/1.8.1.1@milvus/2.4#7345034855d593047826b0c74d9a0ced",
-        "librdkafka/1.9.1#e24dcbb0a1684dcf5a56d8d0692ceef3",
-        "abseil/20230125.3#dad7cc4c83bbd44c1f1cc9cc4d97ac88",
-        "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
-        "grpc/1.50.1@milvus/dev#75103960d1cac300cf425ccfccceac08",
-        "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
-        "xxhash/0.8.3#199e63ab9800302c232d030b27accec0",
-        "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
-        "geos/3.12.0#0b177c90c25a8ca210578fb9e2899c37",
-        "icu/74.2#cd1937b9561b8950a2ae6311284c5813",
+        "rocksdb/6.29.5@milvus/dev",
+        "onetbb/2021.9.0",
+        "zstd/1.5.5",
+        "lz4/1.9.4",
+        "snappy/1.1.9",
+        "arrow/17.0.0@milvus/dev-2.6",
+        "googleapis/cci.20221108",
+        "gtest/1.13.0",
+        "benchmark/1.7.0",
+        "yaml-cpp/0.7.0",
+        "marisa/0.2.6",
+        "glog/0.6.0",
+        "gflags/2.2.2",
+        "double-conversion/3.2.1",
+        "libsodium/cci.20220430",
+        "xsimd/9.0.1",
+        "xz_utils/5.4.0",
+        "prometheus-cpp/1.1.0",
+        "re2/20230301",
+        "folly/2023.10.30.09@milvus/dev",
+        "google-cloud-cpp/2.28.0@milvus/dev",
+        "opentelemetry-cpp/1.8.1.1@milvus/2.4",
+        "librdkafka/1.9.1",
+        "roaring/3.0.0",
+        "simde/0.8.2",
+        "xxhash/0.8.3",
+        "unordered_dense/4.4.0",
+        "geos/3.12.0",
+        "icu/74.2",
         "libavrocpp/1.12.1@milvus/dev",
+        "rapidjson/1.1.0",
     )
 
-    generators = ("cmake", "cmake_find_package")
     default_options = {
-        "openssl:shared": True,
-        "libevent:shared": True,
-        "double-conversion:shared": True,
-        "folly:shared": True,
-        "librdkafka:shared": True,
-        "librdkafka:zstd": True,
-        "librdkafka:ssl": True,
-        "librdkafka:sasl": True,
-        "rocksdb:shared": True,
-        "rocksdb:with_zstd": True,
-        "arrow:filesystem_layer": True,
-        "arrow:parquet": True,
-        "arrow:compute": True,
-        "arrow:with_re2": True,
-        "arrow:with_zstd": True,
-        "arrow:with_boost": True,
-        "arrow:with_thrift": True,
-        "arrow:with_jemalloc": True,
-        "arrow:with_openssl": True,
-        "arrow:shared": False,
-        "arrow:with_azure": True,
-        "arrow:with_s3": True,
-        "arrow:encryption": True,
-        "aws-sdk-cpp:config": True,
-        "aws-sdk-cpp:text-to-speech": False,
-        "aws-sdk-cpp:transfer": False,
-        "aws-sdk-cpp:s3-crt": True,
-        "gtest:build_gmock": True,
-        "boost:without_locale": False,
-        "boost:without_test": True,
-        "glog:with_gflags": True,
-        "glog:shared": True,
-        "prometheus-cpp:with_pull": False,
-        "fmt:header_only": True,
-        "onetbb:tbbmalloc": False,
-        "onetbb:tbbproxy": False,
-        "gdal:shared": True,
-        "gdal:fPIC": True,
-        "icu:shared": False,
-        "icu:data_packaging": "library",
+        "openssl/*:shared": True,
+        "libevent/*:shared": True,
+        "double-conversion/*:shared": True,
+        "folly/*:shared": True,
+        "librdkafka/*:shared": True,
+        "librdkafka/*:zstd": True,
+        "librdkafka/*:ssl": True,
+        "librdkafka/*:sasl": True,
+        "rocksdb/*:shared": True,
+        "rocksdb/*:with_zstd": True,
+        "arrow/*:filesystem_layer": True,
+        "arrow/*:parquet": True,
+        "arrow/*:compute": True,
+        "arrow/*:with_re2": True,
+        "arrow/*:with_zstd": True,
+        "arrow/*:with_boost": True,
+        "arrow/*:with_thrift": True,
+        "arrow/*:with_jemalloc": True,
+        "arrow/*:with_openssl": True,
+        "arrow/*:shared": False,
+        "arrow/*:with_azure": True,
+        "arrow/*:with_s3": True,
+        "arrow/*:encryption": True,
+        "aws-sdk-cpp/*:config": True,
+        "aws-sdk-cpp/*:text-to-speech": False,
+        "aws-sdk-cpp/*:transfer": False,
+        "aws-sdk-cpp/*:s3-crt": True,
+        "gtest/*:build_gmock": True,
+        "boost/*:without_locale": False,
+        "boost/*:without_test": True,
+        "folly/*:use_sse4_2": True,
+        "glog/*:with_gflags": True,
+        "glog/*:shared": True,
+        "prometheus-cpp/*:with_pull": False,
+        "fmt/*:header_only": True,
+        "onetbb/*:tbbmalloc": False,
+        "onetbb/*:tbbproxy": False,
+        "gdal/*:shared": True,
+        "gdal/*:fPIC": True,
+        "icu/*:shared": False,
+        "icu/*:data_packaging": "library",
+        "opentelemetry-cpp/*:with_stl": True,
     }
 
     def configure(self):
         if self.settings.arch not in ("x86_64", "x86"):
-            del self.options["folly"].use_sse4_2
+            try:
+                del self.options["folly"].use_sse4_2
+            except Exception:
+                pass
         if self.settings.os == "Macos":
             # By default abseil use static link but can not be compatible with macos X86
             self.options["abseil"].shared = True
@@ -107,17 +105,45 @@ class MilvusConan(ConanFile):
             self.options["libcurl"].with_ssl = "openssl"
 
     def requirements(self):
+        # force=True: override transitive dependency versions (same behavior as Conan 1)
+        self.requires("boost/1.83.0", force=True)
+        self.requires("openssl/3.1.2", force=True)
+        self.requires("protobuf/3.21.4", force=True)
+        self.requires("grpc/1.50.1@milvus/dev", force=True)
+        self.requires("zlib/1.2.13", force=True)
+        self.requires("libcurl/7.86.0", force=True)
+        self.requires("nlohmann_json/3.11.3", force=True)
+        self.requires("abseil/20230125.3", force=True)
+        self.requires("fmt/9.1.0", force=True)
         if self.settings.os != "Macos":
             self.requires("libunwind/1.7.2")
             # On Linux, use Conan's aws-sdk-cpp (Arrow and milvus-storage both use it)
-            self.requires("aws-sdk-cpp/1.11.352@milvus/dev")
+            self.requires("aws-sdk-cpp/1.11.692@milvus/dev")
         # On macOS, S3 support is provided by milvus-storage using Homebrew's
         # aws-sdk-cpp (brew install aws-sdk-cpp). Arrow's S3 is disabled to avoid
         # pulling in incompatible aws-c-* packages from Conan.
 
-    def imports(self):
-        self.copy("*.dylib", "../lib", "lib")
-        self.copy("*.dll", "../lib", "lib")
-        self.copy("*.so*", "../lib", "lib")
-        self.copy("*", "../bin", "bin")
-        self.copy("*.proto", "../include", "include")
+    def generate(self):
+        deps = CMakeDeps(self)
+        # Set cmake file names to match what downstream projects expect
+        deps.set_property("libavrocpp", "cmake_file_name", "libavrocpp")
+        deps.set_property("libavrocpp", "cmake_target_name", "libavrocpp::libavrocpp")
+        deps.generate()
+        tc = CMakeToolchain(self)
+        tc.generate()
+        # Copy shared libraries (replaces imports() from Conan 1)
+        # In Conan 1, imports() dst="lib" was relative to the build dir (cmake_build/).
+        # In Conan 2, we use generators_folder (cmake_build/conan/) parent to get cmake_build/lib.
+        build_dir = os.path.join(self.generators_folder, "..")
+        for dep in self.dependencies.values():
+            if dep.package_folder:
+                copy(self, "*.so*", src=os.path.join(dep.package_folder, "lib"),
+                     dst=os.path.join(build_dir, "lib"))
+                copy(self, "*.dylib", src=os.path.join(dep.package_folder, "lib"),
+                     dst=os.path.join(build_dir, "lib"))
+                copy(self, "*.dll", src=os.path.join(dep.package_folder, "lib"),
+                     dst=os.path.join(build_dir, "lib"))
+                copy(self, "*", src=os.path.join(dep.package_folder, "bin"),
+                     dst=os.path.join(build_dir, "bin"))
+                copy(self, "*.proto", src=os.path.join(dep.package_folder, "include"),
+                     dst=os.path.join(build_dir, "include"))

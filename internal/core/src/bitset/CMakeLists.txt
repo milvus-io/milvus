@@ -14,6 +14,7 @@ set(BITSET_SRCS
 )
 
 add_library(milvus_bitset)
+target_link_libraries(milvus_bitset PUBLIC milvus_conan_deps)
 
 if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
     list(APPEND BITSET_SRCS
