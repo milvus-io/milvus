@@ -134,6 +134,7 @@ message SearchRequest {
   bool is_iterator = 28;
   string analyzer_name = 29;
   uint64 collection_ttl_timestamps = 30;
+  uint64 entity_ttl_physical_time = 31;
 }
 
 message SubSearchResults {
@@ -203,6 +204,8 @@ message RetrieveRequest {
   common.ConsistencyLevel consistency_level = 18;
   bool is_iterator = 19;
   uint64 collection_ttl_timestamps = 20;
+  // align for master
+  uint64 entity_ttl_physical_time = 23;
 }
 
 

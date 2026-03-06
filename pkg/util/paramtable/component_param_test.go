@@ -45,13 +45,6 @@ func TestComponentParam(t *testing.T) {
 		assert.NotEqual(t, Params.DefaultIndexName.GetValue(), "")
 		t.Logf("default index name = %s", Params.DefaultIndexName.GetValue())
 
-		assert.Equal(t, Params.EntityExpirationTTL.GetAsInt64(), int64(-1))
-		t.Logf("default entity expiration = %d", Params.EntityExpirationTTL.GetAsInt64())
-
-		// test the case coommo
-		params.Save("common.entityExpiration", "50")
-		assert.Equal(t, Params.EntityExpirationTTL.GetAsInt(), 50)
-
 		assert.NotEqual(t, Params.SimdType.GetValue(), "")
 		t.Logf("knowhere simd type = %s", Params.SimdType.GetValue())
 

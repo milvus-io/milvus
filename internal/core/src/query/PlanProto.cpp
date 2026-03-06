@@ -192,8 +192,21 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             pre_filter_plan();
         }
     } else {
-        // no filter, force set iterative filter hint to false, go with normal vector search path
+        // No user filter. Force non-iterative: the iterative path requires
+        // a FilterNode for row-by-row post-filtering, which doesn't apply
+        // here (TTL uses bitmap pre-filtering via FilterBitsNode).
         plan_node->search_info_.iterative_filter_execution = false;
+
+        // When entity-level TTL is enabled, add an AlwaysTrueExpr so that
+        // CompileExpressions injects the TTL bitmap filter at runtime.
+        // (issue #47977)
+        if (schema->get_ttl_field_id().has_value()) {
+            auto always_true_expr = std::make_shared<expr::AlwaysTrueExpr>();
+            plannode = std::make_shared<plan::FilterBitsNode>(
+                milvus::plan::GetNextPlanNodeId(), always_true_expr);
+            sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+        }
+
         plannode = std::make_shared<milvus::plan::MvccNode>(
             milvus::plan::GetNextPlanNodeId(), sources);
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};

@@ -177,10 +177,67 @@ func TestBinlogSerializeWriter(t *testing.T) {
 		err = writer.Close()
 		assert.NoError(t, err)
 
-		logs, _, _, _ := writer.GetLogs()
+		logs, _, _, _, _ := writer.GetLogs()
 		assert.Equal(t, 18, len(logs))
 		assert.Equal(t, 5, len(logs[0].Binlogs))
 	})
+}
+
+func TestCompositeBinlogRecordWriter_TTLFieldCollection(t *testing.T) {
+	ttlFieldID := FieldID(100)
+	w := &CompositeBinlogRecordWriter{
+		// avoid initWriters() side-effects in Write()
+		rw: &MockRecordWriter{
+			writefn: func(Record) error { return nil },
+			closefn: func() error { return nil },
+		},
+		pkCollector:   &PkStatsCollector{pkstats: nil},
+		bm25Collector: &Bm25StatsCollector{bm25Stats: map[int64]*BM25Stats{}},
+		chunkSize:     1<<63 - 1,
+		ttlFieldID:    ttlFieldID,
+	}
+
+	// Build a record with timestamp + nullable ttl field:
+	// ttl values: [10, -1, 0, null, 20] -> only [10, 20] should be collected.
+	rows := 5
+	tsBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	tsBuilder.AppendValues([]int64{1, 2, 3, 4, 5}, nil)
+	tsArr := tsBuilder.NewArray()
+	tsBuilder.Release()
+	defer tsArr.Release()
+
+	ttlBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	ttlBuilder.AppendValues([]int64{10, -1, 0, 30, 20}, []bool{true, true, true, false, true})
+	ttlArr := ttlBuilder.NewArray()
+	ttlBuilder.Release()
+	defer ttlArr.Release()
+
+	ar := array.NewRecord(
+		arrow.NewSchema(
+			[]arrow.Field{
+				{Name: "ts", Type: arrow.PrimitiveTypes.Int64},
+				{Name: "ttl", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+			},
+			nil,
+		),
+		[]arrow.Array{tsArr, ttlArr},
+		int64(rows),
+	)
+	r := NewSimpleArrowRecord(ar, map[FieldID]int{
+		common.TimeStampField: 0,
+		ttlFieldID:            1,
+	})
+	defer r.Release()
+
+	err := w.Write(r)
+	assert.NoError(t, err)
+
+	assert.Equal(t, int64(rows), w.rowNum)
+	assert.ElementsMatch(t, []int64{10, 20}, w.ttlFieldValues)
+
+	neverExpire := int64(^uint64(0) >> 1)
+	got := w.GetExpirQuantiles()
+	assert.Equal(t, []int64{10, 20, neverExpire, neverExpire, neverExpire}, got)
 }
 
 func TestBinlogValueWriter(t *testing.T) {

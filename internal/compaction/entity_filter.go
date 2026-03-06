@@ -8,7 +8,7 @@ import (
 )
 
 type EntityFilter interface {
-	Filtered(pk any, ts typeutil.Timestamp) bool
+	Filtered(pk any, ts typeutil.Timestamp, expirationTimeMicros int64) bool
 
 	GetExpiredCount() int
 	GetDeletedCount() int
@@ -40,7 +40,7 @@ func newEntityFilter(deletedPkTs map[interface{}]typeutil.Timestamp, ttl int64, 
 	}
 }
 
-func (filter *EntityFilterImpl) Filtered(pk any, ts typeutil.Timestamp) bool {
+func (filter *EntityFilterImpl) Filtered(pk any, ts typeutil.Timestamp, expirationTimeMicros int64) bool {
 	if filter.isEntityDeleted(pk, ts) {
 		filter.deletedCount++
 		return true
@@ -48,6 +48,11 @@ func (filter *EntityFilterImpl) Filtered(pk any, ts typeutil.Timestamp) bool {
 
 	// Filtering expired entity
 	if filter.isEntityExpired(ts) {
+		filter.expiredCount++
+		return true
+	}
+
+	if filter.isEntityExpiredByTTLField(expirationTimeMicros) {
 		filter.expiredCount++
 		return true
 	}
@@ -99,4 +104,14 @@ func (filter *EntityFilterImpl) isEntityExpired(entityTs typeutil.Timestamp) boo
 
 	// filter.ttl is nanoseconds
 	return filter.ttl/int64(time.Millisecond) <= dur
+}
+
+func (filter *EntityFilterImpl) isEntityExpiredByTTLField(expirationTimeMicros int64) bool {
+	// entity expire is not enabled if expirationTimeMicros < 0
+	if expirationTimeMicros < 0 {
+		return false
+	}
+
+	// entityExpireTs is microseconds
+	return filter.currentTime.UnixMicro() >= expirationTimeMicros
 }
