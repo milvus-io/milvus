@@ -3,7 +3,8 @@ codecov:
   require_ci_to_pass: no
   notify:
     require_ci_to_pass: no
-    wait_for_ci: false
+    wait_for_ci: true
+    after_n_builds: 3  # Wait for all 3 coverage uploads: cpp-unit-test, go-test, integration-test
   ci:
     - jenkins.milvus.io:18080
 coverage:
