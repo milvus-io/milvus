@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -93,10 +94,18 @@ func (s *SortCompactionTaskSuite) setupTest() {
 }
 
 func (s *SortCompactionTaskSuite) SetupTest() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
+	initcore.InitStorageV2FileSystem(paramtable.Get())
 	s.setupTest()
 }
 
 func (s *SortCompactionTaskSuite) TearDownTest() {
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	initcore.CleanArrowFileSystemSingleton()
 }
 
 func (s *SortCompactionTaskSuite) TestNewSortCompactionTask() {

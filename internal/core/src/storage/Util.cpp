@@ -1588,8 +1588,8 @@ GetFieldDatasFromManifest(
             continue;
         }
 
-        auto chunked_array =
-            std::make_shared<arrow::ChunkedArray>(batch->column(0));
+        auto chunked_array = std::make_shared<arrow::ChunkedArray>(
+            batch->GetColumnByName(field_id_str));
         auto field_data = CreateFieldData(data_type.value(),
                                           element_type.value(),
                                           batch->schema()->field(0)->nullable(),
