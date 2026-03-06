@@ -9,6 +9,7 @@ import (
 )
 
 // MustGetBuilder returns the wal builder by name.
+// Deprecated: Use NewOpener instead.
 func MustGetBuilder(name message.WALName, interceptorBuilders ...interceptors.InterceptorBuilder) wal.OpenerBuilder {
 	b := registry.MustGetBuilder(name)
 	return adaptor.AdaptImplsToBuilder(b, interceptorBuilders...)

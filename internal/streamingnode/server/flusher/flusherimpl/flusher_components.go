@@ -5,6 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
@@ -82,6 +83,7 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 				MsgID:     adaptor.MustGetMQWrapperIDFromMessage(createCollectionMsg.LastConfirmedMessageID()).Serialize(),
 				MsgGroup:  "", // Not important any more.
 				Timestamp: createCollectionMsg.TimeTick(),
+				WALName:   commonpb.WALName(createCollectionMsg.WALName()),
 			},
 		},
 		func(t syncmgr.Task, err error) {
