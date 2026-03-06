@@ -56,17 +56,22 @@ type MixCompactionTaskStorageV2Suite struct {
 }
 
 func (s *MixCompactionTaskStorageV2Suite) SetupTest() {
-	s.setupTest()
-	paramtable.Get().Save("common.storageType", "local")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
 	initcore.InitStorageV2FileSystem(paramtable.Get())
+	s.setupTest()
 	s.task.compactionParams = compaction.GenParams()
 }
 
 func (s *MixCompactionTaskStorageV2Suite) TearDownTest() {
-	paramtable.Get().Reset("common.storageType")
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "insert_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "delta_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "stats_log")
+	initcore.CleanArrowFileSystemSingleton()
 }
 
 func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK() {

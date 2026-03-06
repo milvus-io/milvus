@@ -413,19 +413,21 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return res, nil
 	}
 	stepStart = time.Now()
-	textStatsLogs, err := t.createTextIndex(ctx,
-		t.collectionID, t.partitionID, targetSegemntID, t.GetPlanID(),
-		res.GetSegments()[0].GetInsertLogs())
-	if err != nil {
-		log.Warn("failed to create text indexes", zap.Int64("targetSegmentID", targetSegemntID),
-			zap.Error(err))
-		return &datapb.CompactionPlanResult{
-			PlanID: t.GetPlanID(),
-			State:  datapb.CompactionTaskState_failed,
-		}, nil
+	for _, resultSegment := range res.GetSegments() {
+		textStatsLogs, err := t.createTextIndex(ctx,
+			t.collectionID, t.partitionID, targetSegemntID, t.GetPlanID(),
+			resultSegment)
+		if err != nil {
+			log.Warn("failed to create text indexes", zap.Int64("targetSegmentID", targetSegemntID),
+				zap.Error(err))
+			return &datapb.CompactionPlanResult{
+				PlanID: t.GetPlanID(),
+				State:  datapb.CompactionTaskState_failed,
+			}, nil
+		}
+		resultSegment.TextStatsLogs = textStatsLogs
 	}
 	createTextIndexCost := time.Since(stepStart)
-	res.Segments[0].TextStatsLogs = textStatsLogs
 
 	totalCost := time.Since(compactStart)
 	log.Info("compact done", zap.Int64("targetSegmentID", targetSegemntID),
@@ -478,7 +480,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 	partitionID int64,
 	segmentID int64,
 	taskID int64,
-	insertBinlogs []*datapb.FieldBinlog,
+	segment *datapb.CompactionSegment,
 ) (map[int64]*datapb.TextIndexStats, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collectionID),
@@ -486,7 +488,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 		zap.Int64("segmentID", segmentID),
 	)
 
-	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
+	fieldBinlogs := lo.GroupBy(segment.GetInsertLogs(), func(binlog *datapb.FieldBinlog) int64 {
 		return binlog.GetFieldID()
 	})
 
@@ -559,7 +561,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				StorageConfig:             newStorageConfig,
 				CurrentScalarIndexVersion: t.plan.GetCurrentScalarIndexVersion(),
 				StorageVersion:            t.storageVersion,
-				Manifest:                  t.manifest,
+				Manifest:                  segment.GetManifest(),
 			}
 
 			if len(analyzerExtraInfo) > 0 {
@@ -568,7 +570,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 
 			if t.storageVersion == storage.StorageV2 || t.storageVersion == storage.StorageV3 {
 				buildIndexParams.SegmentInsertFiles = util.GetSegmentInsertFiles(
-					insertBinlogs,
+					segment.GetInsertLogs(),
 					t.compactionParams.StorageConfig,
 					collectionID,
 					partitionID,
