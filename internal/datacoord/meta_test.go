@@ -97,6 +97,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Maybe()
 
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.Error(err)
@@ -114,6 +116,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil).Maybe()
 
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.Error(err)
@@ -172,6 +175,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil).Maybe()
 
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.Error(err)
@@ -188,6 +193,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil).Maybe()
 
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.Error(err)
@@ -204,6 +211,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil).Maybe()
 
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.Error(err)
@@ -220,6 +229,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil).Maybe()
 
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.Error(err)
@@ -236,6 +247,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil).Maybe()
 
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.Error(err)
