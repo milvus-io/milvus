@@ -270,6 +270,15 @@ struct GeneratedData {
                                 src_data.begin(), src_data.end(), ret_data);
                             break;
                         }
+                        case DataType::MOL: {
+                            auto ret_data =
+                                reinterpret_cast<std::string*>(ret.data());
+                            auto src_data =
+                                target_field_data.scalars().mol_data().data();
+                            std::copy(
+                                src_data.begin(), src_data.end(), ret_data);
+                            break;
+                        }
                         default: {
                             ThrowInfo(Unsupported, "unsupported");
                         }
@@ -540,6 +549,27 @@ GenRandomGeometry() {
         default:
             return generateRandomPoint();
     }
+}
+
+// Generate random MOL data (SMILES strings as bytes)
+// Common SMILES examples for testing
+inline std::string
+GenRandomMol() {
+    // Simple SMILES molecules for testing
+    static const std::vector<std::string> smiles_list = {
+        "C",         // Methane
+        "CC",        // Ethane
+        "CCC",       // Propane
+        "CCO",       // Ethanol
+        "CCCO",      // Propanol
+        "c1ccccc1",  // Benzene
+        "CC(=O)O",   // Acetic acid
+        "CCN",       // Ethylamine
+        "CCOCC",     // Diethyl ether
+        "CC(C)C",    // Isobutane
+    };
+    int idx = rand() % smiles_list.size();
+    return smiles_list[idx];
 }
 
 inline GeneratedData
@@ -1014,6 +1044,17 @@ DataGen(SchemaPtr schema,
                     }
                 }
                 GEOS_finish_r(ctx);
+                insert_cols(data, N, field_meta, random_valid);
+                break;
+            }
+            case DataType::MOL: {
+                vector<std::string> data(N);
+                for (int i = 0; i < N / repeat_count; i++) {
+                    std::string mol = GenRandomMol();
+                    for (int j = 0; j < repeat_count; j++) {
+                        data[i * repeat_count + j] = mol;
+                    }
+                }
                 insert_cols(data, N, field_meta, random_valid);
                 break;
             }
@@ -1654,6 +1695,22 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                                             dim);
                 } else {
                     createFieldData(data_raw.data(), DataType::GEOMETRY, dim);
+                }
+                break;
+            }
+            case DataType::MOL: {
+                auto src_data = data->scalars().mol_data().data();
+                std::vector<std::string> data_raw(src_data.size());
+                for (int i = 0; i < src_data.size(); i++) {
+                    auto str = src_data.Get(i);
+                    data_raw[i] = std::move(std::string(str));
+                }
+                if (field_meta.is_nullable()) {
+                    auto raw_valid_data = data->valid_data().data();
+                    createNullableFieldData(
+                        data_raw.data(), raw_valid_data, DataType::MOL, dim);
+                } else {
+                    createFieldData(data_raw.data(), DataType::MOL, dim);
                 }
                 break;
             }
