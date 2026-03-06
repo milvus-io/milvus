@@ -36,7 +36,7 @@ type vllmProvider struct {
 	truncateParams map[string]any
 }
 
-func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (modelProvider, error) {
+func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (ModelProvider, error) {
 	var endpoint string
 	var err error
 	maxBatch := 32
@@ -81,7 +81,7 @@ func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, cr
 	return &provider, nil
 }
 
-func (provider *vllmProvider) rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
+func (provider *vllmProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
 	rerankResp, err := provider.client.Rerank(query, docs, provider.truncateParams, 30)
 	if err != nil {
 		return nil, err
