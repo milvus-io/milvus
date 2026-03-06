@@ -872,8 +872,8 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    bitset,
                                    op_context,
                                    output);
-        milvus::tracer::AddEvent(
-            "finish_searching_vector_temperate_binlog_index");
+        // milvus::tracer::AddEvent(
+            // "finish_searching_vector_temperate_binlog_index");
     } else if (get_bit(index_ready_bitset_, field_id)) {
         AssertInfo(vector_indexings_.is_ready(field_id),
                    "vector indexes isn't ready for field " +
@@ -887,7 +887,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    bitset,
                                    op_context,
                                    output);
-        milvus::tracer::AddEvent("finish_searching_vector_index");
+        // milvus::tracer::AddEvent("finish_searching_vector_index");
     } else {
         AssertInfo(
             get_bit(field_data_ready_bitset_, field_id),
@@ -916,7 +916,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                     bitset,
                                     op_context,
                                     output);
-        milvus::tracer::AddEvent("finish_searching_vector_data");
+        // milvus::tracer::AddEvent("finish_searching_vector_data");
     }
 }
 

@@ -52,7 +52,7 @@ PhyMvccNode::GetOutput() {
         return nullptr;
     }
 
-    tracer::AutoSpan span("PhyMvccNode::Execute", tracer::GetRootSpan(), true);
+    // tracer::AutoSpan span("PhyMvccNode::Execute", tracer::GetRootSpan(), true);
 
     if (!is_source_node_ && input_ == nullptr) {
         return nullptr;
@@ -63,7 +63,7 @@ PhyMvccNode::GetOutput() {
         return nullptr;
     }
 
-    tracer::AddEvent(fmt::format("input_rows: {}", active_count_));
+    // tracer::AddEvent(fmt::format("input_rows: {}", active_count_));
     // the first vector is filtering result and second bitset is a valid bitset
     // if valid_bitset[i]==false, means result[i] is null
     auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
