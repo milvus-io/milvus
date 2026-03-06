@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
@@ -283,19 +284,48 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 
 	phaseStart = time.Now()
 	binlogs, stats, bm25stats, manifest, expirQuantiles := srw.GetLogs()
+
+	// For V3 segments, register bloom filter and BM25 stats in manifest.
+	// After registration, stats/bm25stats are set to nil so the legacy
+	// binlog-compress path below is skipped for these fields.
+	if manifest != "" {
+		var statEntries []packed.StatEntry
+		if stats != nil {
+			statEntries = append(statEntries, packed.FieldBinlogStatEntry("bloom_filter", stats.GetFieldID(), stats))
+		}
+		for fieldID, bm25stat := range bm25stats {
+			statEntries = append(statEntries, packed.FieldBinlogStatEntry("bm25", fieldID, bm25stat))
+		}
+
+		if len(statEntries) > 0 {
+			manifest, err = packed.AddStatsToManifest(manifest, t.compactionParams.StorageConfig, statEntries)
+			if err != nil {
+				return nil, fmt.Errorf("failed to add stats to manifest: %w", err)
+			}
+		}
+		stats = nil
+		bm25stats = nil
+	}
+
 	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err
 	}
 
-	statsLogs := []*datapb.FieldBinlog{stats}
-	if err := binlog.CompressFieldBinlogs(statsLogs); err != nil {
-		return nil, err
+	var statsLogs []*datapb.FieldBinlog
+	if stats != nil {
+		statsLogs = []*datapb.FieldBinlog{stats}
+		if err := binlog.CompressFieldBinlogs(statsLogs); err != nil {
+			return nil, err
+		}
 	}
 
-	bm25StatsLogs := lo.Values(bm25stats)
-	if err := binlog.CompressFieldBinlogs(bm25StatsLogs); err != nil {
-		return nil, err
+	var bm25StatsLogs []*datapb.FieldBinlog
+	if len(bm25stats) > 0 {
+		bm25StatsLogs = lo.Values(bm25stats)
+		if err := binlog.CompressFieldBinlogs(bm25StatsLogs); err != nil {
+			return nil, err
+		}
 	}
 	compressCost := time.Since(phaseStart)
 
@@ -425,6 +455,23 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		}, nil
 	}
 	createTextIndexCost := time.Since(stepStart)
+
+	// For V3 segments, register text index stats in manifest
+	if res.Segments[0].GetManifest() != "" && len(textStatsLogs) > 0 {
+		statEntries := packed.TextIndexStatEntries(textStatsLogs, t.plan.GetCurrentScalarIndexVersion())
+		newManifest, mErr := packed.AddStatsToManifest(
+			res.Segments[0].GetManifest(), t.compactionParams.StorageConfig, statEntries)
+		if mErr != nil {
+			log.Warn("failed to add text index stats to manifest",
+				zap.Int64("targetSegmentID", targetSegemntID), zap.Error(mErr))
+			return &datapb.CompactionPlanResult{
+				PlanID: t.GetPlanID(),
+				State:  datapb.CompactionTaskState_failed,
+			}, nil
+		}
+		res.Segments[0].Manifest = newManifest
+		textStatsLogs = nil
+	}
 	res.Segments[0].TextStatsLogs = textStatsLogs
 
 	totalCost := time.Since(compactStart)
