@@ -717,7 +717,9 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 	}, nil
 }
 
-// only used for shard delegator search segments from worker
+// SearchSegments performs search on segments.
+// If req.FilterOnly is true, only executes filter and returns valid count per segment (Stage 1 of two-stage search).
+// If req.FilterOnly is false, performs normal vector search and returns search results.
 func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
 	channel := req.GetDmlChannels()[0]
 	log := log.Ctx(ctx).With(
