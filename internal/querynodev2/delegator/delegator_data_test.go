@@ -22,6 +22,8 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1537,6 +1539,116 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	delegator.deleteBuffer.UnRegister(uint64(21))
 	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.Empty(pks)
+}
+
+// TestLoadSegmentsDoesNotBlockProcessDelete verifies that the 3-phase loadStreamDelete
+// does not block ProcessDelete for extended periods. Before the fix (#47882),
+// loadStreamDelete held deleteMut.RLock for the entire duration of BF checking (30-60s),
+// which blocked ProcessDelete (needs WLock), freezing tsafe and causing query timeouts.
+func (s *DelegatorDataSuite) TestLoadSegmentsDoesNotBlockProcessDelete() {
+	defer func() {
+		s.workerManager.ExpectedCalls = nil
+		s.loader.ExpectedCalls = nil
+	}()
+
+	// Set up bloom filter that will match some deletes
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
+		Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
+		return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
+			bfs := pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
+			bf := bloomfilter.NewBloomFilterWithType(
+				paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				paramtable.Get().CommonCfg.BloomFilterType.GetValue())
+			pks := &storage.PkStatistics{PkFilter: bf}
+			pks.UpdatePKRange(&storage.Int64FieldData{Data: []int64{10, 20, 30}})
+			bfs.AddHistoricalStats(pks)
+			return bfs
+		})
+	}, func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) error {
+		return nil
+	})
+
+	workers := make(map[int64]*cluster.MockWorker)
+	worker1 := &cluster.MockWorker{}
+	workers[1] = worker1
+
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		Return(nil)
+	worker1.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).Return(nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+		return workers[nodeID]
+	}, nil)
+
+	// Pre-populate delete buffer with entries so loadStreamDelete has work to do
+	for i := 0; i < 100; i++ {
+		s.delegator.ProcessDelete([]*DeleteData{
+			{
+				PartitionID: 500,
+				PrimaryKeys: []storage.PrimaryKey{
+					storage.NewInt64PrimaryKey(int64(i)),
+				},
+				Timestamps: []uint64{uint64(10 + i)},
+				RowCount:   1,
+			},
+		}, uint64(10+i))
+	}
+
+	// Track ProcessDelete latency during concurrent LoadSegments
+	var processDeleteBlocked atomic.Bool
+	var wg sync.WaitGroup
+
+	// Start LoadSegments in background
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		_ = s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			DstNodeID:    1,
+			CollectionID: s.collectionID,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:     300,
+					PartitionID:   500,
+					StartPosition: &msgpb.MsgPosition{Timestamp: 5},
+					DeltaPosition: &msgpb.MsgPosition{Timestamp: 5},
+					Level:         datapb.SegmentLevel_L1,
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+				},
+			},
+		})
+	}()
+
+	// Give LoadSegments time to start Phase 2 (unlock period)
+	time.Sleep(10 * time.Millisecond)
+
+	// Attempt ProcessDelete — with the fix, this should complete quickly
+	// because Phase 2 does NOT hold deleteMut
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		start := time.Now()
+		s.delegator.ProcessDelete([]*DeleteData{
+			{
+				PartitionID: 500,
+				PrimaryKeys: []storage.PrimaryKey{
+					storage.NewInt64PrimaryKey(999),
+				},
+				Timestamps: []uint64{200},
+				RowCount:   1,
+			},
+		}, 200)
+		// If ProcessDelete took more than 5 seconds, something is wrong
+		// (before the fix, it would block for 30-60s)
+		if time.Since(start) > 5*time.Second {
+			processDeleteBlocked.Store(true)
+		}
+	}()
+
+	wg.Wait()
+	s.False(processDeleteBlocked.Load(), "ProcessDelete was blocked for too long during LoadSegments — tsafe would freeze")
 }
 
 func (s *DelegatorDataSuite) TestDelegatorData_ExcludeSegments() {

@@ -541,13 +541,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 
-	log.Debug("load delete...")
-	err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker)
-	if err != nil {
-		log.Warn("load stream delete failed", zap.Error(err))
-		return err
-	}
-
+	// Load BM25 stats BEFORE loadStreamDelete so stats are ready before segment becomes visible
 	err = sd.loadBM25Stats(ctx, infos, req)
 	if err != nil {
 		log.Warn("failed to load BM25 stats", zap.Error(err))
@@ -563,8 +557,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		bfMap[candidate.ID()] = candidate
 	}
 
-	// Build entries with Candidate - use filtered infos instead of req.GetInfos()
-	// This ensures we only add entries for segments that were actually loaded (not skipped as duplicates)
+	// Build entries with Candidate before loadStreamDelete, which will atomically add them to distribution
 	entries := make([]SegmentEntry, 0, len(infos))
 	for _, info := range infos {
 		entry := SegmentEntry{
@@ -578,7 +571,24 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		entries = append(entries, entry)
 	}
 
-	return sd.addDistributionIfVersionOK(req.GetLoadMeta().GetSchemaVersion(), entries...)
+	log.Debug("load delete...")
+	// loadStreamDelete now handles distribution add atomically in Phase 3
+	err = sd.loadStreamDelete(ctx, candidates, infos, req, targetNodeID, worker,
+		entries, req.GetLoadMeta().GetSchemaVersion())
+	if err != nil {
+		log.Warn("load stream delete failed", zap.Error(err))
+		// Rollback BM25 stats registered by loadBM25Stats above,
+		// since segment will not be added to distribution.
+		if sd.idfOracle != nil {
+			segmentIDs := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
+				return info.GetSegmentID()
+			})
+			sd.idfOracle.UnregisterSealed(segmentIDs...)
+		}
+		return err
+	}
+
+	return nil
 }
 
 func (sd *shardDelegator) addDistributionIfVersionOK(version uint64, entries ...SegmentEntry) error {
@@ -724,35 +734,101 @@ func (sd *shardDelegator) RefreshLevel0DeletionStats() {
 	).Set(float64(totalSize))
 }
 
+// processDeleteRecords performs BF checks on delete buffer records and forwards matching deletes
+// via the buffered forwarder. Does NOT require any lock to be held.
+// Returns the number of timestamp-hit and bloom-filter-hit rows.
+func (sd *shardDelegator) processDeleteRecords(
+	candidate *pkoracle.BloomFilterSet,
+	records []*deletebuffer.Item,
+	forwarder *BufferForwarder,
+) (tsHit, bfHit int64, err error) {
+	for _, entry := range records {
+		for _, record := range entry.Data {
+			tsHit += int64(len(record.DeleteData.Pks))
+			if record.PartitionID != common.AllPartitionsID && candidate.Partition() != record.PartitionID {
+				continue
+			}
+			pks := record.DeleteData.Pks
+			batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+			for idx := 0; idx < len(pks); idx += batchSize {
+				endIdx := idx + batchSize
+				if endIdx > len(pks) {
+					endIdx = len(pks)
+				}
+
+				lc := storage.NewBatchLocationsCache(pks[idx:endIdx])
+				hits := candidate.BatchPkExist(lc)
+				for i, hit := range hits {
+					if hit {
+						bfHit++
+						if err = forwarder.Buffer(pks[idx+i], record.DeleteData.Tss[idx+i]); err != nil {
+							return tsHit, bfHit, err
+						}
+					}
+				}
+			}
+		}
+	}
+	return tsHit, bfHit, nil
+}
+
+// segDeleteSnapshot holds the snapshotted delete buffer entries for a segment,
+// captured under RLock in Phase 1 of loadStreamDelete.
+type segDeleteSnapshot struct {
+	records       []*deletebuffer.Item // copied slice of delete buffer entries
+	snapshotMaxTs uint64               // max Item.Ts in snapshot, used for timestamp-based catch-up
+}
+
 func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	candidates []*pkoracle.BloomFilterSet,
 	infos []*querypb.SegmentLoadInfo,
 	req *querypb.LoadSegmentsRequest,
 	targetNodeID int64,
 	worker cluster.Worker,
+	entries []SegmentEntry,
+	schemaVersion uint64,
 ) error {
 	log := sd.getLogger(ctx)
 
 	idCandidates := lo.SliceToMap(candidates, func(candidate *pkoracle.BloomFilterSet) (int64, *pkoracle.BloomFilterSet) {
 		return candidate.ID(), candidate
 	})
+
+	// Phase 0: Forward L0 deletions (no lock needed, unchanged)
 	for _, info := range infos {
 		candidate := idCandidates[info.GetSegmentID()]
-		// forward l0 deletion
 		err := sd.forwardL0Deletion(ctx, info, req, candidate, targetNodeID, worker)
 		if err != nil {
 			return err
 		}
 	}
 
+	// === Phase 1: Snapshot delete buffer entries under RLock (fast — microseconds) ===
 	sd.deleteMut.RLock()
-	defer sd.deleteMut.RUnlock()
-	// apply buffered delete for new segments
-	// no goroutines here since qnv2 has no load merging logic
-	for _, info := range infos {
+	snapshots := make([]segDeleteSnapshot, len(infos))
+	for i, info := range infos {
+		records := sd.deleteBuffer.ListAfter(info.GetStartPosition().GetTimestamp())
+		// Copy the slice to safely use outside lock scope.
+		// ListAfter returns a new slice from doubleCacheBuffer, but we copy to
+		// ensure no dependency on internal buffer state that may change after unlock.
+		copied := make([]*deletebuffer.Item, len(records))
+		copy(copied, records)
+		var maxTs uint64
+		if len(records) > 0 {
+			maxTs = records[len(records)-1].Ts
+		}
+		snapshots[i] = segDeleteSnapshot{
+			records:       copied,
+			snapshotMaxTs: maxTs,
+		}
+	}
+	sd.deleteMut.RUnlock()
+	// RLock released — WAL pipeline (ProcessDelete) is now unblocked
+
+	// Create one forwarder per segment, shared across Phase 2 and Phase 3, flushed once at the end.
+	forwarders := make([]*BufferForwarder, len(infos))
+	for i, info := range infos {
 		candidate := idCandidates[info.GetSegmentID()]
-		// after L0 segment feature
-		// growing segemnts should have load stream delete as well
 		deleteScope := querypb.DataScope_All
 		switch candidate.Type() {
 		case commonpb.SegmentState_Sealed:
@@ -760,57 +836,73 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		case commonpb.SegmentState_Growing:
 			deleteScope = querypb.DataScope_Streaming
 		}
-
-		bufferedForwarder := NewBufferedForwarder(paramtable.Get().QueryNodeCfg.ForwardBatchSize.GetAsInt64(),
+		forwarders[i] = NewBufferedForwarder(paramtable.Get().QueryNodeCfg.ForwardBatchSize.GetAsInt64(),
 			deleteViaWorker(ctx, worker, targetNodeID, info, deleteScope))
+	}
 
-		// list buffered delete
-		deleteRecords := sd.deleteBuffer.ListAfter(info.GetStartPosition().GetTimestamp())
-		tsHitDeleteRows := int64(0)
-		bfHitDeleteRows := int64(0)
+	// === Phase 2: Process snapshot WITHOUT lock (expensive — seconds) ===
+	for i, info := range infos {
+		candidate := idCandidates[info.GetSegmentID()]
 		start := time.Now()
-		for _, entry := range deleteRecords {
-			for _, record := range entry.Data {
-				tsHitDeleteRows += int64(len(record.DeleteData.Pks))
-				if record.PartitionID != common.AllPartitionsID && candidate.Partition() != record.PartitionID {
-					continue
-				}
-				pks := record.DeleteData.Pks
-				batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
-				for idx := 0; idx < len(pks); idx += batchSize {
-					endIdx := idx + batchSize
-					if endIdx > len(pks) {
-						endIdx = len(pks)
-					}
-
-					lc := storage.NewBatchLocationsCache(pks[idx:endIdx])
-					hits := candidate.BatchPkExist(lc)
-					for i, hit := range hits {
-						if hit {
-							bfHitDeleteRows += 1
-							err := bufferedForwarder.Buffer(pks[idx+i], record.DeleteData.Tss[idx+i])
-							if err != nil {
-								return err
-							}
-						}
-					}
-				}
-			}
-		}
-		log.Info("forward delete to worker...",
-			zap.String("channel", info.InsertChannel),
-			zap.Int64("segmentID", info.GetSegmentID()),
-			zap.Time("startPosition", tsoutil.PhysicalTime(info.GetStartPosition().GetTimestamp())),
-			zap.Int64("tsHitDeleteRowNum", tsHitDeleteRows),
-			zap.Int64("bfHitDeleteRowNum", bfHitDeleteRows),
-			zap.Int64("bfCost", time.Since(start).Milliseconds()),
-		)
-		err := bufferedForwarder.Flush()
+		tsHit, bfHit, err := sd.processDeleteRecords(candidate, snapshots[i].records, forwarders[i])
 		if err != nil {
 			return err
 		}
+		log.Info("forward delete to worker (phase 2: snapshot)...",
+			zap.String("channel", info.InsertChannel),
+			zap.Int64("segmentID", info.GetSegmentID()),
+			zap.Time("startPosition", tsoutil.PhysicalTime(info.GetStartPosition().GetTimestamp())),
+			zap.Int64("tsHitDeleteRowNum", tsHit),
+			zap.Int64("bfHitDeleteRowNum", bfHit),
+			zap.Int64("bfCost", time.Since(start).Milliseconds()),
+		)
 	}
-	log.Info("load delete done")
+
+	// === Phase 3: Catch-up new entries + flush + add distribution under RLock (fast — milliseconds) ===
+	sd.deleteMut.RLock()
+	defer sd.deleteMut.RUnlock()
+
+	for i, info := range infos {
+		candidate := idCandidates[info.GetSegmentID()]
+
+		// Use timestamp-based catch-up: fetch records added after the snapshot's max timestamp.
+		// This is robust against delete buffer eviction (Put → evict discards old tail during Phase 2).
+		// Index-based approach (allRecords[snapshotLen:]) would panic or miss data if eviction occurs.
+		// Item.Ts comes from WAL TSO, monotonically increasing and unique per ProcessDelete call,
+		// so ListAfter(snapshotMaxTs + 1) precisely captures only new records.
+		catchUpTs := info.GetStartPosition().GetTimestamp()
+		if snapshots[i].snapshotMaxTs > 0 {
+			catchUpTs = snapshots[i].snapshotMaxTs + 1
+		}
+		newRecords := sd.deleteBuffer.ListAfter(catchUpTs)
+		if len(newRecords) > 0 {
+			start := time.Now()
+			tsHit, bfHit, err := sd.processDeleteRecords(candidate, newRecords, forwarders[i])
+			if err != nil {
+				return err
+			}
+			log.Info("forward delete to worker (phase 3: catch-up)...",
+				zap.String("channel", info.InsertChannel),
+				zap.Int64("segmentID", info.GetSegmentID()),
+				zap.Int64("tsHitDeleteRowNum", tsHit),
+				zap.Int64("bfHitDeleteRowNum", bfHit),
+				zap.Int64("bfCost", time.Since(start).Milliseconds()),
+			)
+		}
+
+		// Flush once per segment after both phases are done
+		if err := forwarders[i].Flush(); err != nil {
+			return err
+		}
+	}
+
+	// Atomically add to distribution while still holding RLock.
+	// This guarantees no ProcessDelete can run between catch-up and distribution update,
+	// so there is no gap between "deletes applied" and "segment visible".
+	if err := sd.addDistributionIfVersionOK(schemaVersion, entries...); err != nil {
+		return err
+	}
+	log.Info("load stream delete done")
 	return nil
 }
 
