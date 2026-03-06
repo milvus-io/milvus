@@ -89,6 +89,11 @@ jobs:
           CCACHE_COMPRESS: 1
           CCACHE_COMPRESSLEVEL: 9
           CCACHE_MAXSIZE: 1G
+          # Disable heavy Rust release optimizations for faster CI builds.
+          # The code checker only verifies compilation, not runtime performance.
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+          CARGO_PROFILE_RELEASE_OPT_LEVEL: "1"
         run: |
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
