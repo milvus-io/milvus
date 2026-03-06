@@ -21,8 +21,8 @@ RUN apt-get update && \
     apt-get update && \
     apt-get install -y --no-install-recommends gpgv curl libaio-dev libgomp1 libopenblas-dev && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
-        ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
-        echo "Etc/UTC" > /etc/timezone && \
+    ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
+    echo "Etc/UTC" > /etc/timezone && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
@@ -44,11 +44,12 @@ ENV MALLOC_CONF=background_thread:true
 
 # Change user to milvus
 ENV ASAN_OPTIONS=detect_leaks=0
-RUN groupadd -r milvus && useradd -r -g milvus milvus && \
+RUN useradd -r -g root milvus && \
     mkdir -p /var/lib/milvus && \
-    chown -R milvus:milvus /milvus /var/lib/milvus
+    chown -R milvus:root /milvus /var/lib/milvus && \
+    chmod -R g=u /milvus /var/lib/milvus
 ENV ASAN_OPTIONS=detect_leaks=1
-USER milvus:milvus
+USER milvus
 
 ENTRYPOINT ["/tini", "--"]
 
