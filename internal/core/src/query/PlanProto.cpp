@@ -112,7 +112,7 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
                 // check if hints is valid
                 ThrowInfo(ConfigInvalid,
                           "hints: {} not supported",
-                          search_info.search_params_[HINTS]);
+                          search_info.search_params_[HINTS].dump());
             }
         }
     }

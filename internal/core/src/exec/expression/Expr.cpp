@@ -98,7 +98,7 @@ ExprSet::Eval(int32_t begin,
 // Create TTL field filtering expression if schema has TTL field configured
 // Returns a single OR expression: ttl_field is null OR ttl_field > physical_us
 // This means: keep entities with null TTL (never expire) OR entities with TTL > current time (not expired)
-inline expr::TypedExprPtr
+expr::TypedExprPtr
 CreateTTLFieldFilterExpression(QueryContext* query_context) {
     auto segment = query_context->get_segment();
     auto& schema = segment->get_schema();

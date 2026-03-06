@@ -593,7 +593,7 @@ template <>
 struct fmt::formatter<milvus::index::JSONType> : fmt::formatter<std::string> {
     template <typename FormatContext>
     auto
-    format(const milvus::index::JSONType& jt, FormatContext& ctx) {
+    format(const milvus::index::JSONType& jt, FormatContext& ctx) const {
         switch (jt) {
             case milvus::index::JSONType::UNKNOWN:
                 return fmt::format_to(ctx.out(), "UNKNOWN");
@@ -631,7 +631,8 @@ template <>
 struct fmt::formatter<milvus::index::JsonKeyLayoutType>
     : fmt::formatter<std::string> {
     auto
-    format(milvus::index::JsonKeyLayoutType type, fmt::format_context& ctx) {
+    format(milvus::index::JsonKeyLayoutType type,
+           fmt::format_context& ctx) const {
         std::string name;
         switch (type) {
             case milvus::index::JsonKeyLayoutType::TYPED:

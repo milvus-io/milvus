@@ -475,8 +475,8 @@ TEST(Query, InnerProduct) {
 }
 
 TEST(Query, DISABLED_FillSegment) {
-    namespace pb = milvus::proto;
-    pb::schema::CollectionSchema proto;
+    namespace milvus_pb = milvus::proto;
+    milvus_pb::schema::CollectionSchema proto;
     proto.set_name("col");
     proto.set_description("asdfhsalkgfhsadg");
     auto dim = 16;
@@ -494,7 +494,7 @@ TEST(Query, DISABLED_FillSegment) {
         field->set_is_primary_key(false);
         field->set_description("asdgfsagf");
         field->set_fieldid(100);
-        field->set_data_type(pb::schema::DataType::FloatVector);
+        field->set_data_type(milvus_pb::schema::DataType::FloatVector);
         auto param = field->add_type_params();
         param->set_key("dim");
         param->set_value("16");
@@ -510,7 +510,7 @@ TEST(Query, DISABLED_FillSegment) {
         field->set_fieldid(101);
         field->set_is_primary_key(true);
         field->set_description("asdgfsagf");
-        field->set_data_type(pb::schema::DataType::Int64);
+        field->set_data_type(milvus_pb::schema::DataType::Int64);
     }
 
     {
@@ -520,7 +520,7 @@ TEST(Query, DISABLED_FillSegment) {
         field->set_fieldid(102);
         field->set_is_primary_key(false);
         field->set_description("asdgfsagf");
-        field->set_data_type(pb::schema::DataType::Int32);
+        field->set_data_type(milvus_pb::schema::DataType::Int32);
     }
 
     auto schema = Schema::ParseFrom(proto);
@@ -556,7 +556,7 @@ TEST(Query, DISABLED_FillSegment) {
         field->set_fieldid(103);
         field->set_is_primary_key(false);
         field->set_description("lack null binlog");
-        field->set_data_type(pb::schema::DataType::Float);
+        field->set_data_type(milvus_pb::schema::DataType::Float);
     }
 
     {
@@ -566,7 +566,7 @@ TEST(Query, DISABLED_FillSegment) {
         field->set_fieldid(104);
         field->set_is_primary_key(false);
         field->set_description("lack default value binlog");
-        field->set_data_type(pb::schema::DataType::Bool);
+        field->set_data_type(milvus_pb::schema::DataType::Bool);
         field->mutable_default_value()->set_bool_data(bool_default_value);
     }
 
@@ -577,7 +577,7 @@ TEST(Query, DISABLED_FillSegment) {
         field->set_fieldid(105);
         field->set_is_primary_key(false);
         field->set_description("lack default value binlog");
-        field->set_data_type(pb::schema::DataType::Int32);
+        field->set_data_type(milvus_pb::schema::DataType::Int32);
         field->mutable_default_value()->set_int_data(int_default_value);
     }
 
@@ -588,7 +588,7 @@ TEST(Query, DISABLED_FillSegment) {
         field->set_fieldid(106);
         field->set_is_primary_key(false);
         field->set_description("lack default value binlog");
-        field->set_data_type(pb::schema::DataType::Int64);
+        field->set_data_type(milvus_pb::schema::DataType::Int64);
         field->mutable_default_value()->set_int_data(long_default_value);
     }
 
@@ -599,7 +599,7 @@ TEST(Query, DISABLED_FillSegment) {
         field->set_fieldid(107);
         field->set_is_primary_key(false);
         field->set_description("lack default value binlog");
-        field->set_data_type(pb::schema::DataType::Float);
+        field->set_data_type(milvus_pb::schema::DataType::Float);
         field->mutable_default_value()->set_float_data(float_default_value);
     }
 
@@ -610,7 +610,7 @@ TEST(Query, DISABLED_FillSegment) {
         field->set_fieldid(108);
         field->set_is_primary_key(false);
         field->set_description("lack default value binlog");
-        field->set_data_type(pb::schema::DataType::Double);
+        field->set_data_type(milvus_pb::schema::DataType::Double);
         field->mutable_default_value()->set_double_data(double_default_value);
     }
 
@@ -621,7 +621,7 @@ TEST(Query, DISABLED_FillSegment) {
         field->set_fieldid(109);
         field->set_is_primary_key(false);
         field->set_description("lack default value binlog");
-        field->set_data_type(pb::schema::DataType::VarChar);
+        field->set_data_type(milvus_pb::schema::DataType::VarChar);
         auto str_type_params = field->add_type_params();
         str_type_params->set_key(MAX_LENGTH);
         str_type_params->set_value(std::to_string(64));
