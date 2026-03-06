@@ -85,6 +85,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 			gcp_credential_json:    C.CString(storageConfig.GetGcpCredentialJSON()),
 			use_custom_part_upload: true,
 			max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
+			tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
 		}
 		defer C.free(unsafe.Pointer(cStorageConfig.address))
 		defer C.free(unsafe.Pointer(cStorageConfig.bucket_name))
@@ -98,6 +99,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
 		defer C.free(unsafe.Pointer(cStorageConfig.region))
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
+		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
 
 		cNeededColumn := make([]*C.char, len(neededColumns))
 		for i, columnName := range neededColumns {
