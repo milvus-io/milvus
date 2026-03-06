@@ -83,6 +83,7 @@ type VecIndexMgr interface {
 	IsDiskVecIndex(indexType IndexType) bool
 	IsMMapSupported(indexType IndexType) bool
 	IsMvSupported(indexType IndexType) bool
+	IsIVFIndexType(indexType IndexType) bool
 }
 
 type vecIndexMgrImpl struct {
@@ -242,6 +243,22 @@ func (mgr *vecIndexMgrImpl) IsDiskVecIndex(indexType IndexType) bool {
 		return false
 	}
 	return (feature & DiskFlag) == DiskFlag
+}
+
+var ivfIndexTypes = map[string]struct{}{
+	"IVF_FLAT":     {},
+	"IVF_PQ":       {},
+	"IVF_SQ8":      {},
+	"SCANN":        {},
+	"BIN_IVF_FLAT": {},
+	"GPU_IVF_FLAT": {},
+	"GPU_IVF_PQ":   {},
+	"IVF_RABITQ":   {},
+}
+
+func (mgr *vecIndexMgrImpl) IsIVFIndexType(indexType IndexType) bool {
+	_, ok := ivfIndexTypes[indexType]
+	return ok
 }
 
 func newVecIndexMgr() *vecIndexMgrImpl {

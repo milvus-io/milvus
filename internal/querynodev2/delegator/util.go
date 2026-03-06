@@ -1,6 +1,7 @@
 package delegator
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"unicode/utf8"
@@ -9,6 +10,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
@@ -163,4 +165,64 @@ func fetchFragmentsFromOffsets(text string, spans SpanList, fragmentOffset int64
 		result = append(result, frag)
 	}
 	return result
+}
+
+func ValidateNprobeForIVF(req *internalpb.SearchRequest, indexType string) error {
+	if !vecindexmgr.GetVecIndexMgrInstance().IsIVFIndexType(indexType) {
+		return nil
+	}
+
+	serializedPlan := req.GetSerializedExprPlan()
+	if serializedPlan == nil {
+		return nil
+	}
+
+	plan := planpb.PlanNode{}
+	err := proto.Unmarshal(serializedPlan, &plan)
+	if err != nil {
+		return nil
+	}
+
+	var searchParams string
+	switch plan.GetNode().(type) {
+	case *planpb.PlanNode_VectorAnns:
+		searchParams = plan.GetVectorAnns().GetQueryInfo().GetSearchParams()
+	default:
+		return nil
+	}
+
+	if searchParams == "" {
+		return nil
+	}
+
+	var params map[string]interface{}
+	if err := json.Unmarshal([]byte(searchParams), &params); err != nil {
+		return nil
+	}
+
+	nprobeVal, ok := params["nprobe"]
+	if !ok {
+		return nil
+	}
+
+	switch v := nprobeVal.(type) {
+	case float64:
+		if v == 0 {
+			return merr.WrapErrParameterInvalidMsg("invalid search parameter 'nprobe': value must be greater than 0, but got 0")
+		}
+	case int:
+		if v == 0 {
+			return merr.WrapErrParameterInvalidMsg("invalid search parameter 'nprobe': value must be greater than 0, but got 0")
+		}
+	case int64:
+		if v == 0 {
+			return merr.WrapErrParameterInvalidMsg("invalid search parameter 'nprobe': value must be greater than 0, but got 0")
+		}
+	case string:
+		if v == "0" {
+			return merr.WrapErrParameterInvalidMsg("invalid search parameter 'nprobe': value must be greater than 0, but got 0")
+		}
+	}
+
+	return nil
 }
