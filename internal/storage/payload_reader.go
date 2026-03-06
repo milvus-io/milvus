@@ -739,33 +739,9 @@ func (r *PayloadReader) GetBinaryVectorFromPayload() ([]byte, int, []bool, int, 
 		}
 
 		column := table.Column(0)
-		validCount := 0
-		for _, chunk := range column.Data().Chunks() {
-			for i := 0; i < chunk.Len(); i++ {
-				if chunk.IsValid(i) {
-					validCount++
-				}
-			}
-		}
-
-		ret := make([]byte, validCount*dim)
-		validData := make([]bool, r.numRows)
-		offset := 0
-		dataIdx := 0
-		for _, chunk := range column.Data().Chunks() {
-			binaryArray, ok := chunk.(*array.Binary)
-			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("expected Binary array for nullable vector, got %T", chunk)
-			}
-			for i := 0; i < binaryArray.Len(); i++ {
-				if binaryArray.IsValid(i) {
-					validData[offset+i] = true
-					bytes := binaryArray.Value(i)
-					copy(ret[dataIdx*dim:(dataIdx+1)*dim], bytes)
-					dataIdx++
-				}
-			}
-			offset += binaryArray.Len()
+		ret, validData, err := readNullableVectorData(column, r.numRows, dim)
+		if err != nil {
+			return nil, -1, nil, 0, err
 		}
 
 		return ret, dim * 8, validData, int(r.numRows), nil
@@ -850,33 +826,9 @@ func (r *PayloadReader) GetFloat16VectorFromPayload() ([]byte, int, []bool, int,
 		}
 
 		column := table.Column(0)
-		validCount := 0
-		for _, chunk := range column.Data().Chunks() {
-			for i := 0; i < chunk.Len(); i++ {
-				if chunk.IsValid(i) {
-					validCount++
-				}
-			}
-		}
-
-		ret := make([]byte, validCount*dim*2)
-		validData := make([]bool, r.numRows)
-		offset := 0
-		dataIdx := 0
-		for _, chunk := range column.Data().Chunks() {
-			binaryArray, ok := chunk.(*array.Binary)
-			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("expected Binary array for nullable vector, got %T", chunk)
-			}
-			for i := 0; i < binaryArray.Len(); i++ {
-				if binaryArray.IsValid(i) {
-					validData[offset+i] = true
-					bytes := binaryArray.Value(i)
-					copy(ret[dataIdx*dim*2:(dataIdx+1)*dim*2], bytes)
-					dataIdx++
-				}
-			}
-			offset += binaryArray.Len()
+		ret, validData, err := readNullableVectorData(column, r.numRows, dim*2)
+		if err != nil {
+			return nil, -1, nil, 0, err
 		}
 
 		return ret, dim, validData, int(r.numRows), nil
@@ -962,33 +914,9 @@ func (r *PayloadReader) GetBFloat16VectorFromPayload() ([]byte, int, []bool, int
 		}
 
 		column := table.Column(0)
-		validCount := 0
-		for _, chunk := range column.Data().Chunks() {
-			for i := 0; i < chunk.Len(); i++ {
-				if chunk.IsValid(i) {
-					validCount++
-				}
-			}
-		}
-
-		ret := make([]byte, validCount*dim*2)
-		validData := make([]bool, r.numRows)
-		offset := 0
-		dataIdx := 0
-		for _, chunk := range column.Data().Chunks() {
-			binaryArray, ok := chunk.(*array.Binary)
-			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("expected Binary array for nullable vector, got %T", chunk)
-			}
-			for i := 0; i < binaryArray.Len(); i++ {
-				if binaryArray.IsValid(i) {
-					validData[offset+i] = true
-					bytes := binaryArray.Value(i)
-					copy(ret[dataIdx*dim*2:(dataIdx+1)*dim*2], bytes)
-					dataIdx++
-				}
-			}
-			offset += binaryArray.Len()
+		ret, validData, err := readNullableVectorData(column, r.numRows, dim*2)
+		if err != nil {
+			return nil, -1, nil, 0, err
 		}
 
 		return ret, dim, validData, int(r.numRows), nil
@@ -1074,36 +1002,12 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, []bool, int
 		}
 
 		column := table.Column(0)
-		validCount := 0
-		for _, chunk := range column.Data().Chunks() {
-			for i := 0; i < chunk.Len(); i++ {
-				if chunk.IsValid(i) {
-					validCount++
-				}
-			}
+		retBytes, validData, err := readNullableVectorData(column, r.numRows, dim*4)
+		if err != nil {
+			return nil, -1, nil, 0, err
 		}
 
-		ret := make([]float32, validCount*dim)
-		validData := make([]bool, r.numRows)
-		offset := 0
-		dataIdx := 0
-		for _, chunk := range column.Data().Chunks() {
-			binaryArray, ok := chunk.(*array.Binary)
-			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("expected Binary array for nullable vector, got %T", chunk)
-			}
-			for i := 0; i < binaryArray.Len(); i++ {
-				if binaryArray.IsValid(i) {
-					validData[offset+i] = true
-					bytes := binaryArray.Value(i)
-					copy(arrow.Float32Traits.CastToBytes(ret[dataIdx*dim:(dataIdx+1)*dim]), bytes)
-					dataIdx++
-				}
-			}
-			offset += binaryArray.Len()
-		}
-
-		return ret, dim, validData, int(r.numRows), nil
+		return arrow.Float32Traits.CastFromBytes(retBytes), dim, validData, int(r.numRows), nil
 	}
 
 	col, err := r.reader.RowGroup(0).Column(0)
@@ -1267,37 +1171,12 @@ func (r *PayloadReader) GetInt8VectorFromPayload() ([]int8, int, []bool, int, er
 		}
 
 		column := table.Column(0)
-		validCount := 0
-		for _, chunk := range column.Data().Chunks() {
-			for i := 0; i < chunk.Len(); i++ {
-				if chunk.IsValid(i) {
-					validCount++
-				}
-			}
+		retBytes, validData, err := readNullableVectorData(column, r.numRows, dim)
+		if err != nil {
+			return nil, -1, nil, 0, err
 		}
 
-		ret := make([]int8, validCount*dim)
-		validData := make([]bool, r.numRows)
-		offset := 0
-		dataIdx := 0
-		for _, chunk := range column.Data().Chunks() {
-			binaryArray, ok := chunk.(*array.Binary)
-			if !ok {
-				return nil, -1, nil, 0, fmt.Errorf("expected Binary array for nullable vector, got %T", chunk)
-			}
-			for i := 0; i < binaryArray.Len(); i++ {
-				if binaryArray.IsValid(i) {
-					validData[offset+i] = true
-					bytes := binaryArray.Value(i)
-					int8Vals := arrow.Int8Traits.CastFromBytes(bytes)
-					copy(ret[dataIdx*dim:(dataIdx+1)*dim], int8Vals)
-					dataIdx++
-				}
-			}
-			offset += binaryArray.Len()
-		}
-
-		return ret, dim, validData, int(r.numRows), nil
+		return arrow.Int8Traits.CastFromBytes(retBytes), dim, validData, int(r.numRows), nil
 	}
 
 	col, err := r.reader.RowGroup(0).Column(0)
@@ -1495,3 +1374,63 @@ var (
 	BitMask        = [8]byte{1, 2, 4, 8, 16, 32, 64, 128}
 	FlippedBitMask = [8]byte{254, 253, 251, 247, 239, 223, 191, 127}
 )
+
+// readNullableVectorData reads nullable vector data stored as Arrow Binary chunks.
+// bytesPerVector is the byte size of each vector entry.
+// Returns compact byte data (only valid vector entries) and validData bitmap.
+//
+// Arrow Binary array has 3 buffers:
+//   - Buffer 0 (validity bitmap): bit i indicates whether row i is valid (non-null).
+//   - Buffer 1 (offsets, int32): length n+1, offsets[i] is the start position of row i
+//     in the values buffer, offsets[n] is the total byte length.
+//   - Buffer 2 (values): concatenated raw bytes of all entries.
+//
+// Milvus's PayloadWriter uses BinaryBuilder.AppendNull() for null entries, which advances
+// the offset without appending any bytes (offsets[i] == offsets[i+1]). Therefore null entries
+// contribute zero bytes to the values buffer, and ValueBytes() returns a contiguous block
+// containing only valid entries' data. This allows us to bulk-copy ValueBytes() directly
+// instead of iterating per element with Value(i).
+// We add a length assertion to guard against any future change that breaks this invariant.
+func readNullableVectorData(column *arrow.Column, numRows int64, bytesPerVector int) ([]byte, []bool, error) {
+	chunks := column.Data().Chunks()
+	validCount := column.Len() - column.NullN()
+
+	ret := make([]byte, validCount*bytesPerVector)
+	validData := make([]bool, numRows)
+	logicalOffset := 0
+	dataOffset := 0
+	for _, chunk := range chunks {
+		binaryArray, ok := chunk.(*array.Binary)
+		if !ok {
+			return nil, nil, merr.WrapErrParameterInvalidMsg("expected Binary array for nullable vector, got %T", chunk)
+		}
+		chunkLen := binaryArray.Len()
+
+		// Bulk copy all non-null vector data from this chunk
+		chunkValidCount := chunkLen - binaryArray.NullN()
+		if chunkValidCount > 0 {
+			valueBytes := binaryArray.ValueBytes()
+			expected := chunkValidCount * bytesPerVector
+			if len(valueBytes) != expected {
+				return nil, nil, merr.WrapErrParameterInvalidMsg(
+					"unexpected valueBytes length for nullable vector: got %d, expected %d", len(valueBytes), expected)
+			}
+			copy(ret[dataOffset:dataOffset+len(valueBytes)], valueBytes)
+			dataOffset += len(valueBytes)
+		}
+
+		// Build validData
+		if binaryArray.NullN() == 0 {
+			// compiler optimizes this range-based fill pattern
+			for i := range validData[logicalOffset : logicalOffset+chunkLen] {
+				validData[logicalOffset+i] = true
+			}
+		} else {
+			for i := 0; i < chunkLen; i++ {
+				validData[logicalOffset+i] = binaryArray.IsValid(i)
+			}
+		}
+		logicalOffset += chunkLen
+	}
+	return ret, validData, nil
+}
