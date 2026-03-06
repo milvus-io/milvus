@@ -85,7 +85,9 @@ type WatchKV interface {
 	WatchWithRevision(ctx context.Context, key string, revision int64) clientv3.WatchChan
 }
 
-// SnapShotKV is TxnKV for snapshot data. It must save timestamp.
+// SnapShotKV is a KV interface with timestamp support.
+// Deprecated: The ts parameter is no longer used. All operations read/write the latest version only.
+// Snapshot versioning has been removed. This interface is kept for backward compatibility with the Catalog layer.
 //
 //go:generate mockery --name=SnapShotKV --with-expecter
 type SnapShotKV interface {
