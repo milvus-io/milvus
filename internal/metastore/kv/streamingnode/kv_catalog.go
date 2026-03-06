@@ -3,7 +3,6 @@ package streamingnode
 import (
 	"context"
 	"fmt"
-	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -274,7 +273,7 @@ func (c *catalog) SaveConsumeCheckpoint(ctx context.Context, pchannelName string
 
 // buildVChannelMetaPath builds the path for vchannel meta
 func buildVChannelMetaPath(pChannelName string) string {
-	return path.Join(buildWALDirectory(pChannelName), DirectoryVChannel) + "/"
+	return buildWALDirectory(pChannelName) + DirectoryVChannel + "/"
 }
 
 // removePrefix removes the prefix from the keys.
@@ -287,30 +286,30 @@ func removePrefix(prefix string, keys []string) []string {
 
 // buildVChannelMetaPathOfVChannel builds the path for vchannel meta
 func buildVChannelMetaPathOfVChannel(pChannelName string, vchannelName string) string {
-	return path.Join(buildVChannelMetaPath(pChannelName), vchannelName)
+	return buildVChannelMetaPath(pChannelName) + vchannelName
 }
 
 // buildVChannelSchemaPath builds the path for vchannel schema
 func buildVChannelSchemaPath(pChannelName string, vchannelName string, version uint64) string {
-	return path.Join(buildVChannelMetaPathOfVChannel(pChannelName, vchannelName), DirectorySchema, strconv.FormatUint(version, 10))
+	return buildVChannelMetaPathOfVChannel(pChannelName, vchannelName) + "/" + DirectorySchema + "/" + strconv.FormatUint(version, 10)
 }
 
 // buildSegmentAssignmentMetaPath builds the path for segment assignment
 func buildSegmentAssignmentMetaPath(pChannelName string) string {
-	return path.Join(buildWALDirectory(pChannelName), DirectorySegmentAssign) + "/"
+	return buildWALDirectory(pChannelName) + DirectorySegmentAssign + "/"
 }
 
 // buildSegmentAssignmentMetaPathOfSegment builds the path for segment assignment
 func buildSegmentAssignmentMetaPathOfSegment(pChannelName string, segmentID int64) string {
-	return path.Join(buildWALDirectory(pChannelName), DirectorySegmentAssign, strconv.FormatInt(segmentID, 10))
+	return buildWALDirectory(pChannelName) + DirectorySegmentAssign + "/" + strconv.FormatInt(segmentID, 10)
 }
 
 // buildConsumeCheckpointPath builds the path for consume checkpoint
 func buildConsumeCheckpointPath(pchannelName string) string {
-	return path.Join(buildWALDirectory(pchannelName), KeyConsumeCheckpoint)
+	return buildWALDirectory(pchannelName) + KeyConsumeCheckpoint
 }
 
 // buildWALDirectory builds the path for wal directory
 func buildWALDirectory(pchannelName string) string {
-	return path.Join(MetaPrefix, DirectoryWAL, pchannelName) + "/"
+	return MetaPrefix + "/" + DirectoryWAL + "/" + pchannelName + "/"
 }

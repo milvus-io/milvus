@@ -61,7 +61,7 @@ const (
 )
 
 func BuildDatabasePrefixWithDBID(dbID int64) string {
-	return fmt.Sprintf("%s/%d", CollectionInfoMetaPrefix, dbID)
+	return fmt.Sprintf("%s/%d/", CollectionInfoMetaPrefix, dbID)
 }
 
 func BuildCollectionKeyWithDBID(dbID int64, collectionID int64) string {
@@ -76,7 +76,7 @@ func getDatabasePrefix(dbID int64) string {
 	if dbID != util.NonDBID {
 		return BuildDatabasePrefixWithDBID(dbID)
 	}
-	return CollectionMetaPrefix
+	return CollectionMetaPrefix + "/"
 }
 
 func BuildPrivilegeGroupkey(groupName string) string {
