@@ -56,6 +56,14 @@ endif ()
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 
+# Enable hardware popcnt for all compilation units.
+# PopCountHelper in bitset/detail/popcount.h is header-only and compiled
+# wherever CustomBitset.h is included (query, exec, segcore, etc.).
+# Without this flag, __builtin_popcountll falls back to __popcountdi2 software.
+if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mpopcnt")
+endif()
+
 if (CMAKE_COMPILER_IS_GNUCC)
     if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 11.99)
         # ignore deprecated declarations for gcc>=12

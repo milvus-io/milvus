@@ -419,7 +419,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	}
 
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
+		paramtable.GetStringNodeID(), metrics.SearchLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
 	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)

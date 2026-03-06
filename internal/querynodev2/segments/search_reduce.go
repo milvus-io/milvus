@@ -36,32 +36,42 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 			Topks:      make([]int64, 0),
 		}, nil
 	}
+	nq := info.GetNq()
+	topk := info.GetTopK()
 	ret := &schemapb.SearchResultData{
-		NumQueries: info.GetNq(),
-		TopK:       info.GetTopK(),
+		NumQueries: nq,
+		TopK:       topk,
 		FieldsData: make([]*schemapb.FieldData, len(searchResultData[0].FieldsData)),
-		Scores:     make([]float32, 0),
+		Scores:     make([]float32, 0, nq*topk),
 		Ids:        &schemapb.IDs{},
-		Topks:      make([]int64, 0),
+		Topks:      make([]int64, 0, nq),
 	}
 
 	resultOffsets := make([][]int64, len(searchResultData))
+	totalOffsetElements := 0
+	for i := range searchResultData {
+		totalOffsetElements += len(searchResultData[i].Topks)
+	}
+	offsetBacking := make([]int64, totalOffsetElements)
 	for i := 0; i < len(searchResultData); i++ {
-		resultOffsets[i] = make([]int64, len(searchResultData[i].Topks))
-		for j := int64(1); j < info.GetNq(); j++ {
+		n := len(searchResultData[i].Topks)
+		resultOffsets[i] = offsetBacking[:n:n]
+		offsetBacking = offsetBacking[n:]
+		for j := int64(1); j < nq; j++ {
 			resultOffsets[i][j] = resultOffsets[i][j-1] + searchResultData[i].Topks[j-1]
 		}
 		ret.AllSearchCount += searchResultData[i].GetAllSearchCount()
 	}
 
+	numResults := len(searchResultData)
 	var skipDupCnt int64
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for i := int64(0); i < info.GetNq(); i++ {
-		offsets := make([]int64, len(searchResultData))
+	for i := int64(0); i < nq; i++ {
+		offsets := make([]int64, numResults)
 		idSet := make(map[interface{}]struct{})
 		var j int64
-		for j = 0; j < info.GetTopK(); {
+		for j = 0; j < topk; {
 			sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, i)
 			if sel == -1 {
 				break
@@ -118,20 +128,29 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 			Topks:      make([]int64, 0),
 		}, nil
 	}
+	nq := info.GetNq()
+	topk := info.GetTopK()
 	ret := &schemapb.SearchResultData{
-		NumQueries: info.GetNq(),
-		TopK:       info.GetTopK(),
+		NumQueries: nq,
+		TopK:       topk,
 		FieldsData: make([]*schemapb.FieldData, len(searchResultData[0].FieldsData)),
-		Scores:     make([]float32, 0),
+		Scores:     make([]float32, 0, nq*topk),
 		Ids:        &schemapb.IDs{},
-		Topks:      make([]int64, 0),
+		Topks:      make([]int64, 0, nq),
 	}
 
 	resultOffsets := make([][]int64, len(searchResultData))
+	totalOffsetElements := 0
+	for i := range searchResultData {
+		totalOffsetElements += len(searchResultData[i].Topks)
+	}
+	offsetBacking := make([]int64, totalOffsetElements)
 	groupByValIterator := make([]func(int) any, len(searchResultData))
 	for i := range searchResultData {
-		resultOffsets[i] = make([]int64, len(searchResultData[i].Topks))
-		for j := int64(1); j < info.GetNq(); j++ {
+		n := len(searchResultData[i].Topks)
+		resultOffsets[i] = offsetBacking[:n:n]
+		offsetBacking = offsetBacking[n:]
+		for j := int64(1); j < nq; j++ {
 			resultOffsets[i][j] = resultOffsets[i][j-1] + searchResultData[i].Topks[j-1]
 		}
 		ret.AllSearchCount += searchResultData[i].GetAllSearchCount()

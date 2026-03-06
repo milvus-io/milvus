@@ -739,10 +739,12 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	}
 	defer node.lifetime.Done()
 
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+	nodeIDStr := paramtable.GetStringNodeID()
+	collIDStr := strconv.FormatInt(req.GetReq().GetCollectionID(), 10)
+	metrics.QueryNodeSQCount.WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.TotalLabel, metrics.FromLeader, collIDStr).Inc()
 	defer func() {
 		if !merr.Ok(resp.GetStatus()) {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+			metrics.QueryNodeSQCount.WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.FailLabel, metrics.FromLeader, collIDStr).Inc()
 		}
 	}()
 
@@ -786,14 +788,11 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		return resp, nil
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("search segments done, channel = %s, segmentIDs = %v",
-		channel,
-		req.GetSegmentIDs(),
-	))
+	tr.CtxElapse(ctx, "search segments done")
 
 	latency := tr.ElapseSpan()
-	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.SuccessLabel, metrics.FromLeader, collIDStr).Inc()
 
 	resp = task.SearchResult()
 	resp.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
