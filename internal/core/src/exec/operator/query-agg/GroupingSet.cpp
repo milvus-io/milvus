@@ -224,6 +224,9 @@ GroupingSet::populateTempVectors(int32_t aggregateIndex,
 
 int32_t
 GroupingSet::outputRowCount() const {
+    if (!lookup_) {
+        return 0;
+    }
     return lookup_->newGroups_.size();
 }
 
