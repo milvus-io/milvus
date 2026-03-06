@@ -91,7 +91,6 @@ func TestNullableDefault(t *testing.T) {
 
 // create collection with default value and insert with column / nullableColumn
 func TestDefaultValueDefault(t *testing.T) {
-	t.Skip("set defaultValue and insert with default column gets unexpected error, waiting for fix")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -111,8 +110,8 @@ func TestDefaultValueDefault(t *testing.T) {
 	defaultVarCharField := entity.NewField().WithName(common.GenRandomString("varchar", 3)).WithDataType(entity.FieldTypeVarChar).WithDefaultValueString("default").WithMaxLength(common.TestMaxLen)
 	schema.WithField(defaultBoolField).WithField(defaultInt8Field).WithField(defaultInt16Field).WithField(defaultInt32Field).WithField(defaultInt64Field).WithField(defaultFloatField).WithField(defaultDoubleField).WithField(defaultVarCharField)
 
-	// create collection
-	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema))
+	// create collection with strong consistency to ensure inserted data is immediately visible
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
 	common.CheckFieldsDefaultValue(t, map[string]interface{}{
@@ -133,13 +132,14 @@ func TestDefaultValueDefault(t *testing.T) {
 	defColumnOpt := hp.TNewColumnOptions()
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), defColumnOpt)
 
-	// query with null expr
-	countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s == -1", defaultInt8Field.Name)).WithOutputFields(common.QueryCountFieldName))
+	// query to verify first insert has no default values for fields where default doesn't overlap with generated data
+	// use int64 field (default=10000) since generated values are 0..2999, so no overlap
+	countRes, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s == %d", defaultInt64Field.Name, 10000)).WithOutputFields(common.QueryCountFieldName))
 	common.CheckErr(t, err, true)
 	count, _ := countRes.Fields[0].GetAsInt64(0)
 	require.EqualValues(t, 0, count)
 
-	// insert data
+	// insert data with validData (half valid, half use default values)
 	validData := make([]bool, common.DefaultNb)
 	for i := 0; i < common.DefaultNb; i++ {
 		validData[i] = i%2 == 0
@@ -158,11 +158,18 @@ func TestDefaultValueDefault(t *testing.T) {
 		expr  string
 		count int64
 	}
+	// Expected counts with 6000 total rows (2 inserts x 3000, same PKs but count(*) doesn't dedup):
+	// - First insert: full generated data (3000 rows, no defaults)
+	// - Second insert: 1500 valid (generated) + 1500 invalid (filled with default values)
+	// For int8: default=-1 also appears in generated data due to int8 wrapping (int8(255)==-1, etc.)
+	//   First insert: 11 occurrences (i%256==255 for i in [0,3000)), Second valid: 5 (i in [0,1500))
+	// For int16: default=4, appears at i=4 in both inserts' generated data
+	// For int32: default=2000, appears at i=2000 in first insert only (second valid range is [0,1500))
 	exprCounts := []exprCount{
 		{expr: fmt.Sprintf("%s == %t", defaultBoolField.Name, true), count: common.DefaultNb * 5 / 4},
-		{expr: fmt.Sprintf("%s == %d", defaultInt8Field.Name, -1), count: common.DefaultNb/2 + 10}, // int8 [-128, 127]
+		{expr: fmt.Sprintf("%s == %d", defaultInt8Field.Name, -1), count: common.DefaultNb/2 + 16}, // int8 wrapping: 11 from first + 5 from second valid
 		{expr: fmt.Sprintf("%s == %d", defaultInt16Field.Name, 4), count: common.DefaultNb/2 + 2},
-		{expr: fmt.Sprintf("%s == %d", defaultInt32Field.Name, 2000), count: common.DefaultNb / 2},
+		{expr: fmt.Sprintf("%s == %d", defaultInt32Field.Name, 2000), count: common.DefaultNb/2 + 1},
 		{expr: fmt.Sprintf("%s == %d", defaultInt64Field.Name, 10000), count: common.DefaultNb / 2},
 		{expr: fmt.Sprintf("%s == %f", defaultFloatField.Name, -1.0), count: common.DefaultNb / 2},
 		{expr: fmt.Sprintf("%s == %f", defaultDoubleField.Name, math.MaxFloat64), count: common.DefaultNb / 2},
@@ -497,7 +504,6 @@ func TestNullableQuery(t *testing.T) {
 
 // test insert with part/all/not default value -> query check
 func TestDefaultValueQuery(t *testing.T) {
-	t.Skip("set defaultValue and insert with default column gets unexpected error, waiting for fix")
 	for _, nullable := range [2]bool{false, true} {
 		ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 		mc := hp.CreateDefaultMilvusClient(ctx, t)
