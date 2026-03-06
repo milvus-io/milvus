@@ -578,6 +578,17 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 			return nil, r.wrapTypeError(wktValue, fieldID)
 		}
 		return wkbValue, nil
+	case schemapb.DataType_Mol:
+		smilesValue, ok := obj.(string)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+
+		pickleValue, err := pkgcommon.ConvertSMILESToPickle(smilesValue)
+		if err != nil {
+			return nil, r.wrapTypeError(smilesValue, fieldID)
+		}
+		return pickleValue, nil
 	case schemapb.DataType_Timestamptz:
 		strValue, ok := obj.(string)
 		if !ok {

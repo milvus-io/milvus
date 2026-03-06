@@ -222,6 +222,22 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		}
 		data = byteArr
 		c.readPosition += int(readCount)
+	case schemapb.DataType_Mol:
+		var strs []string
+		strs, err = c.ReadString(readCount)
+		if err != nil {
+			return nil, nil, err
+		}
+		byteArr := make([][]byte, 0)
+		for _, smilesValue := range strs {
+			pickleValue, err := pkgcommon.ConvertSMILESToPickle(smilesValue)
+			if err != nil {
+				return nil, nil, err
+			}
+			byteArr = append(byteArr, pickleValue)
+		}
+		data = byteArr
+		c.readPosition += int(readCount)
 	case schemapb.DataType_JSON:
 		var strs []string
 		strs, err = c.ReadString(readCount)

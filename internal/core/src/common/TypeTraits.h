@@ -35,8 +35,9 @@ template <typename T>
 constexpr bool IsScalar =
     std::is_fundamental_v<T> || std::is_same_v<T, std::string> ||
     std::is_same_v<T, Json> || std::is_same_v<T, Geometry> ||
-    std::is_same_v<T, std::string_view> || std::is_same_v<T, Array> ||
-    std::is_same_v<T, ArrayView> || std::is_same_v<T, proto::plan::Array>;
+    std::is_same_v<T, Mol> || std::is_same_v<T, std::string_view> ||
+    std::is_same_v<T, Array> || std::is_same_v<T, ArrayView> ||
+    std::is_same_v<T, proto::plan::Array>;
 
 template <typename T>
 constexpr bool IsSparse =
