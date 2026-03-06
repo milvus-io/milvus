@@ -136,6 +136,38 @@ PhyVectorSearchNode::GetOutput() {
     milvus::SearchResult search_result;
 
     auto col_input = GetColumnVector(input_);
+
+    // Fast path: MvccNode set skip_filter flag on QueryContext, meaning
+    // no filtering is needed (sealed segment, no deletes, no scalar filter,
+    // no TTL). Pass an empty BitsetView to Knowhere so it uses
+    // IDSelectorAll — the fastest search path.
+    if (query_context_->get_skip_filter()) {
+        milvus::BitsetView empty_view;
+        auto op_context = query_context_->get_op_context();
+        segment_->vector_search(search_info_,
+                                src_data,
+                                src_offsets,
+                                num_queries,
+                                query_timestamp_,
+                                empty_view,
+                                op_context,
+                                search_result);
+        search_result.total_data_cnt_ = active_count_;
+        span.GetSpan()->SetAttribute(
+            "result_count",
+            static_cast<int>(search_result.seg_offsets_.size()));
+        query_context_->set_search_result(std::move(search_result));
+        std::chrono::high_resolution_clock::time_point vector_end =
+            std::chrono::high_resolution_clock::now();
+        double vector_cost =
+            std::chrono::duration<double, std::micro>(
+                vector_end - vector_start)
+                .count();
+        milvus::monitor::internal_core_search_latency_vector.Observe(
+            vector_cost / 1000);
+        return input_;
+    }
+
     TargetBitmapView view(col_input->GetRawData(), col_input->size());
 
     if (view.all()) {

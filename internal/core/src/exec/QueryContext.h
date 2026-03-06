@@ -375,6 +375,16 @@ class QueryContext : public Context {
         return element_level_bitset_.has_value();
     }
 
+    void
+    set_skip_filter(bool v) {
+        skip_filter_ = v;
+    }
+
+    bool
+    get_skip_filter() const {
+        return skip_filter_;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -412,6 +422,11 @@ class QueryContext : public Context {
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
     int64_t active_element_count_{0};  // Total elements in active documents
     std::optional<TargetBitmap> element_level_bitset_;
+
+    // Set by MvccNode when no filtering is needed (sealed, no filter,
+    // no deletes, no TTL). VectorSearchNode checks this to pass empty
+    // BitsetView to Knowhere (IDSelectorAll fast path).
+    bool skip_filter_{false};
 };
 
 // Represent the state of one thread of query execution.
