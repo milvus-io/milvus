@@ -264,6 +264,9 @@ const (
 	AllowInsertAutoIDKey    = "allow_insert_auto_id"
 	DisableFuncRuntimeCheck = "disable_func_runtime_check"
 
+	// BigTopK optimization
+	BigTopKOptimizationEnabledKey = "bigtopk_optimization.enabled"
+
 	// warmup related
 	WarmupKey            = "warmup"
 	WarmupScalarFieldKey = "warmup.scalarField"
@@ -313,6 +316,16 @@ func IsMmapIndexEnabled(kvs ...*commonpb.KeyValuePair) (bool, bool) {
 		}
 	}
 	return false, false
+}
+
+func IsBigTopKOptimizationEnabled(kvs ...*commonpb.KeyValuePair) bool {
+	for _, kv := range kvs {
+		if kv.Key == BigTopKOptimizationEnabledKey {
+			enable, _ := strconv.ParseBool(kv.Value)
+			return enable
+		}
+	}
+	return false
 }
 
 // GetWarmupPolicy returns the warmup policy value and whether it exists from key-value pairs
