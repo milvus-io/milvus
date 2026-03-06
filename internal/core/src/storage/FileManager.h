@@ -31,6 +31,12 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/properties.h"
 #include "storage/ChunkManager.h"
+#include "storage/IndexEntryDirectStreamWriter.h"
+#include "storage/IndexEntryEncryptedLocalWriter.h"
+#include "storage/IndexEntryWriter.h"
+#include "storage/PluginLoader.h"
+#include "storage/RemoteInputStream.h"
+#include "storage/RemoteOutputStream.h"
 #include "storage/Types.h"
 
 namespace milvus::storage {
@@ -163,11 +169,84 @@ class FileManagerImpl : public milvus::FileManager {
     virtual bool
     AddFileMeta(const FileMeta& file_meta) override = 0;
 
-    virtual std::shared_ptr<InputStream>
-    OpenInputStream(const std::string& filename) override = 0;
+    std::shared_ptr<InputStream>
+    OpenInputStream(const std::string& filename) override final {
+        return OpenInputStream(filename, /*is_index_file=*/true);
+    }
 
-    virtual std::shared_ptr<OutputStream>
-    OpenOutputStream(const std::string& filename) override = 0;
+    std::shared_ptr<OutputStream>
+    OpenOutputStream(const std::string& filename) override final {
+        return OpenOutputStream(filename, /*is_index_file=*/true);
+    }
+
+    std::shared_ptr<InputStream>
+    OpenInputStream(const std::string& filename, bool is_index_file) {
+        AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
+        auto local_file_name = GetFileName(filename);
+        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefixV2()
+                                              : GetRemoteTextLogPrefixV2();
+        remote_file_path += "/" + local_file_name;
+        auto remote_file = fs_->OpenInputFile(remote_file_path);
+        AssertInfo(remote_file.ok(),
+                   "failed to open remote file, reason: {}",
+                   remote_file.status().ToString());
+        return std::static_pointer_cast<milvus::InputStream>(
+            std::make_shared<milvus::storage::RemoteInputStream>(
+                std::move(remote_file.ValueOrDie())));
+    }
+
+    std::shared_ptr<OutputStream>
+    OpenOutputStream(const std::string& filename, bool is_index_file) {
+        AssertInfo(fs_, "fs_ is nullptr, cannot open output stream");
+        auto local_file_name = GetFileName(filename);
+        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefixV2()
+                                              : GetRemoteTextLogPrefixV2();
+        remote_file_path += "/" + local_file_name;
+        // Ensure parent directory exists before opening the output stream.
+        // Only needed for local filesystems; object stores don't require
+        // explicit directory creation and the call would waste I/O.
+        if (milvus_storage::IsLocalFileSystem(fs_)) {
+            auto dir_path =
+                remote_file_path.substr(0, remote_file_path.find_last_of('/'));
+            if (!dir_path.empty()) {
+                auto status = fs_->CreateDir(dir_path, /*recursive=*/true);
+                AssertInfo(status.ok(),
+                           "failed to create directory {}, reason: {}",
+                           dir_path,
+                           status.ToString());
+            }
+        }
+        auto remote_stream = fs_->OpenOutputStream(remote_file_path);
+        AssertInfo(remote_stream.ok(),
+                   "failed to open remote stream, reason: {}",
+                   remote_stream.status().ToString());
+        return std::make_shared<milvus::storage::RemoteOutputStream>(
+            std::move(remote_stream.ValueOrDie()));
+    }
+
+    std::unique_ptr<IndexEntryWriter>
+    CreateIndexEntryWriterV3(const std::string& filename,
+                             bool is_index_file = true) {
+        if (plugin_context_) {
+            auto cipher_plugin = PluginLoader::GetInstance().getCipherPlugin();
+            if (cipher_plugin) {
+                auto local_file_name = GetFileName(filename);
+                auto remote_path = is_index_file
+                                       ? GetRemoteIndexObjectPrefixV2()
+                                       : GetRemoteTextLogPrefixV2();
+                remote_path += "/" + local_file_name;
+                return std::make_unique<IndexEntryEncryptedLocalWriter>(
+                    remote_path,
+                    fs_,
+                    cipher_plugin,
+                    plugin_context_->ez_id,
+                    plugin_context_->collection_id,
+                    GetLocalTempDir());
+            }
+        }
+        return std::make_unique<IndexEntryDirectStreamWriter>(
+            OpenOutputStream(filename, is_index_file));
+    }
 
  public:
     virtual std::string
@@ -210,11 +289,6 @@ class FileManagerImpl : public milvus::FileManager {
     }
 
     virtual std::string
-    GetRemoteIndexFilePrefixV2() const {
-        return GetRemoteIndexObjectPrefixV2();
-    }
-
-    virtual std::string
     GetRemoteTextLogPrefix() const {
         boost::filesystem::path prefix = rcm_->GetRootPath();
         boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
@@ -226,6 +300,30 @@ class FileManagerImpl : public milvus::FileManager {
             std::to_string(field_meta_.segment_id) + "/" +
             std::to_string(field_meta_.field_id);
         return NormalizePath(prefix / path / path1);
+    }
+
+    virtual std::string
+    GetRemoteTextLogPrefixV2() const {
+        return std::string(TEXT_LOG_ROOT_PATH) + "/" +
+               std::to_string(index_meta_.build_id) + "/" +
+               std::to_string(index_meta_.index_version) + "/" +
+               std::to_string(field_meta_.collection_id) + "/" +
+               std::to_string(field_meta_.partition_id) + "/" +
+               std::to_string(field_meta_.segment_id) + "/" +
+               std::to_string(field_meta_.field_id);
+    }
+
+    static std::string
+    GetFileName(const std::string& filepath) {
+        return boost::filesystem::path(filepath).filename().string();
+    }
+
+    std::string
+    GetLocalTempDir() const {
+        if (rcm_) {
+            return rcm_->GetRootPath();
+        }
+        return "";
     }
 
  protected:

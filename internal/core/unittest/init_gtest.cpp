@@ -26,6 +26,7 @@
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "index/Meta.h"
 #include "test_utils/Constants.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -98,5 +99,6 @@ main(int argc, char** argv) {
         {10, true, 30},
         std::chrono::milliseconds(0));
 
+    milvus::index::kScalarIndexUseV3 = true;
     return RUN_ALL_TESTS();
 }
