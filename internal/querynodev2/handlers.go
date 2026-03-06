@@ -120,7 +120,7 @@ func (node *QueryNode) loadDeltaLogs(ctx context.Context, req *querypb.LoadSegme
 			continue
 		}
 
-		err := node.loader.LoadDeltaLogs(ctx, segment, info.GetDeltalogs())
+		err := node.loader.LoadDeltaLogs(ctx, segment, info)
 		if err != nil {
 			if finalErr == nil {
 				finalErr = err
