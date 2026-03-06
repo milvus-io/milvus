@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	singleton     = syncutil.NewFuture[broadcaster.Broadcaster]()
-	ErrNotPrimary = broadcaster.ErrNotPrimary
+	singleton       = syncutil.NewFuture[broadcaster.Broadcaster]()
+	ErrNotPrimary   = broadcaster.ErrNotPrimary
+	ErrNotSecondary = broadcaster.ErrNotSecondary
 )
 
 // Register registers the broadcaster.
@@ -41,6 +42,24 @@ func StartBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message
 		return nil, errors.Wrap(err, "failed to wait until WAL based DDL ready")
 	}
 	return broadcaster.WithResourceKeys(ctx, resourceKeys...)
+}
+
+// StartBroadcastWithSecondaryClusterResourceKey starts a broadcast with exclusive cluster resource key
+// and verifies the cluster is secondary. Returns error if the cluster is primary.
+// This is used for force promote operations that should only be executed on secondary clusters.
+func StartBroadcastWithSecondaryClusterResourceKey(ctx context.Context) (broadcaster.BroadcastAPI, error) {
+	broadcaster, err := singleton.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
+		return nil, errors.Wrap(err, "failed to wait until WAL based DDL ready")
+	}
+	return broadcaster.WithSecondaryClusterResourceKey(ctx)
 }
 
 // Release releases the broadcaster.
