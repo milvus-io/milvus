@@ -150,12 +150,6 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 	segmentPks := typeutil.NewConcurrentMap[int64, pkoracle.PkStat]()
 	segmentBm25 := typeutil.NewConcurrentMap[int64, map[int64]*storage.BM25Stats]()
 
-	pkField, err := typeutil.GetPrimaryFieldSchema(info.GetSchema())
-	if err != nil {
-		return nil, err
-	}
-	pkFieldID := pkField.GetFieldID()
-
 	loadSegmentStats := func(segType string, segments []*datapb.SegmentInfo) {
 		for _, item := range segments {
 			log.Info("recover segments from checkpoints",
@@ -166,8 +160,12 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 			)
 			segment := item
 			future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
+				pkField, err := typeutil.GetPrimaryFieldSchema(info.GetSchema())
+				if err != nil {
+					return nil, err
+				}
 				resolver := packed.NewStatsResolverFromSegmentInfo(segment)
-				bfPaths, err := resolver.BloomFilterPaths(pkFieldID)
+				bfPaths, err := resolver.BloomFilterPaths(pkField.GetFieldID())
 				if err != nil {
 					return nil, err
 				}
