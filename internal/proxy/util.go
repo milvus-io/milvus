@@ -1184,6 +1184,10 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 }
 
 func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
+	validData := make([]bool, len(data))
+	for i := range validData {
+		validData[i] = true
+	}
 	return &schemapb.FieldData{
 		FieldName: common.MetaFieldName,
 		Type:      schemapb.DataType_JSON,
@@ -1197,6 +1201,7 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 			},
 		},
 		IsDynamic: true,
+		ValidData: validData,
 	}
 }
 
