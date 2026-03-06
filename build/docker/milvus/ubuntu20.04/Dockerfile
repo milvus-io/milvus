@@ -50,4 +50,6 @@ USER milvus:milvus
 
 ENTRYPOINT ["/tini", "--"]
 
+CMD ["milvus", "run", "standalone"]
+
 WORKDIR /milvus/
