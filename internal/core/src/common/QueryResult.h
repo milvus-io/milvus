@@ -162,7 +162,6 @@ class ChunkMergeIterator : public VectorIterator {
                        const std::vector<int64_t>& total_rows_until_chunk = {},
                        bool larger_is_closer = false)
         : offset_mapping_(&offset_mapping),
-          larger_is_closer_(larger_is_closer),
           heap_(OffsetDisPairComparator(larger_is_closer)) {
         iterators_.reserve(chunk_count);
     }
@@ -240,7 +239,6 @@ class ChunkMergeIterator : public VectorIterator {
     bool sealed = false;
     const milvus::OffsetMapping* offset_mapping_ = nullptr;
     std::vector<int64_t> total_rows_until_chunk_;
-    bool larger_is_closer_ = false;
     //currently, ChunkMergeIterator is guaranteed to be used serially without concurrent problem, in the future
     //we may need to add mutex to protect the variable sealed
 };

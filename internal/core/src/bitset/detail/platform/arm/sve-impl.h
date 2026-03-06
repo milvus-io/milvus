@@ -1480,8 +1480,6 @@ OpArithCompareImpl<int8_t, AOp, CmpOp>::op_arith_compare(
 
         auto handler = [src, right_operand, value](const svbool_t pred,
                                                    const size_t idx) {
-            using sve_t = SVEVector<T>;
-
             const auto right_v = svdup_n_s64(right_operand);
             const auto value_v = svdup_n_s64(value);
             const svint64_t src_v = svld1sb_s64(pred, src + idx);
@@ -1510,8 +1508,6 @@ OpArithCompareImpl<int16_t, AOp, CmpOp>::op_arith_compare(
 
         auto handler = [src, right_operand, value](const svbool_t pred,
                                                    const size_t idx) {
-            using sve_t = SVEVector<T>;
-
             const auto right_v = svdup_n_s64(right_operand);
             const auto value_v = svdup_n_s64(value);
             const svint64_t src_v = svld1sh_s64(pred, src + idx);
@@ -1540,8 +1536,6 @@ OpArithCompareImpl<int32_t, AOp, CmpOp>::op_arith_compare(
 
         auto handler = [src, right_operand, value](const svbool_t pred,
                                                    const size_t idx) {
-            using sve_t = SVEVector<T>;
-
             const auto right_v = svdup_n_s64(right_operand);
             const auto value_v = svdup_n_s64(value);
             const svint64_t src_v = svld1sw_s64(pred, src + idx);
@@ -1570,8 +1564,6 @@ OpArithCompareImpl<int64_t, AOp, CmpOp>::op_arith_compare(
 
         auto handler = [src, right_operand, value](const svbool_t pred,
                                                    const size_t idx) {
-            using sve_t = SVEVector<T>;
-
             const auto right_v = svdup_n_s64(right_operand);
             const auto value_v = svdup_n_s64(value);
             const svint64_t src_v = svld1_s64(pred, src + idx);
@@ -1606,8 +1598,6 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
 
                 auto handler = [src, right_operand, value](const svbool_t pred,
                                                            const size_t idx) {
-                    using sve_t = SVEVector<T>;
-
                     const auto right_v = svdup_n_f32(right_operand);
                     const auto value_v = svdup_n_f32(value);
                     const svfloat32_t src_v = svld1_f32(pred, src + idx);
@@ -1637,8 +1627,6 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
 
             auto handler = [src, right_operand, value](const svbool_t pred,
                                                        const size_t idx) {
-                using sve_t = SVEVector<T>;
-
                 const auto right_v = svdup_n_f32(right_operand);
                 const auto value_v = svdup_n_f32(value);
                 const svfloat32_t src_v = svld1_f32(pred, src + idx);
@@ -1674,8 +1662,6 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
 
                 auto handler = [src, right_operand, value](const svbool_t pred,
                                                            const size_t idx) {
-                    using sve_t = SVEVector<T>;
-
                     const auto right_v = svdup_n_f64(right_operand);
                     const auto value_v = svdup_n_f64(value);
                     const svfloat64_t src_v = svld1_f64(pred, src + idx);
@@ -1705,8 +1691,6 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
 
             auto handler = [src, right_operand, value](const svbool_t pred,
                                                        const size_t idx) {
-                using sve_t = SVEVector<T>;
-
                 const auto right_v = svdup_n_f64(right_operand);
                 const auto value_v = svdup_n_f64(value);
                 const svfloat64_t src_v = svld1_f64(pred, src + idx);

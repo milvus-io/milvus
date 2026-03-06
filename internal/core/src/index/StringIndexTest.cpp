@@ -82,7 +82,7 @@ TEST_F(StringIndexMarisaTest, In) {
     index->Build(nb, strs.data());
     auto bitset = index->In(strs.size(), strs.data());
     ASSERT_EQ(bitset.size(), strs.size());
-    ASSERT_TRUE(Any(bitset));
+    ASSERT_TRUE(bitset.any());
 }
 
 TEST_F(StringIndexMarisaTest, InHasNull) {
@@ -110,7 +110,7 @@ TEST_F(StringIndexMarisaTest, NotIn) {
     index->Build(nb, strs.data());
     auto bitset = index->NotIn(strs.size(), strs.data());
     ASSERT_EQ(bitset.size(), strs.size());
-    ASSERT_TRUE(BitSetNone(bitset));
+    ASSERT_TRUE(bitset.none());
 }
 
 TEST_F(StringIndexMarisaTest, NotInHasNull) {
@@ -202,9 +202,8 @@ TEST_F(StringIndexMarisaTest, Range) {
 TEST_F(StringIndexMarisaTest, Reverse) {
     auto index_types = GetIndexTypes<std::string>();
     for (const auto& index_type : index_types) {
-        CreateIndexInfo create_index_info{
-            .index_type = index_type,
-        };
+        CreateIndexInfo create_index_info;
+        create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance()
                 .CreatePrimitiveScalarIndex<std::string>(create_index_info);
@@ -276,7 +275,7 @@ TEST_F(StringIndexMarisaTest, Query) {
         ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
                                 milvus::OpType::In);
         auto bitset = index->Query(ds);
-        ASSERT_TRUE(Any(bitset));
+        ASSERT_TRUE(bitset.any());
     }
 
     {
@@ -284,7 +283,7 @@ TEST_F(StringIndexMarisaTest, Query) {
         ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
                                 milvus::OpType::NotIn);
         auto bitset = index->Query(ds);
-        ASSERT_TRUE(BitSetNone(bitset));
+        ASSERT_TRUE(bitset.none());
     }
 
     {
@@ -306,7 +305,7 @@ TEST_F(StringIndexMarisaTest, Query) {
         ds->Set<bool>(milvus::index::LOWER_BOUND_INCLUSIVE, true);
         ds->Set<bool>(milvus::index::UPPER_BOUND_INCLUSIVE, true);
         auto bitset = index->Query(ds);
-        ASSERT_TRUE(Any(bitset));
+        ASSERT_TRUE(bitset.any());
     }
 
     {
@@ -343,19 +342,19 @@ TEST_F(StringIndexMarisaTest, Codec) {
     {
         auto bitset = copy_index->In(nb, strings.data());
         ASSERT_EQ(bitset.size(), nb);
-        ASSERT_TRUE(Any(bitset));
+        ASSERT_TRUE(bitset.any());
     }
 
     {
         auto bitset = copy_index->In(1, invalid_strings.data());
         ASSERT_EQ(bitset.size(), nb);
-        ASSERT_TRUE(BitSetNone(bitset));
+        ASSERT_TRUE(bitset.none());
     }
 
     {
         auto bitset = copy_index->NotIn(nb, strings.data());
         ASSERT_EQ(bitset.size(), nb);
-        ASSERT_TRUE(BitSetNone(bitset));
+        ASSERT_TRUE(bitset.none());
     }
 
     {
@@ -421,19 +420,19 @@ TEST_F(StringIndexMarisaTest, BaseIndexCodec) {
     {
         auto bitset = copy_index->In(nb, strings.data());
         ASSERT_EQ(bitset.size(), nb);
-        ASSERT_TRUE(Any(bitset));
+        ASSERT_TRUE(bitset.any());
     }
 
     {
         auto bitset = copy_index->In(1, invalid_strings.data());
         ASSERT_EQ(bitset.size(), nb);
-        ASSERT_TRUE(BitSetNone(bitset));
+        ASSERT_TRUE(bitset.none());
     }
 
     {
         auto bitset = copy_index->NotIn(nb, strings.data());
         ASSERT_EQ(bitset.size(), nb);
-        ASSERT_TRUE(BitSetNone(bitset));
+        ASSERT_TRUE(bitset.none());
     }
 
     {

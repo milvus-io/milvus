@@ -144,8 +144,8 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
         auto& iterator_v2_info_proto =
             query_info_proto.search_iterator_v2_info();
         search_info.iterator_v2_info_ = SearchIteratorV2Info{
-            .token = iterator_v2_info_proto.token(),
-            .batch_size = iterator_v2_info_proto.batch_size(),
+            iterator_v2_info_proto.token(),
+            iterator_v2_info_proto.batch_size(),
         };
         if (iterator_v2_info_proto.has_last_bound()) {
             search_info.iterator_v2_info_->last_bound =

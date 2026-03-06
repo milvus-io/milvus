@@ -40,7 +40,7 @@ class QueryAggTest : public testing::TestWithParam<bool> {
     void
     SetUp() override {
         schema_ = std::make_shared<Schema>();
-        auto vec_fid = schema_->AddDebugField(
+        schema_->AddDebugField(
             "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
         auto nullable = GetParam();
         auto bool_fid =
@@ -766,12 +766,9 @@ TEST_P(QueryAggTest, RetrieveAggregationWithValidityBitmap) {
 
         // Count valid and invalid entries
         int valid_count = 0;
-        int invalid_count = 0;
         for (int i = 0; i < valid_data_size; i++) {
             if (field_data.valid_data(i)) {
                 valid_count++;
-            } else {
-                invalid_count++;
             }
         }
         // With nullable fields, we expect some null values

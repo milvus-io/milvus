@@ -176,11 +176,6 @@ template <typename T>
 void
 BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
     int64_t offset = 0;
-    using GetType = std::conditional_t<std::is_same_v<T, int8_t> ||
-                                           std::is_same_v<T, int16_t> ||
-                                           std::is_same_v<T, int32_t>,
-                                       int32_t,
-                                       T>;
     for (const auto& data : field_datas) {
         auto slice_row_num = data->get_num_rows();
         for (size_t i = 0; i < slice_row_num; ++i) {

@@ -91,7 +91,7 @@ class PhyConjunctFilterExpr : public Expr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         if (!input_order_.empty()) {
             std::vector<std::string> inputs;
             inputs.reserve(input_order_.size());

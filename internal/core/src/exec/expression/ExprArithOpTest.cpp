@@ -186,7 +186,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRange) {
     };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto i8_fid = schema->AddDebugField("age8", DataType::INT8);
     auto i16_fid = schema->AddDebugField("age16", DataType::INT16);
     auto i32_fid = schema->AddDebugField("age32", DataType::INT32);
@@ -636,7 +636,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeNullable) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto i8_nullable_fid = schema->AddDebugField("age8", DataType::INT8, true);
     auto i16_nullable_fid =
         schema->AddDebugField("age16", DataType::INT16, true);
@@ -1058,7 +1058,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
@@ -1502,7 +1502,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONNullable) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto nullable_fid = schema->AddDebugField("json", DataType::JSON, true);
@@ -2008,7 +2008,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto i8_fid = schema->AddDebugField("age8", DataType::INT8);
     auto i16_fid = schema->AddDebugField("age16", DataType::INT16);
     auto i32_fid = schema->AddDebugField("age32", DataType::INT32);
@@ -2245,7 +2245,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto i8_nullable_fid = schema->AddDebugField("age8", DataType::INT8, true);
     auto i16_nullable_fid =
         schema->AddDebugField("age16", DataType::INT16, true);

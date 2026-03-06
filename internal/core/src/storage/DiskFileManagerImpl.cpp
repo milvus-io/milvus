@@ -522,9 +522,6 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     auto remote_files = insert_files.value();
     SortByPath(remote_files);
 
-    auto segment_id = GetFieldDataMeta().segment_id;
-    auto field_id = GetFieldDataMeta().field_id;
-
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string local_data_path;

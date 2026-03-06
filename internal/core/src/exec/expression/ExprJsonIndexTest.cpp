@@ -67,9 +67,9 @@ TYPED_TEST_SUITE(JsonIndexTestFixture, JsonIndexTypes);
 
 TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
-    auto i32_fid = schema->AddDebugField("age32", DataType::INT32);
+    schema->AddDebugField("age32", DataType::INT32);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
     schema->set_primary_field_id(i64_fid);
@@ -216,7 +216,7 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
 
 TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
@@ -326,7 +326,7 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
     auto json_index_path = GetParam();
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
@@ -515,7 +515,7 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
     };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
@@ -644,7 +644,7 @@ TEST(JsonNonIndexExistsTest, TestExistsExprSealedNoIndex) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
     auto json_fid = schema->AddDebugField("json", DataType::JSON);

@@ -343,7 +343,6 @@ GetBruteForceSearchIterators(
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
     DataType data_type) {
-    auto nq = query_ds.num_queries;
     auto [query_dataset, base_dataset] =
         PrepareBFDataSet(query_ds, raw_ds, data_type);
     auto search_cfg = PrepareBFSearchParams(search_info, index_info);

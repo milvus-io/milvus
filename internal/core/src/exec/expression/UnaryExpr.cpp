@@ -1896,7 +1896,7 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
     if (cached_match_res_ == nullptr) {
         auto pw = segment_->GetTextIndex(op_ctx_, field_id_);
         auto index = pw.get();
-        auto res = std::move(func(index, query));
+        auto res = func(index, query);
         auto valid_res = index->IsNotNull();
         cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
         cached_index_chunk_valid_res_ =
@@ -2009,7 +2009,7 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
         cached_phase1_res_ =
             std::make_shared<TargetBitmap>(std::move(candidates));
         cached_index_chunk_valid_res_ =
-            std::make_shared<TargetBitmap>(std::move(index->IsNotNull()));
+            std::make_shared<TargetBitmap>(index->IsNotNull());
     }
 
     // Phase 2: Execute per batch with batch-level bitmap_input

@@ -792,7 +792,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
