@@ -83,6 +83,11 @@ type RootCoordCatalog interface {
 	// For example []string{"user1/role1"}
 	ListUserRole(ctx context.Context, tenant string) ([]string, error)
 
+	// DeleteGrantByCollectionName deletes all grants for a specific collection.
+	DeleteGrantByCollectionName(ctx context.Context, tenant string, dbName string, collectionName string) error
+	// MigrateGrantCollectionName migrates all grants from oldName to newName when a collection is renamed.
+	MigrateGrantCollectionName(ctx context.Context, tenant string, oldDBName string, oldName string, newDBName string, newName string) error
+
 	ListCredentialsWithPasswd(ctx context.Context) (map[string]string, error)
 	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)
 	RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error

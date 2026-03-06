@@ -848,6 +848,55 @@ func (_c *RootCoordCatalog_DeleteGrant_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// DeleteGrantByCollectionName provides a mock function with given fields: ctx, tenant, dbName, collectionName
+func (_m *RootCoordCatalog) DeleteGrantByCollectionName(ctx context.Context, tenant string, dbName string, collectionName string) error {
+	ret := _m.Called(ctx, tenant, dbName, collectionName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteGrantByCollectionName")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string) error); ok {
+		r0 = rf(ctx, tenant, dbName, collectionName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_DeleteGrantByCollectionName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteGrantByCollectionName'
+type RootCoordCatalog_DeleteGrantByCollectionName_Call struct {
+	*mock.Call
+}
+
+// DeleteGrantByCollectionName is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tenant string
+//   - dbName string
+//   - collectionName string
+func (_e *RootCoordCatalog_Expecter) DeleteGrantByCollectionName(ctx interface{}, tenant interface{}, dbName interface{}, collectionName interface{}) *RootCoordCatalog_DeleteGrantByCollectionName_Call {
+	return &RootCoordCatalog_DeleteGrantByCollectionName_Call{Call: _e.mock.On("DeleteGrantByCollectionName", ctx, tenant, dbName, collectionName)}
+}
+
+func (_c *RootCoordCatalog_DeleteGrantByCollectionName_Call) Run(run func(ctx context.Context, tenant string, dbName string, collectionName string)) *RootCoordCatalog_DeleteGrantByCollectionName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_DeleteGrantByCollectionName_Call) Return(_a0 error) *RootCoordCatalog_DeleteGrantByCollectionName_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_DeleteGrantByCollectionName_Call) RunAndReturn(run func(context.Context, string, string, string) error) *RootCoordCatalog_DeleteGrantByCollectionName_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropAlias provides a mock function with given fields: ctx, dbID, alias, ts
 func (_m *RootCoordCatalog) DropAlias(ctx context.Context, dbID int64, alias string, ts uint64) error {
 	ret := _m.Called(ctx, dbID, alias, ts)
@@ -2075,6 +2124,57 @@ func (_c *RootCoordCatalog_ListUserRole_Call) Return(_a0 []string, _a1 error) *R
 }
 
 func (_c *RootCoordCatalog_ListUserRole_Call) RunAndReturn(run func(context.Context, string) ([]string, error)) *RootCoordCatalog_ListUserRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// MigrateGrantCollectionName provides a mock function with given fields: ctx, tenant, oldDBName, oldName, newDBName, newName
+func (_m *RootCoordCatalog) MigrateGrantCollectionName(ctx context.Context, tenant string, oldDBName string, oldName string, newDBName string, newName string) error {
+	ret := _m.Called(ctx, tenant, oldDBName, oldName, newDBName, newName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MigrateGrantCollectionName")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, string, string) error); ok {
+		r0 = rf(ctx, tenant, oldDBName, oldName, newDBName, newName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_MigrateGrantCollectionName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MigrateGrantCollectionName'
+type RootCoordCatalog_MigrateGrantCollectionName_Call struct {
+	*mock.Call
+}
+
+// MigrateGrantCollectionName is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tenant string
+//   - oldDBName string
+//   - oldName string
+//   - newDBName string
+//   - newName string
+func (_e *RootCoordCatalog_Expecter) MigrateGrantCollectionName(ctx interface{}, tenant interface{}, oldDBName interface{}, oldName interface{}, newDBName interface{}, newName interface{}) *RootCoordCatalog_MigrateGrantCollectionName_Call {
+	return &RootCoordCatalog_MigrateGrantCollectionName_Call{Call: _e.mock.On("MigrateGrantCollectionName", ctx, tenant, oldDBName, oldName, newDBName, newName)}
+}
+
+func (_c *RootCoordCatalog_MigrateGrantCollectionName_Call) Run(run func(ctx context.Context, tenant string, oldDBName string, oldName string, newDBName string, newName string)) *RootCoordCatalog_MigrateGrantCollectionName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string), args[4].(string), args[5].(string))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_MigrateGrantCollectionName_Call) Return(_a0 error) *RootCoordCatalog_MigrateGrantCollectionName_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_MigrateGrantCollectionName_Call) RunAndReturn(run func(context.Context, string, string, string, string, string) error) *RootCoordCatalog_MigrateGrantCollectionName_Call {
 	_c.Call.Return(run)
 	return _c
 }

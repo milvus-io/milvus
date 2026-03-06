@@ -35,6 +35,13 @@ func TestCreateAlias_all(t *testing.T) {
 
 	defer rc.Close()
 	ctx := context.Background()
+
+	// Save and clear globalMetaCache to avoid resolveCollectionAlias calling
+	// DescribeAlias on a stale testify mock from a previous test.
+	oldCache := globalMetaCache
+	globalMetaCache = nil
+	defer func() { globalMetaCache = oldCache }()
+
 	prefix := "TestCreateAlias_all"
 	collectionName := prefix + funcutil.GenRandomStr()
 	task := &CreateAliasTask{
@@ -115,6 +122,13 @@ func TestAlterAlias_all(t *testing.T) {
 	rc := NewMixCoordMock()
 	defer rc.Close()
 	ctx := context.Background()
+
+	// Save and clear globalMetaCache to avoid resolveCollectionAlias calling
+	// DescribeAlias on a stale testify mock from a previous test.
+	oldCache := globalMetaCache
+	globalMetaCache = nil
+	defer func() { globalMetaCache = oldCache }()
+
 	prefix := "TestAlterAlias_all"
 	collectionName := prefix + funcutil.GenRandomStr()
 	task := &AlterAliasTask{
