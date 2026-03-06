@@ -89,6 +89,7 @@
 #include "knowhere/sparse_utils.h"
 #include "knowhere/version.h"
 #include "log/Log.h"
+#include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/chunk_manager.h"
@@ -97,10 +98,11 @@
 #include "mmap/ChunkedColumn.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "mmap/ChunkedColumnInterface.h"
+#include "mmap/VirtualPKChunkedColumn.h"
 #include "mmap/Types.h"
+#include "common/VirtualPK.h"
 #include "monitor/Monitor.h"
 #include "monitor/scope_metric.h"
-#include "nlohmann/json.hpp"
 #include "parquet/metadata.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/schema.pb.h"
@@ -342,6 +344,116 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info,
             load_field_data_internal(load_info, op_ctx, is_replace);
             break;
     }
+}
+
+void
+ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
+    LOG_INFO(
+        "Loading segment {} field data with manifest {}", id_, manifest_path);
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
+    auto column_groups = segment_load_info_.GetColumnGroups();
+
+    auto arrow_schema = schema_->BuildReaderArrowSchema();
+    reader_ = milvus_storage::api::Reader::create(
+        column_groups, arrow_schema, nullptr, *properties);
+
+    // Pre-resolve field IDs for each column group, then reuse the
+    // standard LoadColumnGroup overload.
+    std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids;
+    cg_field_ids.reserve(column_groups->size());
+    for (size_t i = 0; i < column_groups->size(); ++i) {
+        auto cg = column_groups->at(i);
+        std::vector<FieldId> field_ids;
+        field_ids.reserve(cg->columns.size());
+        for (auto& column : cg->columns) {
+            field_ids.emplace_back(
+                schema_->ResolveColumnFieldId(column));
+        }
+        cg_field_ids.emplace_back(
+            static_cast<int>(i), std::move(field_ids));
+    }
+
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    std::vector<std::future<void>> load_group_futures;
+    for (const auto& pair : cg_field_ids) {
+        auto cg_index = pair.first;
+        const auto& field_ids = pair.second;
+        auto future = pool.Submit(
+            [this, column_groups, properties, cg_index, field_ids] {
+                LoadColumnGroup(column_groups,
+                                properties,
+                                cg_index,
+                                field_ids,
+                                /*eager_load=*/false,
+                                /*op_ctx=*/nullptr);
+            });
+        load_group_futures.emplace_back(std::move(future));
+    }
+
+    std::vector<std::exception_ptr> load_exceptions;
+    for (auto& future : load_group_futures) {
+        try {
+            future.get();
+        } catch (...) {
+            load_exceptions.push_back(std::current_exception());
+        }
+    }
+
+    // If any exceptions occurred during index loading, handle them
+    if (!load_exceptions.empty()) {
+        LOG_ERROR("Failed to load {} out of {} indexes for segment {}",
+                  load_exceptions.size(),
+                  load_group_futures.size(),
+                  id_);
+
+        // Rethrow the first exception
+        std::rethrow_exception(load_exceptions[0]);
+    }
+
+    if (schema_->is_external_collection()) {
+        SynthesizeExternalSystemFields();
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields() {
+    int64_t num_rows = segment_load_info_.GetNumOfRows();
+    if (num_rows == 0) {
+        std::unique_lock lck(mutex_);
+        update_row_count(0);
+        system_ready_count_++;
+        return;
+    }
+
+    // 1. VirtualPKChunkedColumn for the synthetic primary key
+    auto pk_field_id = schema_->get_primary_field_id().value();
+    auto virtual_pk =
+        std::make_shared<VirtualPKChunkedColumn>(id_, num_rows);
+    fields_.wlock()->emplace(pk_field_id, virtual_pk);
+    set_bit(field_data_ready_bitset_, pk_field_id, true);
+
+    // 2. PK→offset index for filter expressions
+    insert_record_.insert_pks(DataType::INT64, virtual_pk.get());
+    insert_record_.seal_pks();
+
+    // 3. Synthetic timestamps (all 0 — rows always visible)
+    std::vector<Timestamp> timestamps(num_rows, 0);
+    TimestampIndex index;
+    auto min_slice_length = num_rows < 4096 ? 1 : 4096;
+    auto meta = GenerateFakeSlices(
+        timestamps.data(), num_rows, min_slice_length);
+    index.set_length_meta(std::move(meta));
+    index.build_with(timestamps.data(), num_rows);
+    insert_record_.init_timestamps_from_owned(std::move(timestamps),
+                                               std::move(index));
+
+    // 4. Row count + readiness
+    {
+        std::unique_lock lck(mutex_);
+        update_row_count(num_rows);
+    }
+    system_ready_count_++;
 }
 
 std::optional<ChunkedSegmentSealedImpl::ParquetStatistics>
@@ -2572,9 +2684,12 @@ void
 ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
                                                Timestamp timestamp,
                                                Timestamp collection_ttl) const {
+    // External collections have no timestamps; all data is always visible
+    if (schema_->is_external_collection()) {
+        return;
+    }
     auto& ts = insert_record_.timestamps_;
     auto total_size = static_cast<int64_t>(ts.size());
-
     if (collection_ttl > 0) {
         auto range =
             insert_record_.timestamp_index_.get_active_range(collection_ttl);
@@ -3050,11 +3165,15 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
     }
 
     // load column groups
-    bool has_cg_changes = !diff.column_groups_to_load.empty() ||
-                          !diff.column_groups_to_replace.empty() ||
-                          !diff.column_groups_to_lazyload.empty() ||
-                          !diff.column_groups_to_lazyreplace.empty();
-    if (has_cg_changes) {
+    if (diff.load_external_manifest) {
+        // External collections: load via manifest path
+        LoadColumnGroups(segment_load_info.GetManifestPath());
+    } else {
+        bool has_cg_changes = !diff.column_groups_to_load.empty() ||
+                              !diff.column_groups_to_replace.empty() ||
+                              !diff.column_groups_to_lazyload.empty() ||
+                              !diff.column_groups_to_lazyreplace.empty();
+        if (has_cg_changes) {
         auto properties =
             milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                 .GetProperties();
@@ -3097,6 +3216,7 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
                              false,
                              op_ctx,
                              true);
+        }
         }
     }
 

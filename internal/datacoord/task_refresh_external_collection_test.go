@@ -117,6 +117,18 @@ func (s *stubCluster) DropExternalCollectionTask(nodeID int64, taskID int64) err
 
 // ==================== Helper Functions ====================
 
+// newTestCollections creates a collections map with a single external collection
+// that has one VChannel and one partition, as expected by SetJobInfo.
+func newTestCollections(collectionID int64) *typeutil.ConcurrentMap[UniqueID, *collectionInfo] {
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collectionID, &collectionInfo{
+		ID:            collectionID,
+		VChannelNames: []string{"by-dev-rootcoord-dml_0_v1"},
+		Partitions:    []int64{1},
+	})
+	return collections
+}
+
 func createTestRefreshTaskWithStubs(t *testing.T, taskID, jobID, collectionID int64) (*refreshExternalCollectionTask, *externalCollectionRefreshMeta) {
 	catalog := &stubCatalog{}
 	refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
@@ -435,7 +447,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		mt := &meta{
 			catalog:     catalog,
 			segments:    segments,
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			collections: newTestCollections(100),
 		}
 
 		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
@@ -473,7 +485,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		mt := &meta{
 			catalog:     catalog,
 			segments:    segments,
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			collections: newTestCollections(100),
 		}
 
 		task := createTestRefreshTaskWithMetaAndStubs(t, 1001, 1, 100, mt, refreshMeta)
@@ -502,7 +514,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo(t *testing.T) {
 		mt := &meta{
 			catalog:     catalog,
 			segments:    segments,
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			collections: newTestCollections(100),
 		}
 
 		protoTask := &datapb.ExternalCollectionRefreshTask{
@@ -1001,12 +1013,10 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 			},
 		})
 
-		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-		collections.Insert(100, &collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "test_coll"}})
 		mt := &meta{
 			catalog:     catalog,
 			segments:    segments,
-			collections: collections,
+			collections: newTestCollections(100),
 		}
 
 		alloc := &stubAllocator{nextID: 99999}
@@ -1023,6 +1033,10 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 			},
 		}, nil).Build()
 		defer mockQuery.UnPatch()
+
+		// Mock UpdateSegmentsInfo to succeed
+		mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).Return(nil).Build()
+		defer mockUpdate.UnPatch()
 
 		task.QueryTaskOnWorker(cluster)
 
@@ -1165,7 +1179,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_FinishedSuccess(t *test
 	segments := NewSegmentsInfo()
 	mt := &meta{
 		segments:    segments,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		collections: newTestCollections(100),
 	}
 
 	alloc := &stubAllocator{nextID: 99999}
@@ -1355,7 +1369,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo_SuccessWithSegments(t *testing
 
 	mt := &meta{
 		segments:    segments,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		collections: newTestCollections(100),
 	}
 
 	alloc := &stubAllocator{nextID: 99999}
@@ -1408,7 +1422,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo_HighDropRatioWarning(t *testin
 
 	mt := &meta{
 		segments:    segments,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		collections: newTestCollections(100),
 	}
 
 	alloc := &stubAllocator{nextID: 99999}
@@ -1448,7 +1462,7 @@ func TestRefreshExternalCollectionTask_SetJobInfo_UpdateSegmentsInfoFailed(t *te
 	segments := NewSegmentsInfo()
 	mt := &meta{
 		segments:    segments,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		collections: newTestCollections(100),
 	}
 
 	alloc := &stubAllocator{nextID: 99999}

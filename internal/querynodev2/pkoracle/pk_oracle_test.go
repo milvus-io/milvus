@@ -38,7 +38,7 @@ func TestGet(t *testing.T) {
 	}
 
 	bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-	bfs.UpdateBloomFilter(pks)
+	bfs.UpdatePkCandidate(pks)
 	pko.Register(bfs, 1)
 
 	ret := pko.Exists(bfs, 1)
@@ -78,7 +78,7 @@ func TestRemoveReturnsRemovedCandidates(t *testing.T) {
 		}
 
 		bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-		bfs.UpdateBloomFilter(pks)
+		bfs.UpdatePkCandidate(pks)
 		pko.Register(bfs, 1)
 
 		removed := pko.Remove(WithSegmentIDs(1))
@@ -98,15 +98,15 @@ func TestRemoveReturnsRemovedCandidates(t *testing.T) {
 
 		// Register multiple candidates
 		bfs1 := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-		bfs1.UpdateBloomFilter(pks)
+		bfs1.UpdatePkCandidate(pks)
 		pko.Register(bfs1, 1)
 
 		bfs2 := NewBloomFilterSet(2, 1, commonpb.SegmentState_Sealed)
-		bfs2.UpdateBloomFilter(pks)
+		bfs2.UpdatePkCandidate(pks)
 		pko.Register(bfs2, 1)
 
 		bfs3 := NewBloomFilterSet(3, 1, commonpb.SegmentState_Sealed)
-		bfs3.UpdateBloomFilter(pks)
+		bfs3.UpdatePkCandidate(pks)
 		pko.Register(bfs3, 1)
 
 		// Remove multiple segments
@@ -143,12 +143,12 @@ func TestRemoveReturnsRemovedCandidates(t *testing.T) {
 
 		// Register sealed segment
 		bfsSealed := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-		bfsSealed.UpdateBloomFilter(pks)
+		bfsSealed.UpdatePkCandidate(pks)
 		pko.Register(bfsSealed, 1)
 
 		// Register growing segment
 		bfsGrowing := NewBloomFilterSet(2, 1, commonpb.SegmentState_Growing)
-		bfsGrowing.UpdateBloomFilter(pks)
+		bfsGrowing.UpdatePkCandidate(pks)
 		pko.Register(bfsGrowing, 1)
 
 		// Remove only sealed segments
@@ -172,11 +172,11 @@ func TestRemoveReturnsRemovedCandidates(t *testing.T) {
 
 		// Register on different workers
 		bfs1 := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-		bfs1.UpdateBloomFilter(pks)
+		bfs1.UpdatePkCandidate(pks)
 		pko.Register(bfs1, 1)
 
 		bfs2 := NewBloomFilterSet(2, 1, commonpb.SegmentState_Sealed)
-		bfs2.UpdateBloomFilter(pks)
+		bfs2.UpdatePkCandidate(pks)
 		pko.Register(bfs2, 2)
 
 		// Remove only from worker 1
@@ -201,7 +201,7 @@ func TestRemoveReturnsRemovedCandidates(t *testing.T) {
 		// Register multiple candidates
 		for i := 0; i < 5; i++ {
 			bfs := NewBloomFilterSet(int64(i), 1, commonpb.SegmentState_Sealed)
-			bfs.UpdateBloomFilter(pks)
+			bfs.UpdatePkCandidate(pks)
 			pko.Register(bfs, 1)
 		}
 
@@ -234,10 +234,10 @@ func TestRefundRemoved(t *testing.T) {
 
 		// Create bloom filter sets (not charged, so Refund() is a no-op)
 		bfs1 := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-		bfs1.UpdateBloomFilter(pks)
+		bfs1.UpdatePkCandidate(pks)
 
 		bfs2 := NewBloomFilterSet(2, 1, commonpb.SegmentState_Sealed)
-		bfs2.UpdateBloomFilter(pks)
+		bfs2.UpdatePkCandidate(pks)
 
 		candidates := []Candidate{bfs1, bfs2}
 
@@ -268,11 +268,11 @@ func TestRemoveAndRefundAll(t *testing.T) {
 
 		// Create and register bloom filter sets (not charged)
 		bfs1 := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-		bfs1.UpdateBloomFilter(pks)
+		bfs1.UpdatePkCandidate(pks)
 		pko.Register(bfs1, 1)
 
 		bfs2 := NewBloomFilterSet(2, 1, commonpb.SegmentState_Sealed)
-		bfs2.UpdateBloomFilter(pks)
+		bfs2.UpdatePkCandidate(pks)
 		pko.Register(bfs2, 1)
 
 		// Should not panic - Refund() returns early when not charged

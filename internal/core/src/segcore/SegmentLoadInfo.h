@@ -101,6 +101,11 @@ struct LoadDiff {
     // Text fields that need text indexes created from raw data
     std::unordered_set<FieldId> text_indexes_to_create;
 
+    // External collections with manifest should bypass ComputeDiffColumnGroups
+    // (their column names are parquet field names, not numeric field IDs)
+    // and use LoadColumnGroups(manifest_path) directly in ApplyLoadDiff
+    bool load_external_manifest = false;
+
     // Whether manifest path has changed (only when both use manifest mode)
     bool manifest_updated = false;
 
@@ -118,7 +123,8 @@ struct LoadDiff {
                !fields_to_reload.empty() || !indexes_to_drop.empty() ||
                !field_data_to_drop.empty() || !fields_to_fill_default.empty() ||
                !text_indexes_to_load.empty() ||
-               !text_indexes_to_create.empty() || manifest_updated;
+               !text_indexes_to_create.empty() || manifest_updated ||
+               load_external_manifest;
     }
 
     [[nodiscard]] bool
@@ -315,6 +321,11 @@ struct LoadDiff {
         oss << "manifest_updated=" << (manifest_updated ? "true" : "false");
         if (manifest_updated) {
             oss << ", new_manifest_path=" << new_manifest_path;
+        }
+
+        // load_external_manifest
+        if (load_external_manifest) {
+            oss << ", load_external_manifest=true";
         }
 
         oss << "}";
