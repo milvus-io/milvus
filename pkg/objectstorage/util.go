@@ -2,8 +2,10 @@ package objectstorage
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 
@@ -130,6 +133,20 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 		Secure:       c.UseSSL,
 		Region:       c.Region,
 	}
+
+	if c.UseSSL && c.SslTLSMinVersion != "" && c.SslTLSMinVersion != "default" {
+		tr, err := minio.DefaultTransport(true)
+		if err != nil {
+			return nil, err
+		}
+		minVer, err := parseTLSMinVersion(c.SslTLSMinVersion)
+		if err != nil {
+			return nil, err
+		}
+		tr.TLSClientConfig.MinVersion = minVer
+		minioOpts.Transport = tr
+	}
+
 	minIOClient, err := newMinioFn(c.Address, minioOpts)
 	// options nil or invalid formatted endpoint, don't need to retry
 	if err != nil {
@@ -167,6 +184,16 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 func NewAzureObjectStorageClient(ctx context.Context, c *Config) (*service.Client, error) {
 	var client *service.Client
 	var err error
+
+	svcOpts := &service.ClientOptions{}
+	if c.UseSSL && c.SslTLSMinVersion != "" && c.SslTLSMinVersion != "default" {
+		httpClient, err := newTLSHTTPClient(c.SslTLSMinVersion)
+		if err != nil {
+			return nil, err
+		}
+		svcOpts.Transport = httpClient
+	}
+
 	if c.UseIAM {
 		cred, credErr := azidentity.NewWorkloadIdentityCredential(&azidentity.WorkloadIdentityCredentialOptions{
 			ClientID:      os.Getenv("AZURE_CLIENT_ID"),
@@ -176,14 +203,14 @@ func NewAzureObjectStorageClient(ctx context.Context, c *Config) (*service.Clien
 		if credErr != nil {
 			return nil, credErr
 		}
-		client, err = service.NewClient("https://"+c.AccessKeyID+".blob."+c.Address+"/", cred, &service.ClientOptions{})
+		client, err = service.NewClient("https://"+c.AccessKeyID+".blob."+c.Address+"/", cred, svcOpts)
 	} else {
 		connectionString := os.Getenv("AZURE_STORAGE_CONNECTION_STRING")
 		if connectionString == "" {
 			connectionString = "DefaultEndpointsProtocol=https;AccountName=" + c.AccessKeyID +
 				";AccountKey=" + c.SecretAccessKeyID + ";EndpointSuffix=" + c.Address
 		}
-		client, err = service.NewClientFromConnectionString(connectionString, &service.ClientOptions{})
+		client, err = service.NewClientFromConnectionString(connectionString, svcOpts)
 	}
 	if err != nil {
 		return nil, err
@@ -228,9 +255,18 @@ func NewGcpObjectStorageClient(ctx context.Context, c *Config) (*storage.Client,
 		completeAddress = completeAddress + c.Address + "/storage/v1/"
 		opts = append(opts, option.WithEndpoint(completeAddress))
 	}
+	needTLS := c.UseSSL && c.SslTLSMinVersion != "" && c.SslTLSMinVersion != "default"
+
 	if c.GcpNativeWithoutAuth {
 		opts = append(opts, option.WithoutAuthentication())
-	} else {
+		if needTLS {
+			httpClient, err := newTLSHTTPClient(c.SslTLSMinVersion)
+			if err != nil {
+				return nil, err
+			}
+			opts = append(opts, option.WithHTTPClient(httpClient))
+		}
+	} else if c.GcpCredentialJSON != "" {
 		creds, err := google.CredentialsFromJSON(ctx, []byte(c.GcpCredentialJSON), storage.ScopeReadWrite)
 		if err != nil {
 			return nil, err
@@ -239,7 +275,45 @@ func NewGcpObjectStorageClient(ctx context.Context, c *Config) (*storage.Client,
 		if err != nil {
 			return nil, err
 		}
-		opts = append(opts, option.WithCredentials(creds))
+		if needTLS {
+			// WithHTTPClient overrides WithCredentials, so we must wrap the
+			// TLS transport with OAuth2 token injection manually.
+			httpClient, err := newTLSHTTPClient(c.SslTLSMinVersion)
+			if err != nil {
+				return nil, err
+			}
+			httpClient.Transport = &oauth2.Transport{
+				Source: creds.TokenSource,
+				Base:   httpClient.Transport,
+			}
+			opts = append(opts, option.WithHTTPClient(httpClient))
+		} else {
+			opts = append(opts, option.WithCredentials(creds))
+		}
+	} else if c.UseIAM {
+		// IAM mode: use Application Default Credentials (ADC).
+		creds, err := google.FindDefaultCredentials(ctx, storage.ScopeReadWrite)
+		if err != nil {
+			return nil, err
+		}
+		if creds.ProjectID != "" {
+			projectId = creds.ProjectID
+		}
+		if needTLS {
+			httpClient, err := newTLSHTTPClient(c.SslTLSMinVersion)
+			if err != nil {
+				return nil, err
+			}
+			httpClient.Transport = &oauth2.Transport{
+				Source: creds.TokenSource,
+				Base:   httpClient.Transport,
+			}
+			opts = append(opts, option.WithHTTPClient(httpClient))
+		} else {
+			opts = append(opts, option.WithCredentials(creds))
+		}
+	} else {
+		return nil, merr.WrapErrParameterInvalidMsg("gcpnative requires GcpCredentialJSON or UseIAM")
 	}
 
 	client, err := storage.NewClient(ctx, opts...)
@@ -269,6 +343,34 @@ func NewGcpObjectStorageClient(ctx context.Context, c *Config) (*storage.Client,
 		return nil, err
 	}
 	return client, nil
+}
+
+func parseTLSMinVersion(v string) (uint16, error) {
+	switch v {
+	case "1.0":
+		return tls.VersionTLS10, nil
+	case "1.1":
+		return tls.VersionTLS11, nil
+	case "1.2":
+		return tls.VersionTLS12, nil
+	case "1.3":
+		return tls.VersionTLS13, nil
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg("unsupported TLS version: %s, supported values: default, 1.0, 1.1, 1.2, 1.3", v)
+	}
+}
+
+func newTLSHTTPClient(minVersion string) (*http.Client, error) {
+	minVer, err := parseTLSMinVersion(minVersion)
+	if err != nil {
+		return nil, err
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	if tr.TLSClientConfig == nil {
+		tr.TLSClientConfig = &tls.Config{}
+	}
+	tr.TLSClientConfig.MinVersion = minVer
+	return &http.Client{Transport: tr}, nil
 }
 
 func getProjectId(gcpCredentialJSON string) (string, error) {
