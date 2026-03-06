@@ -69,6 +69,7 @@ class PhyExistsFilterExpr : public SegmentExpr {
                       consistency_level,
                       true),
           expr_(expr) {
+        DetermineExecPath();
     }
 
     void

@@ -76,10 +76,14 @@ class PhyTermFilterExpr : public SegmentExpr {
                       consistency_level),
           expr_(expr),
           query_timestamp_(timestamp) {
+        DetermineExecPath();
     }
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    void
+    DetermineExecPath() override;
 
     bool
     IsSource() const override {
