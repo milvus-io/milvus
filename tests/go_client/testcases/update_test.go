@@ -229,6 +229,131 @@ func TestPartialUpdateDynamicSchemaStaticOnly(t *testing.T) {
 	require.Equal(t, "static_new_801", resultMap[801], "id=801 should be inserted")
 }
 
+func TestPartialUpdateDynamicSchemaWithDynamicFields(t *testing.T) {
+	/*
+		Test partial upsert with dynamic schema enabled AND user-provided dynamic fields:
+		1. Create collection with enable_dynamic_field=true, schema has id + vector + name(nullable)
+		2. Insert initial data with static fields + dynamic field "color"
+		3. Partial upsert a mixed batch (existing + new rows) with static + dynamic fields
+		4. Verify existing rows updated, new rows inserted, dynamic fields correct
+
+		This reproduces a bug where $meta valid_data length mismatches when:
+		- enable_dynamic_field=true
+		- partial_update=true
+		- data contains user-provided dynamic fields
+		- batch mixes existing and new primary keys
+	*/
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	collName := common.GenRandomString("update_dyn_fields", 6)
+
+	// Create schema: id(pk) + vector + name(nullable), enable_dynamic_field=true
+	pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
+	nameField := entity.NewField().WithName("name").WithDataType(entity.FieldTypeVarChar).WithMaxLength(256).WithNullable(true)
+
+	fields := []*entity.Field{pkField, vecField, nameField}
+	schema := hp.GenSchema(hp.TNewSchemaOption().
+		TWithName(collName).
+		TWithDescription("test partial update with dynamic schema and dynamic data").
+		TWithFields(fields).
+		TWithEnableDynamicField(true))
+
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second*10)
+		defer cancel()
+		err := mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
+		common.CheckErr(t, err, true)
+	})
+
+	// Insert initial data with static fields + dynamic field "color"
+	initNb := 10
+	initPks := make([]int64, initNb)
+	initNames := make([]string, initNb)
+	for i := 0; i < initNb; i++ {
+		initPks[i] = int64(i)
+		initNames[i] = fmt.Sprintf("item_%d", i)
+	}
+	initPkCol := column.NewColumnInt64(common.DefaultInt64FieldName, initPks)
+	initVecCol := hp.GenColumnData(initNb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	initNameCol := column.NewColumnVarChar("name", initNames)
+	initColorCol := column.NewColumnVarChar("color", []string{
+		"red", "blue", "green", "yellow", "purple",
+		"orange", "pink", "white", "black", "gray",
+	})
+
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithColumns(initPkCol, initVecCol, initNameCol, initColorCol))
+	common.CheckErr(t, err, true)
+
+	// Flush -> Index -> Load
+	prepare := &hp.CollectionPrepare{}
+	prepare.FlushData(ctx, t, mc, collName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(collName))
+	time.Sleep(time.Second * 3)
+
+	// Partial upsert mixed batch with static + dynamic fields
+	// existing rows (id=0,1) + new rows (id=800,801), with dynamic field "color"
+	upsertPks := []int64{0, 1, 800, 801}
+	upsertNames := []string{"upd_0", "upd_1", "new_800", "new_801"}
+	upsertColors := []string{"gold", "silver", "bronze", "copper"}
+	upsertNb := len(upsertPks)
+
+	upsertPkCol := column.NewColumnInt64(common.DefaultInt64FieldName, upsertPks)
+	upsertVecCol := hp.GenColumnData(upsertNb, entity.FieldTypeFloatVector, *hp.TNewDataOption().TWithStart(500))
+	upsertNameCol := column.NewColumnVarChar("name", upsertNames)
+	upsertColorCol := column.NewColumnVarChar("color", upsertColors)
+
+	upsertRes, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithColumns(upsertPkCol, upsertVecCol, upsertNameCol, upsertColorCol).
+		WithPartialUpdate(true))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, upsertNb, upsertRes.UpsertCount)
+
+	// Query and verify
+	resSet, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter(fmt.Sprintf("%s in [0, 1, 800, 801]", common.DefaultInt64FieldName)).
+		WithOutputFields(common.DefaultInt64FieldName, "name", "color").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+
+	require.Equal(t, 4, resSet.GetColumn(common.DefaultInt64FieldName).Len())
+	pkResults := resSet.GetColumn(common.DefaultInt64FieldName).(*column.ColumnInt64).Data()
+	nameResults := resSet.GetColumn("name").(*column.ColumnVarChar).Data()
+
+	// Build result maps
+	nameMap := make(map[int64]string)
+	for i, pk := range pkResults {
+		nameMap[pk] = nameResults[i]
+	}
+
+	// Verify static field "name"
+	require.Equal(t, "upd_0", nameMap[0], "id=0 name should be updated")
+	require.Equal(t, "upd_1", nameMap[1], "id=1 name should be updated")
+	require.Equal(t, "new_800", nameMap[800], "id=800 name should be inserted")
+	require.Equal(t, "new_801", nameMap[801], "id=801 name should be inserted")
+
+	// Verify dynamic field "color" updated for all rows
+	colorCol := resSet.GetColumn("color")
+	require.NotNil(t, colorCol, "color column should exist")
+	require.Equal(t, 4, colorCol.Len())
+	colorMap := make(map[int64]string)
+	for i, pk := range pkResults {
+		val, err := colorCol.GetAsString(i)
+		require.NoError(t, err)
+		colorMap[pk] = val
+	}
+	require.Equal(t, "gold", colorMap[0], "id=0 color should be updated")
+	require.Equal(t, "silver", colorMap[1], "id=1 color should be updated")
+	require.Equal(t, "bronze", colorMap[800], "id=800 color should be inserted")
+	require.Equal(t, "copper", colorMap[801], "id=801 color should be inserted")
+}
+
 func TestUpdateNullableFieldBehavior(t *testing.T) {
 	/*
 		Test nullable field behavior for Update operation:
@@ -383,6 +508,104 @@ func TestUpdateDefaultValueFieldBehavior(t *testing.T) {
 	require.Equal(t, 1, resSet3.GetColumn("default_varchar").Len())
 	unchangedResults := resSet3.GetColumn("default_varchar").(*column.ColumnVarChar).Data()
 	require.Equal(t, "original_3", unchangedResults[0])
+}
+
+func TestPartialUpdateEmptyStringDefaultValue(t *testing.T) {
+	/*
+		Test partial update on a non-nullable field with empty string as default value:
+		1. Create collection with non-nullable varchar field, defaultValue=""
+		2. Insert rows with explicit non-empty values
+		3. Partial update to a different non-empty value → should succeed
+		4. Partial update to empty string "" → should succeed (empty string is a valid value, not null)
+	*/
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	collName := common.GenRandomString("update_empty_default", 6)
+
+	pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
+	tagField := entity.NewField().WithName("tag").WithDataType(entity.FieldTypeVarChar).WithMaxLength(256).WithDefaultValueString("")
+
+	fields := []*entity.Field{pkField, vecField, tagField}
+	schema := hp.GenSchema(hp.TNewSchemaOption().
+		TWithName(collName).
+		TWithDescription("test partial update with empty string default value").
+		TWithFields(fields))
+
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second*10)
+		defer cancel()
+		err := mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
+		common.CheckErr(t, err, true)
+	})
+
+	// Step 2: Insert 3 rows with explicit tag values
+	pkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, []int64{1, 2, 3})
+	vecColumn := hp.GenColumnData(3, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	tagColumn := column.NewColumnVarChar("tag", []string{"alpha", "beta", "gamma"})
+
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(pkColumn, vecColumn, tagColumn))
+	common.CheckErr(t, err, true)
+
+	// Flush -> Index -> Load
+	prepare := &hp.CollectionPrepare{}
+	prepare.FlushData(ctx, t, mc, collName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(collName))
+	time.Sleep(time.Second * 3)
+
+	// Step 3: Partial update id=1 tag to a different non-empty value
+	updatePk1 := column.NewColumnInt64(common.DefaultInt64FieldName, []int64{1})
+	updateVec1 := hp.GenColumnData(1, entity.FieldTypeFloatVector, *hp.TNewDataOption().TWithStart(100))
+	updateTag1 := column.NewColumnVarChar("tag", []string{"updated_alpha"})
+
+	res1, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithColumns(updatePk1, updateVec1, updateTag1).
+		WithPartialUpdate(true))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, 1, res1.UpsertCount)
+
+	// Verify id=1 tag updated
+	resSet1, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter(fmt.Sprintf("%s == 1", common.DefaultInt64FieldName)).
+		WithOutputFields("tag").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	tagResults1 := resSet1.GetColumn("tag").(*column.ColumnVarChar).Data()
+	require.Equal(t, "updated_alpha", tagResults1[0], "id=1 tag should be updated to new value")
+
+	// Step 4: Partial update id=2 tag to empty string ""
+	updatePk2 := column.NewColumnInt64(common.DefaultInt64FieldName, []int64{2})
+	updateVec2 := hp.GenColumnData(1, entity.FieldTypeFloatVector, *hp.TNewDataOption().TWithStart(200))
+	updateTag2 := column.NewColumnVarChar("tag", []string{""})
+
+	res2, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).
+		WithColumns(updatePk2, updateVec2, updateTag2).
+		WithPartialUpdate(true))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, 1, res2.UpsertCount)
+
+	// Verify id=2 tag updated to empty string
+	resSet2, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter(fmt.Sprintf("%s == 2", common.DefaultInt64FieldName)).
+		WithOutputFields("tag").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	tagResults2 := resSet2.GetColumn("tag").(*column.ColumnVarChar).Data()
+	require.Equal(t, "", tagResults2[0], "id=2 tag should be updated to empty string")
+
+	// Verify id=3 tag unchanged
+	resSet3, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithFilter(fmt.Sprintf("%s == 3", common.DefaultInt64FieldName)).
+		WithOutputFields("tag").
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	tagResults3 := resSet3.GetColumn("tag").(*column.ColumnVarChar).Data()
+	require.Equal(t, "gamma", tagResults3[0], "id=3 tag should remain unchanged")
 }
 
 func TestUpsertDefaultValueWithCompressedValidData(t *testing.T) {
