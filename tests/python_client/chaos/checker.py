@@ -455,6 +455,7 @@ class Checker:
                 collection_name=c_name,
                 schema=schema,
                 shards_num=shards_num,
+                consistency_level="Strong",
                 timeout=timeout
             )
         self.scalar_field_names = cf.get_scalar_field_name_list(schema=schema)
@@ -1597,7 +1598,8 @@ class CollectionCreateChecker(Checker):
             collection_name = cf.gen_unique_str("CreateChecker_")
             schema = cf.gen_default_collection_schema()
             self.milvus_client.create_collection(collection_name=collection_name,
-                                                schema=schema)
+                                                schema=schema,
+                                                consistency_level="Strong")
             return None, True
         except Exception as e:
             return str(e), False
@@ -1631,7 +1633,7 @@ class CollectionDropChecker(Checker):
         for i in range(pool_size):
             collection_name = cf.gen_unique_str("DropChecker_")
             try:
-                self.milvus_client.create_collection(collection_name=collection_name, schema=schema)
+                self.milvus_client.create_collection(collection_name=collection_name, schema=schema, consistency_level="Strong")
                 self.collection_pool.append(collection_name)
             except Exception as e:
                 log.error(f"Failed to create collection {collection_name}: {e}")
@@ -1678,7 +1680,7 @@ class PartitionCreateChecker(Checker):
             collection_name = cf.gen_unique_str("PartitionCreateChecker_")
         super().__init__(collection_name=collection_name, schema=schema, partition_name=partition_name)
         c_name = cf.gen_unique_str("PartitionDropChecker_")
-        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema)
+        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema, consistency_level="Strong")
         self.c_name = c_name
         log.info(f"collection {c_name} created")
         p_name = cf.gen_unique_str("PartitionDropChecker_")
@@ -1715,7 +1717,7 @@ class PartitionDropChecker(Checker):
             collection_name = cf.gen_unique_str("PartitionDropChecker_")
         super().__init__(collection_name=collection_name, schema=schema, partition_name=partition_name)
         c_name = cf.gen_unique_str("PartitionDropChecker_")
-        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema)
+        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema, consistency_level="Strong")
         self.c_name = c_name
         log.info(f"collection {c_name} created")
         p_name = cf.gen_unique_str("PartitionDropChecker_")
@@ -1841,7 +1843,7 @@ class IndexCreateChecker(Checker):
     @exception_handler()
     def run_task(self):
         c_name = cf.gen_unique_str("IndexCreateChecker_")
-        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema)
+        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema, consistency_level="Strong")
         self.c_name = c_name
         res, result = self.create_index()
         if result:
@@ -1881,14 +1883,14 @@ class IndexDropChecker(Checker):
     def run_task(self):
         res, result = self.drop_index()
         if result:
-            self.milvus_client.create_collection(collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema)
+            self.milvus_client.create_collection(collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema, consistency_level="Strong")
             index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
             self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         return res, result
 
     def keep_running(self):
         while self._keep_running:
-            self.milvus_client.create_collection(collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema)
+            self.milvus_client.create_collection(collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema, consistency_level="Strong")
             index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
             self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
             self.run_task()
@@ -2378,7 +2380,7 @@ class BulkInsertChecker(Checker):
                 log.debug(f"check failed task: {self.c_name}")
             else:
                 self.c_name = cf.gen_unique_str("BulkInsertChecker_")
-        self.milvus_client.create_collection(collection_name=self.c_name, schema=self.schema)
+        self.milvus_client.create_collection(collection_name=self.c_name, schema=self.schema, consistency_level="Strong")
         log.info(f"collection schema: {self.milvus_client.describe_collection(self.c_name)}")
         # bulk insert data
         num_entities = self.milvus_client.get_collection_stats(collection_name=self.c_name).get("row_count", 0)
