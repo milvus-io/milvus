@@ -303,7 +303,7 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 	numAggs := len(reducer.aggregates)
 	hashers := make([]FieldAccessor, numGroupingKeys)
 	accumulators := make([]FieldAccessor, numAggs)
-	firstFieldData := results[0].GetFieldDatas()
+	firstFieldData := results[0].GetFieldDatas() //nolint:gosec // results[0] is safe: empty/single-result cases already returned above
 	outputColumnCount := len(firstFieldData)
 	for idx, fieldData := range firstFieldData {
 		accessor, err := NewFieldAccessor(fieldData.GetType())
@@ -353,10 +353,10 @@ processResults:
 			break processResults
 		}
 
-		reducedResult.allRetrieveCount += result.GetAllRetrieveCount()
 		if result == nil {
 			return nil, fmt.Errorf("input result from any sources cannot be nil")
 		}
+		reducedResult.allRetrieveCount += result.GetAllRetrieveCount()
 		fieldDatas := result.GetFieldDatas()
 		if outputColumnCount != len(fieldDatas) {
 			return nil, fmt.Errorf("retrieved results from different segments have different size of columns")
@@ -423,7 +423,9 @@ processResults:
 					bucket.AddRow(newRow)
 					totalRowCount++
 				} else {
-					bucket.Accumulate(newRow, rowIdx, numGroupingKeys, aggs)
+					if err := bucket.Accumulate(newRow, rowIdx, numGroupingKeys, aggs); err != nil {
+						return nil, err
+					}
 				}
 			}
 			// Don't guarantee specific groups to be returned before milvus support order by
