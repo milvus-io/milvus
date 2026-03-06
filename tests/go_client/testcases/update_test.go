@@ -204,3 +204,156 @@ func TestUpdateNullableFieldBehavior(t *testing.T) {
 	require.Equal(t, "original_1", nullableResults[0])
 	require.Equal(t, "original_2", nullableResults[1])
 }
+
+func TestUpdateDefaultValueFieldBehavior(t *testing.T) {
+	/*
+		Test default value field behavior for Update operation:
+		1. Insert data with a non-nullable default-value field having explicit values
+		2. Partial update the same entities without providing the default-value field
+		3. Verify that the field retains its original value (not replaced with the default)
+	*/
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// Create collection with non-nullable default-value field
+	collName := common.GenRandomString("update_default", 6)
+
+	pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
+	defaultField := entity.NewField().WithName("default_varchar").WithDataType(entity.FieldTypeVarChar).WithMaxLength(100).WithDefaultValueString("default_val")
+
+	fields := []*entity.Field{pkField, vecField, defaultField}
+	schema := hp.GenSchema(hp.TNewSchemaOption().TWithName(collName).TWithDescription("test default value field behavior for update").TWithFields(fields))
+
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second*10)
+		defer cancel()
+		err := mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
+		common.CheckErr(t, err, true)
+	})
+
+	// Insert initial data with explicit varchar values
+	pkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, []int64{1, 2, 3})
+	vecColumn := hp.GenColumnData(3, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	defaultColumn := column.NewColumnVarChar("default_varchar", []string{"original_1", "original_2", "original_3"})
+
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(pkColumn, vecColumn, defaultColumn))
+	common.CheckErr(t, err, true)
+
+	// Flush -> Index -> Load
+	prepare := &hp.CollectionPrepare{}
+	prepare.FlushData(ctx, t, mc, collName)
+	indexParams := hp.TNewIndexParams(schema)
+	prepare.CreateIndex(ctx, t, mc, indexParams)
+	loadParams := hp.NewLoadParams(collName)
+	prepare.Load(ctx, t, mc, loadParams)
+
+	time.Sleep(time.Second * 5)
+
+	// Partial update PKs 1,2 with only pk + vec (omit default_varchar)
+	updatePkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, []int64{1, 2})
+	updateVecColumn := hp.GenColumnData(2, entity.FieldTypeFloatVector, *hp.TNewDataOption().TWithStart(100))
+
+	updateRes, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(updatePkColumn, updateVecColumn).WithPartialUpdate(true))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, 2, updateRes.UpsertCount)
+
+	time.Sleep(time.Second * 3)
+
+	// Query PKs 1,2 -> verify default_varchar retains original values
+	resSet, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(fmt.Sprintf("%s in [1, 2]", common.DefaultInt64FieldName)).WithOutputFields("*").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+
+	require.Equal(t, 2, resSet.GetColumn("default_varchar").Len())
+	defaultResults := resSet.GetColumn("default_varchar").(*column.ColumnVarChar).Data()
+	require.Equal(t, "original_1", defaultResults[0])
+	require.Equal(t, "original_2", defaultResults[1])
+
+	// Query PK 3 -> verify unchanged
+	resSet3, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(fmt.Sprintf("%s == 3", common.DefaultInt64FieldName)).WithOutputFields("*").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+
+	require.Equal(t, 1, resSet3.GetColumn("default_varchar").Len())
+	unchangedResults := resSet3.GetColumn("default_varchar").(*column.ColumnVarChar).Data()
+	require.Equal(t, "original_3", unchangedResults[0])
+}
+
+func TestUpsertDefaultValueWithCompressedValidData(t *testing.T) {
+	/*
+		Test upsert with compressed ValidData for a field with defaultValue.
+		This covers the upsert path (task_upsert.go queryPreExecute) where
+		FillWithDefaultValue is dispatched instead of FillWithNullValue.
+
+		1. Create collection with nullable + defaultValue varchar field
+		2. Insert 3 rows with explicit values
+		3. Upsert 3 rows using NullableColumn (compressed format with ValidData),
+		   where row 3 has valid=false -> should be filled with default value
+		4. Query and verify row 3 gets the default value
+	*/
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	collName := common.GenRandomString("upsert_default_compressed", 6)
+
+	pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
+	defaultField := entity.NewField().WithName("default_varchar").WithDataType(entity.FieldTypeVarChar).
+		WithMaxLength(100).WithNullable(true).WithDefaultValueString("default_val")
+
+	fields := []*entity.Field{pkField, vecField, defaultField}
+	schema := hp.GenSchema(hp.TNewSchemaOption().TWithName(collName).TWithDescription("test upsert default value with compressed valid data").TWithFields(fields))
+
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second*10)
+		defer cancel()
+		err := mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
+		common.CheckErr(t, err, true)
+	})
+
+	// Insert 3 rows with explicit values
+	pkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, []int64{1, 2, 3})
+	vecColumn := hp.GenColumnData(3, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	varcharColumn := column.NewColumnVarChar("default_varchar", []string{"v1", "v2", "v3"})
+
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(pkColumn, vecColumn, varcharColumn))
+	common.CheckErr(t, err, true)
+
+	prepare := &hp.CollectionPrepare{}
+	prepare.FlushData(ctx, t, mc, collName)
+	indexParams := hp.TNewIndexParams(schema)
+	prepare.CreateIndex(ctx, t, mc, indexParams)
+	loadParams := hp.NewLoadParams(collName)
+	prepare.Load(ctx, t, mc, loadParams)
+
+	time.Sleep(time.Second * 5)
+
+	// Upsert 3 rows with compressed ValidData:
+	// data=["new1","new2"], validData=[true,true,false]
+	// Row 3 (valid=false) should be filled with "default_val" by FillWithDefaultValue
+	upsertPkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, []int64{1, 2, 3})
+	upsertVecColumn := hp.GenColumnData(3, entity.FieldTypeFloatVector, *hp.TNewDataOption().TWithStart(100))
+	nullableVarcharColumn, err := column.NewNullableColumnVarChar("default_varchar", []string{"new1", "new2"}, []bool{true, true, false})
+	common.CheckErr(t, err, true)
+
+	upsertRes, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(upsertPkColumn, upsertVecColumn, nullableVarcharColumn))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, 3, upsertRes.UpsertCount)
+
+	time.Sleep(time.Second * 3)
+
+	// Query all 3 rows and verify
+	resSet, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(fmt.Sprintf("%s in [1, 2, 3]", common.DefaultInt64FieldName)).WithOutputFields("*").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+
+	require.Equal(t, 3, resSet.GetColumn("default_varchar").Len())
+	results := resSet.GetColumn("default_varchar").(*column.ColumnVarChar).Data()
+	require.Equal(t, "new1", results[0])
+	require.Equal(t, "new2", results[1])
+	require.Equal(t, "default_val", results[2])
+}
