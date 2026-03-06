@@ -196,7 +196,7 @@ type DataCoordCatalog interface {
 	DropIndex(ctx context.Context, collID, dropIdxID typeutil.UniqueID) error
 
 	CreateSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error
-	ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error)
+	ListSegmentIndexes(ctx context.Context, collectionID int64) ([]*model.SegmentIndex, error)
 	AlterSegmentIndexes(ctx context.Context, newSegIdxes []*model.SegmentIndex) error
 	DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error
 

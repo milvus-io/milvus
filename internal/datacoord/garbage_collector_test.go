@@ -1920,7 +1920,7 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 	}).Build()
 	defer mock5.UnPatch()
 
-	mock6 := mockey.Mock((*datacoord.Catalog).ListSegmentIndexes).To(func(c *datacoord.Catalog, ctx context.Context) ([]*model.SegmentIndex, error) {
+	mock6 := mockey.Mock((*datacoord.Catalog).ListSegmentIndexes).To(func(c *datacoord.Catalog, ctx context.Context, collectionID int64) ([]*model.SegmentIndex, error) {
 		return []*model.SegmentIndex{}, nil
 	}).Build()
 	defer mock6.UnPatch()
@@ -2027,7 +2027,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 	}).Build()
 	defer mock1.UnPatch()
 
-	mock2 := mockey.Mock((*datacoord.Catalog).ListSegmentIndexes).To(func(c *datacoord.Catalog, ctx context.Context) ([]*model.SegmentIndex, error) {
+	mock2 := mockey.Mock((*datacoord.Catalog).ListSegmentIndexes).To(func(c *datacoord.Catalog, ctx context.Context, collectionID int64) ([]*model.SegmentIndex, error) {
 		return []*model.SegmentIndex{segIdx1, segIdx2}, nil
 	}).Build()
 	defer mock2.UnPatch()

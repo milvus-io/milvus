@@ -59,12 +59,12 @@ func (s *ClusteringCompactionPolicySuite) SetupTest() {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.catalog = catalog
 
 	compactionTaskMeta, _ := newCompactionTaskMeta(context.TODO(), s.catalog)
 	partitionStatsMeta, _ := newPartitionStatsMeta(context.TODO(), s.catalog)
-	indexMeta, _ := newIndexMeta(context.TODO(), s.catalog)
+	indexMeta, _ := newIndexMeta(context.TODO(), s.catalog, nil)
 
 	meta := &meta{
 		segments:           NewSegmentsInfo(),

@@ -45,17 +45,17 @@ func TestReloadFromKV(t *testing.T) {
 	t.Run("ListIndexes_fail", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, errors.New("mock"))
-		catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil).Maybe()
-		_, err := newIndexMeta(context.TODO(), catalog)
+		catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		_, err := newIndexMeta(context.TODO(), catalog, []int64{0})
 		assert.Error(t, err)
 	})
 
 	t.Run("ListSegmentIndexes_fails", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
-		catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, errors.New("mock"))
+		catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 
-		_, err := newIndexMeta(context.TODO(), catalog)
+		_, err := newIndexMeta(context.TODO(), catalog, []int64{0})
 		assert.Error(t, err)
 	})
 
@@ -70,14 +70,14 @@ func TestReloadFromKV(t *testing.T) {
 			},
 		}, nil)
 
-		catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{
+		catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{
 			{
 				SegmentID: 1,
 				IndexID:   1,
 			},
 		}, nil)
 
-		meta, err := newIndexMeta(context.TODO(), catalog)
+		meta, err := newIndexMeta(context.TODO(), catalog, []int64{0})
 		assert.NoError(t, err)
 		assert.NotNil(t, meta)
 	})
