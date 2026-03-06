@@ -53,11 +53,18 @@ class ChunkedColumnGroup {
         num_rows_ = GetNumRowsUntilChunk().back();
     }
 
-    virtual ~ChunkedColumnGroup() = default;
+    virtual ~ChunkedColumnGroup() {
+        slot_->CancelWarmup();
+    }
 
     void
     ManualEvictCache() const {
         slot_->ManualEvictAll();
+    }
+
+    void
+    CancelWarmup() {
+        slot_->CancelWarmup();
     }
 
     // Get the number of group chunks
@@ -184,10 +191,21 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
           data_type_(field_meta.get_data_type()) {
     }
 
+    ~ProxyChunkColumn() override {
+        CancelWarmup();
+    }
+
     void
     ManualEvictCache() const override {
         if (group_->NumFieldsInGroup() == 1) {
             group_->ManualEvictCache();
+        }
+    }
+
+    void
+    CancelWarmup() override {
+        if (group_->NumFieldsInGroup() == 1) {
+            group_->CancelWarmup();
         }
     }
 
