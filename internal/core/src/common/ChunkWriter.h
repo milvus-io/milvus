@@ -260,6 +260,18 @@ class GeometryChunkWriter : public ChunkWriterBase {
                     const std::shared_ptr<ChunkTarget>& target) override;
 };
 
+class MolChunkWriter : public ChunkWriterBase {
+ public:
+    using ChunkWriterBase::ChunkWriterBase;
+
+    std::pair<size_t, size_t>
+    calculate_size(const arrow::ArrayVector& array_vec) override;
+
+    void
+    write_to_target(const arrow::ArrayVector& array_vec,
+                    const std::shared_ptr<ChunkTarget>& target) override;
+};
+
 class ArrayChunkWriter : public ChunkWriterBase {
  public:
     ArrayChunkWriter(const milvus::DataType element_type, bool nullable)

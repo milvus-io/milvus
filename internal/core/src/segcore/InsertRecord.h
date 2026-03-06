@@ -954,6 +954,11 @@ class InsertRecordGrowing {
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
+            case DataType::MOL: {
+                this->append_data<std::string>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
+                return;
+            }
             default: {
                 ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported scalar type",
