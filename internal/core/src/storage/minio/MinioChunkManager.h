@@ -70,6 +70,9 @@ enum class RemoteStorageType {
     ALIYUN_CLOUD = 2,
 };
 
+void
+ConfigureGoogleCloudIAMHttpClientFactory(Aws::SDKOptions& sdk_options);
+
 template <typename... Args>
 static std::string
 S3ErrorMessage(const std::string& func,

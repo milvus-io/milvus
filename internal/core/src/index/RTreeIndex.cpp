@@ -15,6 +15,8 @@
 #include <exception>
 #include <list>
 #include <map>
+#include <mutex>
+#include <shared_mutex>
 #include <utility>
 
 #include "boost/filesystem/directory.hpp"
@@ -139,7 +141,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         };
 
         auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
-            folly::SharedMutexWritePriority::WriteHolder lock(mutex_);
+            std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
             null_offset_.resize((size_t)size / sizeof(size_t));
             memcpy(null_offset_.data(), data, (size_t)size);
         };
@@ -295,7 +297,7 @@ RTreeIndex<T>::BuildWithFieldData(
                 total_rows += n;
             }
             if (!local_nulls.empty()) {
-                folly::SharedMutexWritePriority::WriteHolder lock(mutex_);
+                std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
                 null_offset_.reserve(null_offset_.size() + local_nulls.size());
                 null_offset_.insert(
                     null_offset_.end(), local_nulls.begin(), local_nulls.end());
@@ -373,7 +375,7 @@ RTreeIndex<T>::Upload(const Config& config) {
 template <typename T>
 BinarySet
 RTreeIndex<T>::Serialize(const Config& config) {
-    folly::SharedMutexWritePriority::ReadHolder lock(mutex_);
+    std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
     auto bytes = null_offset_.size() * sizeof(size_t);
     BinarySet res_set;
     if (bytes > 0) {
@@ -412,7 +414,7 @@ const TargetBitmap
 RTreeIndex<T>::IsNull() {
     int64_t count = Count();
     TargetBitmap bitset(count);
-    folly::SharedMutexWritePriority::ReadHolder lock(mutex_);
+    std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
     auto end = std::lower_bound(
         null_offset_.begin(), null_offset_.end(), static_cast<size_t>(count));
     for (auto it = null_offset_.begin(); it != end; ++it) {
@@ -426,7 +428,7 @@ TargetBitmap
 RTreeIndex<T>::IsNotNull() {
     int64_t count = Count();
     TargetBitmap bitset(count, true);
-    folly::SharedMutexWritePriority::ReadHolder lock(mutex_);
+    std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
     auto end = std::lower_bound(
         null_offset_.begin(), null_offset_.end(), static_cast<size_t>(count));
     for (auto it = null_offset_.begin(); it != end; ++it) {
@@ -603,7 +605,7 @@ RTreeIndex<T>::AddGeometry(const std::string& wkb_data, int64_t row_offset) {
         LOG_DEBUG("Added geometry at row offset {}", row_offset);
     } else {
         // Handle null geometry
-        folly::SharedMutexWritePriority::WriteHolder lock(mutex_);
+        std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
         null_offset_.push_back(static_cast<size_t>(row_offset));
 
         // Update total row count
