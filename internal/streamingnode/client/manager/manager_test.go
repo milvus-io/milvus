@@ -57,7 +57,7 @@ func TestManager(t *testing.T) {
 		}, nil
 	})
 	// Not address here.
-	nodes, err := m.CollectAllStatus(context.Background())
+	nodes, err := m.CollectAllStatus(context.Background(), "")
 	assert.NoError(t, err)
 	assert.Len(t, nodes, 0)
 
@@ -84,7 +84,7 @@ func TestManager(t *testing.T) {
 		return s, nil
 	})
 
-	nodes, err = m.CollectAllStatus(context.Background())
+	nodes, err = m.CollectAllStatus(context.Background(), "")
 	assert.NoError(t, err)
 	assert.Len(t, nodes, 3)
 	assert.ErrorIs(t, nodes[3].Err, types.ErrNotAlive)
@@ -132,7 +132,7 @@ func TestManager(t *testing.T) {
 	nodeInfos, err = m.GetAllStreamingNodes(context.Background())
 	assert.Nil(t, nodeInfos)
 	assert.Error(t, err)
-	nodes, err = m.CollectAllStatus(context.Background())
+	nodes, err = m.CollectAllStatus(context.Background(), "")
 	assert.Nil(t, nodes)
 	assert.Error(t, err)
 	err = m.Assign(context.Background(), types.PChannelInfoAssigned{})
@@ -144,26 +144,135 @@ func TestManager(t *testing.T) {
 	assert.Error(t, err)
 }
 
+type serverInfo struct {
+	stopping      bool
+	resourceGroup string
+}
+
 func newVersionedState(version int64, serverIDs map[uint64]bool) discoverer.VersionedState {
+	infos := make(map[uint64]serverInfo, len(serverIDs))
+	for id, stopping := range serverIDs {
+		infos[id] = serverInfo{stopping: stopping}
+	}
+	return newVersionedStateWithRG(version, infos)
+}
+
+func newVersionedStateWithRG(version int64, servers map[uint64]serverInfo) discoverer.VersionedState {
 	state := discoverer.VersionedState{
 		Version: typeutil.VersionInt64(version),
 		State: resolver.State{
-			Addresses: make([]resolver.Address, 0, len(serverIDs)),
+			Addresses: make([]resolver.Address, 0, len(servers)),
 		},
 	}
 
-	for serverID, stopping := range serverIDs {
+	for serverID, info := range servers {
+		session := &sessionutil.SessionRaw{
+			ServerID: int64(serverID),
+			Stopping: info.stopping,
+		}
+		if info.resourceGroup != "" {
+			session.ServerLabels = map[string]string{
+				sessionutil.LabelResourceGroup: info.resourceGroup,
+			}
+		}
 		state.State.Addresses = append(state.State.Addresses, resolver.Address{
-			Addr: fmt.Sprintf("localhost:%d", serverID),
-			BalancerAttributes: attributes.WithSession(
-				new(attributes.Attributes), &sessionutil.SessionRaw{
-					ServerID: int64(serverID),
-					Stopping: stopping,
-				},
-			),
+			Addr:               fmt.Sprintf("localhost:%d", serverID),
+			BalancerAttributes: attributes.WithSession(new(attributes.Attributes), session),
 		})
 	}
 	return state
+}
+
+func TestGetAllStreamingNodesWithResourceGroup(t *testing.T) {
+	rb := mock_resolver.NewMockBuilder(t)
+	managerService := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeManagerServiceClient](t)
+	m := &managerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		stopped:  make(chan struct{}),
+		rb:       rb,
+		service:  managerService,
+	}
+	r := mock_resolver.NewMockResolver(t)
+	rb.EXPECT().Resolver().Return(r)
+
+	// Return sessions with resource group labels
+	r.EXPECT().GetLatestState(mock.Anything).RunAndReturn(func(ctx context.Context) (discoverer.VersionedState, error) {
+		return newVersionedStateWithRG(1, map[uint64]serverInfo{
+			1: {resourceGroup: "rg_a"},
+			2: {resourceGroup: "rg_b"},
+			3: {resourceGroup: ""}, // empty RG should default to __default_resource_group
+		}), nil
+	})
+
+	nodes, err := m.GetAllStreamingNodes(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, nodes, 3)
+	assert.Equal(t, "rg_a", nodes[1].ResourceGroup)
+	assert.Equal(t, "rg_b", nodes[2].ResourceGroup)
+	assert.Equal(t, "__default_resource_group", nodes[3].ResourceGroup)
+
+	managerService.EXPECT().Close().Return()
+	rb.EXPECT().Close().Return()
+	m.Close()
+}
+
+func TestCollectAllStatusWithResourceGroupFilter(t *testing.T) {
+	rb := mock_resolver.NewMockBuilder(t)
+	managerService := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeManagerServiceClient](t)
+	m := &managerClientImpl{
+		lifetime: typeutil.NewLifetime(),
+		stopped:  make(chan struct{}),
+		rb:       rb,
+		service:  managerService,
+	}
+	r := mock_resolver.NewMockResolver(t)
+	rb.EXPECT().Resolver().Return(r)
+
+	managerServiceClient := mock_streamingpb.NewMockStreamingNodeManagerServiceClient(t)
+	managerService.EXPECT().GetService(mock.Anything).RunAndReturn(func(ctx context.Context) (streamingpb.StreamingNodeManagerServiceClient, error) {
+		return managerServiceClient, nil
+	})
+	managerServiceClient.EXPECT().CollectStatus(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, snmcsr *streamingpb.StreamingNodeManagerCollectStatusRequest, co ...grpc.CallOption) (*streamingpb.StreamingNodeManagerCollectStatusResponse, error) {
+		return &streamingpb.StreamingNodeManagerCollectStatusResponse{}, nil
+	})
+
+	// Two calls to GetLatestState: first for initial state, second for re-check
+	callCount := 0
+	r.EXPECT().GetLatestState(mock.Anything).RunAndReturn(func(ctx context.Context) (discoverer.VersionedState, error) {
+		callCount++
+		return newVersionedStateWithRG(int64(callCount), map[uint64]serverInfo{
+			1: {resourceGroup: "rg_a"},
+			2: {resourceGroup: "rg_a"},
+			3: {resourceGroup: "rg_b"},
+			4: {resourceGroup: ""}, // defaults to __default_resource_group
+		}), nil
+	})
+
+	// Filter by rg_a - should only collect status from servers 1 and 2
+	nodes, err := m.CollectAllStatus(context.Background(), "rg_a")
+	assert.NoError(t, err)
+	assert.Len(t, nodes, 2)
+	assert.Contains(t, nodes, int64(1))
+	assert.Contains(t, nodes, int64(2))
+	assert.NotContains(t, nodes, int64(3))
+	assert.NotContains(t, nodes, int64(4))
+
+	// Filter by __default_resource_group - should only collect status from server 4
+	callCount = 0
+	nodes, err = m.CollectAllStatus(context.Background(), "__default_resource_group")
+	assert.NoError(t, err)
+	assert.Len(t, nodes, 1)
+	assert.Contains(t, nodes, int64(4))
+
+	// Filter by non-existent RG - should return empty
+	callCount = 0
+	nodes, err = m.CollectAllStatus(context.Background(), "non_existent_rg")
+	assert.NoError(t, err)
+	assert.Len(t, nodes, 0)
+
+	managerService.EXPECT().Close().Return()
+	rb.EXPECT().Close().Return()
+	m.Close()
 }
 
 func TestDial(t *testing.T) {

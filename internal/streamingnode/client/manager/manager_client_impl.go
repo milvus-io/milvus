@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -53,8 +54,8 @@ func (c *managerClientImpl) WatchNodeChanged(ctx context.Context) (<-chan struct
 	return resultCh, nil
 }
 
-// GetAllStreamingNodes fetches all streaming node info.
-func (c *managerClientImpl) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
+// GetAllStreamingNodes fetches all streaming node info with resource group.
+func (c *managerClientImpl) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("manager client is closing")
 	}
@@ -65,19 +66,26 @@ func (c *managerClientImpl) GetAllStreamingNodes(ctx context.Context) (map[int64
 	if err != nil {
 		return nil, err
 	}
-
-	result := make(map[int64]*types.StreamingNodeInfo, len(state.State.Addresses))
+	result := make(map[int64]*types.StreamingNodeInfoWithResourceGroup, len(state.State.Addresses))
 	for serverID, session := range state.Sessions() {
-		result[serverID] = &types.StreamingNodeInfo{
-			ServerID: serverID,
-			Address:  session.Address,
+		rg := session.GetResourceGroupName()
+		if rg == "" {
+			rg = common.DefaultResourceGroupName
+		}
+		result[serverID] = &types.StreamingNodeInfoWithResourceGroup{
+			StreamingNodeInfo: types.StreamingNodeInfo{
+				ServerID: serverID,
+				Address:  session.Address,
+			},
+			ResourceGroup: rg,
 		}
 	}
 	return result, nil
 }
 
 // CollectAllStatus collects status in all underlying streamingnode.
-func (c *managerClientImpl) CollectAllStatus(ctx context.Context) (map[int64]*types.StreamingNodeStatus, error) {
+// If resourceGroup is not empty, only nodes with matching resource group will be collected.
+func (c *managerClientImpl) CollectAllStatus(ctx context.Context, resourceGroup string) (map[int64]*types.StreamingNodeStatus, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("manager client is closing")
 	}
@@ -93,7 +101,7 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context) (map[int64]*ty
 	}
 
 	// Collect status of all streamingnode.
-	result, err := c.getAllStreamingNodeStatus(ctx, state)
+	result, err := c.getAllStreamingNodeStatus(ctx, state, resourceGroup)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +124,7 @@ func (c *managerClientImpl) CollectAllStatus(ctx context.Context) (map[int64]*ty
 	return result, nil
 }
 
-func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state discoverer.VersionedState) (map[int64]*types.StreamingNodeStatus, error) {
+func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state discoverer.VersionedState, resourceGroup string) (map[int64]*types.StreamingNodeStatus, error) {
 	log := log.Ctx(ctx)
 	// wait for manager service ready.
 	manager, err := c.service.GetService(ctx)
@@ -127,10 +135,18 @@ func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state
 	g, _ := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 	var mu sync.Mutex
-	result := make(map[int64]*types.StreamingNodeStatus, len(state.State.Addresses))
+	result := make(map[int64]*types.StreamingNodeStatus, len(state.Sessions()))
 	for serverID, session := range state.Sessions() {
 		serverID := serverID
 		address := session.Address
+		rg := session.GetResourceGroupName()
+		if rg == "" {
+			rg = common.DefaultResourceGroupName
+		}
+		if resourceGroup != "" && rg != resourceGroup {
+			// skip the streaming node if the resource group is not matched.
+			continue
+		}
 		g.Go(func() error {
 			ctx := contextutil.WithPickServerID(ctx, serverID)
 			resp, err := manager.CollectStatus(ctx, &streamingpb.StreamingNodeManagerCollectStatusRequest{})

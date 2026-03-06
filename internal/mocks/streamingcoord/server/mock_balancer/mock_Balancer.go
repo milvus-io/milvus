@@ -125,23 +125,23 @@ func (_c *MockBalancer_Close_Call) RunAndReturn(run func()) *MockBalancer_Close_
 }
 
 // GetAllStreamingNodes provides a mock function with given fields: ctx
-func (_m *MockBalancer) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
+func (_m *MockBalancer) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
 	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAllStreamingNodes")
 	}
 
-	var r0 map[int64]*types.StreamingNodeInfo
+	var r0 map[int64]*types.StreamingNodeInfoWithResourceGroup
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (map[int64]*types.StreamingNodeInfo, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error)); ok {
 		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) map[int64]*types.StreamingNodeInfo); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) map[int64]*types.StreamingNodeInfoWithResourceGroup); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[int64]*types.StreamingNodeInfo)
+			r0 = ret.Get(0).(map[int64]*types.StreamingNodeInfoWithResourceGroup)
 		}
 	}
 
@@ -172,12 +172,12 @@ func (_c *MockBalancer_GetAllStreamingNodes_Call) Run(run func(ctx context.Conte
 	return _c
 }
 
-func (_c *MockBalancer_GetAllStreamingNodes_Call) Return(_a0 map[int64]*types.StreamingNodeInfo, _a1 error) *MockBalancer_GetAllStreamingNodes_Call {
+func (_c *MockBalancer_GetAllStreamingNodes_Call) Return(_a0 map[int64]*types.StreamingNodeInfoWithResourceGroup, _a1 error) *MockBalancer_GetAllStreamingNodes_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockBalancer_GetAllStreamingNodes_Call) RunAndReturn(run func(context.Context) (map[int64]*types.StreamingNodeInfo, error)) *MockBalancer_GetAllStreamingNodes_Call {
+func (_c *MockBalancer_GetAllStreamingNodes_Call) RunAndReturn(run func(context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error)) *MockBalancer_GetAllStreamingNodes_Call {
 	_c.Call.Return(run)
 	return _c
 }
