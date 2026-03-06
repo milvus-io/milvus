@@ -39,8 +39,9 @@ class JsonCastFunction {
         switch (cast_function_type_) {
             case Type::kString2Double:
                 return std::is_same_v<T, double>;
+            default:
+                return false;
         }
-        return false;
     }
 
     static JsonCastFunction

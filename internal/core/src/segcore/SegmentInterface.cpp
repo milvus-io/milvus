@@ -277,7 +277,7 @@ SegmentInternalInterface::FillTargetEntry(
         std::unique_ptr<DataArray> col;
         auto& field_meta = plan->schema_->operator[](field_id);
         if (!is_field_exist(field_id)) {
-            col = std::move(bulk_subscript_not_exist_field(field_meta, size));
+            col = bulk_subscript_not_exist_field(field_meta, size);
         } else {
             col = bulk_subscript(&op_ctx, field_id, offsets, size);
         }

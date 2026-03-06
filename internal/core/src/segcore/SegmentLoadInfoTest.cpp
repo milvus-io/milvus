@@ -907,8 +907,6 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsSkipAlreadyFilled) {
 
     // Verify fields were added to fields_to_fill_default
     EXPECT_FALSE(first_diff.fields_to_fill_default.empty());
-    size_t first_count = first_diff.fields_to_fill_default.size();
-
     // Second diff: first_new_info -> same proto (simulates reopen)
     // first_new_info should now have fields_filled_with_default_ populated
     SegmentLoadInfo second_new_info(proto, schema_);

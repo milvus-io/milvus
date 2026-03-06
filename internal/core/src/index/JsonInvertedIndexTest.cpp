@@ -80,12 +80,12 @@ TEST(JsonIndexTest, TestJSONErrRecorder) {
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
+    index::CreateIndexInfo cii_double;
+    cii_double.index_type = index::INVERTED_INDEX_TYPE;
+    cii_double.json_cast_type = JsonCastType::FromString("DOUBLE");
+    cii_double.json_path = json_path;
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::CreateIndexInfo{
-            .index_type = index::INVERTED_INDEX_TYPE,
-            .json_cast_type = JsonCastType::FromString("DOUBLE"),
-            .json_path = json_path,
-        },
+        cii_double,
         file_manager_ctx);
     auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
         static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
@@ -143,12 +143,12 @@ TEST(JsonIndexTest, TestJsonContains) {
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
+    index::CreateIndexInfo cii_array_double;
+    cii_array_double.index_type = index::INVERTED_INDEX_TYPE;
+    cii_array_double.json_cast_type = JsonCastType::FromString("ARRAY_DOUBLE");
+    cii_array_double.json_path = json_path;
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::CreateIndexInfo{
-            .index_type = index::INVERTED_INDEX_TYPE,
-            .json_cast_type = JsonCastType::FromString("ARRAY_DOUBLE"),
-            .json_path = json_path,
-        },
+        cii_array_double,
         file_manager_ctx);
     auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
         static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
@@ -239,13 +239,13 @@ TEST(JsonIndexTest, TestJsonCast) {
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
+    index::CreateIndexInfo cii_cast;
+    cii_cast.index_type = index::INVERTED_INDEX_TYPE;
+    cii_cast.json_cast_type = JsonCastType::FromString("DOUBLE");
+    cii_cast.json_path = json_path;
+    cii_cast.json_cast_function = "STRING_TO_DOUBLE";
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::CreateIndexInfo{
-            .index_type = index::INVERTED_INDEX_TYPE,
-            .json_cast_type = JsonCastType::FromString("DOUBLE"),
-            .json_path = json_path,
-            .json_cast_function = "STRING_TO_DOUBLE",
-        },
+        cii_cast,
         file_manager_ctx);
     auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
         static_cast<JsonInvertedIndex<double>*>(inv_index.release()));

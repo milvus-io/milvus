@@ -249,13 +249,11 @@ TEST_P(ChunkVectorTest, SearchWithMmap) {
         is_sparse ? DataType::VECTOR_SPARSE_U32_F32 : DataType::VECTOR_FLOAT;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto random = schema->AddDebugField("random", DataType::DOUBLE);
-    auto vec = schema->AddDebugField("embeddings", data_type, 128, metric_type);
+    schema->AddDebugField("random", DataType::DOUBLE);
+    schema->AddDebugField("embeddings", data_type, 128, metric_type);
     schema->set_primary_field_id(pk);
 
     auto segment = CreateGrowingSegment(schema, empty_index_meta, 11, config);
-    auto segmentImplPtr = dynamic_cast<SegmentGrowingImpl*>(segment.get());
-
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
     if (is_sparse) {
@@ -286,16 +284,6 @@ TEST_P(ChunkVectorTest, SearchWithMmap) {
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
                         dataset.raw_);
-        const VectorBase* field_data = nullptr;
-        if (is_sparse) {
-            field_data = segmentImplPtr->get_insert_record()
-                             .get_data<milvus::SparseFloatVector>(vec);
-        } else {
-            field_data = segmentImplPtr->get_insert_record()
-                             .get_data<milvus::FloatVector>(vec);
-        }
-        auto inserted = (i + 1) * per_batch;
-
         auto num_queries = 5;
         auto ph_group_raw =
             is_sparse ? CreateSparseFloatPlaceholderGroup(num_queries)

@@ -765,7 +765,7 @@ class ConcurrentVector<Int8Vector> : public ConcurrentVectorImpl<int8, false> {
     }
 };
 
-static bool
+[[maybe_unused]] static bool
 ConcurrentDenseVectorCheck(const VectorBase* vec_base, DataType data_type) {
     if (data_type == DataType::VECTOR_FLOAT) {
         return dynamic_cast<const ConcurrentVector<FloatVector>*>(vec_base);

@@ -390,42 +390,33 @@ GenerateRandomSparseFloatVector(size_t rows,
 
 inline SchemaPtr CreateTestSchema() {
     auto schema = std::make_shared<milvus::Schema>();
-    auto bool_field =
-        schema->AddDebugField("bool", milvus::DataType::BOOL, true);
-    auto int8_field =
-        schema->AddDebugField("int8", milvus::DataType::INT8, true);
-    auto int16_field =
-        schema->AddDebugField("int16", milvus::DataType::INT16, true);
-    auto int32_field =
-        schema->AddDebugField("int32", milvus::DataType::INT32, true);
+    schema->AddDebugField("bool", milvus::DataType::BOOL, true);
+    schema->AddDebugField("int8", milvus::DataType::INT8, true);
+    schema->AddDebugField("int16", milvus::DataType::INT16, true);
+    schema->AddDebugField("int32", milvus::DataType::INT32, true);
     auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
-    auto timestamptz_field =
-        schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ, true);
-    auto float_field =
-        schema->AddDebugField("float", milvus::DataType::FLOAT, true);
-    auto double_field =
-        schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
-    auto varchar_field =
-        schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
-    auto json_field =
-        schema->AddDebugField("json", milvus::DataType::JSON, true);
-    auto int_array_field = schema->AddDebugField(
+    schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ, true);
+    schema->AddDebugField("float", milvus::DataType::FLOAT, true);
+    schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
+    schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
+    schema->AddDebugField("json", milvus::DataType::JSON, true);
+    schema->AddDebugField(
         "int_array", milvus::DataType::ARRAY, milvus::DataType::INT8, true);
-    auto long_array_field = schema->AddDebugField(
+    schema->AddDebugField(
         "long_array", milvus::DataType::ARRAY, milvus::DataType::INT64, true);
-    auto bool_array_field = schema->AddDebugField(
+    schema->AddDebugField(
         "bool_array", milvus::DataType::ARRAY, milvus::DataType::BOOL, true);
-    auto string_array_field = schema->AddDebugField("string_array",
+    schema->AddDebugField("string_array",
                                                     milvus::DataType::ARRAY,
                                                     milvus::DataType::VARCHAR,
                                                     true);
-    auto double_array_field = schema->AddDebugField("double_array",
+    schema->AddDebugField("double_array",
                                                     milvus::DataType::ARRAY,
                                                     milvus::DataType::DOUBLE,
                                                     true);
-    auto float_array_field = schema->AddDebugField(
+    schema->AddDebugField(
         "float_array", milvus::DataType::ARRAY, milvus::DataType::FLOAT, true);
-    auto vec = schema->AddDebugField("embeddings",
+    schema->AddDebugField("embeddings",
                                      milvus::DataType::VECTOR_FLOAT,
                                      128,
                                      knowhere::metric::L2);
@@ -577,7 +568,7 @@ DataGen(SchemaPtr schema,
             insert_data->mutable_fields_data()->AddAllocated(array.release());
         };
 
-    auto generate_float_vector = [&seed, &offset, &random, &distr](
+    auto generate_float_vector = [&seed, &offset](
                                      auto& field_meta, int64_t N) {
         auto dim = field_meta.get_dim();
         vector<float> final(dim * N);
@@ -605,7 +596,7 @@ DataGen(SchemaPtr schema,
         return final;
     };
 
-    auto generate_binary_vector = [&seed, &offset, &random](auto& field_meta,
+    auto generate_binary_vector = [&random](auto& field_meta,
                                                             int64_t N) {
         auto dim = field_meta.get_dim();
         Assert(dim % 8 == 0);
@@ -616,7 +607,7 @@ DataGen(SchemaPtr schema,
         return data;
     };
 
-    auto generate_float16_vector = [&seed, &offset, &random, &distr](
+    auto generate_float16_vector = [&offset, &random, &distr](
                                        auto& field_meta, int64_t N) {
         auto dim = field_meta.get_dim();
         vector<float16> data(dim * N);
@@ -626,7 +617,7 @@ DataGen(SchemaPtr schema,
         return data;
     };
 
-    auto generate_bfloat16_vector = [&seed, &offset, &random, &distr](
+    auto generate_bfloat16_vector = [&offset, &random, &distr](
                                         auto& field_meta, int64_t N) {
         auto dim = field_meta.get_dim();
         vector<bfloat16> data(dim * N);
@@ -636,7 +627,7 @@ DataGen(SchemaPtr schema,
         return data;
     };
 
-    auto generate_int8_vector = [&seed, &offset, &random](auto& field_meta,
+    auto generate_int8_vector = [&random](auto& field_meta,
                                                           int64_t N) {
         auto dim = field_meta.get_dim();
         vector<int8_t> data(dim * N);
@@ -1644,7 +1635,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 std::vector<std::string> data_raw(src_data.size());
                 for (int i = 0; i < src_data.size(); i++) {
                     auto str = src_data.Get(i);
-                    data_raw[i] = std::move(std::string(str));
+                    data_raw[i] = std::string(str);
                 }
                 if (field_meta.is_nullable()) {
                     auto raw_valid_data = data->valid_data().data();
@@ -2311,10 +2302,10 @@ gen_field_meta(int64_t collection_id = 1,
                bool nullable = false,
                int64_t max_length = 64) {
     auto meta = storage::FieldDataMeta{
-        .collection_id = collection_id,
-        .partition_id = partition_id,
-        .segment_id = segment_id,
-        .field_id = field_id,
+        collection_id,
+        partition_id,
+        segment_id,
+        field_id,
     };
     meta.field_schema.set_data_type(
         static_cast<proto::schema::DataType>(data_type));
@@ -2333,42 +2324,34 @@ gen_field_meta(int64_t collection_id = 1,
 inline std::shared_ptr<Schema>
 gen_all_data_types_schema() {
     auto schema = std::make_shared<milvus::Schema>();
-    auto bool_field =
-        schema->AddDebugField("bool", milvus::DataType::BOOL, true);
-    auto int8_field =
-        schema->AddDebugField("int8", milvus::DataType::INT8, true);
-    auto int16_field =
-        schema->AddDebugField("int16", milvus::DataType::INT16, true);
-    auto int32_field =
-        schema->AddDebugField("int32", milvus::DataType::INT32, true);
+    schema->AddDebugField("bool", milvus::DataType::BOOL, true);
+    schema->AddDebugField("int8", milvus::DataType::INT8, true);
+    schema->AddDebugField("int16", milvus::DataType::INT16, true);
+    schema->AddDebugField("int32", milvus::DataType::INT32, true);
     auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
-    auto float_field =
-        schema->AddDebugField("float", milvus::DataType::FLOAT, true);
-    auto double_field =
-        schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
-    auto timestamptz_field = schema->AddDebugField(
+    schema->AddDebugField("float", milvus::DataType::FLOAT, true);
+    schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
+    schema->AddDebugField(
         "timestamptz", milvus::DataType::TIMESTAMPTZ, true);
-    auto varchar_field =
-        schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
-    auto json_field =
-        schema->AddDebugField("json", milvus::DataType::JSON, true);
-    auto int_array_field = schema->AddDebugField(
+    schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
+    schema->AddDebugField("json", milvus::DataType::JSON, true);
+    schema->AddDebugField(
         "int_array", milvus::DataType::ARRAY, milvus::DataType::INT8, true);
-    auto long_array_field = schema->AddDebugField(
+    schema->AddDebugField(
         "long_array", milvus::DataType::ARRAY, milvus::DataType::INT64, true);
-    auto bool_array_field = schema->AddDebugField(
+    schema->AddDebugField(
         "bool_array", milvus::DataType::ARRAY, milvus::DataType::BOOL, true);
-    auto string_array_field = schema->AddDebugField("string_array",
+    schema->AddDebugField("string_array",
                                                     milvus::DataType::ARRAY,
                                                     milvus::DataType::VARCHAR,
                                                     true);
-    auto double_array_field = schema->AddDebugField("double_array",
+    schema->AddDebugField("double_array",
                                                     milvus::DataType::ARRAY,
                                                     milvus::DataType::DOUBLE,
                                                     true);
-    auto float_array_field = schema->AddDebugField(
+    schema->AddDebugField(
         "float_array", milvus::DataType::ARRAY, milvus::DataType::FLOAT, true);
-    auto vec = schema->AddDebugField("embeddings",
+    schema->AddDebugField("embeddings",
                                      milvus::DataType::VECTOR_FLOAT,
                                      128,
                                      knowhere::metric::L2);
@@ -2379,11 +2362,11 @@ gen_all_data_types_schema() {
 inline SchemaPtr
 GenChunkedSegmentTestSchema(bool pk_is_string) {
     auto schema = std::make_shared<Schema>();
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64, true);
+    schema->AddDebugField("int64", DataType::INT64, true);
     auto pk_fid = schema->AddDebugField(
         "pk", pk_is_string ? DataType::VARCHAR : DataType::INT64, false);
-    auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR, true);
-    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR, true);
+    schema->AddDebugField("string1", DataType::VARCHAR, true);
+    schema->AddDebugField("string2", DataType::VARCHAR, true);
     schema->AddField(FieldName("ts"),
                      TimestampFieldID,
                      DataType::INT64,

@@ -142,7 +142,7 @@ PhyVectorSearchNode::GetOutput() {
 
     if (view.all()) {
         query_context_->set_search_result(
-            std::move(empty_search_result(num_queries)));
+            empty_search_result(num_queries));
         return input_;
     }
 

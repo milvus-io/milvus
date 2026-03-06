@@ -279,6 +279,7 @@ GroupChunkTranslator::get_file_and_row_group_offset(
                     key_,
                     global_row_group_idx,
                     file_row_group_prefix_sum_.back()));
+    return {0, 0};  // unreachable, suppress -Wreturn-type
 }
 
 milvus::cachinglayer::cid_t

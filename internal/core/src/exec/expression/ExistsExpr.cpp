@@ -91,7 +91,7 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                         dynamic_cast<const index::JsonInvertedIndex<double>*>(
                             index));
                 cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-                    std::move(json_index->Exists()));
+                    json_index->Exists());
                 break;
             }
 
@@ -101,7 +101,7 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                     dynamic_cast<const index::JsonInvertedIndex<std::string>*>(
                         index));
                 cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-                    std::move(json_index->Exists()));
+                    json_index->Exists());
                 break;
             }
 
@@ -109,7 +109,7 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                 auto* json_index = const_cast<index::JsonInvertedIndex<bool>*>(
                     dynamic_cast<const index::JsonInvertedIndex<bool>*>(index));
                 cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-                    std::move(json_index->Exists()));
+                    json_index->Exists());
                 break;
             }
 
@@ -119,7 +119,7 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                 auto executor =
                     json_flat_index->create_executor<double>(pointer);
                 cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-                    std::move(executor->Exists()));
+                    executor->Exists());
                 break;
             }
 

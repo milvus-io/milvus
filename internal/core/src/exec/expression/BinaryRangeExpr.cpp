@@ -335,7 +335,6 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
-    using Index = index::ScalarIndex<IndexInnerType>;
     typedef std::conditional_t<std::is_integral_v<IndexInnerType> &&
                                    !std::is_same_v<bool, T>,
                                int64_t,
@@ -499,9 +498,6 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 template <typename ValueType>
 VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
-    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
-                                       std::string_view,
-                                       ValueType>;
     const auto& bitmap_input = context.get_bitmap_input();
     auto* input = context.get_offset_input();
     FieldId field_id = expr_->column_.field_id_;
@@ -834,9 +830,6 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
 template <typename ValueType>
 VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
-    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
-                                       std::string_view,
-                                       ValueType>;
     const auto& bitmap_input = context.get_bitmap_input();
     auto* input = context.get_offset_input();
     auto real_batch_size =

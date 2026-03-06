@@ -506,7 +506,6 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
     if (cached_index_chunk_res_ == nullptr) {
         // Reuse segment-level coarse cache directly
         auto& coarse = coarse_global_;
-        auto& chunk_valid = coarse_valid_global_;
         // Exact refinement with lambda functions for code reuse
         TargetBitmap refined(coarse.size());
 

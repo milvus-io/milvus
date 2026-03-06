@@ -175,8 +175,6 @@ ChunkTranslator::get_cells(
              fmt::format("{}", fmt::join(cids, " ")));
     LoadArrowReaderFromRemote(remote_files, channel, load_priority_);
 
-    auto data_type = field_meta_.get_data_type();
-
     for (auto cid : cids) {
         // Check for cancellation before processing each chunk
         CheckCancellation(

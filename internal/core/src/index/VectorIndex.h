@@ -78,7 +78,7 @@ class VectorIndex : public IndexBase {
     }
 
     virtual const bool
-    HasRawData() const = 0;
+    HasRawData() const override = 0;
 
     virtual std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const = 0;
@@ -124,7 +124,7 @@ class VectorIndex : public IndexBase {
     }
 
     virtual bool
-    IsMmapSupported() const {
+    IsMmapSupported() const override {
         return knowhere::IndexFactory::Instance().FeatureCheck(
             index_type_, knowhere::feature::MMAP);
     }

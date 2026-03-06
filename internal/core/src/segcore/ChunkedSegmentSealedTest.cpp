@@ -389,7 +389,7 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithAllNullVectors) {
     search_info.metric_type_ = knowhere::metric::L2;
     search_info.topk_ = 10;
     // Enable iterator_v2
-    search_info.iterator_v2_info_ = SearchIteratorV2Info{.batch_size = 10};
+    search_info.iterator_v2_info_ = SearchIteratorV2Info{"", 10};
 
     uint8_t* bitset_data = new uint8_t[bitset_size];
     defer.AddDefer([bitset_data]() { delete[] bitset_data; });
@@ -531,7 +531,7 @@ TEST(test_chunk_segment, TestSearchIteratorOnSealedWithPartialNullVectors) {
     search_info.metric_type_ = knowhere::metric::L2;
     search_info.topk_ = 10;
     // Enable iterator_v2 to exercise CachedSearchIterator path
-    search_info.iterator_v2_info_ = SearchIteratorV2Info{.batch_size = 10};
+    search_info.iterator_v2_info_ = SearchIteratorV2Info{"", 10};
 
     uint8_t* bitset_data = new uint8_t[bitset_size];
     defer.AddDefer([bitset_data]() { delete[] bitset_data; });

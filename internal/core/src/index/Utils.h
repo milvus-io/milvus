@@ -227,10 +227,9 @@ void inline SetBitsetUnused(void* bitset, const uint32_t* doc_id, uintptr_t n) {
 // For sealed segment, the doc_id is guaranteed to be less than bitset size which equals to the doc count of tantivy before querying.
 void inline SetBitsetSealed(void* bitset, const uint32_t* doc_id, uintptr_t n) {
     TargetBitmap* bitmap = static_cast<TargetBitmap*>(bitset);
-    const auto bitmap_size = bitmap->size();
 
     for (uintptr_t i = 0; i < n; ++i) {
-        assert(doc_id[i] < bitmap_size);
+        assert(doc_id[i] < bitmap->size());
         (*bitmap)[doc_id[i]] = true;
     }
 }
