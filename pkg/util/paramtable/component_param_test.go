@@ -532,6 +532,26 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 5*time.Second, Params.CatchUpStreamingDataTsLag.GetAsDurationByParse())
 		params.Save(Params.CatchUpStreamingDataTsLag.Key, "0s")
 		assert.Equal(t, time.Duration(0), Params.CatchUpStreamingDataTsLag.GetAsDurationByParse())
+
+		assert.Equal(t, 0.4, Params.SchedulePolicyMaxConcurrentRatioPerUser.GetAsFloat())
+		params.Save("queryNode.scheduler.scheduleReadPolicy.maxConcurrentRatioPerUser", "0.5")
+		assert.Equal(t, 0.5, Params.SchedulePolicyMaxConcurrentRatioPerUser.GetAsFloat())
+
+		assert.Equal(t, false, Params.SchedulePolicySegmentSQLimitEnabled.GetAsBool())
+		params.Save("queryNode.scheduler.scheduleReadPolicy.segmentSQLimitEnabled", "true")
+		assert.Equal(t, true, Params.SchedulePolicySegmentSQLimitEnabled.GetAsBool())
+
+		assert.Equal(t, 0.5, Params.SchedulePolicySegmentSQConcurrencyLimitOfLwm.GetAsFloat())
+		params.Save("queryNode.scheduler.scheduleReadPolicy.segmentSQConcurrencyLimitOfLwm", "0.7")
+		assert.Equal(t, 0.7, Params.SchedulePolicySegmentSQConcurrencyLimitOfLwm.GetAsFloat())
+
+		assert.Equal(t, 0.3, Params.SchedulePolicySegmentSQConcurrencyLimitCPUUsageLwmThreshold.GetAsFloat())
+		params.Save("queryNode.scheduler.scheduleReadPolicy.segmentSQConcurrencyLimitCPUUsageLwmThreshold", "0.4")
+		assert.Equal(t, 0.4, Params.SchedulePolicySegmentSQConcurrencyLimitCPUUsageLwmThreshold.GetAsFloat())
+
+		assert.Equal(t, 0.9, Params.SchedulePolicySegmentSQConcurrencyLimitCPUUsageHwmThreshold.GetAsFloat())
+		params.Save("queryNode.scheduler.scheduleReadPolicy.segmentSQConcurrencyLimitCPUUsageHwmThreshold", "0.8")
+		assert.Equal(t, 0.8, Params.SchedulePolicySegmentSQConcurrencyLimitCPUUsageHwmThreshold.GetAsFloat())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {

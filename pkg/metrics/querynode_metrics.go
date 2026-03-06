@@ -523,6 +523,46 @@ var (
 			segmentStateLabelName,
 		})
 
+	QueryNodeSegmentSQPerTaskConcurrencyLimit = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_sq_per_task_concurrency_limit",
+			Help:      "the concurrency limit of search or query per task at segment level",
+		}, []string{nodeIDLabelName})
+
+	QueryNodeSegmentSQPerTaskConcurrencyLimitLwmThreshold = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_sq_per_task_concurrency_limit_cpu_lwm_threshold",
+			Help:      "the CPU usage low water mark threshold of search or query per task at segment level",
+		}, []string{nodeIDLabelName})
+
+	QueryNodeSegmentSQPerTaskConcurrencyLimitHwmThreshold = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_sq_per_task_concurrency_limit_cpu_hwm_threshold",
+			Help:      "the CPU usage high water mark threshold of search or query per task at segment level",
+		}, []string{nodeIDLabelName})
+
+	QueryNodeSegmentSQPerTaskConcurrencyLimitOfCPULwm = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_sq_per_task_concurrency_limit_of_cpu_lwm",
+			Help:      "the concurrency limit when CPU usage is less than low water mark threshold",
+		}, []string{nodeIDLabelName})
+
+	QueryNodeSegmentSQPerTaskConcurrencyLimitOfCPUHwm = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_sq_per_task_concurrency_limit_of_cpu_hwm",
+			Help:      "the concurrency limit when CPU usage is greater than high water mark threshold",
+		}, []string{nodeIDLabelName})
+
 	QueryNodeWatchDmlChannelLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -865,6 +905,11 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeConsumeTimeTickLag)
 	registry.MustRegister(QueryNodeMsgDispatcherTtLag)
 	registry.MustRegister(QueryNodeSegmentSearchLatencyPerVector)
+	registry.MustRegister(QueryNodeSegmentSQPerTaskConcurrencyLimit)
+	registry.MustRegister(QueryNodeSegmentSQPerTaskConcurrencyLimitLwmThreshold)
+	registry.MustRegister(QueryNodeSegmentSQPerTaskConcurrencyLimitHwmThreshold)
+	registry.MustRegister(QueryNodeSegmentSQPerTaskConcurrencyLimitOfCPULwm)
+	registry.MustRegister(QueryNodeSegmentSQPerTaskConcurrencyLimitOfCPUHwm)
 	registry.MustRegister(QueryNodeWatchDmlChannelLatency)
 	registry.MustRegister(QueryNodeDiskUsedSize)
 	registry.MustRegister(QueryNodeProcessCost)
