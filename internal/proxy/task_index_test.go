@@ -1762,3 +1762,149 @@ func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 		assert.Equal(t, "BF16", result["refine_type"])
 	})
 }
+
+func Test_parseIndexParams_AutoIndex_ArrayOfVector(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+	Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+	Params.Save(Params.AutoIndexConfig.SparseIndexParams.Key, `{"drop_ratio_build": 0.2, "index_type": "SPARSE_INVERTED_INDEX"}`)
+	Params.Save(Params.AutoIndexConfig.IntVectorIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT"}`)
+
+	defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+	defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+	defer Params.Reset(Params.AutoIndexConfig.SparseIndexParams.Key)
+	defer Params.Reset(Params.AutoIndexConfig.IntVectorIndexParams.Key)
+
+	t.Run("ArrayOfVector with FloatVector element uses dense float autoindex", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "MAX_SIM_L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: common.MetricTypeKey, Value: "MAX_SIM_L2"},
+			{Key: "M", Value: "30"},
+			{Key: "efConstruction", Value: "360"},
+		}, task.newIndexParams)
+	})
+
+	t.Run("ArrayOfVector with SparseFloatVector element is not supported", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_SparseFloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "64"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "MAX_SIM_IP"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("ArrayOfVector with Int8Vector element is not supported", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_Int8Vector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "MAX_SIM_L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("ArrayOfVector without user metric maps config metric to EmbList", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
+		// Config default metric (COSINE) should be mapped to MAX_SIM_COSINE
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: common.MetricTypeKey, Value: metric.MaxSimCosine},
+			{Key: "M", Value: "30"},
+			{Key: "efConstruction", Value: "360"},
+		}, task.newIndexParams)
+	})
+
+	t.Run("ArrayOfVector sparse without user metric is not supported", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_SparseFloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "64"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+}
+
+func Test_mapVectorMetricToEmbListMetric(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{metric.COSINE, metric.MaxSimCosine},
+		{metric.L2, metric.MaxSimL2},
+		{metric.IP, metric.MaxSimIP},
+		{metric.HAMMING, metric.MaxSimHamming},
+		{metric.JACCARD, metric.MaxSimJaccard},
+		// case insensitive
+		{"cosine", metric.MaxSimCosine},
+		{"ip", metric.MaxSimIP},
+		{"l2", metric.MaxSimL2},
+		// already EmbList metric - pass through
+		{metric.MaxSimIP, metric.MaxSimIP},
+		{metric.MaxSim, metric.MaxSim},
+		// unknown metric - pass through
+		{"UNKNOWN", "UNKNOWN"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.expected, mapVectorMetricToEmbListMetric(tt.input))
+		})
+	}
+}
