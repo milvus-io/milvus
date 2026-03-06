@@ -51,6 +51,10 @@ func (v *BasePlanVisitor) VisitIdentifier(ctx *IdentifierContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitStructField(ctx *StructFieldContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitLike(ctx *LikeContext) interface{} {
 	return v.VisitChildren(ctx)
 }
