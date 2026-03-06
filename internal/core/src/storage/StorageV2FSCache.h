@@ -47,6 +47,7 @@ class StorageV2FSCache {
         std::string gcp_credential_json = "";
         bool use_custom_part_upload = true;
         uint32_t max_connections = 100;
+        std::string tls_min_version = "";
 
         bool
         operator==(const Key& other) const {
@@ -66,7 +67,8 @@ class StorageV2FSCache {
                    gcp_native_without_auth == other.gcp_native_without_auth &&
                    gcp_credential_json == other.gcp_credential_json &&
                    use_custom_part_upload == other.use_custom_part_upload &&
-                   max_connections == other.max_connections;
+                   max_connections == other.max_connections &&
+                   tls_min_version == other.tls_min_version;
         }
     };
 
@@ -93,6 +95,7 @@ class StorageV2FSCache {
             hash_combine(hash, k.gcp_credential_json);
             hash_combine(hash, k.use_custom_part_upload);
             hash_combine(hash, k.max_connections);
+            hash_combine(hash, k.tls_min_version);
             return hash;
         }
 
