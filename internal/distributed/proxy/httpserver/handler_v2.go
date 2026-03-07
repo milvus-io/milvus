@@ -1557,8 +1557,11 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			return nil, merr.ErrParameterInvalid
 		}
 
-		// Convert ids to schemapb.IDs
-		ids, err := convertIDsToSchemapbIDs(httpReq.Ids, primaryField)
+		// Convert ids to schemapb.IDs using raw body to preserve int64 precision.
+		// Go's encoding/json decodes JSON numbers as float64, which loses precision
+		// for int64 values > 2^53, causing different IDs to collide.
+		body, _ := c.Get(gin.BodyBytesKey)
+		ids, err := convertRawBodyIDsToSchemapbIDs(body.([]byte), primaryField)
 		if err != nil {
 			log.Ctx(ctx).Warn("high level restful api, convert ids to schemapb.IDs failed", zap.Error(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{
