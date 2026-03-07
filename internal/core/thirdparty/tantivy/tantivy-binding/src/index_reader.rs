@@ -9,7 +9,7 @@ use tantivy::query::{
 };
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::tokenizer::{NgramTokenizer, TokenStream, Tokenizer};
-use tantivy::{Directory, HasLen, Index, IndexReader, ReloadPolicy, Term};
+use tantivy::{Directory, DocSet, HasLen, Index, IndexReader, ReloadPolicy, Term, TERMINATED};
 
 use crate::bitset_wrapper::BitsetWrapper;
 use crate::docid_collector::{DocIdCollector, DocIdCollectorI64};
@@ -168,11 +168,70 @@ impl IndexReaderWrapper {
             .map_err(TantivyBindingError::TantivyError)
     }
 
+    /// Returns true when direct posting-list reads are safe:
+    /// id_field is None (raw DocId == bitset offset), and either single-segment
+    /// or user_specified_doc_id (globally unique doc IDs).
+    #[inline]
+    fn can_use_direct_posting(&self) -> bool {
+        if self.id_field.is_some() {
+            return false;
+        }
+        if !self.user_specified_doc_id {
+            // Legacy auto-assigned IDs are segment-local; only safe with one segment.
+            let n_segments = self.reader.searcher().segment_readers().len();
+            if n_segments > 1 {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Reads posting lists directly for multiple terms, bypassing Query/Weight/Scorer.
+    /// Caller must verify [`can_use_direct_posting`] before calling.
+    fn direct_terms_posting(&self, terms: &[Term], bitset: *mut c_void) -> Result<()> {
+        let searcher = self.reader.searcher();
+        let bw = BitsetWrapper::new(bitset, self.set_bitset);
+        let mut buffer = [0u32; 4096];
+
+        for segment_reader in searcher.segment_readers() {
+            let inv_index = segment_reader
+                .inverted_index(self.field)
+                .map_err(TantivyBindingError::TantivyError)?;
+            let alive_bitset = segment_reader.alive_bitset();
+            for term in terms {
+                if let Some(mut posting) =
+                    inv_index.read_postings(term, IndexRecordOption::Basic)?
+                {
+                    let mut len = 0;
+                    while posting.doc() != TERMINATED {
+                        let doc = posting.doc();
+                        if alive_bitset.map_or(true, |bs| bs.is_alive(doc)) {
+                            buffer[len] = doc;
+                            len += 1;
+                            if len == 4096 {
+                                bw.batch_set(&buffer[..len]);
+                                len = 0;
+                            }
+                        }
+                        posting.advance();
+                    }
+                    if len > 0 {
+                        bw.batch_set(&buffer[..len]);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     #[inline]
     fn single_term_query<F>(&self, term_builder: F, bitset: *mut c_void) -> Result<()>
     where
         F: FnOnce(Field) -> Term,
     {
+        // Single-term queries go through the normal pipeline — the overhead of
+        // TermQuery/Weight/Scorer is negligible for one term and tantivy's scorer
+        // already batches docs via collect_block(64).
         let q = TermQuery::new(term_builder(self.field), IndexRecordOption::Basic);
         self.search(&q, bitset)
     }
@@ -191,6 +250,13 @@ impl IndexReaderWrapper {
         F: Fn(Field, T) -> Term,
     {
         if terms.len() < BATCH_THRESHOLD {
+            if self.can_use_direct_posting() {
+                let term_vec: Vec<Term> = terms
+                    .iter()
+                    .map(|&term| term_builder(self.field, term))
+                    .collect();
+                return self.direct_terms_posting(&term_vec, bitset);
+            }
             return terms.iter().try_for_each(|term| {
                 self.single_term_query(|field| term_builder(field, *term), bitset)
             });
@@ -226,13 +292,22 @@ impl IndexReaderWrapper {
     }
 
     pub fn terms_query_keyword(&self, terms: &[*const c_char], bitset: *mut c_void) -> Result<()> {
-        let mut term_strs = Vec::with_capacity(terms.len());
         if terms.len() < BATCH_THRESHOLD {
+            if self.can_use_direct_posting() {
+                let term_vec: Vec<Term> = terms
+                    .iter()
+                    .map(|term| -> Result<Term> {
+                        Ok(Term::from_field_text(self.field, c_ptr_to_str(*term)?))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                return self.direct_terms_posting(&term_vec, bitset);
+            }
             return terms
                 .iter()
                 .try_for_each(|term| self.term_query_keyword(c_ptr_to_str(*term)?, bitset));
         }
 
+        let mut term_strs = Vec::with_capacity(terms.len());
         for term in terms {
             let term_str = c_ptr_to_str(*term)?;
             term_strs.push(Term::from_field_text(self.field, term_str));
@@ -802,5 +877,172 @@ mod test {
             .terms_query_keyword(&arrays, &mut res as *mut _ as *mut c_void)
             .unwrap();
         assert_eq!(res.len(), 20000);
+    }
+
+    /// Regression test for `direct_terms_posting`:
+    /// - Exercises the direct posting-list bypass (user_specified_doc_id, id_field=None)
+    /// - Verifies terms not present in the index are silently skipped
+    /// - Verifies duplicate terms don't produce duplicate bits
+    /// - Verifies multi-segment correctness with user-specified doc IDs
+    #[test]
+    fn test_direct_terms_posting_keyword() {
+        let mut schema_builder = Schema::builder();
+        // TEXT_WITH_DOC_ID is required when user_specified_doc_id is enabled
+        // (disables fieldnorms which are incompatible with user-specified doc IDs).
+        schema_builder.add_text_field("tag", TEXT_WITH_DOC_ID);
+        schema_builder.enable_user_specified_doc_id();
+        let schema = schema_builder.build();
+        let tag = schema.get_field("tag").unwrap();
+
+        let index = Index::create_in_ram(schema.clone());
+        let mut index_writer = index.writer(50000000).unwrap();
+
+        // Insert 500 docs with known tags across two commits (potentially two segments).
+        for i in 0u32..250 {
+            index_writer
+                .add_document_with_doc_id(i, doc!(tag => format!("val{}", i)))
+                .unwrap();
+        }
+        index_writer.commit().unwrap();
+        for i in 250u32..500 {
+            index_writer
+                .add_document_with_doc_id(i, doc!(tag => format!("val{}", i)))
+                .unwrap();
+        }
+        index_writer.commit().unwrap();
+
+        let reader = IndexReaderWrapper::from_index(Arc::new(index), set_bitset).unwrap();
+        assert!(reader.can_use_direct_posting());
+
+        // --- Case 1: basic multi-term query, all terms present ---
+        let terms: Vec<CString> = (0..100)
+            .map(|i| CString::new(format!("val{}", i)).unwrap())
+            .collect();
+        let ptrs: Vec<*const libc::c_char> = terms.iter().map(|s| s.as_ptr()).collect();
+        let mut res: HashSet<u32> = HashSet::new();
+        reader
+            .terms_query_keyword(&ptrs, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res.len(), 100);
+        for i in 0u32..100 {
+            assert!(res.contains(&i), "missing doc_id {}", i);
+        }
+
+        // --- Case 2: some terms not in the index (should be silently skipped) ---
+        let terms: Vec<CString> = (0..10)
+            .map(|i| CString::new(format!("val{}", i)).unwrap())
+            .chain(
+                (0..5).map(|i| CString::new(format!("nonexistent{}", i)).unwrap()),
+            )
+            .collect();
+        let ptrs: Vec<*const libc::c_char> = terms.iter().map(|s| s.as_ptr()).collect();
+        let mut res: HashSet<u32> = HashSet::new();
+        reader
+            .terms_query_keyword(&ptrs, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res.len(), 10);
+
+        // --- Case 3: duplicate terms should not produce duplicate bits ---
+        let terms: Vec<CString> = vec![
+            CString::new("val0").unwrap(),
+            CString::new("val0").unwrap(),
+            CString::new("val1").unwrap(),
+        ];
+        let ptrs: Vec<*const libc::c_char> = terms.iter().map(|s| s.as_ptr()).collect();
+        let mut res: HashSet<u32> = HashSet::new();
+        reader
+            .terms_query_keyword(&ptrs, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res.len(), 2);
+        assert!(res.contains(&0));
+        assert!(res.contains(&1));
+
+        // --- Case 4: empty terms list ---
+        let ptrs: Vec<*const libc::c_char> = vec![];
+        let mut res: HashSet<u32> = HashSet::new();
+        reader
+            .terms_query_keyword(&ptrs, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res.len(), 0);
+
+        // --- Case 5: terms spanning both segments ---
+        let terms: Vec<CString> = vec![
+            CString::new("val0").unwrap(),
+            CString::new("val249").unwrap(),
+            CString::new("val250").unwrap(),
+            CString::new("val499").unwrap(),
+        ];
+        let ptrs: Vec<*const libc::c_char> = terms.iter().map(|s| s.as_ptr()).collect();
+        let mut res: HashSet<u32> = HashSet::new();
+        reader
+            .terms_query_keyword(&ptrs, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res.len(), 4);
+        assert!(res.contains(&0));
+        assert!(res.contains(&249));
+        assert!(res.contains(&250));
+        assert!(res.contains(&499));
+    }
+
+    /// Verifies that `can_use_direct_posting` returns false for legacy indexes
+    /// (no user_specified_doc_id) with multiple segments, preventing segment-local
+    /// doc ID collisions in the direct posting path.
+    #[test]
+    fn test_can_use_direct_posting_gate() {
+        // --- Legacy format: no user_specified_doc_id → multi-segment is unsafe ---
+        let mut schema_builder = Schema::builder();
+        schema_builder.add_text_field("color", STRING);
+        let schema = schema_builder.build();
+        let color = schema.get_field("color").unwrap();
+
+        let index = Index::create_in_ram(schema.clone());
+        let mut index_writer = index.writer(50000000).unwrap();
+        index_writer
+            .add_document(doc!(color => "red"))
+            .unwrap();
+        index_writer
+            .add_document(doc!(color => "blue"))
+            .unwrap();
+        index_writer.commit().unwrap();
+
+        let reader = IndexReaderWrapper::from_index(Arc::new(index), set_bitset).unwrap();
+        let n_segments = reader.reader.searcher().segment_readers().len();
+
+        if n_segments > 1 {
+            // Legacy multi-segment: guard must block the direct posting path.
+            assert!(
+                !reader.can_use_direct_posting(),
+                "must NOT use direct posting with legacy multi-segment"
+            );
+        } else {
+            // Legacy single-segment: safe to use direct posting.
+            assert!(reader.can_use_direct_posting());
+        }
+
+        // --- user_specified_doc_id format: multi-segment is always safe ---
+        let mut schema_builder = Schema::builder();
+        schema_builder.add_text_field("tag", TEXT_WITH_DOC_ID);
+        schema_builder.enable_user_specified_doc_id();
+        let schema = schema_builder.build();
+        let tag = schema.get_field("tag").unwrap();
+
+        let index = Index::create_in_ram(schema.clone());
+        let mut index_writer = index.writer(50000000).unwrap();
+        // Two commits to potentially create multiple segments.
+        index_writer
+            .add_document_with_doc_id(0, doc!(tag => "red"))
+            .unwrap();
+        index_writer.commit().unwrap();
+        index_writer
+            .add_document_with_doc_id(1, doc!(tag => "blue"))
+            .unwrap();
+        index_writer.commit().unwrap();
+
+        let reader = IndexReaderWrapper::from_index(Arc::new(index), set_bitset).unwrap();
+        // user_specified_doc_id: always safe regardless of segment count.
+        assert!(
+            reader.can_use_direct_posting(),
+            "user_specified_doc_id should always allow direct posting"
+        );
     }
 }
