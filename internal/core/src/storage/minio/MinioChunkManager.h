@@ -98,7 +98,7 @@ ThrowS3Error(const std::string& func,
     throw SegcoreError(S3Error, error_message);
 }
 
-static bool
+[[maybe_unused]] static bool
 IsNotFound(const Aws::S3::S3Errors& s3err) {
     return (s3err == Aws::S3::S3Errors::NO_SUCH_KEY ||
             s3err == Aws::S3::S3Errors::RESOURCE_NOT_FOUND);

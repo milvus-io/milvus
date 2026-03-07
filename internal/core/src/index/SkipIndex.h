@@ -42,7 +42,7 @@ class FieldChunkMetricsTranslatorFromStatistics
                 false) {
         for (auto& statistic : statistics) {
             cells_.emplace_back(
-                std::move(builder_.Build(data_type_, statistic)));
+                builder_.Build(data_type_, statistic));
         }
     }
 

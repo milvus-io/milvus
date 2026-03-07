@@ -725,8 +725,6 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
         auto shared_executor = [this, &res_view](milvus::BsonView bson,
                                                  uint32_t row_offset,
                                                  uint32_t value_offset) {
-            auto get_value = bson.ParseAsValueAtOffset<GetType>(value_offset);
-
             if constexpr (std::is_same_v<GetType, int64_t> ||
                           std::is_same_v<GetType, double>) {
                 auto get_value =
@@ -976,7 +974,7 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
     auto execute_sub_batch = [](Index* index_ptr,
                                 const std::vector<uint8_t>& vals) {
         TermIndexFunc<bool> func;
-        return std::move(func(index_ptr, vals.size(), (bool*)vals.data()));
+        return func(index_ptr, vals.size(), (bool*)vals.data());
     };
     auto args = std::dynamic_pointer_cast<FlatVectorElement<uint8_t>>(arg_set_);
     auto res = ProcessIndexChunks<bool>(execute_sub_batch, args->values_);

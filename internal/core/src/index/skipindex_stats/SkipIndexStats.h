@@ -291,7 +291,7 @@ class BooleanFieldChunkMetrics : public FieldChunkMetrics {
         }
         bool contains_true = std::get<bool>(values[0]);
         bool contains_false = std::get<bool>(values[1]);
-        if (contains_true && has_true_ || contains_false && has_false_) {
+        if ((contains_true && has_true_) || (contains_false && has_false_)) {
             return false;
         }
         return true;
@@ -846,7 +846,7 @@ class SkipIndexStatsBuilder {
     ProcessFieldMetrics(
         const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
         int col_idx) const {
-        T min, max;
+        T min{}, max{};
         int64_t total_rows = 0;
         int64_t null_count = 0;
         bool contains_true = false;
@@ -939,7 +939,6 @@ class SkipIndexStatsBuilder {
                     continue;
                 }
                 unique_values.insert(value);
-                size_t length = value.length();
                 ExtractNgrams(
                     ngram_values, value, DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH);
             }
@@ -961,7 +960,7 @@ class SkipIndexStatsBuilder {
                         const bool* valid_data,
                         int64_t count) const {
         bool has_first_valid = false;
-        T min, max;
+        T min{}, max{};
         int64_t total_rows = count;
         int64_t null_count = 0;
         bool contains_true = false;
@@ -1045,7 +1044,6 @@ class SkipIndexStatsBuilder {
                 continue;
             }
             unique_values.insert(value);
-            size_t length = value.length();
             ExtractNgrams(
                 ngram_values, value, DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH);
         }

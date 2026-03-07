@@ -123,7 +123,7 @@ TEST(Expr, IntegerOverflow) {
     };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i8_fid = schema->AddDebugField("age", DataType::INT8);
     auto i64_fid = schema->AddDebugField("pk", DataType::INT64);

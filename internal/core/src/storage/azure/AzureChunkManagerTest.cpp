@@ -167,7 +167,7 @@ TEST_F(AzureChunkManagerTest, WritePositive) {
     if (!chunk_manager_->BucketExists(testBucketName)) {
         chunk_manager_->CreateBucket(testBucketName);
     }
-    auto has_bucket = chunk_manager_->BucketExists(testBucketName);
+    ASSERT_TRUE(chunk_manager_->BucketExists(testBucketName));
     uint8_t data[5] = {0x17, 0x32, 0x45, 0x34, 0x23};
     string path = "1";
     chunk_manager_->Write(path, data, sizeof(data));

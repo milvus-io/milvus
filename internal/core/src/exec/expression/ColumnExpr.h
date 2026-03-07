@@ -129,7 +129,7 @@ class PhyColumnExpr : public Expr {
     DoEval(OffsetVector* input = nullptr);
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 

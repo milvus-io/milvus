@@ -79,7 +79,7 @@ AppendFieldInfoForTest(CLoadIndexInfo c_load_index_info,
 
 namespace {
 
-std::string
+[[maybe_unused]] std::string
 generate_max_float_query_data(int all_nq, int max_float_nq) {
     assert(max_float_nq <= all_nq);
     namespace ser = milvus::proto::common;
@@ -129,7 +129,7 @@ generate_query_data(int nq) {
     return blob;
 }
 
-void
+[[maybe_unused]] void
 CheckSearchResultDuplicate(const std::vector<CSearchResult>& results,
                            int group_size = 1) {
     auto nq = ((SearchResult*)results[0])->total_nq_;
@@ -187,7 +187,7 @@ get_default_schema_config() {
     return fmt.str();
 }
 
-const char*
+[[maybe_unused]] const char*
 get_default_schema_config_nullable() {
     static std::string conf = R"(name: "default-collection"
                                 fields: <
@@ -219,7 +219,7 @@ get_default_schema_config_nullable() {
     return conf.c_str();
 }
 
-CStatus
+[[maybe_unused]] CStatus
 CSearch(CSegmentInterface c_segment,
         CSearchPlan c_plan,
         CPlaceholderGroup c_placeholder_group,
@@ -247,7 +247,7 @@ CSearch(CSegmentInterface c_segment,
     return status;
 }
 
-CStatus
+[[maybe_unused]] CStatus
 CRetrieve(CSegmentInterface c_segment,
           CRetrievePlan c_plan,
           uint64_t timestamp,
@@ -281,7 +281,7 @@ CRetrieve(CSegmentInterface c_segment,
     return status;
 }
 
-CStatus
+[[maybe_unused]] CStatus
 CRetrieveByOffsets(CSegmentInterface c_segment,
                    CRetrievePlan c_plan,
                    int64_t* offsets,
@@ -345,13 +345,13 @@ generate_collection_schema(std::string metric_type, int dim) {
     other_field_schema3->set_data_type(schema::DataType::Timestamptz);
 
     std::string schema_string;
-    auto marshal = google::protobuf::TextFormat::PrintToString(
+    bool marshal = google::protobuf::TextFormat::PrintToString(
         collection_schema, &schema_string);
-    assert(marshal);
+    AssertInfo(marshal, "failed to serialize collection schema");
     return schema_string;
 }
 
-const char*
+[[maybe_unused]] const char*
 get_default_index_meta() {
     static std::string conf = R"(maxIndexRowCount: 1000
                                 index_metas: <
@@ -378,7 +378,7 @@ get_default_index_meta() {
     return conf.c_str();
 }
 
-IndexBasePtr
+[[maybe_unused]] IndexBasePtr
 generate_index(void* raw_data,
                DataType field_type,
                MetricType metric_type,

@@ -236,7 +236,7 @@ class HashTable : public BaseHashTable {
 
         TagVector tags_;
         char pointers_[sizeof(TagVector) * kPointerSize];
-        char padding_[16];
+        [[maybe_unused]] char padding_[16];
     };
     static_assert(sizeof(Bucket) == 128);
     static constexpr uint64_t kBucketSize = sizeof(Bucket);
@@ -342,7 +342,7 @@ class HashTable : public BaseHashTable {
     int64_t sizeMask_{0};
     int8_t sizeBits_;
 
-    int64_t numRehashes_{0};
+    [[maybe_unused]] int64_t numRehashes_{0};
     char* table_ = nullptr;
 
     HashMode

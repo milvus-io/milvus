@@ -176,7 +176,7 @@ NgramInvertedIndex::BuildWithJsonFieldData(
         // handle null
         [this](int64_t offset) { this->null_offset_.push_back(offset); },
         // handle non exist
-        [this](int64_t offset) {},
+        [](int64_t offset) {},
         // handle error
         [this](const Json& json,
                const std::string& nested_path,
@@ -523,8 +523,6 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
                "candidates size {} != batch_size {}",
                candidates.size(),
                batch_size);
-
-    size_t pre_count = candidates.count();
 
     TargetBitmapView res(candidates);
 

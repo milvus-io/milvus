@@ -566,7 +566,6 @@ TEST(CApiTest, SearchTestWhenNullable) {
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
-    int64_t ts_offset = 1000;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -1433,7 +1432,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data) {
                      false,
                      std::nullopt);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
     schema->set_primary_field_id(str_fid);
 
@@ -1465,7 +1464,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
                      false,
                      std::nullopt);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
     schema->set_primary_field_id(str_fid);
 
@@ -1539,7 +1538,7 @@ TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
                      false,
                      std::nullopt);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
     schema->set_primary_field_id(str_fid);
 

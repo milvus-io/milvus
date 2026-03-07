@@ -643,8 +643,6 @@ StringIndexSortMemoryImpl::GetSerializedSize() const {
 void
 StringIndexSortMemoryImpl::SerializeToBinary(uint8_t* ptr,
                                              size_t& offset) const {
-    size_t start_offset = offset;
-
     // Write unique count as uint32_t
     uint32_t unique_count = static_cast<uint32_t>(unique_values_.size());
     memcpy(ptr + offset, &unique_count, sizeof(uint32_t));

@@ -112,7 +112,7 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
         auto index_meta = storage::IndexMeta{
             segment_id, field_id, index_build_id, index_version};
 
-        data_ = std::move(GenerateJsons(size));
+        data_ = GenerateJsons(size);
         auto field_data =
             storage::CreateFieldData(DataType::JSON, DataType::NONE, nullable_);
         if (nullable_) {

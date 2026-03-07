@@ -146,25 +146,24 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeExpr_forbigint_mod) {
 TEST_P(ExprTest, TestMutiInConvert) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("id", DataType::INT64);
-    auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
-    auto bool_1_fid = schema->AddDebugField("bool1", DataType::BOOL);
-    auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
-    auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
-    auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
+    schema->AddDebugField("bool", DataType::BOOL);
+    schema->AddDebugField("bool1", DataType::BOOL);
+    schema->AddDebugField("int8", DataType::INT8);
+    schema->AddDebugField("int81", DataType::INT8);
+    schema->AddDebugField("int16", DataType::INT16);
+    schema->AddDebugField("int161", DataType::INT16);
+    schema->AddDebugField("int32", DataType::INT32);
+    schema->AddDebugField("int321", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
-    auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
-    auto float_1_fid = schema->AddDebugField("float1", DataType::FLOAT);
-    auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
-    auto double_1_fid = schema->AddDebugField("double1", DataType::DOUBLE);
-    auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
-    auto json_fid = schema->AddDebugField("json", DataType::JSON, false);
-    auto str_array_fid =
-        schema->AddDebugField("str_array", DataType::ARRAY, DataType::VARCHAR);
+    schema->AddDebugField("int641", DataType::INT64);
+    schema->AddDebugField("float", DataType::FLOAT);
+    schema->AddDebugField("float1", DataType::FLOAT);
+    schema->AddDebugField("double", DataType::DOUBLE);
+    schema->AddDebugField("double1", DataType::DOUBLE);
+    schema->AddDebugField("string1", DataType::VARCHAR);
+    schema->AddDebugField("string2", DataType::VARCHAR);
+    schema->AddDebugField("json", DataType::JSON, false);
+    schema->AddDebugField("str_array", DataType::ARRAY, DataType::VARCHAR);
     schema->set_primary_field_id(pk);
 
     auto seg = CreateSealedSegment(schema);
@@ -224,13 +223,13 @@ TEST(Expr, TestExprPerformance) {
     GTEST_SKIP() << "Skip performance test, open it when test performance";
     auto schema = std::make_shared<Schema>();
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
+    schema->AddDebugField("int81", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
+    schema->AddDebugField("int161", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
+    schema->AddDebugField("int321", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
+    schema->AddDebugField("int641", DataType::INT64);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
     auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
@@ -329,41 +328,6 @@ TEST(Expr, TestExprPerformance) {
                 val2,
                 true,
                 true);
-        } else {
-            throw std::runtime_error("not supported type");
-        }
-    };
-
-    auto build_term_expr =
-        [&](DataType data_type,
-            std::vector<int64_t> in_vals) -> expr::TypedExprPtr {
-        if (IsIntegerDataType(data_type)) {
-            std::vector<proto::plan::GenericValue> vals;
-            for (auto& v : in_vals) {
-                proto::plan::GenericValue val;
-                val.set_int64_val(v);
-                vals.push_back(val);
-            }
-            return std::make_shared<expr::TermFilterExpr>(
-                expr::ColumnInfo(fids[data_type], data_type), vals, false);
-        } else if (IsFloatDataType(data_type)) {
-            std::vector<proto::plan::GenericValue> vals;
-            for (auto& v : in_vals) {
-                proto::plan::GenericValue val;
-                val.set_float_val(float(v));
-                vals.push_back(val);
-            }
-            return std::make_shared<expr::TermFilterExpr>(
-                expr::ColumnInfo(fids[data_type], data_type), vals, false);
-        } else if (IsStringDataType(data_type)) {
-            std::vector<proto::plan::GenericValue> vals;
-            for (auto& v : in_vals) {
-                proto::plan::GenericValue val;
-                val.set_string_val(std::to_string(v));
-                vals.push_back(val);
-            }
-            return std::make_shared<expr::TermFilterExpr>(
-                expr::ColumnInfo(fids[data_type], data_type), vals, false);
         } else {
             throw std::runtime_error("not supported type");
         }
@@ -562,13 +526,13 @@ TEST(Expr, TestExprPerformance) {
 TEST(Expr, TestExprNOT) {
     auto schema = std::make_shared<Schema>();
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8, true);
-    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
+    schema->AddDebugField("int81", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16, true);
-    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
+    schema->AddDebugField("int161", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32, true);
-    auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
+    schema->AddDebugField("int321", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64, true);
-    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
+    schema->AddDebugField("int641", DataType::INT64);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR, true);
     auto float_fid = schema->AddDebugField("float", DataType::FLOAT, true);
@@ -681,41 +645,6 @@ TEST(Expr, TestExprNOT) {
                 val2,
                 true,
                 true);
-        } else {
-            throw std::runtime_error("not supported type");
-        }
-    };
-
-    auto build_term_expr =
-        [&](DataType data_type,
-            std::vector<int64_t> in_vals) -> expr::TypedExprPtr {
-        if (IsIntegerDataType(data_type)) {
-            std::vector<proto::plan::GenericValue> vals;
-            for (auto& v : in_vals) {
-                proto::plan::GenericValue val;
-                val.set_int64_val(v);
-                vals.push_back(val);
-            }
-            return std::make_shared<expr::TermFilterExpr>(
-                expr::ColumnInfo(fids[data_type], data_type), vals, false);
-        } else if (IsFloatDataType(data_type)) {
-            std::vector<proto::plan::GenericValue> vals;
-            for (auto& v : in_vals) {
-                proto::plan::GenericValue val;
-                val.set_float_val(float(v));
-                vals.push_back(val);
-            }
-            return std::make_shared<expr::TermFilterExpr>(
-                expr::ColumnInfo(fids[data_type], data_type), vals, false);
-        } else if (IsStringDataType(data_type)) {
-            std::vector<proto::plan::GenericValue> vals;
-            for (auto& v : in_vals) {
-                proto::plan::GenericValue val;
-                val.set_string_val(std::to_string(v));
-                vals.push_back(val);
-            }
-            return std::make_shared<expr::TermFilterExpr>(
-                expr::ColumnInfo(fids[data_type], data_type), vals, false);
         } else {
             throw std::runtime_error("not supported type");
         }
@@ -939,8 +868,8 @@ TEST_P(ExprTest, test_term_pk) {
                      DataType::INT64,
                      false,
                      std::nullopt);
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
-    auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("string1", DataType::VARCHAR);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
 
@@ -1004,7 +933,7 @@ TEST_P(ExprTest, test_term_pk) {
 
 TEST_P(ExprTest, TestGrowingSegmentGetBatchSize) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     schema->set_primary_field_id(str1_fid);
@@ -1060,19 +989,19 @@ TEST_P(ExprTest, TestGrowingSegmentGetBatchSize) {
 
 TEST_P(ExprTest, TestConjuctExpr) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
-    auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
-    auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
-    auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("int8", DataType::INT8);
+    schema->AddDebugField("int81", DataType::INT8);
+    schema->AddDebugField("int16", DataType::INT16);
+    schema->AddDebugField("int161", DataType::INT16);
+    schema->AddDebugField("int32", DataType::INT32);
+    schema->AddDebugField("int321", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
+    schema->AddDebugField("int641", DataType::INT64);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
-    auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
-    auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
+    schema->AddDebugField("string2", DataType::VARCHAR);
+    schema->AddDebugField("float", DataType::FLOAT);
+    schema->AddDebugField("double", DataType::DOUBLE);
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
@@ -1134,23 +1063,20 @@ TEST_P(ExprTest, TestConjuctExpr) {
 
 TEST_P(ExprTest, TestConjuctExprNullable) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
-    auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    auto int8_nullable_fid =
-        schema->AddDebugField("int8_nullable", DataType::INT8);
-    auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int16_nullable_fid =
-        schema->AddDebugField("int16_nullable", DataType::INT16);
-    auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int32_nullable_fid =
-        schema->AddDebugField("int32_nullable", DataType::INT32);
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("int8", DataType::INT8);
+    schema->AddDebugField("int8_nullable", DataType::INT8);
+    schema->AddDebugField("int16", DataType::INT16);
+    schema->AddDebugField("int16_nullable", DataType::INT16);
+    schema->AddDebugField("int32", DataType::INT32);
+    schema->AddDebugField("int32_nullable", DataType::INT32);
+    schema->AddDebugField("int64", DataType::INT64);
     auto int64_nullable_fid =
         schema->AddDebugField("int64_nullable", DataType::INT64);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
-    auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
-    auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
+    schema->AddDebugField("string2", DataType::VARCHAR);
+    schema->AddDebugField("float", DataType::FLOAT);
+    schema->AddDebugField("double", DataType::DOUBLE);
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
@@ -1212,17 +1138,17 @@ TEST_P(ExprTest, TestConjuctExprNullable) {
 
 TEST_P(ExprTest, TestUnaryBenchTest) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
+    schema->AddDebugField("int81", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
+    schema->AddDebugField("int161", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
+    schema->AddDebugField("int321", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
+    schema->AddDebugField("int641", DataType::INT64);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
+    schema->AddDebugField("string2", DataType::VARCHAR);
     auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
     auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
     schema->set_primary_field_id(str1_fid);
@@ -1266,17 +1192,17 @@ TEST_P(ExprTest, TestUnaryBenchTest) {
 
 TEST_P(ExprTest, TestBinaryRangeBenchTest) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
+    schema->AddDebugField("int81", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
+    schema->AddDebugField("int161", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
+    schema->AddDebugField("int321", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
+    schema->AddDebugField("int641", DataType::INT64);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
+    schema->AddDebugField("string2", DataType::VARCHAR);
     auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
     auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
     schema->set_primary_field_id(str1_fid);
@@ -1328,17 +1254,17 @@ TEST_P(ExprTest, TestBinaryRangeBenchTest) {
 
 TEST_P(ExprTest, TestLogicalUnaryBenchTest) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
+    schema->AddDebugField("int81", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
+    schema->AddDebugField("int161", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
+    schema->AddDebugField("int321", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
+    schema->AddDebugField("int641", DataType::INT64);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
+    schema->AddDebugField("string2", DataType::VARCHAR);
     auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
     auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
     schema->set_primary_field_id(str1_fid);
@@ -1385,17 +1311,17 @@ TEST_P(ExprTest, TestLogicalUnaryBenchTest) {
 
 TEST_P(ExprTest, TestBinaryLogicalBenchTest) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
+    schema->AddDebugField("int81", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
+    schema->AddDebugField("int161", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
+    schema->AddDebugField("int321", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
+    schema->AddDebugField("int641", DataType::INT64);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
+    schema->AddDebugField("string2", DataType::VARCHAR);
     auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
     auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
     schema->set_primary_field_id(str1_fid);
@@ -1453,17 +1379,17 @@ TEST_P(ExprTest, TestBinaryLogicalBenchTest) {
 
 TEST_P(ExprTest, TestBinaryArithOpEvalRangeBenchExpr) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
+    schema->AddDebugField("int81", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
+    schema->AddDebugField("int161", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
+    schema->AddDebugField("int321", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
+    schema->AddDebugField("int641", DataType::INT64);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
+    schema->AddDebugField("string2", DataType::VARCHAR);
     auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
     auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
     schema->set_primary_field_id(str1_fid);
@@ -1781,17 +1707,17 @@ TEST(Expr, TestExprNull) {
 
 TEST_P(ExprTest, TestCompareExprBenchTest) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
     auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
+    schema->AddDebugField("int161", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
     auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
     auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
+    schema->AddDebugField("string2", DataType::VARCHAR);
     auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
     auto float_1_fid = schema->AddDebugField("float1", DataType::FLOAT);
     auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
@@ -1834,17 +1760,17 @@ TEST_P(ExprTest, TestCompareExprBenchTest) {
 
 TEST_P(ExprTest, TestRefactorExprs) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
+    schema->AddDebugField("int81", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int16_1_fid = schema->AddDebugField("int161", DataType::INT16);
+    schema->AddDebugField("int161", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int32_1_fid = schema->AddDebugField("int321", DataType::INT32);
+    schema->AddDebugField("int321", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
+    schema->AddDebugField("int641", DataType::INT64);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
+    schema->AddDebugField("string2", DataType::VARCHAR);
     auto float_fid = schema->AddDebugField("float", DataType::FLOAT);
     auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
     schema->set_primary_field_id(str1_fid);
@@ -1999,7 +1925,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMaris) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
     schema->set_primary_field_id(str1_fid);
@@ -2127,7 +2053,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto nullable_fid =
         schema->AddDebugField("nullable_fid", DataType::VARCHAR, true);
@@ -2257,7 +2183,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable2) {
         };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto nullable_fid =
         schema->AddDebugField("nullable_fid", DataType::VARCHAR, true);

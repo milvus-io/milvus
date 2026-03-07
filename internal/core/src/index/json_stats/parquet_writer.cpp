@@ -123,7 +123,7 @@ JsonStatsParquetWriter::Init(const ParquetWriteContext& context) {
                    result.status().ToString());
     packed_writer_ = result.ValueOrDie();
     for (const auto& [key, value] : kv_metadata_) {
-        packed_writer_->AddUserMetadata(key, value);
+        (void)packed_writer_->AddUserMetadata(key, value);
     }
 }
 

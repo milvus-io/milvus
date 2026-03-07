@@ -732,7 +732,6 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
 
     std::vector<const milvus::query::PlaceholderGroup*> ph_group_arr = {
         ph_group.get()};
-    auto nlist = segcore_config.get_nlist();
     auto binlog_index_sr =
         segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     ASSERT_EQ(binlog_index_sr->total_nq_, num_queries);
@@ -1007,7 +1006,6 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
 
     std::vector<const milvus::query::PlaceholderGroup*> ph_group_arr = {
         ph_group.get()};
-    auto nlist = segcore_config.get_nlist();
     auto binlog_index_sr =
         segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     ASSERT_EQ(binlog_index_sr->total_nq_, num_queries);

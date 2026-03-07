@@ -84,10 +84,10 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
         bool ok;
         ok = google::protobuf::TextFormat::PrintToString(type_params,
                                                          &type_params_str);
-        assert(ok);
+        ASSERT_TRUE(ok);
         ok = google::protobuf::TextFormat::PrintToString(index_params,
                                                          &index_params_str);
-        assert(ok);
+        ASSERT_TRUE(ok);
 
         search_conf = generate_search_conf(index_type, metric_type);
 

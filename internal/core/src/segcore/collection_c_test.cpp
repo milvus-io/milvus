@@ -112,9 +112,9 @@ TEST(CApiTest, SetIndexMetaTest) {
 
     milvus::proto::segcore::CollectionIndexMeta indexMeta;
     indexMeta.ParseFromString(get_default_index_meta());
-    char buffer[indexMeta.ByteSizeLong()];
-    indexMeta.SerializeToArray(buffer, indexMeta.ByteSizeLong());
-    SetIndexMeta(collection, buffer, indexMeta.ByteSizeLong());
+    std::vector<char> buffer(indexMeta.ByteSizeLong());
+    indexMeta.SerializeToArray(buffer.data(), indexMeta.ByteSizeLong());
+    SetIndexMeta(collection, buffer.data(), indexMeta.ByteSizeLong());
     DeleteCollection(collection);
 }
 
