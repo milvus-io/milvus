@@ -479,3 +479,39 @@ func TestPrintIndexFile(t *testing.T) {
 		_ = os.RemoveAll(file)
 	}
 }
+
+func TestPrintBinlogFilesMol(t *testing.T) {
+	w := NewInsertBinlogWriter(schemapb.DataType_Mol, 10, 20, 30, 40, false)
+
+	curTS := time.Now().UnixNano() / int64(time.Millisecond)
+
+	e1, err := w.NextInsertEventWriter()
+	assert.NoError(t, err)
+	err = e1.AddOneMolToPayload([]byte("CCO"), true)
+	assert.NoError(t, err)
+	err = e1.AddOneMolToPayload([]byte("c1ccccc1"), true)
+	assert.NoError(t, err)
+	e1.SetEventTimestamp(tsoutil.ComposeTS(curTS+10*60*1000, 0), tsoutil.ComposeTS(curTS+20*60*1000, 0))
+
+	w.SetEventTimeStamp(tsoutil.ComposeTS(curTS, 0), tsoutil.ComposeTS(curTS+3600*1000, 0))
+
+	sizeTotal := 20000000
+	w.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	err = w.Finish()
+	assert.NoError(t, err)
+	buf, err := w.GetBuffer()
+	assert.NoError(t, err)
+	w.Close()
+
+	fd, err := os.CreateTemp("", "binlog_mol.db")
+	defer os.RemoveAll(fd.Name())
+	assert.NoError(t, err)
+	num, err := fd.Write(buf)
+	assert.NoError(t, err)
+	assert.Equal(t, num, len(buf))
+	err = fd.Close()
+	assert.NoError(t, err)
+
+	err = PrintBinlogFiles([]string{fd.Name()})
+	assert.NoError(t, err)
+}

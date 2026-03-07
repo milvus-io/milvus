@@ -759,6 +759,16 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
+func validateMOLField(coll *schemapb.CollectionSchema) error {
+	// Temporarily disable MOL field support
+	for _, field := range coll.Fields {
+		if field.GetDataType() == schemapb.DataType_Mol {
+			return merr.WrapErrParameterInvalidMsg("MOL data type is not supported yet")
+		}
+	}
+	return nil
+}
+
 func validateDynamicField(coll *schemapb.CollectionSchema) error {
 	for _, field := range coll.Fields {
 		if field.IsDynamic {
