@@ -417,6 +417,26 @@ func (mgr *segmentManager) Put(ctx context.Context, segmentType SegmentType, seg
 			segment.Type().String(),
 			segment.Level().String(),
 		).Inc()
+
+		// Record segment by storage version
+		metrics.QueryNodeSegmentByStorageVersion.WithLabelValues(
+			fmt.Sprint(paramtable.GetNodeID()),
+			fmt.Sprint(segment.Collection()),
+			segment.Type().String(),
+			fmt.Sprint(segment.LoadInfo().GetStorageVersion()),
+		).Inc()
+
+		// Record segment index status metric (skip L0 segments)
+		// This ensures growing segments created via ProcessInsert also increment the metric
+		if segment.Level() != datapb.SegmentLevel_L0 {
+			indexStatus := segment.GetIndexStatus()
+			metrics.QueryNodeLoadedSegmentCount.WithLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				fmt.Sprint(segment.Collection()),
+				segment.Type().String(),
+				indexStatus.String(),
+			).Inc()
+		}
 	}
 
 	// release replaced segment
@@ -741,6 +761,25 @@ func (mgr *segmentManager) release(ctx context.Context, segment Segment) {
 		fmt.Sprint(segment.Collection()),
 		segment.Type().String(),
 		segment.Level().String(),
+	).Dec()
+
+	// Decrement segment index status metric (skip L0 segments)
+	if segment.Level() != datapb.SegmentLevel_L0 {
+		indexStatus := segment.GetIndexStatus()
+		metrics.QueryNodeLoadedSegmentCount.WithLabelValues(
+			fmt.Sprint(paramtable.GetNodeID()),
+			fmt.Sprint(segment.Collection()),
+			segment.Type().String(),
+			indexStatus.String(),
+		).Dec()
+	}
+
+	// Decrement segment by storage version metric
+	metrics.QueryNodeSegmentByStorageVersion.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		fmt.Sprint(segment.Collection()),
+		segment.Type().String(),
+		fmt.Sprint(segment.LoadInfo().GetStorageVersion()),
 	).Dec()
 
 	switch segment.Type() {

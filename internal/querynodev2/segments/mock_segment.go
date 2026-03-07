@@ -224,6 +224,53 @@ func (_c *MockSegment_Collection_Call) RunAndReturn(run func() int64) *MockSegme
 	return _c
 }
 
+// CompareAndSetIndexStatus provides a mock function with given fields: old, new
+func (_m *MockSegment) CompareAndSetIndexStatus(old IndexStatus, new IndexStatus) bool {
+	ret := _m.Called(old, new)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CompareAndSetIndexStatus")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(IndexStatus, IndexStatus) bool); ok {
+		r0 = rf(old, new)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockSegment_CompareAndSetIndexStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CompareAndSetIndexStatus'
+type MockSegment_CompareAndSetIndexStatus_Call struct {
+	*mock.Call
+}
+
+// CompareAndSetIndexStatus is a helper method to define mock.On call
+//   - old IndexStatus
+//   - new IndexStatus
+func (_e *MockSegment_Expecter) CompareAndSetIndexStatus(old interface{}, new interface{}) *MockSegment_CompareAndSetIndexStatus_Call {
+	return &MockSegment_CompareAndSetIndexStatus_Call{Call: _e.mock.On("CompareAndSetIndexStatus", old, new)}
+}
+
+func (_c *MockSegment_CompareAndSetIndexStatus_Call) Run(run func(old IndexStatus, new IndexStatus)) *MockSegment_CompareAndSetIndexStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(IndexStatus), args[1].(IndexStatus))
+	})
+	return _c
+}
+
+func (_c *MockSegment_CompareAndSetIndexStatus_Call) Return(_a0 bool) *MockSegment_CompareAndSetIndexStatus_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_CompareAndSetIndexStatus_Call) RunAndReturn(run func(IndexStatus, IndexStatus) bool) *MockSegment_CompareAndSetIndexStatus_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DatabaseName provides a mock function with no fields
 func (_m *MockSegment) DatabaseName() string {
 	ret := _m.Called()
@@ -596,6 +643,51 @@ func (_c *MockSegment_GetIndexByID_Call) Return(_a0 *IndexedFieldInfo) *MockSegm
 }
 
 func (_c *MockSegment_GetIndexByID_Call) RunAndReturn(run func(int64) *IndexedFieldInfo) *MockSegment_GetIndexByID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetIndexStatus provides a mock function with no fields
+func (_m *MockSegment) GetIndexStatus() IndexStatus {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetIndexStatus")
+	}
+
+	var r0 IndexStatus
+	if rf, ok := ret.Get(0).(func() IndexStatus); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(IndexStatus)
+	}
+
+	return r0
+}
+
+// MockSegment_GetIndexStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetIndexStatus'
+type MockSegment_GetIndexStatus_Call struct {
+	*mock.Call
+}
+
+// GetIndexStatus is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) GetIndexStatus() *MockSegment_GetIndexStatus_Call {
+	return &MockSegment_GetIndexStatus_Call{Call: _e.mock.On("GetIndexStatus")}
+}
+
+func (_c *MockSegment_GetIndexStatus_Call) Run(run func()) *MockSegment_GetIndexStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_GetIndexStatus_Call) Return(_a0 IndexStatus) *MockSegment_GetIndexStatus_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_GetIndexStatus_Call) RunAndReturn(run func() IndexStatus) *MockSegment_GetIndexStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1941,6 +2033,39 @@ func (_c *MockSegment_SetBloomFilter_Call) Return() *MockSegment_SetBloomFilter_
 }
 
 func (_c *MockSegment_SetBloomFilter_Call) RunAndReturn(run func(*pkoracle.BloomFilterSet)) *MockSegment_SetBloomFilter_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetIndexStatus provides a mock function with given fields: status
+func (_m *MockSegment) SetIndexStatus(status IndexStatus) {
+	_m.Called(status)
+}
+
+// MockSegment_SetIndexStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetIndexStatus'
+type MockSegment_SetIndexStatus_Call struct {
+	*mock.Call
+}
+
+// SetIndexStatus is a helper method to define mock.On call
+//   - status IndexStatus
+func (_e *MockSegment_Expecter) SetIndexStatus(status interface{}) *MockSegment_SetIndexStatus_Call {
+	return &MockSegment_SetIndexStatus_Call{Call: _e.mock.On("SetIndexStatus", status)}
+}
+
+func (_c *MockSegment_SetIndexStatus_Call) Run(run func(status IndexStatus)) *MockSegment_SetIndexStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(IndexStatus))
+	})
+	return _c
+}
+
+func (_c *MockSegment_SetIndexStatus_Call) Return() *MockSegment_SetIndexStatus_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegment_SetIndexStatus_Call) RunAndReturn(run func(IndexStatus)) *MockSegment_SetIndexStatus_Call {
 	_c.Run(run)
 	return _c
 }

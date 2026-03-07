@@ -107,6 +107,7 @@ const (
 	isVectorIndex                  = "is_vector_index"
 	segmentStateLabelName          = "segment_state"
 	segmentLevelLabelName          = "segment_level"
+	segmentIndexStatusLabelName    = "index_status"
 	segmentIsSortedLabelName       = "segment_is_sorted"
 	segmentStorageVersionLabelName = "segment_storage_version"
 	usernameLabelName              = "username"
