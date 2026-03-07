@@ -244,7 +244,7 @@ func combineToSegmentIndexesMeta220(segmentIndexes SegmentIndexesMeta210, indexB
 			for i, filePath := range buildMeta.GetIndexFilePaths() {
 				parts := strings.Split(filePath, "/")
 				if len(parts) == 0 {
-					return nil, fmt.Errorf("invaild index file path: %s", filePath)
+					return nil, fmt.Errorf("invalid index file path: %s", filePath)
 				}
 
 				fileKeys[i] = parts[len(parts)-1]
