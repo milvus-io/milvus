@@ -1115,8 +1115,14 @@ class HybridSearchChecker(Checker):
 
     def gen_hybrid_search_request(self):
         res = []
-        dim = self.dim
+        # Get actual dimension for each vector field from schema
+        schema_info = self.get_schema()
+        field_dim_map = {}
+        for f in schema_info.get("fields", []):
+            if f.get("type") in (DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR):
+                field_dim_map[f.get("name")] = f.get("params", {}).get("dim", self.dim)
         for vec_field_name in self.float_vector_field_names:
+            dim = field_dim_map.get(vec_field_name, self.dim)
             search_param = {
                 "data": cf.gen_vectors(1, dim),
                 "anns_field": vec_field_name,
@@ -2933,24 +2939,8 @@ class AddVectorFieldChecker(Checker):
     def add_vector_field(self):
         """Add a nullable FLOAT_VECTOR field, create index, insert data, and query to verify."""
         try:
-            # Check vector field limit before adding
-            schema_info = self.milvus_client.describe_collection(self.c_name)
-            fields = schema_info.get("fields", [])
-            current_vector_fields = sum(
-                1 for f in fields if f.get("type") in (
-                    DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR,
-                    DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
-                    DataType.INT8_VECTOR, DataType.SPARSE_FLOAT_VECTOR
-                )
-            )
-            if current_vector_fields >= 10:
-                log.info(f"[AddVectorFieldChecker] vector field limit reached "
-                         f"({current_vector_fields}), fallback to insert only")
-                _, insert_result = self.insert_data()
-                return None, insert_result
-
             new_vec_field = cf.gen_unique_str("new_vec_")
-            dim = 32
+            dim = self.dim
             self.milvus_client.add_collection_field(
                 collection_name=self.c_name,
                 field_name=new_vec_field,
@@ -2988,6 +2978,15 @@ class AddVectorFieldChecker(Checker):
 
             return None, True
         except Exception as e:
+            # When vector field limit is reached, fallback to insert only
+            if "maximum vector field" in str(e):
+                log.info(f"[AddVectorFieldChecker] vector field limit reached, fallback to insert only")
+                try:
+                    _, insert_result = self.insert_data()
+                    return None, insert_result
+                except Exception as insert_e:
+                    log.error(f"[AddVectorFieldChecker] fallback insert error: {insert_e}")
+                    return str(insert_e), False
             log.error(f"[AddVectorFieldChecker] error: {e}")
             return str(e), False
 
