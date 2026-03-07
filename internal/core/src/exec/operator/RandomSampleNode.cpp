@@ -22,7 +22,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <numeric>
 #include <optional>
 #include <ratio>
 #include <unordered_set>
@@ -39,6 +38,14 @@
 #include "monitor/Monitor.h"
 #include "plan/PlanNode.h"
 #include "prometheus/histogram.h"
+
+namespace {
+std::mt19937&
+GetThreadLocalGen() {
+    thread_local std::mt19937 gen(std::random_device{}());
+    return gen;
+}
+}  // namespace
 
 namespace milvus {
 namespace exec {
@@ -67,45 +74,20 @@ PhyRandomSampleNode::AddInput(RowVectorPtr& input) {
     input_ = std::move(input);
 }
 
-FixedVector<uint32_t>
-PhyRandomSampleNode::HashsetSample(const uint32_t N,
-                                   const uint32_t M,
-                                   std::mt19937& gen) {
-    std::uniform_int_distribution<> dis(0, N - 1);
-    std::unordered_set<uint32_t> sampled;
-    sampled.reserve(N);
-    while (sampled.size() < M) {
-        sampled.insert(dis(gen));
+FixedVector<size_t>
+PhyRandomSampleNode::FloydSample(const size_t N,
+                                 const size_t M,
+                                 std::mt19937& gen) {
+    std::unordered_set<size_t> selected;
+    selected.reserve(M);
+    for (size_t j = N - M; j < N; ++j) {
+        std::uniform_int_distribution<size_t> dis(0, j);
+        size_t t = dis(gen);
+        if (!selected.insert(t).second) {
+            selected.insert(j);
+        }
     }
-
-    return FixedVector<uint32_t>(sampled.begin(), sampled.end());
-}
-
-FixedVector<uint32_t>
-PhyRandomSampleNode::StandardSample(const uint32_t N,
-                                    const uint32_t M,
-                                    std::mt19937& gen) {
-    FixedVector<uint32_t> inputs(N);
-    FixedVector<uint32_t> outputs(M);
-    std::iota(inputs.begin(), inputs.end(), 0);
-
-    std::sample(inputs.begin(), inputs.end(), outputs.begin(), M, gen);
-    return outputs;
-}
-
-FixedVector<uint32_t>
-PhyRandomSampleNode::Sample(const uint32_t N, const float factor) {
-    const uint32_t M = std::max(static_cast<uint32_t>(N * factor), 1u);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    float epsilon = std::numeric_limits<float>::epsilon();
-    // It's derived from some experiments
-    if (factor <= 0.02 + epsilon ||
-        (N <= 10000000 && factor <= 0.045 + epsilon) ||
-        (N <= 60000000 && factor <= 0.025 + epsilon)) {
-        return HashsetSample(N, M, gen);
-    }
-    return StandardSample(N, M, gen);
+    return FixedVector<size_t>(selected.begin(), selected.end());
 }
 
 RowVectorPtr
@@ -144,21 +126,25 @@ PhyRandomSampleNode::GetOutput() {
         size_t input_false_count = input_data.size() - input_data.count();
 
         if (input_false_count > 0) {
-            FixedVector<uint32_t> pos{};
-            pos.reserve(input_false_count);
+            size_t remaining = input_false_count;
+            size_t needed = std::max(
+                static_cast<size_t>(input_false_count * factor_),
+                static_cast<size_t>(1));
+            auto& gen = GetThreadLocalGen();
+
             auto value = input_data.find_first(false);
             while (value.has_value()) {
                 auto offset = value.value();
-                pos.push_back(offset);
-                value = input_data.find_next(offset, false);
-            }
-            assert(pos.size() == input_false_count);
-
-            input_data.set();
-            auto sampled = Sample(input_false_count, factor_);
-            assert(sampled.back() < input_false_count);
-            for (auto i = 0; i < sampled.size(); ++i) {
-                input_data[pos[sampled[i]]] = false;
+                auto next = input_data.find_next(offset, false);
+                if (needed > 0 &&
+                    std::uniform_int_distribution<size_t>(
+                        0, remaining - 1)(gen) < needed) {
+                    --needed;  // keep as false (selected)
+                } else {
+                    input_data[offset] = true;  // not selected
+                }
+                --remaining;
+                value = next;
             }
         }
 
@@ -168,19 +154,42 @@ PhyRandomSampleNode::GetOutput() {
             TargetBitmap(active_count_), TargetBitmap(active_count_));
         TargetBitmapView data(sample_output->GetRawData(),
                               sample_output->size());
-        // true in TargetBitmap means we don't want this row, while for readability, we set the relevant row be true
-        // if it's sampled. So we need to flip the bits at last.
-        // However, if sample rate is larger than 0.5, we use 1-factor for sampling so that in some cases, the sampling
-        // performance would be better. In that case, we don't need to flip at last.
+        // true in TargetBitmap means we don't want this row.
+        // We sample the minority set (min(factor, 1-factor)) and mark those
+        // bits true, then flip if needed so that exactly factor*N bits are
+        // false (wanted).
         bool need_flip = true;
         float factor = factor_;
         if (factor > 0.5) {
             need_flip = false;
             factor = 1.0 - factor;
         }
-        auto sampled = Sample(active_count_, factor);
-        for (auto n : sampled) {
-            data[n] = true;
+
+        size_t N = active_count_;
+        size_t M = std::max(static_cast<size_t>(N * factor),
+                            static_cast<size_t>(1));
+        auto& gen = GetThreadLocalGen();
+
+        float epsilon = std::numeric_limits<float>::epsilon();
+        if (factor <= 0.02 + epsilon ||
+            (N <= 10000000 && factor <= 0.045 + epsilon) ||
+            (N <= 60000000 && factor <= 0.025 + epsilon)) {
+            // Floyd: small M, use vector + scatter
+            auto sampled = FloydSample(N, M, gen);
+            for (auto n : sampled) {
+                data[n] = true;
+            }
+        } else {
+            // Selection sampling: write directly into bitmap
+            size_t remaining = N, needed = M;
+            for (size_t i = 0; i < N && needed > 0; ++i) {
+                if (std::uniform_int_distribution<size_t>(
+                        0, remaining - 1)(gen) < needed) {
+                    data[i] = true;
+                    --needed;
+                }
+                --remaining;
+            }
         }
 
         if (need_flip) {

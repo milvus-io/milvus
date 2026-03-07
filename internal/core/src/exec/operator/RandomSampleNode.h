@@ -64,20 +64,10 @@ class PhyRandomSampleNode : public Operator {
     }
 
  private:
-    // Samples M elements from 0 to N - 1 where every element has equal probability to be selected.
-    static FixedVector<uint32_t>
-    HashsetSample(const uint32_t N, const uint32_t M, std::mt19937& gen);
-
-    // Samples M elements from 0 to N - 1 where every element has equal probability to be selected.
-    static FixedVector<uint32_t>
-    StandardSample(const uint32_t N, const uint32_t M, std::mt19937& gen);
-
-    // Samples M elements from 0 to N - 1 where every element has equal probability to be selected.
-    // It selects which kinds of sample method we use for sampling which is based on some experiments.
-    // Basically, the performance of HashsetSample is highly related to N * factor while StandardSample is highly
-    // related to N.
-    static FixedVector<uint32_t>
-    Sample(const uint32_t N, const float factor);
+    // Floyd's algorithm: exactly M iterations with zero collision retries.
+    // Used for low sampling factors where M << N; result scattered into bitmap.
+    static FixedVector<size_t>
+    FloydSample(const size_t N, const size_t M, std::mt19937& gen);
 
     float factor_{0};
     int64_t active_count_{0};
