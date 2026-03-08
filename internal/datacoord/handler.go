@@ -227,16 +227,6 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 
 	flushedIDs, droppedIDs = retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, segmentIndexed)
 
-	log.Info("GetQueryVChanPositions",
-		zap.Int64("collectionID", channel.GetCollectionID()),
-		zap.String("channel", channel.GetName()),
-		zap.Int("numOfSegments", len(segments)),
-		zap.Int("result flushed", len(flushedIDs)),
-		zap.Int("result growing", len(growingIDs)),
-		zap.Int("result L0", len(levelZeroIDs)),
-		zap.Any("partition stats", partStatsVersionsMap),
-	)
-
 	seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
 	// if no l0 segment exist, use checkpoint as delete checkpoint
 	if len(levelZeroIDs) == 0 {
@@ -485,10 +475,6 @@ func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs .
 	var seekPosition *msgpb.MsgPosition
 	seekPosition = h.s.meta.GetChannelCheckpoint(channel.GetName())
 	if seekPosition != nil {
-		log.Info("channel seek position set from channel checkpoint meta",
-			zap.Uint64("posTs", seekPosition.Timestamp),
-			zap.Stringer("posWALName", seekPosition.WALName),
-			zap.Time("posTime", tsoutil.PhysicalTime(seekPosition.GetTimestamp())))
 		return seekPosition
 	}
 
