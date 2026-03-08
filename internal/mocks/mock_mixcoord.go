@@ -16,6 +16,8 @@ import (
 
 	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 
+	metricsinfo "github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
@@ -3455,6 +3457,65 @@ func (_c *MixCoord_GetCredential_Call) RunAndReturn(run func(context.Context, *r
 	return _c
 }
 
+// GetDataCoordTopology provides a mock function with given fields: ctx, req
+func (_m *MixCoord) GetDataCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.DataCoordTopology, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDataCoordTopology")
+	}
+
+	var r0 *metricsinfo.DataCoordTopology
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) (*metricsinfo.DataCoordTopology, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) *metricsinfo.DataCoordTopology); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metricsinfo.DataCoordTopology)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetMetricsRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetDataCoordTopology_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDataCoordTopology'
+type MixCoord_GetDataCoordTopology_Call struct {
+	*mock.Call
+}
+
+// GetDataCoordTopology is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.GetMetricsRequest
+func (_e *MixCoord_Expecter) GetDataCoordTopology(ctx interface{}, req interface{}) *MixCoord_GetDataCoordTopology_Call {
+	return &MixCoord_GetDataCoordTopology_Call{Call: _e.mock.On("GetDataCoordTopology", ctx, req)}
+}
+
+func (_c *MixCoord_GetDataCoordTopology_Call) Run(run func(ctx context.Context, req *milvuspb.GetMetricsRequest)) *MixCoord_GetDataCoordTopology_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetMetricsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetDataCoordTopology_Call) Return(_a0 *metricsinfo.DataCoordTopology, _a1 error) *MixCoord_GetDataCoordTopology_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetDataCoordTopology_Call) RunAndReturn(run func(context.Context, *milvuspb.GetMetricsRequest) (*metricsinfo.DataCoordTopology, error)) *MixCoord_GetDataCoordTopology_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetDcMetrics provides a mock function with given fields: ctx, req
 func (_m *MixCoord) GetDcMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret := _m.Called(ctx, req)
@@ -4395,6 +4456,65 @@ func (_c *MixCoord_GetQcMetrics_Call) Return(_a0 *milvuspb.GetMetricsResponse, _
 }
 
 func (_c *MixCoord_GetQcMetrics_Call) RunAndReturn(run func(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)) *MixCoord_GetQcMetrics_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetQueryCoordTopology provides a mock function with given fields: ctx, req
+func (_m *MixCoord) GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetQueryCoordTopology")
+	}
+
+	var r0 *metricsinfo.QueryCoordTopology
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetMetricsRequest) *metricsinfo.QueryCoordTopology); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*metricsinfo.QueryCoordTopology)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetMetricsRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetQueryCoordTopology_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetQueryCoordTopology'
+type MixCoord_GetQueryCoordTopology_Call struct {
+	*mock.Call
+}
+
+// GetQueryCoordTopology is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.GetMetricsRequest
+func (_e *MixCoord_Expecter) GetQueryCoordTopology(ctx interface{}, req interface{}) *MixCoord_GetQueryCoordTopology_Call {
+	return &MixCoord_GetQueryCoordTopology_Call{Call: _e.mock.On("GetQueryCoordTopology", ctx, req)}
+}
+
+func (_c *MixCoord_GetQueryCoordTopology_Call) Run(run func(ctx context.Context, req *milvuspb.GetMetricsRequest)) *MixCoord_GetQueryCoordTopology_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetMetricsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetQueryCoordTopology_Call) Return(_a0 *metricsinfo.QueryCoordTopology, _a1 error) *MixCoord_GetQueryCoordTopology_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetQueryCoordTopology_Call) RunAndReturn(run func(context.Context, *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error)) *MixCoord_GetQueryCoordTopology_Call {
 	_c.Call.Return(run)
 	return _c
 }
