@@ -1,0 +1,165 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <stddef.h>
+#include <stdint.h>
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <condition_variable>
+#include <functional>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <ostream>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <utility>
+
+#include "SafeQueue.h"
+#include "glog/logging.h"
+#include "log/Log.h"
+
+namespace milvus {
+
+const int DEFAULT_CPU_NUM = 1;
+
+const int64_t DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = 10;
+const int64_t DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = 5;
+const int64_t DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT = 1;
+
+extern std::atomic<float> HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
+extern std::atomic<float> MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
+extern std::atomic<float> LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
+
+extern int CPU_NUM;
+
+void
+SetHighPriorityThreadCoreCoefficient(const float coefficient);
+
+void
+SetMiddlePriorityThreadCoreCoefficient(const float coefficient);
+
+void
+SetLowPriorityThreadCoreCoefficient(const float coefficient);
+
+void
+InitCpuNum(const int core);
+
+class ThreadPool {
+ public:
+    explicit ThreadPool(const float thread_core_coefficient, std::string name)
+        : shutdown_(false), name_(std::move(name)) {
+        idle_threads_size_ = 0;
+        current_threads_size_ = 0;
+        min_threads_size_ = 1;
+        max_threads_size_.store(std::max(
+            1,
+            static_cast<int>(std::round(CPU_NUM * thread_core_coefficient))));
+        LOG_INFO("Init thread pool:{}", name_)
+            << " with min worker num:" << min_threads_size_
+            << " and max worker num:" << max_threads_size_.load();
+        Init();
+    }
+
+    ~ThreadPool() {
+        ShutDown();
+    }
+
+    ThreadPool(const ThreadPool&) = delete;
+    ThreadPool(ThreadPool&&) = delete;
+    ThreadPool&
+    operator=(const ThreadPool&) = delete;
+    ThreadPool&
+    operator=(ThreadPool&&) = delete;
+
+    void
+    Init();
+
+    void
+    ShutDown();
+
+    size_t
+    GetThreadNum() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return current_threads_size_;
+    }
+
+    size_t
+    GetMaxThreadNum() {
+        return max_threads_size_.load();
+    }
+
+    template <typename F, typename... Args>
+    auto
+    Submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
+        std::function<decltype(f(args...))()> func =
+            std::bind(std::forward<F>(f), std::forward<Args>(args)...);
+        auto task_ptr =
+            std::make_shared<std::packaged_task<decltype(f(args...))()>>(func);
+
+        std::function<void()> wrap_func = [task_ptr]() { (*task_ptr)(); };
+
+        work_queue_.enqueue(wrap_func);
+
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        if (idle_threads_size_ > 0) {
+            condition_lock_.notify_one();
+        } else if (current_threads_size_ < max_threads_size_.load()) {
+            // Dynamic increase thread number
+            std::thread t(&ThreadPool::Worker, this);
+            assert(threads_.find(t.get_id()) == threads_.end());
+            threads_[t.get_id()] = std::move(t);
+            current_threads_size_++;
+        }
+
+        return task_ptr->get_future();
+    }
+
+    void
+    Worker();
+
+    void
+    FinishThreads();
+
+    void
+    Resize(int new_size) {
+        //no need to hold mutex here as we don't require
+        //max_threads_size to take effect instantly, just guaranteed atomic
+        new_size = std::max(1, new_size);
+        max_threads_size_.store(new_size);
+    }
+
+ public:
+    int min_threads_size_;
+    int idle_threads_size_;
+    int current_threads_size_;
+    std::atomic<int> max_threads_size_;
+    bool shutdown_;
+    static constexpr size_t WAIT_SECONDS = 2;
+    SafeQueue<std::function<void()>> work_queue_;
+    std::unordered_map<std::thread::id, std::thread> threads_;
+    SafeQueue<std::thread::id> need_finish_threads_;
+    std::mutex mutex_;
+    std::condition_variable condition_lock_;
+    std::string name_;
+};
+
+}  // namespace milvus

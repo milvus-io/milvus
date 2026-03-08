@@ -1,0 +1,21 @@
+metrics:
+  serviceMonitor:
+    enabled: true
+pulsar:
+  bookkeeper:
+    volumes:
+      ledgers:
+        existingStorageClassName: local-path
+  zookeeper:
+    volumes:
+      data:
+        existingStorageClassName: local-path
+
+kafka:
+  metrics:
+    kafka:
+      enabled: true
+    jmx:
+      enabled: true
+    serviceMonitor:
+      enabled: true

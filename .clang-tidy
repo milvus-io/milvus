@@ -1,0 +1,44 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# The checks defined here will be run and will display by default as warnings.
+Checks: >
+    -*, clang-diagnostic-*, -clang-diagnostic-error,
+    clang-analyzer-*,
+    google-*, -google-runtime-references, -google-readability-todo,
+    modernize-*, -modernize-use-trailing-return-type, -modernize-use-nodiscard,
+    performance-*,
+    bugprone-bool-pointer-implicit-conversion,
+    bugprone-branch-clone,
+    bugprone-dangling-handle,
+    bugprone-exception-escape,
+    bugprone-inaccurate-erase,
+    
+
+# produce HeaderFilterRegex from core/build-support/lint_exclusions.txt with:
+# echo -n '^?!('; sed -e 's/*/\.*/g' core/build-support/lint_exclusions.txt | tr '\n' '|'; echo ')$'
+HeaderFilterRegex: '^?!(.*cmake-build-debug.*|.*cmake-build-release.*|.*cmake_build.*|.*thirdparty.*|.*src/grpc.*|.*output.*|.*unittest.*|.*src/pb.*)$'
+AnalyzeTemporaryDtors: true
+CheckOptions:
+  - key:             google-readability-braces-around-statements.ShortStatementLines
+    value:           '1'
+  - key:             google-readability-function-size.StatementThreshold
+    value:           '200'
+  - key:             google-readability-namespace-comments.ShortNamespaceLines
+    value:           '10'
+  - key:             google-readability-namespace-comments.SpacesBeforeComments
+    value:           '2'

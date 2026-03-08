@@ -1,0 +1,10 @@
+repos:
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.0
+    hooks:
+      - id: golangci-lint
+        args: [--config=.golangci.yml, --timeout=3m]
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.16.10
+    hooks:
+      - id: typos

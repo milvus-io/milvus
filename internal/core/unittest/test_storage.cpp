@@ -1,0 +1,330 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
+
+#include <arrow/scalar.h>
+#include <boost/filesystem/path.hpp>
+#include <gtest/gtest.h>
+#include <chrono>
+#include <cstdint>
+#include <iosfwd>
+#include <memory>
+#include <optional>
+#include <string>
+
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/Types.h"
+#include "common/common_type_c.h"
+#include "common/type_c.h"
+#include "gtest/gtest.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "storage/storage_c.h"
+#include "test_utils/Constants.h"
+
+using namespace std;
+using namespace milvus;
+using namespace milvus::storage;
+
+string bucketName = "a-bucket";
+
+CStorageConfig
+get_azure_storage_config() {
+    auto endpoint = "core.windows.net";
+    auto accessKey = "devstoreaccount1";
+    auto accessValue =
+        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/"
+        "K1SZFPTOtr/KBHBeksoGMGw==";
+
+    return CStorageConfig{endpoint,
+                          bucketName.c_str(),
+                          accessKey,
+                          accessValue,
+                          TestRemotePath.c_str(),
+                          "remote",
+                          "azure",
+                          "",
+                          "error",
+                          "",
+                          false,
+                          "",
+                          false,
+                          false,
+                          30000,
+                          "",
+                          false,
+                          100};
+}
+
+class StorageTest : public testing::Test {
+ public:
+    StorageTest() {
+    }
+    ~StorageTest() {
+    }
+    virtual void
+    SetUp() {
+    }
+};
+
+TEST_F(StorageTest, InitLocalChunkManagerSingleton) {
+    auto status = InitLocalChunkManagerSingleton("tmp");
+    EXPECT_EQ(status.error_code, Success);
+}
+
+TEST_F(StorageTest, GetLocalUsedSize) {
+    int64_t size = 0;
+    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    EXPECT_EQ(lcm->GetRootPath(), TestLocalPath);
+    string test_dir =
+        lcm->GetRootPath() + "tmp" +
+        // add random number to avoid dir conflict
+        std::to_string(
+            std::chrono::system_clock::now().time_since_epoch().count());
+    string test_file = test_dir + "/test.txt";
+
+    auto status = GetLocalUsedSize(test_dir.c_str(), &size);
+    EXPECT_EQ(status.error_code, Success);
+    EXPECT_EQ(size, 0);
+    lcm->CreateDir(test_dir);
+    lcm->CreateFile(test_file);
+    uint8_t data[5] = {0x17, 0x32, 0x45, 0x34, 0x23};
+    lcm->Write(test_file, data, sizeof(data));
+    status = GetLocalUsedSize(test_dir.c_str(), &size);
+    EXPECT_EQ(status.error_code, Success);
+    EXPECT_EQ(size, 5);
+    lcm->RemoveDir(test_dir);
+}
+
+TEST_F(StorageTest, InitRemoteChunkManagerSingleton) {
+    CStorageConfig storageConfig = get_azure_storage_config();
+    auto status = InitRemoteChunkManagerSingleton(storageConfig);
+    EXPECT_STREQ(status.error_msg, "");
+    EXPECT_EQ(status.error_code, Success);
+    auto rcm =
+        RemoteChunkManagerSingleton::GetInstance().GetRemoteChunkManager();
+    EXPECT_EQ(rcm->GetRootPath(), TestRemotePath);
+}
+
+TEST_F(StorageTest, CleanRemoteChunkManagerSingleton) {
+    CleanRemoteChunkManagerSingleton();
+}
+
+class StorageUtilTest : public testing::Test {
+ public:
+    StorageUtilTest() = default;
+    ~StorageUtilTest() {
+    }
+    void
+    SetUp() override {
+    }
+};
+
+TEST_F(StorageUtilTest, CreateArrowScalarFromDefaultValue) {
+    {
+        FieldMeta field_without_defval(
+            FieldName("f"), FieldId(100), DataType::INT64, false, std::nullopt);
+        ASSERT_ANY_THROW(
+            CreateArrowScalarFromDefaultValue(field_without_defval));
+    }
+    {
+        DefaultValueType default_value;
+        default_value.set_int_data(10);
+        FieldMeta int_field(FieldName("f"),
+                            FieldId(100),
+                            DataType::INT32,
+                            false,
+                            default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(int_field);
+        ASSERT_TRUE(scalar->Equals(*arrow::MakeScalar(int32_t(10))));
+    }
+    {
+        DefaultValueType default_value;
+        default_value.set_long_data(10);
+        FieldMeta long_field(FieldName("f"),
+                             FieldId(100),
+                             DataType::INT64,
+                             false,
+                             default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(long_field);
+        ASSERT_TRUE(scalar->Equals(*arrow::MakeScalar(int64_t(10))));
+    }
+    {
+        DefaultValueType default_value;
+        default_value.set_float_data(1.0f);
+        FieldMeta float_field(FieldName("f"),
+                              FieldId(100),
+                              DataType::FLOAT,
+                              false,
+                              default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(float_field);
+        ASSERT_TRUE(scalar->ApproxEquals(*arrow::MakeScalar(1.0f)));
+    }
+    {
+        DefaultValueType default_value;
+        default_value.set_double_data(1.0f);
+        FieldMeta double_field(FieldName("f"),
+                               FieldId(100),
+                               DataType::DOUBLE,
+                               false,
+                               default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(double_field);
+        ASSERT_TRUE(scalar->ApproxEquals(arrow::DoubleScalar(1.0f)));
+    }
+    {
+        DefaultValueType default_value;
+        default_value.set_timestamptz_data(123456789);
+        FieldMeta timestamptz_field(FieldName("f"),
+                                    FieldId(100),
+                                    DataType::TIMESTAMPTZ,
+                                    false,
+                                    default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(timestamptz_field);
+        ASSERT_TRUE(scalar->Equals(*arrow::MakeScalar(int64_t(123456789))));
+    }
+    {
+        DefaultValueType default_value;
+        default_value.set_bool_data(true);
+        FieldMeta bool_field(
+            FieldName("f"), FieldId(100), DataType::BOOL, false, default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(bool_field);
+        ASSERT_TRUE(scalar->Equals(*arrow::MakeScalar(true)));
+    }
+    {
+        DefaultValueType default_value;
+        default_value.set_string_data("bar");
+        FieldMeta varchar_field(FieldName("f"),
+                                FieldId(100),
+                                DataType::VARCHAR,
+                                false,
+                                default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(varchar_field);
+        ASSERT_TRUE(scalar->Equals(*arrow::MakeScalar("bar")));
+    }
+    {
+        FieldMeta unsupport_field(
+            FieldName("f"), FieldId(100), DataType::JSON, false, std::nullopt);
+        ASSERT_ANY_THROW(CreateArrowScalarFromDefaultValue(unsupport_field));
+    }
+}
+
+TEST_F(StorageUtilTest, TestInitArrowFileSystem) {
+    // Test local storage configuration
+    {
+        StorageConfig local_config;
+        local_config.storage_type = "local";
+        local_config.root_path = TestLocalPath;
+
+        auto fs = InitArrowFileSystem(local_config);
+        ASSERT_NE(fs, nullptr);
+    }
+
+    // // Test remote storage configuration (Azure)
+    // {
+    //     StorageConfig remote_config;
+    //     remote_config.storage_type = "remote";
+    //     remote_config.cloud_provider = "azure";
+    //     remote_config.address = "core.windows.net";
+    //     remote_config.bucket_name = "test-bucket";
+    //     remote_config.access_key_id = "test-access-key";
+    //     remote_config.access_key_value = "test-access-value";
+    //     remote_config.root_path = "/tmp/milvus/remote_data";
+    //     remote_config.iam_endpoint = "";
+    //     remote_config.log_level = "error";
+    //     remote_config.region = "";
+    //     remote_config.useSSL = false;
+    //     remote_config.sslCACert = "";
+    //     remote_config.useIAM = false;
+    //     remote_config.useVirtualHost = false;
+    //     remote_config.requestTimeoutMs = 30000;
+    //     remote_config.gcp_credential_json = "";
+
+    //     auto fs = InitArrowFileSystem(remote_config);
+    //     ASSERT_NE(fs, nullptr);
+    // }
+}
+
+// Test cases for NormalizePath function
+// NormalizePath uses boost::filesystem::path::lexically_normal() and then
+// removes trailing "/." (only the dot, keeping the slash)
+TEST_F(StorageUtilTest, NormalizePath) {
+    // === Basic paths ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/c")), "a/b/c");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("")), "");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("file")), "file");
+
+    // === Dot handling ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path(".")), ".");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("./a/b")), "a/b");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/./b")), "a/b");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/.")), "a/b/");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("./a/./b/.")), "a/b/");
+
+    // === Double dot (..) handling ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/../c")), "a/c");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/c/../../d")), "a/d");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("../a/b")), "../a/b");
+
+    // === Trailing slash ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/")), "a/b/");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("files/")), "files/");
+
+    // === Absolute paths ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("/a/b/c")), "/a/b/c");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("/a/./b")), "/a/b");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("/a/b/.")), "/a/b/");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("/")), "/");
+
+    // === Multiple slashes ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a//b//c")), "a/b/c");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/./b//c")), "a/b/c");
+
+    // === Real-world scenarios (S3/MinIO) ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("bucket/index_files/123")),
+              "bucket/index_files/123");
+    // Key fix for 403 error
+    EXPECT_EQ(
+        NormalizePath(boost::filesystem::path("./index_files/segment_123")),
+        "index_files/segment_123");
+
+    // Path construction with root_path = "."
+    boost::filesystem::path prefix = ".";
+    boost::filesystem::path path = "index_files";
+    boost::filesystem::path path1 = "segment_123";
+    EXPECT_EQ(NormalizePath(prefix / path / path1), "index_files/segment_123");
+
+    // Non-empty root path
+    boost::filesystem::path prefix2 = "files";
+    EXPECT_EQ(NormalizePath(prefix2 / path / path1),
+              "files/index_files/segment_123");
+
+    // Root path with trailing slash
+    boost::filesystem::path prefix3 = "files/";
+    EXPECT_EQ(NormalizePath(prefix3 / path / path1),
+              "files/index_files/segment_123");
+
+    // Empty root path
+    boost::filesystem::path prefix4 = "";
+    EXPECT_EQ(NormalizePath(prefix4 / path / path1), "index_files/segment_123");
+
+    // === Edge cases ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/..")), "a");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("./a/../b/./c/../d")),
+              "b/d");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b c/d")), "a/b c/d");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("./.")), ".");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("./..")), "..");
+}

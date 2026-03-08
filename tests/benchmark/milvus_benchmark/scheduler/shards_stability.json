@@ -1,0 +1,10 @@
+[
+    {
+        "suite_params": [
+            {
+                "suite": "shards_loop_stability.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

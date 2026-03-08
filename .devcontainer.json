@@ -1,0 +1,12 @@
+{
+    "name": "Milvus Distributed Dev Container Definition",
+    "dockerComposeFile": ["./docker-compose-devcontainer.yml"],
+    "service": "builder",
+    "initializeCommand": "scripts/devcontainer.sh",
+    "workspaceFolder": "/go/src/github.com/milvus-io/milvus",
+    "remoteEnv": { "GOPROXY": "https://goproxy.cn" },
+    "extensions": [
+      "ms-vscode.cpptools",
+      "golang.go"
+    ]
+}

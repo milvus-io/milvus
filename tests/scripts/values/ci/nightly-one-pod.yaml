@@ -1,0 +1,41 @@
+metrics:
+  serviceMonitor:
+    enabled: true
+
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 1
+      preference:
+        matchExpressions:
+        - key: "node-role.kubernetes.io/e2e"
+          operator: "Exists"
+
+tolerations:
+- key: "node-role.kubernetes.io/e2e"
+  operator: "Exists"
+  effect: "NoSchedule"  
+
+cluster:
+  enabled: false
+etcd:
+  enabled: false
+minio:
+  enabled: false
+  tls:
+    enabled: false
+pulsar:
+  enabled: false
+standalone:
+  extraEnv:
+  - name: ETCD_CONFIG_PATH
+    value: /milvus/configs/advanced/etcd.yaml
+extraConfigFiles:
+  user.yaml: |+
+    etcd:
+      use:
+        embed: true
+      data:
+        dir: /var/lib/milvus/etcd
+    common:
+      storageType: local

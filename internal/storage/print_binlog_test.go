@@ -1,0 +1,481 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package storage
+
+import (
+	"fmt"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
+)
+
+func TestPrintBinlogFilesInt64(t *testing.T) {
+	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40, false)
+
+	curTS := time.Now().UnixNano() / int64(time.Millisecond)
+
+	e1, err := w.NextInsertEventWriter()
+	assert.NoError(t, err)
+	err = e1.AddDataToPayloadForUT([]int64{1, 2, 3}, nil)
+	assert.NoError(t, err)
+	err = e1.AddDataToPayloadForUT([]int32{4, 5, 6}, nil)
+	assert.Error(t, err)
+	err = e1.AddDataToPayloadForUT([]int64{4, 5, 6}, nil)
+	assert.NoError(t, err)
+	e1.SetEventTimestamp(tsoutil.ComposeTS(curTS+10*60*1000, 0), tsoutil.ComposeTS(curTS+20*60*1000, 0))
+
+	e2, err := w.NextInsertEventWriter()
+	assert.NoError(t, err)
+	err = e2.AddDataToPayloadForUT([]int64{7, 8, 9}, nil)
+	assert.NoError(t, err)
+	err = e2.AddDataToPayloadForUT([]bool{true, false, true}, nil)
+	assert.Error(t, err)
+	err = e2.AddDataToPayloadForUT([]int64{10, 11, 12}, nil)
+	assert.NoError(t, err)
+	e2.SetEventTimestamp(tsoutil.ComposeTS(curTS+30*60*1000, 0), tsoutil.ComposeTS(curTS+40*60*1000, 0))
+
+	w.SetEventTimeStamp(tsoutil.ComposeTS(curTS, 0), tsoutil.ComposeTS(curTS+3600*1000, 0))
+
+	_, err = w.GetBuffer()
+	assert.Error(t, err)
+	sizeTotal := 20000000
+	w.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	err = w.Finish()
+	assert.NoError(t, err)
+	buf, err := w.GetBuffer()
+	assert.NoError(t, err)
+	w.Close()
+
+	fd, err := os.CreateTemp("", "binlog_int64.db")
+	defer os.RemoveAll(fd.Name())
+	assert.NoError(t, err)
+	num, err := fd.Write(buf)
+	assert.NoError(t, err)
+	assert.Equal(t, num, len(buf))
+	err = fd.Close()
+	assert.NoError(t, err)
+}
+
+func TestPrintBinlogFiles(t *testing.T) {
+	Schema := &etcdpb.CollectionMeta{
+		ID:            1,
+		CreateTime:    1,
+		SegmentIDs:    []int64{0, 1},
+		PartitionTags: []string{"partition_0", "partition_1"},
+		Schema: &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      0,
+					Name:         "row_id",
+					IsPrimaryKey: false,
+					Description:  "row_id",
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:      1,
+					Name:         "Ts",
+					IsPrimaryKey: false,
+					Description:  "Ts",
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:      100,
+					Name:         "field_bool",
+					IsPrimaryKey: false,
+					Description:  "description_2",
+					DataType:     schemapb.DataType_Bool,
+				},
+				{
+					FieldID:      101,
+					Name:         "field_int8",
+					IsPrimaryKey: false,
+					Description:  "description_3",
+					DataType:     schemapb.DataType_Int8,
+				},
+				{
+					FieldID:      102,
+					Name:         "field_int16",
+					IsPrimaryKey: false,
+					Description:  "description_4",
+					DataType:     schemapb.DataType_Int16,
+				},
+				{
+					FieldID:      103,
+					Name:         "field_int32",
+					IsPrimaryKey: false,
+					Description:  "description_5",
+					DataType:     schemapb.DataType_Int32,
+				},
+				{
+					FieldID:      104,
+					Name:         "field_int64",
+					IsPrimaryKey: false,
+					Description:  "description_6",
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:      105,
+					Name:         "field_float",
+					IsPrimaryKey: false,
+					Description:  "description_7",
+					DataType:     schemapb.DataType_Float,
+				},
+				{
+					FieldID:      106,
+					Name:         "field_double",
+					IsPrimaryKey: false,
+					Description:  "description_8",
+					DataType:     schemapb.DataType_Double,
+				},
+				{
+					FieldID:      107,
+					Name:         "field_string",
+					IsPrimaryKey: false,
+					Description:  "description_9",
+					DataType:     schemapb.DataType_String,
+				},
+				{
+					FieldID:      108,
+					Name:         "field_binary_vector",
+					IsPrimaryKey: false,
+					Description:  "description_10",
+					DataType:     schemapb.DataType_BinaryVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "8"},
+					},
+				},
+				{
+					FieldID:      109,
+					Name:         "field_float_vector",
+					IsPrimaryKey: false,
+					Description:  "description_11",
+					DataType:     schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "8"},
+					},
+				},
+				{
+					FieldID:      110,
+					Name:         "field_json",
+					IsPrimaryKey: false,
+					Description:  "description_12",
+					DataType:     schemapb.DataType_JSON,
+				},
+				{
+					FieldID:      111,
+					Name:         "field_bfloat16_vector",
+					IsPrimaryKey: false,
+					Description:  "description_13",
+					DataType:     schemapb.DataType_BFloat16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4"},
+					},
+				},
+				{
+					FieldID:      112,
+					Name:         "field_float16_vector",
+					IsPrimaryKey: false,
+					Description:  "description_14",
+					DataType:     schemapb.DataType_Float16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4"},
+					},
+				},
+				{
+					FieldID:      113,
+					Name:         "field_geometry",
+					IsPrimaryKey: false,
+					Description:  "description_15",
+					DataType:     schemapb.DataType_Geometry,
+				},
+				{
+					FieldID:      114,
+					Name:         "field_int8_vector",
+					IsPrimaryKey: false,
+					Description:  "description_16",
+					DataType:     schemapb.DataType_Int8Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4"},
+					},
+				},
+				{
+					FieldID:      115,
+					Name:         "field_sparse_float_vector",
+					IsPrimaryKey: false,
+					Description:  "description_17",
+					DataType:     schemapb.DataType_SparseFloatVector,
+				},
+			},
+		},
+	}
+	insertCodec := NewInsertCodecWithSchema(Schema)
+	insertDataFirst := &InsertData{
+		Data: map[int64]FieldData{
+			0: &Int64FieldData{
+				Data: []int64{3, 4},
+			},
+			1: &Int64FieldData{
+				Data: []int64{3, 4},
+			},
+			100: &BoolFieldData{
+				Data: []bool{true, false},
+			},
+			101: &Int8FieldData{
+				Data: []int8{3, 4},
+			},
+			102: &Int16FieldData{
+				Data: []int16{3, 4},
+			},
+			103: &Int32FieldData{
+				Data: []int32{3, 4},
+			},
+			104: &Int64FieldData{
+				Data: []int64{3, 4},
+			},
+			105: &FloatFieldData{
+				Data: []float32{3, 4},
+			},
+			106: &DoubleFieldData{
+				Data: []float64{3, 4},
+			},
+			107: &StringFieldData{
+				Data: []string{"3", "4"},
+			},
+			108: &BinaryVectorFieldData{
+				Data: []byte{0, 255},
+				Dim:  8,
+			},
+			109: &FloatVectorFieldData{
+				Data: []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+				Dim:  8,
+			},
+			110: &JSONFieldData{
+				Data: [][]byte{
+					[]byte(`{}`),
+					[]byte(`{"key":"hello"}`),
+				},
+			},
+			111: &BFloat16VectorFieldData{
+				Data: []byte("12345678"),
+				Dim:  4,
+			},
+			112: &Float16VectorFieldData{
+				Data: []byte("12345678"),
+				Dim:  4,
+			},
+			113: &GeometryFieldData{
+				Data: [][]byte{
+					// POINT (30.123 -10.456) and LINESTRING (30.123 -10.456, 10.789 30.123, -40.567 40.890)
+					{0x01, 0x01, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40},
+					{0x01, 0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40, 0x03, 0xA6, 0xB4, 0xA6, 0xA4, 0xD2, 0xC5, 0xC0, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A},
+				},
+			},
+			114: &Int8VectorFieldData{
+				Data: []int8{1, 2, 3, 4, 5, 6, 7, 8},
+				Dim:  4,
+			},
+			115: &SparseFloatVectorFieldData{
+				SparseFloatArray: schemapb.SparseFloatArray{
+					Dim: 100,
+					Contents: [][]byte{
+						typeutil.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{1.1, 1.2, 1.3}),
+						typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
+					},
+				},
+			},
+		},
+	}
+
+	insertDataSecond := &InsertData{
+		Data: map[int64]FieldData{
+			0: &Int64FieldData{
+				Data: []int64{1, 2},
+			},
+			1: &Int64FieldData{
+				Data: []int64{1, 2},
+			},
+			100: &BoolFieldData{
+				Data: []bool{true, false},
+			},
+			101: &Int8FieldData{
+				Data: []int8{1, 2},
+			},
+			102: &Int16FieldData{
+				Data: []int16{1, 2},
+			},
+			103: &Int32FieldData{
+				Data: []int32{1, 2},
+			},
+			104: &Int64FieldData{
+				Data: []int64{1, 2},
+			},
+			105: &FloatFieldData{
+				Data: []float32{1, 2},
+			},
+			106: &DoubleFieldData{
+				Data: []float64{1, 2},
+			},
+			107: &StringFieldData{
+				Data: []string{"1", "2"},
+			},
+			108: &BinaryVectorFieldData{
+				Data: []byte{0, 255},
+				Dim:  8,
+			},
+			109: &FloatVectorFieldData{
+				Data: []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+				Dim:  8,
+			},
+			110: &JSONFieldData{
+				Data: [][]byte{
+					[]byte(`{}`),
+					[]byte(`{"key":"world"}`),
+				},
+			},
+			111: &BFloat16VectorFieldData{
+				Data: []byte("abcdefgh"),
+				Dim:  4,
+			},
+			112: &Float16VectorFieldData{
+				Data: []byte("abcdefgh"),
+				Dim:  4,
+			},
+			113: &GeometryFieldData{
+				Data: [][]byte{
+					// POINT (30.123 -10.456) and LINESTRING (30.123 -10.456, 10.789 30.123, -40.567 40.890)
+					{0x01, 0x01, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40},
+					{0x01, 0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A, 0x0D, 0x1B, 0x4F, 0x4F, 0x9A, 0x3D, 0x40, 0x03, 0xA6, 0xB4, 0xA6, 0xA4, 0xD2, 0xC5, 0xC0, 0xD2, 0x4A, 0x4D, 0x6A, 0x8B, 0x3C, 0x5C, 0x0A},
+				},
+			},
+			114: &Int8VectorFieldData{
+				Data: []int8{11, 12, 13, 14, 15, 16, 17, 18},
+				Dim:  4,
+			},
+			115: &SparseFloatVectorFieldData{
+				SparseFloatArray: schemapb.SparseFloatArray{
+					Dim: 100,
+					Contents: [][]byte{
+						typeutil.CreateSparseFloatRow([]uint32{5, 6, 7}, []float32{3.1, 3.2, 3.3}),
+						typeutil.CreateSparseFloatRow([]uint32{15, 25, 35}, []float32{4.1, 4.2, 4.3}),
+					},
+				},
+			},
+		},
+	}
+	firstBlobs, err := insertCodec.Serialize(1, 1, insertDataFirst)
+	assert.NoError(t, err)
+	var binlogFiles []string
+	for index, blob := range firstBlobs {
+		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 100)
+		fileName := fmt.Sprintf("/tmp/firstblob_%d.db", index)
+		binlogFiles = append(binlogFiles, fileName)
+		fd, err := os.Create(fileName)
+		assert.NoError(t, err)
+		num, err := fd.Write(blob.GetValue())
+		assert.NoError(t, err)
+		assert.Equal(t, num, len(blob.GetValue()))
+		err = fd.Close()
+		assert.NoError(t, err)
+	}
+	secondBlobs, err := insertCodec.Serialize(1, 1, insertDataSecond)
+	assert.NoError(t, err)
+	for index, blob := range secondBlobs {
+		blob.Key = fmt.Sprintf("1/insert_log/2/3/4/5/%d", 99)
+		fileName := fmt.Sprintf("/tmp/secondblob_%d.db", index)
+		binlogFiles = append(binlogFiles, fileName)
+		fd, err := os.Create(fileName)
+		assert.NoError(t, err)
+		num, err := fd.Write(blob.GetValue())
+		assert.NoError(t, err)
+		assert.Equal(t, num, len(blob.GetValue()))
+		err = fd.Close()
+		assert.NoError(t, err)
+	}
+	binlogFiles = append(binlogFiles, "test")
+
+	PrintBinlogFiles(binlogFiles)
+	for _, file := range binlogFiles {
+		_ = os.RemoveAll(file)
+	}
+}
+
+func TestPrintIndexFile(t *testing.T) {
+	indexBuildID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	version := int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	collectionID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	partitionID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	segmentID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	fieldID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	indexName := funcutil.GenRandomStr()
+	indexID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	indexParams := make(map[string]string)
+	indexParams[common.IndexTypeKey] = "IVF_FLAT"
+	datas := []*Blob{
+		{
+			Key:   "ivf1",
+			Value: []byte{1, 2, 3},
+		},
+		{
+			Key:   "ivf2",
+			Value: []byte{4, 5, 6},
+		},
+		{
+			Key:   "SLICE_META",
+			Value: []byte(`"{"meta":[{"name":"IVF","slice_num":5,"total_len":20047555},{"name":"RAW_DATA","slice_num":20,"total_len":80025824}]}"`),
+		},
+	}
+
+	codec := NewIndexFileBinlogCodec()
+
+	serializedBlobs, err := codec.Serialize(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexParams, indexName, indexID, datas)
+	assert.NoError(t, err)
+
+	var binlogFiles []string
+	for index, blob := range serializedBlobs {
+		fileName := fmt.Sprintf("/tmp/index_blob_%d.binlog", index)
+		binlogFiles = append(binlogFiles, fileName)
+		fd, err := os.Create(fileName)
+		assert.NoError(t, err)
+		num, err := fd.Write(blob.GetValue())
+		assert.NoError(t, err)
+		assert.Equal(t, num, len(blob.GetValue()))
+		err = fd.Close()
+		assert.NoError(t, err)
+	}
+
+	err = PrintBinlogFiles(binlogFiles)
+	assert.NoError(t, err)
+
+	// remove tmp files
+	for _, file := range binlogFiles {
+		_ = os.RemoveAll(file)
+	}
+}

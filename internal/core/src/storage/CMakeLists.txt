@@ -1,0 +1,46 @@
+# Licensed to the LF AI & Data foundation under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+add_source_at_current_directory()
+
+add_subdirectory(minio)
+add_subdirectory(aliyun)
+add_subdirectory(tencent)
+add_subdirectory(huawei)
+
+if (ENABLE_GCP_NATIVE)
+    add_definitions(-DENABLE_GCP_NATIVE)
+    add_subdirectory(gcp-native-storage)
+endif()
+
+if (ENABLE_AZURE_FS)
+    set(AZURE_BUILD_DIR ON)
+    add_definitions(-DAZURE_BUILD_DIR)
+    add_subdirectory(azure)
+endif()
+
+if(USE_OPENDAL)
+    include_directories(${OPENDAL_INCLUDE_DIR})
+    set(SOURCE_FILES ${SOURCE_FILES} opendal/OpenDALChunkManager.cpp)
+endif()
+
+# Add loon_ffi subdirectory to include loon FFI source files
+add_subdirectory(loon_ffi)
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/loon_ffi)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/plugin)
+
+add_library(milvus_storage OBJECT ${SOURCE_FILES})

@@ -1,0 +1,15 @@
+[
+  {
+        "server": "apollo",
+        "suite_params": [
+            {
+                "suite": "011_insert_performance.yaml",
+                "image_type": "cpu"
+            },
+            {
+                "suite": "011_delete_performance.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

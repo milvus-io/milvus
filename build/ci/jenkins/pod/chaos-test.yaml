@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: milvus-test
+  namespace: chaos-testing
+spec:
+  containers:
+  - name: main
+    image: harbor.milvus.io/qa/krte:dev-4
+    command:
+    - cat
+    tty: true
+    resources:
+      limits:
+        memory: 6Gi
+        cpu: 2.0
+      requests:
+        memory: 4Gi
+        cpu: 2.0
+    volumeMounts:
+    - mountPath: /root/.kube/config
+      name: kubeconfig
+      subPath: config
+  volumes:
+  - configMap:
+      defaultMode: 420
+      name: qa-kubeconfig
+    name: kubeconfig
+  serviceAccountName: qa-chaos-admin

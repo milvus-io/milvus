@@ -1,0 +1,45 @@
+cmd:
+  # Option: run/backup/rollback
+  type: run
+  runWithBackup: false
+
+config:
+  sourceVersion: 2.1.0
+  targetVersion: 2.2.0
+  backupFilePath: /tmp/migration.bak
+
+metastore:
+  type: etcd
+
+etcd:
+  endpoints:
+    - localhost:2379
+  rootPath: by-dev # The root path where data is stored in etcd
+  metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
+  kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
+  log:
+    # path is one of:
+    #  - "default" as os.Stderr,
+    #  - "stderr" as os.Stderr,
+    #  - "stdout" as os.Stdout,
+    #  - file path to append server logs to.
+    # please adjust in embedded Milvus: /tmp/milvus/logs/etcd.log
+    path: stdout
+    level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
+  use:
+    # please adjust in embedded Milvus: true
+    embed: false # Whether to enable embedded Etcd (an in-process EtcdServer).
+  data:
+    # Embedded Etcd only.
+    # please adjust in embedded Milvus: /tmp/milvus/etcdData/
+    dir: default.etcd
+  ssl:
+    enabled: false # Whether to support ETCD secure connection mode
+    tlsCert: /path/to/etcd-client.pem # path to your cert file
+    tlsKey: /path/to/etcd-client-key.pem # path to your key file
+    tlsCACert: /path/to/ca.pem # path to your CACert file
+    # TLS min version
+    # Optional values: 1.0, 1.1, 1.2, 1.3。
+    # We recommend using version 1.2 and above
+    tlsMinVersion: 1.3
+

@@ -1,0 +1,32 @@
+# Testcases All-in-one
+#   pod kill
+#     standalone
+#       3 pods(standalone-ha-blabla, etcd, minio)
+#     cluster-1-node
+#       11 pods(proxy, rootcoord, querynode, querycoord, datanode, datacoord,
+#               indexnode, indexcoord, pulsar, etcd, minio)
+#     cluster-n-nodes
+#       11 pods* n: kill one and kill all
+
+Collections:
+  -
+    testcase:
+      name: test_datanode_container_kill
+      chaos: chaos_datanode_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          insert: succ
+          flush: fail
+        cluster_n_nodes:
+          insert: degrade
+
+  -
+    testcase:
+      name: test_standalone_container_kill
+      chaos: chaos_standalone_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          insert: succ
+          flush: fail
+        cluster_n_nodes:
+          insert: degrade

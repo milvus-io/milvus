@@ -1,0 +1,194 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package pipeline
+
+import (
+	"fmt"
+	"sync"
+
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+)
+
+// Manager manage pipeline in querynode
+type Manager interface {
+	Num() int
+	Add(collectionID UniqueID, channel string) (Pipeline, error)
+	Get(channel string) Pipeline
+	Remove(channels ...string)
+	Start(channels ...string) error
+	Close()
+	GetChannelStats(collectionID int64) []*metricsinfo.Channel
+}
+
+type manager struct {
+	channel2Pipeline map[string]Pipeline
+	dataManager      *DataManager
+	delegators       *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
+
+	dispatcher msgdispatcher.Client
+	mu         sync.RWMutex
+}
+
+func (m *manager) Num() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.channel2Pipeline)
+}
+
+// Add pipeline for each channel of collection
+func (m *manager) Add(collectionID UniqueID, channel string) (Pipeline, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	log.Info("start create pipeine",
+		zap.Int64("collectionID", collectionID),
+		zap.String("channel", channel),
+	)
+	tr := timerecord.NewTimeRecorder("add dmChannel")
+	collection := m.dataManager.Collection.Get(collectionID)
+	if collection == nil {
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
+
+	if pipeline, ok := m.channel2Pipeline[channel]; ok {
+		return pipeline, nil
+	}
+
+	// get shard delegator for add growing in pipeline
+	delegator, ok := m.delegators.Get(channel)
+	if !ok {
+		return nil, merr.WrapErrChannelNotFound(channel, "delegator not found")
+	}
+
+	newPipeLine, err := NewPipeLine(collection, channel, m.dataManager, m.dispatcher, delegator)
+	if err != nil {
+		return nil, merr.WrapErrServiceUnavailable(err.Error(), "failed to create new pipeline")
+	}
+
+	m.channel2Pipeline[channel] = newPipeLine
+	metrics.QueryNodeNumFlowGraphs.WithLabelValues(paramtable.GetStringNodeID()).Inc()
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(paramtable.GetStringNodeID()).Inc()
+	metrics.QueryNodeWatchDmlChannelLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return newPipeLine, nil
+}
+
+func (m *manager) Get(channel string) Pipeline {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	pipeline, ok := m.channel2Pipeline[channel]
+	if !ok {
+		log.Warn("pipeline not existed",
+			zap.String("channel", channel),
+		)
+		return nil
+	}
+
+	return pipeline
+}
+
+// Remove pipeline from Manager by channel
+func (m *manager) Remove(channels ...string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, channel := range channels {
+		if pipeline, ok := m.channel2Pipeline[channel]; ok {
+			pipeline.Close()
+			delete(m.channel2Pipeline, channel)
+		} else {
+			log.Warn("pipeline to be removed doesn't existed", zap.String("channel", channel))
+		}
+	}
+	metrics.QueryNodeNumFlowGraphs.WithLabelValues(paramtable.GetStringNodeID()).Dec()
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(paramtable.GetStringNodeID()).Dec()
+}
+
+// Start pipeline by channel
+func (m *manager) Start(channels ...string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// check pipelie all exist before start
+	for _, channel := range channels {
+		if _, ok := m.channel2Pipeline[channel]; !ok {
+			reason := fmt.Sprintf("pipeline with channel %s not exist", channel)
+			return merr.WrapErrServiceUnavailable(reason, "pipine start failed")
+		}
+	}
+
+	for _, channel := range channels {
+		m.channel2Pipeline[channel].Start()
+	}
+	return nil
+}
+
+// Close all pipeline of Manager
+func (m *manager) Close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, pipeline := range m.channel2Pipeline {
+		pipeline.Close()
+	}
+}
+
+func (m *manager) GetChannelStats(collectionID int64) []*metricsinfo.Channel {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ret := make([]*metricsinfo.Channel, 0, len(m.channel2Pipeline))
+	for ch, p := range m.channel2Pipeline {
+		if collectionID > 0 && p.GetCollectionID() != collectionID {
+			continue
+		}
+		delegator, ok := m.delegators.Get(ch)
+		if ok {
+			tt := delegator.GetTSafe()
+			ret = append(ret, &metricsinfo.Channel{
+				Name:           ch,
+				WatchState:     p.Status(),
+				LatestTimeTick: tsoutil.PhysicalTimeFormat(tt),
+				NodeID:         paramtable.GetNodeID(),
+				CollectionID:   p.GetCollectionID(),
+			})
+		}
+	}
+	return ret
+}
+
+func NewManager(dataManager *DataManager,
+	dispatcher msgdispatcher.Client,
+	delegators *typeutil.ConcurrentMap[string, delegator.ShardDelegator],
+) Manager {
+	return &manager{
+		channel2Pipeline: make(map[string]Pipeline),
+		dataManager:      dataManager,
+		delegators:       delegators,
+		dispatcher:       dispatcher,
+	}
+}

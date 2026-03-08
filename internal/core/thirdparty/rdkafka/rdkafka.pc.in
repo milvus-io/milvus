@@ -1,0 +1,9 @@
+libdir=@CMAKE_INSTALL_FULL_LIBDIR@
+includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+Name: Rdkafka
+Description: RdKafka
+Version: @RDKAFKA_VERSION@
+
+Libs: -L${libdir} -lrdkafka
+# Libs.private: -lz -lbz2
+Cflags: -I${includedir}

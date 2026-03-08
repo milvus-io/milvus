@@ -1,0 +1,23 @@
+kind: Schedule
+apiVersion: chaos-mesh.org/v1alpha1
+metadata:
+  name: test-streamingnode-pod-kill
+  namespace: chaos-testing
+spec:
+  schedule: '*/5 * * * * *'
+  startingDeadlineSeconds: 60
+  concurrencyPolicy: Forbid
+  historyLimit: 1
+  type: PodChaos
+  podChaos:
+    selector:
+      namespaces:
+        - chaos-testing
+      labelSelectors:
+        app.kubernetes.io/instance: milvus-chaos
+        app.kubernetes.io/name: milvus
+        component: streamingnode
+    mode: fixed
+    value: "1"
+    action: pod-kill
+    gracePeriod: 0

@@ -1,0 +1,40 @@
+FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
+
+ARG TARGETARCH
+
+# Install ca-certificates first, then switch to HTTPS and install other packages
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    sed -i 's/http:/https:/g' /etc/apt/sources.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends curl libaio-dev libgomp1 libopenblas-dev && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
+        ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
+        echo "Etc/UTC" > /etc/timezone && \
+    apt-get remove --purge -y && \
+    rm -rf /var/lib/apt/lists/*
+
+# Add Tini
+RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
+    chmod +x /tini
+
+RUN mkdir -p /milvus/bin
+COPY --chown=root:root --chmod=774 ./bin/milvus /milvus/bin/milvus 
+COPY --chown=root:root --chmod=774 ./configs/ /milvus/configs/
+COPY --chown=root:root --chmod=774 ./lib/ /milvus/lib/
+
+ENV PATH=/milvus/bin:$PATH
+ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
+ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
+ENV MALLOC_CONF=background_thread:true
+
+# Change user to milvus
+RUN groupadd -r milvus && useradd -r -g milvus milvus && \
+    mkdir -p /var/lib/milvus && \
+    chown -R milvus:milvus /milvus /var/lib/milvus
+USER milvus:milvus
+
+ENTRYPOINT ["/tini", "--"]
+
+WORKDIR /milvus
+

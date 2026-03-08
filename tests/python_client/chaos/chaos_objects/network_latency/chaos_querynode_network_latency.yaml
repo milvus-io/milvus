@@ -1,0 +1,26 @@
+kind: NetworkChaos
+apiVersion: chaos-mesh.org/v1alpha1
+metadata:
+  name: test-querynode-network-latency
+  namespace: chaos-testing
+spec:
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      app.kubernetes.io/instance: milvus-chaos
+      component: querynode
+  mode: all
+  action: delay
+  delay:
+    latency: 200ms
+    correlation: '100'
+    jitter: 0ms
+  direction: both
+  target:
+    selector:
+      namespaces:
+        - chaos-testing
+      labelSelectors:
+        app.kubernetes.io/instance: milvus-chaos
+    mode: all

@@ -1,0 +1,272 @@
+package message
+
+import (
+	"go.uber.org/zap/zapcore"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+)
+
+var (
+	_ BasicMessage        = (*messageImpl)(nil)
+	_ MutableMessage      = (*messageImpl)(nil)
+	_ ImmutableMessage    = (*immutableMessageImpl)(nil)
+	_ ImmutableTxnMessage = (*immutableTxnMessageImpl)(nil)
+)
+
+// BasicMessage is the basic interface of message.
+type BasicMessage interface {
+	zapcore.ObjectMarshaler
+
+	// MessageType returns the type of message.
+	MessageType() MessageType
+
+	// Version returns the message version.
+	// 0: old version before streamingnode.
+	// from 1: new version after streamingnode.
+	Version() Version
+
+	// MessageTypeWithVersion returns the message type with version.
+	MessageTypeWithVersion() MessageTypeWithVersion
+
+	// Payload returns the message payload.
+	// If the underlying message is encrypted, the payload will be decrypted.
+	// !!! So if the message is encrypted, additional overhead will be paid for decryption.
+	// If the underlying message is not encrypted, the payload will be returned directly.
+	Payload() []byte
+
+	// EstimateSize returns the estimated size of message.
+	EstimateSize() int
+
+	// Properties returns the message properties.
+	// Should be used with read-only promise.
+	Properties() RProperties
+
+	// TimeTick returns the time tick of current message.
+	// Available only when the message's version greater than 0.
+	// Otherwise, it will panic.
+	TimeTick() uint64
+
+	// BarrierTimeTick returns the barrier time tick of current message.
+	// 0 by default, no fence.
+	BarrierTimeTick() uint64
+
+	// TxnContext returns the transaction context of current message.
+	// If the message is not a transaction message, it will return nil.
+	TxnContext() *TxnContext
+
+	// BroadcastHeader returns the broadcast common header of the message.
+	// If the message is not a broadcast message, it will return 0.
+	BroadcastHeader() *BroadcastHeader
+
+	// ReplicateHeader returns the replicate header of current message.
+	// If the message is not a replicate message, it will return nil.
+	ReplicateHeader() *ReplicateHeader
+
+	// IsPersisted returns true if the message is persisted into underlying log storage.
+	IsPersisted() bool
+
+	// IsPChannelLevel returns true if the message is a pchannel-level message.
+	// A pchannel-level message is broadcast to all pchannels and should be handled
+	// at pchannel scope rather than vchannel scope.
+	IsPChannelLevel() bool
+
+	// IntoMessageProto converts the message to a protobuf message.
+	IntoMessageProto() *messagespb.Message
+}
+
+// MutableMessage is the mutable message interface.
+// Message can be modified before it is persistent by wal.
+type MutableMessage interface {
+	BasicMessage
+
+	// VChannel returns the virtual channel of current message.
+	// Available only when the message's version greater than 0.
+	// Return "" or Pchannel if message is can be seen by all vchannels on the pchannel.
+	VChannel() string
+
+	// PChannel returns the physical channel derived from VChannel.
+	// It strips the virtual channel suffix to return the underlying physical channel name.
+	PChannel() string
+
+	// WithBarrierTimeTick sets the barrier time tick of current message.
+	// these time tick is used to promised the message will be sent after that time tick.
+	// and the message which timetick is less than it will never concurrent append with it.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithBarrierTimeTick(tt uint64) MutableMessage
+
+	// WithWALTerm sets the wal term of current message.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithWALTerm(term int64) MutableMessage
+
+	// WithLastConfirmed sets the last confirmed message id of current message.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithLastConfirmed(id MessageID) MutableMessage
+
+	// WithOldVersion sets the version of current message to be old version.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	// TODO: used for old version message compatibility, will be removed in the future.
+	WithOldVersion() MutableMessage
+
+	// WithLastConfirmedUseMessageID sets the last confirmed message id of current message to be the same as message id.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithLastConfirmedUseMessageID() MutableMessage
+
+	// WithTimeTick sets the time tick of current message.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithTimeTick(tt uint64) MutableMessage
+
+	// WithTxnContext sets the transaction context of current message.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithTxnContext(txnCtx TxnContext) MutableMessage
+
+	// WithReplicateHeader sets the replicate header of current message.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithReplicateHeader(rh *ReplicateHeader) MutableMessage
+
+	// IntoImmutableMessage converts the mutable message to immutable message.
+	IntoImmutableMessage(msgID MessageID) ImmutableMessage
+}
+
+// ReplicateMutableMessage is the replicate message interface.
+type ReplicateMutableMessage interface {
+	MutableMessage
+
+	// OverwriteReplicateVChannel overwrites the vchannel of the replicate message.
+	OverwriteReplicateVChannel(vchannel string, broadcastVChannels ...[]string)
+}
+
+// BroadcastMutableMessage is the broadcast message interface.
+// Indicated the message is broadcasted on various vchannels.
+type BroadcastMutableMessage interface {
+	BasicMessage
+
+	// WithBroadcastID sets the broadcast id of the message.
+	WithBroadcastID(broadcastID uint64) BroadcastMutableMessage
+
+	// OverwriteBroadcastHeader overwrites the broadcast header of the message.
+	OverwriteBroadcastHeader(broadcastID uint64, rks ...ResourceKey) BroadcastMutableMessage
+
+	// SplitIntoMutableMessage splits the broadcast message into multiple mutable messages.
+	// The broadcast id will be set into the properties of each message.
+	SplitIntoMutableMessage() []MutableMessage
+}
+
+// ImmutableMessage is the read-only message interface.
+// Once a message is persistent by wal or temporary generated by wal, it will be immutable.
+type ImmutableMessage interface {
+	BasicMessage
+
+	// WALName returns the name of message related wal.
+	WALName() WALName
+
+	// VChannel returns the virtual channel of current message.
+	// Available only when the message's version greater than 0.
+	// Return "" if message is can be seen by all vchannels on the pchannel.
+	VChannel() string
+
+	// PChannel returns the physical channel derived from VChannel.
+	// It strips the virtual channel suffix to return the underlying physical channel name.
+	PChannel() string
+
+	// MessageID returns the message id of current message.
+	MessageID() MessageID
+
+	// LastConfirmedMessageID returns the last confirmed message id of current message.
+	// Read from this message id will guarantee the time tick greater than this message's time tick,
+	// also promise for the txn message.
+	// Available only when the message's version greater than 0.
+	// Otherwise, it will panic.
+	LastConfirmedMessageID() MessageID
+
+	// IntoImmutableMessageProto converts the message to a protobuf immutable message.
+	IntoImmutableMessageProto() *commonpb.ImmutableMessage
+
+	// IntoBroadcastMutableMessage converts the message to a broadcast mutable message.
+	// panic if the message is not generated by broadcast message.
+	IntoBroadcastMutableMessage() BroadcastMutableMessage
+}
+
+// ImmutableTxnMessage is the read-only transaction message interface.
+// Once a transaction is committed, the wal will generate a transaction message.
+// The MessageType() is always return MessageTypeTransaction if it's a transaction message.
+type ImmutableTxnMessage interface {
+	ImmutableMessage
+
+	// Begin returns the begin message of the transaction.
+	Begin() ImmutableMessage
+
+	// Commit returns the commit message of the transaction.
+	Commit() ImmutableMessage
+
+	// RangeOver iterates over the underlying messages in the transaction.
+	// If visitor return not nil, the iteration will be stopped.
+	RangeOver(visitor func(ImmutableMessage) error) error
+
+	// Size returns the number of messages in the transaction.
+	Size() int
+}
+
+// SpecializedBroadcastMessage is the specialized broadcast message interface.
+type SpecializedBroadcastMessage[H proto.Message, B proto.Message] interface {
+	BasicMessage
+
+	// MessageHeader returns the message header.
+	// Modifications to the returned header will be reflected in the message.
+	Header() H
+
+	// Body returns the message body.
+	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
+	Body() (B, error)
+
+	// MustBody return the message body, panic if error occurs.
+	MustBody() B
+
+	// OverwriteHeader overwrites the message header.
+	OverwriteHeader(header H)
+
+	// BroadcastMessage returns the broadcast message.
+	BroadcastMessage() BroadcastMutableMessage
+}
+
+// specializedMutableMessage is the specialized mutable message interface.
+type specializedMutableMessage[H proto.Message, B proto.Message] interface {
+	BasicMessage
+
+	// VChannel returns the virtual channel of current message.
+	VChannel() string
+
+	// MessageHeader returns the message header.
+	// Modifications to the returned header will be reflected in the message.
+	Header() H
+
+	// Body returns the message body.
+	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
+	Body() (B, error)
+
+	// MustBody return the message body, panic if error occurs.
+	MustBody() B
+
+	// OverwriteHeader overwrites the message header.
+	OverwriteHeader(header H)
+
+	// OverwriteBody overwrites the message body.
+	OverwriteBody(body B)
+}
+
+// SpecializedImmutableMessage is the specialized immutable message interface.
+type SpecializedImmutableMessage[H proto.Message, B proto.Message] interface {
+	ImmutableMessage
+
+	// Header returns the message header.
+	// Modifications to the returned header will be reflected in the message.
+	Header() H
+
+	// Body returns the message body.
+	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
+	Body() (B, error)
+
+	// MustBody return the message body, panic if error occurs.
+	MustBody() B
+}

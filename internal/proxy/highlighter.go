@@ -1,0 +1,587 @@
+package proxy
+
+import (
+	"context"
+	"encoding/json"
+	"strconv"
+	"strings"
+
+	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/util/function/highlight"
+	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+)
+
+const (
+	PreTagsKey             = "pre_tags"
+	PostTagsKey            = "post_tags"
+	HighlightSearchTextKey = "highlight_search_text"
+	HighlightQueryKey      = "highlight_query"
+	FragmentOffsetKey      = "fragment_offset"
+	FragmentSizeKey        = "fragment_size"
+	FragmentNumKey         = "num_of_fragments"
+	DefaultFragmentSize    = 100
+	DefaultFragmentNum     = 5
+	DefaultPreTag          = "<em>"
+	DefaultPostTag         = "</em>"
+)
+
+type Highlighter interface {
+	AsSearchPipelineOperator(t *searchTask) (operator, error)
+	FieldIDs() []int64
+	RequiredFieldIDs() []int64
+	DynamicFieldNames() []string
+}
+
+// highlight task for one field
+type highlightTask struct {
+	*querypb.HighlightTask
+	preTags  [][]byte
+	postTags [][]byte
+}
+
+type highlightQuery struct {
+	text          string
+	fieldName     string
+	highlightType querypb.HighlightQueryType
+}
+
+type LexicalHighlighter struct {
+	tasks       map[int64]*highlightTask // fieldID -> highlightTask
+	extraFields []int64                  // extra fields id for fetch analyzer name of multi analyzers
+	// option for all highlight task
+	// TODO: support set option for each task
+	preTags         [][]byte
+	postTags        [][]byte
+	highlightSearch bool
+	options         *querypb.HighlightOptions
+	queries         []*highlightQuery
+}
+
+// add highlight task with search
+// must used before addTaskWithQuery
+func (h *LexicalHighlighter) addTaskWithSearchText(collInfo *schemaInfo, fieldID int64, fieldName string, analyzerName string, texts []string) error {
+	_, ok := h.tasks[fieldID]
+	if ok {
+		return merr.WrapErrParameterInvalidMsg("not support hybrid search with highlight now. fieldID: %d", fieldID)
+	}
+
+	task := &highlightTask{
+		preTags:  h.preTags,
+		postTags: h.postTags,
+		HighlightTask: &querypb.HighlightTask{
+			FieldName: fieldName,
+			FieldId:   fieldID,
+			Options:   h.options,
+		},
+	}
+	h.tasks[fieldID] = task
+
+	task.Texts = texts
+	task.SearchTextNum = int64(len(texts))
+
+	// try get multi analyzer name field id
+	nameFieldID, err := collInfo.GetMultiAnalyzerNameFieldID(fieldID)
+	if err != nil {
+		return err
+	}
+	// set analyzer name and extra field id for multi analyzer
+	if nameFieldID > 0 {
+		// if multi analyzer name field id is found, set analyzer name to default
+		if analyzerName == "" {
+			analyzerName = "default"
+		}
+
+		task.AnalyzerNames = []string{}
+		for i := 0; i < len(texts); i++ {
+			task.AnalyzerNames = append(task.AnalyzerNames, analyzerName)
+		}
+		h.extraFields = append(h.extraFields, nameFieldID)
+	}
+	return nil
+}
+
+func (h *LexicalHighlighter) addTaskWithQuery(fieldID int64, query *highlightQuery) {
+	task, ok := h.tasks[fieldID]
+	if !ok {
+		task = &highlightTask{
+			HighlightTask: &querypb.HighlightTask{
+				Texts:     []string{},
+				FieldId:   fieldID,
+				FieldName: query.fieldName,
+				Options:   h.options,
+			},
+			preTags:  h.preTags,
+			postTags: h.postTags,
+		}
+		h.tasks[fieldID] = task
+	}
+
+	task.Texts = append(task.Texts, query.text)
+	task.Queries = append(task.Queries, &querypb.HighlightQuery{
+		Type: query.highlightType,
+	})
+}
+
+func (h *LexicalHighlighter) initHighlightQueries(t *searchTask) error {
+	// add query to highlight tasks
+	for _, query := range h.queries {
+		fieldID, ok := t.schema.MapFieldID(query.fieldName)
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("highlight field not found in schema: %s", query.fieldName)
+		}
+		h.addTaskWithQuery(fieldID, query)
+	}
+	return nil
+}
+
+func (h *LexicalHighlighter) AsSearchPipelineOperator(t *searchTask) (operator, error) {
+	return newLexicalHighlightOperator(t, lo.Values(h.tasks))
+}
+
+func (h *LexicalHighlighter) FieldIDs() []int64 {
+	return append(lo.Keys(h.tasks), h.extraFields...)
+}
+
+func (h *LexicalHighlighter) RequiredFieldIDs() []int64 {
+	return h.FieldIDs()
+}
+
+func (h *LexicalHighlighter) DynamicFieldNames() []string {
+	return []string{}
+}
+
+func NewLexicalHighlighter(highlighter *commonpb.Highlighter) (*LexicalHighlighter, error) {
+	params := funcutil.KeyValuePair2Map(highlighter.GetParams())
+	h := &LexicalHighlighter{
+		tasks:       make(map[int64]*highlightTask),
+		options:     &querypb.HighlightOptions{},
+		extraFields: make([]int64, 0),
+	}
+
+	// set pre_tags and post_tags
+	if value, ok := params[PreTagsKey]; ok {
+		tags := []string{}
+		if err := json.Unmarshal([]byte(value), &tags); err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("unmarshal pre_tags as string array failed: %v", err)
+		}
+		if len(tags) == 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("pre_tags cannot be empty list")
+		}
+
+		h.preTags = make([][]byte, len(tags))
+		for i, tag := range tags {
+			h.preTags[i] = []byte(tag)
+		}
+	} else {
+		h.preTags = [][]byte{[]byte(DefaultPreTag)}
+	}
+
+	if value, ok := params[PostTagsKey]; ok {
+		tags := []string{}
+		if err := json.Unmarshal([]byte(value), &tags); err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("unmarshal post_tags as string list failed: %v", err)
+		}
+		if len(tags) == 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("post_tags cannot be empty list")
+		}
+		h.postTags = make([][]byte, len(tags))
+		for i, tag := range tags {
+			h.postTags[i] = []byte(tag)
+		}
+	} else {
+		h.postTags = [][]byte{[]byte(DefaultPostTag)}
+	}
+
+	// set fragment config
+	if value, ok := params[FragmentSizeKey]; ok {
+		fragmentSize, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || fragmentSize <= 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("invalid fragment_size: %s", value)
+		}
+		h.options.FragmentSize = fragmentSize
+	} else {
+		h.options.FragmentSize = DefaultFragmentSize
+	}
+
+	if value, ok := params[FragmentNumKey]; ok {
+		fragmentNum, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || fragmentNum < 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("invalid num_of_fragments: %s", value)
+		}
+		h.options.NumOfFragments = fragmentNum
+	} else {
+		h.options.NumOfFragments = DefaultFragmentNum
+	}
+
+	if value, ok := params[FragmentOffsetKey]; ok {
+		fragmentOffset, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || fragmentOffset < 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("invalid fragment_offset: %s", value)
+		}
+		h.options.FragmentOffset = fragmentOffset
+	}
+
+	if value, ok := params[HighlightSearchTextKey]; ok {
+		enable, err := strconv.ParseBool(value)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("unmarshal highlight_search_text as bool failed: %v", err)
+		}
+
+		h.highlightSearch = enable
+	}
+
+	if value, ok := params[HighlightQueryKey]; ok {
+		queries := []any{}
+		if err := json.Unmarshal([]byte(value), &queries); err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("unmarshal highlight queries as json array failed: %v", err)
+		}
+
+		for _, query := range queries {
+			m, ok := query.(map[string]any)
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("unmarshal highlight queries failed: item in array is not json object")
+			}
+
+			text, ok := m["text"]
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("unmarshal highlight queries failed: must set `text` in query")
+			}
+
+			textStr, ok := text.(string)
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("unmarshal highlight queries failed: `text` must be string")
+			}
+
+			t, ok := m["type"]
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("unmarshal highlight queries failed: must set `type` in query")
+			}
+
+			typeStr, ok := t.(string)
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("unmarshal highlight queries failed: `type` must be string")
+			}
+
+			typeEnum, ok := querypb.HighlightQueryType_value[typeStr]
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("unmarshal highlight queries failed: invalid highlight query type: %s", typeStr)
+			}
+
+			f, ok := m["field"]
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("unmarshal highlight queries failed: must set `field` in query")
+			}
+			fieldStr, ok := f.(string)
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("unmarshal highlight queries failed: `field` must be string")
+			}
+
+			h.queries = append(h.queries, &highlightQuery{
+				text:          textStr,
+				highlightType: querypb.HighlightQueryType(typeEnum),
+				fieldName:     fieldStr,
+			})
+		}
+	}
+	return h, nil
+}
+
+type lexicalHighlightOperator struct {
+	tasks     []*highlightTask
+	schema    *schemaInfo
+	lbPolicy  shardclient.LBPolicy
+	scheduler *taskScheduler
+
+	collectionName string
+	collectionID   int64
+	dbName         string
+}
+
+func newLexicalHighlightOperator(t *searchTask, tasks []*highlightTask) (operator, error) {
+	return &lexicalHighlightOperator{
+		tasks:          tasks,
+		lbPolicy:       t.lb,
+		scheduler:      t.node.(*Proxy).sched,
+		schema:         t.schema,
+		collectionName: t.request.CollectionName,
+		collectionID:   t.CollectionID,
+		dbName:         t.request.DbName,
+	}, nil
+}
+
+func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+	result := inputs[0].(*milvuspb.SearchResults)
+	datas := result.GetResults().GetFieldsData()
+	// skip highlight if result is empty
+	if len(datas) == 0 {
+		return []any{result}, nil
+	}
+
+	req := &querypb.GetHighlightRequest{
+		Topks: result.GetResults().GetTopks(),
+		Tasks: lo.Map(op.tasks, func(task *highlightTask, _ int) *querypb.HighlightTask { return task.HighlightTask }),
+	}
+
+	for _, task := range req.GetTasks() {
+		textFieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldId == task.GetFieldId() })
+		if !ok {
+			return nil, errors.Errorf("get highlight failed, text field not in output field %s: %d", task.GetFieldName(), task.GetFieldId())
+		}
+		texts := textFieldDatas.GetScalars().GetStringData().GetData()
+		task.Texts = append(task.Texts, texts...)
+		task.CorpusTextNum = int64(len(texts))
+
+		field, err := op.schema.schemaHelper.GetFieldFromID(task.GetFieldId())
+		if err != nil {
+			return nil, err
+		}
+
+		nameFieldID, err := op.schema.GetMultiAnalyzerNameFieldID(field.GetFieldID())
+		if err != nil {
+			return nil, err
+		}
+
+		// if use multi analyzer
+		// get analyzer field data
+		if nameFieldID > 0 {
+			analyzerFieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldId == nameFieldID })
+			if !ok {
+				return nil, errors.Errorf("get highlight failed, analyzer name field: %d for multi analyzer not in output field", nameFieldID)
+			}
+			task.AnalyzerNames = append(task.AnalyzerNames, analyzerFieldDatas.GetScalars().GetStringData().GetData()...)
+		}
+	}
+
+	task := &HighlightTask{
+		ctx:                 ctx,
+		lb:                  op.lbPolicy,
+		Condition:           NewTaskCondition(ctx),
+		GetHighlightRequest: req,
+		collectionName:      op.collectionName,
+		collectionID:        op.collectionID,
+		dbName:              op.dbName,
+	}
+	if err := op.scheduler.dqQueue.Enqueue(task); err != nil {
+		return nil, err
+	}
+
+	if err := task.WaitToFinish(); err != nil {
+		return nil, err
+	}
+
+	rowNum := len(result.Results.GetScores())
+	HighlightResults := []*commonpb.HighlightResult{}
+	if rowNum != 0 {
+		rowDatas := lo.Map(task.result.Results, func(result *querypb.HighlightResult, i int) *commonpb.HighlightData {
+			return buildStringFragments(op.tasks[i/rowNum], i%rowNum, result.GetFragments())
+		})
+
+		for i, task := range req.GetTasks() {
+			HighlightResults = append(HighlightResults, &commonpb.HighlightResult{
+				FieldName: task.GetFieldName(),
+				Datas:     rowDatas[i*rowNum : (i+1)*rowNum],
+			})
+		}
+	}
+
+	result.Results.HighlightResults = HighlightResults
+	return []any{result}, nil
+}
+
+func buildStringFragments(task *highlightTask, idx int, frags []*querypb.HighlightFragment) *commonpb.HighlightData {
+	startOffset := int(task.GetSearchTextNum()) + len(task.Queries)
+	text := []rune(task.Texts[startOffset+idx])
+	preTagsNum := len(task.preTags)
+	postTagsNum := len(task.postTags)
+	result := &commonpb.HighlightData{Fragments: make([]string, 0)}
+	for _, frag := range frags {
+		var fragString strings.Builder
+		cursor := int(frag.GetStartOffset())
+		for i := 0; i < len(frag.GetOffsets())/2; i++ {
+			startOffset := int(frag.Offsets[i<<1])
+			endOffset := int(frag.Offsets[(i<<1)+1])
+			if cursor < startOffset {
+				fragString.WriteString(string(text[cursor:startOffset]))
+			}
+			fragString.WriteString(string(task.preTags[i%preTagsNum]))
+			fragString.WriteString(string(text[startOffset:endOffset]))
+			fragString.WriteString(string(task.postTags[i%postTagsNum]))
+			cursor = endOffset
+		}
+		if cursor < int(frag.GetEndOffset()) {
+			fragString.WriteString(string(text[cursor:frag.GetEndOffset()]))
+		}
+		result.Fragments = append(result.Fragments, fragString.String())
+	}
+	return result
+}
+
+type SemanticHighlighter struct {
+	highlight *highlight.SemanticHighlight
+}
+
+func newSemanticHighlighter(t *searchTask, extraInfo *models.ModelExtraInfo) (*SemanticHighlighter, error) {
+	conf := paramtable.Get().FunctionCfg.ZillizProviders.GetValue()
+	highlight, err := highlight.NewSemanticHighlight(t.schema.CollectionSchema, t.request.GetHighlighter().GetParams(), conf, extraInfo)
+	if err != nil {
+		return nil, err
+	}
+	return &SemanticHighlighter{highlight: highlight}, nil
+}
+
+func (h *SemanticHighlighter) FieldIDs() []int64 {
+	return h.highlight.FieldIDs()
+}
+
+func (h *SemanticHighlighter) RequiredFieldIDs() []int64 {
+	return h.highlight.RequiredFieldIDs()
+}
+
+func (h *SemanticHighlighter) DynamicFieldNames() []string {
+	return h.highlight.DynamicFieldNames()
+}
+
+func (h *SemanticHighlighter) AsSearchPipelineOperator(t *searchTask) (operator, error) {
+	return &semanticHighlightOperator{highlight: h.highlight}, nil
+}
+
+type semanticHighlightOperator struct {
+	highlight *highlight.SemanticHighlight
+}
+
+func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+	result := inputs[0].(*milvuspb.SearchResults)
+	datas := result.Results.GetFieldsData()
+	if len(datas) == 0 {
+		return []any{result}, nil
+	}
+	highlightResults := []*commonpb.HighlightResult{}
+	topks := result.Results.GetTopks()
+
+	// Process schema fields
+	for _, fieldID := range op.highlight.FieldIDs() {
+		fieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldId == fieldID })
+		if !ok {
+			return nil, errors.Errorf("get highlight failed, text field not in output field %d", fieldID)
+		}
+		texts := fieldDatas.GetScalars().GetStringData().GetData()
+		fieldName := op.highlight.GetFieldName(fieldID)
+
+		highlightResult, err := op.processFieldHighlight(ctx, fieldName, texts, topks)
+		if err != nil {
+			return nil, err
+		}
+		highlightResults = append(highlightResults, highlightResult)
+	}
+
+	// Process dynamic fields
+	if op.highlight.HasDynamicFields() {
+		// Find $meta field data
+		dynamicFieldID := op.highlight.DynamicFieldID()
+		metaFieldData, ok := lo.Find(datas, func(data *schemapb.FieldData) bool {
+			return data.FieldId == dynamicFieldID || data.FieldName == common.MetaFieldName
+		})
+		if !ok {
+			return nil, errors.Errorf("get highlight failed, dynamic field ($meta) not in output field")
+		}
+
+		// Safely get JSON data with nil checks
+		scalars := metaFieldData.GetScalars()
+		if scalars == nil {
+			return nil, errors.Errorf("get highlight failed, dynamic field ($meta) has no scalar data")
+		}
+		jsonData := scalars.GetJsonData()
+		if jsonData == nil {
+			return nil, errors.Errorf("get highlight failed, dynamic field ($meta) has no JSON data")
+		}
+		jsonDataBytes := jsonData.GetData()
+		dynFieldNames := op.highlight.DynamicFieldNames()
+
+		// Extract all dynamic fields in one pass to avoid parsing JSON multiple times
+		allDynFieldTexts, err := extractMultipleDynamicFieldTexts(jsonDataBytes, dynFieldNames)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, dynFieldName := range dynFieldNames {
+			texts := allDynFieldTexts[dynFieldName]
+
+			highlightResult, err := op.processFieldHighlight(ctx, dynFieldName, texts, topks)
+			if err != nil {
+				return nil, err
+			}
+			highlightResults = append(highlightResults, highlightResult)
+		}
+	}
+
+	result.Results.HighlightResults = highlightResults
+	return []any{result}, nil
+}
+
+// processFieldHighlight processes highlight for a single field and returns the result
+func (op *semanticHighlightOperator) processFieldHighlight(ctx context.Context, fieldName string, texts []string, topks []int64) (*commonpb.HighlightResult, error) {
+	highlights, scores, err := op.highlight.Process(ctx, topks, texts)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(highlights) != len(scores) {
+		return nil, errors.Errorf("Highlights size must equal to scores size, but got highlights size [%d], scores size [%d]", len(highlights), len(scores))
+	}
+
+	result := &commonpb.HighlightResult{
+		FieldName: fieldName,
+		Datas:     make([]*commonpb.HighlightData, len(highlights)),
+	}
+	for i := range highlights {
+		result.Datas[i] = &commonpb.HighlightData{Fragments: highlights[i], Scores: scores[i]}
+	}
+	return result, nil
+}
+
+// extractMultipleDynamicFieldTexts extracts text values from JSON data for multiple field names in one pass
+// This avoids parsing JSON multiple times when there are multiple dynamic fields
+func extractMultipleDynamicFieldTexts(jsonDataBytes [][]byte, fieldNames []string) (map[string][]string, error) {
+	result := make(map[string][]string, len(fieldNames))
+	for _, fieldName := range fieldNames {
+		result[fieldName] = make([]string, len(jsonDataBytes))
+	}
+
+	for i, jsonBytes := range jsonDataBytes {
+		if len(jsonBytes) == 0 {
+			// JSON is empty, all fields use empty string (graceful degradation)
+			continue
+		}
+
+		if !gjson.ValidBytes(jsonBytes) {
+			return nil, errors.Errorf("failed to unmarshal JSON at index %d: invalid JSON", i)
+		}
+
+		for _, fieldName := range fieldNames {
+			r := gjson.GetBytes(jsonBytes, fieldName)
+			if !r.Exists() {
+				// field missing, use empty string (graceful degradation)
+				continue
+			}
+
+			if r.Type != gjson.String {
+				return nil, errors.Errorf("dynamic field %s is not a string type, got %s", fieldName, r.Type.String())
+			}
+			result[fieldName][i] = r.String()
+		}
+	}
+	return result, nil
+}

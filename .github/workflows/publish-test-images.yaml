@@ -1,0 +1,97 @@
+name: Publish Test Images
+# TODO: do not trigger action for some document file update
+
+# This workflow is triggered on pushes or pull request to the repository.
+on:
+  push:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'tests/docker/Dockerfile'
+      - 'tests/python_client/requirements.txt'
+      - '.github/workflows/publish-test-images.yaml'
+      - '!**.md'
+  pull_request:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'tests/docker/Dockerfile'
+      - 'tests/python_client/requirements.txt'
+      - '.github/workflows/publish-test-images.yaml'
+      - '!**.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  publish-pytest-images:
+    name: PyTest
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Get version from system time after release step
+        id: extracter
+        run: |
+          echo "::set-output name=version::$(date +%Y%m%d)"
+          echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
+      - name: Docker Pull
+        shell: bash
+        working-directory: tests/docker
+        run: |
+          docker compose pull pytest
+      - name: Docker Build
+        shell: bash
+        working-directory: tests/docker
+        run: |
+          IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} docker compose build pytest
+          export LATEST_IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
+          IMAGE_TAG=latest docker compose build pytest
+      - name: Docker Push
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        working-directory: tests/docker
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+          IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} docker compose push pytest
+          IMAGE_TAG=latest docker compose push pytest
+          echo "Push pytest image Succeeded"
+      - name: Update Pytest Image Changes
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        working-directory: .
+        run: |
+          sed -i "s#^IMAGE_TAG=.*#IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" ./tests/docker/.env
+          sed -i "s#^LATEST_IMAGE_TAG=.*#LATEST_IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" ./tests/docker/.env
+          sed -i "s#pytest:.*#pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" ./ci/jenkins/pod/rte.yaml
+          sed -i "s#pytest:.*#pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" ./ci/jenkins/pod/e2e.yaml
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add ./tests/docker/.env
+          git add ./ci/jenkins/pod/rte.yaml
+          git add ./ci/jenkins/pod/e2e.yaml
+          git commit -m "Update Pytest image changes"
+      - name: Create Pull Request
+        id: cpr
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        uses: peter-evans/create-pull-request@v3
+        with:
+          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
+          author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+          signoff: true
+          branch: update_pytest_${{ github.sha }}
+          delete-branch: true
+          title: '[automated] Update Pytest image changes'
+          body: |
+            Update Pytest image changes
+            See changes: https://github.com/milvus-io/milvus/commit/${{ github.sha }}
+            Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
+      - name: Check outputs
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        run: |
+          echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
+          echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"

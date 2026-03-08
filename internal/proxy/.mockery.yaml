@@ -1,0 +1,31 @@
+quiet: False
+with-expecter: True
+inpackage: True
+filename: "mock_{{.InterfaceNameSnake}}.go"
+mockname: "Mock{{.InterfaceName}}"
+outpkg: "{{.PackageName}}"
+dir: "{{.InterfaceDir}}"
+packages:
+  github.com/milvus-io/milvus/internal/proxy:
+    interfaces:
+      Cache:
+      timestampAllocatorInterface:
+        config:
+          mockname: mockTimestampAllocator
+          filename: mock_tso_test.go
+      channelsMgr:
+        config:
+          mockname: MockChannelsMgr
+          filename: mock_channels_manager.go
+  github.com/milvus-io/milvus/internal/proxy/shardclient:
+    interfaces:
+      LBPolicy:
+        config:
+          filename: mock_lb_policy.go
+      LBBalancer:
+        config:
+          filename: mock_lb_balancer.go
+      ShardClientMgr:
+        config:
+          filename: mock_shardclient_manager.go
+          mockname: MockShardClientManager

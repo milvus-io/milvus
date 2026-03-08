@@ -1,0 +1,99 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
+
+#include "segcore/tokenizer_c.h"
+
+#include <exception>
+#include <map>
+#include <memory>
+#include <string>
+
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/protobuf_utils.h"
+#include "pb/schema.pb.h"
+#include "tokenizer.h"
+
+using Map = std::map<std::string, std::string>;
+
+CStatus
+set_tokenizer_option(const char* params) {
+    try {
+        milvus::tantivy::set_tokenizer_options(params);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+create_tokenizer(const char* params,
+                 const char* extra_info,
+                 CTokenizer* tokenizer) {
+    try {
+        auto impl =
+            std::make_unique<milvus::tantivy::Tokenizer>(params, extra_info);
+        *tokenizer = impl.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+clone_tokenizer(CTokenizer* tokenizer, CTokenizer* rst) {
+    try {
+        auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(*tokenizer);
+        *rst = impl->Clone().release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+void
+free_tokenizer(CTokenizer tokenizer) {
+    auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(tokenizer);
+    delete impl;
+}
+
+CTokenStream
+create_token_stream(CTokenizer tokenizer, const char* text, uint32_t text_len) {
+    auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(tokenizer);
+    return impl->CreateTokenStream(std::string(text, text_len)).release();
+}
+
+CValidateResult
+validate_tokenizer(const char* params, const char* extra_info) {
+    try {
+        auto [ids, count] =
+            milvus::tantivy::validate_analyzer(params, extra_info);
+        return CValidateResult{ids, count, milvus::SuccessCStatus()};
+    } catch (std::exception& e) {
+        return CValidateResult{nullptr, 0, milvus::FailureCStatus(&e)};
+    }
+}
+
+CStatus
+validate_text_schema(const uint8_t* field_schema, uint64_t length) {
+    try {
+        auto schema = std::make_unique<milvus::proto::schema::FieldSchema>();
+        AssertInfo(schema->ParseFromArray(field_schema, length),
+                   "failed to create field schema");
+
+        auto type_params = milvus::RepeatedKeyValToMap(schema->type_params());
+        milvus::tantivy::Tokenizer _(milvus::ParseTokenizerParams(type_params));
+
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}

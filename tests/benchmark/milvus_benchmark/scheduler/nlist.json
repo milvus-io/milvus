@@ -1,0 +1,11 @@
+[
+    {
+        "server": "idc-sh003",
+        "suite_params": [
+            {
+                "suite": "2_insert_search_sift50m_2048.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

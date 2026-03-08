@@ -1,0 +1,45 @@
+name: 🚀 Feature request
+description: As a user, I want to request a feature for Milvus
+title: "[Feature]: "
+labels: [kind/feature]
+assignees:
+  - xiaofan-luan
+body:
+- type: markdown
+  attributes:
+    value: |
+      Thanks for taking the time to request a feature for Milvus! Please fill the form in English!
+- type: checkboxes
+  attributes:
+    label: Is there an existing issue for this?
+    description: Please search to see if an issue related to this feature request already exists.
+    options:
+    - label: I have searched the existing issues
+      required: true
+- type: textarea
+  attributes:
+    label: Is your feature request related to a problem? Please describe.
+    description: A concise description of the problem you are facing or the motivetion behind this feature request.
+    placeholder: |
+      I faced a problem due to which ...
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: Describe the solution you'd like.
+    description: A concise description of the solution for the issue.
+  validations:
+    required: false
+- type: textarea
+  attributes:
+    label: Describe an alternate solution.
+    description: Is there any other approack to solve the problem?
+  validations:
+    required: false
+- type: textarea
+  attributes:
+    label: Anything else? (Additional Context)
+    description: |
+      Links? References? Anything that will give us more context about this!
+  validations:
+    required: false

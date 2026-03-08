@@ -1,0 +1,110 @@
+#pragma once
+
+#include "tantivy-binding.h"
+#include "rust-binding.h"
+#include "rust-hashmap.h"
+#include "tantivy/rust-array.h"
+#include "token-stream.h"
+#include "log/Log.h"
+#include "common/Utils.h"
+namespace milvus::tantivy {
+
+struct Tokenizer {
+ public:
+    NO_COPY_OR_ASSIGN(Tokenizer);
+
+    explicit Tokenizer(std::string&& params) {
+        auto shared_params = std::make_shared<std::string>(params);
+        auto res = RustResultWrapper(
+            tantivy_create_analyzer(shared_params->c_str(), ""));
+        AssertInfo(res.result_->success,
+                   "Tokenizer creation failed: {}",
+                   res.result_->error);
+        ptr_ = res.result_->value.ptr._0;
+    }
+
+    explicit Tokenizer(std::string&& params, std::string&& extra_info) {
+        auto shared_params = std::make_shared<std::string>(params);
+        auto shared_extra_info = std::make_shared<std::string>(extra_info);
+        auto res = RustResultWrapper(tantivy_create_analyzer(
+            shared_params->c_str(), shared_extra_info->c_str()));
+        AssertInfo(res.result_->success,
+                   "Tokenizer creation failed: {}",
+                   res.result_->error);
+        ptr_ = res.result_->value.ptr._0;
+    }
+
+    explicit Tokenizer(void* _ptr) : ptr_(_ptr) {
+    }
+
+    ~Tokenizer() {
+        if (ptr_ != nullptr) {
+            tantivy_free_analyzer(ptr_);
+        }
+    }
+
+    std::unique_ptr<TokenStream>
+    CreateTokenStream(std::string&& text) {
+        auto shared_text = std::make_shared<std::string>(std::move(text));
+        auto token_stream =
+            tantivy_create_token_stream(ptr_, shared_text->c_str());
+        return std::make_unique<TokenStream>(token_stream, shared_text);
+    }
+
+    std::unique_ptr<Tokenizer>
+    Clone() {
+        auto newptr = tantivy_clone_analyzer(ptr_);
+        return std::make_unique<milvus::tantivy::Tokenizer>(newptr);
+    }
+
+    // CreateTokenStreamCopyText will copy the text and then create token stream based on the text.
+    std::unique_ptr<TokenStream>
+    CreateTokenStreamCopyText(const std::string& text) {
+        auto shared_text = std::make_shared<std::string>(text);
+        auto token_stream =
+            tantivy_create_token_stream(ptr_, shared_text->c_str());
+        return std::make_unique<TokenStream>(token_stream, shared_text);
+    }
+
+ private:
+    void* ptr_;
+};
+
+inline void
+set_tokenizer_options(std::string&& params) {
+    auto shared_params = std::make_shared<std::string>(params);
+    auto res =
+        RustResultWrapper(tantivy_set_analyzer_options(shared_params->c_str()));
+    AssertInfo(res.result_->success,
+               "Set analyzer option failed: {}",
+               res.result_->error);
+}
+
+inline std::pair<int64_t*, size_t>
+validate_analyzer(std::string&& params, std::string&& extra_info) {
+    auto shared_params = std::make_shared<std::string>(params);
+    auto shared_extra_info = std::make_shared<std::string>(extra_info);
+    auto res = RustResultWrapper(tantivy_validate_analyzer(
+        shared_params->c_str(), shared_extra_info->c_str()));
+    AssertInfo(res.result_->success,
+               "Validate analyzer params failed: {}",
+               res.result_->error);
+    auto array_wrapper =
+        RustArrayI64Wrapper(std::move(res.result_->value.rust_array_i64._0));
+    auto* array = array_wrapper.array_.array;
+    auto len = array_wrapper.array_.len;
+
+    int64_t* result = nullptr;
+    if (len > 0) {
+        result = static_cast<int64_t*>(malloc(len * sizeof(int64_t)));
+        if (result == nullptr) {
+            throw std::bad_alloc();
+        }
+        std::memcpy(result,
+                    array,
+                    len * sizeof(int64_t));  // Copy the array to the result
+    }
+    return {result, len};
+}
+
+}  // namespace milvus::tantivy

@@ -1,0 +1,129 @@
+# CLion generated files
+
+# Git worktrees
+.worktrees/
+
+# This can ignore
+#   cmake-build-debug/
+#   proxy/cmake-build-debug/
+#   a/b/c/cmake-build-debug/
+**/cmake-build-debug/*
+**/cmake-build-debug-coverage/*
+**/cmake-build-release/*
+**/cmake_build_release/*
+**/cmake_build/*
+**/CMakeFiles/*
+**/.cmake/*
+CMakeCache.txt
+.cache
+coverage_report/
+
+internal/core/output/*
+internal/core/build/*
+**/.idea/*
+internal/msgstream/pulsarms/client-cpp/build/
+internal/msgstream/pulsarms/client-cpp/build/*
+tests/python_client/default.etcd/
+
+# vscode generated files
+.vscode
+docker-compose-devcontainer.yml
+docker-compose-devcontainer.yml.tmp
+.cursor
+
+*.code-workspace
+
+# Docker generated cache file
+.docker/
+.docker-gpu/
+
+**/_artifacts/**
+
+# proxy
+proxy/milvus
+proxy/thirdparty/grpc-src
+proxy/thirdparty/grpc-build
+proxy/milvus/*
+proxy/suvlim/
+proxy/suvlim/*
+
+proxy-go/proxy-go
+
+# Compiled source
+target/
+bin/
+lib/
+*.a
+*.so
+*.so.*
+*.o
+*.lo
+*.tar.gz
+*.log
+.coverage
+*.pyc
+*.log
+
+# macOS generated files & other irrelevant files
+.DS_Store
+*.sw[po]
+cwrapper_build
+cwrapper_rocksdb_build/
+**/.clangd/*
+**/compile_commands.json
+**/.lint
+typescript
+**/.pytest_cache/
+.root
+gtags.conf
+
+# Delve generated file
+**/__debug_bin
+
+# codecov-go generated files
+*coverage.txt
+profile.out
+*coverage.html
+cover.out
+
+# codecov-cpp generated files
+lcov_*.info
+cpp_coverage/
+
+# virtualenv
+venv/
+.venv/
+
+# gopls generated
+go.work
+go.work.sum
+
+# docker compose volumes
+deployments/docker/*/volumes
+deployments/docker/gpu/*/volumes
+
+# rocksdb
+cwrapper_rocksdb_build/
+
+# local file data
+**/data/*
+!**/tantivy-binding/src/analyzer/data/*
+
+internal/proto/**/*.pb.go
+pkg/streaming/**/*.pb.go
+internal/core/src/pb/*.pb.h
+internal/core/src/pb/*.pb.cc
+**/legacypb/*.pb.go
+pkg/streaming/proto/**/*.pb.go
+
+#AI rules
+WARP.md
+.claude/
+
+# Antlr
+.antlr
+
+# Gocache
+**/.gocache/
+docs/plans/
+

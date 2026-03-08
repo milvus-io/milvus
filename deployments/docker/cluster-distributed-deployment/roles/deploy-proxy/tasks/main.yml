@@ -1,0 +1,11 @@
+- name: "proxy"
+  docker_container: 
+    name: proxy
+    image: "{{image}}"
+    command: "milvus run proxy"
+    env:
+      ETCD_ENDPOINTS: "{{ETCD_ENDPOINTS}}"
+      MINIO_ADDRESS: "{{MINIO_ADDRESS}}"
+      PULSAR_ADDRESS: "{{PULSAR_ADDRESS}}"
+      METRICS_PORT: "9098"
+    network_mode: "{{nodes_network}}" #Use the network which defined as variable in Inventory.

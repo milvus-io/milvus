@@ -1,0 +1,1647 @@
+syntax = "proto3";
+
+package milvus.proto.data;
+
+option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/datapb";
+
+import "common.proto";
+import "internal.proto";
+import "milvus.proto";
+import "schema.proto";
+import "msg.proto";
+import "index_coord.proto";
+
+// TODO: import google/protobuf/empty.proto
+message Empty {}
+
+enum SegmentType {
+  New = 0;
+  Normal = 1;
+  Flushed = 2;
+  Compacted = 3;
+}
+
+enum SegmentLevel {
+  Legacy = 0; // zero value for legacy logic
+  L0 = 1; // L0 segment, contains delta data for current channel
+  L1 = 2; // L1 segment, normal segment, with no extra compaction attribute
+  L2 = 3; // L2 segment, segment with extra data distribution info
+}
+
+service DataCoord {
+  rpc Flush(FlushRequest) returns (FlushResponse) {}
+  // FlushAll flushes all data in the cluster.
+  rpc FlushAll(FlushAllRequest) returns(FlushAllResponse) {}
+
+  rpc CreateExternalCollection(msg.CreateCollectionRequest) returns (CreateExternalCollectionResponse) {}
+
+
+  // AllocSegment alloc a new growing segment, add it into segment meta.
+  rpc AllocSegment(AllocSegmentRequest) returns (AllocSegmentResponse) {}
+
+  rpc AssignSegmentID(AssignSegmentIDRequest) returns (AssignSegmentIDResponse) {
+    option deprecated = true;
+  }
+
+  rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
+  rpc GetSegmentStates(GetSegmentStatesRequest) returns (GetSegmentStatesResponse) {}
+  rpc GetInsertBinlogPaths(GetInsertBinlogPathsRequest) returns (GetInsertBinlogPathsResponse) {}
+
+  rpc GetCollectionStatistics(GetCollectionStatisticsRequest) returns (GetCollectionStatisticsResponse) {}
+  rpc GetPartitionStatistics(GetPartitionStatisticsRequest) returns (GetPartitionStatisticsResponse) {}
+
+  rpc GetSegmentInfoChannel(GetSegmentInfoChannelRequest) returns (milvus.StringResponse){}
+
+  rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
+  rpc GetRecoveryInfo(GetRecoveryInfoRequest) returns (GetRecoveryInfoResponse){}
+  rpc GetRecoveryInfoV2(GetRecoveryInfoRequestV2) returns (GetRecoveryInfoResponseV2){}
+  rpc GetChannelRecoveryInfo(GetChannelRecoveryInfoRequest) returns (GetChannelRecoveryInfoResponse){}
+  rpc GetFlushedSegments(GetFlushedSegmentsRequest) returns(GetFlushedSegmentsResponse){}
+  rpc GetSegmentsByStates(GetSegmentsByStatesRequest) returns(GetSegmentsByStatesResponse){}
+  rpc GetFlushAllState(milvus.GetFlushAllStateRequest) returns(milvus.GetFlushAllStateResponse) {}
+
+  rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse){}
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+  rpc ManualCompaction(milvus.ManualCompactionRequest) returns (milvus.ManualCompactionResponse) {}
+  rpc GetCompactionState(milvus.GetCompactionStateRequest) returns (milvus.GetCompactionStateResponse) {}
+  rpc GetCompactionStateWithPlans(milvus.GetCompactionPlansRequest) returns (milvus.GetCompactionPlansResponse) {}
+
+  rpc WatchChannels(WatchChannelsRequest) returns (WatchChannelsResponse) {
+    option deprecated = true;
+  }
+  rpc GetFlushState(GetFlushStateRequest) returns (milvus.GetFlushStateResponse) {}
+  rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
+
+  rpc SetSegmentState(SetSegmentStateRequest) returns (SetSegmentStateResponse) {}
+  // Deprecated
+  rpc UpdateSegmentStatistics(UpdateSegmentStatisticsRequest) returns (common.Status) {}
+  rpc UpdateChannelCheckpoint(UpdateChannelCheckpointRequest) returns (common.Status) {}
+
+  rpc MarkSegmentsDropped(MarkSegmentsDroppedRequest) returns(common.Status) {}
+
+  rpc BroadcastAlteredCollection(AlterCollectionRequest) returns (common.Status) {}
+
+  rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
+
+  rpc CreateIndex(index.CreateIndexRequest) returns (common.Status){}
+  rpc AlterIndex(index.AlterIndexRequest) returns (common.Status){}
+  // Deprecated: use DescribeIndex instead
+  rpc GetIndexState(index.GetIndexStateRequest) returns (index.GetIndexStateResponse) {}
+  rpc GetSegmentIndexState(index.GetSegmentIndexStateRequest) returns (index.GetSegmentIndexStateResponse) {}
+  rpc GetIndexInfos(index.GetIndexInfoRequest) returns (index.GetIndexInfoResponse){}
+  rpc DropIndex(index.DropIndexRequest) returns (common.Status) {}
+  rpc DescribeIndex(index.DescribeIndexRequest) returns (index.DescribeIndexResponse) {}
+  rpc GetIndexStatistics(index.GetIndexStatisticsRequest) returns (index.GetIndexStatisticsResponse) {}
+  // Deprecated: use DescribeIndex instead
+  rpc GetIndexBuildProgress(index.GetIndexBuildProgressRequest) returns (index.GetIndexBuildProgressResponse) {}
+  rpc ListIndexes(index.ListIndexesRequest) returns (index.ListIndexesResponse) {}
+
+  rpc GcConfirm(GcConfirmRequest) returns (GcConfirmResponse) {}
+
+  rpc ReportDataNodeTtMsgs(ReportDataNodeTtMsgsRequest) returns (common.Status) {}
+
+  rpc GcControl(GcControlRequest) returns(common.Status){}
+
+  // importV2
+  rpc ImportV2(internal.ImportRequestInternal) returns(internal.ImportResponse){}
+  rpc GetImportProgress(internal.GetImportProgressRequest) returns(internal.GetImportProgressResponse){}
+  rpc ListImports(internal.ListImportsRequestInternal) returns(internal.ListImportsResponse){}
+  
+  // snapshot
+  rpc CreateSnapshot(CreateSnapshotRequest) returns(common.Status){}
+  rpc DropSnapshot(DropSnapshotRequest) returns(common.Status){}
+  rpc ListSnapshots(ListSnapshotsRequest) returns(ListSnapshotsResponse){}
+  rpc DescribeSnapshot(DescribeSnapshotRequest) returns(DescribeSnapshotResponse){}
+  rpc RestoreSnapshot(RestoreSnapshotRequest) returns(RestoreSnapshotResponse){}
+  rpc GetRestoreSnapshotState(GetRestoreSnapshotStateRequest) returns(GetRestoreSnapshotStateResponse){}
+  rpc ListRestoreSnapshotJobs(ListRestoreSnapshotJobsRequest) returns(ListRestoreSnapshotJobsResponse){}
+
+  // batch update manifest
+  rpc BatchUpdateManifest(BatchUpdateManifestRequest) returns(common.Status){}
+
+  // External Table Refresh APIs
+  rpc RefreshExternalCollection(RefreshExternalCollectionRequest) returns(RefreshExternalCollectionResponse){}
+  rpc GetRefreshExternalCollectionProgress(GetRefreshExternalCollectionProgressRequest) returns(GetRefreshExternalCollectionProgressResponse){}
+  rpc ListRefreshExternalCollectionJobs(ListRefreshExternalCollectionJobsRequest) returns(ListRefreshExternalCollectionJobsResponse){}
+}
+
+service DataNode {
+  rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns (milvus.StringResponse) {}
+
+  rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
+  rpc FlushSegments(FlushSegmentsRequest) returns(common.Status) {}
+
+  rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse){}
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+
+  rpc CompactionV2(CompactionPlan) returns (common.Status) {}
+  rpc GetCompactionState(CompactionStateRequest) returns (CompactionStateResponse) {}
+  rpc SyncSegments(SyncSegmentsRequest) returns (common.Status) {}
+
+  // Deprecated
+  rpc ResendSegmentStats(ResendSegmentStatsRequest) returns(ResendSegmentStatsResponse) {}
+
+  rpc FlushChannels(FlushChannelsRequest) returns(common.Status) {}
+  rpc NotifyChannelOperation(ChannelOperationsRequest) returns(common.Status) {}
+  rpc CheckChannelOperationProgress(ChannelWatchInfo) returns(ChannelOperationProgressResponse) {}
+
+  // import v2
+  rpc PreImport(PreImportRequest) returns(common.Status) {}
+  rpc ImportV2(ImportRequest) returns(common.Status) {}
+  rpc QueryPreImport(QueryPreImportRequest) returns(QueryPreImportResponse) {}
+  rpc QueryImport(QueryImportRequest) returns(QueryImportResponse) {}
+  rpc DropImport(DropImportRequest) returns(common.Status) {}
+
+  rpc QuerySlot(QuerySlotRequest) returns(QuerySlotResponse) {}
+
+  rpc DropCompactionPlan(DropCompactionPlanRequest) returns(common.Status) {}
+
+  // file resource
+  rpc SyncFileResource(internal.SyncFileResourceRequest) returns(common.Status) {}
+}
+
+message FlushRequest {
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  repeated int64 segmentIDs = 3;
+  int64 collectionID = 4;
+  bool  isImport = 5; // deprecated
+}
+
+message FlushResponse {
+  common.Status status = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  repeated int64 segmentIDs = 4; // newly sealed segments
+  repeated int64 flushSegmentIDs = 5; // old flushed segment
+  int64 timeOfSeal = 6;
+  uint64 flush_ts = 7;
+  map<string, msg.MsgPosition> channel_cps = 8;
+}
+
+message FlushResult {
+  int64 collectionID = 1;
+  repeated int64 segmentIDs =2; // newly sealed segments
+  repeated int64 flushSegmentIDs = 3; // old flushed segment
+  int64 timeOfSeal = 4;
+  uint64 flush_ts = 5;
+  map<string, msg.MsgPosition> channel_cps = 6;
+  string db_name = 7; // database name for this flush result
+  string collection_name = 8; // collection name for this flush result
+}
+
+message FlushAllRequest {
+  common.MsgBase base                   = 1;
+  string dbName                         = 2 [deprecated = true];
+  repeated FlushAllTarget flush_targets = 3 [deprecated = true];
+}
+
+// Deprecated: FlushAll semantics changed to flushing the entire cluster.
+// Specific collection to flush with database context
+// This message allows targeting specific collections within a database for flush operations  
+message FlushAllTarget {
+  // Database name to target for flush operation
+  string db_name = 1;
+  // Collections within this database to flush
+  // If empty, flush all collections in this database
+  repeated int64 collection_ids = 3;
+}
+
+message FlushAllResponse {
+  common.Status status                                = 1;
+  uint64 flushTs                                      = 2 [deprecated = true];
+  repeated FlushResult flush_results                  = 3 [deprecated = true];
+  map<string, common.ImmutableMessage> flush_all_msgs = 4; // pchannel -> FlushAllMsg
+  milvus.ClusterInfo cluster_info                     = 5;
+}
+
+message FlushChannelsRequest {
+  common.MsgBase base = 1;
+  uint64 flush_ts = 2;
+  repeated string channels = 3;
+}
+
+message SegmentIDRequest {
+  uint32 count = 1;
+  string channel_name = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  bool isImport = 5;        // deprecated
+  int64 importTaskID = 6;   // deprecated
+  SegmentLevel level = 7; // deprecated
+  int64 storage_version = 8;
+}
+
+message AllocSegmentRequest {
+  int64 collection_id = 1;
+  int64 partition_id = 2;
+  int64 segment_id = 3; // segment id must be allocate from rootcoord idalloc service.
+  string vchannel = 4;
+  int64 storage_version = 5;
+  bool is_created_by_streaming = 6;
+  int32 schema_version = 7;
+}
+
+message AllocSegmentResponse {
+  SegmentInfo segment_info = 1;
+  common.Status status = 2;
+}
+
+message AssignSegmentIDRequest {
+  int64 nodeID = 1;
+  string peer_role = 2;
+  repeated SegmentIDRequest segmentIDRequests = 3;
+}
+
+message SegmentIDAssignment {
+  int64 segID = 1;
+  string channel_name = 2;
+  uint32 count = 3;
+  int64 collectionID = 4;
+  int64 partitionID = 5;
+  uint64 expire_time = 6;
+  common.Status status = 7;
+}
+
+message AssignSegmentIDResponse {
+  repeated SegmentIDAssignment segIDAssignments = 1;
+  common.Status status = 2;
+}
+
+message GetSegmentStatesRequest {
+  common.MsgBase base = 1;
+  repeated int64 segmentIDs = 2;
+}
+
+message SegmentStateInfo {
+  int64 segmentID = 1;
+  common.SegmentState state = 2;
+  msg.MsgPosition start_position = 3;
+  msg.MsgPosition end_position = 4;
+  common.Status status = 5;
+}
+
+message GetSegmentStatesResponse {
+  common.Status status = 1;
+  repeated SegmentStateInfo states = 2;
+}
+
+message GetSegmentInfoRequest {
+  common.MsgBase base = 1;
+  repeated int64 segmentIDs = 2;
+  bool includeUnHealthy =3;
+}
+
+message GetSegmentInfoResponse {
+  common.Status status = 1;
+  repeated SegmentInfo infos = 2;
+  map<string, msg.MsgPosition> channel_checkpoint = 3;
+}
+
+message GetInsertBinlogPathsRequest {
+  common.MsgBase base = 1;
+  int64 segmentID = 2;
+}
+
+message GetInsertBinlogPathsResponse {
+  repeated int64 fieldIDs = 1;
+  repeated internal.StringList paths = 2;
+  common.Status status = 3;
+}
+
+message GetCollectionStatisticsRequest {
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+}
+
+message GetCollectionStatisticsResponse {
+  repeated common.KeyValuePair stats = 1;
+  common.Status status = 2;
+}
+
+message GetPartitionStatisticsRequest{
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  repeated int64 partitionIDs = 4;
+}
+
+message GetPartitionStatisticsResponse {
+  repeated common.KeyValuePair stats = 1;
+  common.Status status = 2;
+}
+
+message GetSegmentInfoChannelRequest {
+}
+
+message VchannelInfo {
+  int64 collectionID = 1;
+  string channelName = 2;
+  msg.MsgPosition seek_position = 3;
+  repeated SegmentInfo unflushedSegments = 4 [deprecated = true]; // deprecated, keep it for compatibility
+  repeated SegmentInfo flushedSegments = 5 [deprecated = true]; // deprecated, keep it for compatibility
+  repeated SegmentInfo dropped_segments = 6 [deprecated = true]; // deprecated, keep it for compatibility
+  repeated int64 unflushedSegmentIds = 7;
+  repeated int64 flushedSegmentIds = 8;
+  repeated int64 dropped_segmentIds = 9;
+  repeated int64 indexed_segmentIds = 10; // deprecated, keep it for compatibility
+  repeated SegmentInfo indexed_segments = 11; // deprecated, keep it for compatibility
+  repeated int64 level_zero_segment_ids = 12;
+  map<int64, int64> partition_stats_versions = 13;
+  // delete record which ts is smaller than delete_checkpoint already be dispatch to sealed segments.
+  msg.MsgPosition delete_checkpoint = 14; 
+}
+
+message WatchDmChannelsRequest {
+  common.MsgBase base = 1;
+  repeated VchannelInfo vchannels = 2;
+}
+
+message FlushSegmentsRequest {
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  repeated int64 segmentIDs = 4; // segments to flush
+  string channelName = 5; // vchannel name to flush
+}
+
+message SegmentMsg{
+  common.MsgBase base = 1;
+  SegmentInfo segment = 2;
+}
+
+message SegmentInfo {
+  int64 ID = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  string insert_channel = 4;
+  int64 num_of_rows = 5;
+  common.SegmentState state = 6;
+  int64 max_row_num = 7 [deprecated = true]; // deprecated, we use the binary size to control the segment size but not a estimate rows.
+  uint64 last_expire_time = 8;
+  msg.MsgPosition start_position = 9;
+  msg.MsgPosition dml_position = 10;
+  // binlogs consist of insert binlogs
+  repeated FieldBinlog binlogs = 11;
+  repeated FieldBinlog statslogs = 12;
+  // deltalogs consists of delete binlogs. FieldID is not used yet since delete is always applied on primary key
+  repeated FieldBinlog deltalogs = 13;
+  bool createdByCompaction = 14;
+  repeated int64 compactionFrom = 15;
+  uint64 dropped_at = 16; // timestamp when segment marked drop
+  // A flag indicating if:
+  // (1) this segment is created by bulk insert, and
+  // (2) the bulk insert task that creates this segment has not yet reached `ImportCompleted` state.
+  bool is_importing = 17;
+  bool is_fake = 18;
+
+  // denote if this segment is compacted to other segment.
+  // For compatibility reasons, this flag of an old compacted segment may still be False.
+  // As for new fields added in the message, they will be populated with their respective field types' default values.
+  bool compacted = 19;
+
+  // Segment level, indicating compaction segment level
+  // Available value: Legacy, L0, L1, L2
+  // For legacy level, it represent old segment before segment level introduced
+  // so segments with Legacy level shall be treated as L1 segment
+  SegmentLevel level = 20;
+  int64 storage_version = 21;
+
+  int64 partition_stats_version = 22;
+  // use in major compaction, if compaction fail, should revert segment level to last value
+  SegmentLevel last_level = 23;
+  // use in major compaction, if compaction fail, should revert partition stats version to last value 
+  int64 last_partition_stats_version = 24;
+
+  // used to indicate whether the segment is sorted by primary key.
+  bool is_sorted = 25;
+
+  // textStatsLogs is used to record tokenization index for fields.
+  map<int64, TextIndexStats> textStatsLogs = 26;
+  repeated FieldBinlog bm25statslogs = 27;
+
+  // This field is used to indicate that some intermediate state segments should not be loaded.
+  // For example, segments that have been clustered but haven't undergone stats yet.
+  bool is_invisible = 28;
+
+  // jsonKeyStats is used to record json key index for fields.
+  map<int64, JsonKeyStats> jsonKeyStats = 29;
+    // This field is used to indicate that the segment is created by streaming service.
+  // This field is meaningful only when the segment state is growing.
+  // If the segment is created by streaming service, it will be a true.
+  // A segment generated by datacoord of old arch, will be false.
+  // After the growing segment is full managed by streamingnode, the true value can never be seen at coordinator.
+  bool is_created_by_streaming = 30;
+  bool is_partition_key_sorted = 31;
+
+  // manifest_path stores the fullpath of LOON manifest file of segemnt data files.
+  // we could keep the fullpath since one segment shall only have one active manifest
+  // and we could keep the possiblity that manifest stores out side of collection/partition/segment path
+  string manifest_path = 32;
+
+  // expirQuantiles records the expiration timestamptz values of the segment
+  // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
+  repeated int64 expirQuantiles = 33;
+  int32 schema_version = 34;
+}
+
+message SegmentStartPosition {
+  msg.MsgPosition start_position = 1;
+  int64 segmentID = 2;
+}
+
+message SaveBinlogPathsRequest {
+  common.MsgBase base = 1;
+  int64 segmentID = 2;
+  int64 collectionID = 3;
+  repeated FieldBinlog field2BinlogPaths = 4;
+  repeated CheckPoint checkPoints = 5;
+  repeated SegmentStartPosition start_positions = 6;
+  bool flushed = 7;
+  repeated FieldBinlog field2StatslogPaths = 8;
+  repeated FieldBinlog deltalogs = 9;
+  bool dropped = 10;
+  bool importing = 11; // deprecated
+  string channel = 12; // report channel name for verification
+  SegmentLevel seg_level =13;
+  int64 partitionID =14; // report partitionID for create L0 segment
+  int64 storageVersion = 15;
+  repeated FieldBinlog field2Bm25logPaths = 16;
+  bool with_full_binlogs = 17; // report with full data for verification.
+  string manifest_path = 18; //
+}
+
+message CheckPoint {
+  int64 segmentID = 1;
+  msg.MsgPosition position = 2;
+  int64 num_of_rows = 3;
+}
+
+message DeltaLogInfo {
+  uint64 record_entries = 1;
+  uint64 timestamp_from = 2;
+  uint64 timestamp_to = 3;
+  string delta_log_path = 4;
+  int64 delta_log_size = 5;
+}
+
+enum ChannelWatchState {
+  Uncomplete = 0; // deprecated, keep it for compatibility
+  Complete = 1; // deprecated, keep it for compatibility
+  ToWatch = 2;
+  WatchSuccess = 3;
+  WatchFailure = 4;
+  ToRelease = 5;
+  ReleaseSuccess = 6;
+  ReleaseFailure = 7;
+}
+
+message ChannelStatus {
+  string name = 1;
+  ChannelWatchState state=2;
+  int64 collectionID = 3;
+}
+
+message DataNodeInfo {
+  string address = 1;
+  int64 version  = 2;
+  repeated ChannelStatus channels = 3;
+}
+
+message SegmentBinlogs {
+  int64 segmentID = 1;
+  repeated FieldBinlog fieldBinlogs = 2;
+  int64 num_of_rows = 3;
+  repeated FieldBinlog statslogs = 4;
+  repeated FieldBinlog deltalogs = 5;
+  string insert_channel = 6;
+  map<int64, TextIndexStats> textStatsLogs = 7;
+}
+
+message FieldBinlog{
+  int64 fieldID = 1;
+  repeated Binlog binlogs = 2;
+  repeated int64 child_fields = 3;
+}
+
+message TextIndexStats {
+  int64 fieldID = 1;
+  int64 version = 2;
+  repeated string files = 3;
+  int64 log_size = 4;
+  int64 memory_size = 5;
+  int64 buildID = 6;
+  int32 current_scalar_index_version = 7;
+}
+
+message JsonKeyStats {
+  int64 fieldID = 1;
+  int64 version = 2;
+  repeated string files = 3;
+  int64 log_size = 4;
+  int64 memory_size = 5;
+  int64 buildID = 6;
+  int64 json_key_stats_data_format =7;
+}
+
+message Binlog {
+  int64 entries_num = 1;
+  uint64 timestamp_from = 2;
+  uint64 timestamp_to = 3;
+  // deprecated
+  string log_path = 4;
+  int64 log_size = 5;
+  int64 logID = 6;
+  // memory_size represents the size occupied by loading data into memory.
+  // log_size represents the size after data serialized.
+  // for stats_log, the memory_size always equal log_size.
+  int64 memory_size = 7;
+  // null counts per field in this column group.
+  map<int64, int64> field_null_counts = 8;
+}
+
+message GetRecoveryInfoResponse {
+  common.Status status = 1;
+  repeated VchannelInfo channels = 2;
+  repeated SegmentBinlogs binlogs = 3;
+}
+
+message GetRecoveryInfoRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+}
+
+message GetRecoveryInfoResponseV2 {
+  common.Status status = 1;
+  repeated VchannelInfo channels = 2;
+  repeated SegmentInfo segments = 3;
+}
+
+message GetRecoveryInfoRequestV2 {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  repeated int64 partitionIDs = 3;
+}
+
+message GetChannelRecoveryInfoRequest {
+  common.MsgBase base = 1;
+  string vchannel = 2;
+}
+
+message GetChannelRecoveryInfoResponse {
+  common.Status status = 1;
+  VchannelInfo info = 2;
+  schema.CollectionSchema schema = 3 [deprecated = true]; // schema is managed by streaming node itself now, so it should not be passed by rpc.
+  repeated SegmentNotCreatedByStreaming segments_not_created_by_streaming = 4; // Should be flushed by streaming service when upgrading.
+}
+
+message SegmentNotCreatedByStreaming {
+  int64 collection_id = 1;
+  int64 partition_id = 2;
+  int64 segment_id = 3;
+}
+
+message GetSegmentsByStatesRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  repeated common.SegmentState states = 4;
+}
+
+message GetSegmentsByStatesResponse {
+  common.Status status = 1;
+  repeated int64 segments = 2;
+}
+
+message GetFlushedSegmentsRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  bool includeUnhealthy = 4;
+}
+
+message GetFlushedSegmentsResponse {
+  common.Status status = 1;
+  repeated int64 segments = 2;
+}
+
+message SegmentFlushCompletedMsg {
+  common.MsgBase base = 1;
+  SegmentInfo segment = 2;
+}
+
+message ChannelWatchInfo {
+    VchannelInfo vchan= 1;
+    int64 startTs = 2;
+    ChannelWatchState state = 3;
+    // the timeout ts, datanode shall do nothing after it
+    // NOT USED.
+    int64 timeoutTs = 4;
+    // the schema of the collection to watch, to avoid get schema rpc issues.
+    schema.CollectionSchema schema = 5;
+    // watch progress, deprecated
+    int32 progress = 6;
+    int64 opID = 7;
+    repeated common.KeyValuePair dbProperties = 8;
+}
+
+enum CompactionType {
+  UndefinedCompaction = 0;
+  reserved 1;
+  MergeCompaction = 2;
+  MixCompaction = 3;
+  // compactionV2
+  SingleCompaction = 4;
+  MinorCompaction = 5;
+  MajorCompaction = 6;
+  Level0DeleteCompaction = 7;
+  ClusteringCompaction = 8;
+  SortCompaction = 9;
+  PartitionKeySortCompaction = 10;
+  ClusteringPartitionKeySortCompaction = 11;
+  BackfillCompaction = 12;
+}
+
+message CompactionStateRequest {
+  common.MsgBase base = 1;
+  int64 planID = 2;
+}
+
+message SyncSegmentInfo {
+  int64 segment_id = 1;
+  FieldBinlog pk_stats_log = 2;
+  common.SegmentState state = 3;
+  SegmentLevel level = 4;
+  int64 num_of_rows = 5;
+}
+
+message SyncSegmentsRequest {
+  // Deprecated, after v2.4.3
+  int64 planID = 1;
+  // Deprecated, after v2.4.3
+  int64 compacted_to = 2;
+  // Deprecated, after v2.4.3
+  int64 num_of_rows = 3;
+  // Deprecated, after v2.4.3
+  repeated int64 compacted_from = 4;
+  // Deprecated, after v2.4.3
+  repeated FieldBinlog stats_logs = 5;
+  string channel_name = 6;
+  int64 partition_id = 7;
+  int64 collection_id = 8;
+  map<int64, SyncSegmentInfo> segment_infos = 9;
+}
+
+message CompactionSegmentBinlogs {
+  int64 segmentID = 1;
+  repeated FieldBinlog fieldBinlogs = 2;
+  repeated FieldBinlog field2StatslogPaths = 3;
+  repeated FieldBinlog deltalogs = 4;
+  string insert_channel = 5;
+  SegmentLevel level = 6;
+  int64 collectionID = 7;
+  int64 partitionID = 8;
+  bool is_sorted = 9;
+  int64 storage_version = 10;
+  string manifest = 11;
+  // expirQuantiles records the expiration timestamptz values of the segment
+  // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
+  repeated int64 expirQuantiles = 12;
+}
+
+message CompactionPlan {
+  int64 planID = 1;
+  repeated CompactionSegmentBinlogs segmentBinlogs = 2;
+  int64 start_time = 3;
+  int32 timeout_in_seconds = 4 [deprecated = true];
+  CompactionType type = 5;
+  uint64 timetravel = 6;
+  string channel = 7;
+  int64 collection_ttl = 8; // nanoseconds
+  int64 total_rows = 9;
+  schema.CollectionSchema schema = 10;
+  int64 clustering_key_field = 11;
+  int64 max_segment_rows = 12;
+  int64 prefer_segment_rows = 13;
+  string analyze_result_path = 14;
+  repeated int64 analyze_segment_ids = 15;
+  int32 state = 16;
+  int64 begin_logID = 17; // deprecated, use pre_allocated_logIDs instead.
+  IDRange pre_allocated_segmentIDs = 18;
+  int64 slot_usage = 19;
+  int64 max_size = 20;
+  // bf path for importing
+  // collection is importing
+  IDRange pre_allocated_logIDs = 21;
+  string json_params = 22;
+  int32 current_scalar_index_version = 23;
+  repeated common.KeyValuePair plugin_context = 29;
+  repeated internal.FileResourceInfo file_resources = 30;
+  repeated schema.FunctionSchema functions = 31;
+}
+
+message CompactionSegment {
+  int64 planID = 1; // deprecated after 2.3.4
+  int64 segmentID = 2;
+  int64 num_of_rows = 3;
+  repeated FieldBinlog insert_logs = 4;
+  repeated FieldBinlog field2StatslogPaths = 5;
+  repeated FieldBinlog deltalogs = 6;
+  string channel = 7;
+  bool is_sorted = 8;
+  repeated FieldBinlog bm25logs = 9;
+  int64 storage_version = 10;
+  map<int64, data.TextIndexStats> text_stats_logs = 11;
+  string manifest = 12;
+  repeated int64 expirQuantiles = 13;
+}
+
+message CompactionPlanResult {
+  int64 planID = 1;
+  CompactionTaskState state = 2;
+  repeated CompactionSegment segments = 3;
+  string channel = 4;
+  CompactionType type = 5;
+}
+
+message CompactionStateResponse {
+  common.Status status = 1;
+  repeated CompactionPlanResult results = 2;
+}
+
+// Deprecated
+message SegmentFieldBinlogMeta {
+  int64  fieldID = 1;
+  string binlog_path = 2;
+}
+
+message WatchChannelsRequest {
+  int64 collectionID = 1;
+  repeated string channelNames = 2;
+  repeated common.KeyDataPair start_positions = 3;
+  schema.CollectionSchema schema = 4;
+  uint64 create_timestamp = 5;
+  repeated common.KeyValuePair db_properties = 6;
+  map<string, common.WALName> channel_wal_names = 7;
+}
+
+message WatchChannelsResponse {
+  common.Status status = 1;
+}
+
+message SetSegmentStateRequest {
+  common.MsgBase base = 1;
+  int64 segment_id = 2;
+  common.SegmentState new_state = 3;
+}
+
+message SetSegmentStateResponse {
+  common.Status status = 1;
+}
+
+message DropVirtualChannelRequest {
+  common.MsgBase base = 1;
+  string channel_name = 2;
+  repeated DropVirtualChannelSegment segments = 3;
+}
+
+message DropVirtualChannelSegment {
+  int64 segmentID = 1;
+  int64 collectionID = 2;
+  repeated FieldBinlog field2BinlogPaths = 3;
+  repeated FieldBinlog field2StatslogPaths = 4;
+  repeated FieldBinlog deltalogs = 5;
+  msg.MsgPosition startPosition = 6;
+  msg.MsgPosition checkPoint = 7;
+  int64 numOfRows = 8;
+}
+
+message DropVirtualChannelResponse {
+  common.Status status = 1;
+}
+
+message UpdateSegmentStatisticsRequest {
+  common.MsgBase base = 1;
+  repeated common.SegmentStats stats = 2;
+}
+
+message UpdateChannelCheckpointRequest {
+  common.MsgBase base = 1;
+  string vChannel = 2; // deprecated, keep it for compatibility
+  msg.MsgPosition position = 3; // deprecated, keep it for compatibility
+  repeated msg.MsgPosition channel_checkpoints = 4;
+}
+
+message ResendSegmentStatsRequest {
+  common.MsgBase base = 1;
+}
+
+message ResendSegmentStatsResponse {
+  common.Status status = 1;
+  repeated int64 seg_resent = 2;
+}
+
+message MarkSegmentsDroppedRequest {
+  common.MsgBase base = 1;
+  repeated int64 segment_ids = 2;       // IDs of segments that needs to be marked as `dropped`.
+}
+
+message SegmentReferenceLock {
+  int64 taskID = 1;
+  int64 nodeID = 2;
+  repeated int64 segmentIDs = 3;
+}
+
+
+message AlterCollectionRequest {
+  int64  collectionID = 1;
+  schema.CollectionSchema schema = 2;
+  repeated int64 partitionIDs = 3;
+  repeated common.KeyDataPair start_positions = 4;
+  repeated common.KeyValuePair properties = 5;
+  int64  dbID = 6;
+  repeated string vChannels = 7;
+}
+
+message AddCollectionFieldRequest {
+  int64  collectionID = 1;
+  int64  dbID = 2;
+  schema.FieldSchema field_schema = 3;
+  schema.CollectionSchema schema = 4;
+  repeated int64 partitionIDs = 5;
+  repeated common.KeyDataPair start_positions = 6;
+  repeated common.KeyValuePair properties = 7;
+  repeated string vChannels = 8;
+}
+
+message GcConfirmRequest {
+  int64 collection_id = 1;
+  int64 partition_id = 2; // -1 means whole collection.
+}
+
+message GcConfirmResponse {
+  common.Status status = 1;
+  bool gc_finished = 2;
+}
+
+message ReportDataNodeTtMsgsRequest {
+  common.MsgBase base = 1;
+  repeated msg.DataNodeTtMsg msgs = 2; // -1 means whole collection.
+}
+
+message GetFlushStateRequest {
+  repeated int64 segmentIDs = 1;
+  uint64 flush_ts = 2;
+  string db_name = 3;
+  string collection_name = 4;
+  int64 collectionID = 5;
+}
+
+message ChannelOperationsRequest {
+  repeated ChannelWatchInfo infos = 1;
+}
+
+message ChannelOperationProgressResponse {
+  common.Status status = 1;
+  int64 opID = 2;
+  ChannelWatchState state = 3;
+  int32 progress = 4;
+}
+
+message PreImportRequest {
+  string clusterID = 1;
+  int64 jobID = 2;
+  int64 taskID = 3;
+  int64 collectionID = 4;
+  repeated int64 partitionIDs = 5;
+  repeated string vchannels = 6;
+  schema.CollectionSchema schema = 7;
+  repeated internal.ImportFile import_files = 8;
+  repeated common.KeyValuePair options = 9;
+  index.StorageConfig storage_config = 10;
+  int64 task_slot = 11;
+  repeated common.KeyValuePair plugin_context = 12;
+}
+
+message IDRange {
+  int64 begin = 1;
+  int64 end = 2;
+}
+
+message ImportRequestSegment {
+  int64 segmentID = 1;
+  int64 partitionID = 2;
+  string vchannel = 3;
+}
+
+message ImportRequest {
+  string clusterID = 1;
+  int64 jobID = 2;
+  int64 taskID = 3;
+  int64 collectionID = 4;
+  repeated int64 partitionIDs = 5;
+  repeated string vchannels = 6;
+  schema.CollectionSchema schema = 7;
+  repeated internal.ImportFile files = 8;
+  repeated common.KeyValuePair options = 9;
+  uint64 ts = 10;
+  IDRange ID_range = 11;
+  repeated ImportRequestSegment request_segments = 12;
+  index.StorageConfig storage_config = 13;
+  int64 task_slot = 14;
+  int64 storage_version = 15;
+  repeated common.KeyValuePair plugin_context = 16;
+  bool use_loon_ffi = 17;
+}
+
+message QueryPreImportRequest {
+  string clusterID = 1;
+  int64 jobID = 2;
+  int64 taskID = 3;
+}
+
+message PartitionImportStats {
+  map<int64, int64> partition_rows = 1; // partitionID -> numRows
+  map<int64, int64> partition_data_size = 2; // partitionID -> dataSize
+}
+
+message ImportFileStats {
+  internal.ImportFile import_file = 1;
+  int64 file_size = 2;
+  int64 total_rows = 3;
+  int64 total_memory_size = 4;
+  map<string, PartitionImportStats> hashed_stats = 5; // channel -> PartitionImportStats
+}
+
+message QueryPreImportResponse {
+  common.Status status = 1;
+  int64 taskID = 2;
+  ImportTaskStateV2 state = 3;
+  string reason = 4;
+  int64 slots = 5;
+  repeated ImportFileStats file_stats = 6;
+}
+
+message QueryImportRequest {
+  string clusterID = 1;
+  int64 jobID = 2;
+  int64 taskID = 3;
+  bool querySlot = 4;
+}
+
+message ImportSegmentInfo {
+  int64 segmentID = 1;
+  int64 imported_rows = 2;
+  repeated FieldBinlog binlogs = 3;
+  repeated FieldBinlog statslogs = 4;
+  repeated FieldBinlog deltalogs = 5;
+  repeated FieldBinlog bm25logs = 6;
+  string manifest_path = 7;
+}
+
+message QueryImportResponse {
+  common.Status status = 1;
+  int64 taskID = 2;
+  ImportTaskStateV2 state = 3;
+  string reason = 4;
+  int64 slots = 5;
+  repeated ImportSegmentInfo import_segments_info = 6;
+}
+
+message DropImportRequest {
+  string clusterID = 1;
+  int64 jobID = 2;
+  int64 taskID = 3;
+}
+
+// CopySegment related messages
+message CopySegmentSource {
+  // Source identity (avoid parsing from path)
+  int64 collection_id = 1;  // source collection ID
+  int64 partition_id = 2;   // source partition ID
+  int64 segment_id = 3;     // source segment ID
+
+  // Source binlogs (paths contain source IDs)
+  repeated FieldBinlog insert_binlogs = 4;  // insert log files
+  repeated FieldBinlog stats_binlogs = 5;   // stats log files
+  repeated FieldBinlog delta_binlogs = 6;   // delta log files
+
+  // Optional: vector/scalar index files to copy (if provided, copy index along with segment data)
+  repeated index.IndexFilePathInfo index_files = 7;  // vector/scalar index file info
+
+  // BM25 stats binlogs (for BM25 index)
+  repeated FieldBinlog bm25_binlogs = 8;  // bm25 stats log files
+
+  // Text index files (for text tokenization index)
+  map<int64, TextIndexStats> text_index_files = 9;  // text index files by field ID
+
+  // JSON key index files (for JSON index)
+  map<int64, JsonKeyStats> json_key_index_files = 10;  // json key index files by field ID
+
+  // StorageV2 manifest (JSON encoded)
+  string manifest_path = 11;
+
+  // Storage version: 0=V1(legacy binlog), 2=V2(packed parquet), 3=V3(loon manifest)
+  // When storage_version >= 3, binlog paths must be resolved from manifest_path
+  int64 storage_version = 12;
+}
+
+message CopySegmentTarget {
+  int64 collection_id = 1;  // target collection ID
+  int64 partition_id = 2;   // target partition ID
+  int64 segment_id = 3;     // target segment ID
+}
+
+message CopySegmentRequest {
+  string clusterID = 1;
+  int64 jobID = 2;
+  int64 taskID = 3;
+
+  // Copy mappings (sources[i] -> targets[i])
+  repeated CopySegmentSource sources = 4;  // source segments with full identity
+  repeated CopySegmentTarget targets = 5;  // target segments with full identity
+
+  index.StorageConfig storage_config = 6;
+  int64 task_slot = 7;
+}
+
+message QueryCopySegmentRequest {
+  string clusterID = 1;
+  int64 jobID = 2;
+  int64 taskID = 3;
+}
+
+message QueryCopySegmentResponse {
+  common.Status status = 1;
+  int64 taskID = 2;
+  CopySegmentTaskState state = 3;  // Task state
+  string reason = 4;
+  repeated CopySegmentResult segment_results = 5;  // Complete segment and index metadata
+  int64 slots = 6;
+}
+
+message DropCopySegmentRequest {
+  string clusterID = 1;
+  int64 jobID = 2;
+  int64 taskID = 3;
+}
+
+// VectorScalarIndexInfo contains metadata for copied vector/scalar indexes
+// Combines information from IndexTaskInfo for copy operations
+message VectorScalarIndexInfo {
+  int64 field_id = 1;
+  int64 index_id = 2;
+  int64 build_id = 3;
+  int64 version = 4;
+  repeated string index_file_paths = 5;    // Full paths to index files
+  int64 index_size = 6;                    // Total index size in bytes
+  int32 current_index_version = 7;         // Index engine version
+  int32 current_scalar_index_version = 8;  // Scalar index engine version
+}
+
+// CopySegmentResult contains the complete result of a copy segment operation
+// It extends ImportSegmentInfo with index metadata from copied indexes
+message CopySegmentResult {
+  // Basic segment info (same as ImportSegmentInfo)
+  int64 segment_id = 1;
+  int64 imported_rows = 2;
+  repeated FieldBinlog binlogs = 3;
+  repeated FieldBinlog statslogs = 4;
+  repeated FieldBinlog deltalogs = 5;
+  repeated FieldBinlog bm25logs = 6;
+
+  // Index metadata
+  // Vector/Scalar indexes - map<fieldID, VectorScalarIndexInfo>
+  map<int64, VectorScalarIndexInfo> index_infos = 7;
+
+  // Text indexes - map<fieldID, TextIndexStats>
+  map<int64, TextIndexStats> text_index_infos = 8;
+
+  // JSON Key indexes - map<int64, JsonKeyStats>
+  map<int64, JsonKeyStats> json_key_index_infos = 9;
+
+  // Transformed manifest path for target segment
+  string manifest_path = 10;
+}
+
+// CopySegmentTask represents a copy segment task that copies segment data and optionally indexes
+// from source locations to target locations for snapshot restore or other purposes
+// Optimized for minimal etcd storage: heavy data (binlogs, schema, results) are not persisted
+message CopySegmentTask {
+  int64 task_id = 1;
+  int64 job_id = 2;
+  int64 collection_id = 3;
+
+  int64 node_id = 4;
+  int64 task_version = 5;
+  int64 task_slot = 6;
+
+  CopySegmentTaskState state = 7;
+  string reason = 8;
+  repeated CopySegmentIDMapping id_mappings = 9;
+  uint64 created_ts = 10;   // Unix timestamp in nanoseconds
+  uint64 complete_ts = 11;  // Unix timestamp in nanoseconds
+}
+
+// CopySegmentJobState defines the state machine for copy segment jobs
+enum CopySegmentJobState {
+  CopySegmentJobNone = 0;
+  CopySegmentJobPending = 1;   // Job created, waiting to start
+  CopySegmentJobExecuting = 2; // Executing copy segment tasks
+  CopySegmentJobCompleted = 3; // All done
+  CopySegmentJobFailed = 4;    // Failed
+}
+
+// CopySegmentTaskState defines the state machine for copy segment tasks
+enum CopySegmentTaskState {
+  CopySegmentTaskNone = 0;
+  CopySegmentTaskPending = 1;      // Task created, waiting to be scheduled
+  CopySegmentTaskInProgress = 2;   // Task is being executed on DataNode
+  CopySegmentTaskCompleted = 3;    // Task successfully completed, segment copied
+  CopySegmentTaskFailed = 4;       // Task failed, requires manual handling
+}
+
+// SnapshotState defines the state for snapshot 2PC commit
+enum SnapshotState {
+  SnapshotStateUnknown = 0;    // Default/unknown state
+  SnapshotStatePending = 1;    // S3 files are being written
+  SnapshotStateCommitted = 2;  // S3 write completed, snapshot is ready
+  SnapshotStateDeleting = 3;   // Marked for deletion, S3 cleanup in progress
+}
+
+// RestoreSnapshotState defines the state machine for restore snapshot jobs
+enum RestoreSnapshotState {
+  RestoreSnapshotNone = 0;
+  RestoreSnapshotPending = 1;   // Job created, waiting to start
+  RestoreSnapshotExecuting = 2; // Executing restore tasks
+  RestoreSnapshotCompleted = 3; // All done
+  RestoreSnapshotFailed = 4;    // Failed
+}
+
+// CopySegmentIDMapping defines lightweight ID-only mapping from source to target segment
+// Used in Job and Task storage to minimize etcd load
+message CopySegmentIDMapping {
+  int64 source_segment_id = 1;
+  int64 target_segment_id = 2;
+  int64 partition_id = 3;  // Cached for grouping, avoid repeated meta lookups
+}
+
+// CopySegmentJob represents a user-level copy segment job
+message CopySegmentJob {
+  int64 job_id = 1;
+  int64 db_id = 2;
+  int64 collection_id = 3;
+  string collection_name = 4;
+  // Job state machine: Pending -> Copying -> IndexBuilding -> Completed/Failed
+  CopySegmentJobState state = 5;
+  string reason = 6;
+
+  // Segment copy ID mappings (lightweight, ~48 bytes per segment)
+  repeated CopySegmentIDMapping id_mappings = 7;
+
+  // Timestamps
+  uint64 timeout_ts = 8;
+  uint64 cleanup_ts = 9;
+
+  // Timing
+  uint64 start_ts = 10;     // Unix timestamp in nanoseconds
+  uint64 complete_ts = 11;  // Unix timestamp in nanoseconds
+
+  // Options (e.g., "copy_index": "true")
+  repeated common.KeyValuePair options = 12;
+
+  // Statistics
+  int64 total_segments = 13;
+  int64 copied_segments = 14;
+  int64 total_rows = 15;
+
+  // Optional snapshot name for restore snapshot use case
+  string snapshot_name = 16;
+}
+
+message ImportJob {
+  int64 jobID = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  string collection_name = 4;
+  repeated int64 partitionIDs = 5;
+  repeated string vchannels = 6;
+  schema.CollectionSchema schema = 7;
+  uint64 timeout_ts = 8;
+  uint64 cleanup_ts = 9;
+  int64 requestedDiskSize = 10;
+  internal.ImportJobState state = 11;
+  string reason = 12;
+  string complete_time = 13;
+  repeated internal.ImportFile files = 14;
+  repeated common.KeyValuePair options = 15;
+  string create_time = 16;
+  repeated string ready_vchannels = 17;
+  uint64 data_ts = 18;
+}
+
+enum ImportTaskStateV2 {
+  None = 0;
+  Pending = 1;
+  InProgress = 2;
+  Failed = 3;
+  Completed = 4;
+  Retry = 5;
+}
+
+enum ImportTaskSourceV2 {
+  Request = 0;
+  L0Compaction = 1;
+}
+
+message PreImportTask {
+  int64 jobID = 1;
+  int64 taskID = 2;
+  int64 collectionID = 3;
+  int64 nodeID = 6;
+  ImportTaskStateV2 state = 7;
+  string reason = 8;
+  repeated ImportFileStats file_stats = 10;
+  string created_time = 11;
+  string complete_time = 12;
+}
+
+message ImportTaskV2 {
+  int64 jobID = 1;
+  int64 taskID = 2;
+  int64 collectionID = 3;
+  repeated int64 segmentIDs = 4;
+  int64 nodeID = 5;
+  ImportTaskStateV2 state = 6;
+  string reason = 7;
+  string complete_time = 8;
+  repeated ImportFileStats file_stats = 9;
+  repeated int64 sorted_segmentIDs = 10;
+  string created_time = 11;
+  ImportTaskSourceV2 source = 12;
+}
+
+enum GcCommand {
+  _ = 0;
+  Pause = 1;
+  Resume = 2;
+}
+
+message GcControlRequest {
+  common.MsgBase base = 1;
+  GcCommand command = 2;
+  repeated common.KeyValuePair params = 3;
+}
+
+// The response message for GetGcStatus.
+message GetGcStatusResponse {
+  // is_paused is true if the garbage collector is currently paused.
+  bool is_paused = 1;
+  // time_remaining_seconds is the remaining duration in seconds until the GC resumes.
+  int32 time_remaining_seconds = 2;
+}
+
+message QuerySlotRequest {}
+
+message QuerySlotResponse {
+  common.Status status = 1;
+  int64 available_slots = 2;
+}
+
+enum CompactionTaskState {
+  unknown = 0;
+  executing = 1;
+  pipelining = 2;
+  completed = 3;
+  failed = 4;
+  timeout = 5;
+  analyzing = 6;
+  indexing = 7;
+  cleaned = 8;
+  meta_saved = 9;
+  statistic = 10;
+}
+
+message CompactionTask{
+  int64 planID = 1;
+  int64 triggerID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  string channel = 5;
+  CompactionType type = 6;
+  CompactionTaskState state = 7;
+  string fail_reason = 8;
+  int64 start_time = 9;
+  int64 end_time = 10;
+  int32 timeout_in_seconds = 11 [deprecated = true];
+  int32 retry_times = 12;
+  int64 collection_ttl = 13;
+  int64 total_rows = 14;
+  repeated int64 inputSegments = 15;
+  repeated int64 resultSegments = 16;
+  msg.MsgPosition pos = 17;
+  int64 nodeID = 18;
+  schema.CollectionSchema schema = 19;
+  schema.FieldSchema clustering_key_field = 20;
+  int64 max_segment_rows = 21;
+  int64 prefer_segment_rows = 22;
+  int64 analyzeTaskID = 23;
+  int64 analyzeVersion = 24;
+  int64 lastStateStartTime = 25;
+  int64 max_size = 26;
+  repeated int64 tmpSegments = 27;
+  IDRange pre_allocated_segmentIDs = 28;
+  repeated schema.FunctionSchema diff_functions = 29;
+}
+
+message PartitionStatsInfo {
+  int64 collectionID = 1;
+  int64 partitionID = 2;
+  string vChannel = 3;
+  int64 version = 4;
+  repeated int64 segmentIDs = 5;
+  int64 analyzeTaskID = 6;
+  int64 commitTime = 7;
+}
+
+message DropCompactionPlanRequest {
+  int64 planID = 1;
+}
+
+message CreateExternalCollectionResponse {
+  common.Status status = 1;
+}
+
+message UpdateExternalCollectionRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 taskID = 3;
+  repeated SegmentInfo currentSegments = 4;
+  string externalSource = 5;
+  string externalSpec = 6;
+  index.StorageConfig storage_config = 7;
+  schema.CollectionSchema schema = 8;
+  IDRange pre_allocated_segment_ids = 9;  // pre-allocated segment ID range for data mapping
+  int64 num_segments_expected = 10;       // expected number of segments for validation
+}
+
+message UpdateExternalCollectionResponse {
+  common.Status status = 1;
+  repeated int64 keptSegments = 2;
+  repeated SegmentInfo updatedSegments = 3;
+  index.JobState state = 4;
+  string fail_reason = 5;
+}
+
+message QueryExternalCollectionRequest {
+  int64 taskID = 1;
+}
+
+message DropExternalCollectionRequest {
+  int64 taskID = 1;
+}
+
+// External Table Refresh Messages
+
+message RefreshExternalCollectionRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  string collection_name = 3;
+  string external_source = 4;    // Optional: new external source path
+  string external_spec = 5;      // Optional: new external spec configuration
+}
+
+message RefreshExternalCollectionResponse {
+  common.Status status = 1;
+  int64 job_id = 2;
+}
+
+message GetRefreshExternalCollectionProgressRequest {
+  common.MsgBase base = 1;
+  int64 job_id = 2;
+}
+
+// ExternalCollectionRefreshJob - Job level abstraction for API tracking and user queries
+// A Job represents a user-initiated refresh operation and can contain multiple tasks (1:N)
+message ExternalCollectionRefreshJob {
+  int64 job_id = 1;              // Unique job identifier for API tracking
+  int64 collection_id = 2;
+  string collection_name = 3;
+  string external_source = 4;
+  string external_spec = 5;
+  index.JobState state = 6;      // Aggregated state from all tasks
+  string fail_reason = 7;        // Error message if failed
+  int64 start_time = 8;          // Job start timestamp (Unix ms)
+  int64 end_time = 9;            // Job end timestamp (Unix ms, 0 if not completed)
+  int64 progress = 10;           // Aggregated progress percentage (0-100)
+  repeated int64 task_ids = 11;  // Task IDs belonging to this job
+}
+
+// ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution
+// A Task is an execution unit managed by the scheduler, belonging to a parent Job
+message ExternalCollectionRefreshTask {
+  int64 task_id = 1;             // Unique task identifier
+  int64 job_id = 2;              // Parent job ID
+  int64 collection_id = 3;
+  int64 version = 4;             // Task version for CAS
+  int64 node_id = 5;             // Assigned worker node
+  index.JobState state = 6;      // Task execution state
+  string fail_reason = 7;
+  string external_source = 8;    // Copied from job for worker execution
+  string external_spec = 9;      // Copied from job for worker execution
+  int64 progress = 10;           // Task-level progress (0-100)
+}
+
+message GetRefreshExternalCollectionProgressResponse {
+  common.Status status = 1;
+  ExternalCollectionRefreshJob job_info = 2;
+}
+
+message ListRefreshExternalCollectionJobsRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+}
+
+message ListRefreshExternalCollectionJobsResponse {
+  common.Status status = 1;
+  repeated ExternalCollectionRefreshJob jobs = 2;
+}
+
+// Note: QueryExternalCollectionRequest and DropExternalCollectionRequest are kept
+// for internal use by the unified task system, but are not exposed as separate RPCs
+
+message CreateSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2;  // user-defined snapshot name
+  string description = 3; // user-defined snapshot description
+  int64 collection_id= 4; // collection name
+}
+
+message DropSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2; // snapshot name
+}
+
+message ListSnapshotsRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2; // collection id, if collection_id is 0, it will list all snapshots.
+  int64 partition_id = 3; // partition id, if partition_id is 0, it will list all snapshots.
+}
+
+// return all snapshots for the given collection or partition
+// Note: list snapshots is not a privilege check operation
+message ListSnapshotsResponse {
+  common.Status status = 1;
+  repeated string snapshots = 2;
+}
+
+message SegmentDescription {
+  int64 segment_id = 1; // segment id
+  int64 partition_id = 2; // partition id
+  SegmentLevel segment_level = 3; // segment level
+  string channel_name = 4; // channel name
+  repeated data.FieldBinlog binlogs = 5; // binlog files
+  repeated data.FieldBinlog deltalogs = 6; // deltalog files
+  repeated data.FieldBinlog statslogs = 7; // statslog files
+  repeated data.FieldBinlog bm25_statslogs = 8; // bm25 stats logs
+  map<int64, TextIndexStats> text_index_files = 9; // text index files
+  map<int64, JsonKeyStats> json_key_index_files = 10; // json key index files
+  repeated index.IndexFilePathInfo index_files = 11; // vector/scalar index files
+  int64 num_of_rows = 12; // number of rows
+  msg.MsgPosition start_position = 13; // start position
+  msg.MsgPosition dml_position = 14; // dml position
+  int64 storage_version = 15; // storage version
+  bool is_sorted = 16; // whether the segment is sorted by primary key
+  string manifest_path = 17; // StorageV2 manifest file path
+}
+
+message CollectionDescription {
+  schema.CollectionSchema schema = 1; // collection schema
+  int64 num_partitions = 2; // num of default physical partitions, only used in partition key mode and changes are not supported
+  int64 num_shards = 3; // num of shards
+  common.ConsistencyLevel consistency_level = 4; // consistency level
+  repeated common.KeyValuePair properties = 5; // properties
+  map<string, int64> partitions = 6; // partition name to id mapping
+  repeated string virtual_channel_names = 7; // virtual channel names for restore to preserve pchannel mapping
+}
+
+message SnapshotInfo {
+  string name = 1;  // user-defined snapshot name
+  int64 id = 2; // snapshot id
+  string description = 3; // user-defined snapshot description
+  int64 collection_id = 4; // collection id
+  repeated int64 partition_ids = 5; // partition ids
+  int64 create_ts = 6; // create timestamp, all stream data before this timestamp will be flushed to segment list.
+  string s3_location = 7; // s3 location of the snapshot meta file if snapshot is exported to s3.
+  SnapshotState state = 8; // snapshot state for 2PC commit (Pending/Committed)
+  int64 pending_start_time = 9; // timestamp when pending started, for GC timeout
+}
+
+// StorageV2SegmentManifest maps a segment ID to its StorageV2 manifest file path.
+// StorageV2 is Milvus's newer storage format that uses Lance/Arrow for better performance.
+message StorageV2SegmentManifest {
+  int64 segment_id = 1;
+  string manifest = 2;
+}
+
+// SnapshotMetadata is the root structure for snapshot metadata JSON file.
+// This file serves as the entry point for reading a snapshot, containing:
+//   - Snapshot identification and status information
+//   - Collection schema and properties
+//   - References to segment manifest files
+//   - Pre-computed ID lists for optimized loading
+//
+// File path: snapshots/{collection_id}/metadata/{snapshot_id}.json
+message SnapshotMetadata {
+  int32 format_version = 1;
+  SnapshotInfo snapshot_info = 2;
+  CollectionDescription collection = 3;
+  repeated index.IndexInfo indexes = 4;
+  repeated string manifest_list = 5;
+  repeated StorageV2SegmentManifest storagev2_manifest_list = 6;
+  repeated int64 segment_ids = 7;
+  repeated int64 index_ids = 8;
+  repeated int64 build_ids = 9;
+}
+
+message RestoreSnapshotInfo {
+  int64 job_id = 1; // restore job ID
+  string snapshot_name = 2; // snapshot name
+  int64 collection_id = 3; // collection id
+  RestoreSnapshotState state = 4; // restore job state
+  int32 progress = 5; // progress percentage (0-100)
+  string reason = 6; // error reason if failed
+  uint64 time_cost = 7; // time cost in milliseconds
+  uint64 start_time = 8; // start time in milliseconds since Unix epoch
+}
+
+message DescribeSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2; // snapshot name
+
+  bool include_collection_info = 3; // if include_collection_info is true, it will return collection info.
+}
+
+// return snapshot basic info and snapshot data info
+message DescribeSnapshotResponse {
+  common.Status status = 1;
+  SnapshotInfo snapshot_info = 2; // snapshot info, if snapshot_info is not nil, it will be used to describe the snapshot.
+
+  CollectionDescription collection_info = 3; // collection info, if include_collection_info is true, it will return collection info.
+  repeated index.IndexInfo index_infos = 4; // index infos, if include_collection_info is true, it will return index infos.
+}
+
+// restore a snapshot to a new collection (DataCoord-driven flow)
+// DataCoord creates the collection and partitions via RootCoord, then creates copy segment jobs
+message RestoreSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2; // snapshot name
+  reserved 3; // previously: collection_id (removed, DataCoord creates collection)
+  reserved 4; // previously: create_indexes (handled by RootCoord DDL callback)
+  reserved 5; // previously: job_id (DataCoord allocates internally)
+  string db_name = 6; // target database name
+  string collection_name = 7; // target collection name (must not exist)
+}
+
+message RestoreSnapshotResponse {
+  common.Status status = 1;
+  int64 job_id = 2; // restore job ID for async tracking (deprecated, use ListRestoreJobs)
+  int64 collection_id = 3; // deprecated
+}
+
+message GetRestoreSnapshotStateRequest {
+  common.MsgBase base = 1;
+  int64 job_id = 2; // restore job ID
+}
+
+message GetRestoreSnapshotStateResponse {
+  common.Status status = 1;
+  RestoreSnapshotInfo info = 2; // restore snapshot job info
+}
+
+message ListRestoreSnapshotJobsRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2; // filter by collection id, empty for all
+
+}
+
+message ListRestoreSnapshotJobsResponse {
+  common.Status status = 1;
+  repeated RestoreSnapshotInfo jobs = 2; // list of restore snapshot jobs
+}
+
+message BatchUpdateManifestRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  repeated BatchUpdateManifestItem items = 3;
+}
+
+message BatchUpdateManifestItem {
+  int64 segment_id = 1;
+  int64 manifest_version = 2;
+}

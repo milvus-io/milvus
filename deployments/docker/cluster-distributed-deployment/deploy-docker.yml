@@ -1,0 +1,10 @@
+---
+- name: setup pre-requisites & Docker #Install prerequisite
+  hosts: dockernodes
+  become: yes
+  become_user: root
+  roles:
+    - install-modules
+    - docker-installation
+
+    

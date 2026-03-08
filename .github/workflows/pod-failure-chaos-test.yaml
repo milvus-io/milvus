@@ -1,0 +1,192 @@
+name: Cluster N node Chaos Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: The image tag to use for the chaos test
+        required: true
+        default: 'master-latest'
+      image_repo:
+        description: The image repo to use for the chaos test
+        required: true
+        default: 'milvusdb/milvus'    
+  schedule:
+    - cron: "30 19 * * *"
+jobs:
+  
+  test-cluster-n-node-chaos:
+   
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        chaos_type: [pod_failure, pod_kill]
+        pod: [querynode, datanode, indexnode, proxy]
+    
+    steps:
+      - name: Set env param
+        env:
+          DEFAULT_IMAGE_TAG: master-latest
+          DEFAULT_IMAGE_REPO: milvusdb/milvus        
+        run: |
+          chaos_type=${{ matrix.chaos_type }}
+          release="test"-${{ matrix.pod }}-${chaos_type/_/-}
+          echo "RELEASE=$release" >> $GITHUB_ENV
+          echo "IMAGE_REPO=${{ github.event.inputs.image_repo || env.DEFAULT_IMAGE_REPO}}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${{ github.event.inputs.image_tag || env.DEFAULT_IMAGE_TAG}}" >> $GITHUB_ENV
+      - name: Creating kind cluster
+        uses: helm/kind-action@v1.2.0
+      
+      - name: Print cluster information
+        run: |
+          kubectl config view
+          kubectl cluster-info
+          kubectl get nodes
+          kubectl get pods -n kube-system
+          helm version
+          kubectl version
+      
+      - uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+
+      - name: Install dependency
+        uses: nick-invision/retry@v2
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_on: error
+          shell: bash
+          command: |
+            pip install -r tests/python_client/requirements.txt
+      
+      - name: Deploy Chaos Mesh
+        shell: bash
+        run: |
+          helm repo add chaos-mesh https://charts.chaos-mesh.org
+          helm search repo chaos-mesh
+          kubectl create ns chaos-testing
+          helm install chaos-mesh chaos-mesh/chaos-mesh --namespace=chaos-testing --version v2.0.3 --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock
+          sleep 60s
+          kubectl get po -n chaos-testing
+      
+      - name: Deploy Milvus
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          echo "latest tag:"
+          bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus -t master-latest -f master- -F -L -q
+          declare -A pod_map=( ["querynode"]="queryNode" ["indexnode"]="indexNode" ["datanode"]="dataNode" ["proxy"]="proxy")
+          helm repo add milvus https://zilliztech.github.io/milvus-helm
+          helm repo update
+          helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set image.all.repository=${{ env.IMAGE_REPO }} --set image.all.tag=${{ env.IMAGE_TAG }} --set ${pod_map[${{ matrix.pod }}]}.replicas=2 -f cluster-values.yaml  -n=chaos-testing
+          kubectl get pods -n chaos-testing
+          sleep 20s
+          kubectl get pods -n chaos-testing
+          kubectl port-forward service/${{ env.RELEASE }}-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
+          sleep 20s
+          # check whether port-forward success
+          nc -vz 127.0.0.1 19530
+          # check whether milvus server is healthy
+          pytest -s -v ../testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
+          python scripts/hello_milvus.py --host 127.0.0.1
+
+      - name: Chaos Test
+        timeout-minutes: 15
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          # replace chaos object
+          sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/${{ matrix.chaos_type }}\/'/g" constants.py
+          sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_${{ matrix.chaos_type }}.yaml\'/g" constants.py
+          sed -i "s/CHAOS_DURATION =.*/CHAOS_DURATION = 80/g" constants.py
+          sed -i "s/RELEASE_NAME =.*/RELEASE_NAME = \'${{ env.RELEASE }}\'/g" constants.py
+          cat constants.py
+          timeout 14m pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO --capture=no || echo "chaos test failed"
+
+      - name: Result Analysis
+        timeout-minutes: 15
+        shell: bash
+        working-directory: tests/python_client/chaos/reports
+        run: |
+          echo "result analysis"
+          cat ${{ env.RELEASE }}.log || echo "no log file"
+
+      - name: Milvus E2E Test
+        timeout-minutes: 10
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client
+        run: |
+          kubectl get pod -n chaos-testing
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${{ env.RELEASE }} -n chaos-testing --timeout=360s
+          kubectl wait --for=condition=Ready pod -l release=${{ env.RELEASE }} -n chaos-testing --timeout=360s
+          kubectl get pod -n chaos-testing
+          ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9
+          kubectl port-forward service/${{ env.RELEASE }}-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
+
+          sleep 20s
+          nc -vz 127.0.0.1 19530
+
+          pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
+          python chaos/scripts/hello_milvus.py --host 127.0.0.1
+
+      - name: Export logs
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          #in this step, verify whether pod has been killed by pod's age
+          kubectl get po -n chaos-testing
+          # export k8s log for chaos mesh and milvus
+          bash ../../scripts/export_log_k8s.sh chaos-testing ${{ env.RELEASE }} k8s_logs/chaos-test
+
+      - name: Data Consist Test
+        timeout-minutes: 5
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          pytest -s -v test_chaos_data_consist.py --host 127.0.0.1 --log-cli-level=INFO || echo "data consist chaos test failed"
+
+      - name: Milvus E2E Test
+        timeout-minutes: 5
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client
+        run: |
+          kubectl get pod -n chaos-testing
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${{ env.RELEASE }} -n chaos-testing --timeout=360s
+          kubectl wait --for=condition=Ready pod -l release=${{ env.RELEASE }} -n chaos-testing --timeout=360s
+          kubectl get pod -n chaos-testing
+          ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9
+          kubectl port-forward service/${{ env.RELEASE }}-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
+
+          sleep 20s
+          nc -vz 127.0.0.1 19530
+
+          pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
+          python chaos/scripts/hello_milvus.py --host 127.0.0.1
+
+      - name: Export logs
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          #in this step, verify whether pod has been killed by pod's age
+          kubectl get po -n chaos-testing
+          # export k8s log for chaos mesh and milvus
+          bash ../../scripts/export_log_k8s.sh chaos-testing ${{ env.RELEASE }} k8s_logs/data-consist-test
+          bash ../../scripts/export_log_k8s.sh chaos-testing chaos-daemon
+      
+      - name: Upload logs
+        if: ${{ ! success() }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: logs-${{ matrix.pod }}-${{ matrix.chaos_type }}
+          path: tests/python_client/chaos/k8s_logs

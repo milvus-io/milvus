@@ -1,0 +1,151 @@
+version: '3.5'
+
+x-ccache: &ccache
+  CCACHE_COMPILERCHECK: content
+  CCACHE_COMPRESS: 1
+  CCACHE_COMPRESSLEVEL: 5
+  CCACHE_MAXSIZE: 2G
+  CCACHE_DIR: /ccache
+
+services:
+  builder:
+    image: ${IMAGE_REPO}/milvus-env:${OS_NAME}-${DATE_VERSION}
+    # Build devcontainer
+    build:
+      context: .
+      dockerfile: build/docker/builder/cpu/${OS_NAME}/Dockerfile
+      args:
+        TARGETARCH: ${IMAGE_ARCH}
+      cache_from:
+        - ${IMAGE_REPO}/milvus-env:${OS_NAME}-${LATEST_DATE_VERSION}
+    platform: linux/${IMAGE_ARCH}
+    shm_size: 2G
+    # expose 19530 port so we can directly access milvus inside build container
+    # ports:
+    #  - "19530:19530"
+    environment:
+      <<: *ccache
+      OS_NAME: ${OS_NAME}
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
+      CONAN_USER_HOME: /home/milvus
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURITE_CONNECTION_STRING}
+      ENABLE_GCP_NATIVE: ${ENABLE_GCP_NATIVE}
+      USE_ASAN: ${USE_ASAN}
+    volumes: &builder-volumes
+      - .:/go/src/github.com/milvus-io/milvus:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache:/ccache:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-go-mod:/go/pkg/mod:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-vscode-extensions:/home/milvus/.vscode-server/extensions:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-conan:/home/milvus/.conan:delegated
+    working_dir: '/go/src/github.com/milvus-io/milvus'
+    depends_on:
+      - etcd
+      - minio
+      - pulsar
+      - azurite
+      - gcpnative
+    # Command
+    command: &builder-command >
+      /bin/bash -c "
+        make check-proto-product && make verifiers && make unittest"
+
+  gpubuilder:
+    image: ${IMAGE_REPO}/milvus-env:gpu-${OS_NAME}-${GPU_DATE_VERSION}
+    # Build devcontainer
+    build:
+      context: .
+      dockerfile: build/docker/builder/gpu/${OS_NAME}/Dockerfile
+      args:
+        TARGETARCH: ${IMAGE_ARCH}
+      cache_from:
+        - ${IMAGE_REPO}/milvus-env:gpu-${OS_NAME}-${LATEST_GPU_DATE_VERSION}
+    # user: {{ CURRENT_ID }}
+    shm_size: 2G
+    # expose 19530 port so we can directly access milvus inside build container
+    # ports:
+    #  - "19530:19530"
+    environment:
+      <<: *ccache
+      OS_NAME: ${OS_NAME}
+      PULSAR_ADDRESS: ${PULSAR_ADDRESS}
+      ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
+      CONAN_USER_HOME: /home/milvus
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURITE_CONNECTION_STRING}
+      ENABLE_GCP_NATIVE: ${ENABLE_GCP_NATIVE}
+    volumes: &builder-volumes-gpu
+      - .:/go/src/github.com/milvus-io/milvus:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker-gpu}/${OS_NAME}-ccache:/ccache:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker-gpu}/${OS_NAME}-go-mod:/go/pkg/mod:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker-gpu}/${OS_NAME}-vscode-extensions:/home/milvus/.vscode-server/extensions:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker-gpu}/${OS_NAME}-conan:/home/milvus/.conan:delegated
+    working_dir: '/go/src/github.com/milvus-io/milvus'
+    depends_on:
+      - etcd
+      - minio
+      - pulsar
+      - azurite
+      - gcpnative
+    # Command
+    command: &builder-command-gpu >
+      /bin/bash -c "
+        make check-proto-product && make verifiers && make unittest"
+
+  etcd:
+    image: milvusdb/etcd:3.5.5-r2
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    healthcheck:
+      test: [ 'CMD', '/opt/bitnami/scripts/etcd/healthcheck.sh' ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  pulsar:
+    image: apachepulsar/pulsar:2.8.2
+    command: |
+      /bin/bash -c \
+      "bin/apply-config-from-env.py conf/standalone.conf && \
+      exec bin/pulsar standalone --no-functions-worker --no-stream-storage"
+    environment:
+      # 10MB
+      - PULSAR_PREFIX_maxMessageSize=10485760
+      # this is 104857600 + 10240 (padding)
+      - nettyMaxFrameSizeBytes=104867840
+      - PULSAR_GC=-XX:+UseG1GC
+
+  minio:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data
+    healthcheck:
+      test: [ 'CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live' ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    command: azurite-blob --blobHost 0.0.0.0
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+
+  gcpnative:
+    image: fsouza/fake-gcs-server
+    command: -scheme http -public-host storage.gcs.127.0.0.1.nip.io:4443 -external-url "http://storage.gcs.127.0.0.1.nip.io:4443"
+    hostname: storage.gcs.127.0.0.1.nip.io
+    ports:
+      - "4443:4443"
+
+networks:
+  default:
+    name: milvus_dev

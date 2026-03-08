@@ -1,0 +1,23 @@
+build_performance:
+  collections:
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_7/sift_10m_1024_128_l2_nsg_wal
+        cache_config.cpu_cache_capacity: 32
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 6
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+      collection_name: sift_10m_1024_128_l2
+      index_type: nsg
+      index_param:
+        search_length: 50 
+        out_degree: 40
+        candidate_pool_size: 100
+        knng: 50

@@ -1,0 +1,42 @@
+package channel
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+)
+
+func TestPChannelView(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	metas := map[ChannelID]*PChannelMeta{
+		types.ChannelID{
+			Name: "test",
+		}: newPChannelMetaFromProto(&streamingpb.PChannelMeta{
+			Channel: &streamingpb.PChannelInfo{Name: "test", Term: 1},
+			State:   streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
+		}, nil),
+		types.ChannelID{
+			Name: "test2",
+		}: newPChannelMetaFromProto(&streamingpb.PChannelMeta{
+			Channel: &streamingpb.PChannelInfo{Name: "test2", Term: 1},
+			State:   streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
+		}, nil),
+	}
+	view := newPChannelView(metas)
+	assert.Len(t, view.Channels, 2)
+	assert.Len(t, view.Stats, 2)
+	StaticPChannelStatsManager.Get().AddVChannel(
+		"by-dev-rootcoord-dml_0_100v0",
+		"by-dev-rootcoord-dml_0_101v0",
+	)
+	StaticPChannelStatsManager.Get().RemoveVChannel(
+		"by-dev-rootcoord-dml_0_100v0",
+		"by-dev-rootcoord-dml_0_101v0",
+	)
+	StaticPChannelStatsManager.Get().WatchAtChannelCountChanged()
+}

@@ -1,0 +1,24 @@
+piVersion: v1
+kind: Pod
+metadata:
+  name: milvus-test-pod
+  namespace: qa
+spec:
+  containers:
+  - name: milvus-test
+    image: harbor.milvus.io/qa/fouram:1.1
+#    image: dockerhub-mirror-sh.zilliz.cc/milvusdb/pytest:20211209-cef343f
+    command:
+    - cat
+    tty: true
+    env:
+      - name: IN_CLUSTER
+        value: True
+  - name: jnlp
+    image: jenkins/inbound-agent:4.11-1-jdk8
+    resources:
+      limits: {}
+      requests:
+        memory: 256Mi
+        cpu: 100m
+  serviceAccountName: qa-admin

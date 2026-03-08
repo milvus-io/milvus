@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: milvus-e2e
+  namespace: milvus-ci
+spec:
+  hostNetwork: true
+  securityContext:  # Optional: Restrict capabilities for some security hardening
+    privileged: true
+  tolerations:
+  - key: "node-role.kubernetes.io/arm"
+    operator: "Exists"
+    effect: "NoSchedule"
+  nodeSelector:
+    "kubernetes.io/arch": "arm64"
+  enableServiceLinks: false
+  containers:
+  - name: main
+    image: docker:latest
+    args: ["sleep", "36000"]
+    # workingDir: /home/jenkins/agent/workspace
+    securityContext:
+      privileged: true
+    resources:
+      limits:
+        cpu: "6"
+        memory: 12Gi
+      requests:
+        cpu: "0.5"
+        memory: 5Gi
+    volumeMounts:
+    - mountPath: /var/run
+      name: docker-root
+    - mountPath: /root/.conan
+      name: build-cache
+    # - mountPath: /ci-logs
+    #   name: ci-logs  
+  - name: dind
+    image: docker:dind
+    securityContext:
+      privileged: true
+    args: ["dockerd","--host=unix:///var/run/docker.sock","--registry-mirror=https://docker-nexus-ci.zilliz.cc"]
+    resources:
+      limits:
+        cpu: "6"
+        memory: 12Gi
+      requests:
+        cpu: "0.5"
+        memory: 5Gi
+    volumeMounts:
+    - mountPath: /var/run
+      name: docker-root
+    - mountPath: /root/.conan
+      name: build-cache
+  volumes:
+  - emptyDir: {}
+    name: docker-root
+  - hostPath:
+      path:  /root/.conan
+      type: DirectoryOrCreate
+    name: build-cache
+  # - name: ci-logs
+  #   nfs:
+  #     path: /ci-logs
+  #     server: 172.16.70.249

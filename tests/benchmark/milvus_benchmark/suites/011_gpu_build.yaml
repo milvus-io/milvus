@@ -1,0 +1,21 @@
+build_performance:
+  collections:
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/sift_10m_100000_128_l2_sq8_4096
+        cache_config.cpu_cache_capacity: 32GB
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 6GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+      collection_name: sift_10m_100000_128_l2
+      index_type: ivf_sq8
+      index_param:
+        nlist: 4096
+

@@ -1,0 +1,73 @@
+# Configuration File for CodeCov
+codecov:
+  require_ci_to_pass: no
+  notify:
+    require_ci_to_pass: no
+    wait_for_ci: false
+  ci:
+    - jenkins.milvus.io:18080
+coverage:
+  precision: 2
+  round: down
+  range: "70...100"
+
+  status:
+    project:
+      default:
+        target: 77%
+        threshold: 0% #Allow the coverage to drop by threshold%, and posting a success status.
+    patch:
+      default:
+        target: 80%   #target of patch diff
+        threshold: 0%
+        if_ci_failed: error #success, failure, error, ignore
+
+comment:
+  layout: "reach, diff, flags, components, files"
+  behavior: default
+  require_changes: false
+  branches: # branch names that can post comment
+    - master
+ 
+component_management:
+  default_rules:  # default rules that will be inherited by all components
+    statuses:
+      - type: project # in this case every component that doens't have a status defined will have a project type one
+        target: auto
+        branches:
+          - "!main"
+
+  individual_components:
+    - component_id: client
+      name: Client
+      paths:
+        - client/**
+
+    - component_id: core
+      name: Core
+      paths:
+        - internal/core/**
+
+
+    - component_id: go
+      name: Go
+      paths:
+        - pkg/**
+        - internal/**
+        - "!internal/core/**"  # Exclude core component
+
+ignore:
+  - "LICENSES"
+  - ".git"
+  - "*.yml"
+  - "*.md"
+  - "docs/.*"
+  - "**/*.pb.go"
+  - "**/*.proto"
+  - "internal/metastore/db/dbmodel/mocks/.*"
+  - "**/mock_*.go"
+
+
+
+
+

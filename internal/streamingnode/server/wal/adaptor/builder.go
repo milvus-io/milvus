@@ -1,0 +1,36 @@
+package adaptor
+
+import (
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+)
+
+var _ wal.OpenerBuilder = (*builderAdaptorImpl)(nil)
+
+// Deprecated: Use NewOpener to create opener directly, no need for builder
+func AdaptImplsToBuilder(builder walimpls.OpenerBuilderImpls, interceptorBuilders ...interceptors.InterceptorBuilder) wal.OpenerBuilder {
+	return builderAdaptorImpl{
+		builder:             builder,
+		interceptorBuilders: interceptorBuilders,
+	}
+}
+
+type builderAdaptorImpl struct {
+	builder             walimpls.OpenerBuilderImpls
+	interceptorBuilders []interceptors.InterceptorBuilder
+}
+
+func (b builderAdaptorImpl) Name() message.WALName {
+	return b.builder.Name()
+}
+
+func (b builderAdaptorImpl) Build() (wal.Opener, error) {
+	o, err := b.builder.Build()
+	if err != nil {
+		return nil, err
+	}
+	// Add all interceptor here.
+	return adaptImplsToOpener(o, b.interceptorBuilders), nil
+}

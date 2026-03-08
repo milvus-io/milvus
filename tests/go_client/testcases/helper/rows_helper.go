@@ -1,0 +1,322 @@
+package helper
+
+import (
+	"bytes"
+	"strconv"
+
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/tests/go_client/common"
+)
+
+type Dynamic struct {
+	Number int32  `json:"dynamicNumber,omitempty" milvus:"name:dynamicNumber"`
+	String string `json:"dynamicString,omitempty" milvus:"name:dynamicString"`
+	*BoolDynamic
+	List []int64 `json:"dynamicList,omitempty" milvus:"name:dynamicList"`
+}
+
+type BaseRow struct {
+	*BoolStruct
+	Int8      int8                   `json:"int8,omitempty" milvus:"name:int8"`
+	Int16     int16                  `json:"int16,omitempty" milvus:"name:int16"`
+	Int32     int32                  `json:"int32,omitempty" milvus:"name:int32"`
+	Int64     int64                  `json:"int64,omitempty" milvus:"name:int64"`
+	Float     float32                `json:"float,omitempty" milvus:"name:float"`
+	Double    float64                `json:"double,omitempty" milvus:"name:double"`
+	Varchar   string                 `json:"varchar,omitempty" milvus:"name:varchar"`
+	JSON      *JSONStruct            `json:"json,omitempty" milvus:"name:json"`
+	Geometry  string                 `json:"geometry,omitempty" milvus:"name:geometry"`
+	FloatVec  []float32              `json:"floatVec,omitempty" milvus:"name:floatVec"`
+	Fp16Vec   []byte                 `json:"fp16Vec,omitempty" milvus:"name:fp16Vec"`
+	Bf16Vec   []byte                 `json:"bf16Vec,omitempty" milvus:"name:bf16Vec"`
+	BinaryVec []byte                 `json:"binaryVec,omitempty" milvus:"name:binaryVec"`
+	SparseVec entity.SparseEmbedding `json:"sparseVec,omitempty" milvus:"name:sparseVec"`
+	Array
+	Dynamic
+}
+
+type BoolStruct struct {
+	Bool bool `json:"bool" milvus:"name:bool"`
+}
+
+type BoolDynamic struct {
+	Bool bool `json:"dynamicBool" milvus:"name:dynamicBool"`
+}
+
+type Array struct {
+	BoolArray    []bool    `json:"boolArray,omitempty" milvus:"name:boolArray"`
+	Int8Array    []int8    `json:"int8Array,omitempty" milvus:"name:int8Array"`
+	Int16Array   []int16   `json:"int16Array,omitempty" milvus:"name:int16Array"`
+	Int32Array   []int32   `json:"int32Array,omitempty" milvus:"name:int32Array"`
+	Int64Array   []int64   `json:"int64Array,omitempty" milvus:"name:int64Array"`
+	FloatArray   []float32 `json:"floatArray,omitempty" milvus:"name:floatArray"`
+	DoubleArray  []float64 `json:"doubleArray,omitempty" milvus:"name:doubleArray"`
+	VarcharArray [][]byte  `json:"varcharArray,omitempty" milvus:"name:varcharArray"`
+}
+
+func getBool(b bool) *bool {
+	return &b
+}
+
+func GenDynamicRow(index int) Dynamic {
+	var dynamic Dynamic
+	_bool := &BoolDynamic{
+		Bool: index%2 == 0,
+	}
+	if index%2 == 0 {
+		dynamic = Dynamic{
+			Number:      int32(index),
+			String:      strconv.Itoa(index),
+			BoolDynamic: _bool,
+		}
+	} else {
+		dynamic = Dynamic{
+			Number:      int32(index),
+			String:      strconv.Itoa(index),
+			BoolDynamic: _bool,
+			List:        []int64{int64(index), int64(index + 1)},
+		}
+	}
+	return dynamic
+}
+
+func GenJSONRow(index int) *JSONStruct {
+	var jsonStruct JSONStruct
+	_bool := &BoolStruct{
+		Bool: index%2 == 0,
+	}
+	if index%2 == 0 {
+		jsonStruct = JSONStruct{
+			String:     strconv.Itoa(index),
+			BoolStruct: _bool,
+		}
+	} else {
+		jsonStruct = JSONStruct{
+			Number:     int32(index),
+			String:     strconv.Itoa(index),
+			BoolStruct: _bool,
+			List:       []int64{int64(index), int64(index + 1)},
+		}
+	}
+	return &jsonStruct
+}
+
+func GenGeometryRow(i int) string {
+	const (
+		point           = "POINT (30.123 -10.456)"
+		linestring      = "LINESTRING (30.123 -10.456, 10.789 30.123, -40.567 40.890)"
+		polygon         = "POLYGON ((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456))"
+		multipoint      = "MULTIPOINT ((10.111 40.222), (40.333 30.444), (20.555 20.666), (30.777 10.888))"
+		multilinestring = "MULTILINESTRING ((10.111 10.222, 20.333 20.444), (15.555 15.666, 25.777 25.888), (-30.999 20.000, 40.111 30.222))"
+		multipolygon    = "MULTIPOLYGON (((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456)),((15.123 5.456, 25.678 5.890, 25.345 15.567, 15.123 15.456, 15.123 5.456)))"
+	)
+	wktArray := [6]string{point, linestring, polygon, multipoint, multilinestring, multipolygon}
+	return wktArray[i%6]
+}
+
+// NullableVarcharRow is a row struct for Int64VarcharSparseVec collections with nullable varchar.
+// A nil Varchar pointer maps to NULL in Milvus.
+type NullableVarcharRow struct {
+	Int64     int64                  `json:"int64,omitempty" milvus:"name:int64"`
+	Varchar   *string                `json:"varchar,omitempty" milvus:"name:varchar"`
+	SparseVec entity.SparseEmbedding `json:"sparseVec,omitempty" milvus:"name:sparseVec"`
+}
+
+// NullableScalarRow is a row struct with all nullable scalar pointer fields + floatVec.
+type NullableScalarRow struct {
+	Int64    int64     `json:"int64,omitempty" milvus:"name:int64"`
+	Bool     *bool     `json:"bool,omitempty" milvus:"name:bool"`
+	Int8     *int8     `json:"int8,omitempty" milvus:"name:int8"`
+	Int16    *int16    `json:"int16,omitempty" milvus:"name:int16"`
+	Int32    *int32    `json:"int32,omitempty" milvus:"name:int32"`
+	Float    *float32  `json:"float,omitempty" milvus:"name:float"`
+	Double   *float64  `json:"double,omitempty" milvus:"name:double"`
+	Varchar  *string   `json:"varchar,omitempty" milvus:"name:varchar"`
+	FloatVec []float32 `json:"floatVec,omitempty" milvus:"name:floatVec"`
+}
+
+// GenNullableVarcharSparseRows generates rows with nullable varchar using *string pointers.
+// When option.validData[i] is false, Varchar is nil (null).
+func GenNullableVarcharSparseRows(nb int, autoID bool, option GenDataOption) []interface{} {
+	start := option.start
+	rows := make([]interface{}, 0, nb)
+	for i := start; i < start+nb; i++ {
+		row := NullableVarcharRow{
+			SparseVec: common.GenSparseVector(2),
+		}
+		if !autoID {
+			row.Int64 = int64(i + 1)
+		}
+		idx := i - start
+		if option.validData != nil && idx < len(option.validData) && option.validData[idx] {
+			v := strconv.Itoa(i + 1)
+			row.Varchar = &v
+		}
+		rows = append(rows, &row)
+	}
+	return rows
+}
+
+// GenNullableScalarRows generates rows with all nullable scalar pointer fields.
+// When option.validData[i] is false, all nullable fields are nil (null).
+func GenNullableScalarRows(nb int, option GenDataOption) []interface{} {
+	start := option.start
+	dim := option.dim
+	rows := make([]interface{}, 0, nb)
+	for i := start; i < start+nb; i++ {
+		row := NullableScalarRow{
+			Int64:    int64(i + 1),
+			FloatVec: common.GenFloatVector(dim),
+		}
+		idx := i - start
+		if option.validData != nil && idx < len(option.validData) && option.validData[idx] {
+			bVal := (i%2 == 0)
+			i8Val := int8(i + 1)
+			i16Val := int16(i + 1)
+			i32Val := int32(i + 1)
+			fVal := float32(i + 1)
+			dVal := float64(i + 1)
+			vVal := strconv.Itoa(i + 1)
+			row.Bool = &bVal
+			row.Int8 = &i8Val
+			row.Int16 = &i16Val
+			row.Int32 = &i32Val
+			row.Float = &fVal
+			row.Double = &dVal
+			row.Varchar = &vVal
+		}
+		rows = append(rows, &row)
+	}
+	return rows
+}
+
+func GenInt64VecRows(nb int, enableDynamicField bool, autoID bool, option GenDataOption) []interface{} {
+	if option.validData != nil {
+		log.Fatal("GenInt64VecRows with valid data is not yet implemented")
+	}
+	dim := option.dim
+	start := option.start
+
+	rows := make([]interface{}, 0, nb)
+
+	// BaseRow generate insert rows
+	for i := start; i < start+nb; i++ {
+		baseRow := BaseRow{
+			FloatVec: common.GenFloatVector(dim),
+		}
+		if !autoID {
+			baseRow.Int64 = int64(i + 1)
+		}
+		if enableDynamicField {
+			baseRow.Dynamic = GenDynamicRow(i + 1)
+		}
+		rows = append(rows, &baseRow)
+	}
+	return rows
+}
+
+func GenInt64VarcharSparseRows(nb int, enableDynamicField bool, autoID bool, option GenDataOption) []interface{} {
+	start := option.start
+	if option.validData != nil && len(option.validData) != nb {
+		log.Warn("GenInt64VarcharSparseRows", zap.Int("unexpected validData length", len(option.validData)))
+	}
+
+	rows := make([]interface{}, 0, nb)
+	// BaseRow generate insert rows
+	for i := start; i < start+nb; i++ {
+		vec := common.GenSparseVector(2)
+		baseRow := BaseRow{SparseVec: vec}
+		if option.validData[i] {
+			baseRow.Varchar = strconv.Itoa(i + 1)
+		}
+		if !autoID {
+			baseRow.Int64 = int64(i + 1)
+		}
+		if enableDynamicField {
+			baseRow.Dynamic = GenDynamicRow(i + 1)
+		}
+		rows = append(rows, &baseRow)
+	}
+	return rows
+}
+
+func GenAllFieldsRows(nb int, enableDynamicField bool, option GenDataOption) []interface{} {
+	if option.validData != nil {
+		log.Fatal("GenAllFieldsRows with valid data is not yet implemented")
+	}
+	rows := make([]interface{}, 0, nb)
+
+	// BaseRow generate insert rows
+	dim := option.dim
+	start := option.start
+
+	for i := start; i < start+nb; i++ {
+		_bool := &BoolStruct{
+			Bool: i%2 == 0,
+		}
+		baseRow := BaseRow{
+			Int64:      int64(i + 1),
+			BoolStruct: _bool,
+			Int8:       int8(i + 1),
+			Int16:      int16(i + 1),
+			Int32:      int32(i + 1),
+			Float:      float32(i + 1),
+			Double:     float64(i + 1),
+			Varchar:    strconv.Itoa(i + 1),
+			JSON:       GenJSONRow(i + 1),
+			Geometry:   GenGeometryRow(i + 1),
+			FloatVec:   common.GenFloatVector(dim),
+			Fp16Vec:    common.GenFloat16Vector(dim),
+			Bf16Vec:    common.GenBFloat16Vector(dim),
+			BinaryVec:  common.GenBinaryVector(dim),
+		}
+		baseRow.Array = GenAllArrayRow(i, option)
+		if enableDynamicField {
+			baseRow.Dynamic = GenDynamicRow(i + 1)
+		}
+		rows = append(rows, &baseRow)
+	}
+	return rows
+}
+
+func GenAllArrayRow(index int, option GenDataOption) Array {
+	if option.validData != nil {
+		log.Fatal("GenAllArrayRow with valid data is not yet implemented")
+	}
+
+	capacity := option.maxCapacity
+	boolRow := make([]bool, 0, capacity)
+	int8Row := make([]int8, 0, capacity)
+	int16Row := make([]int16, 0, capacity)
+	int32Row := make([]int32, 0, capacity)
+	int64Row := make([]int64, 0, capacity)
+	floatRow := make([]float32, 0, capacity)
+	doubleRow := make([]float64, 0, capacity)
+	varcharRow := make([][]byte, 0, capacity)
+	for j := 0; j < capacity; j++ {
+		boolRow = append(boolRow, index%2 == 0)
+		int8Row = append(int8Row, int8(index+j))
+		int16Row = append(int16Row, int16(index+j))
+		int32Row = append(int32Row, int32(index+j))
+		int64Row = append(int64Row, int64(index+j))
+		floatRow = append(floatRow, float32(index+j))
+		doubleRow = append(doubleRow, float64(index+j))
+		var buf bytes.Buffer
+		buf.WriteString(strconv.Itoa(index + j))
+		varcharRow = append(varcharRow, buf.Bytes())
+	}
+	arrayRow := Array{
+		BoolArray:    boolRow,
+		Int8Array:    int8Row,
+		Int16Array:   int16Row,
+		Int32Array:   int32Row,
+		Int64Array:   int64Row,
+		FloatArray:   floatRow,
+		DoubleArray:  doubleRow,
+		VarcharArray: varcharRow,
+	}
+	return arrayRow
+}

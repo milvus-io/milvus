@@ -1,0 +1,14 @@
+reviewers:
+  - binbinlv
+  - ThreadDao
+  - wangting0128
+  - yanliang567
+  - zhuwenxing
+
+approvers:
+  - maintainers
+
+labels:
+- area/test
+- sig/testing
+

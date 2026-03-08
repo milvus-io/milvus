@@ -1,0 +1,39 @@
+insert_performance:
+  collections:
+    - 
+      server:
+        db_config.primary_path: /test/milvus/db_data_7/sub_50m_512_512_sub_wal
+        cache_config.cpu_cache_capacity: 8
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: false
+        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.search_resources:
+          - gpu0
+        gpu_resource_config.build_index_resources:
+          - gpu0
+      collection_name: sub_50m_512_512_sub
+      ni_per: 100000
+      build_index: false
+      index_type: flat
+      index_param:
+        nlist: 2048
+
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_7/super_50m_512_512_super_wal
+        cache_config.cpu_cache_capacity: 8
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: false
+        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.search_resources:
+          - gpu0
+        gpu_resource_config.build_index_resources:
+          - gpu0
+      collection_name: super_50m_512_512_super
+      ni_per: 100000
+      build_index: false
+      index_type: flat
+      index_param:
+        nlist: 2048

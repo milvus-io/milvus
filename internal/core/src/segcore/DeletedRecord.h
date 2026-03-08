@@ -1,0 +1,414 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
+
+#pragma once
+
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <tuple>
+#include <utility>
+#include <vector>
+#include <folly/ConcurrentSkipList.h>
+
+#include "AckResponder.h"
+#include "common/Common.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "segcore/Record.h"
+#include "segcore/InsertRecord.h"
+#include "segcore/SegmentInterface.h"
+#include "ConcurrentVector.h"
+
+namespace milvus::segcore {
+
+using Offset = int32_t;
+
+struct Comparator {
+    bool
+    operator()(const std::pair<Timestamp, Offset>& left,
+               const std::pair<Timestamp, Offset>& right) const {
+        if (left.first == right.first) {
+            return left.second < right.second;
+        }
+        return left.first < right.first;
+    }
+};
+
+// a lock-free list for multi-thread insert && read
+using SortedDeleteList =
+    folly::ConcurrentSkipList<std::pair<Timestamp, Offset>, Comparator>;
+
+static int32_t DELETE_PAIR_SIZE = sizeof(std::pair<Timestamp, Offset>);
+
+// atomic snapshot for fast path query optimization
+// contains a consistent view of (max_timestamp, deleted_bitset)
+struct DeleteSnapshot {
+    Timestamp max_ts{0};
+    BitsetType bitset;
+
+    DeleteSnapshot() = default;
+    DeleteSnapshot(Timestamp ts, BitsetType&& b)
+        : max_ts(ts), bitset(std::move(b)) {
+    }
+    DeleteSnapshot(Timestamp ts, const BitsetType& b)
+        : max_ts(ts), bitset(b.clone()) {
+    }
+};
+
+template <bool is_sealed = false>
+class DeletedRecord {
+ public:
+    DeletedRecord(InsertRecord<is_sealed>* insert_record,
+                  std::function<void(
+                      const std::vector<PkType>& pks,
+                      const Timestamp* timestamps,
+                      std::function<void(SegOffset offset, Timestamp ts)> cb)>
+                      search_pk_func,
+                  int64_t segment_id)
+        : insert_record_(insert_record),
+          search_pk_func_(std::move(search_pk_func)),
+          segment_id_(segment_id),
+          deleted_lists_(SortedDeleteList::createInstance()) {
+    }
+
+    ~DeletedRecord() {
+        if constexpr (is_sealed) {
+            if (estimated_memory_size_ > 0) {
+                cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                    {estimated_memory_size_, 0});
+                estimated_memory_size_ = 0;
+            }
+        }
+    }
+
+    DeletedRecord(DeletedRecord<is_sealed>&& delete_record) = delete;
+
+    DeletedRecord<is_sealed>&
+    operator=(DeletedRecord<is_sealed>&& delete_record) = delete;
+
+    void
+    LoadPush(const std::vector<PkType>& pks, const Timestamp* timestamps) {
+        if (pks.empty()) {
+            return;
+        }
+
+        auto max_deleted_ts = InternalPush(pks, timestamps);
+
+        if (max_deleted_ts > max_load_timestamp_) {
+            max_load_timestamp_ = max_deleted_ts;
+        }
+
+        //TODO: add support for dump snapshot when load finished
+    }
+
+    // stream push delete timestamps should be sorted outside of the interface
+    // considering concurrent query and push
+    void
+    StreamPush(const std::vector<PkType>& pks, const Timestamp* timestamps) {
+        if (pks.empty()) {
+            return;
+        }
+
+        auto max_ts = InternalPush(pks, timestamps);
+
+        if (ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.load()) {
+            UpdateLatestSnapshot(max_ts);
+        }
+
+        bool can_dump = timestamps[0] >= max_load_timestamp_;
+        if (can_dump) {
+            DumpSnapshot();
+        }
+    }
+
+    Timestamp
+    InternalPush(const std::vector<PkType>& pks, const Timestamp* timestamps) {
+        int64_t removed_num = 0;
+        int64_t mem_add = 0;
+        Timestamp max_timestamp = 0;
+
+        SortedDeleteList::Accessor accessor(deleted_lists_);
+        for (size_t i = 0; i < pks.size(); ++i) {
+            auto deleted_ts = timestamps[i];
+            if (deleted_ts > max_timestamp) {
+                max_timestamp = deleted_ts;
+            }
+        }
+        search_pk_func_(
+            pks,
+            timestamps,
+            [&](const SegOffset offset, const Timestamp delete_ts) {
+                auto row_id = offset.get();
+                // if already deleted, no need to add new record
+                if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
+                    return;
+                }
+                // if insert record and delete record is same timestamp,
+                // delete not take effect on this record.
+                if (delete_ts == insert_record_->timestamps_[row_id]) {
+                    return;
+                }
+                accessor.insert(std::make_pair(delete_ts, row_id));
+                if constexpr (is_sealed) {
+                    Assert(deleted_mask_.size() > 0);
+                    deleted_mask_.set(row_id);
+                } else {
+                    // need to add mask size firstly for growing segment
+                    deleted_mask_.resize(insert_record_->row_count());
+                    deleted_mask_.set(row_id);
+                }
+                removed_num++;
+                mem_add += DELETE_PAIR_SIZE;
+            });
+
+        n_.fetch_add(removed_num);
+        mem_size_.fetch_add(mem_add);
+
+        if constexpr (is_sealed) {
+            // update estimated memory size to caching layer only when the delta is large enough (64KB)
+            constexpr int64_t MIN_DELTA_SIZE = 64 * 1024;
+            auto new_estimated_size = size();
+            if (std::abs(new_estimated_size - estimated_memory_size_) >
+                MIN_DELTA_SIZE) {
+                auto delta_size = new_estimated_size - estimated_memory_size_;
+                if (delta_size >= 0) {
+                    cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+                        {delta_size, 0});
+                } else {
+                    cachinglayer::Manager::GetInstance().RefundLoadedResource(
+                        {-delta_size, 0});
+                }
+                estimated_memory_size_ = new_estimated_size;
+            }
+        } else {
+            // The resource usage of DeletedRecord for a Growing Segment is already counted in
+            // SegmentGrowingImpl::EstimateSegmentResourceUsage(), so there is no need to count it here.
+            // The reason we don't count it here is that we treat the Growing Segment as a single unit,
+            // we do not track memory separately for each field.
+            // If you intend to add this tracking here, first consider how to count the memory usage separately
+            // within the growing segment.
+        }
+
+        return max_timestamp;
+    }
+
+    // update the atomic snapshot with current deleted_mask_ and max timestamp
+    // this ensures a consistent view for fast path query
+    void
+    UpdateLatestSnapshot(Timestamp new_max_ts) {
+        std::lock_guard<std::mutex> lock(snapshot_update_mutex_);
+
+        auto new_snapshot =
+            std::make_shared<const DeleteSnapshot>(new_max_ts, deleted_mask_);
+
+        std::atomic_store(&latest_snapshot_, new_snapshot);
+    }
+
+    void
+    Query(BitsetTypeView& bitset,
+          int64_t insert_barrier,
+          Timestamp query_timestamp) {
+        Assert(bitset.size() == insert_barrier);
+
+        SortedDeleteList::Accessor accessor(deleted_lists_);
+        if (accessor.size() == 0) {
+            return;
+        }
+
+        // fast path: use atomic snapshot when query_timestamp >= max_delete_timestamp
+        // this avoids traversing the SkipList entirely
+        auto snapshot = std::atomic_load(&latest_snapshot_);
+        if (snapshot && snapshot->max_ts > 0 &&
+            query_timestamp >= snapshot->max_ts) {
+            auto or_size = std::min({snapshot->bitset.size(), bitset.size()});
+            bitset.inplace_or_with_count(snapshot->bitset, or_size);
+            return;
+        }
+
+        // slow path: try use snapshot to skip iterations
+        bool hit_snapshot = false;
+        SortedDeleteList::iterator next_iter;
+        {
+            std::shared_lock<std::shared_mutex> lock(snap_lock_);
+            // find last meeted snapshot
+            if (!snapshots_.empty()) {
+                int loc = snapshots_.size() - 1;
+                while (loc >= 0 && snapshots_[loc].first > query_timestamp) {
+                    loc--;
+                }
+                if (loc >= 0) {
+                    // use lower_bound to relocate the iterator in current accessor
+                    next_iter = accessor.lower_bound(snap_next_pos_[loc]);
+                    auto or_size =
+                        std::min(snapshots_[loc].second.size(), bitset.size());
+                    bitset.inplace_or_with_count(snapshots_[loc].second,
+                                                 or_size);
+                    hit_snapshot = true;
+                }
+            }
+        }
+
+        auto it = hit_snapshot ? next_iter : accessor.begin();
+
+        while (it != accessor.end() && it->first <= query_timestamp) {
+            if (it->second < insert_barrier) {
+                bitset.set(it->second);
+            }
+            it++;
+        }
+    }
+
+    size_t
+    GetSnapshotBitsSize() const {
+        auto all_dump_bits = 0;
+        auto next_dump_ts = 0;
+        std::shared_lock<std::shared_mutex> lock(snap_lock_);
+        int loc = snapshots_.size() - 1;
+        while (loc >= 0) {
+            if (next_dump_ts != snapshots_[loc].first) {
+                all_dump_bits += snapshots_[loc].second.size();
+            }
+            loc--;
+        }
+        return all_dump_bits;
+    }
+
+    void
+    DumpSnapshot() {
+        SortedDeleteList::Accessor accessor(deleted_lists_);
+        int total_size = accessor.size();
+
+        while (total_size - dumped_entry_count_.load() >
+               DELETE_DUMP_BATCH_SIZE) {
+            int32_t bitsize = 0;
+            if constexpr (is_sealed) {
+                bitsize = sealed_row_count_;
+            } else {
+                bitsize = insert_record_->row_count();
+            }
+            BitsetType bitmap(bitsize, false);
+
+            auto it = accessor.begin();
+            Timestamp last_dump_ts = 0;
+            if (!snapshots_.empty()) {
+                it = accessor.lower_bound(snap_next_pos_.back());
+                bitmap.inplace_or_with_count(snapshots_.back().second,
+                                             snapshots_.back().second.size());
+            }
+
+            while (total_size - dumped_entry_count_.load() >
+                       DELETE_DUMP_BATCH_SIZE &&
+                   it != accessor.end()) {
+                Timestamp dump_ts = 0;
+
+                for (auto size = 0;
+                     size < DELETE_DUMP_BATCH_SIZE && it != accessor.end();
+                     ++it, ++size) {
+                    bitmap.set(it->second);
+                    dump_ts = it->first;
+                }
+
+                {
+                    std::unique_lock<std::shared_mutex> lock(snap_lock_);
+                    if (dump_ts == last_dump_ts) {
+                        // only update
+                        snapshots_.back().second = std::move(bitmap.clone());
+                        Assert(it != accessor.end() && it.good());
+                        snap_next_pos_.back() = *it;
+                    } else {
+                        // add new snapshot
+                        snapshots_.push_back(
+                            std::make_pair(dump_ts, bitmap.clone()));
+                        Assert(it != accessor.end() && it.good());
+                        snap_next_pos_.push_back(*it);
+                    }
+                }
+
+                dumped_entry_count_.fetch_add(DELETE_DUMP_BATCH_SIZE);
+                LOG_INFO(
+                    "dump delete record snapshot at ts: {}, cursor: {}, "
+                    "total size:{} "
+                    "current snapshot size: {} for segment: {}",
+                    dump_ts,
+                    dumped_entry_count_.load(),
+                    total_size,
+                    snapshots_.size(),
+                    segment_id_);
+                last_dump_ts = dump_ts;
+            }
+        }
+    }
+
+    int64_t
+    size() const {
+        SortedDeleteList::Accessor accessor(deleted_lists_);
+        return accessor.size();
+    }
+
+    size_t
+    mem_size() const {
+        return mem_size_.load();
+    }
+
+    void
+    set_sealed_row_count(size_t row_count) {
+        sealed_row_count_ = row_count;
+        deleted_mask_.resize(row_count);
+    }
+
+    std::vector<std::pair<Timestamp, BitsetType>>
+    get_snapshots() const {
+        std::shared_lock<std::shared_mutex> lock(snap_lock_);
+        std::vector<std::pair<Timestamp, BitsetType>> snapshots;
+        for (const auto& snap : snapshots_) {
+            snapshots.emplace_back(snap.first, snap.second.clone());
+        }
+        return snapshots;
+    }
+
+ public:
+    std::atomic<int64_t> n_ = 0;
+    std::atomic<int64_t> mem_size_ = 0;
+    std::conditional_t<is_sealed, InsertRecordSealed, InsertRecordGrowing>*
+        insert_record_;
+    std::function<void(const std::vector<PkType>& pks,
+                       const Timestamp* timestamps,
+                       std::function<void(SegOffset offset, Timestamp ts)>)>
+        search_pk_func_;
+    int64_t segment_id_{0};
+    std::shared_ptr<SortedDeleteList> deleted_lists_;
+    // max timestamp of deleted records which replayed in load process
+    Timestamp max_load_timestamp_{0};
+    int32_t sealed_row_count_;
+    // used to remove duplicated deleted records for fast access
+    BitsetType deleted_mask_;
+
+    // dump snapshot low frequency
+    mutable std::shared_mutex snap_lock_;
+    std::vector<std::pair<Timestamp, BitsetType>> snapshots_;
+    // next delete record position that follows every snapshot
+    // store position (timestamp, offset)
+    std::vector<std::pair<Timestamp, Offset>> snap_next_pos_;
+    // total number of delete entries that have been incorporated into snapshots
+    std::atomic<int64_t> dumped_entry_count_{0};
+    // estimated memory size of DeletedRecord, only used for sealed segment
+    int64_t estimated_memory_size_{0};
+
+    // atomic snapshot for fast path query optimization
+    // when query_timestamp >= snapshot.max_ts, we can directly use the bitset
+    // without traversing the SkipList
+    std::shared_ptr<const DeleteSnapshot> latest_snapshot_;
+    mutable std::mutex snapshot_update_mutex_;
+};
+
+}  // namespace milvus::segcore

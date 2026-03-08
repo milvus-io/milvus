@@ -1,0 +1,12 @@
+build_performance:
+  collections:
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_011/sift_10m_128_ip_hnsw
+        cache_config.cpu_cache_capacity: 8GB
+        gpu_resource_config.enable: false
+      collection_name: sift_10m_128_ip
+      index_type: hnsw
+      index_param:
+        M: 48
+        efConstruction: 500

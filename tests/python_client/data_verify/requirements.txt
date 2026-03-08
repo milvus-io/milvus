@@ -1,0 +1,2 @@
+pymilvus>=2.5.11
+pymilvus-pg==0.1.3

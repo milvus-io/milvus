@@ -1,0 +1,19 @@
+# targets cannot be reloaded.
+
+[Unit]
+Description=Milvus Standalone Server
+After=network.target syslog.target
+
+[Install]
+WantedBy=multi-user.target
+Alias=milvus.service
+
+[Service]
+Type=simple
+StandardOutput=journal
+StandardError=inherit
+Restart=always
+
+Environment=MILVUSCONF=/etc/milvus/configs/
+ExecStart=/usr/bin/milvus run standalone
+

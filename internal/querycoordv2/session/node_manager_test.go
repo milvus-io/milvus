@@ -1,0 +1,260 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package session
+
+import (
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+)
+
+type NodeManagerSuite struct {
+	suite.Suite
+
+	nodeManager *NodeManager
+}
+
+func (s *NodeManagerSuite) SetupTest() {
+	s.nodeManager = NewNodeManager()
+}
+
+func (s *NodeManagerSuite) TearDownTest() {
+}
+
+func (s *NodeManagerSuite) TestNodeOperation() {
+	s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   3,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+
+	s.NotNil(s.nodeManager.Get(1))
+	s.Len(s.nodeManager.GetAll(), 3)
+	s.nodeManager.Remove(1)
+	s.Nil(s.nodeManager.Get(1))
+	s.Len(s.nodeManager.GetAll(), 2)
+
+	s.nodeManager.Stopping(2)
+	s.True(s.nodeManager.IsStoppingNode(2))
+	node := s.nodeManager.Get(2)
+	node.SetState(NodeStateNormal)
+	s.False(s.nodeManager.IsStoppingNode(2))
+}
+
+func (s *NodeManagerSuite) TestResourceExhaustion() {
+	nodeID := int64(1)
+	s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{NodeID: nodeID}))
+
+	s.Run("mark_exhausted", func() {
+		s.nodeManager.MarkResourceExhaustion(nodeID, 10*time.Minute)
+		s.True(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("expired_without_cleanup", func() {
+		// IsResourceExhausted is pure read-only, does not auto-clear
+		s.nodeManager.MarkResourceExhaustion(nodeID, 1*time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
+		// After expiry, IsResourceExhausted returns false (pure check)
+		s.False(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("clear_expired", func() {
+		// Set expired mark
+		s.nodeManager.MarkResourceExhaustion(nodeID, 1*time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
+		// ClearExpiredResourceExhaustion should clear expired marks
+		s.nodeManager.ClearExpiredResourceExhaustion()
+		s.False(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("clear_does_not_affect_active", func() {
+		// Set active mark
+		s.nodeManager.MarkResourceExhaustion(nodeID, 10*time.Minute)
+		// ClearExpiredResourceExhaustion should not clear active marks
+		s.nodeManager.ClearExpiredResourceExhaustion()
+		s.True(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("invalid_node", func() {
+		s.False(s.nodeManager.IsResourceExhausted(999))
+	})
+
+	s.Run("mark_non_existent_node", func() {
+		// MarkResourceExhaustion on non-existent node should not panic
+		s.nodeManager.MarkResourceExhaustion(999, 10*time.Minute)
+		s.False(s.nodeManager.IsResourceExhausted(999))
+	})
+
+	s.Run("clear_mark_with_zero_duration", func() {
+		// Mark the node as exhausted
+		s.nodeManager.MarkResourceExhaustion(nodeID, 10*time.Minute)
+		s.True(s.nodeManager.IsResourceExhausted(nodeID))
+		// Clear the mark by setting duration to 0
+		s.nodeManager.MarkResourceExhaustion(nodeID, 0)
+		s.False(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("clear_mark_with_negative_duration", func() {
+		// Mark the node as exhausted
+		s.nodeManager.MarkResourceExhaustion(nodeID, 10*time.Minute)
+		s.True(s.nodeManager.IsResourceExhausted(nodeID))
+		// Clear the mark by setting negative duration
+		s.nodeManager.MarkResourceExhaustion(nodeID, -1*time.Second)
+		s.False(s.nodeManager.IsResourceExhausted(nodeID))
+	})
+
+	s.Run("multiple_nodes_cleanup", func() {
+		// Add more nodes
+		nodeID2 := int64(2)
+		nodeID3 := int64(3)
+		s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{NodeID: nodeID2}))
+		s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{NodeID: nodeID3}))
+
+		// Mark all nodes as exhausted with different durations
+		s.nodeManager.MarkResourceExhaustion(nodeID, 1*time.Millisecond)  // will expire
+		s.nodeManager.MarkResourceExhaustion(nodeID2, 10*time.Minute)     // won't expire
+		s.nodeManager.MarkResourceExhaustion(nodeID3, 1*time.Millisecond) // will expire
+
+		time.Sleep(2 * time.Millisecond)
+
+		// Before cleanup, check status
+		s.False(s.nodeManager.IsResourceExhausted(nodeID))  // expired
+		s.True(s.nodeManager.IsResourceExhausted(nodeID2))  // still active
+		s.False(s.nodeManager.IsResourceExhausted(nodeID3)) // expired
+
+		// Cleanup should clear expired marks only
+		s.nodeManager.ClearExpiredResourceExhaustion()
+
+		s.False(s.nodeManager.IsResourceExhausted(nodeID))
+		s.True(s.nodeManager.IsResourceExhausted(nodeID2)) // still active
+		s.False(s.nodeManager.IsResourceExhausted(nodeID3))
+	})
+}
+
+func (s *NodeManagerSuite) TestNodeInfo() {
+	node := NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	})
+	s.Equal(int64(1), node.ID())
+	s.Equal("localhost", node.Addr())
+	node.setChannelCnt(1)
+	node.setSegmentCnt(1)
+	s.Equal(1, node.ChannelCnt())
+	s.Equal(1, node.SegmentCnt())
+
+	node.UpdateStats(WithSegmentCnt(5))
+	node.UpdateStats(WithChannelCnt(5))
+	s.Equal(5, node.ChannelCnt())
+	s.Equal(5, node.SegmentCnt())
+
+	node.SetLastHeartbeat(time.Now())
+	s.NotNil(node.LastHeartbeat())
+}
+
+// TestCPUNumFunctionality tests the newly added CPU core number functionality
+func (s *NodeManagerSuite) TestCPUNumFunctionality() {
+	node := NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost:19530",
+		Hostname: "test-host",
+	})
+
+	// Test initial CPU core number
+	s.Equal(int64(0), node.CPUNum())
+
+	// Test WithCPUNum option
+	node.UpdateStats(WithCPUNum(8))
+	s.Equal(int64(8), node.CPUNum())
+
+	// Test updating CPU core number
+	node.UpdateStats(WithCPUNum(16))
+	s.Equal(int64(16), node.CPUNum())
+
+	// Test multiple stats update including CPU core number
+	node.UpdateStats(
+		WithSegmentCnt(100),
+		WithChannelCnt(5),
+		WithMemCapacity(4096.0),
+		WithCPUNum(32),
+	)
+	s.Equal(int64(32), node.CPUNum())
+	s.Equal(100, node.SegmentCnt())
+	s.Equal(5, node.ChannelCnt())
+	s.Equal(4096.0, node.MemCapacity())
+}
+
+// TestMemCapacityFunctionality tests memory capacity related methods
+func (s *NodeManagerSuite) TestMemCapacityFunctionality() {
+	node := NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost:19530",
+		Hostname: "test-host",
+	})
+
+	// Test initial memory capacity
+	s.Equal(float64(0), node.MemCapacity())
+
+	// Test WithMemCapacity option
+	node.UpdateStats(WithMemCapacity(1024.5))
+	s.Equal(1024.5, node.MemCapacity())
+
+	// Test updating memory capacity
+	node.UpdateStats(WithMemCapacity(2048.75))
+	s.Equal(2048.75, node.MemCapacity())
+}
+
+func (s *NodeManagerSuite) TestNodeInfoLabels() {
+	info := ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+		Labels: map[string]string{
+			sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode: "1",
+		},
+	}
+
+	info2 := NodeInfo{
+		immutableInfo: info,
+	}
+	s.True(info2.IsEmbeddedQueryNodeInStreamingNode())
+
+	info2.immutableInfo.Labels[sessionutil.LabelStreamingNodeEmbeddedQueryNode] = "1"
+	delete(info2.immutableInfo.Labels, sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode)
+	s.True(info2.IsEmbeddedQueryNodeInStreamingNode())
+
+	info.Labels[sessionutil.LabelResourceGroup] = "rg1"
+	s.Equal("rg1", info2.ResourceGroupName())
+}
+
+func TestNodeManagerSuite(t *testing.T) {
+	suite.Run(t, new(NodeManagerSuite))
+}

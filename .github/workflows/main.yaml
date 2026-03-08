@@ -1,0 +1,313 @@
+name: Build and test
+
+# This workflow is triggered on pushes or pull request to the repository.
+on:
+  push:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'scripts/**'
+      - 'internal/**'
+      - 'client/**'
+      - 'pkg/**'
+      - 'cmd/**'
+      - 'build/**'
+      - 'tests/integration/**' # run integration test
+      - '.github/workflows/main.yaml'
+      - '.env'
+      - docker-compose.yml
+      - Makefile
+      - go.mod
+      - '!**.md'
+      - '!build/ci/jenkins/**'
+  pull_request:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'scripts/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - 'client/**'
+      - 'cmd/**'
+      - 'build/**'
+      - 'tests/integration/**' # run integration test
+      - '.github/workflows/main.yaml'
+      - '.env'
+      - docker-compose.yml
+      - Makefile
+      - go.mod
+      - '!**.md'
+      - '!build/ci/jenkins/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  Build:
+    name: Build and test AMD64 Ubuntu 22.04
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Setup $HOME'
+        # hot fix
+        run: |
+            # Check if $HOME is not set
+            if [ -z "$HOME" ]; then
+                echo '$HOME was no set'
+                echo "HOME=/home/zilliz-user" >> $GITHUB_ENV
+            fi
+            echo "HOME variable is:$HOME"
+            echo "GITHUB_ENV variable is:$GITHUB_ENV"
+      - name: Setup mold
+        uses: rui314/setup-mold@v1
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
+        with:
+          root-reserve-mb: 20480
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: 'Check Changed files'
+        id: changed-files-cpp
+        uses: tj-actions/changed-files@v46
+        with:
+          since_last_remote_commit: 'true'
+          files: |
+            **/*.cpp
+            **/*.cc
+            **/*.c
+            **/*.h
+            **/*.hpp
+            **/*.CMakeLists.txt
+            **/conanfile.*
+      - name: 'Setup Use USE_ASAN'
+        if: steps.changed-files-cpp.outputs.any_changed == 'true'
+        run: |
+          echo "useasan=OFF" >> $GITHUB_ENV
+          echo "Setup USE_ASAN to true since cpp file(s) changed"
+      - name: Download Caches
+        uses: ./.github/actions/cache-restore
+        with:
+          os: 'ubuntu22.04'
+          kind: 'cpp'
+      - name: Build
+        run: |
+          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp && chmod -R a+rwx /home/milvus/.conan"
+      - run: |
+          zip -r code.zip . -x "./.docker/*" -x "./cmake_build/thirdparty/**" -x ".git/**"
+      - name: Archive code
+        uses: actions/upload-artifact@v4
+        with:
+          name: code
+          path: code.zip
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu22.04'
+          kind: 'cpp'
+
+  UT-Cpp:
+    # skip the UT-Cpp job in github workflow, it run in jenkins now see: UT-CPP.groovy
+    if: false 
+    name: UT for Cpp
+    needs: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
+        with:
+          root-reserve-mb: 20480
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+      - name: Download code
+        uses: actions/download-artifact@v4.1.3
+        with:
+          name: code
+      - run: |
+          unzip code.zip
+          rm code.zip
+      - name: Download Caches
+        uses: ./.github/actions/cache-restore
+        with:
+          os: 'ubuntu22.04'
+          kind: 'cpp'
+      - name: Start Service
+        shell: bash
+        run: |
+          docker compose up -d azurite gcpnative
+      - name: UT
+        run: |
+          chmod +x build/builder.sh
+          chmod +x scripts/*
+          chmod +x internal/core/output/unittest/*
+          ./build/builder.sh /bin/bash -c ./scripts/run_cpp_codecov.sh
+      - name: Archive result
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpp-result
+          path: |
+            ./go_coverage.txt
+            ./lcov_output.info
+            *.info
+            *.out
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu22.04'
+          kind: 'cpp'
+  UT-Go:
+    name: UT for Go
+    needs: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
+        with:
+          root-reserve-mb: 20480
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+      - name: Download code
+        uses: actions/download-artifact@v4.1.3
+        with:
+          name: code
+      - run: |
+          unzip code.zip
+          rm code.zip
+      - name: Download Caches
+        uses: ./.github/actions/cache-restore
+        with:
+          os: 'ubuntu22.04'
+          kind: 'go'
+      - name: Start Service
+        shell: bash
+        run: |
+          docker compose up -d pulsar etcd minio azurite gcpnative
+      - name: UT
+        run: |
+          chmod +x build/builder.sh
+          chmod +x scripts/run_go_codecov.sh
+          ./build/builder.sh /bin/bash -c "make codecov-go-without-build"
+      - name: Archive result
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-result
+          path: |
+            ./go_coverage.txt
+            ./lcov_output.info
+            *.info
+            *.out
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu22.04'
+          kind: 'go'
+
+  integration-test:
+    name: Integration Test
+    needs: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
+        with:
+          root-reserve-mb: 20480
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+      - name: Download code
+        uses: actions/download-artifact@v4.1.3
+        with:
+          name: code
+      - run: |
+          unzip code.zip
+          rm code.zip
+      - name: Download Caches
+        uses: ./.github/actions/cache-restore
+        with:
+          os: 'ubuntu22.04'
+          kind: 'go'
+      - name: Start Service
+        shell: bash
+        run: |
+          docker compose up -d pulsar etcd minio
+      - name: IntegrationTest
+        run: |
+          chmod +x build/builder.sh
+          chmod +x scripts/run_intergration_test.sh
+          ./build/builder.sh /bin/bash -c "make build-go && make integration-test" 
+      - name: Archive result
+        uses: actions/upload-artifact@v4
+        with:
+          name: it-result
+          path: |
+            ./it_coverage.txt
+            *.info
+            *.out
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        if: github.event_name != 'pull_request'
+        with:
+          os: 'ubuntu22.04'
+          kind: 'go'
+
+  codecov:
+    name: Upload Code Coverage
+    needs: [UT-Go, integration-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Download Go code coverage results
+        uses: actions/download-artifact@v4.1.3
+        with:
+          name: go-result
+      - name: Download Integration Test coverage results
+        uses: actions/download-artifact@v4.1.3
+        with:
+          name: it-result
+      - name: Display structure of code coverage results
+        run: |
+          ls -lah
+      - name: Upload coverage to Codecov
+        if: ${{ github.repository == 'milvus-io/milvus' }}
+        uses: codecov/codecov-action@v4
+        id: upload_cov
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./go_coverage.txt,./it_coverage.txt
+          name: ubuntu-20.04-unittests
+          fail_ci_if_error: true
+          disable_safe_directory: true
+          verbose: true
+      - name: Retry Upload coverage to Codecov
+        if: ${{ failure()  && github.repository == 'milvus-io/milvus' }}
+        uses: codecov/codecov-action@v4
+        id: retry_upload_cov
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./go_coverage.txt,./it_coverage.txt
+          name: ubuntu-20.04-unittests
+          fail_ci_if_error: true
+          disable_safe_directory: true
+          verbose: true

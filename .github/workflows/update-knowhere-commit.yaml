@@ -1,0 +1,100 @@
+name: Update Knowhere Commit
+
+on:
+  workflow_dispatch:
+  schedule:
+    # * is a special character in YAML so you have to quote this string
+    #         ┌───────────── minute (0 - 59)
+    #         │ ┌───────────── hour (0 - 23)
+    #         │ │  ┌───────────── day of the month (1 - 31)
+    #         │ │  │ ┌───────────── month (1 - 12 or JAN-DEC)
+    #         │ │  │ │ ┌───────────── day of the week (0 - 6 or SUN-SAT)
+    #         │ │  │ │ │
+    #         │ │  │ │ │
+    #         │ │  │ │ │
+    - cron:  '0 15 * * *'
+
+
+jobs:
+  update-knowhere-commits:
+    name: update-knowhere-commit
+    runs-on: ubuntu-latest
+    env:
+      OS_NAME: ubuntu20.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install GitHub CLI
+        run: |
+          sudo apt update
+          sudo apt install -y gh
+      - name: Close Previous PRs
+        run: |
+          REPO=${{ github.repository }}
+
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          # Set up GitHub CLI authentication non-interactively
+          gh auth login --with-token <<< "${{ secrets.ALL_CONTRIBUTORS_TOKEN }}"
+            
+          BRANCH_PREFIX="update_knowhere_commit_"
+            
+          prs=$(gh pr list --repo "$REPO" --state open --json number,headRefName --jq ".[] | select(.headRefName | startswith(\"$BRANCH_PREFIX\")) | .number")
+            
+          for pr in $prs; do
+              echo "Closing old PR #$pr"
+              gh pr close $pr --repo "$REPO"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
+      - name: get knowhere latest commit
+        id: get-knowhere-latest-commit
+        run: | 
+          cd ..
+          rm -fr Knowhere
+          git clone https://github.com/zilliztech/Knowhere.git
+          cd Knowhere
+          export commit=$(git rev-parse --short HEAD)
+          echo $commit
+          echo "::set-output name=knowhere-commit::$commit"
+          cd ../milvus
+      - name: Update Commit Changes
+        continue-on-error: true
+        shell: bash
+        run: |
+          sed -i "0,/(\ KNOWHERE_VERSION/ s#( KNOWHERE_VERSION.*#( KNOWHERE_VERSION ${{ steps.get-knowhere-latest-commit.outputs.knowhere-commit }} )#g" internal/core/thirdparty/knowhere/CMakeLists.txt
+          head -n 17 internal/core/thirdparty/knowhere/CMakeLists.txt
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add internal/core/thirdparty/knowhere/CMakeLists.txt
+          git commit -m "Update knowhere commit"
+      - name: Create Pull Request
+        id: cpr
+        continue-on-error: true
+        uses: peter-evans/create-pull-request@v3
+        with:
+          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
+          author: sre-ci-robot <sre-ci-robot@users.noreply.github.com>
+          signoff: true
+          branch: update_knowhere_commit_${{ github.sha }}
+          delete-branch: true
+          title: '[automated] Update Knowhere Commit'
+          body: |
+            Update Knowhere Commit
+            Signed-off-by: sre-ci-robot sre-ci-robot@users.noreply.github.com
+      - name: Check outputs
+        run: |
+          echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
+          echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"
+      - name: Send Message To Feishu
+        env:
+          ACTIONS_FEISHU_TAG: 'v1.3.1'
+          INPUT_WEBHOOK: "${{ secrets.FEISHU_WEBHOOK_KNOWHERE_COMMIT_BOT }}"
+          INPUT_MESSAGE_TYPE: text
+          INPUT_CONTENT: "Pr url by rebot: ${{ steps.cpr.outputs.pull-request-url }}"
+        run: |
+          wget -q https://github.com/xiachufang/actions-feishu/releases/download/${{ env.ACTIONS_FEISHU_TAG }}/linux-amd64-actions-feishu.tar.gz
+          tar zxf linux-amd64-actions-feishu.tar.gz feishu
+          ./feishu

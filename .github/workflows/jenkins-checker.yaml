@@ -1,0 +1,60 @@
+name: Jenkins Checker
+# Lint Jenkinsfile  and related groovy files
+
+
+on:
+  pull_request:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'build/ci/jenkins/**.groovy'
+      - 'ci/jenkins/**.groovy'
+      - '.github/workflows/jenkins-checker.yaml'
+jobs:
+  check-jenkinsfile:
+    name: Jenkinsfile Checker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Validate Jenkinsfile
+        shell: bash
+        run: |
+          function validate(){
+            local file_path=${1:-Jenkinsfile}
+            local jenkins_url=${2:-"https://jenkins.milvus.io:18080/"}
+       
+            JENKINS_CRUMB=`curl "${jenkins_url}/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,\":\",//crumb)"`
+            response=$(curl --max-time 10 --retry 5 --retry-delay 0 --retry-max-time 40  -X POST -H $JENKINS_CRUMB -F "jenkinsfile=<${file_path}" ${jenkins_url}/pipeline-model-converter/validate)
+            
+            if [[ ${response} =~ "Error"  ]]
+            then
+                echo " ${response}"
+                echo "Validate ${file_path} failed !"
+                
+                exit 1  
+            fi
+          }
+          function validate_path(){
+            local path=${1}
+            local jenkins_url=${2}
+
+            for file in ${path}
+            do
+                if [ -f "$file"  ] 
+                then 
+                    # echo "$file"
+                    file_name=$(basename "$file")
+                    if echo "${file_name}" | grep -q -E '\.groovy$'
+                    then 
+                        # echo "Validate groovy file ${file_name}"
+                        validate $file ${jenkins_url}
+                    elif [[ "${file_name}" == "Jenkinsfile" ]]
+                    then
+                        # echo "Validate Jenkinsfile"
+                        validate $file ${jenkins_url} 
+                    fi
+                fi
+            done
+          }
+          validate_path "ci/jenkins/*" "https://jenkins.milvus.io:18080/"
+    

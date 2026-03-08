@@ -1,0 +1,272 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <string>
+#include <type_traits>
+
+#include "Array.h"
+#include "Types.h"
+#include "common/type_c.h"
+#include "pb/common.pb.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+
+namespace milvus {
+
+#define GET_ELEM_TYPE_FOR_VECTOR_TRAIT                                        \
+    using elem_type = std::conditional_t<                                     \
+        std::is_same_v<TraitType, milvus::EmbListFloatVector>,                \
+        milvus::EmbListFloatVector::embedded_type,                            \
+        std::conditional_t<                                                   \
+            std::is_same_v<TraitType, milvus::EmbListBinaryVector>,           \
+            milvus::EmbListBinaryVector::embedded_type,                       \
+            std::conditional_t<                                               \
+                std::is_same_v<TraitType, milvus::EmbListFloat16Vector>,      \
+                milvus::EmbListFloat16Vector::embedded_type,                  \
+                std::conditional_t<                                           \
+                    std::is_same_v<TraitType, milvus::EmbListBFloat16Vector>, \
+                    milvus::EmbListBFloat16Vector::embedded_type,             \
+                    std::conditional_t<                                       \
+                        std::is_same_v<TraitType, milvus::EmbListInt8Vector>, \
+                        milvus::EmbListInt8Vector::embedded_type,             \
+                        std::conditional_t<                                   \
+                            std::is_same_v<TraitType, milvus::FloatVector>,   \
+                            milvus::FloatVector::embedded_type,               \
+                            std::conditional_t<                               \
+                                std::is_same_v<TraitType,                     \
+                                               milvus::Float16Vector>,        \
+                                milvus::Float16Vector::embedded_type,         \
+                                std::conditional_t<                           \
+                                    std::is_same_v<TraitType,                 \
+                                                   milvus::BFloat16Vector>,   \
+                                    milvus::BFloat16Vector::embedded_type,    \
+                                    std::conditional_t<                       \
+                                        std::is_same_v<TraitType,             \
+                                                       milvus::Int8Vector>,   \
+                                        milvus::Int8Vector::embedded_type,    \
+                                        milvus::BinaryVector::                \
+                                            embedded_type>>>>>>>>>;
+
+#define GET_SCHEMA_DATA_TYPE_FOR_VECTOR_TRAIT               \
+    auto schema_data_type =                                 \
+        std::is_same_v<TraitType, milvus::FloatVector>      \
+            ? milvus::FloatVector::schema_data_type         \
+        : std::is_same_v<TraitType, milvus::Float16Vector>  \
+            ? milvus::Float16Vector::schema_data_type       \
+        : std::is_same_v<TraitType, milvus::BFloat16Vector> \
+            ? milvus::BFloat16Vector::schema_data_type      \
+        : std::is_same_v<TraitType, milvus::Int8Vector>     \
+            ? milvus::Int8Vector::schema_data_type          \
+            : milvus::BinaryVector::schema_data_type;
+
+class VectorTrait {
+ public:
+    static constexpr bool
+    is_embedding_list() {
+        return false;
+    }
+};
+
+class FloatVector : public VectorTrait {
+ public:
+    using embedded_type = float;
+    static constexpr int32_t dim_factor = 1;
+    static constexpr auto data_type = DataType::VECTOR_FLOAT;
+    static constexpr auto c_data_type = CDataType::FloatVector;
+    static constexpr auto schema_data_type =
+        proto::schema::DataType::FloatVector;
+    static constexpr auto vector_type = proto::plan::VectorType::FloatVector;
+    static constexpr auto placeholder_type =
+        proto::common::PlaceholderType::FloatVector;
+};
+
+class BinaryVector : public VectorTrait {
+ public:
+    using embedded_type = uint8_t;
+    static constexpr int32_t dim_factor = 8;
+    static constexpr auto data_type = DataType::VECTOR_BINARY;
+    static constexpr auto c_data_type = CDataType::BinaryVector;
+    static constexpr auto schema_data_type =
+        proto::schema::DataType::BinaryVector;
+    static constexpr auto vector_type = proto::plan::VectorType::BinaryVector;
+    static constexpr auto placeholder_type =
+        proto::common::PlaceholderType::BinaryVector;
+};
+
+class Float16Vector : public VectorTrait {
+ public:
+    using embedded_type = float16;
+    static constexpr int32_t dim_factor = 1;
+    static constexpr auto data_type = DataType::VECTOR_FLOAT16;
+    static constexpr auto c_data_type = CDataType::Float16Vector;
+    static constexpr auto schema_data_type =
+        proto::schema::DataType::Float16Vector;
+    static constexpr auto vector_type = proto::plan::VectorType::Float16Vector;
+    static constexpr auto placeholder_type =
+        proto::common::PlaceholderType::Float16Vector;
+};
+
+class BFloat16Vector : public VectorTrait {
+ public:
+    using embedded_type = bfloat16;
+    static constexpr int32_t dim_factor = 1;
+    static constexpr auto data_type = DataType::VECTOR_BFLOAT16;
+    static constexpr auto c_data_type = CDataType::BFloat16Vector;
+    static constexpr auto schema_data_type =
+        proto::schema::DataType::BFloat16Vector;
+    static constexpr auto vector_type = proto::plan::VectorType::BFloat16Vector;
+    static constexpr auto placeholder_type =
+        proto::common::PlaceholderType::BFloat16Vector;
+};
+
+class SparseFloatVector : public VectorTrait {
+ public:
+    using embedded_type = float;
+    static constexpr int32_t dim_factor = 1;
+    static constexpr auto data_type = DataType::VECTOR_SPARSE_U32_F32;
+    static constexpr auto c_data_type = CDataType::SparseFloatVector;
+    static constexpr auto schema_data_type =
+        proto::schema::DataType::SparseFloatVector;
+    static constexpr auto vector_type =
+        proto::plan::VectorType::SparseFloatVector;
+    static constexpr auto placeholder_type =
+        proto::common::PlaceholderType::SparseFloatVector;
+};
+
+class Int8Vector : public VectorTrait {
+ public:
+    using embedded_type = int8;
+    static constexpr int32_t dim_factor = 1;
+    static constexpr auto data_type = DataType::VECTOR_INT8;
+    static constexpr auto c_data_type = CDataType::Int8Vector;
+    static constexpr auto schema_data_type =
+        proto::schema::DataType::Int8Vector;
+    static constexpr auto vector_type = proto::plan::VectorType::Int8Vector;
+    static constexpr auto placeholder_type =
+        proto::common::PlaceholderType::Int8Vector;
+};
+
+class EmbListFloatVector : public VectorTrait {
+ public:
+    using embedded_type = float;
+    static constexpr int32_t dim_factor = 1;
+    static constexpr auto data_type = DataType::VECTOR_ARRAY;
+    static constexpr auto c_data_type = CDataType::VectorArray;
+    static constexpr auto schema_data_type =
+        proto::schema::DataType::ArrayOfVector;
+    static constexpr auto vector_type =
+        proto::plan::VectorType::EmbListFloatVector;
+    static constexpr auto placeholder_type =
+        proto::common::PlaceholderType::EmbListFloatVector;
+
+    static constexpr bool
+    is_embedding_list() {
+        return true;
+    }
+};
+
+class EmbListBinaryVector : public VectorTrait {
+ public:
+    using embedded_type = uint8_t;
+    static constexpr int32_t dim_factor = 8;
+    static constexpr auto data_type = DataType::VECTOR_ARRAY;
+    static constexpr auto c_data_type = CDataType::VectorArray;
+    static constexpr auto schema_data_type =
+        proto::schema::DataType::ArrayOfVector;
+    static constexpr auto vector_type =
+        proto::plan::VectorType::EmbListBinaryVector;
+    static constexpr auto placeholder_type =
+        proto::common::PlaceholderType::EmbListBinaryVector;
+
+    static constexpr bool
+    is_embedding_list() {
+        return true;
+    }
+};
+
+class EmbListFloat16Vector : public VectorTrait {
+ public:
+    using embedded_type = float16;
+    static constexpr int32_t dim_factor = 1;
+    static constexpr auto data_type = DataType::VECTOR_ARRAY;
+    static constexpr auto c_data_type = CDataType::VectorArray;
+    static constexpr auto schema_data_type =
+        proto::schema::DataType::ArrayOfVector;
+    static constexpr auto vector_type =
+        proto::plan::VectorType::EmbListFloat16Vector;
+    static constexpr auto placeholder_type =
+        proto::common::PlaceholderType::EmbListFloat16Vector;
+
+    static constexpr bool
+    is_embedding_list() {
+        return true;
+    }
+};
+
+class EmbListBFloat16Vector : public VectorTrait {
+ public:
+    using embedded_type = bfloat16;
+    static constexpr int32_t dim_factor = 1;
+    static constexpr auto data_type = DataType::VECTOR_ARRAY;
+    static constexpr auto c_data_type = CDataType::VectorArray;
+    static constexpr auto schema_data_type =
+        proto::schema::DataType::ArrayOfVector;
+    static constexpr auto vector_type =
+        proto::plan::VectorType::EmbListBFloat16Vector;
+    static constexpr auto placeholder_type =
+        proto::common::PlaceholderType::EmbListBFloat16Vector;
+
+    static constexpr bool
+    is_embedding_list() {
+        return true;
+    }
+};
+
+class EmbListInt8Vector : public VectorTrait {
+ public:
+    using embedded_type = int8;
+    static constexpr int32_t dim_factor = 1;
+    static constexpr auto data_type = DataType::VECTOR_ARRAY;
+    static constexpr auto c_data_type = CDataType::VectorArray;
+    static constexpr auto schema_data_type =
+        proto::schema::DataType::ArrayOfVector;
+    static constexpr auto vector_type =
+        proto::plan::VectorType::EmbListInt8Vector;
+    static constexpr auto placeholder_type =
+        proto::common::PlaceholderType::EmbListInt8Vector;
+
+    static constexpr bool
+    is_embedding_list() {
+        return true;
+    }
+};
+
+struct FundamentalTag {};
+struct StringTag {};
+
+template <class T>
+struct TagDispatchTrait {
+    using Tag = FundamentalTag;
+};
+
+template <>
+struct TagDispatchTrait<std::string> {
+    using Tag = StringTag;
+};
+
+}  // namespace milvus

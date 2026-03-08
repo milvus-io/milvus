@@ -1,0 +1,29 @@
+search_performance:
+  collections:
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/sift_10w_128_l2_sq8
+        cache_config.cpu_cache_capacity: 150GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 200
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 6GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      collection_name: sift_10m_128_l2
+      ni_per: 50000
+      index_type: ivf_flat 
+      index_param:
+        nlist: 16384
+
+      run_count: 2
+      top_ks: [1]
+      nqs: [1, 10]
+      search_params:
+        -
+          nprobe: 8

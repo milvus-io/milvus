@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+
+# Licensed to the LF AI & Data foundation under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Exit immediately for non zero status
+set -e
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+ROOT_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+source ${ROOT_DIR}/scripts/setenv.sh
+
+MILVUS_CORE_DIR="${ROOT_DIR}/internal/core"
+MILVUS_CORE_UNITTEST_DIR="${MILVUS_CORE_DIR}/output/unittest"
+
+# Suppress known LeakSanitizer false positives from uninstrumented shared libraries
+LSAN_SUPPRESSIONS="${MILVUS_CORE_DIR}/lsan_suppressions.txt"
+if [ -f "${LSAN_SUPPRESSIONS}" ]; then
+    export LSAN_OPTIONS="suppressions=${LSAN_SUPPRESSIONS}"
+fi
+
+echo "ROOT_DIR = ${ROOT_DIR}"
+echo "MILVUS_CORE_DIR = ${MILVUS_CORE_DIR}"
+echo "MILVUS_CORE_UNITTEST_DIR = ${MILVUS_CORE_UNITTEST_DIR}"
+
+LCOV_CMD="lcov"
+LCOV_GEN_CMD="genhtml"
+
+FILE_INFO_BASE="${ROOT_DIR}/lcov_base.info"
+FILE_INFO_UT="${ROOT_DIR}/lcov_ut.info"
+FILE_INFO_COMBINE="${ROOT_DIR}/lcov_combine.info"
+FILE_INFO_OUTPUT="${ROOT_DIR}/lcov_output.info"
+DIR_LCOV_OUTPUT="${ROOT_DIR}/cpp_coverage"
+DIR_GCNO="${ROOT_DIR}/cmake_build/"
+
+# delete old code coverage info files
+rm -f ${FILE_INFO_BASE}
+rm -f ${FILE_INFO_UT}
+rm -f ${FILE_INFO_COMBINE}
+rm -f ${FILE_INFO_OUTPUT}
+rm -rf ${DIR_LCOV_OUTPUT}
+
+# generate baseline
+${LCOV_CMD} -c -i -d ${DIR_GCNO} -o ${FILE_INFO_BASE}
+if [ $? -ne 0 ]; then
+    echo "Failed to generate coverage baseline"
+    exit -1
+fi
+# starting the timer
+beginTime=$(date +%s)
+
+# run unittest
+for test in $(ls ${MILVUS_CORE_UNITTEST_DIR}); do
+    echo "Running cpp unittest: ${MILVUS_CORE_UNITTEST_DIR}/$test"
+    # run unittest
+    if [ -n "$MILVUS_ENABLE_ASAN_LIB" ]; then
+        echo "ASAN is enabled with env MILVUS_ENABLE_ASAN_LIB, set {$MILVUS_ENABLE_ASAN_LIB} at the front of LD_PRELOAD"
+        # protobuf 5.x RepeatedField triggers ASAN container-overflow false positives during static init
+        # LSAN suppression: __cxa_allocate_exception false positives from uninstrumented shared libs
+        ASAN_OPTIONS="${ASAN_OPTIONS:+${ASAN_OPTIONS}:}detect_container_overflow=0" \
+        LSAN_OPTIONS="${LSAN_OPTIONS:+${LSAN_OPTIONS}:}suppressions=${MILVUS_CORE_DIR}/lsan_suppressions.txt" \
+        LD_PRELOAD="$MILVUS_ENABLE_ASAN_LIB:$LD_PRELOAD" ${MILVUS_CORE_UNITTEST_DIR}/${test}
+    else
+        ${MILVUS_CORE_UNITTEST_DIR}/${test}
+    fi
+    if [ $? -ne 0 ]; then
+        echo ${args}
+        echo "${MILVUS_CORE_UNITTEST_DIR}/${test} run failed"
+        exit -1
+    fi
+done
+
+# generate ut file
+${LCOV_CMD} -c -d ${DIR_GCNO} -o ${FILE_INFO_UT}
+
+# merge baseline and ut file
+${LCOV_CMD} -a ${FILE_INFO_BASE} -a ${FILE_INFO_UT} -o ${FILE_INFO_COMBINE}
+
+# remove unnecessary info
+${LCOV_CMD} -r "${FILE_INFO_COMBINE}" -o "${FILE_INFO_OUTPUT}" \
+    "/usr/*" \
+    "*/llvm/*" \
+    "*/src/pb/*" \
+    "*/src/core/bench/*" \
+    "*/unittest/*" \
+    "*/thirdparty/*" \
+    "*/3rdparty_download/*" \
+    "*/.conan/data/*"
+
+# generate html report
+${LCOV_GEN_CMD} ${FILE_INFO_OUTPUT} --output-directory ${DIR_LCOV_OUTPUT}/
+echo "Generate cpp code coverage report to ${DIR_LCOV_OUTPUT}"
+
+endTime=$(date +%s)
+
+echo "Total time for cpp unittest:" $(($endTime - $beginTime)) "s"

@@ -1,0 +1,646 @@
+# ==============================================================================
+# Mergify Configuration for Milvus Project
+# This file defines automated rules for pull request management
+# ==============================================================================
+
+# ==============================================================================
+# GLOBAL CONFIGURATIONS AND ALIASES
+# Define reusable conditions and patterns for better maintainability
+# ==============================================================================
+misc:
+  # File pattern matchers
+  - &source_code_files files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+  - &no_source_code_files -files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+  - &only_go_unittest_files -files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
+  - &morethan_go_unittest_files files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
+  
+  # Build and test status conditions
+  - when_build_and_test_status_successs: &Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
+      - 'status-success=Build and test AMD64 Ubuntu 20.04'
+      - 'status-success=Build and test AMD64 Ubuntu 22.04'
+  - when_build_and_test_status_failed: &Build_AND_TEST_STATUS_FAILED_ON_UBUNTU_20_OR_UBUNTU_22
+      - &failed_on_ubuntu_20 'check-failure=Build and test AMD64 Ubuntu 20.04'
+      - &failed_on_ubuntu_22 'check-failure=Build and test AMD64 Ubuntu 22.04'
+  - when_go_sdk_status_success: &WHEN_GO_SDK_STATUS_SUCCESS
+      - 'status-success=go-sdk'
+      - 'status-success=milvus-sdk-go'
+      - 'status-success=ci-v2/go-sdk'
+  - when_cpp_unit_test_success: &WHEN_CPP_UNIT_TEST_SUCCESS
+      - 'status-success=cpp-unit-test'
+      - 'status-success=UT for Cpp'
+      - 'status-success=ci-v2/ut-cpp'
+  - when_go_unit_test_success: &WHEN_GO_UNIT_TEST_SUCCESS
+      - 'status-success=go-unit-test'
+      - 'status-success=UT for Go'
+      - 'status-success=ci-v2/ut-go'
+  - when_integration_unit_test_success: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+      - 'status-success=integration-test'
+      - 'status-success=Integration Test'
+      - 'status-success=ci-v2/integration-test'
+  - when_e2e_test_success: &WHEN_E2E_TEST_SUCCESS
+      - 'status-success=cpu-e2e'
+      - 'status-success=ci-v2/e2e-default'
+  - when_build_success: &WHEN_BUILD_SUCCESS
+      - 'status-success=Build and test AMD64 Ubuntu 22.04'
+      - 'status-success=ci-v2/build'
+  - when_code_check_ubuntu_success: &WHEN_CODE_CHECK_UBUNTU_SUCCESS
+      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - 'status-success=ci-v2/code-check'
+  - when_code_check_macos_success: &WHEN_CODE_CHECK_MACOS_SUCCESS
+      - 'status-success=Code Checker MacOS 13'
+      - 'status-success=Code Checker MacOS'
+  
+  # Branch configurations
+  - branch: &BRANCHES
+      - &MASTER_BRANCH base=master
+      - &2X_BRANCH base~=^2(\.\d+){1,2}$
+
+# ==============================================================================
+# PULL REQUEST RULES
+# Organized by functionality for better maintenance and understanding
+# ==============================================================================
+pull_request_rules:
+  
+  # ==========================================================================
+  # DCO (Developer Certificate of Origin) MANAGEMENT
+  # Handles DCO compliance for all contributions
+  # ==========================================================================
+  
+  - name: Add needs-dco label when DCO check failed
+    conditions:
+      - or: *BRANCHES
+      - -status-success=DCO
+    actions:
+      label:
+        remove:
+          - dco-passed
+        add:
+          - needs-dco
+      comment:
+        message: |
+          @{{author}} Thanks for your contribution. Please submit with DCO, see the contributing guide https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md#developer-certificate-of-origin-dco.
+
+  - name: Add dco-passed label when DCO check passed
+    conditions:
+      - or: *BRANCHES
+      - status-success=DCO
+    actions:
+      label:
+        remove:
+          - needs-dco
+        add:
+          - dco-passed
+
+  # ==========================================================================
+  # CONTINUOUS INTEGRATION (CI) STATUS MANAGEMENT
+  # Rules for managing CI test results and labeling PRs accordingly
+  # ==========================================================================
+  
+  - name: Test passed for code changed on master 
+    conditions:
+      - *MASTER_BRANCH
+      - or: *WHEN_BUILD_SUCCESS
+      - or: *WHEN_GO_SDK_STATUS_SUCCESS
+      - or: *WHEN_CPP_UNIT_TEST_SUCCESS
+      - or: *WHEN_GO_UNIT_TEST_SUCCESS
+      - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+      - or: *WHEN_E2E_TEST_SUCCESS
+      - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
+      # - 'status-success=codecov/patch'
+      # - 'status-success=codecov/project'
+    actions:
+      label:
+        add:
+          - ci-passed
+          
+  - name: Test passed for code changed on 2.* branch
+    conditions:
+      - *2X_BRANCH
+      - or: *WHEN_BUILD_SUCCESS
+      # 2.* skip WHEN_GO_SDK_STATUS_SUCCESS
+      - or: *WHEN_CPP_UNIT_TEST_SUCCESS
+      - or: *WHEN_GO_UNIT_TEST_SUCCESS
+      - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+      - or: *WHEN_E2E_TEST_SUCCESS
+      - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
+      # - 'status-success=codecov/patch'
+      # - 'status-success=codecov/project'
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  # Special cases for minimal testing requirements
+  - name: Test passed for tests changed
+    conditions:
+      - or: *BRANCHES
+      - -files~=^(?!tests\/python_client).+
+      - or: *WHEN_E2E_TEST_SUCCESS
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  - name: Test passed for docs changed only
+    conditions:
+      - or: *BRANCHES
+      - -files~=^(?!.*\.(md)).*$
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  - name: Test passed for non rust go or c++ code changed
+    conditions:
+      - or: *BRANCHES
+      - or: *WHEN_E2E_TEST_SUCCESS
+      - *no_source_code_files
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  - name: Test passed for go unittest code changed-master
+    conditions:
+      - or: *BRANCHES
+      - *only_go_unittest_files
+      - or: *WHEN_BUILD_SUCCESS
+      - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
+      - or: *WHEN_GO_UNIT_TEST_SUCCESS
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  - name: Test passed for mergify changed
+    conditions:
+      - or: *BRANCHES
+      - -files~=^(?!\.github\/mergify\.yml).*$
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  # Skip E2E testing rules
+  - name: Test passed for title skip e2e when no source code changed
+    conditions:
+      - or: *BRANCHES
+      - title~=\[skip e2e\]
+      - label=kind/enhancement
+      - *no_source_code_files
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  - name: Test passed for skip e2e when source code changed
+    conditions:
+      - or: *BRANCHES
+      - or: *WHEN_BUILD_SUCCESS
+      - title~=\[skip e2e\]
+      - or: *WHEN_CPP_UNIT_TEST_SUCCESS
+      - or: *WHEN_GO_UNIT_TEST_SUCCESS
+      - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+      - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
+      - *source_code_files
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  # ==========================================================================
+  # CI FAILURE HANDLING
+  # Remove ci-passed labels when tests fail
+  # ==========================================================================
+
+  - name: Remove ci-passed when E2E test not success for tests changed
+    conditions:
+      - or: *BRANCHES
+      - -files~=^(?!tests\/python_client).+
+      - label!=manual-pass
+      - label=ci-passed
+      - not:
+          or:
+            - status-success=cpu-e2e
+            - status-success=ci-v2/e2e-default
+    actions:
+      label:
+        remove:
+          - ci-passed
+
+  # ==========================================================================
+  # CONSOLIDATED MIGRATION FAILURE HANDLING
+  # Handle failure scenarios during CI system migration with optimized rules
+  # ==========================================================================
+
+  - name: Remove ci-passed when any CI system fails during migration
+    conditions:
+      - or:
+        - *MASTER_BRANCH
+        - *2X_BRANCH
+      - label!=manual-pass
+      - *source_code_files
+      # Comprehensive failure logic: remove ci-passed when any required system fails
+      - or:
+        # Build systems: remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = Build and test AMD64 Ubuntu 22.04
+                  - status-success = ci-v2/build
+            - or:
+                - status-failure = Build and test AMD64 Ubuntu 22.04
+                - status-failure = ci-v2/build
+        # Go unit tests: remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = UT for Go
+                  - status-success = ci-v2/ut-go
+            - or:
+                - status-failure = UT for Go
+                - status-failure = ci-v2/ut-go
+        # Integration tests: remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = Integration Test
+                  - status-success = ci-v2/integration-test
+            - or:
+                - status-failure = Integration Test
+                - status-failure = ci-v2/integration-test
+        # Cpp unit tests: remove if no success AND has failure (only when cpp files changed)
+        - and:
+          - *morethan_go_unittest_files
+          - not:
+              or:
+                - status-success = cpp-unit-test
+                - status-success = ci-v2/ut-cpp
+          - or:
+              - status-failure = cpp-unit-test
+              - status-failure = ci-v2/ut-cpp
+        # Code checker Ubuntu: remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = Code Checker AMD64 Ubuntu 22.04
+                  - status-success = ci-v2/code-check
+            - or:
+                - status-failure = Code Checker AMD64 Ubuntu 22.04
+                - status-failure = ci-v2/code-check
+        # Code checker MacOS: remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = Code Checker MacOS 13
+                  - status-success = Code Checker MacOS
+            - or:
+                - status-failure = Code Checker MacOS 13
+                - status-failure = Code Checker MacOS
+        # E2E tests: regular case - remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = cpu-e2e
+                  - status-success = ci-v2/e2e-default
+            - or:
+                - status-failure = cpu-e2e
+                - status-failure = ci-v2/e2e-default
+        # E2E tests: required case - remove if no success AND has failure (when not skipped)
+        - and:
+          - -title~=\[skip e2e\]
+          - files~=^(?!(.*_test\.go|.*\.md|\.github\/mergify\.yml)).*$
+          - not:
+              or:
+                - status-success = cpu-e2e
+                - status-success = ci-v2/e2e-default
+          - or:
+              - status-failure = cpu-e2e
+              - status-failure = ci-v2/e2e-default
+    actions:
+      label:
+        remove:
+          - ci-passed
+
+  # ==========================================================================
+  # PR VALIDATION AND BLOCKING RULES
+  # Ensure PRs meet project standards before merging
+  # ==========================================================================
+
+  - name: Blocking PR if missing a related issue or doesn't have kind/enhancement label
+    conditions:
+      - or: *BRANCHES
+      - and:
+          - -body~=\#[0-9]{1,6}(\s+|$)
+          - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
+      - or:
+        - and:
+          - label=kind/enhancement
+          - or:
+            - label=size/L
+            - label=size/XL
+            - label=size/XXL
+        - label=kind/bug
+        - label=kind/feature
+      - -label=kind/doc
+      - -label=kind/test
+      - -title~=\[automated\]
+    actions:
+      label:
+        add:
+          - do-not-merge/missing-related-issue
+      comment:
+        message: |
+          @{{author}} Please associate the related issue to the body of your Pull Request.  (eg. "issue: #<xyz>")
+
+  - name: Dismiss block label if related issue be added into PR
+    conditions:
+      - and:
+          - or: *BRANCHES
+          - or:
+              - body~=\#[0-9]{1,6}(\s+|$)
+              - body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-related-issue
+
+  - name: Blocking PR if missing a related master PR or doesn't have kind/branch-feature label
+    conditions:
+      - *2X_BRANCH
+      - and:
+          - -body~=pr\:\ \#[0-9]{1,6}(\s+|$)
+          - -body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
+      - -label=kind/branch-feature
+      - -title~=\[automated\]
+    actions:
+      label:
+        add:
+          - do-not-merge/missing-related-pr
+      comment:
+        message: |
+          @{{author}} Please associate the related pr of master to the body of your Pull Request.  (eg. "pr: #<xyz>")
+
+  - name: Dismiss block label if related pr be added into PR
+    conditions:
+      - *2X_BRANCH
+      - or:
+          - body~=pr\:\ \#[0-9]{1,6}(\s+|$)
+          - body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
+          - label=kind/branch-feature
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-related-pr
+
+  - name: Dismiss block label if automated create PR
+    conditions:
+      - or: *BRANCHES
+      - title~=\[automated\]
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-related-issue
+          - do-not-merge/missing-related-pr
+          - do-not-merge/missing-design-doc
+
+  - name: Blocking PR if feat PR missing design doc
+    conditions:
+      - or: *BRANCHES
+      - or:
+          - 'title~=^feat:'
+          - label=kind/feature
+      - -title~=\[automated\]
+      # PR body does not contain design doc link
+      - -body~=https://github.com/milvus-io/milvus-design-docs/(blob|tree)/[^/]+/design_docs/
+    actions:
+      label:
+        add:
+          - do-not-merge/missing-design-doc
+      comment:
+        message: |
+          @{{author}} This is a feature PR (`feat:`). Please provide a design document.
+
+          **How to resolve:**
+          Link a design doc in the PR description:
+          ```
+          design doc: https://github.com/milvus-io/milvus-design-docs/blob/main/design_docs/your_design.md
+          ```
+
+          Design documents location: https://github.com/milvus-io/milvus-design-docs/tree/main/design_docs
+
+  - name: Dismiss block label if design doc is provided
+    conditions:
+      - or: *BRANCHES
+      - label=do-not-merge/missing-design-doc
+      - body~=https://github.com/milvus-io/milvus-design-docs/(blob|tree)/[^/]+/design_docs/
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-design-doc
+
+  # ==========================================================================
+  # PR FORMAT VALIDATION
+  # Enforce consistent PR title and description formats
+  # ==========================================================================
+
+  - name: Add 'do-not-merge/invalid-pr-format' label for invalid PR titles
+    conditions:
+      - or: *BRANCHES
+      - or:
+        - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:|build\(deps\):|\[automated\])'
+        - body=^$
+    actions:
+      label:
+        add:
+          - do-not-merge/invalid-pr-format
+      comment:
+        message: |
+          @{{author}} 
+
+          **Invalid PR Title Format Detected**
+
+          Your PR submission does not adhere to our required standards. To ensure clarity and consistency, please meet the following criteria:
+
+          1. **Title Format:** The PR title must begin with one of these prefixes:
+            - `feat:` for introducing a new feature.
+            - `fix:` for bug fixes.
+            - `enhance:` for improvements to existing functionality.
+            - `test`: for add tests to existing functionality.
+            - `doc`: for modifying documentation.
+            - `auto`: for the pull request from bot.
+            - `build(deps)`: for dependency updates from Dependabot.
+
+          2. **Description Requirement:** The PR must include a non-empty description, detailing the changes and their impact.
+
+          **Required Title Structure:**
+
+          ```
+          [Type]: [Description of the PR]
+          ```
+
+          Where `Type` is one of `feat`, `fix`, `enhance`, `test` or `doc`. 
+
+          **Example:**
+          ```
+          enhance: improve search performance significantly 
+          ```
+
+          Please review and update your PR to comply with these guidelines.
+
+  - name: Remove 'do-not-merge/invalid-pr-format' label for valid PRs
+    conditions:
+      - or: *BRANCHES
+      - 'title~=^(feat:|enhance:|fix:|test:|doc:|auto:|build\(deps\):|\[automated\])'
+      - '-body=^$'
+      - 'label=do-not-merge/invalid-pr-format'
+    actions:
+      label:
+        remove:
+          - do-not-merge/invalid-pr-format
+
+
+
+  # ==========================================================================
+  # FAILURE NOTIFICATION AND RETRY HELPERS
+  # Provide helpful comments when CI jobs fail with retry instructions
+  # ==========================================================================
+
+  - name: Add comment when cpu-e2e job failed
+    conditions:
+      - or: *BRANCHES
+      - 'check-failure=cpu-e2e'
+    actions:
+      comment:
+        message: |
+          @{{author}} cpu-e2e job failed, comment `/run-cpu-e2e` can trigger the job again.
+
+  - name: Add comment when go-sdk check failed
+    conditions:
+      - or: *BRANCHES
+      - 'check-failure=go-sdk'
+    actions:
+      comment:
+        message: |
+          @{{author}} go-sdk check failed, comment `rerun go-sdk` can trigger the job again.
+
+  - name: Add comment when cpp-unit-test check failed
+    conditions:
+      - or: *BRANCHES
+      - 'check-failure=cpp-unit-test'
+    actions:
+      comment:
+        message: |
+          @{{author}} cpp-unit-test check failed, comment `rerun cpp-unit-test` can trigger the job again.
+
+  - name: Add comment when go-unit-test check failed
+    conditions:
+      - or: *BRANCHES
+      - 'check-failure=go-unit-test'
+    actions:
+      comment:
+        message: |
+          @{{author}} go-unit-test check failed, comment `rerun go-unit-test` can trigger the job again.
+
+  - name: Add comment when integration-test check failed
+    conditions:
+      - or: *BRANCHES
+      - 'check-failure=integration-test'
+    actions:
+      comment:
+        message: |
+          @{{author}} integration-test check failed, comment `rerun integration-test` can trigger the job again.
+
+  - name: Add comment when code checker or ut failed -master
+    conditions:
+      - or: *BRANCHES
+      - or:
+          # - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
+          - 'check-failure=Build and test AMD64 Ubuntu 20.04'
+    actions:
+      comment:
+        message: |
+          @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
+
+  - name: Add comment when code checker or ut failed -2.2.*
+    conditions:
+      - *2X_BRANCH
+      - or:
+          # - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
+          - 'check-failure=Build and test AMD64 Ubuntu 20.04'
+    actions:
+      comment:
+        message: |
+          @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
+
+  # ==========================================================================
+  # AUTOMATIC LABELING BASED ON PR TITLES
+  # Automatically categorize PRs based on their title prefixes
+  # ==========================================================================
+
+  - name: Label bug fix PRs
+    conditions:
+      - or: *BRANCHES
+      - 'title~=^fix:'
+    actions:
+      label:
+        add:
+          - kind/bug
+
+  - name: Label feature PRs
+    conditions:
+      - or: *BRANCHES
+      - 'title~=^feat:'
+    actions:
+      label:
+        add:
+          - kind/feature
+
+  - name: Label enhancement PRs
+    conditions:
+      - or: *BRANCHES
+      - 'title~=^enhance:'
+    actions:
+      label:
+        add:
+          - kind/enhancement
+
+  - name: Label test PRs
+    conditions:
+      - or: *BRANCHES
+      - 'title~=^test:'
+    actions:
+      label:
+        add:
+          - kind/test
+
+  - name: Label doc PRs
+    conditions:
+      - or: *BRANCHES
+      - 'title~=^doc:'
+    actions:
+      label:
+        add:
+          - kind/doc
+
+  # ==========================================================================
+  # SPECIAL AUTOMATION RULES
+  # Handle specific automated workflows and updates
+  # ==========================================================================
+
+  - name: Assign the 'lgtm' and 'approved' labels following the successful testing of the 'Update Knowhere Commit'
+    conditions:
+      - or: *BRANCHES
+      - 'title~=Update Knowhere Commit'
+      - label=ci-passed
+    actions:
+      label:
+        add:
+          - lgtm
+          - approved
+
+        

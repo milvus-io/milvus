@@ -1,0 +1,67 @@
+search_performance:
+  collections:
+    # - 
+    #   server:
+    #     db_config.primary_path: /test/milvus/db_data_7/sub_50m_512_512_sub_wal
+    #     cache_config.cpu_cache_capacity: 32
+    #     engine_config.use_blas_threshold: 1100
+    #     engine_config.gpu_search_threshold: 1
+    #     gpu_resource_config.enable: false
+    #     gpu_resource_config.cache_capacity: 4
+    #     gpu_resource_config.search_resources:
+    #       - gpu0
+    #     gpu_resource_config.build_index_resources:
+    #       - gpu0
+    #   collection_name: sub_50m_512_512_sub
+    #   run_count: 2
+    #   top_ks: [1, 10, 100, 1000]
+    #   nqs: [1, 10, 100, 200, 500, 1000]
+    #   search_params:
+    #     -
+    #       nprobe: 8
+    #     -
+    #       nprobe: 32
+
+    # -
+    #   server:
+    #     db_config.primary_path: /test/milvus/db_data_7/super_50m_512_512_super_wal
+    #     cache_config.cpu_cache_capacity: 32
+    #     engine_config.use_blas_threshold: 1100
+    #     engine_config.gpu_search_threshold: 1
+    #     gpu_resource_config.enable: false
+    #     gpu_resource_config.cache_capacity: 4
+    #     gpu_resource_config.search_resources:
+    #       - gpu0
+    #     gpu_resource_config.build_index_resources:
+    #       - gpu0
+    #   collection_name: super_50m_512_512_super
+    #   run_count: 2
+    #   top_ks: [1, 10, 100, 1000]
+    #   nqs: [1, 10, 100, 200, 500, 1000]
+    #   search_params:
+    #     -
+    #       nprobe: 8
+    #     -
+    #       nprobe: 32
+
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_7/jaccard_50m_512_512_jaccard_wal
+        cache_config.cpu_cache_capacity: 32
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: false
+        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.search_resources:
+          - gpu0
+        gpu_resource_config.build_index_resources:
+          - gpu0
+      collection_name: jaccard_50m_512_512_jaccard
+      run_count: 2
+      top_ks: [1, 10, 100, 1000]
+      nqs: [1, 10, 100, 200, 500, 1000]
+      search_params:
+        -
+          nprobe: 8
+        -
+          nprobe: 32

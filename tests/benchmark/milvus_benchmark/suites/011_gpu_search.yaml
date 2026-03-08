@@ -1,0 +1,251 @@
+search_performance:
+  collections:
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/sift_50m_128_l2
+        cache_config.cpu_cache_capacity: 32GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 100
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 6GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      collection_name: sift_50m_128_l2
+      run_count: 2
+      top_ks: [1, 10, 100, 1000]
+      nqs: [1, 10, 100, 1000, 1200]
+      search_params:
+        -
+          nprobe: 8
+        -
+          nprobe: 32
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/sift_50m_128_l2_ivf_flat
+        cache_config.cpu_cache_capacity: 32GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 100
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 6GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      collection_name: sift_50m_128_l2
+      run_count: 2
+      top_ks: [1, 10, 100, 1000]
+      nqs: [1, 10, 100, 1000, 1200]
+      search_params:
+        -
+          nprobe: 8
+        -
+          nprobe: 32
+
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/sift_50m_128_l2_sq8
+        cache_config.cpu_cache_capacity: 32GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 100
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 6GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      collection_name: sift_50m_128_l2
+      run_count: 2
+      top_ks: [1, 10, 100, 1000]
+      nqs: [1, 10, 100, 1000, 1200]
+      search_params:
+        -
+          nprobe: 8
+        -
+          nprobe: 32
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/sift_50m_128_l2_sq8h
+        cache_config.cpu_cache_capacity: 32GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 100
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 6GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      collection_name: sift_50m_128_l2
+      run_count: 2
+      top_ks: [1, 10, 100, 1000]
+      nqs: [1, 10, 100, 1000, 1200]
+      search_params:
+        -
+          nprobe: 8
+        -
+          nprobe: 32
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/sift_50m_128_l2_pq
+        cache_config.cpu_cache_capacity: 32GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 100
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 6GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      collection_name: sift_50m_128_l2
+      run_count: 2
+      top_ks: [1, 10, 100, 1000]
+      nqs: [1, 10, 100, 1000, 1200]
+      search_params:
+        -
+          nprobe: 8
+        -
+          nprobe: 32
+
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/sift_10m_128_l2_hnsw
+        cache_config.cpu_cache_capacity: 16GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 100
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 4GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      collection_name: sift_10m_128_l2
+      run_count: 2
+      top_ks: [100]
+      nqs: [1, 10, 100, 200, 500, 1000]
+      search_params:
+        -
+          ef: 100
+        -
+          ef: 200
+        -
+          ef: 500
+        -
+          ef: 1000
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/sift_10m_100000_128_l2_annoy
+        cache_config.cpu_cache_capacity: 16GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 100
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 4GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      collection_name: sift_10m_100000_128_l2
+      run_count: 2
+      top_ks: [1, 10, 100]
+      nqs: [1, 10, 100, 200, 500, 1000]
+      search_params:
+        -
+         search_k: 100
+        -
+         search_k: 500
+        -
+         search_k: 1000
+
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/sift_10m_100000_128_l2_nsg
+        cache_config.cpu_cache_capacity: 16GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 100
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 4GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      collection_name: sift_10m_100000_128_l2
+      run_count: 2
+      top_ks: [1, 10, 100, 1000]
+      nqs: [1, 10, 100, 200, 500, 1000]
+      search_params:
+        -
+         search_length: 50
+
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/sift_1b_128_l2_sq8h
+        cache_config.cpu_cache_capacity: 150GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 200
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 6GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      collection_name: sift_1b_128_l2
+      run_count: 2
+      top_ks: [1, 10, 100, 1000]
+      nqs: [1, 10, 100, 1000, 1200]
+      search_params:
+        -
+          nprobe: 8
+        -
+          nprobe: 32
+
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/sift_1b_128_l2_sq8
+        cache_config.cpu_cache_capacity: 150GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 200
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 6GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      collection_name: sift_1b_128_l2
+      run_count: 2
+      top_ks: [1, 10, 100, 1000]
+      nqs: [1, 10, 100, 1000, 1200]
+      search_params:
+        -
+          nprobe: 8
+        -
+          nprobe: 32

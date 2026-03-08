@@ -1,0 +1,23 @@
+locust_insert_performance:
+  collections:
+    - 
+      server:
+        cache_config.cpu_cache_capacity: 8GB
+        cache_config.insert_buffer_size: 2GB
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 4GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      task: 
+        type: insert
+        connection_num: 1
+        clients_num: 10
+        hatch_rate: 5
+        during_time: 2m

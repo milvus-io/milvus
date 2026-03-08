@@ -1,0 +1,13 @@
+reviewers:
+  - wayblink
+  - jiaoew1991
+  - congqixia
+
+approvers:
+  - maintainers
+
+labels:
+- area/test
+- sig/testing
+- test/integration
+

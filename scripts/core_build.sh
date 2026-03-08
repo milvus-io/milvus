@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+
+# Licensed to the LF AI & Data foundation under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Compile jobs variable; Usage: $ jobs=12 ./core_build.sh ...
+if [[ ! ${jobs+1} ]]; then
+    if command -v nproc &> /dev/null
+    # For linux
+    then
+        jobs=$(nproc)
+    elif command -v sysctl &> /dev/null
+    # For macOS
+    then
+        jobs=$(sysctl -n hw.logicalcpu)
+    else
+        jobs=4
+    fi
+fi
+
+function get_cpu_arch {
+  local CPU_ARCH=$1
+
+  local OS
+  OS=$(uname)
+  local MACHINE
+  MACHINE=$(uname -m)
+  ADDITIONAL_FLAGS=""
+
+  if [ -z "$CPU_ARCH" ]; then
+
+    if [ "$OS" = "Darwin" ]; then
+
+      if [ "$MACHINE" = "x86_64" ]; then
+        local CPU_CAPABILITIES
+        CPU_CAPABILITIES=$(sysctl -a | grep machdep.cpu.features | awk '{print tolower($0)}')
+
+        if [[ $CPU_CAPABILITIES =~ "avx" ]]; then
+          CPU_ARCH="avx"
+        else
+          CPU_ARCH="sse"
+        fi
+
+      elif [[ $(sysctl -a | grep machdep.cpu.brand_string) =~ "Apple" ]]; then
+        # Apple silicon.
+        CPU_ARCH="arm64"
+      fi
+
+    else [ "$OS" = "Linux" ];
+
+      local CPU_CAPABILITIES
+      CPU_CAPABILITIES=$(cat /proc/cpuinfo | grep flags | head -n 1| awk '{print tolower($0)}')
+
+      if [[ "$CPU_CAPABILITIES" =~ "avx" ]]; then
+            CPU_ARCH="avx"
+      elif [[ "$CPU_CAPABILITIES" =~ "sse" ]]; then
+            CPU_ARCH="sse"
+      elif [ "$MACHINE" = "aarch64" ]; then
+            CPU_ARCH="aarch64"
+      fi
+    fi
+  fi
+  echo -n $CPU_ARCH
+}
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
+
+CPP_SRC_DIR="${ROOT_DIR}/internal/core"
+
+BUILD_OUTPUT_DIR="${ROOT_DIR}/cmake_build"
+BUILD_TYPE="Release"
+BUILD_UNITTEST="OFF"
+INSTALL_PREFIX="${CPP_SRC_DIR}/output"
+BUILD_COVERAGE="OFF"
+RUN_CPPLINT="OFF"
+CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+GPU_VERSION="OFF" #defaults to CPU version
+CUDA_ARCH="DEFAULT"
+EMBEDDED_MILVUS="OFF"
+BUILD_DISK_ANN="OFF"
+USE_ASAN="OFF"
+USE_DYNAMIC_SIMD="ON"
+USE_OPENDAL="OFF"
+TANTIVY_FEATURES=""
+INDEX_ENGINE="KNOWHERE"
+ENABLE_AZURE_FS="ON"
+: "${ENABLE_GCP_NATIVE:="OFF"}"
+
+while getopts "p:t:s:n:a:y:x:o:f:ulcgbZh" arg; do
+  case $arg in
+  p)
+    INSTALL_PREFIX=$OPTARG
+    ;;
+  t)
+    BUILD_TYPE=$OPTARG # BUILD_TYPE
+    ;;
+  u)
+    echo "Build and run unittest cases"
+    BUILD_UNITTEST="ON"
+    ;;
+  l)
+    RUN_CPPLINT="ON"
+    ;;
+  c)
+    BUILD_COVERAGE="ON"
+    ;;
+  g)
+    GPU_VERSION="ON"
+    ;;
+  s)
+    CUDA_ARCH=$OPTARG
+    ;;
+  b)
+    EMBEDDED_MILVUS="ON"
+    ;;
+  n)
+    BUILD_DISK_ANN=$OPTARG
+    ;;
+  a)
+    ENV_VAL=$OPTARG
+    if [[ ${ENV_VAL} == 'ON' ]]; then
+        echo "Set USE_ASAN to ON"
+        USE_ASAN="ON"
+    fi
+    ;;
+  y)
+    USE_DYNAMIC_SIMD=$OPTARG
+    ;;
+  x)
+    INDEX_ENGINE=$OPTARG
+    ;;
+  o)
+    USE_OPENDAL=$OPTARG
+    ;;
+  f)
+    TANTIVY_FEATURES=$OPTARG
+    ;;
+  h) # help
+    echo "
+
+parameter:
+-p: install prefix(default: $(pwd)/milvus)
+-d: db data path(default: /tmp/milvus)
+-t: build type(default: Debug)
+-u: building unit test options(default: OFF)
+-l: run cpplint, clang-format and clang-tidy(default: OFF)
+-c: code coverage(default: OFF)
+-g: build GPU version(default: OFF)
+-e: build without prometheus(default: OFF)
+-s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61;-gencode=compute_75,code=sm_75'
+-b: build embedded milvus(default: OFF)
+-a: build milvus with AddressSanitizer(default: false)
+-Z: build milvus without azure-sdk-for-cpp, so cannot use azure blob
+-o: build milvus with opendal(default: false)
+-f: build milvus with tantivy features(default: '')
+-h: help
+
+usage:
+./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f \${TANTIVY_FEATURES} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h] [-b] [-o]
+                "
+    exit 0
+    ;;
+  ?)
+    echo "ERROR! unknown argument"
+    exit 1
+    ;;
+  esac
+done
+
+# Azure SDK build has been removed as we now use Arrow with Azure support directly
+
+if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
+  mkdir ${BUILD_OUTPUT_DIR}
+fi
+source ${ROOT_DIR}/scripts/setenv.sh
+
+# Use Ninja if available for faster builds, fallback to Unix Makefiles
+if command -v ninja &> /dev/null; then
+    CMAKE_GENERATOR="Ninja"
+    # If ninja is available but build dir has Makefile (not build.ninja), clean it
+    if [[ -f "${BUILD_OUTPUT_DIR}/Makefile" && ! -f "${BUILD_OUTPUT_DIR}/build.ninja" ]]; then
+        echo "Detected Makefile build but ninja is available, cleaning build directory..."
+        rm -rf "${BUILD_OUTPUT_DIR}"
+        mkdir -p "${BUILD_OUTPUT_DIR}"
+    fi
+else
+    CMAKE_GENERATOR="Unix Makefiles"
+fi
+
+# build with diskann index if OS is ubuntu or rocky or amzn
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS=$ID
+fi
+if [ "$OS" = "ubuntu" ] || [ "$OS" = "rocky" ] || [ "$OS" = "amzn" ]; then
+  BUILD_DISK_ANN=ON
+fi
+
+pushd ${BUILD_OUTPUT_DIR}
+
+# Remove make cache since build.sh -l use default variables
+# Force update the variables each time
+make rebuild_cache >/dev/null 2>&1
+
+CPU_ARCH=$(get_cpu_arch $CPU_TARGET)
+
+# In case any 3rdparty (e.g. libavrocpp) requires a minimum version of CMake lower than 3.5
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
+
+arch=$(uname -m)
+CMAKE_CMD="cmake \
+${CMAKE_EXTRA_ARGS} \
+-DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
+-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX} \
+-DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+-DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
+-DCMAKE_LIBRARY_ARCHITECTURE=${arch} \
+-DBUILD_COVERAGE=${BUILD_COVERAGE} \
+-DMILVUS_GPU_VERSION=${GPU_VERSION} \
+-DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
+-DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
+-DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
+-DUSE_ASAN=${USE_ASAN} \
+-DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
+-DCPU_ARCH=${CPU_ARCH} \
+-DUSE_OPENDAL=${USE_OPENDAL} \
+-DINDEX_ENGINE=${INDEX_ENGINE} \
+-DTANTIVY_FEATURES_LIST=${TANTIVY_FEATURES} \
+-DENABLE_GCP_NATIVE=${ENABLE_GCP_NATIVE} \
+-DENABLE_AZURE_FS=${ENABLE_AZURE_FS} "
+# Azure build variables removed as we now use Arrow with Azure support directly
+CMAKE_CMD=${CMAKE_CMD}"${CPP_SRC_DIR}"
+
+echo "CC $CC"
+echo ${CMAKE_CMD}
+${CMAKE_CMD} -G "${CMAKE_GENERATOR}"
+
+# Export PROTOC for Rust crates (e.g. lance-encoding) that need it at build time
+if [ -z "$PROTOC" ]; then
+  _PROTOC=$(grep -m1 "^Protobuf_PROTOC_EXECUTABLE" CMakeCache.txt 2>/dev/null | cut -d= -f2-)
+  if [ -n "$_PROTOC" ] && [ -f "$_PROTOC" ]; then
+    export PROTOC="$_PROTOC"
+    echo "Exported PROTOC=$PROTOC for Rust builds"
+  fi
+fi
+
+if [[ ${RUN_CPPLINT} == "ON" ]]; then
+  if [ "$CMAKE_GENERATOR" = "Ninja" ]; then
+    BUILD_CMD="ninja"
+  else
+    BUILD_CMD="make"
+  fi
+
+  # cpplint check
+  ${BUILD_CMD} lint
+  if [ $? -ne 0 ]; then
+    echo "ERROR! cpplint check failed"
+    exit 1
+  fi
+  echo "cpplint check passed!"
+
+  # clang-format check
+  ${BUILD_CMD} check-clang-format
+  if [ $? -ne 0 ]; then
+    echo "ERROR! clang-format check failed"
+    exit 1
+  fi
+  echo "clang-format check passed!"
+else
+  # compile and build
+  if [ "$CMAKE_GENERATOR" = "Ninja" ]; then
+    ninja -j ${jobs} install || exit 1
+  else
+    make -j ${jobs} install || exit 1
+  fi
+fi
+
+if command -v ccache &> /dev/null
+then
+	ccache -s
+fi
+
+popd

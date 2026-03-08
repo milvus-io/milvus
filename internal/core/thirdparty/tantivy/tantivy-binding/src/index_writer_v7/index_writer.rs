@@ -1,0 +1,259 @@
+use core::slice;
+use std::sync::Arc;
+
+use futures::executor::block_on;
+use libc::c_char;
+use log::info;
+use tantivy::indexer::UserOperation;
+use tantivy::schema::{
+    Field, IndexRecordOption, NumericOptions, Schema, SchemaBuilder, TextFieldIndexing,
+    TextOptions, FAST, STRING,
+};
+use tantivy::{doc, Index, IndexWriter, TantivyDocument};
+
+use crate::convert_to_rust_slice;
+use crate::data_type::TantivyDataType;
+
+use crate::error::{Result, TantivyBindingError};
+use crate::index_reader::IndexReaderWrapper;
+use crate::index_reader_c::SetBitsetFn;
+use crate::index_writer::TantivyValue;
+use crate::util::c_ptr_to_str;
+
+#[inline]
+pub(crate) fn schema_builder_add_field(
+    schema_builder: &mut SchemaBuilder,
+    field_name: &str,
+    data_type: TantivyDataType,
+) -> Field {
+    match data_type {
+        TantivyDataType::I64 => {
+            schema_builder.add_i64_field(field_name, NumericOptions::default().set_indexed())
+        }
+        TantivyDataType::F64 => {
+            schema_builder.add_f64_field(field_name, NumericOptions::default().set_indexed())
+        }
+        TantivyDataType::Bool => {
+            schema_builder.add_bool_field(field_name, NumericOptions::default().set_indexed())
+        }
+        TantivyDataType::Keyword => {
+            let text_field_indexing = TextFieldIndexing::default()
+                .set_tokenizer("raw")
+                .set_fieldnorms(false)
+                .set_index_option(IndexRecordOption::Basic);
+            let text_options = TextOptions::default().set_indexing_options(text_field_indexing);
+            schema_builder.add_text_field(field_name, text_options)
+        }
+        TantivyDataType::Text => {
+            panic!("text should be indexed with analyzer");
+        }
+        TantivyDataType::JSON => schema_builder.add_json_field(&field_name, STRING | FAST),
+    }
+}
+
+impl TantivyValue<TantivyDocument> for i64 {
+    #[inline]
+    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
+        document.add_i64(Field::from_field_id(field), *self);
+    }
+}
+
+impl TantivyValue<TantivyDocument> for u64 {
+    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
+        document.add_u64(Field::from_field_id(field), *self);
+    }
+}
+
+impl TantivyValue<TantivyDocument> for f64 {
+    #[inline]
+    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
+        document.add_f64(Field::from_field_id(field), *self);
+    }
+}
+
+impl TantivyValue<TantivyDocument> for &str {
+    #[inline]
+    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
+        document.add_text(Field::from_field_id(field), *self);
+    }
+}
+
+impl TantivyValue<TantivyDocument> for bool {
+    #[inline]
+    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
+        document.add_bool(Field::from_field_id(field), *self);
+    }
+}
+
+impl TantivyValue<TantivyDocument> for serde_json::Value {
+    #[inline]
+    fn add_to_document(&self, field: u32, document: &mut TantivyDocument) {
+        document.add_field_value(Field::from_field_id(field), self);
+    }
+}
+
+pub struct IndexWriterWrapperImpl {
+    pub(crate) field: Field,
+    pub(crate) index_writer: IndexWriter,
+    pub(crate) index: Arc<Index>,
+    pub(crate) id_field: Option<Field>,
+    pub(crate) enable_user_specified_doc_id: bool,
+}
+
+impl IndexWriterWrapperImpl {
+    pub fn new(
+        field_name: &str,
+        data_type: TantivyDataType,
+        path: String,
+        num_threads: usize,
+        overall_memory_budget_in_bytes: usize,
+        enable_user_specified_doc_id: bool,
+    ) -> Result<IndexWriterWrapperImpl> {
+        info!(
+            "create index writer, field_name: {}, data_type: {:?}, tantivy_index_version 7",
+            field_name, data_type
+        );
+        let mut schema_builder = Schema::builder();
+        let field = schema_builder_add_field(&mut schema_builder, field_name, data_type);
+        let id_field = if enable_user_specified_doc_id {
+            schema_builder.enable_user_specified_doc_id();
+            None
+        } else {
+            Some(schema_builder.add_i64_field("doc_id", FAST))
+        };
+        let schema = schema_builder.build();
+        let index = Index::create_in_dir(path.clone(), schema)?;
+        let index_writer =
+            index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
+        Ok(IndexWriterWrapperImpl {
+            field,
+            index_writer,
+            index: Arc::new(index),
+            id_field,
+            enable_user_specified_doc_id,
+        })
+    }
+
+    pub fn create_reader(&self, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
+        IndexReaderWrapper::from_index(self.index.clone(), set_bitset)
+    }
+
+    #[inline]
+    fn add_document(&mut self, mut document: TantivyDocument, offset: u32) -> Result<()> {
+        if self.enable_user_specified_doc_id {
+            self.index_writer
+                .add_document_with_doc_id(offset as u32, document)?;
+        } else {
+            document.add_i64(self.id_field.unwrap(), offset as i64);
+            self.index_writer.add_document(document)?;
+        }
+        Ok(())
+    }
+
+    pub fn add<T: TantivyValue<TantivyDocument>>(&mut self, data: T, offset: u32) -> Result<()> {
+        let mut document = TantivyDocument::default();
+        data.add_to_document(self.field.field_id(), &mut document);
+
+        self.add_document(document, offset)
+    }
+
+    pub fn add_array<T: TantivyValue<TantivyDocument>, I>(
+        &mut self,
+        data: I,
+        offset: u32,
+    ) -> Result<()>
+    where
+        I: IntoIterator<Item = T>,
+    {
+        let mut document = TantivyDocument::default();
+        data.into_iter()
+            .for_each(|d| d.add_to_document(self.field.field_id(), &mut document));
+
+        self.add_document(document, offset)
+    }
+
+    pub fn add_array_keywords(&mut self, datas: &[*const c_char], offset: u32) -> Result<()> {
+        let mut document = TantivyDocument::default();
+        for element in datas {
+            let data = c_ptr_to_str(*element)?;
+            document.add_field_value(self.field, data);
+        }
+
+        self.add_document(document, offset)
+    }
+
+    pub fn add_json(&mut self, data: &str, offset: u32) -> Result<()> {
+        let j = serde_json::from_str::<serde_json::Value>(data)?;
+        let mut document = TantivyDocument::default();
+        j.add_to_document(self.field.field_id(), &mut document);
+
+        self.add_document(document, offset)
+    }
+
+    pub fn add_array_json(&mut self, datas: &[*const c_char], offset: u32) -> Result<()> {
+        let mut document = TantivyDocument::default();
+        for element in datas {
+            let data = c_ptr_to_str(*element)?;
+            let j = serde_json::from_str::<serde_json::Value>(data)?;
+            j.add_to_document(self.field.field_id(), &mut document);
+        }
+
+        self.add_document(document, offset)
+    }
+
+    /// Add json key stats - adds documents one by one
+    /// Tantivy's IndexWriter has internal buffering, so external batching is unnecessary
+    pub fn add_json_key_stats(
+        &mut self,
+        keys: &[*const c_char],
+        json_offsets: &[*const i64],
+        json_offsets_len: &[usize],
+    ) -> Result<()> {
+        let id_field = self.id_field.unwrap();
+
+        for i in 0..keys.len() {
+            let key = c_ptr_to_str(keys[i])
+                .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
+
+            let offsets = unsafe { convert_to_rust_slice!(json_offsets[i], json_offsets_len[i]) };
+
+            for offset in offsets {
+                self.index_writer.add_document(doc!(
+                    id_field => *offset,
+                    self.field => key,
+                ))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn manual_merge(&mut self) -> Result<()> {
+        let metas = self.index_writer.index().searchable_segment_metas()?;
+        let policy = self.index_writer.get_merge_policy();
+        let candidates = policy.compute_merge_candidates(metas.as_slice());
+        for candidate in candidates {
+            self.index_writer.merge(candidate.0.as_slice()).wait()?;
+        }
+        Ok(())
+    }
+
+    pub fn finish(mut self) -> Result<()> {
+        self.index_writer.commit()?;
+        // self.manual_merge();
+        block_on(self.index_writer.garbage_collect_files())?;
+        self.index_writer.wait_merging_threads()?;
+
+        // TODO: remove this log when #45590 is solved
+        let metas = self.index.searchable_segment_metas()?;
+        let segment_ids: Vec<_> = metas.iter().map(|m| m.id().uuid_string()).collect();
+        info!("tantivy index_writer finish, segments: {:?}", segment_ids);
+
+        Ok(())
+    }
+
+    pub(crate) fn commit(&mut self) -> Result<()> {
+        self.index_writer.commit()?;
+        Ok(())
+    }
+}

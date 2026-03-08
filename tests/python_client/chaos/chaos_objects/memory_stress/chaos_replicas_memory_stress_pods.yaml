@@ -1,0 +1,17 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: test-querynode-memory-stress-replica
+  namespace: chaos-testing
+spec:
+  selector:
+    pods:
+      chaos-testing:
+        - mic-replica-milvus-querynode-86c77dd756-rfw8r
+        - mic-replica-milvus-querynode-86c77dd756-wmtdk
+  mode: all
+  stressors:
+    memory:
+      workers: 4
+      size: 85%
+  duration: 3m

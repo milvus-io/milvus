@@ -1,0 +1,13 @@
+syntax = "proto2";
+
+package milvus.proto.streaming.wal.pulsar;
+
+option go_package = "github.com/milvus-io/milvus/pkg/streaming/walimpls/impls/pulsar";
+
+
+message MessageIdData {
+    required uint64 ledgerId = 1;
+    required uint64 entryId = 2;
+    optional int32 partition = 3;
+    optional int32 batch_index = 4;
+}

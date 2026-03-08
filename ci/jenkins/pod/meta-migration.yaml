@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: meta-migration
+  namespace: milvus-ci
+spec:
+  enableServiceLinks: false
+  containers:
+  - name: main
+    image: milvusdb/krte:20211213-dcc15e9
+    env:
+    - name: DOCKER_IN_DOCKER_ENABLED
+      value: "true"
+    - name: DOCKER_VOLUME_DIRECTORY
+      value: "/mnt/disk/.docker"
+    tty: true
+    securityContext:
+      privileged: true
+    args: ["cat"]
+    resources:
+      limits:
+        cpu: "6"
+        memory: 12Gi
+      requests:
+        cpu: "0.5"
+        memory: 512Mi
+    volumeMounts:
+    - mountPath: /docker-graph
+      name: docker-graph
+    - mountPath: /var/lib/docker
+      name: docker-root
+    - mountPath: /lib/modules
+      name: modules
+      readOnly: true
+    - mountPath: /sys/fs/cgroup
+      name: cgroup
+    - mountPath: /mnt/disk/.docker
+      name: build-cache
+      subPath: docker-volume
+  - name: build
+    image: harbor.milvus.io/milvus/meta-migration-builder:20221018-fc6fe33f8
+    command: ["/bin/sh"]
+    args: ["-c","cat"]
+    tty: true
+  volumes:
+  - emptyDir: {}
+    name: docker-graph
+  - emptyDir: {}
+    name: docker-root
+  - hostPath:
+      path: /tmp/krte/cache
+      type: DirectoryOrCreate
+    name: build-cache
+  - hostPath:
+      path: /lib/modules
+      type: Directory
+    name: modules
+  - hostPath:
+      path: /sys/fs/cgroup
+      type: Directory
+    name: cgroup

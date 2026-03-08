@@ -1,0 +1,87 @@
+name: SIMD Compatibility Test
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 18 * * 0"
+
+jobs:
+  test-simd-compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        simd_type: ["sse4_2", "avx", "avx2", "avx512"]
+    steps:
+
+      - name: Creating kind cluster
+        uses: helm/kind-action@v1.2.0
+
+      - name: Print cluster information
+        run: |
+          kubectl config view
+          kubectl cluster-info
+          kubectl get nodes
+          kubectl get pods -n kube-system
+          helm version
+          kubectl version
+
+      - uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+
+      - name: Install dependency
+        shell: bash
+        working-directory: tests/python_client/deploy
+        run: |
+          pip install -r requirements.txt
+          pip install --upgrade protobuf
+
+      - name: install milvus operator and milvus cluster
+        shell: bash
+        working-directory: tests/python_client/customize/template
+        run: |
+          kubectl apply -f https://github.com/jetstack/cert-manager/releases/download/v1.5.3/cert-manager.yaml
+          sleep 30s
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=cert-manager -n cert-manager --timeout=360s
+          kubectl get pods -A
+
+          #install milvus operator
+          kubectl apply -f https://raw.githubusercontent.com/milvus-io/milvus-operator/main/deploy/manifests/deployment.yaml
+          sleep 30s
+          kubectl wait --for=condition=Ready pod --all -n milvus-operator --timeout=360s
+          kubectl get pods -A
+          #install milvus cluster
+
+          # change simdType
+          sed -i "s/simdType.*/simdType\: ${{ matrix.simd_type }}/g" minimum.yaml
+          kubectl apply -f minimum.yaml
+          sleep 60s
+          # wait all pod running
+          kubectl get pods -A
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=my-release-minio --timeout=360s
+          kubectl get pods -A
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=my-release-etcd --timeout=360s
+          kubectl get pods -A
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=my-release-pulsar --timeout=360s
+          kubectl get pods -A
+          sleep 60s
+          kubectl get pods -A
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=my-release --timeout=360s
+          sleep 30s
+          kubectl get pods -A
+
+          # port-forward
+          kubectl port-forward service/my-release-milvus 19530 >/dev/null 2>&1 &
+          sleep 20s
+          # check whether port-forward success
+          nc -vz 127.0.0.1 19530
+
+      - name: Run E2E test
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          python scripts/hello_milvus.py

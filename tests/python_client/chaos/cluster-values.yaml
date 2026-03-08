@@ -1,0 +1,43 @@
+cluster:
+  enabled: true
+log:
+  level: debug
+image:
+  all:
+    repository: milvusdb/milvus
+    tag: master-latest
+    pullPolicy: Always
+
+indexNode:
+  resources:
+    requests:
+      cpu: 2
+    limits:
+      cpu: 8
+proxy:
+  resources:
+    requests:
+      cpu: 2
+    limits:
+      cpu: 8
+
+etcd: 
+  replicaCount: 3
+  image:
+    repository: milvusdb/etcd
+    tag: 3.5.5-r2
+
+minio:
+  resources:
+    requests:
+      memory: 256Mi
+
+kafka:
+  enabled: true
+  name: kafka
+  replicaCount: 3
+  defaultReplicationFactor: 2
+pulsar:
+  enabled: false
+pulsarv3:
+  enabled: false

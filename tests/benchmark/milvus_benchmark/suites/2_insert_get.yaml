@@ -1,0 +1,13 @@
+insert_get_performance:
+  collections:
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/sift_1m_128_128_l2
+      collection_name: sift_1m_128_l2
+      ni_per: 50000
+      build_index: false
+      index_type: ivf_sq8
+      index_param:
+        nlist: 16384
+      ids_length_list:
+        [1, 100, 100000]

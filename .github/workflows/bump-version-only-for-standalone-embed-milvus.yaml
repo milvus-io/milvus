@@ -1,0 +1,47 @@
+name: Bump Standalone Embed Milvus Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      imageTag:
+        description: "the milvus image tag"
+        required: true
+        type: string
+
+jobs:
+  update-knowhere-commits:
+    name: Bump Milvus Version for release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Update milvus image tag
+        # continue-on-error: true
+        shell: bash
+        run: |
+          sed -i 's/\(milvusdb\/milvus:\)[^[:space:]]*/\1${{ inputs.imageTag }}/' scripts/standalone_embed.sh
+          sed -i 's/\(milvusdb\/milvus:\)[^[:space:]]*/\1${{ inputs.imageTag }}/' scripts/standalone_embed.bat
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add scripts
+          git status
+          git commit -m "Bump milvus version to ${{ inputs.imageTag }}"
+      - name: Create Pull Request
+        id: cpr
+        continue-on-error: true
+        uses: peter-evans/create-pull-request@v3
+        with:
+          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
+          author: sre-ci-robot <sre-ci-robot@users.noreply.github.com>
+          signoff: true
+          branch: bump_milvus_commit_${{ github.sha }}
+          delete-branch: true
+          title: '[automated] Bump milvus version to ${{ inputs.imageTag }}'
+          body: |
+            Bump milvus version to ${{ inputs.imageTag }}
+            Signed-off-by: sre-ci-robot sre-ci-robot@users.noreply.github.com
+      - name: Check outputs
+        run: |
+          echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
+          echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"

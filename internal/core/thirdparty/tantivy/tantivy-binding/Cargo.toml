@@ -1,0 +1,83 @@
+[package]
+name = "tantivy-binding"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
+lindera-ipadic = ["lindera/ipadic"]
+lindera-ipadic-neologd = ["lindera/ipadic-neologd"]
+lindera-unidic = ["lindera/unidic"]
+lindera-ko-dic = ["lindera/ko-dic"]
+lindera-cc-cedict = ["lindera/cc-cedict"]
+
+[profile.release]
+opt-level = 3
+debug = 1
+lto = true
+debug-assertions = false
+codegen-units = 1
+panic = "unwind"
+overflow-checks = false
+
+[dependencies]
+tantivy = { git = "https://github.com/zilliztech/tantivy.git" }
+tantivy-5 = { package = "tantivy", git = "https://github.com/zilliztech/tantivy", tag = "0.21.1-fix4" }
+lindera = "0.42.4"
+fs2 = "0.4"
+lindera-dictionary = "0.42.4"
+futures = "0.3.21"
+libc = "0.2"
+scopeguard = "1.2"
+zstd-sys = "=2.0.9"
+env_logger = "0.11.3"
+log = "0.4.21"
+lazy_static = "1.4.0"
+serde_json = "1.0.128"
+jieba-rs = "0.6.8"
+regex = "1.11.1"
+either = "1.13.0"
+icu_segmenter = "2.0.0"
+whatlang = "0.16.4"
+lingua = "1.7.1"
+fancy-regex = "0.14.0"
+tonic = { features = ["_tls-any", "tls-ring"], version = "0.13.1" }
+url = "2.5.4"
+prost = "0.13.5"
+once_cell = "1.20.3"
+unicode-general-category = "1.0.0"
+unicode_categories = "0.1.1"
+
+# lindera dependencies for fetch and prepare dictionary online.
+tokio = { version = "1.45.0", features = [
+    "rt",
+    "macros",
+    "time",
+    "sync",
+    "io-util",
+] }
+reqwest = { version = "0.12.15", features = [
+    "rustls-tls",
+], default-features = false }
+md5 = "0.7.0"
+rand = "0.9.1" 
+flate2 = "1.1.0"
+tar = "0.4.44"
+
+[dev-dependencies]
+rand = "0.7"
+criterion = "0.5"
+tempfile = "3.0"
+
+[build-dependencies]
+cbindgen = "0.27.0"
+tonic-build = "0.13.0"
+
+[[bench]]
+name = "analyzer_bench"
+harness = false
+
+[lib]
+crate-type = ["staticlib", "rlib"]

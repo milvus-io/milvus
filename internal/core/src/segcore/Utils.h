@@ -1,0 +1,269 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
+
+#pragma once
+
+#include <memory>
+#include <cstdlib>
+#include <string>
+#include <vector>
+
+#include "common/FieldData.h"
+#include "common/type_c.h"
+#include "common/Types.h"
+#include "index/Index.h"
+#include "cachinglayer/Utils.h"
+#include "segcore/ConcurrentVector.h"
+#include "segcore/Types.h"
+#include "common/Consts.h"
+#include "segcore/SegmentInterface.h"
+
+namespace milvus::segcore {
+
+void
+ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data);
+
+void
+ParsePksFromFieldData(DataType data_type,
+                      std::vector<PkType>& pks,
+                      const std::vector<FieldDataPtr>& datas);
+
+void
+ParsePksFromIDs(std::vector<PkType>& pks,
+                DataType data_type,
+                const IdArray& data);
+
+int64_t
+GetSizeOfIdArray(const IdArray& data);
+
+int64_t
+GetRawDataSizeOfDataArray(const DataArray* data,
+                          const FieldMeta& field_meta,
+                          int64_t num_rows);
+
+// Note: this is temporary solution.
+// modify bulk script implement to make process more clear
+std::unique_ptr<DataArray>
+CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta);
+
+void
+SetUpScalarFieldData(milvus::proto::schema::ScalarField*& scalar_array,
+                     DataType data_type,
+                     DataType element_type,
+                     int64_t count);
+
+void
+CreateScalarDataArray(DataArray& data_array,
+                      int64_t count,
+                      DataType data_type,
+                      DataType element_type,
+                      bool nullable);
+
+std::unique_ptr<DataArray>
+CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta);
+
+std::unique_ptr<DataArray>
+CreateEmptyVectorDataArray(int64_t count,
+                           int64_t valid_count,
+                           const void* valid_data,
+                           const FieldMeta& field_meta);
+
+std::unique_ptr<DataArray>
+CreateScalarDataArrayFrom(const void* data_raw,
+                          const void* valid_data,
+                          int64_t count,
+                          const FieldMeta& field_meta);
+
+std::unique_ptr<DataArray>
+CreateVectorDataArrayFrom(const void* data_raw,
+                          int64_t count,
+                          const FieldMeta& field_meta);
+
+std::unique_ptr<DataArray>
+CreateVectorDataArrayFrom(const void* data_raw,
+                          const void* valid_data,
+                          int64_t count,
+                          int64_t valid_count,
+                          const FieldMeta& field_meta);
+
+std::unique_ptr<DataArray>
+CreateDataArrayFrom(const void* data_raw,
+                    const void* valid_data,
+                    int64_t count,
+                    const FieldMeta& field_meta);
+
+// TODO remove merge dataArray, instead fill target entity when get data slice
+struct MergeBase {
+ private:
+    std::map<FieldId, std::unique_ptr<milvus::DataArray>>* output_fields_data_;
+    size_t offset_;
+    std::map<FieldId, size_t> valid_data_offsets_;
+
+ public:
+    MergeBase() {
+    }
+
+    MergeBase(std::map<FieldId, std::unique_ptr<milvus::DataArray>>*
+                  output_fields_data,
+              size_t offset)
+        : output_fields_data_(output_fields_data), offset_(offset) {
+    }
+
+    size_t
+    getOffset() const {
+        return offset_;
+    }
+
+    void
+    setValidDataOffset(FieldId fieldId, size_t valid_offset) {
+        valid_data_offsets_[fieldId] = valid_offset;
+    }
+
+    size_t
+    getValidDataOffset(FieldId fieldId) const {
+        auto it = valid_data_offsets_.find(fieldId);
+        if (it != valid_data_offsets_.end()) {
+            return it->second;
+        }
+        return offset_;
+    }
+
+    milvus::DataArray*
+    get_field_data(FieldId fieldId) const {
+        return (*output_fields_data_)[fieldId].get();
+    }
+};
+
+std::unique_ptr<DataArray>
+MergeDataArray(std::vector<MergeBase>& merge_bases,
+               const FieldMeta& field_meta);
+
+std::unique_ptr<DataArray>
+ReverseDataFromIndex(const index::IndexBase* index,
+                     const int64_t* seg_offsets,
+                     int64_t count,
+                     const FieldMeta& field_meta);
+void
+LoadArrowReaderForJsonStatsFromRemote(
+    const std::vector<std::string>& remote_files,
+    std::shared_ptr<ArrowReaderChannel> channel);
+
+void
+LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
+                          std::shared_ptr<ArrowReaderChannel> channel,
+                          milvus::proto::common::LoadPriority priority);
+
+void
+LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
+                         FieldDataChannelPtr channel,
+                         milvus::proto::common::LoadPriority priority);
+/**
+ * Returns an index pointing to the first element in the range [first, last) such that `value < element` is true
+ * (i.e. that is strictly greater than value), or last if no such element is found.
+ *
+ * @param timestamps
+ * @param first
+ * @param last
+ * @param value
+ * @return The index of answer, last will be returned if no timestamp is bigger than the value.
+ */
+int64_t
+upper_bound(const ConcurrentVector<Timestamp>& timestamps,
+            int64_t first,
+            int64_t last,
+            Timestamp value);
+
+// Get the cache warmup policy for the given content type.
+// If warmup_policy is not empty, parse it and return the corresponding policy.
+// If warmup_policy is empty, fall back to the global config.
+CacheWarmupPolicy
+getCacheWarmupPolicy(const std::string& warmup_policy,
+                     bool is_vector,
+                     bool is_index,
+                     bool in_load_list = true);
+
+milvus::cachinglayer::CellDataType
+getCellDataType(bool is_vector, bool is_index);
+
+void
+LoadIndexData(milvus::tracer::TraceContext& ctx,
+              milvus::segcore::LoadIndexInfo* load_index_info,
+              milvus::OpContext* op_ctx = nullptr);
+
+/**
+ * Convert Milvus timestamp to physical time in milliseconds.
+ * Milvus timestamp format: physical time in the high bits, logical counter in
+ * the lower LOGICAL_BITS bits. Shifting by LOGICAL_BITS extracts the physical
+ * time component in milliseconds.
+ *
+ * @param timestamp Milvus timestamp value
+ * @return Physical time in millisecond
+ */
+inline uint64_t
+TimestampToPhysicalMs(Timestamp timestamp) {
+    return timestamp >> LOGICAL_BITS;
+}
+
+FieldDataPtr
+bulk_script_field_data(milvus::OpContext* op_ctx,
+                       FieldId fieldId,
+                       DataType dataType,
+                       const int64_t* seg_offsets,
+                       int64_t count,
+                       const segcore::SegmentInternalInterface* segment,
+                       TargetBitmap& valid_view,
+                       bool small_int_raw_type = false);
+
+/**
+ * @brief Check if an operation has been cancelled and throw if so.
+ *
+ * This is a helper function to reduce boilerplate cancellation checking code.
+ *
+ * @param op_ctx The operation context containing the cancellation token (can be nullptr)
+ * @param segment_id The segment ID for error message context
+ * @param operation Description of the operation being performed
+ * @throws SegcoreError with ErrorCode::FollyCancel if cancellation was requested
+ */
+inline void
+CheckCancellation(milvus::OpContext* op_ctx,
+                  int64_t segment_id,
+                  const std::string& operation) {
+    if (op_ctx && op_ctx->cancellation_token.isCancellationRequested()) {
+        throw SegcoreError(
+            ErrorCode::FollyCancel,
+            fmt::format("{} cancelled for segment {}", operation, segment_id));
+    }
+}
+
+/**
+ * @brief Check if an operation has been cancelled and throw if so (with field context).
+ *
+ * @param op_ctx The operation context containing the cancellation token (can be nullptr)
+ * @param segment_id The segment ID for error message context
+ * @param field_id The field ID for error message context
+ * @param operation Description of the operation being performed
+ * @throws SegcoreError with ErrorCode::FollyCancel if cancellation was requested
+ */
+inline void
+CheckCancellation(milvus::OpContext* op_ctx,
+                  int64_t segment_id,
+                  int64_t field_id,
+                  const std::string& operation) {
+    if (op_ctx && op_ctx->cancellation_token.isCancellationRequested()) {
+        throw SegcoreError(ErrorCode::FollyCancel,
+                           fmt::format("{} cancelled for segment {} field {}",
+                                       operation,
+                                       segment_id,
+                                       field_id));
+    }
+}
+
+}  // namespace milvus::segcore

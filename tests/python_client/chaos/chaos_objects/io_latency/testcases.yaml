@@ -1,0 +1,39 @@
+Collections:
+  -
+    testcase:
+      name: test_etcd_io_latency
+      chaos: chaos_etcd_io_latency.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+
+  -
+    testcase:
+      name: test_minio_io_latency
+      chaos: chaos_minio_io_latency.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+
+  -
+    testcase:
+      name: test_pulsar_io_latency
+      chaos: chaos_pulsar_io_latency.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail

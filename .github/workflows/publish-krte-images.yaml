@@ -1,0 +1,85 @@
+name: Publish KRTE Images
+# TODO: do not trigger action for some document file update
+
+# This workflow is triggered on pushes or pull request to the repository.
+on:
+  workflow_dispatch:
+  push:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'build/docker/krte/**'
+      - '.github/workflows/publish-krte-images.yaml'
+      - '!**.md'
+  pull_request:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'build/docker/krte/**'
+      - '.github/workflows/publish-krte-images.yaml'
+      - '!**.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  publish-krte-images:
+    name: KRTE
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Get version from system time after release step
+        id: extracter
+        run: |
+          echo "::set-output name=version::$(date +%Y%m%d)"
+          echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
+      - name: Docker Build
+        shell: bash
+        working-directory: build/docker/krte
+        run: |
+          export TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
+          docker build --build-arg IMAGE_ARG="milvusdb/krte:$TAG" --build-arg GO_VERSION=1.15.8 -t "milvusdb/krte:$TAG" .
+      - name: Docker Push
+        if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' )&& github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} \
+                       -p ${{ secrets.DOCKERHUB_TOKEN }}
+          export TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
+          docker push "milvusdb/krte:$TAG"
+          echo "Push krte image Succeeded"
+      - name: Update KRTE Image Changes
+        if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ) && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        working-directory: build/ci/jenkins/pod
+        run: |
+          export TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
+          sed -i "s#krte:.*#krte:${TAG}#g" ./build/ci/jenkins/pod/rte.yaml
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add rte.yaml
+          git commit -m "Update KRTE image changes"
+      - name: Create Pull Request
+        id: cpr
+        if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ) && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        uses: peter-evans/create-pull-request@v3
+        with:
+          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
+          author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+          signoff: false
+          branch: update_krte_${{ github.sha }}
+          delete-branch: true
+          title: '[automated] Update KRTE image changes'
+          body: |
+            Update KRTE image changes
+
+            Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
+      - name: Check outputs
+        if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ) && github.repository == 'milvus-io/milvus'
+        run: |
+          echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
+          echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"

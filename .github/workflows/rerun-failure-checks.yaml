@@ -1,0 +1,47 @@
+name: Rerun Failure Checks
+on:
+  issue_comment:
+    types: [created]
+jobs:
+  rerun-checks:
+    if:  "github.event_name == 'issue_comment'&& startsWith(github.event.comment.body, 'rerun ut')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Is Organization Member
+        shell: bash
+        if:  "github.event_name == 'issue_comment'"
+        id: is_organization_member
+        run: |
+          response_code=$(curl -sIL -w %{http_code} -H "Authorization: token ${{ secrets.RERUN_BOT_TOKEN }}" -H "Accept: application/vnd.github.v3+json" \
+          -o /dev/null https://api.github.com/orgs/${GITHUB_REPOSITORY_OWNER}/members/${{ github.event.sender.login }})
+          echo " response code is ${response_code} "
+          if [[ ${response_code} == '204' ]];then
+            echo "::set-output name=is-member::true"
+          elif [[ ${response_code} == '404' ]]; then 
+            echo "::set-output name=is-member::false"
+          else
+            echo "Please check if the repository secret RERUN_BOT_TOKEN  still exists and have the permission to read organization membership."
+            exit 1
+          fi
+      - name: Create Comment for Non-Org Member
+        if: "github.event_name == 'issue_comment' && steps.is_organization_member.outputs.is-member == 'false'"
+        uses: actions-cool/issues-helper@v2.5.0       
+        with:
+          actions: 'create-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            Hello ${{ github.event.sender.login }}, you are not in the organization, so you do not have the permission to rerun the workflow, please contact `@milvus-io/milvus-maintainers` for help.
+      - uses: actions/checkout@v2
+      - name: Rerun Failure Checks
+        if: "github.event_name == 'issue_comment' && steps.is_organization_member.outputs.is-member == 'true'"
+        uses: zymap/bot@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # replace here to your token
+        with:
+          repo_owner: milvus-io  # replace here to your repo owner
+          repo_name: milvus     # replace here to your repo name
+          rerun_cmd: rerun ut
+          comment: ${{ github.event.comment.body }}
+
+ 

@@ -1,0 +1,11 @@
+[
+  {
+        "server": "apollo",
+        "suite_params": [
+            {
+                "suite": "011_cpu_accuracy_ann.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]
