@@ -513,6 +513,8 @@ type MetaStoreConfig struct {
 	MetaStoreType              ParamItem `refreshable:"false"`
 	SnapshotTTLSeconds         ParamItem `refreshable:"true"`
 	SnapshotReserveTimeSeconds ParamItem `refreshable:"true"`
+	SnapshotGCBatchSize        ParamItem `refreshable:"true"`
+	SnapshotGCInterval         ParamItem `refreshable:"true"`
 	PaginationSize             ParamItem `refreshable:"true"`
 	ReadConcurrency            ParamItem `refreshable:"true"`
 	MaxEtcdTxnNum              ParamItem `refreshable:"true"`
@@ -534,6 +536,13 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		DefaultValue: "86400",
 		Doc:          `snapshot ttl in seconds`,
 		Export:       true,
+		Formatter: func(v string) string {
+			ttl := getAsInt(v)
+			if ttl <= 0 {
+				return "86400"
+			}
+			return v
+		},
 	}
 	p.SnapshotTTLSeconds.Init(base.mgr)
 
@@ -543,8 +552,47 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		DefaultValue: "3600",
 		Doc:          `snapshot reserve time in seconds`,
 		Export:       true,
+		Formatter: func(v string) string {
+			reserveTime := getAsInt(v)
+			if reserveTime <= 0 {
+				return "3600"
+			}
+			return v
+		},
 	}
 	p.SnapshotReserveTimeSeconds.Init(base.mgr)
+
+	p.SnapshotGCBatchSize = ParamItem{
+		Key:          "metastore.snapshot.gcBatchSize",
+		Version:      "2.6.12",
+		DefaultValue: "10000",
+		Doc:          "number of snapshot keys to scan per GC batch",
+		Export:       true,
+		Formatter: func(v string) string {
+			batchSize := getAsInt(v)
+			if batchSize <= 0 {
+				return "10000"
+			}
+			return v
+		},
+	}
+	p.SnapshotGCBatchSize.Init(base.mgr)
+
+	p.SnapshotGCInterval = ParamItem{
+		Key:          "metastore.snapshot.gcInterval",
+		Version:      "2.6.12",
+		DefaultValue: "30",
+		Doc:          "base interval in seconds between snapshot GC batches",
+		Export:       true,
+		Formatter: func(v string) string {
+			interval := getAsInt(v)
+			if interval <= 0 {
+				return "30"
+			}
+			return v
+		},
+	}
+	p.SnapshotGCInterval.Init(base.mgr)
 
 	p.PaginationSize = ParamItem{
 		Key:          "metastore.paginationSize",

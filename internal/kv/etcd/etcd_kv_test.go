@@ -847,6 +847,94 @@ func Test_WalkWithPagination(t *testing.T) {
 	})
 }
 
+func Test_WalkWithPrefixFrom(t *testing.T) {
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	require.NoError(t, err)
+	defer etcdCli.Close()
+
+	rootPath := "/etcd/test/root/walkfrom"
+	etcdKV := NewEtcdKV(etcdCli, rootPath)
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix(context.TODO(), "")
+
+	ctx := context.TODO()
+
+	// Seed data: keys A/1 through A/5
+	for i := 1; i <= 5; i++ {
+		err = etcdKV.Save(ctx, fmt.Sprintf("A/%d", i), fmt.Sprintf("v%d", i))
+		require.NoError(t, err)
+	}
+
+	t.Run("empty startKey delegates to WalkWithPrefix", func(t *testing.T) {
+		var keys []string
+		err := etcdKV.WalkWithPrefixFrom(ctx, "A/", "", 10, func(k []byte, v []byte) error {
+			keys = append(keys, string(k))
+			return nil
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 5, len(keys))
+	})
+
+	t.Run("start after first key", func(t *testing.T) {
+		// Start after A/1 (exclusive), should get A/2..A/5
+		var keys []string
+		err := etcdKV.WalkWithPrefixFrom(ctx, "A/", "A/1", 10, func(k []byte, v []byte) error {
+			k2 := string(k)[len(rootPath)+1:] // strip root path
+			keys = append(keys, k2)
+			return nil
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"A/2", "A/3", "A/4", "A/5"}, keys)
+	})
+
+	t.Run("start after middle key", func(t *testing.T) {
+		var keys []string
+		err := etcdKV.WalkWithPrefixFrom(ctx, "A/", "A/3", 10, func(k []byte, v []byte) error {
+			k2 := string(k)[len(rootPath)+1:]
+			keys = append(keys, k2)
+			return nil
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"A/4", "A/5"}, keys)
+	})
+
+	t.Run("start after last key returns empty", func(t *testing.T) {
+		var count int
+		err := etcdKV.WalkWithPrefixFrom(ctx, "A/", "A/5", 10, func(k []byte, v []byte) error {
+			count++
+			return nil
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, count)
+	})
+
+	t.Run("pagination across multiple pages", func(t *testing.T) {
+		var keys []string
+		err := etcdKV.WalkWithPrefixFrom(ctx, "A/", "A/1", 2, func(k []byte, v []byte) error {
+			k2 := string(k)[len(rootPath)+1:]
+			keys = append(keys, k2)
+			return nil
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"A/2", "A/3", "A/4", "A/5"}, keys)
+	})
+
+	t.Run("callback error propagated", func(t *testing.T) {
+		expectedErr := errors.New("stop")
+		err := etcdKV.WalkWithPrefixFrom(ctx, "A/", "A/1", 10, func(k []byte, v []byte) error {
+			return expectedErr
+		})
+		assert.ErrorIs(t, err, expectedErr)
+	})
+}
+
 func TestElapse(t *testing.T) {
 	start := time.Now()
 	isElapse := CheckElapseAndWarn(context.TODO(), start, "err message")

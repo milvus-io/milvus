@@ -73,6 +73,9 @@ type MetaKv interface {
 	LoadWithPrefix(ctx context.Context, key string) ([]string, []string, error)
 	CompareVersionAndSwap(ctx context.Context, key string, version int64, target string) (bool, error)
 	WalkWithPrefix(ctx context.Context, prefix string, paginationSize int, fn func([]byte, []byte) error) error
+	// WalkWithPrefixFrom walks keys matching prefix, starting after startKey (exclusive).
+	// If startKey is empty, behaves identically to WalkWithPrefix.
+	WalkWithPrefixFrom(ctx context.Context, prefix string, startKey string, paginationSize int, fn func([]byte, []byte) error) error
 }
 
 // WatchKV is watchable MetaKv. As of today(2023/06/24), it's coupled with etcd.
@@ -85,7 +88,9 @@ type WatchKV interface {
 	WatchWithRevision(ctx context.Context, key string, revision int64) clientv3.WatchChan
 }
 
-// SnapShotKV is TxnKV for snapshot data. It must save timestamp.
+// SnapShotKV is a KV interface with timestamp support.
+// Save/Load operations use the ts parameter to write/read snapshot versions for time-travel.
+// When ts == 0 or ts == MaxTimestamp, operations read/write the latest version only.
 //
 //go:generate mockery --name=SnapShotKV --with-expecter
 type SnapShotKV interface {

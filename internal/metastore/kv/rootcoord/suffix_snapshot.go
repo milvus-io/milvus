@@ -82,7 +82,15 @@ type SuffixSnapshot struct {
 
 	paginationSize int
 
-	closeGC chan struct{}
+	// gcCursor tracks the last snapshot key processed by GC.
+	// Empty string means start from the beginning of the snapshot prefix.
+	// Only accessed by the single GC goroutine — no lock needed.
+	gcCursor string
+
+	closeGC    chan struct{}
+	closeOnce  sync.Once
+	gcWg       sync.WaitGroup
+	cancelFunc context.CancelFunc
 }
 
 // tsv struct stores kv with timestamp
@@ -111,6 +119,7 @@ func NewSuffixSnapshot(metaKV kv.MetaKv, sep, root, snapshot string) (*SuffixSna
 	}
 	rootLen := len(root)
 
+	ctx, cancel := context.WithCancel(context.Background())
 	ss := &SuffixSnapshot{
 		MetaKv:         metaKV,
 		lastestTS:      make(map[string]typeutil.Timestamp),
@@ -121,8 +130,10 @@ func NewSuffixSnapshot(metaKV kv.MetaKv, sep, root, snapshot string) (*SuffixSna
 		rootLen:        rootLen,
 		paginationSize: paramtable.Get().MetaStoreCfg.PaginationSize.GetAsInt(),
 		closeGC:        make(chan struct{}, 1),
+		cancelFunc:     cancel,
 	}
-	go ss.startBackgroundGC(context.TODO())
+	ss.gcWg.Add(1)
+	go ss.startBackgroundGC(ctx)
 	return ss, nil
 }
 
@@ -175,7 +186,7 @@ func (ss *SuffixSnapshot) isTSKey(key string) (typeutil.Timestamp, bool) {
 }
 
 // isTSOfKey check whether a key is in ts-key format of provided group key
-// if true, laso returns parsed ts value
+// if true, also returns parsed ts value
 func (ss *SuffixSnapshot) isTSOfKey(key string, groupKey string) (typeutil.Timestamp, bool) {
 	// not in snapshot path
 	if !strings.HasPrefix(key, ss.snapshotPrefix) {
@@ -211,7 +222,7 @@ func (ss *SuffixSnapshot) checkKeyTS(ctx context.Context, key string, ts typeuti
 	return latest <= ts, nil
 }
 
-// loadLatestTS load the loatest ts for specified key
+// loadLatestTS load the latest ts for specified key
 func (ss *SuffixSnapshot) loadLatestTS(ctx context.Context, key string) error {
 	prefix := ss.composeSnapshotPrefix(key)
 	keys, _, err := ss.MetaKv.LoadWithPrefix(ctx, prefix)
@@ -258,7 +269,6 @@ func binarySearchRecords(records []tsv, ts typeutil.Timestamp) (string, bool) {
 	i, j := 0, len(records)
 	for i+1 < j {
 		k := (i + j) / 2
-		// log.Warn("", zap.Int("i", i), zap.Int("j", j), zap.Int("k", k))
 		if records[k].ts == ts {
 			return records[k].value, true
 		}
@@ -508,7 +518,7 @@ func (ss *SuffixSnapshot) LoadWithPrefix(ctx context.Context, key string, ts typ
 	return resultKeys, resultValues, nil
 }
 
-// MultiSaveAndRemove save muiltple kvs and remove as well
+// MultiSaveAndRemove save multiple kvs and remove as well
 // if ts == 0, act like MetaKv
 // each key-value will be treated in same logic like Save
 func (ss *SuffixSnapshot) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, ts typeutil.Timestamp) error {
@@ -561,7 +571,7 @@ func (ss *SuffixSnapshot) MultiSaveAndRemove(ctx context.Context, saves map[stri
 	return err
 }
 
-// MultiSaveAndRemoveWithPrefix save muiltple kvs and remove as well
+// MultiSaveAndRemoveWithPrefix save multiple kvs and remove as well
 // if ts == 0, act like MetaKv
 // each key-value will be treated in same logic like Save
 func (ss *SuffixSnapshot) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, ts typeutil.Timestamp) error {
@@ -610,28 +620,11 @@ func (ss *SuffixSnapshot) MultiSaveAndRemoveWithPrefix(ctx context.Context, save
 }
 
 func (ss *SuffixSnapshot) Close() {
-	close(ss.closeGC)
-}
-
-// startBackgroundGC the data will clean up if key ts!=0 and expired
-func (ss *SuffixSnapshot) startBackgroundGC(ctx context.Context) {
-	log := log.Ctx(ctx)
-	log.Debug("suffix snapshot GC goroutine start!")
-	ticker := time.NewTicker(60 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ss.closeGC:
-			log.Warn("quit suffix snapshot GC goroutine!")
-			return
-		case now := <-ticker.C:
-			err := ss.removeExpiredKvs(ctx, now)
-			if err != nil {
-				log.Warn("remove expired data fail during GC", zap.Error(err))
-			}
-		}
-	}
+	ss.closeOnce.Do(func() {
+		ss.cancelFunc()
+		close(ss.closeGC)
+	})
+	ss.gcWg.Wait()
 }
 
 func (ss *SuffixSnapshot) getOriginalKey(snapshotKey string) (string, error) {
@@ -647,104 +640,200 @@ func (ss *SuffixSnapshot) getOriginalKey(snapshotKey string) (string, error) {
 	return prefix[ss.snapshotLen:], nil
 }
 
-func (ss *SuffixSnapshot) batchRemoveExpiredKvs(ctx context.Context, keyGroup []string, originalKey string, includeOriginalKey bool) error {
-	if includeOriginalKey {
-		keyGroup = append(keyGroup, originalKey)
+// errGCBatchFull is a sentinel error used to interrupt WalkWithPrefixFrom
+// when enough keys have been collected for a single GC batch.
+var errGCBatchFull = fmt.Errorf("gc batch full")
+
+// batchMultiLoad loads values for the given keys in batches to avoid exceeding
+// etcd transaction limit (maxTxnNum). Returns a map of key -> (value exists).
+// Note: MultiLoad returns error if any key is not found, but this is expected
+// behavior for deleted collections. We handle this by checking values array.
+func (ss *SuffixSnapshot) batchMultiLoad(ctx context.Context, keys []string, maxTxnNum int) (map[string]bool, error) {
+	result := make(map[string]bool, len(keys))
+
+	for i := 0; i < len(keys); i += maxTxnNum {
+		end := i + maxTxnNum
+		if end > len(keys) {
+			end = len(keys)
+		}
+		batch := keys[i:end]
+		values, err := ss.MetaKv.MultiLoad(ctx, batch)
+
+		// MultiLoad returns error if any key is not found, but still returns values array
+		// with empty strings for missing keys. This is expected for deleted collections.
+		// We only fail on actual errors (len mismatch indicates etcd malfunction).
+		//
+		// Safety guarantee: If we encounter real errors (network failures, etcd timeouts, etc.),
+		// we return error immediately without marking any keys for deletion. This prevents
+		// incorrectly treating valid keys as "non-existent" and deleting them.
+		if err != nil && len(values) != len(batch) {
+			// Real error: values array is incomplete, not just missing keys
+			return nil, err
+		}
+
+		for j, key := range batch {
+			result[key] = values[j] != ""
+		}
 	}
 
-	// to protect txn finished with ascend order, reverse the latest kv with tombstone to tail of array
-	sort.Strings(keyGroup)
-	if !includeOriginalKey && len(keyGroup) > 0 {
-		// keep the latest snapshot key for historical version compatibility
-		keyGroup = keyGroup[0 : len(keyGroup)-1]
-	}
-	removeFn := func(partialKeys []string) error {
-		return ss.MetaKv.MultiRemove(ctx, partialKeys)
-	}
-	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	return etcd.RemoveByBatchWithLimit(keyGroup, maxTxnNum, removeFn)
+	return result, nil
 }
 
-// removeExpiredKvs removes expired key-value pairs from the snapshot
-// It walks through all keys with the snapshot prefix, groups them by original key,
-// and removes expired versions or all versions if the original key has been deleted
-func (ss *SuffixSnapshot) removeExpiredKvs(ctx context.Context, now time.Time) error {
+// startBackgroundGC runs incremental cursor-based GC for expired snapshot keys.
+// It scans batchSize keys per tick, advances the cursor, and wraps around when
+// the end of the snapshot keyspace is reached.
+func (ss *SuffixSnapshot) startBackgroundGC(ctx context.Context) {
+	defer ss.gcWg.Done()
 	log := log.Ctx(ctx)
-	ttlTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotTTLSeconds.GetAsDuration(time.Second)
-	reserveTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotReserveTimeSeconds.GetAsDuration(time.Second)
 
-	candidateExpiredKeys := make([]string, 0)
-	latestOriginalKey := ""
-	latestOriginValue := ""
-	totalVersions := 0
+	gcInterval := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotGCInterval.GetAsDuration(time.Second)
+	batchSize := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotGCBatchSize.GetAsInt()
+	ttl := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotTTLSeconds.GetAsDuration(time.Second)
+	log.Info("snapshot GC goroutine started",
+		zap.Int("batchSize", batchSize),
+		zap.Duration("interval", gcInterval),
+		zap.Duration("ttl", ttl))
 
-	// cleanFn processes a group of keys for a single original key
-	cleanFn := func(curOriginalKey string) error {
-		if curOriginalKey == "" {
-			return nil
-		}
-		if ss.isTombstone(latestOriginValue) {
-			// If deleted, remove all versions including the original key
-			return ss.batchRemoveExpiredKvs(ctx, candidateExpiredKeys, curOriginalKey, totalVersions == len(candidateExpiredKeys))
-		}
+	ticker := time.NewTicker(gcInterval)
+	defer ticker.Stop()
 
-		// If not deleted, check for expired versions
-		expiredKeys := make([]string, 0)
-		for _, key := range candidateExpiredKeys {
-			ts, _ := ss.isTSKey(key)
-			expireTime, _ := tsoutil.ParseTS(ts)
-			if expireTime.Add(ttlTime).Before(now) {
-				expiredKeys = append(expiredKeys, key)
+	for {
+		select {
+		case <-ss.closeGC:
+			log.Info("snapshot GC goroutine stopped")
+			return
+		case <-ticker.C:
+			// Re-read parameters each tick to support dynamic configuration.
+			batchSize = paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotGCBatchSize.GetAsInt()
+			ttl = paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotTTLSeconds.GetAsDuration(time.Second)
+			newInterval := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotGCInterval.GetAsDuration(time.Second)
+			if newInterval != gcInterval {
+				gcInterval = newInterval
+				ticker.Reset(gcInterval)
+				log.Info("snapshot GC interval updated", zap.Duration("interval", gcInterval))
 			}
-		}
-		if len(expiredKeys) > 0 {
-			return ss.batchRemoveExpiredKvs(ctx, expiredKeys, curOriginalKey, false)
-		}
-		return nil
-	}
 
-	// Walk through all keys with the snapshot prefix
-	err := ss.MetaKv.WalkWithPrefix(ctx, ss.snapshotPrefix, ss.paginationSize, func(k []byte, v []byte) error {
+			deleted, scanned, err := ss.gcOneBatch(ctx, batchSize, ttl)
+			if err != nil {
+				log.Warn("snapshot GC batch error", zap.Error(err))
+				continue
+			}
+			log.Info("snapshot GC batch done",
+				zap.Int("scanned", scanned),
+				zap.Int("deleted", deleted),
+				zap.String("cursor", ss.gcCursor))
+		}
+	}
+}
+
+// gcCandidate holds metadata for a snapshot key collected during scan.
+type gcCandidate struct {
+	key         string
+	originalKey string
+	ts          typeutil.Timestamp
+}
+
+// gcOneBatch scans up to batchSize snapshot keys starting from gcCursor,
+// identifies expired keys, and deletes them in cross-group aggregated batches.
+// Returns the number of deleted and scanned keys.
+func (ss *SuffixSnapshot) gcOneBatch(ctx context.Context, batchSize int, ttlTime time.Duration) (deleted int, scanned int, err error) {
+	now := time.Now()
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+
+	// ========== Phase 1: Scan ==========
+	candidates := make([]gcCandidate, 0, batchSize)
+	latestPerGroup := make(map[string]string) // originalKey -> latest snapshot key
+	count := 0
+	lastKey := ""
+
+	walkErr := ss.MetaKv.WalkWithPrefixFrom(ctx, ss.snapshotPrefix, ss.gcCursor, batchSize, func(k []byte, v []byte) error {
+		count++
 		key := ss.hideRootPrefix(string(k))
+		lastKey = key
+
 		ts, ok := ss.isTSKey(key)
 		if !ok {
-			log.Warn("Skip key because it doesn't contain ts", zap.String("key", key))
 			return nil
 		}
 
-		curOriginalKey, err := ss.getOriginalKey(key)
+		originalKey, err := ss.getOriginalKey(key)
 		if err != nil {
-			log.Error("Failed to parse the original key for GC", zap.String("key", key), zap.Error(err))
-			return err
+			log.Ctx(ctx).Warn("snapshot GC: failed to parse original key", zap.String("key", key), zap.Error(err))
+			return nil
 		}
 
-		// If we've moved to a new original key, process the previous group
-		if latestOriginalKey != "" && latestOriginalKey != curOriginalKey {
-			if err := cleanFn(latestOriginalKey); err != nil {
-				return err
-			}
+		// Keys are lexicographically sorted, so last seen = latest within this batch.
+		// If a group is split across batches, this may not be the global latest —
+		// but that only causes at most one extra key to be retained per split group,
+		// which will be cleaned up in the next GC round when it is no longer latest.
+		latestPerGroup[originalKey] = key
+		candidates = append(candidates, gcCandidate{key: key, originalKey: originalKey, ts: ts})
 
-			candidateExpiredKeys = make([]string, 0)
-			totalVersions = 0
+		if count >= batchSize {
+			return errGCBatchFull
 		}
-
-		latestOriginalKey = curOriginalKey
-		latestOriginValue = string(v)
-		totalVersions++
-
-		// Record versions that are already expired but not removed
-		time, _ := tsoutil.ParseTS(ts)
-		if time.Add(reserveTime).Before(now) {
-			candidateExpiredKeys = append(candidateExpiredKeys, key)
-		}
-
 		return nil
 	})
-	if err != nil {
-		log.Error("Error occurred during WalkWithPrefix", zap.Error(err))
-		return err
+	if walkErr != nil && !errors.Is(walkErr, errGCBatchFull) {
+		return 0, count, walkErr
 	}
 
-	// Process the last group of keys
-	return cleanFn(latestOriginalKey)
+	// ========== Phase 2: Check plain key existence ==========
+	// If the plain key is gone, the entity was deleted (ts=0 direct removal).
+	// All its snapshot keys are orphans — delete everything including latest.
+	originalKeys := make([]string, 0, len(latestPerGroup))
+	for originalKey := range latestPerGroup {
+		originalKeys = append(originalKeys, originalKey)
+	}
+
+	plainExists, err := ss.batchMultiLoad(ctx, originalKeys, maxTxnNum)
+	if err != nil {
+		return 0, count, err
+	}
+
+	// ========== Phase 3: Filter ==========
+	toDelete := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		if !plainExists[c.originalKey] {
+			// Orphan: plain key is gone, delete unconditionally.
+			// When a collection/partition is dropped, RootCoord's tombstone sweeper removes
+			// the plain key after DataCoord confirms all segments are GC'd. If the plain key
+			// is missing, it means the collection/partition has been deleted, and all its
+			// snapshot keys are orphans that should be cleaned up immediately (including latest).
+			toDelete = append(toDelete, c.key)
+			continue
+		}
+
+		// Plain key exists: only delete expired non-latest keys.
+		expireTime, _ := tsoutil.ParseTS(c.ts)
+		if !expireTime.Add(ttlTime).Before(now) {
+			continue
+		}
+		if c.key == latestPerGroup[c.originalKey] {
+			continue
+		}
+
+		toDelete = append(toDelete, c.key)
+	}
+
+	// ========== Phase 4: Delete ==========
+	if len(toDelete) > 0 {
+		removeFn := func(partialKeys []string) error {
+			return ss.MetaKv.MultiRemove(ctx, partialKeys)
+		}
+		if err := etcd.RemoveByBatchWithLimit(toDelete, maxTxnNum, removeFn); err != nil {
+			return 0, count, err
+		}
+	}
+
+	// ========== Cursor update ==========
+	// Only update cursor after all operations (scan, load, delete) succeed.
+	// This ensures we don't skip keys if an error occurs mid-batch.
+	if count < batchSize {
+		ss.gcCursor = ""
+	} else {
+		ss.gcCursor = lastKey
+	}
+
+	return len(toDelete), count, nil
 }

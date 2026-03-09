@@ -69,6 +69,8 @@ metastore:
   snapshot:
     ttl: 86400 # snapshot ttl in seconds
     reserveTime: 3600 # snapshot reserve time in seconds
+    gcBatchSize: 10000 # number of snapshot keys to scan per GC batch
+    gcInterval: 30 # base interval in seconds between snapshot GC batches
   maxEtcdTxnNum: 64 # maximum number of operations in a single etcd transaction
 
 # Related configuration of tikv, used to store Milvus metadata.

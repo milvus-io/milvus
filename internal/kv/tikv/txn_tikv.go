@@ -637,6 +637,51 @@ func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, pagination
 	return nil
 }
 
+func (kv *txnTiKV) WalkWithPrefixFrom(ctx context.Context, prefix string, startKey string, paginationSize int, fn func([]byte, []byte) error) error {
+	if startKey == "" {
+		return kv.WalkWithPrefix(ctx, prefix, paginationSize, fn)
+	}
+
+	start := time.Now()
+	prefix = kv.GetPath(prefix)
+
+	var loggingErr error
+	defer logWarnOnFailure(&loggingErr, "txnTiKV WalkWithPrefixFrom error", zap.String("prefix", prefix))
+
+	ss := getSnapshot(kv.txn, paginationSize)
+
+	// Start after startKey (exclusive) by appending null byte
+	startKeyFull := kv.GetPath(startKey)
+	startKeyFull = string(append([]byte(startKeyFull), 0))
+	endKey := tikv.PrefixNextKey([]byte(prefix))
+	iter, err := ss.Iter([]byte(startKeyFull), endKey)
+	if err != nil {
+		loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to create iterator for %s during WalkWithPrefixFrom", prefix))
+		return loggingErr
+	}
+	defer iter.Close()
+
+	for iter.Valid() {
+		byteVal := iter.Value()
+		if isEmptyByte(byteVal) {
+			byteVal = []byte{}
+		}
+		err = fn(iter.Key(), byteVal)
+		if err != nil {
+			// Return fn errors directly without logging — caller may use
+			// sentinel errors (e.g., errGCBatchFull) for flow control.
+			return err
+		}
+		err = iter.Next()
+		if err != nil {
+			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to move Iterator after key %s for WalkWithPrefixFrom", string(iter.Key())))
+			return loggingErr
+		}
+	}
+	CheckElapseAndWarn(start, "Slow txnTiKV WalkWithPrefixFrom() operation", zap.String("prefix", prefix))
+	return nil
+}
+
 func (kv *txnTiKV) executeTxn(ctx context.Context, txn *transaction.KVTxn) error {
 	start := timerecord.NewTimeRecorder("executeTxn")
 

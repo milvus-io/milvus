@@ -833,6 +833,83 @@ func TestEmbedEtcd(te *testing.T) {
 	})
 }
 
+func Test_EmbedEtcd_WalkWithPrefixFrom(t *testing.T) {
+	te := t
+	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+	param := new(paramtable.ComponentParam)
+	te.Setenv("etcd.use.embed", "true")
+	te.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
+
+	dir := te.TempDir()
+	te.Setenv("etcd.data.dir", dir)
+
+	param.Init(paramtable.NewBaseTable())
+
+	rootPath := path.Join("unittest/walkfrom", funcutil.RandomString(8))
+	etcdKV, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
+	require.NoError(t, err)
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix(context.TODO(), "")
+
+	ctx := context.TODO()
+
+	// Seed data: keys A/1 through A/5
+	for i := 1; i <= 5; i++ {
+		err = etcdKV.Save(ctx, fmt.Sprintf("A/%d", i), fmt.Sprintf("v%d", i))
+		require.NoError(t, err)
+	}
+
+	t.Run("empty startKey delegates to WalkWithPrefix", func(t *testing.T) {
+		var count int
+		err := etcdKV.WalkWithPrefixFrom(ctx, "A/", "", 10, func(k []byte, v []byte) error {
+			count++
+			return nil
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 5, count)
+	})
+
+	t.Run("start after first key", func(t *testing.T) {
+		var keys []string
+		err := etcdKV.WalkWithPrefixFrom(ctx, "A/", "A/1", 10, func(k []byte, v []byte) error {
+			k2 := string(k)[len(rootPath)+1:]
+			keys = append(keys, k2)
+			return nil
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"A/2", "A/3", "A/4", "A/5"}, keys)
+	})
+
+	t.Run("start after last key returns empty", func(t *testing.T) {
+		var count int
+		err := etcdKV.WalkWithPrefixFrom(ctx, "A/", "A/5", 10, func(k []byte, v []byte) error {
+			count++
+			return nil
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, count)
+	})
+
+	t.Run("pagination across multiple pages", func(t *testing.T) {
+		var keys []string
+		err := etcdKV.WalkWithPrefixFrom(ctx, "A/", "A/1", 2, func(k []byte, v []byte) error {
+			k2 := string(k)[len(rootPath)+1:]
+			keys = append(keys, k2)
+			return nil
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"A/2", "A/3", "A/4", "A/5"}, keys)
+	})
+
+	t.Run("callback error propagated", func(t *testing.T) {
+		expectedErr := errors.New("stop")
+		err := etcdKV.WalkWithPrefixFrom(ctx, "A/", "A/1", 10, func(k []byte, v []byte) error {
+			return expectedErr
+		})
+		assert.ErrorIs(t, err, expectedErr)
+	})
+}
+
 type EmbedEtcdKVSuite struct {
 	suite.Suite
 

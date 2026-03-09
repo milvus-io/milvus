@@ -117,6 +117,52 @@ func (kv *etcdKV) WalkWithPrefix(ctx context.Context, prefix string, paginationS
 	return nil
 }
 
+func (kv *etcdKV) WalkWithPrefixFrom(ctx context.Context, prefix string, startKey string, paginationSize int, fn func([]byte, []byte) error) error {
+	if startKey == "" {
+		return kv.WalkWithPrefix(ctx, prefix, paginationSize, fn)
+	}
+
+	start := time.Now()
+	prefix = kv.GetPath(prefix)
+
+	batch := int64(paginationSize)
+	opts := []clientv3.OpOption{
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
+		clientv3.WithLimit(batch),
+		clientv3.WithRange(clientv3.GetPrefixRangeEnd(prefix)),
+	}
+
+	// Start after startKey (exclusive) by appending null byte
+	key := kv.GetPath(startKey)
+	key = string(append([]byte(key), 0))
+
+	for {
+		ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
+		resp, err := kv.getEtcdMeta(ctx1, key, opts...)
+		if err != nil {
+			cancel()
+			return err
+		}
+
+		for _, kv := range resp.Kvs {
+			if err = fn(kv.Key, kv.Value); err != nil {
+				cancel()
+				return err
+			}
+		}
+
+		if !resp.More {
+			cancel()
+			break
+		}
+		key = string(append(resp.Kvs[len(resp.Kvs)-1].Key, 0))
+		cancel()
+	}
+
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation(WalkWithPrefixFrom)", zap.String("prefix", prefix))
+	return nil
+}
+
 // LoadWithPrefix returns all the keys and values with the given key prefix.
 func (kv *etcdKV) LoadWithPrefix(ctx context.Context, key string) ([]string, []string, error) {
 	start := time.Now()
