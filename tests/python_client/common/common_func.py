@@ -1419,6 +1419,22 @@ def gen_default_data_for_upsert(nb=ct.default_nb, dim=ct.default_dim, start=0, s
     return df, float_values
 
 
+def gen_default_rows_data_for_upsert(nb=ct.default_nb, dim=ct.default_dim, start=0, size=10000):
+    """Row-based version of gen_default_data_for_upsert (without json_field).
+    float and string fields are offset by `size` so upsert can be verified by checking updated values."""
+    float_vec_values = gen_vectors(nb, dim)
+    float_values = [float(np.float32(i + size)) for i in range(start, start + nb)]
+    rows = []
+    for i in range(nb):
+        rows.append({
+            ct.default_int64_field_name: start + i,
+            ct.default_float_field_name: float_values[i],
+            ct.default_string_field_name: str(start + i + size),
+            ct.default_float_vec_field_name: float_vec_values[i]
+        })
+    return rows, float_values
+
+
 def gen_array_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, auto_id=False,
                              array_length=ct.default_max_capacity, with_json=False, random_primary_key=False):
     if not random_primary_key:
