@@ -84,6 +84,24 @@ fi
 source ${ROOT_DIR}/scripts/setenv.sh
 pushd ${BUILD_OUTPUT_DIR}
 
+# Unset LD_PRELOAD and LD_LIBRARY_PATH to prevent jemalloc and other shared
+# libraries (set by setenv.sh) from being injected into conan's Python process.
+# - LD_PRELOAD with jemalloc causes immediate segfaults in Python.
+# - LD_LIBRARY_PATH with cmake_build/lib/ (populated by conan imports on
+#   previous runs) causes the Python ssl module to load a mismatched
+#   libssl.so during the conan update check, also triggering segfaults.
+# The pre_build hook (below) handles setting LD_LIBRARY_PATH per-build
+# for tools like grpc_cpp_plugin that need shared libs at build time.
+SAVED_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+SAVED_LD_PRELOAD="${LD_PRELOAD:-}"
+SAVED_DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}"
+SAVED_DYLD_INSERT_LIBRARIES="${DYLD_INSERT_LIBRARIES:-}"
+unset LD_PRELOAD
+unset LD_LIBRARY_PATH
+unset DYLD_LIBRARY_PATH
+unset DYLD_INSERT_LIBRARIES
+
+
 export CONAN_REVISIONS_ENABLED=1
 export CXXFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
 export CFLAGS="-Wno-error=address -Wno-error=deprecated-declarations"
@@ -124,6 +142,21 @@ case "${unameOut}" in
     echo "Cannot build on windows"
     ;;
 esac
+
+# Restore LD_LIBRARY_PATH/LD_PRELOAD/DYLD vars so downstream build steps can find shared libs
+if [[ -n "${SAVED_LD_LIBRARY_PATH}" ]]; then
+    export LD_LIBRARY_PATH="${SAVED_LD_LIBRARY_PATH}"
+fi
+if [[ -n "${SAVED_LD_PRELOAD}" ]]; then
+    export LD_PRELOAD="${SAVED_LD_PRELOAD}"
+fi
+if [[ -n "${SAVED_DYLD_LIBRARY_PATH}" ]]; then
+    export DYLD_LIBRARY_PATH="${SAVED_DYLD_LIBRARY_PATH}"
+fi
+if [[ -n "${SAVED_DYLD_INSERT_LIBRARIES}" ]]; then
+    export DYLD_INSERT_LIBRARIES="${SAVED_DYLD_INSERT_LIBRARIES}"
+fi
+
 
 popd
 
