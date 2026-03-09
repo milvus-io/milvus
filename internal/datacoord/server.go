@@ -359,7 +359,7 @@ func (s *Server) initDataCoord() error {
 	}
 
 	// Initialize copy segment meta and components
-	s.copySegmentMeta, err = NewCopySegmentMeta(s.ctx, s.meta.catalog, s.meta, s.meta.snapshotMeta)
+	s.copySegmentMeta, err = NewCopySegmentMeta(s.ctx, s.meta.catalog, s.meta, s.meta.snapshotMeta, s.allocator)
 	if err != nil {
 		return err
 	}
