@@ -99,17 +99,31 @@ type segmentBuildInfo struct {
 	taskStats *expirable.LRU[UniqueID, *metricsinfo.IndexTaskStats]
 }
 
+const taskStatsLRUCapacity = 1024
+
 func newSegmentIndexBuildInfo() *segmentBuildInfo {
 	return &segmentBuildInfo{
 		// build ID -> segment index
 		buildID2SegmentIndex: typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex](),
 		// build ID -> task stats
-		taskStats: expirable.NewLRU[UniqueID, *metricsinfo.IndexTaskStats](1024, nil, time.Minute*30),
+		taskStats: expirable.NewLRU[UniqueID, *metricsinfo.IndexTaskStats](taskStatsLRUCapacity, nil, time.Minute*30),
 	}
 }
 
 func (m *segmentBuildInfo) Add(segIdx *model.SegmentIndex) {
 	m.buildID2SegmentIndex.Insert(segIdx.BuildID, segIdx)
+	m.taskStats.Add(segIdx.BuildID, newIndexTaskStats(segIdx))
+}
+
+// AddForRecovery inserts segment index during recovery. It skips the LRU write
+// only when the LRU is already full and the index task is finished, since
+// finished tasks are unlikely to be queried and the LRU write is expensive
+// during bulk recovery.
+func (m *segmentBuildInfo) AddForRecovery(segIdx *model.SegmentIndex) {
+	m.buildID2SegmentIndex.Insert(segIdx.BuildID, segIdx)
+	if m.taskStats.Len() >= taskStatsLRUCapacity && segIdx.IndexState == commonpb.IndexState_Finished {
+		return
+	}
 	m.taskStats.Add(segIdx.BuildID, newIndexTaskStats(segIdx))
 }
 
@@ -189,7 +203,6 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 				if segIdx.IndexMemSize == 0 {
 					segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
 				}
-				// Bypass updateSegmentIndex: LRU writes are too expensive during recovery.
 				indexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 				if ok {
 					indexes.Insert(segIdx.IndexID, segIdx)
@@ -198,7 +211,7 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 					indexes.Insert(segIdx.IndexID, segIdx)
 					m.segmentIndexes.Insert(segIdx.SegmentID, indexes)
 				}
-				m.segmentBuildInfo.buildID2SegmentIndex.Insert(segIdx.BuildID, segIdx)
+				m.segmentBuildInfo.AddForRecovery(segIdx)
 			}
 		}
 
