@@ -322,73 +322,61 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     // When segments reference absolute URIs (e.g., aws://host/bucket/path),
     // the storage layer matches against extfs.* configs to find credentials.
     if (c_storage_config.storage_type != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map,
-            "extfs.default.storage_type",
-            c_storage_config.storage_type);
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.storage_type",
+                                      c_storage_config.storage_type);
         if (std::string(c_storage_config.storage_type) == "local") {
             milvus_storage::api::SetValue(
                 *properties_map, "extfs.default.bucket_name", "local");
         } else if (c_storage_config.bucket_name != nullptr) {
-            milvus_storage::api::SetValue(
-                *properties_map,
-                "extfs.default.bucket_name",
-                c_storage_config.bucket_name);
+            milvus_storage::api::SetValue(*properties_map,
+                                          "extfs.default.bucket_name",
+                                          c_storage_config.bucket_name);
         }
     }
     if (c_storage_config.address != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map,
-            "extfs.default.address",
-            fs_address_internal.c_str());
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.address",
+                                      fs_address_internal.c_str());
     }
     if (c_storage_config.root_path != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map,
-            "extfs.default.root_path",
-            c_storage_config.root_path);
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.root_path",
+                                      c_storage_config.root_path);
     }
     if (c_storage_config.access_key_id != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map,
-            "extfs.default.access_key_id",
-            c_storage_config.access_key_id);
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.access_key_id",
+                                      c_storage_config.access_key_id);
     }
     if (c_storage_config.access_key_value != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map,
-            "extfs.default.access_key_value",
-            c_storage_config.access_key_value);
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.access_key_value",
+                                      c_storage_config.access_key_value);
     }
     if (c_storage_config.cloud_provider != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map,
-            "extfs.default.cloud_provider",
-            c_storage_config.cloud_provider);
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.cloud_provider",
+                                      c_storage_config.cloud_provider);
     }
     if (c_storage_config.iam_endpoint != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map,
-            "extfs.default.iam_endpoint",
-            c_storage_config.iam_endpoint);
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.iam_endpoint",
+                                      c_storage_config.iam_endpoint);
     }
     if (c_storage_config.region != nullptr) {
         milvus_storage::api::SetValue(
-            *properties_map,
-            "extfs.default.region",
-            c_storage_config.region);
+            *properties_map, "extfs.default.region", c_storage_config.region);
     }
     if (c_storage_config.sslCACert != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map,
-            "extfs.default.ssl_ca_cert",
-            c_storage_config.sslCACert);
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.ssl_ca_cert",
+                                      c_storage_config.sslCACert);
     }
     if (c_storage_config.gcp_credential_json != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map,
-            "extfs.default.gcp_credential_json",
-            c_storage_config.gcp_credential_json);
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.gcp_credential_json",
+                                      c_storage_config.gcp_credential_json);
     }
     // Temporarily disabled: extfs.default.* boolean properties.
     // extfs.* keys are not registered in property_infos, so SetValue stores

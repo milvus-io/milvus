@@ -369,11 +369,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
         std::vector<FieldId> field_ids;
         field_ids.reserve(cg->columns.size());
         for (auto& column : cg->columns) {
-            field_ids.emplace_back(
-                schema_->ResolveColumnFieldId(column));
+            field_ids.emplace_back(schema_->ResolveColumnFieldId(column));
         }
-        cg_field_ids.emplace_back(
-            static_cast<int>(i), std::move(field_ids));
+        cg_field_ids.emplace_back(static_cast<int>(i), std::move(field_ids));
     }
 
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
@@ -381,8 +379,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
     for (const auto& pair : cg_field_ids) {
         auto cg_index = pair.first;
         const auto& field_ids = pair.second;
-        auto future = pool.Submit(
-            [this, column_groups, properties, cg_index, field_ids] {
+        auto future =
+            pool.Submit([this, column_groups, properties, cg_index, field_ids] {
                 LoadColumnGroup(column_groups,
                                 properties,
                                 cg_index,
@@ -430,8 +428,7 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields() {
 
     // 1. VirtualPKChunkedColumn for the synthetic primary key
     auto pk_field_id = schema_->get_primary_field_id().value();
-    auto virtual_pk =
-        std::make_shared<VirtualPKChunkedColumn>(id_, num_rows);
+    auto virtual_pk = std::make_shared<VirtualPKChunkedColumn>(id_, num_rows);
     fields_.wlock()->emplace(pk_field_id, virtual_pk);
     set_bit(field_data_ready_bitset_, pk_field_id, true);
 
@@ -443,12 +440,12 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields() {
     std::vector<Timestamp> timestamps(num_rows, 0);
     TimestampIndex index;
     auto min_slice_length = num_rows < 4096 ? 1 : 4096;
-    auto meta = GenerateFakeSlices(
-        timestamps.data(), num_rows, min_slice_length);
+    auto meta =
+        GenerateFakeSlices(timestamps.data(), num_rows, min_slice_length);
     index.set_length_meta(std::move(meta));
     index.build_with(timestamps.data(), num_rows);
     insert_record_.init_timestamps_from_owned(std::move(timestamps),
-                                               std::move(index));
+                                              std::move(index));
 
     // 4. Row count + readiness
     {
@@ -3178,49 +3175,49 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
                               !diff.column_groups_to_lazyload.empty() ||
                               !diff.column_groups_to_lazyreplace.empty();
         if (has_cg_changes) {
-        auto properties =
-            milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-                .GetProperties();
-        auto column_groups = segment_load_info.GetColumnGroups();
-        auto arrow_schema = schema_->ConvertToLoonArrowSchema();
-        auto needed_columns = std::make_shared<std::vector<std::string>>();
-        for (const auto& field_id : schema_->get_field_ids()) {
-            needed_columns->push_back(std::to_string(field_id.get()));
-        }
-        reader_ = milvus_storage::api::Reader::create(
-            column_groups, arrow_schema, needed_columns, *properties);
-        // New column group fields
-        if (!diff.column_groups_to_load.empty()) {
-            LoadColumnGroups(column_groups,
-                             properties,
-                             diff.column_groups_to_load,
-                             true,
-                             op_ctx);
-        }
-        if (!diff.column_groups_to_lazyload.empty()) {
-            LoadColumnGroups(column_groups,
-                             properties,
-                             diff.column_groups_to_lazyload,
-                             false,
-                             op_ctx);
-        }
-        // Replace column group fields
-        if (!diff.column_groups_to_replace.empty()) {
-            LoadColumnGroups(column_groups,
-                             properties,
-                             diff.column_groups_to_replace,
-                             true,
-                             op_ctx,
-                             true);
-        }
-        if (!diff.column_groups_to_lazyreplace.empty()) {
-            LoadColumnGroups(column_groups,
-                             properties,
-                             diff.column_groups_to_lazyreplace,
-                             false,
-                             op_ctx,
-                             true);
-        }
+            auto properties =
+                milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                    .GetProperties();
+            auto column_groups = segment_load_info.GetColumnGroups();
+            auto arrow_schema = schema_->ConvertToLoonArrowSchema();
+            auto needed_columns = std::make_shared<std::vector<std::string>>();
+            for (const auto& field_id : schema_->get_field_ids()) {
+                needed_columns->push_back(std::to_string(field_id.get()));
+            }
+            reader_ = milvus_storage::api::Reader::create(
+                column_groups, arrow_schema, needed_columns, *properties);
+            // New column group fields
+            if (!diff.column_groups_to_load.empty()) {
+                LoadColumnGroups(column_groups,
+                                 properties,
+                                 diff.column_groups_to_load,
+                                 true,
+                                 op_ctx);
+            }
+            if (!diff.column_groups_to_lazyload.empty()) {
+                LoadColumnGroups(column_groups,
+                                 properties,
+                                 diff.column_groups_to_lazyload,
+                                 false,
+                                 op_ctx);
+            }
+            // Replace column group fields
+            if (!diff.column_groups_to_replace.empty()) {
+                LoadColumnGroups(column_groups,
+                                 properties,
+                                 diff.column_groups_to_replace,
+                                 true,
+                                 op_ctx,
+                                 true);
+            }
+            if (!diff.column_groups_to_lazyreplace.empty()) {
+                LoadColumnGroups(column_groups,
+                                 properties,
+                                 diff.column_groups_to_lazyreplace,
+                                 false,
+                                 op_ctx,
+                                 true);
+            }
         }
     }
 
@@ -3494,7 +3491,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     needed_columns->reserve(milvus_field_ids.size());
     for (const auto& fid : milvus_field_ids) {
-        needed_columns->push_back(std::to_string(fid.get()));
+        const auto& field_meta = (*schema_)[fid];
+        if (field_meta.is_external_field()) {
+            needed_columns->push_back(field_meta.get_external_field());
+        } else {
+            needed_columns->push_back(std::to_string(fid.get()));
+        }
     }
     auto chunk_reader_result = reader_->get_chunk_reader(index, needed_columns);
     AssertInfo(chunk_reader_result.ok(),

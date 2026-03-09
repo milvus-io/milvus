@@ -254,9 +254,8 @@ Schema::BuildReaderArrowSchema() const {
             meta.get_external_field(),
             arrow_data_type,
             meta.is_nullable(),
-            arrow::key_value_metadata(
-                {milvus_storage::ARROW_FIELD_ID_KEY},
-                {std::to_string(meta.get_id().get())}));
+            arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
+                                      {std::to_string(meta.get_id().get())}));
         external_fields.push_back(arrow_field);
     }
     return arrow::schema(external_fields);

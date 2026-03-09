@@ -79,23 +79,20 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                    "Null values in vector columns are not supported for "
                    "external collections, field: {}",
                    field_meta.get_name().get());
-        auto buffer_result =
-            arrow::AllocateBuffer(num_rows * byte_width);
+        auto buffer_result = arrow::AllocateBuffer(num_rows * byte_width);
         AssertInfo(buffer_result.ok(),
                    "Failed to allocate buffer for vector normalization");
         auto buffer = std::move(*buffer_result);
         auto dst = buffer->mutable_data();
 
         if (type_id == arrow::Type::LIST) {
-            auto list_array =
-                std::static_pointer_cast<arrow::ListArray>(array);
+            auto list_array = std::static_pointer_cast<arrow::ListArray>(array);
             auto values = list_array->values();
             int elem_bit_width = values->type()->bit_width();
-            AssertInfo(
-                elem_bit_width > 0 && elem_bit_width % 8 == 0,
-                "Vector list element must be fixed-width byte-aligned "
-                "type, got bit_width={}",
-                elem_bit_width);
+            AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
+                       "Vector list element must be fixed-width byte-aligned "
+                       "type, got bit_width={}",
+                       elem_bit_width);
             int elem_byte_size = elem_bit_width / 8;
             auto raw = reinterpret_cast<const uint8_t*>(
                 values->data()->buffers[1]->data());
@@ -110,11 +107,10 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                 std::static_pointer_cast<arrow::FixedSizeListArray>(array);
             auto values = fsl_array->values();
             int elem_bit_width = values->type()->bit_width();
-            AssertInfo(
-                elem_bit_width > 0 && elem_bit_width % 8 == 0,
-                "Vector list element must be fixed-width byte-aligned "
-                "type, got bit_width={}",
-                elem_bit_width);
+            AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
+                       "Vector list element must be fixed-width byte-aligned "
+                       "type, got bit_width={}",
+                       elem_bit_width);
             int elem_byte_size = elem_bit_width / 8;
             auto raw = reinterpret_cast<const uint8_t*>(
                 values->data()->buffers[1]->data());
@@ -193,14 +189,15 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     auto chunk_size_result = chunk_reader_->get_chunk_size();
     if (!chunk_size_result.ok()) {
         throw std::runtime_error(
-            fmt::format("get row group size failed: {}", chunk_size_result.status().ToString()));
+            fmt::format("get row group size failed: {}",
+                        chunk_size_result.status().ToString()));
     }
     const auto& row_group_sizes = chunk_size_result.ValueOrDie();
 
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
-        throw std::runtime_error(
-            fmt::format("get row group rows failed: {}", rows_result.status().ToString()));
+        throw std::runtime_error(fmt::format("get row group rows failed: {}",
+                                             rows_result.status().ToString()));
     }
     const auto& row_group_rows = rows_result.ValueOrDie();
 
@@ -453,8 +450,7 @@ ManifestGroupTranslator::load_group_chunk(
             !IsSparseFloatVectorDataType(field_metas[idx].get_data_type()) &&
             !IsVectorArrayDataType(field_metas[idx].get_data_type()) &&
             !array_vecs[idx].empty() &&
-            array_vecs[idx][0]->type_id() !=
-                arrow::Type::FIXED_SIZE_BINARY) {
+            array_vecs[idx][0]->type_id() != arrow::Type::FIXED_SIZE_BINARY) {
             array_vecs[idx] = NormalizeVectorArraysToFixedSizeBinary(
                 array_vecs[idx], field_metas[idx]);
         }

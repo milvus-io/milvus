@@ -55,7 +55,8 @@ ExtractOffsetFromVirtualPK(int64_t virtual_pk) {
 // Note: Only compares the lower 32 bits of segment_id.
 inline bool
 IsVirtualPKFromSegment(int64_t virtual_pk, int64_t segment_id) {
-    return ExtractSegmentIDFromVirtualPK(virtual_pk) == (segment_id & 0xFFFFFFFF);
+    return ExtractSegmentIDFromVirtualPK(virtual_pk) ==
+           (segment_id & 0xFFFFFFFF);
 }
 
 // Get the truncated segment ID (lower 32 bits) for comparison with virtual PKs.
