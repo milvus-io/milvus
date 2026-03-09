@@ -1321,7 +1321,6 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				if err == io.EOF {
 					break
 				}
-				log.Warn("CQX readDeltaRecords next failed", zap.Error(err))
 				return err
 			}
 
