@@ -117,13 +117,29 @@ install_cmake_linux() {
 #######################################
 install_conan() {
     print_info "Installing Conan ${CONAN_VERSION}..."
+
+    local pip_cmd=""
     if command_exists pip3; then
-        pip3 install --user conan==${CONAN_VERSION}
+        pip_cmd="pip3"
     elif command_exists pip; then
-        pip install --user conan==${CONAN_VERSION}
+        pip_cmd="pip"
     else
         print_error "pip not found. Please install Python 3 with pip."
         exit 1
+    fi
+
+    # Try direct user install first (works on Ubuntu 20.04/22.04)
+    if $pip_cmd install --user "conan==${CONAN_VERSION}" 2>/dev/null; then
+        :
+    else
+        # Ubuntu 24.04+ enforces PEP 668 — use an isolated venv instead
+        print_info "System pip blocked (PEP 668). Installing Conan in isolated venv..."
+        local venv_dir="${HOME}/.venv/conan"
+        python3 -m venv "$venv_dir"
+        "$venv_dir/bin/pip" install "conan==${CONAN_VERSION}"
+        # Expose the binary via ~/.local/bin
+        mkdir -p "${HOME}/.local/bin"
+        ln -sf "$venv_dir/bin/conan" "${HOME}/.local/bin/conan"
     fi
 
     # Add local bin to PATH if not already there
