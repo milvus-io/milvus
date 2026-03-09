@@ -1610,6 +1610,54 @@ func TestBuildIndexTaskStatsJSON(t *testing.T) {
 	assert.Equal(t, 1, len(im.segmentBuildInfo.List()))
 }
 
+func TestSegmentBuildInfo_AddForRecovery(t *testing.T) {
+	t.Run("lru not full, all states inserted", func(t *testing.T) {
+		info := newSegmentIndexBuildInfo()
+		finished := &model.SegmentIndex{BuildID: 1, IndexState: commonpb.IndexState_Finished}
+		inProgress := &model.SegmentIndex{BuildID: 2, IndexState: commonpb.IndexState_InProgress}
+
+		info.AddForRecovery(finished)
+		info.AddForRecovery(inProgress)
+
+		assert.Equal(t, 2, len(info.List()))
+		assert.Equal(t, 2, len(info.GetTaskStats()))
+	})
+
+	t.Run("lru full, finished tasks skipped", func(t *testing.T) {
+		info := newSegmentIndexBuildInfo()
+		// Fill the LRU to capacity with in-progress tasks.
+		for i := int64(0); i < taskStatsLRUCapacity; i++ {
+			info.AddForRecovery(&model.SegmentIndex{BuildID: i, IndexState: commonpb.IndexState_InProgress})
+		}
+		assert.Equal(t, taskStatsLRUCapacity, info.taskStats.Len())
+
+		// A finished task should be skipped when LRU is full.
+		finished := &model.SegmentIndex{BuildID: taskStatsLRUCapacity + 1, IndexState: commonpb.IndexState_Finished}
+		info.AddForRecovery(finished)
+
+		_, ok := info.Get(finished.BuildID)
+		assert.True(t, ok, "buildID2SegmentIndex should still contain the entry")
+		assert.Equal(t, taskStatsLRUCapacity, info.taskStats.Len(), "LRU size should not grow")
+	})
+
+	t.Run("lru full, unfinished tasks still inserted", func(t *testing.T) {
+		info := newSegmentIndexBuildInfo()
+		for i := int64(0); i < taskStatsLRUCapacity; i++ {
+			info.AddForRecovery(&model.SegmentIndex{BuildID: i, IndexState: commonpb.IndexState_InProgress})
+		}
+		assert.Equal(t, taskStatsLRUCapacity, info.taskStats.Len())
+
+		// An unfinished task should still be inserted (evicting the oldest).
+		unissued := &model.SegmentIndex{BuildID: taskStatsLRUCapacity + 1, IndexState: commonpb.IndexState_Unissued}
+		info.AddForRecovery(unissued)
+
+		_, ok := info.Get(unissued.BuildID)
+		assert.True(t, ok)
+		// LRU size stays at capacity because the oldest entry was evicted.
+		assert.Equal(t, taskStatsLRUCapacity, info.taskStats.Len())
+	})
+}
+
 func TestMeta_GetIndexJSON(t *testing.T) {
 	m := &indexMeta{
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
