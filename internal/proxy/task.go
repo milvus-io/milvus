@@ -1283,7 +1283,7 @@ func checkVectorIndexExist(ctx context.Context, dbName, collectionName string, c
 		CollectionID: collectionID,
 		IndexName:    "",
 	})
-	if err = merr.CheckRPCCall(indexResponse, err); !errors.Is(err, merr.ErrIndexNotFound) && err != nil {
+	if err = merr.CheckRPCCall(indexResponse, err); err != nil && !errors.Is(err, merr.ErrIndexNotFound) {
 		return "", merr.WrapErrServiceInternal("describe index failed", err.Error())
 	}
 	for _, index := range indexResponse.IndexInfos {
@@ -1306,6 +1306,9 @@ func detectBoolPropChange(
 	deleteKeys []string,
 	parseFn func() (bool, error),
 ) (newValue bool, changed bool, err error) {
+	if len(properties) > 0 && len(deleteKeys) > 0 {
+		return false, false, merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
+	}
 	newValue = oldValue
 	if _, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(propKey, properties); ok {
 		newValue, err = parseFn()
