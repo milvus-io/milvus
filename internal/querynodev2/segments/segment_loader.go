@@ -1321,6 +1321,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				if err == io.EOF {
 					break
 				}
+				log.Warn("CQX readDeltaRecords next failed", zap.Error(err))
 				return err
 			}
 
@@ -1371,9 +1372,10 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 			pkField.DataType,
 			manifestPath,
 			storage.WithStorageConfig(createStorageConfig()),
+			storage.WithVersion(storage.StorageV2),
 		)
 		if err != nil {
-			if err != io.EOF {
+			if !errors.Is(err, io.EOF) {
 				return err
 			}
 			// io.EOF means no deltalogs in manifest, not an error
