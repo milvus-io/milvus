@@ -1002,9 +1002,6 @@ func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID Uniqu
 				if version == 0 || curVersion <= version {
 					delete(m.collInfo[database], k)
 					collNames = append(collNames, k)
-<<<<<<< HEAD
-					m.removeAliasesForCollectionLocked(database, k)
-=======
 					m.sfGlobal.Forget(buildSfKeyByName(database, k))
 					m.sfGlobal.Forget(buildSfKeyById(database, v.collID))
 					realName := k
@@ -1012,7 +1009,6 @@ func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID Uniqu
 						realName = v.schema.CollectionSchema.GetName()
 					}
 					m.removeAliasesForCollectionLocked(database, realName)
->>>>>>> c19d6728c6 (fix: fix RBAC grant cleanup on drop and migration on rename)
 				}
 			}
 		}
