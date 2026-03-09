@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -35,6 +36,7 @@ type insertNodeMsg struct {
 	timeRange     TimeRange
 	schema        *schemapb.CollectionSchema
 	schemaVersion uint64
+	indexInfo     *indexpb.IndexInfo
 }
 
 type deleteNodeMsg struct {
@@ -42,6 +44,7 @@ type deleteNodeMsg struct {
 	timeRange     TimeRange
 	schema        *schemapb.CollectionSchema
 	schemaVersion uint64
+	newIndexInfo  *indexpb.IndexInfo
 }
 
 func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
@@ -70,6 +73,10 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 			msg.schema = body.GetUpdates().GetSchema()
 			msg.schemaVersion = taskMsg.BeginTs()
 		}
+	case commonpb.MsgType_CreateIndex:
+		createIndexMsg := taskMsg.(*adaptor.CreateIndexMessageBody)
+		body := createIndexMsg.CreateIndexMessage.MustBody()
+		msg.indexInfo = body.FieldIndex.GetIndexInfo()
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}

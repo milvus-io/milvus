@@ -27,7 +27,7 @@ type BufferManager interface {
 	// Register adds a WriteBuffer with provided schema & options.
 	Register(channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error
 	// CreateNewGrowingSegment notifies writeBuffer to create a new growing segment.
-	CreateNewGrowingSegment(ctx context.Context, channel string, partition int64, segmentID int64) error
+	CreateNewGrowingSegment(ctx context.Context, channel string, partition int64, segmentID int64, schemaVersion int32) error
 	// SealSegments notifies writeBuffer corresponding to provided channel to seal segments.
 	// which will cause segment start flush procedure.
 	SealSegments(ctx context.Context, channel string, segmentIDs []int64) error
@@ -41,7 +41,7 @@ type BufferManager interface {
 	DropChannel(channel string)
 	DropPartitions(channel string, partitionIDs []int64)
 	// BufferData put data into channel write buffer.
-	BufferData(channel string, insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error
+	BufferData(channel string, insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error
 	// GetCheckpoint returns checkpoint for provided channel.
 	GetCheckpoint(channel string) (*msgpb.MsgPosition, bool, error)
 	// NotifyCheckpointUpdated notify write buffer checkpoint updated to reset flushTs.
@@ -175,7 +175,7 @@ func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, 
 }
 
 // CreateNewGrowingSegment notifies writeBuffer to create a new growing segment.
-func (m *bufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, partitionID int64, segmentID int64) error {
+func (m *bufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, partitionID int64, segmentID int64, schemaVersion int32) error {
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
 		log.Ctx(ctx).Warn("write buffer not found when create new growing segment",
@@ -184,7 +184,7 @@ func (m *bufferManager) CreateNewGrowingSegment(ctx context.Context, channel str
 			zap.Int64("segmentID", segmentID))
 		return merr.WrapErrChannelNotFound(channel)
 	}
-	buf.CreateNewGrowingSegment(partitionID, segmentID, nil)
+	buf.CreateNewGrowingSegment(partitionID, segmentID, nil, schemaVersion)
 	return nil
 }
 
@@ -227,7 +227,7 @@ func (m *bufferManager) FlushChannel(ctx context.Context, channel string, flushT
 }
 
 // BufferData put data into channel write buffer.
-func (m *bufferManager) BufferData(channel string, insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
+func (m *bufferManager) BufferData(channel string, insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error {
 	buf, loaded := m.buffers.Get(channel)
 	if !loaded {
 		log.Ctx(context.Background()).Warn("write buffer not found when buffer data",
@@ -235,7 +235,7 @@ func (m *bufferManager) BufferData(channel string, insertData []*InsertData, del
 		return merr.WrapErrChannelNotFound(channel)
 	}
 
-	return buf.BufferData(insertData, deleteMsgs, startPos, endPos)
+	return buf.BufferData(insertData, deleteMsgs, startPos, endPos, schemaVersion)
 }
 
 // GetCheckpoint returns checkpoint for provided channel.

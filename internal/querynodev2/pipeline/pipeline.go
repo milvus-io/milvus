@@ -68,12 +68,6 @@ func NewPipeLine(
 	insertNode := newInsertNode(collectionID, channel, manager, delegator, pipelineQueueLength)
 	deleteNode := newDeleteNode(collectionID, channel, manager, delegator, pipelineQueueLength)
 
-	// skip add embedding node when collection has no function.
-	if embeddingNode != nil {
-		p.Add(filterNode, embeddingNode, insertNode, deleteNode)
-	} else {
-		p.Add(filterNode, insertNode, deleteNode)
-	}
-
+	p.Add(filterNode, embeddingNode, insertNode, deleteNode)
 	return p, nil
 }

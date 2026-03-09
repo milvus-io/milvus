@@ -43,15 +43,6 @@
 namespace milvus {
 namespace exec {
 
-static milvus::SearchResult
-empty_search_result(int64_t num_queries) {
-    milvus::SearchResult final_result;
-    final_result.total_nq_ = num_queries;
-    final_result.unity_topK_ = 0;  // no result
-    final_result.total_data_cnt_ = 0;
-    return final_result;
-}
-
 PhyVectorSearchNode::PhyVectorSearchNode(
     int32_t operator_id,
     DriverContext* driverctx,

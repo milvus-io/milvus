@@ -80,6 +80,9 @@ func (dNode *deleteNode) Operate(in Msg) Msg {
 	if nodeMsg.schema != nil {
 		dNode.delegator.UpdateSchema(context.Background(), nodeMsg.schema, nodeMsg.schemaVersion)
 	}
+	if nodeMsg.newIndexInfo != nil {
+		dNode.delegator.UpdateIndex(context.Background(), nodeMsg.newIndexInfo)
+	}
 
 	// update tSafe
 	dNode.delegator.UpdateTSafe(nodeMsg.timeRange.timestampMax)

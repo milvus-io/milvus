@@ -361,6 +361,10 @@ struct SearchResult {
 using SearchResultPtr = std::shared_ptr<SearchResult>;
 using SearchResultOpt = std::optional<SearchResult>;
 
+[[nodiscard]] inline SearchResult
+make_empty_search_result(int64_t num_queries) {
+    return SearchResult{num_queries, 0, 0};
+}
 struct RetrieveResult {
     RetrieveResult() = default;
 

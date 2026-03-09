@@ -1937,9 +1937,11 @@ func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
 	searchReq.Req.MetricType = metric.IP
 
 	sd := &shardDelegator{
-		functionFieldType:          map[int64]schemapb.FunctionType{101: schemapb.FunctionType_BM25},
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
+	fs := newFunctionState()
+	fs.fieldType[101] = schemapb.FunctionType_BM25
+	sd.funcState.Store(fs)
 
 	_, err := sd.search(context.Background(), searchReq, []SnapshotItem{}, []SegmentEntry{}, map[int64]int64{})
 	require.Error(t, err)

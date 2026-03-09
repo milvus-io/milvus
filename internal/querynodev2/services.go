@@ -1714,12 +1714,28 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 	return merr.Success(), nil
 }
 
+// UpdateIndex updates the index meta of the collection on the querynode.
 func (node *QueryNode) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
 	defer node.updateDistributionModifyTS()
-	// UpdateIndex is currently a placeholder implementation
-	// The actual logic should handle AddIndex and DropIndex actions
-	// For now, return success to satisfy the interface
-	return merr.Success(), nil
+
+	// check node healthy
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return merr.Status(err), nil
+	}
+	defer node.lifetime.Done()
+
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+	)
+
+	log.Info("querynode received update index request")
+
+	err := node.manager.Collection.UpdateIndex(req.GetCollectionID(), req)
+	if err != nil {
+		log.Warn("failed to update index", zap.Error(err))
+	}
+
+	return merr.Status(err), nil
 }
 
 func (node *QueryNode) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) (*querypb.GetHighlightResponse, error) {
