@@ -36,7 +36,6 @@ compare_double(double x, double y, double epsilon = 0.000001f) {
     return false;
 }
 
-
 inline void
 assert_order(const milvus::SearchResult& result,
              const knowhere::MetricType& metric_type) {

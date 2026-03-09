@@ -662,9 +662,8 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidSearchInfo) {
     {
         SearchInfo si;
         si.metric_type_ = "";
-        EXPECT_THROW(
-            DispatchIterator(std::get<0>(GetParam()), si, nullptr),
-            SegcoreError);
+        EXPECT_THROW(DispatchIterator(std::get<0>(GetParam()), si, nullptr),
+                     SegcoreError);
     }
 
     {
@@ -688,9 +687,8 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidSearchInfo) {
         SearchIteratorV2Info iter_info;
         iter_info.batch_size = 0;
         si.iterator_v2_info_ = iter_info;
-        EXPECT_THROW(
-            DispatchIterator(std::get<0>(GetParam()), si, nullptr),
-            SegcoreError);
+        EXPECT_THROW(DispatchIterator(std::get<0>(GetParam()), si, nullptr),
+                     SegcoreError);
     }
 }
 

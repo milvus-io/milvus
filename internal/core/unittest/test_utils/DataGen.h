@@ -388,7 +388,8 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline SchemaPtr CreateTestSchema() {
+inline SchemaPtr
+CreateTestSchema() {
     auto schema = std::make_shared<milvus::Schema>();
     schema->AddDebugField("bool", milvus::DataType::BOOL, true);
     schema->AddDebugField("int8", milvus::DataType::INT8, true);
@@ -407,19 +408,19 @@ inline SchemaPtr CreateTestSchema() {
     schema->AddDebugField(
         "bool_array", milvus::DataType::ARRAY, milvus::DataType::BOOL, true);
     schema->AddDebugField("string_array",
-                                                    milvus::DataType::ARRAY,
-                                                    milvus::DataType::VARCHAR,
-                                                    true);
+                          milvus::DataType::ARRAY,
+                          milvus::DataType::VARCHAR,
+                          true);
     schema->AddDebugField("double_array",
-                                                    milvus::DataType::ARRAY,
-                                                    milvus::DataType::DOUBLE,
-                                                    true);
+                          milvus::DataType::ARRAY,
+                          milvus::DataType::DOUBLE,
+                          true);
     schema->AddDebugField(
         "float_array", milvus::DataType::ARRAY, milvus::DataType::FLOAT, true);
     schema->AddDebugField("embeddings",
-                                     milvus::DataType::VECTOR_FLOAT,
-                                     128,
-                                     knowhere::metric::L2);
+                          milvus::DataType::VECTOR_FLOAT,
+                          128,
+                          knowhere::metric::L2);
     schema->set_primary_field_id(int64_field);
     return schema;
 }
@@ -568,8 +569,7 @@ DataGen(SchemaPtr schema,
             insert_data->mutable_fields_data()->AddAllocated(array.release());
         };
 
-    auto generate_float_vector = [&seed, &offset](
-                                     auto& field_meta, int64_t N) {
+    auto generate_float_vector = [&seed, &offset](auto& field_meta, int64_t N) {
         auto dim = field_meta.get_dim();
         vector<float> final(dim * N);
         bool is_ip = starts_with(field_meta.get_name().get(), "normalized");
@@ -596,8 +596,7 @@ DataGen(SchemaPtr schema,
         return final;
     };
 
-    auto generate_binary_vector = [&random](auto& field_meta,
-                                                            int64_t N) {
+    auto generate_binary_vector = [&random](auto& field_meta, int64_t N) {
         auto dim = field_meta.get_dim();
         Assert(dim % 8 == 0);
         vector<uint8_t> data(dim / 8 * N);
@@ -607,8 +606,8 @@ DataGen(SchemaPtr schema,
         return data;
     };
 
-    auto generate_float16_vector = [&offset, &random, &distr](
-                                       auto& field_meta, int64_t N) {
+    auto generate_float16_vector = [&offset, &random, &distr](auto& field_meta,
+                                                              int64_t N) {
         auto dim = field_meta.get_dim();
         vector<float16> data(dim * N);
         for (auto& x : data) {
@@ -617,8 +616,8 @@ DataGen(SchemaPtr schema,
         return data;
     };
 
-    auto generate_bfloat16_vector = [&offset, &random, &distr](
-                                        auto& field_meta, int64_t N) {
+    auto generate_bfloat16_vector = [&offset, &random, &distr](auto& field_meta,
+                                                               int64_t N) {
         auto dim = field_meta.get_dim();
         vector<bfloat16> data(dim * N);
         for (auto& x : data) {
@@ -627,8 +626,7 @@ DataGen(SchemaPtr schema,
         return data;
     };
 
-    auto generate_int8_vector = [&random](auto& field_meta,
-                                                          int64_t N) {
+    auto generate_int8_vector = [&random](auto& field_meta, int64_t N) {
         auto dim = field_meta.get_dim();
         vector<int8_t> data(dim * N);
         for (auto& x : data) {
@@ -2331,8 +2329,7 @@ gen_all_data_types_schema() {
     auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
     schema->AddDebugField("float", milvus::DataType::FLOAT, true);
     schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
-    schema->AddDebugField(
-        "timestamptz", milvus::DataType::TIMESTAMPTZ, true);
+    schema->AddDebugField("timestamptz", milvus::DataType::TIMESTAMPTZ, true);
     schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
     schema->AddDebugField("json", milvus::DataType::JSON, true);
     schema->AddDebugField(
@@ -2342,19 +2339,19 @@ gen_all_data_types_schema() {
     schema->AddDebugField(
         "bool_array", milvus::DataType::ARRAY, milvus::DataType::BOOL, true);
     schema->AddDebugField("string_array",
-                                                    milvus::DataType::ARRAY,
-                                                    milvus::DataType::VARCHAR,
-                                                    true);
+                          milvus::DataType::ARRAY,
+                          milvus::DataType::VARCHAR,
+                          true);
     schema->AddDebugField("double_array",
-                                                    milvus::DataType::ARRAY,
-                                                    milvus::DataType::DOUBLE,
-                                                    true);
+                          milvus::DataType::ARRAY,
+                          milvus::DataType::DOUBLE,
+                          true);
     schema->AddDebugField(
         "float_array", milvus::DataType::ARRAY, milvus::DataType::FLOAT, true);
     schema->AddDebugField("embeddings",
-                                     milvus::DataType::VECTOR_FLOAT,
-                                     128,
-                                     knowhere::metric::L2);
+                          milvus::DataType::VECTOR_FLOAT,
+                          128,
+                          knowhere::metric::L2);
     schema->set_primary_field_id(int64_field);
     return schema;
 }

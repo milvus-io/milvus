@@ -457,7 +457,8 @@ TEST(StringExpr, Compare) {
         auto expr = test::GenExpr().release();
         expr->set_allocated_compare_expr(compare_expr);
 
-        proto::plan::VectorType vector_type = proto::plan::VectorType::FloatVector;
+        proto::plan::VectorType vector_type =
+            proto::plan::VectorType::FloatVector;
         if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             vector_type = proto::plan::VectorType::FloatVector;
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
@@ -600,7 +601,8 @@ TEST(StringExpr, CompareNullable) {
         auto expr = test::GenExpr().release();
         expr->set_allocated_compare_expr(compare_expr);
 
-        proto::plan::VectorType vector_type = proto::plan::VectorType::FloatVector;
+        proto::plan::VectorType vector_type =
+            proto::plan::VectorType::FloatVector;
         if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             vector_type = proto::plan::VectorType::FloatVector;
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
@@ -752,7 +754,8 @@ TEST(StringExpr, CompareNullable2) {
         auto expr = test::GenExpr().release();
         expr->set_allocated_compare_expr(compare_expr);
 
-        proto::plan::VectorType vector_type = proto::plan::VectorType::FloatVector;
+        proto::plan::VectorType vector_type =
+            proto::plan::VectorType::FloatVector;
         if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             vector_type = proto::plan::VectorType::FloatVector;
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
@@ -894,7 +897,8 @@ TEST(StringExpr, UnaryRange) {
         auto expr = test::GenExpr().release();
         expr->set_allocated_unary_range_expr(unary_range_expr);
 
-        proto::plan::VectorType vector_type = proto::plan::VectorType::FloatVector;
+        proto::plan::VectorType vector_type =
+            proto::plan::VectorType::FloatVector;
         if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             vector_type = proto::plan::VectorType::FloatVector;
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
@@ -1017,7 +1021,8 @@ TEST(StringExpr, UnaryRangeNullable) {
         auto expr = test::GenExpr().release();
         expr->set_allocated_unary_range_expr(unary_range_expr);
 
-        proto::plan::VectorType vector_type = proto::plan::VectorType::FloatVector;
+        proto::plan::VectorType vector_type =
+            proto::plan::VectorType::FloatVector;
         if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             vector_type = proto::plan::VectorType::FloatVector;
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
@@ -1149,7 +1154,8 @@ TEST(StringExpr, NullExpr) {
         auto expr = test::GenExpr().release();
         expr->set_allocated_null_expr(null_expr);
 
-        proto::plan::VectorType vector_type = proto::plan::VectorType::FloatVector;
+        proto::plan::VectorType vector_type =
+            proto::plan::VectorType::FloatVector;
         if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             vector_type = proto::plan::VectorType::FloatVector;
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
@@ -1252,7 +1258,8 @@ TEST(StringExpr, BinaryRange) {
         auto expr = test::GenExpr().release();
         expr->set_allocated_binary_range_expr(binary_range_expr);
 
-        proto::plan::VectorType vector_type = proto::plan::VectorType::FloatVector;
+        proto::plan::VectorType vector_type =
+            proto::plan::VectorType::FloatVector;
         if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             vector_type = proto::plan::VectorType::FloatVector;
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
@@ -1395,7 +1402,8 @@ TEST(StringExpr, BinaryRangeNullable) {
         auto expr = test::GenExpr().release();
         expr->set_allocated_binary_range_expr(binary_range_expr);
 
-        proto::plan::VectorType vector_type = proto::plan::VectorType::FloatVector;
+        proto::plan::VectorType vector_type =
+            proto::plan::VectorType::FloatVector;
         if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             vector_type = proto::plan::VectorType::FloatVector;
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {

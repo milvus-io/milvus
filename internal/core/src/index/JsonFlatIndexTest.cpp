@@ -592,8 +592,7 @@ class JsonFlatIndexExprTest : public ::testing::Test {
         json_index_info.json_cast_type = JsonCastType::FromString("JSON");
         json_index_info.json_path = json_index_path;
         auto index = index::IndexFactory::GetInstance().CreateJsonIndex(
-            json_index_info,
-            file_manager_ctx);
+            json_index_info, file_manager_ctx);
 
         json_index_ = std::unique_ptr<index::JsonFlatIndex>(
             static_cast<index::JsonFlatIndex*>(index.release()));

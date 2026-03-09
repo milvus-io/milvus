@@ -912,10 +912,10 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     for (size_t i = 0; i < field_ids.size(); i++) {
         chunks[field_ids[i]] = make_chunk(field_metas[i],
-                                                    final_row_nums,
-                                                    data + chunk_offsets[i],
-                                                    chunk_sizes[i],
-                                                    chunk_mmap_guard);
+                                          final_row_nums,
+                                          data + chunk_offsets[i],
+                                          chunk_sizes[i],
+                                          chunk_mmap_guard);
         LOG_INFO(
             "created chunk for field {} with chunk offset: {}, chunk "
             "size: {}, file path: {}",

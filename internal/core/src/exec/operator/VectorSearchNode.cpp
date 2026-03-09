@@ -141,8 +141,7 @@ PhyVectorSearchNode::GetOutput() {
     TargetBitmapView view(col_input->GetRawData(), col_input->size());
 
     if (view.all()) {
-        query_context_->set_search_result(
-            empty_search_result(num_queries));
+        query_context_->set_search_result(empty_search_result(num_queries));
         return input_;
     }
 

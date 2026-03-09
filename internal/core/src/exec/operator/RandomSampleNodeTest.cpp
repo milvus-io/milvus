@@ -89,7 +89,8 @@ TEST_P(RandomSampleTest, SampleOnly) {
     int data_size = field.scalars().long_data().data_size();
     int expected_size = static_cast<int>(N * sample_factor);
     // We can accept size one difference due to the float point calculation in sampling.
-    ASSERT_TRUE(expected_size - 1 <= data_size && data_size <= expected_size + 1);
+    ASSERT_TRUE(expected_size - 1 <= data_size &&
+                data_size <= expected_size + 1);
 }
 
 TEST_P(RandomSampleTest, SampleWithUnaryFiler) {
@@ -149,7 +150,8 @@ TEST_P(RandomSampleTest, SampleWithUnaryFiler) {
 
     int expected_size = static_cast<int>(N * sample_factor) / 3;
     // We can accept size one difference due to the float point calculation in sampling.
-    ASSERT_TRUE(expected_size - 1 <= data_size && data_size <= expected_size + 1);
+    ASSERT_TRUE(expected_size - 1 <= data_size &&
+                data_size <= expected_size + 1);
 }
 
 TEST(RandomSampleTest, SampleWithEmptyInput) {

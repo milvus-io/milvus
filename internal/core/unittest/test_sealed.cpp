@@ -1541,8 +1541,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     auto i32_fid = schema->AddDebugField("int32_field", DataType::INT32);
     auto i16_fid = schema->AddDebugField("int16_field", DataType::INT16);
@@ -1690,8 +1689,7 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     size_t N = 10;
     auto dataset = DataGen(schema, N);
@@ -1733,8 +1731,7 @@ TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
 
     auto dataset = DataGen(schema, 5);
@@ -1805,8 +1802,7 @@ TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
     auto dataset = DataGen(schema, 5);
     auto segment = CreateSealedSegment(schema);
@@ -1850,8 +1846,7 @@ TEST(Sealed, SkipIndexSkipStringRange) {
     auto metrics_type = "L2";
     schema->AddDebugField("pk", DataType::INT64);
     auto string_fid = schema->AddDebugField("string_field", DataType::VARCHAR);
-    schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     size_t N = 5;
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);

@@ -154,13 +154,12 @@ struct ParquetWriterFactory {
         context.builders = std::move(builders.first);
         context.builders_map = std::move(builders.second);
         context.kv_metadata = CreateParquetKVMetadata(column_map);
-        context.column_groups =
-            ColumnGroupingStrategyFactory::CreateStrategy(
-                          ColumnGroupingStrategyType::DEFAULT)
-                          ->CreateGroups(TableStatsInfo{
-                              context.schema,
-                              column_map,
-                          });
+        context.column_groups = ColumnGroupingStrategyFactory::CreateStrategy(
+                                    ColumnGroupingStrategyType::DEFAULT)
+                                    ->CreateGroups(TableStatsInfo{
+                                        context.schema,
+                                        column_map,
+                                    });
         auto column_group_id = 0;
         for ([[maybe_unused]] const auto& group : context.column_groups) {
             auto file_log_id = 0;

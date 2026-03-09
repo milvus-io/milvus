@@ -2788,7 +2788,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             if (old_column && !enable_mmap) {
                 if (!is_proxy_column ||
                     (is_proxy_column &&
-                        field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID)) {
+                     field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID)) {
                     stats_.mem_size -= old_column->DataByteSize();
                 }
             }
@@ -2825,7 +2825,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     if (!enable_mmap) {
         if (!is_proxy_column ||
             (is_proxy_column &&
-                field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID)) {
+             field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID)) {
             stats_.mem_size += column->DataByteSize();
         }
         if (IsVariableDataType(data_type)) {

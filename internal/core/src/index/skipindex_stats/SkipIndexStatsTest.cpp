@@ -955,7 +955,7 @@ TEST_F(SkipIndexStatsBuilderTest, BuildFromArrowBatch_StringNgramMatch) {
         "Zhang Hua wurde an der Peking-Universität aufgenommen, Li Ping "
         "besuchte eine technische Sekundarschule, ich arbeitete als Verkäufer "
         "in einem Kaufhaus: Wir alle hatten eine glänzende Zukunft.",
-        "😀😁😂",                       // Emoji (4-byte UTF-8)
+        "😀😁😂",                    // Emoji (4-byte UTF-8)
         "Ñoño",                      // Combining characters
         "👨‍👩‍👧‍👦"  // Family emoji (multiple codepoints)
     };

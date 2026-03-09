@@ -1432,8 +1432,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data) {
                      false,
                      std::nullopt);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
-    schema->AddDebugField(
-        "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
+    schema->AddDebugField("vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
     schema->set_primary_field_id(str_fid);
 
     auto segment = CreateGrowingSegment(schema, empty_index_meta).release();
@@ -1464,8 +1463,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
                      false,
                      std::nullopt);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
-    schema->AddDebugField(
-        "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
+    schema->AddDebugField("vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
     schema->set_primary_field_id(str_fid);
 
     int N = ROW_COUNT;
@@ -1538,8 +1536,7 @@ TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
                      false,
                      std::nullopt);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
-    schema->AddDebugField(
-        "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
+    schema->AddDebugField("vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
     schema->set_primary_field_id(str_fid);
 
     int N = ROW_COUNT;

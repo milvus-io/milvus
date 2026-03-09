@@ -70,8 +70,7 @@ class TaskTest : public testing::TestWithParam<DataType> {
         factory.Initialize();
 
         auto schema = std::make_shared<Schema>();
-        schema->AddDebugField(
-            "fakevec", GetParam(), 16, knowhere::metric::L2);
+        schema->AddDebugField("fakevec", GetParam(), 16, knowhere::metric::L2);
         auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
         field_map_.insert({"bool", bool_fid});
         auto bool_1_fid = schema->AddDebugField("bool1", DataType::BOOL);

@@ -821,8 +821,8 @@ TEST(NgramIndex, TestNgramJson) {
     create_index_info.index_type = index::INVERTED_INDEX_TYPE;
     create_index_info.json_cast_type = JsonCastType::FromString("VARCHAR");
     create_index_info.json_path = json_path;
-    create_index_info.ngram_params = std::optional<index::NgramParams>{
-        index::NgramParams{false, 2, 3}};
+    create_index_info.ngram_params =
+        std::optional<index::NgramParams>{index::NgramParams{false, 2, 3}};
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
         create_index_info, file_manager_ctx);
 
@@ -955,8 +955,8 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
     create_index_info.index_type = index::INVERTED_INDEX_TYPE;
     create_index_info.json_cast_type = JsonCastType::FromString("VARCHAR");
     create_index_info.json_path = json_path;
-    create_index_info.ngram_params = std::optional<index::NgramParams>{
-        index::NgramParams{false, 2, 4}};
+    create_index_info.ngram_params =
+        std::optional<index::NgramParams>{index::NgramParams{false, 2, 4}};
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
         create_index_info, file_manager_ctx);
 

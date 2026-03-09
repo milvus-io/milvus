@@ -1099,10 +1099,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
             }
         }
         // process shared data
-        auto shared_executor = [&elements, &res_view](
-                                   milvus::BsonView bson,
-                                   uint32_t row_offset,
-                                   uint32_t value_offset) {
+        auto shared_executor = [&elements, &res_view](milvus::BsonView bson,
+                                                      uint32_t row_offset,
+                                                      uint32_t value_offset) {
             auto val = bson.ParseAsArrayAtOffset(value_offset);
 
             if (!val.has_value()) {
