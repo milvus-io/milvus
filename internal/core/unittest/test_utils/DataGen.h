@@ -388,8 +388,7 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline SchemaPtr
-CreateTestSchema() {
+inline SchemaPtr CreateTestSchema() {
     auto schema = std::make_shared<milvus::Schema>();
     schema->AddDebugField("bool", milvus::DataType::BOOL, true);
     schema->AddDebugField("int8", milvus::DataType::INT8, true);
