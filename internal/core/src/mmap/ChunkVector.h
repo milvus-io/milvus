@@ -100,7 +100,7 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
         AssertInfo(chunk_id < this->counter_,
                    fmt::format("index out of range, index={}, counter_={}",
                                chunk_id,
-                               this->counter_));
+                               this->counter_.load()));
         if constexpr (!IsMmap || !IsVariableType<Type>) {
             auto ptr = (Type*)vec_[chunk_id].data();
             AssertInfo(
