@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -170,7 +171,9 @@ func (f *testOneWALFramework) Run() {
 				CollectionId: 100,
 				PartitionIds: []int64{200},
 			}).
-			WithBody(&msgpb.CreateCollectionRequest{}).
+			WithBody(&msgpb.CreateCollectionRequest{
+				CollectionSchema: &schemapb.CollectionSchema{Name: "test_collection_100"},
+			}).
 			WithVChannel(testVChannel).
 			MustBuildMutable()
 
@@ -277,7 +280,9 @@ func (f *testOneWALFramework) testSendCreateCollection(ctx context.Context, w wa
 			CollectionId: 1,
 			PartitionIds: []int64{2},
 		}).
-		WithBody(&msgpb.CreateCollectionRequest{}).
+		WithBody(&msgpb.CreateCollectionRequest{
+			CollectionSchema: &schemapb.CollectionSchema{Name: "test_collection"},
+		}).
 		WithVChannel(testVChannel).
 		BuildMutable()
 	require.NoError(f.t, err)

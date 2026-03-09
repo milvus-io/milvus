@@ -282,15 +282,14 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				zap.Uint64("timetick", flushAllMsg.FlushAllMessage.TimeTick()),
 			)
 			ddn.msgHandler.HandleFlushAll(ddn.vChannelName, flushAllMsg.FlushAllMessage)
-		case commonpb.MsgType_AddCollectionField:
+		case commonpb.MsgType_AddCollectionField, commonpb.MsgType_AlterCollectionSchema:
 			schemaMsg := msg.(*adaptor.SchemaChangeMessageBody)
-			logger := log.With(
+			log.Info("receive schema change message",
 				zap.String("vchannel", ddn.Name()),
 				zap.Int32("msgType", int32(msg.Type())),
 				zap.Uint64("timetick", schemaMsg.SchemaChangeMessage.TimeTick()),
 				zap.Int64s("segmentIDs", schemaMsg.SchemaChangeMessage.Header().FlushedSegmentIds),
 			)
-			logger.Info("receive schema change message")
 			ddn.msgHandler.HandleSchemaChange(ddn.ctx, schemaMsg.SchemaChangeMessage)
 		case commonpb.MsgType_AlterCollection:
 			alterCollectionMsg := msg.(*adaptor.AlterCollectionMessageBody)
