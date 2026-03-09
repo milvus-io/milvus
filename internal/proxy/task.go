@@ -863,6 +863,15 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	// Physical backfill is currently only implemented for BM25 in the datanode backfill
+	// compactor. Reject unsupported types early so the request never reaches RootCoord
+	// and no segment is left in an unrecoverable stale-schema state.
+	if addRequest.GetDoPhysicalBackfill() && funcSchemas[0].GetType() != schemapb.FunctionType_BM25 {
+		return merr.WrapErrParameterInvalidMsg(
+			"physical backfill is currently only supported for BM25 functions, got %s",
+			funcSchemas[0].GetType().String())
+	}
+
 	// Validate function-field type compatibility (e.g., BM25 requires varchar input,
 	// SparseFloatVector output). Construct a merged schema with old fields + new fields
 	// + new function, then validate only the new function to avoid re-checking existing

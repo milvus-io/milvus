@@ -304,12 +304,23 @@ func (s *SegmentsInfo) SetFlushTime(segmentID UniqueID, t time.Time) {
 	}
 }
 
-// SetIsCompacting sets compaction status for segment
+// SetIsCompacting sets compaction status for segment.
+// NOTE: This method manually updates secondary indexes after ShadowClone.
+// Other Set methods (SetRowCount, SetLevel, SetFlushTime, etc.) have the same
+// stale-index problem but are not yet fixed. See #48593 for the tracking issue
+// to extract a common updateSegment helper for all Set methods.
 func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
 	st := string(debug.Stack())
 	log.Info("set compacting", zap.Int64("segmentID", segmentID), zap.Bool("isCompacting", isCompacting), zap.Any("stacktrace", st))
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.ShadowClone(SetIsCompacting(isCompacting))
+		newSegment := segment.ShadowClone(SetIsCompacting(isCompacting))
+		s.segments[segmentID] = newSegment
+		if collSegs, ok := s.secondaryIndexes.coll2Segments[segment.GetCollectionID()]; ok {
+			collSegs[segmentID] = newSegment
+		}
+		if chSegs, ok := s.secondaryIndexes.channel2Segments[segment.GetInsertChannel()]; ok {
+			chSegs[segmentID] = newSegment
+		}
 	}
 }
 

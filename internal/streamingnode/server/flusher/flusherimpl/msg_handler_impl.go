@@ -72,6 +72,10 @@ func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchanne
 	}
 	logger := log.With(zap.Int64("collectionID", h.CollectionId), zap.Int64("partitionID", h.PartitionId), zap.Int64("segmentID", h.SegmentId))
 	return retry.Do(ctx, func() (err error) {
+		// TODO: propagate SchemaVersion from CreateSegmentMessageHeader into AllocSegmentRequest
+		// so that DataCoord records the correct schema version for streaming-created segments.
+		// Without this, new segments get SchemaVersion=0 and will be falsely flagged for backfill.
+		// Tracked in companion PR: https://github.com/milvus-io/milvus/pull/48865
 		resp, err := mix.AllocSegment(ctx, &datapb.AllocSegmentRequest{
 			CollectionId:         h.CollectionId,
 			PartitionId:          h.PartitionId,

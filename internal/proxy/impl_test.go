@@ -2392,6 +2392,58 @@ func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
 	assert.Contains(t, resp.GetReason(), "add field operation is not supported for external collection")
 }
 
+func TestProxy_AddCollectionField_SchemaVersionGate(t *testing.T) {
+	t.Run("consistency check fails", func(t *testing.T) {
+		mockey.PatchConvey("consistency check blocks AddCollectionField", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			mockey.Mock((*Proxy).checkSchemaVersionConsistency).Return(
+				merr.WrapErrParameterInvalidMsg("consistency check failed"),
+			).Build()
+
+			resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp))
+			assert.Contains(t, resp.GetReason(), "consistency check failed")
+		})
+	})
+
+	t.Run("concurrent request rejected", func(t *testing.T) {
+		mockey.PatchConvey("in-flight gate blocks concurrent AddCollectionField", t, func() {
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(),
+				Schema: &schemapb.CollectionSchema{Name: "test_coll"},
+			}, nil).Build()
+
+			// Simulate an in-flight schema change on the same collection
+			collKey := "default/test_coll"
+			node.alterSchemaInFlight.Store(collKey, struct{}{})
+
+			resp, err := node.AddCollectionField(context.Background(), &milvuspb.AddCollectionFieldRequest{
+				DbName:         "default",
+				CollectionName: "test_coll",
+			})
+			assert.NoError(t, err)
+			assert.Error(t, merr.Error(resp))
+			assert.Contains(t, resp.GetReason(), "another schema-change request is already in progress")
+
+			node.alterSchemaInFlight.Delete(collKey)
+		})
+	})
+}
+
 func TestProxy_AlterCollectionField_ExternalCollection(t *testing.T) {
 	cache := globalMetaCache
 	defer func() { globalMetaCache = cache }()

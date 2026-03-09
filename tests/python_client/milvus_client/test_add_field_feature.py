@@ -62,8 +62,10 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                        "vector_name": "embeddings"}
         self.add_collection_field(client, collection_name, field_name="field_new_int64", data_type=DataType.INT64,
                                   nullable=True, is_clustering_key=True, mmap_enabled=True)
-        self.add_collection_field(client, collection_name, field_name="field_new_var", data_type=DataType.VARCHAR,
-                                  nullable=True, default_vaule="field_new_var", max_length=64, mmap_enabled=True)
+        # Wait for previous schema bump's backfill segment-version propagation tick to fire.
+        self.add_collection_field_wait_schema_version_consistency(
+            client, collection_name, field_name="field_new_var", data_type=DataType.VARCHAR,
+            nullable=True, default_vaule="field_new_var", max_length=64, mmap_enabled=True)
         check_items["add_fields"] = ["field_new_int64", "field_new_var"]
         self.describe_collection(client, collection_name,
                                  check_task=CheckTasks.check_describe_collection_property,
@@ -271,10 +273,14 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=new_collection_info, start=ct.default_nb)
         self.insert(client, collection_name, rows)
         # 4. add one more vector field and index data
+        # Wait for the previous add_collection_field's backfill segment-version
+        # propagation tick to fire before the second schema change — otherwise
+        # the consistency gate at Proxy / RootCoord rejects this call.
         new_vec_field_name_2 = "embeddings_2"
-        self.add_collection_field(client, collection_name, field_name=new_vec_field_name_2,
-                                  data_type=DataType.FLOAT_VECTOR, dim=dim,
-                                  nullable=True)
+        self.add_collection_field_wait_schema_version_consistency(
+            client, collection_name, field_name=new_vec_field_name_2,
+            data_type=DataType.FLOAT_VECTOR, dim=dim,
+            nullable=True)
         # 5. build index for new added vector field
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(new_vec_field_name_2, index_type=index_type, metric_type="COSINE")
@@ -990,11 +996,17 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dim)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
+        # Each loop iteration bumps the schema version; wait for the previous bump's
+        # backfill segment-version propagation tick to fire before the next call.
         for i in range(62):
-            self.add_collection_field(client, collection_name, field_name=f"{field_name}_{i}",
-                                      data_type=DataType.VARCHAR, nullable=True, max_length=64)
-        self.add_collection_field(client, collection_name, field_name=field_name, data_type=DataType.VARCHAR,
-                                  nullable=True, max_length=64, check_task=CheckTasks.err_res, check_items=error)
+            self.add_collection_field_wait_schema_version_consistency(
+                client, collection_name, field_name=f"{field_name}_{i}",
+                data_type=DataType.VARCHAR, nullable=True, max_length=64)
+        # Final err_res call: the gate must be passed BEFORE this call so the error
+        # returned is the intended "max fields exceeded" error, not a consistency error.
+        self.add_collection_field_wait_schema_version_consistency(
+            client, collection_name, field_name=field_name, data_type=DataType.VARCHAR,
+            nullable=True, max_length=64, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_add_vector_field_exceed_max_vector_field_number(self):
@@ -1012,14 +1024,20 @@ class TestMilvusClientAddFieldFeatureInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, dim)
         collections = self.list_collections(client)[0]
         assert collection_name in collections
+        # Each loop iteration bumps the schema version; wait for the previous bump's
+        # backfill segment-version propagation tick to fire before the next call.
         for i in range(ct.max_vector_field_num - 1):
-            self.add_collection_field(client, collection_name, field_name=f"{field_name}_{i}",
-                                      data_type=DataType.FLOAT_VECTOR, dim=dim,
-                                      nullable=True)
-        self.add_collection_field(client, collection_name, field_name=field_name,
-                                  data_type=DataType.FLOAT_VECTOR, dim=dim,
-                                  nullable=True,
-                                  check_task=CheckTasks.err_res, check_items=error)
+            self.add_collection_field_wait_schema_version_consistency(
+                client, collection_name, field_name=f"{field_name}_{i}",
+                data_type=DataType.FLOAT_VECTOR, dim=dim,
+                nullable=True)
+        # Final err_res call: wait for consistency so the error we assert is the
+        # real "max vector fields exceeded" error, not a spurious consistency error.
+        self.add_collection_field_wait_schema_version_consistency(
+            client, collection_name, field_name=field_name,
+            data_type=DataType.FLOAT_VECTOR, dim=dim,
+            nullable=True,
+            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_add_field_with_reranker_unsupported(self):
