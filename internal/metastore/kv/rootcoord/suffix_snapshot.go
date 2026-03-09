@@ -82,7 +82,15 @@ type SuffixSnapshot struct {
 
 	paginationSize int
 
-	closeGC chan struct{}
+	// gcCursor tracks the last snapshot key processed by GC.
+	// Empty string means start from the beginning of the snapshot prefix.
+	// Only accessed by the single GC goroutine — no lock needed.
+	gcCursor string
+
+	closeGC    chan struct{}
+	closeOnce  sync.Once
+	gcWg       sync.WaitGroup
+	cancelFunc context.CancelFunc
 }
 
 // tsv struct stores kv with timestamp
@@ -108,6 +116,7 @@ func NewSuffixSnapshot(metaKV kv.MetaKv, sep, root, snapshot string) (*SuffixSna
 	tk = path.Join(root, "k")
 	rootLen := len(tk) - 1
 
+	ctx, cancel := context.WithCancel(context.Background())
 	ss := &SuffixSnapshot{
 		MetaKv:         metaKV,
 		lastestTS:      make(map[string]typeutil.Timestamp),
@@ -118,8 +127,10 @@ func NewSuffixSnapshot(metaKV kv.MetaKv, sep, root, snapshot string) (*SuffixSna
 		rootLen:        rootLen,
 		paginationSize: paramtable.Get().MetaStoreCfg.PaginationSize.GetAsInt(),
 		closeGC:        make(chan struct{}, 1),
+		cancelFunc:     cancel,
 	}
-	go ss.startBackgroundGC(context.TODO())
+	ss.gcWg.Add(1)
+	go ss.startBackgroundGC(ctx)
 	return ss, nil
 }
 
@@ -172,7 +183,7 @@ func (ss *SuffixSnapshot) isTSKey(key string) (typeutil.Timestamp, bool) {
 }
 
 // isTSOfKey check whether a key is in ts-key format of provided group key
-// if true, laso returns parsed ts value
+// if true, also returns parsed ts value
 func (ss *SuffixSnapshot) isTSOfKey(key string, groupKey string) (typeutil.Timestamp, bool) {
 	// not in snapshot path
 	if !strings.HasPrefix(key, ss.snapshotPrefix) {
@@ -208,7 +219,7 @@ func (ss *SuffixSnapshot) checkKeyTS(ctx context.Context, key string, ts typeuti
 	return latest <= ts, nil
 }
 
-// loadLatestTS load the loatest ts for specified key
+// loadLatestTS load the latest ts for specified key
 func (ss *SuffixSnapshot) loadLatestTS(ctx context.Context, key string) error {
 	prefix := ss.composeSnapshotPrefix(key)
 	keys, _, err := ss.MetaKv.LoadWithPrefix(ctx, prefix)
@@ -255,7 +266,6 @@ func binarySearchRecords(records []tsv, ts typeutil.Timestamp) (string, bool) {
 	i, j := 0, len(records)
 	for i+1 < j {
 		k := (i + j) / 2
-		// log.Warn("", zap.Int("i", i), zap.Int("j", j), zap.Int("k", k))
 		if records[k].ts == ts {
 			return records[k].value, true
 		}
@@ -505,7 +515,7 @@ func (ss *SuffixSnapshot) LoadWithPrefix(ctx context.Context, key string, ts typ
 	return resultKeys, resultValues, nil
 }
 
-// MultiSaveAndRemove save muiltple kvs and remove as well
+// MultiSaveAndRemove save multiple kvs and remove as well
 // if ts == 0, act like MetaKv
 // each key-value will be treated in same logic like Save
 func (ss *SuffixSnapshot) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, ts typeutil.Timestamp) error {
@@ -558,7 +568,7 @@ func (ss *SuffixSnapshot) MultiSaveAndRemove(ctx context.Context, saves map[stri
 	return err
 }
 
-// MultiSaveAndRemoveWithPrefix save muiltple kvs and remove as well
+// MultiSaveAndRemoveWithPrefix save multiple kvs and remove as well
 // if ts == 0, act like MetaKv
 // each key-value will be treated in same logic like Save
 func (ss *SuffixSnapshot) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, ts typeutil.Timestamp) error {
@@ -607,28 +617,11 @@ func (ss *SuffixSnapshot) MultiSaveAndRemoveWithPrefix(ctx context.Context, save
 }
 
 func (ss *SuffixSnapshot) Close() {
-	close(ss.closeGC)
-}
-
-// startBackgroundGC the data will clean up if key ts!=0 and expired
-func (ss *SuffixSnapshot) startBackgroundGC(ctx context.Context) {
-	log := log.Ctx(ctx)
-	log.Debug("suffix snapshot GC goroutine start!")
-	ticker := time.NewTicker(60 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ss.closeGC:
-			log.Warn("quit suffix snapshot GC goroutine!")
-			return
-		case now := <-ticker.C:
-			err := ss.removeExpiredKvs(ctx, now)
-			if err != nil {
-				log.Warn("remove expired data fail during GC", zap.Error(err))
-			}
-		}
-	}
+	ss.closeOnce.Do(func() {
+		ss.cancelFunc()
+		close(ss.closeGC)
+	})
+	ss.gcWg.Wait()
 }
 
 func (ss *SuffixSnapshot) getOriginalKey(snapshotKey string) (string, error) {
@@ -644,104 +637,234 @@ func (ss *SuffixSnapshot) getOriginalKey(snapshotKey string) (string, error) {
 	return prefix[ss.snapshotLen:], nil
 }
 
-func (ss *SuffixSnapshot) batchRemoveExpiredKvs(ctx context.Context, keyGroup []string, originalKey string, includeOriginalKey bool) error {
-	if includeOriginalKey {
-		keyGroup = append(keyGroup, originalKey)
+// errGCBatchFull is a sentinel error used to interrupt WalkWithPrefixFrom
+// when enough keys have been collected for a single GC batch.
+var errGCBatchFull = fmt.Errorf("gc batch full")
+
+// startBackgroundGC runs incremental cursor-based GC for expired snapshot keys.
+// It scans batchSize keys per tick, advances the cursor, and wraps around when
+// the end of the snapshot keyspace is reached.
+func (ss *SuffixSnapshot) startBackgroundGC(ctx context.Context) {
+	defer ss.gcWg.Done()
+	log := log.Ctx(ctx)
+
+	getGCInterval := func() time.Duration {
+		d := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotGCInterval.GetAsDuration(time.Second)
+		if d <= 0 {
+			d = 10 * time.Second // defensive fallback
+		}
+		return d
+	}
+	getGCBatchSize := func() int {
+		n := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotGCBatchSize.GetAsInt()
+		if n <= 0 {
+			n = 10000 // defensive fallback
+		}
+		return n
 	}
 
-	// to protect txn finished with ascend order, reverse the latest kv with tombstone to tail of array
-	sort.Strings(keyGroup)
-	if !includeOriginalKey && len(keyGroup) > 0 {
-		// keep the latest snapshot key for historical version compatibility
-		keyGroup = keyGroup[0 : len(keyGroup)-1]
+	gcInterval := getGCInterval()
+	log.Info("snapshot GC goroutine started",
+		zap.Int("batchSize", getGCBatchSize()),
+		zap.Duration("interval", gcInterval))
+
+	ticker := time.NewTicker(gcInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ss.closeGC:
+			log.Info("snapshot GC goroutine stopped")
+			return
+		case <-ticker.C:
+			// Re-read parameters each tick to support dynamic configuration
+			batchSize := getGCBatchSize()
+			newInterval := getGCInterval()
+			if newInterval != gcInterval {
+				gcInterval = newInterval
+				ticker.Reset(gcInterval)
+				log.Info("snapshot GC interval updated", zap.Duration("interval", gcInterval))
+			}
+
+			deleted, scanned, err := ss.gcOneBatch(ctx, batchSize)
+			if err != nil {
+				log.Warn("snapshot GC batch error", zap.Error(err))
+				continue
+			}
+			if deleted > 0 {
+				log.Info("snapshot GC batch deleted keys",
+					zap.Int("scanned", scanned),
+					zap.Int("deleted", deleted),
+					zap.String("cursor", ss.gcCursor))
+			} else {
+				log.Debug("snapshot GC batch done",
+					zap.Int("scanned", scanned),
+					zap.String("cursor", ss.gcCursor))
+			}
+		}
 	}
+}
+
+// gcOneBatch scans up to batchSize snapshot keys starting from gcCursor,
+// identifies expired keys, and deletes them in cross-group aggregated batches.
+// Returns the number of deleted and scanned keys.
+func (ss *SuffixSnapshot) gcOneBatch(ctx context.Context, batchSize int) (deleted int, scanned int, err error) {
+	ttlTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotTTLSeconds.GetAsDuration(time.Second)
+	reserveTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotReserveTimeSeconds.GetAsDuration(time.Second)
+	now := time.Now()
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	startCursor := ss.gcCursor
+
+	// ========== Phase 1: Scan — collect candidate expired keys ==========
+	expiredKeys := make([]string, 0, batchSize)
+	// Track the latest snapshot key per originalKey to avoid deleting it.
+	// Since keys are lexicographically sorted and ts is part of the key suffix,
+	// the last seen key for each originalKey within this batch is the latest.
+	latestPerGroup := make(map[string]string) // originalKey -> latest snapshot key
+	// Track which groups contain tombstone values. For tombstone groups,
+	// we use reserveTime (shorter) instead of ttlTime for faster cleanup.
+	tombstoneGroups := make(map[string]bool) // originalKey -> is tombstone
+	// Track total and expired counts per group to detect fully-expired tombstone groups.
+	groupTotalCount := make(map[string]int)   // originalKey -> total snapshot keys seen
+	groupExpiredCount := make(map[string]int) // originalKey -> expired snapshot keys count
+	// Cache parsed ts per key to avoid re-parsing in Phase 2.
+	keyTsCache := make(map[string]typeutil.Timestamp) // snapshot key -> parsed ts
+	count := 0
+	lastKey := ""
+	// Track boundary groups that may be split across batches.
+	var firstGroup, lastGroup string
+
+	walkErr := ss.MetaKv.WalkWithPrefixFrom(ctx, ss.snapshotPrefix, ss.gcCursor, batchSize, func(k []byte, v []byte) error {
+		count++
+		key := ss.hideRootPrefix(string(k))
+		lastKey = key
+
+		ts, ok := ss.isTSKey(key)
+		if !ok {
+			return nil
+		}
+
+		originalKey, err := ss.getOriginalKey(key)
+		if err != nil {
+			log.Ctx(ctx).Warn("snapshot GC: failed to parse original key", zap.String("key", key), zap.Error(err))
+			return nil
+		}
+
+		// Track boundary groups
+		if firstGroup == "" {
+			firstGroup = originalKey
+		}
+		lastGroup = originalKey
+
+		// Track latest per group (keys are sorted, so last seen = latest)
+		latestPerGroup[originalKey] = key
+		// Track tombstone status per group (last value = latest status)
+		tombstoneGroups[originalKey] = ss.isTombstone(string(v))
+		groupTotalCount[originalKey]++
+
+		// Check if expired using reserveTime (the shorter window).
+		// Phase 2 will apply the longer TTL for non-tombstone groups.
+		expireTime, _ := tsoutil.ParseTS(ts)
+		if expireTime.Add(reserveTime).Before(now) {
+			expiredKeys = append(expiredKeys, key)
+			keyTsCache[key] = ts
+			groupExpiredCount[originalKey]++
+		}
+
+		if count >= batchSize {
+			return errGCBatchFull
+		}
+		return nil
+	})
+	if walkErr != nil && !errors.Is(walkErr, errGCBatchFull) {
+		return 0, count, walkErr
+	}
+
+	// ========== Cursor update ==========
+	// Update AFTER scan completes. Cursor semantics: "everything up to here
+	// has been scanned in this round."
+	//
+	// If scanned < batchSize: we've reached the end of the snapshot keyspace.
+	// Reset cursor to "" so next tick starts a new round from the beginning.
+	// This costs one extra tick (scanning the first batch again), but those keys
+	// may have newly expired since the last round, so the scan is not wasted.
+	if count < batchSize {
+		ss.gcCursor = ""
+	} else {
+		ss.gcCursor = lastKey
+	}
+
+	// ========== Phase 2: Filter — protect latest-per-group & apply TTL ==========
+	// Three filtering rules:
+	// 1. For non-tombstone groups: protect the latest snapshot key (needed for
+	//    time-travel), and apply the longer TTL check. Phase 1 used reserveTime
+	//    (shorter) to collect candidates; now we filter out keys that haven't
+	//    actually reached TTL expiry yet.
+	// 2. For tombstone groups where NOT all versions are expired: same as
+	//    non-tombstone (protect latest, apply reserveTime which is already met).
+	// 3. For tombstone groups where ALL versions are expired: delete everything
+	//    including the latest snapshot key AND the plain key (originalKey).
+	//    This cleans up the tombstone from the plain key namespace.
+	toDelete := make([]string, 0, len(expiredKeys))
+	latestSet := make(map[string]struct{}, len(latestPerGroup))
+	for _, v := range latestPerGroup {
+		latestSet[v] = struct{}{}
+	}
+
+	// Identify fully-expired tombstone groups — include latest + plain key.
+	// Boundary groups (first/last in the batch) may be split across batches,
+	// so we exclude them from full cleanup to avoid premature plain key deletion.
+	// They will be handled in a future batch when they appear completely.
+	fullyExpiredTombstones := make(map[string]bool)
+	isBoundaryGroup := func(key string) bool {
+		return (startCursor != "" && key == firstGroup) || (count >= batchSize && key == lastGroup)
+	}
+	for originalKey, isTombstone := range tombstoneGroups {
+		if isTombstone && groupTotalCount[originalKey] == groupExpiredCount[originalKey] && !isBoundaryGroup(originalKey) {
+			fullyExpiredTombstones[originalKey] = true
+		}
+	}
+
+	for _, key := range expiredKeys {
+		originalKey, _ := ss.getOriginalKey(key)
+
+		if _, isLatest := latestSet[key]; isLatest {
+			// Only delete latest if this is a fully-expired tombstone group
+			if !fullyExpiredTombstones[originalKey] {
+				continue
+			}
+		}
+
+		// For non-tombstone groups, apply the longer TTL filter
+		if !tombstoneGroups[originalKey] {
+			ts := keyTsCache[key]
+			expireTime, _ := tsoutil.ParseTS(ts)
+			if !expireTime.Add(ttlTime).Before(now) {
+				continue // not yet expired by TTL
+			}
+		}
+		toDelete = append(toDelete, key)
+	}
+
+	// For fully-expired tombstone groups, also delete the plain key
+	for originalKey := range fullyExpiredTombstones {
+		toDelete = append(toDelete, originalKey)
+	}
+
+	if len(toDelete) == 0 {
+		return 0, count, nil
+	}
+
+	// ========== Phase 3: Delete — cross-group aggregated batch delete ==========
+	// All expired keys from ALL groups in this batch are deleted together,
+	// instead of one MultiRemove per group. This reduces etcd transaction count
+	// from potentially thousands to tens (toDelete / maxTxnNum).
 	removeFn := func(partialKeys []string) error {
 		return ss.MetaKv.MultiRemove(ctx, partialKeys)
 	}
-	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
-	return etcd.RemoveByBatchWithLimit(keyGroup, maxTxnNum, removeFn)
-}
-
-// removeExpiredKvs removes expired key-value pairs from the snapshot
-// It walks through all keys with the snapshot prefix, groups them by original key,
-// and removes expired versions or all versions if the original key has been deleted
-func (ss *SuffixSnapshot) removeExpiredKvs(ctx context.Context, now time.Time) error {
-	log := log.Ctx(ctx)
-	ttlTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotTTLSeconds.GetAsDuration(time.Second)
-	reserveTime := paramtable.Get().ServiceParam.MetaStoreCfg.SnapshotReserveTimeSeconds.GetAsDuration(time.Second)
-
-	candidateExpiredKeys := make([]string, 0)
-	latestOriginalKey := ""
-	latestOriginValue := ""
-	totalVersions := 0
-
-	// cleanFn processes a group of keys for a single original key
-	cleanFn := func(curOriginalKey string) error {
-		if curOriginalKey == "" {
-			return nil
-		}
-		if ss.isTombstone(latestOriginValue) {
-			// If deleted, remove all versions including the original key
-			return ss.batchRemoveExpiredKvs(ctx, candidateExpiredKeys, curOriginalKey, totalVersions == len(candidateExpiredKeys))
-		}
-
-		// If not deleted, check for expired versions
-		expiredKeys := make([]string, 0)
-		for _, key := range candidateExpiredKeys {
-			ts, _ := ss.isTSKey(key)
-			expireTime, _ := tsoutil.ParseTS(ts)
-			if expireTime.Add(ttlTime).Before(now) {
-				expiredKeys = append(expiredKeys, key)
-			}
-		}
-		if len(expiredKeys) > 0 {
-			return ss.batchRemoveExpiredKvs(ctx, expiredKeys, curOriginalKey, false)
-		}
-		return nil
+	if err := etcd.RemoveByBatchWithLimit(toDelete, maxTxnNum, removeFn); err != nil {
+		return 0, count, err
 	}
 
-	// Walk through all keys with the snapshot prefix
-	err := ss.MetaKv.WalkWithPrefix(ctx, ss.snapshotPrefix, ss.paginationSize, func(k []byte, v []byte) error {
-		key := ss.hideRootPrefix(string(k))
-		ts, ok := ss.isTSKey(key)
-		if !ok {
-			log.Warn("Skip key because it doesn't contain ts", zap.String("key", key))
-			return nil
-		}
-
-		curOriginalKey, err := ss.getOriginalKey(key)
-		if err != nil {
-			log.Error("Failed to parse the original key for GC", zap.String("key", key), zap.Error(err))
-			return err
-		}
-
-		// If we've moved to a new original key, process the previous group
-		if latestOriginalKey != "" && latestOriginalKey != curOriginalKey {
-			if err := cleanFn(latestOriginalKey); err != nil {
-				return err
-			}
-
-			candidateExpiredKeys = make([]string, 0)
-			totalVersions = 0
-		}
-
-		latestOriginalKey = curOriginalKey
-		latestOriginValue = string(v)
-		totalVersions++
-
-		// Record versions that are already expired but not removed
-		time, _ := tsoutil.ParseTS(ts)
-		if time.Add(reserveTime).Before(now) {
-			candidateExpiredKeys = append(candidateExpiredKeys, key)
-		}
-
-		return nil
-	})
-	if err != nil {
-		log.Error("Error occurred during WalkWithPrefix", zap.Error(err))
-		return err
-	}
-
-	// Process the last group of keys
-	return cleanFn(latestOriginalKey)
+	return len(toDelete), count, nil
 }

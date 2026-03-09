@@ -73,6 +73,23 @@ func (mm *metaMemoryKV) WalkWithPrefix(ctx context.Context, prefix string, pagin
 	return nil
 }
 
+func (mm *metaMemoryKV) WalkWithPrefixFrom(ctx context.Context, prefix string, startKey string, paginationSize int, fn func([]byte, []byte) error) error {
+	keys, values, err := mm.MemoryKV.LoadWithPrefix(context.TODO(), prefix)
+	if err != nil {
+		return err
+	}
+
+	for i, k := range keys {
+		if startKey != "" && k <= startKey {
+			continue
+		}
+		if err := fn([]byte(k), []byte(values[i])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (mm *metaMemoryKV) GetPath(key string) string {
 	panic("implement me")
 }
