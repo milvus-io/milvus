@@ -190,7 +190,14 @@ const (
 	JSONPathKey         = "json_path"
 	JSONCastFunctionKey = "json_cast_function"
 
-	SchemaVersionConsistencyProportionKey = "schema_version_consistency_proportion"
+	// SchemaVersionConsistentSegmentsKey and SchemaVersionTotalSegmentsKey are emitted by DataCoord
+	// in GetCollectionStatistics when the collection's schema version > 0 (i.e. AlterCollectionSchema
+	// has been called).  Proxy uses these two integer counts to gate schema-change DDLs: the gate
+	// passes only when consistentSegments == totalSegments (exact integer equality, no floating-point
+	// rounding).  Using raw counts avoids the false-100% problem that arises when a float proportion
+	// like 99.999% is formatted with "%.2f" and rounds up to "100.00".
+	SchemaVersionConsistentSegmentsKey = "schema_version_consistent_segments"
+	SchemaVersionTotalSegmentsKey      = "schema_version_total_segments"
 )
 
 // expr query params

@@ -51,6 +51,10 @@ func newStorageVersionUpgradePolicy(meta *meta, allocator allocator.Allocator, h
 	}
 }
 
+func (policy *storageVersionUpgradePolicy) Name() string {
+	return "storageVersionUpgrade"
+}
+
 func (policy *storageVersionUpgradePolicy) Enable() bool {
 	return paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool()
 }

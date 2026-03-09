@@ -302,6 +302,8 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			compactionParams,
 			sortFields,
 		)
+	case datapb.CompactionType_BackfillCompaction:
+		task = compactor.NewBackfillCompactionTask(taskCtx, cm, req, compactionParams)
 	default:
 		log.Warn("Unknown compaction type", zap.String("type", req.GetType().String()))
 		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil

@@ -1859,6 +1859,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			StorageVersion: seg.GetStorageVersion(),
 			ManifestPath:   seg.GetManifest(),
 			ExpirQuantiles: seg.GetExpirQuantiles(),
+			SchemaVersion:  compactFromSegInfos[0].GetSchemaVersion(),
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -1971,6 +1972,7 @@ func (m *meta) completeMixCompactionMutation(
 				ManifestPath:        compactToSegment.GetManifest(),
 				IsSortedByNamespace: compactToSegment.GetIsSortedByNamespace(),
 				ExpirQuantiles:      compactToSegment.GetExpirQuantiles(),
+				SchemaVersion:       compactFromSegInfos[0].GetSchemaVersion(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -2059,6 +2061,8 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 		return m.completeClusterCompactionMutation(t, result)
 	case datapb.CompactionType_SortCompaction:
 		return m.completeSortCompactionMutation(t, result)
+	case datapb.CompactionType_BackfillCompaction:
+		return m.completeBackfillCompactionMutation(t, result)
 	}
 	return nil, nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 }
@@ -2478,6 +2482,7 @@ func (m *meta) completeSortCompactionMutation(
 		ManifestPath:              resultSegment.GetManifest(),
 		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
 		IsSortedByNamespace:       resultSegment.GetIsSortedByNamespace(),
+		SchemaVersion:             oldSegment.GetSchemaVersion(),
 	}
 
 	segment := NewSegmentInfo(segmentInfo)
@@ -2510,6 +2515,119 @@ func (m *meta) completeSortCompactionMutation(
 	m.segments.SetSegment(segment.GetID(), segment)
 	log.Info("meta update: alter in memory meta after compaction - complete")
 	return []*SegmentInfo{segment}, metricMutation, nil
+}
+
+func (m *meta) completeBackfillCompactionMutation(
+	t *datapb.CompactionTask,
+	result *datapb.CompactionPlanResult,
+) ([]*SegmentInfo, *segMetricMutation, error) {
+	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetPlanID()),
+		zap.String("type", t.GetType().String()),
+		zap.Int64("collectionID", t.CollectionID),
+		zap.Int64("partitionID", t.PartitionID),
+		zap.String("channel", t.GetChannel()))
+
+	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]map[string]map[string]int)}
+
+	// Backfill compaction updates the existing segment, not creating a new one
+	if len(t.GetInputSegments()) != 1 {
+		return nil, nil, merr.WrapErrIllegalCompactionPlan("backfill compaction should have exactly one input segment")
+	}
+	if len(result.GetSegments()) != 1 {
+		return nil, nil, merr.WrapErrIllegalCompactionPlan("backfill compaction result should have exactly one segment")
+	}
+
+	segmentID := t.GetInputSegments()[0]
+	oldSegment := m.segments.GetSegment(segmentID)
+	if oldSegment == nil {
+		return nil, nil, merr.WrapErrSegmentNotFound(segmentID)
+	}
+
+	// Re-validate segment health to prevent race condition with drop collection
+	// between ValidateSegmentStateBeforeCompleteCompactionMutation and here
+	if !isSegmentHealthy(oldSegment) {
+		log.Warn("input segment was dropped during compaction mutation",
+			zap.Int64("planID", t.GetPlanID()),
+			zap.Int64("segmentID", segmentID),
+			zap.String("state", oldSegment.GetState().String()))
+		return nil, nil, merr.WrapErrSegmentNotFound(segmentID, "input segment was dropped")
+	}
+
+	resultSegment := result.GetSegments()[0]
+	if resultSegment.GetSegmentID() != segmentID {
+		return nil, nil, merr.WrapErrIllegalCompactionPlan(fmt.Sprintf("backfill compaction result segment ID %d does not match input segment ID %d", resultSegment.GetSegmentID(), segmentID))
+	}
+
+	// Clone the segment for update
+	cloned := oldSegment.Clone()
+
+	// Replace binlogs with result (result already contains original + new function output field binlogs)
+	cloned.Binlogs = resultSegment.GetInsertLogs()
+
+	// Update BM25 stats logs: for V2 segments, stats are separate files tracked in Bm25Statslogs.
+	// Use mergeFieldBinlogs so that stats for previously backfilled BM25 fields are preserved
+	// when a second AlterCollectionSchema adds another BM25 function.
+	// For V3 segments (manifest-based), BM25 stats are embedded in the manifest and
+	// Bm25Logs in the result is nil — skip updating Bm25Statslogs to avoid clearing existing stats.
+	if resultSegment.GetManifest() == "" {
+		cloned.Bm25Statslogs = mergeFieldBinlogs(cloned.GetBm25Statslogs(), resultSegment.GetBm25Logs())
+	}
+
+	// Update SchemaVersion from task schema.
+	// t.Schema is set from collection.Schema at task creation time and should never be nil.
+	// A nil schema here indicates data corruption (e.g. etcd serialization loss); we warn
+	// and skip the update so the segment's schemaVersion remains stale, causing the next
+	// backfill trigger to re-evaluate and re-submit the task.
+	if t.GetSchema() == nil {
+		log.Warn("backfill compaction task has nil schema, skipping schemaVersion update — segment will be re-evaluated on next trigger",
+			zap.Int64("segmentID", segmentID),
+			zap.Int64("planID", t.GetPlanID()))
+	} else {
+		newSchemaVersion := t.GetSchema().GetVersion()
+		if newSchemaVersion > cloned.GetSchemaVersion() {
+			cloned.SchemaVersion = newSchemaVersion
+			log.Info("meta update: update schema version for backfill compaction",
+				zap.Int64("segmentID", segmentID),
+				zap.Int32("oldSchemaVersion", oldSegment.GetSchemaVersion()),
+				zap.Int32("newSchemaVersion", newSchemaVersion))
+		}
+	}
+
+	// Update StorageVersion only when result has manifest (true V3 segment).
+	// V2 segments on V3 clusters stay V2 — backfill forces V2 path to avoid
+	// creating partial manifests that would corrupt segment loading.
+	// Update ManifestPath for V3 segments — the merged manifest contains both
+	// original columns and new function output columns + BM25 stats.
+	if resultSegment.GetManifest() != "" {
+		cloned.StorageVersion = resultSegment.GetStorageVersion()
+		cloned.ManifestPath = resultSegment.GetManifest()
+	}
+
+	// Prepare binlogs increment for catalog update
+	binlogsIncrement := metastore.BinlogsIncrement{
+		Segment: cloned.SegmentInfo,
+	}
+
+	log = log.With(zap.Int64("segmentID", segmentID),
+		zap.Int32("oldSchemaVersion", oldSegment.GetSchemaVersion()),
+		zap.Int32("newSchemaVersion", cloned.GetSchemaVersion()),
+		zap.Int("newInsertLogsCount", len(resultSegment.GetInsertLogs())),
+		zap.Int("newBm25LogsCount", len(resultSegment.GetBm25Logs())))
+
+	log.Info("meta update: prepare for complete backfill compaction mutation - complete",
+		zap.Int64("num rows", cloned.GetNumOfRows()))
+
+	// Save to catalog
+	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo}, binlogsIncrement); err != nil {
+		log.Warn("fail to alter segment for backfill compaction", zap.Error(err))
+		return nil, nil, err
+	}
+
+	// Update in-memory meta
+	m.segments.SetSegment(segmentID, cloned)
+	log.Info("meta update: alter in memory meta after backfill compaction - complete")
+
+	return []*SegmentInfo{cloned}, metricMutation, nil
 }
 
 func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {

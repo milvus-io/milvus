@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 
@@ -25,6 +26,20 @@ import (
 func TestCompactionTriggerManagerSuite(t *testing.T) {
 	suite.Run(t, new(CompactionTriggerManagerSuite))
 }
+
+// testCompactionPolicy is a minimal CompactionPolicy stub for handleTicker tests.
+type testCompactionPolicy struct {
+	enabled       bool
+	triggerResult map[CompactionTriggerType][]CompactionView
+	triggerErr    error
+	policyName    string
+}
+
+func (p *testCompactionPolicy) Enable() bool { return p.enabled }
+func (p *testCompactionPolicy) Trigger(_ context.Context) (map[CompactionTriggerType][]CompactionView, error) {
+	return p.triggerResult, p.triggerErr
+}
+func (p *testCompactionPolicy) Name() string { return p.policyName }
 
 type CompactionTriggerManagerSuite struct {
 	suite.Suite
@@ -390,4 +405,216 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerInvalidParams() {
 	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, false, 0)
 	s.NoError(err)
 	s.Equal(int64(0), triggerID)
+}
+
+func (s *CompactionTriggerManagerSuite) TestSubmitBackfillViewToScheduler() {
+	collectionSchema := &schemapb.CollectionSchema{
+		Name: "test_coll",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{Name: "bm25_fn", Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{100}},
+		},
+	}
+	backfillFunc := collectionSchema.Functions[0]
+
+	makeBackfillView := func(triggerID int64) *BackfillSegmentsView {
+		segView := &SegmentView{
+			ID:        200,
+			label:     s.testLabel,
+			NumOfRows: 1000,
+		}
+		return &BackfillSegmentsView{
+			label:     s.testLabel,
+			segments:  []*SegmentView{segView},
+			triggerID: triggerID,
+			funcDiff:  &FuncDiff{Added: []*schemapb.FunctionSchema{backfillFunc}},
+		}
+	}
+
+	s.Run("AllocN fails", func() {
+		s.SetupTest()
+		s.mockAlloc.EXPECT().AllocN(int64(1)).Return(int64(0), int64(0), errors.New("alloc error")).Once()
+		view := makeBackfillView(111)
+		// Should return early with no panic — no other mock calls expected.
+		s.triggerManager.SubmitBackfillViewToScheduler(context.Background(), view)
+	})
+
+	s.Run("GetCollection fails", func() {
+		s.SetupTest()
+		const planID = int64(500)
+		s.mockAlloc.EXPECT().AllocN(int64(1)).Return(planID, planID, nil).Once()
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(nil, errors.New("get collection error")).Once()
+		s.triggerManager.handler = handler
+
+		view := makeBackfillView(111)
+		s.triggerManager.SubmitBackfillViewToScheduler(context.Background(), view)
+	})
+
+	s.Run("collection is nil", func() {
+		s.SetupTest()
+		const planID = int64(501)
+		s.mockAlloc.EXPECT().AllocN(int64(1)).Return(planID, planID, nil).Once()
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(nil, nil).Once()
+		s.triggerManager.handler = handler
+
+		view := makeBackfillView(111)
+		s.triggerManager.SubmitBackfillViewToScheduler(context.Background(), view)
+	})
+
+	s.Run("collection is external", func() {
+		s.SetupTest()
+		const planID = int64(502)
+		s.mockAlloc.EXPECT().AllocN(int64(1)).Return(planID, planID, nil).Once()
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{
+				ID: s.testLabel.CollectionID,
+				// IsExternal() checks for fields with ExternalField set, not Schema.ExternalSource.
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 1, Name: "ext_field", ExternalField: "s3://bucket/external"},
+					},
+				},
+			}, nil).Once()
+		s.triggerManager.handler = handler
+
+		view := makeBackfillView(111)
+		s.triggerManager.SubmitBackfillViewToScheduler(context.Background(), view)
+	})
+
+	s.Run("view is not BackfillSegmentsView", func() {
+		s.SetupTest()
+		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+		const planID = int64(503)
+		s.mockAlloc.EXPECT().AllocN(int64(1)).Return(planID, planID, nil).Once()
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{
+				ID:     s.testLabel.CollectionID,
+				Schema: collectionSchema,
+			}, nil).Once()
+		s.triggerManager.handler = handler
+
+		// Use LevelZeroCompactionView which is NOT a *BackfillSegmentsView.
+		nonBackfillView := &LevelZeroCompactionView{
+			label:      s.testLabel,
+			l0Segments: []*SegmentView{},
+		}
+		s.triggerManager.SubmitBackfillViewToScheduler(context.Background(), nonBackfillView)
+	})
+
+	s.Run("enqueueCompaction fails", func() {
+		s.SetupTest()
+		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+		const (
+			planID    = int64(504)
+			triggerID = int64(999)
+		)
+		s.mockAlloc.EXPECT().AllocN(int64(1)).Return(planID, planID, nil).Once()
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{
+				ID:     s.testLabel.CollectionID,
+				Schema: collectionSchema,
+			}, nil).Once()
+		s.triggerManager.handler = handler
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).Return(errors.New("enqueue error")).Once()
+
+		view := makeBackfillView(triggerID)
+		s.triggerManager.SubmitBackfillViewToScheduler(context.Background(), view)
+	})
+
+	s.Run("success", func() {
+		s.SetupTest()
+		s.meta.indexMeta = &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)}
+		const (
+			planID    = int64(600)
+			triggerID = int64(1001)
+		)
+		s.mockAlloc.EXPECT().AllocN(int64(1)).Return(planID, planID, nil).Once()
+		handler := NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(&collectionInfo{
+				ID:     s.testLabel.CollectionID,
+				Schema: collectionSchema,
+			}, nil).Once()
+		s.triggerManager.handler = handler
+		s.inspector.EXPECT().enqueueCompaction(mock.Anything).
+			RunAndReturn(func(task *datapb.CompactionTask) error {
+				s.EqualValues(planID, task.GetPlanID())
+				s.EqualValues(triggerID, task.GetTriggerID())
+				s.Equal(datapb.CompactionType_BackfillCompaction, task.GetType())
+				s.Equal(s.testLabel.CollectionID, task.GetCollectionID())
+				s.Equal(s.testLabel.PartitionID, task.GetPartitionID())
+				s.Equal(s.testLabel.Channel, task.GetChannel())
+				s.Equal(collectionSchema, task.GetSchema())
+				s.Require().Len(task.GetDiffFunctions(), 1)
+				s.Equal(backfillFunc.GetName(), task.GetDiffFunctions()[0].GetName())
+				s.ElementsMatch([]int64{200}, task.GetInputSegments())
+				return nil
+			}).Once()
+
+		view := makeBackfillView(triggerID)
+		s.triggerManager.SubmitBackfillViewToScheduler(context.Background(), view)
+	})
+}
+
+func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
+	s.Run("policy not found for ticker type", func() {
+		s.SetupTest()
+		// TickerType 99 is not registered in policies map
+		s.triggerManager.handleTicker(context.Background(), TickerType(99))
+		// Should return without panic
+	})
+
+	s.Run("policy disabled", func() {
+		s.SetupTest()
+		mockPolicy := &testCompactionPolicy{enabled: false, policyName: "test-disabled"}
+		s.triggerManager.policies[BackfillTicker] = mockPolicy
+		s.triggerManager.handleTicker(context.Background(), BackfillTicker)
+		// Returns early — no inspector or trigger calls
+	})
+
+	s.Run("inspector full", func() {
+		s.SetupTest()
+		mockPolicy := &testCompactionPolicy{enabled: true, policyName: "test-full"}
+		s.triggerManager.policies[BackfillTicker] = mockPolicy
+		s.inspector.EXPECT().isFull().Return(true).Once()
+		s.triggerManager.handleTicker(context.Background(), BackfillTicker)
+		// Returns early — no trigger call
+	})
+
+	s.Run("policy trigger error", func() {
+		s.SetupTest()
+		mockPolicy := &testCompactionPolicy{
+			enabled:    true,
+			policyName: "test-err",
+			triggerErr: errors.New("trigger error"),
+		}
+		s.triggerManager.policies[BackfillTicker] = mockPolicy
+		s.inspector.EXPECT().isFull().Return(false).Once()
+		s.triggerManager.handleTicker(context.Background(), BackfillTicker)
+		// Returns early after logging error
+	})
+
+	s.Run("policy trigger returns events", func() {
+		s.SetupTest()
+		mockPolicy := &testCompactionPolicy{
+			enabled:    true,
+			policyName: "test-events",
+			// One trigger type with empty views — notify is called but inner loop is empty.
+			triggerResult: map[CompactionTriggerType][]CompactionView{
+				TriggerTypeBackfill: {},
+			},
+		}
+		s.triggerManager.policies[BackfillTicker] = mockPolicy
+		s.inspector.EXPECT().isFull().Return(false).Once()
+		s.triggerManager.handleTicker(context.Background(), BackfillTicker)
+	})
 }
