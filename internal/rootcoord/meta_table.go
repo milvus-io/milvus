@@ -706,6 +706,11 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		return err
 	}
 
+	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, coll.DBName, coll.Name); err != nil {
+		log.Ctx(ctx).Warn("failed to delete grants for dropped collection, skipping",
+			zap.String("dbName", coll.DBName), zap.String("collectionName", coll.Name), zap.Error(err))
+	}
+
 	allNames := common.CloneStringList(aliases)
 	allNames = append(allNames, coll.Name)
 
