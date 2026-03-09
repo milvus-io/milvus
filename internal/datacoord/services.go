@@ -2003,10 +2003,10 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	log.Info("receive CreateSnapshot request", zap.String("name", req.GetName()),
 		zap.String("description", req.GetDescription()))
 
-	// Check if snapshot name already exists
-	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err == nil {
-		log.Warn("CreateSnapshot failed: snapshot name already exists")
-		return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", req.GetName())), nil
+	// Check if snapshot name already exists within this collection
+	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName()); err == nil {
+		log.Warn("CreateSnapshot failed: snapshot name already exists in collection")
+		return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists in collection %d", req.GetName(), req.GetCollectionId())), nil
 	}
 
 	// Start broadcast with collection lock (also validates collection existence)
@@ -2028,10 +2028,10 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	}
 	defer broadcaster.Close()
 
-	// check if snapshot name already exists
-	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err == nil {
-		log.Warn("CreateSnapshot failed: snapshot name already exists")
-		return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", req.GetName())), nil
+	// check if snapshot name already exists within this collection
+	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName()); err == nil {
+		log.Warn("CreateSnapshot failed: snapshot name already exists in collection")
+		return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists in collection %d", req.GetName(), req.GetCollectionId())), nil
 	}
 
 	// Broadcast CreateSnapshot message via DDL framework
@@ -2106,14 +2106,14 @@ func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdat
 }
 
 func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(zap.String("snapshot", req.GetName()))
+	log := log.Ctx(ctx).With(zap.String("snapshot", req.GetName()), zap.Int64("collectionID", req.GetCollectionId()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
 	log.Info("receive DropSnapshot request")
 
 	// Check if snapshot exists - if not, return success (idempotent)
-	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err != nil {
+	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName()); err != nil {
 		log.Info("DropSnapshot: snapshot not found, returning success (idempotent)", zap.Error(err))
 		return merr.Success(), nil
 	}
@@ -2131,7 +2131,7 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 	defer broadcaster.Close()
 
 	// Double-check after acquiring lock - another goroutine may have dropped it
-	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err != nil {
+	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName()); err != nil {
 		log.Info("DropSnapshot: snapshot not found after lock, returning success (idempotent)", zap.Error(err))
 		return merr.Success(), nil
 	}
@@ -2150,7 +2150,8 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 	// Broadcast DropSnapshot message via DDL framework
 	if _, err := broadcaster.Broadcast(ctx, message.NewDropSnapshotMessageBuilderV2().
 		WithHeader(&message.DropSnapshotMessageHeader{
-			Name: req.GetName(),
+			Name:         req.GetName(),
+			CollectionId: req.GetCollectionId(),
 		}).
 		WithBody(&message.DropSnapshotMessageBody{}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
@@ -2165,7 +2166,7 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 }
 
 func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
-	log := log.Ctx(ctx).With(zap.String("snapshotName", req.GetName()))
+	log := log.Ctx(ctx).With(zap.String("snapshotName", req.GetName()), zap.Int64("collectionID", req.GetCollectionId()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.DescribeSnapshotResponse{
 			Status: merr.Status(err),
@@ -2174,7 +2175,7 @@ func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnaps
 	log.Info("receive DescribeSnapshot request")
 
 	// Delegate to SnapshotManager
-	snapshotData, err := s.snapshotManager.DescribeSnapshot(ctx, req.GetName())
+	snapshotData, err := s.snapshotManager.DescribeSnapshot(ctx, req.GetCollectionId(), req.GetName())
 	if err != nil {
 		log.Error("failed to describe snapshot", zap.Error(err))
 		return &datapb.DescribeSnapshotResponse{
@@ -2198,8 +2199,9 @@ func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnaps
 func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("snapshot", req.GetName()),
-		zap.String("dbName", req.GetDbName()),
-		zap.String("collectionName", req.GetCollectionName()))
+		zap.Int64("sourceCollectionID", req.GetSourceCollectionId()),
+		zap.String("targetDbName", req.GetTargetDbName()),
+		zap.String("targetCollectionName", req.GetTargetCollectionName()))
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.RestoreSnapshotResponse{
@@ -2216,8 +2218,8 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 			Status: merr.Status(err),
 		}, nil
 	}
-	if req.GetCollectionName() == "" {
-		err := merr.WrapErrParameterInvalidMsg("collection name is required")
+	if req.GetTargetCollectionName() == "" {
+		err := merr.WrapErrParameterInvalidMsg("target collection name is required")
 		log.Warn("invalid request", zap.Error(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
@@ -2227,9 +2229,10 @@ func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapsho
 	// Delegate to snapshot manager
 	jobID, err := s.snapshotManager.RestoreSnapshot(
 		ctx,
+		req.GetSourceCollectionId(),
 		req.GetName(),
-		req.GetCollectionName(),
-		req.GetDbName(),
+		req.GetTargetCollectionName(),
+		req.GetTargetDbName(),
 		s.startBroadcastForRestoreSnapshot,
 		s.rollbackRestoreSnapshot,
 		s.validateRestoreSnapshotResources,
@@ -2304,7 +2307,7 @@ func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRe
 	}
 
 	// Delegate to SnapshotManager
-	restoreInfos, err := s.snapshotManager.ListRestoreJobs(ctx, req.GetCollectionId())
+	restoreInfos, err := s.snapshotManager.ListRestoreJobs(ctx, req.GetCollectionId(), req.GetDbId())
 	if err != nil {
 		log.Ctx(ctx).Error("failed to list restore jobs", zap.Error(err))
 		return &datapb.ListRestoreSnapshotJobsResponse{
@@ -2332,7 +2335,7 @@ func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsReq
 	log.Info("receive ListSnapshots request")
 
 	// Delegate to SnapshotManager
-	snapshots, err := s.snapshotManager.ListSnapshots(ctx, req.GetCollectionId(), req.GetPartitionId())
+	snapshots, err := s.snapshotManager.ListSnapshots(ctx, req.GetCollectionId(), req.GetPartitionId(), req.GetDbId())
 	if err != nil {
 		log.Error("failed to list snapshots", zap.Error(err))
 		return &datapb.ListSnapshotsResponse{

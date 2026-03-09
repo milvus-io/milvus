@@ -54,6 +54,7 @@ func (c *DDLCallbacks) registerSnapshotCallbacks() {
 	registry.RegisterCreateSnapshotV2AckCallback(c.createSnapshotV2AckCallback)
 	registry.RegisterDropSnapshotV2AckCallback(c.dropSnapshotV2AckCallback)
 	registry.RegisterRestoreSnapshotV2AckCallback(c.restoreSnapshotV2AckCallback)
+	registry.RegisterDropSnapshotsByCollectionV2AckCallback(c.dropSnapshotsByCollectionV2AckCallback)
 }
 
 func (c *DDLCallbacks) registerExternalCollectionCallbacks() {
@@ -109,10 +110,13 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 
 	// ========== Validate Snapshot Exists ==========
-	snapshot, err := s.meta.snapshotMeta.GetSnapshot(ctx, snapshotData.SnapshotInfo.GetName())
+	// Use source collection ID from snapshot data (not the target collectionID parameter)
+	// because snapshots are stored under the source collection's namespace.
+	sourceCollectionID := snapshotData.SnapshotInfo.GetCollectionId()
+	snapshot, err := s.meta.snapshotMeta.GetSnapshot(ctx, sourceCollectionID, snapshotData.SnapshotInfo.GetName())
 	if err != nil {
 		return fmt.Errorf("snapshot %s does not exist for collection %d: %w",
-			snapshotData.SnapshotInfo.GetName(), collectionID, err)
+			snapshotData.SnapshotInfo.GetName(), sourceCollectionID, err)
 	}
 	log.Info("snapshot validated", zap.String("snapshotName", snapshot.GetName()))
 

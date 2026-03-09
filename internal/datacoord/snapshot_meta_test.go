@@ -116,7 +116,7 @@ func createTestSnapshotMeta(t *testing.T) *snapshotMeta {
 		catalog:                catalog,
 		snapshotID2Info:        typeutil.NewConcurrentMap[typeutil.UniqueID, *datapb.SnapshotInfo](),
 		snapshotID2RefIndex:    typeutil.NewConcurrentMap[typeutil.UniqueID, *SnapshotRefIndex](),
-		snapshotName2ID:        typeutil.NewConcurrentMap[string, typeutil.UniqueID](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[typeutil.UniqueID, *typeutil.ConcurrentMap[string, typeutil.UniqueID]](),
 		collectionID2Snapshots: typeutil.NewConcurrentMap[typeutil.UniqueID, typeutil.UniqueSet](),
 		loaderCtx:              loaderCtx,
 		loaderCancel:           loaderCancel,
@@ -254,7 +254,7 @@ func TestSnapshotMeta_GetSnapshot_Success(t *testing.T) {
 	defer cleanup()
 
 	// Act
-	result, err := sm.GetSnapshot(ctx, snapshotName)
+	result, err := sm.GetSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert
 	assert.NoError(t, err)
@@ -269,7 +269,7 @@ func TestSnapshotMeta_GetSnapshot_NotFound(t *testing.T) {
 	sm := createTestSnapshotMetaLoaded(t)
 
 	// Act
-	result, err := sm.GetSnapshot(ctx, snapshotName)
+	result, err := sm.GetSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert
 	assert.Error(t, err)
@@ -290,7 +290,7 @@ func TestSnapshotMeta_GetSnapshotByName_Success(t *testing.T) {
 	defer cleanup()
 
 	// Act
-	result, err := sm.getSnapshotByName(ctx, snapshotName)
+	result, err := sm.getSnapshotByName(ctx, int64(100), snapshotName)
 
 	// Assert
 	assert.NoError(t, err)
@@ -305,7 +305,7 @@ func TestSnapshotMeta_GetSnapshotByName_NotFound(t *testing.T) {
 	sm := createTestSnapshotMetaLoaded(t)
 
 	// Act
-	result, err := sm.getSnapshotByName(ctx, snapshotName)
+	result, err := sm.getSnapshotByName(ctx, int64(100), snapshotName)
 
 	// Assert
 	assert.Error(t, err)
@@ -335,7 +335,7 @@ func TestSnapshotMeta_GetSnapshotByName_MultipleSnapshots(t *testing.T) {
 	defer cleanup()
 
 	// Act
-	result, err := sm.getSnapshotByName(ctx, targetName)
+	result, err := sm.getSnapshotByName(ctx, int64(100), targetName)
 
 	// Assert
 	assert.NoError(t, err)
@@ -1076,7 +1076,7 @@ func TestSnapshotMeta_DropSnapshot_Success_WithMockey(t *testing.T) {
 	defer mock2.UnPatch()
 
 	// Act
-	err := sm.DropSnapshot(ctx, snapshotName)
+	err := sm.DropSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert
 	assert.NoError(t, err)
@@ -1085,8 +1085,11 @@ func TestSnapshotMeta_DropSnapshot_Success_WithMockey(t *testing.T) {
 	assert.False(t, exists)
 	_, exists = sm.snapshotID2RefIndex.Get(snapshotData.SnapshotInfo.GetId())
 	assert.False(t, exists)
-	_, exists = sm.snapshotName2ID.Get(snapshotName)
-	assert.False(t, exists)
+	nameMap, nameMapExists := sm.snapshotName2ID.Get(int64(100))
+	if nameMapExists {
+		_, exists = nameMap.Get(snapshotName)
+		assert.False(t, exists)
+	}
 }
 
 func TestSnapshotMeta_DropSnapshot_NotFound_WithMockey(t *testing.T) {
@@ -1096,7 +1099,7 @@ func TestSnapshotMeta_DropSnapshot_NotFound_WithMockey(t *testing.T) {
 	snapshotName := "nonexistent_snapshot"
 
 	// Act
-	err := sm.DropSnapshot(ctx, snapshotName)
+	err := sm.DropSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert
 	assert.Error(t, err)
@@ -1133,7 +1136,7 @@ func TestSnapshotMeta_DropSnapshot_CatalogDropError_WithMockey(t *testing.T) {
 	defer mock1.UnPatch()
 
 	// Act
-	err := sm.DropSnapshot(ctx, snapshotName)
+	err := sm.DropSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert - Two-phase delete: if S3 deletion succeeds, operation returns success
 	// even if catalog cleanup fails. GC will clean up the catalog record later.
@@ -1172,7 +1175,7 @@ func TestSnapshotMeta_DropSnapshot_WriterError_WithMockey(t *testing.T) {
 	defer mock2.UnPatch()
 
 	// Act
-	err := sm.DropSnapshot(ctx, snapshotName)
+	err := sm.DropSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert - Two-phase delete: S3 failure returns success, GC will clean up
 	assert.NoError(t, err)
@@ -1202,7 +1205,7 @@ func TestSnapshotMeta_DropSnapshot_MarkDeletingError_WithMockey(t *testing.T) {
 	defer mock0.UnPatch()
 
 	// Act
-	err := sm.DropSnapshot(ctx, snapshotName)
+	err := sm.DropSnapshot(ctx, int64(100), snapshotName)
 
 	// Assert - If marking as Deleting fails, operation should fail
 	assert.Error(t, err)
@@ -1356,7 +1359,7 @@ func TestSnapshotMeta_EmptyMaps(t *testing.T) {
 	snapshots, err := sm.ListSnapshots(ctx, 100, 1)
 	segmentSnapshots := sm.GetSnapshotBySegment(ctx, 100, 1001)
 	indexSnapshots := sm.GetSnapshotByIndex(ctx, 100, 2001)
-	snapshot, getErr := sm.GetSnapshot(ctx, "nonexistent")
+	snapshot, getErr := sm.GetSnapshot(ctx, int64(100), "nonexistent")
 
 	// Assert
 	assert.NoError(t, err)
@@ -2083,4 +2086,438 @@ func TestSnapshotMeta_IsAllRefIndexLoaded(t *testing.T) {
 	sm.snapshotID2Info.Insert(info2.GetId(), info2)
 	sm.snapshotID2RefIndex.Insert(info2.GetId(), NewSnapshotRefIndex())
 	assert.False(t, sm.IsAllRefIndexLoaded())
+}
+
+// --- DropSnapshotsByCollection Tests ---
+
+func TestSnapshotMeta_DropSnapshotsByCollection_DeletesAllForCollection(t *testing.T) {
+	// Should delete all snapshots for a collection while leaving other collections untouched.
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Create snapshots for collection 100
+	snap1 := createTestSnapshotDataForMeta()
+	snap1.SnapshotInfo.Id = 1
+	snap1.SnapshotInfo.Name = "snap_a"
+	snap1.SnapshotInfo.CollectionId = 100
+
+	snap2 := createTestSnapshotDataForMeta()
+	snap2.SnapshotInfo.Id = 2
+	snap2.SnapshotInfo.Name = "snap_b"
+	snap2.SnapshotInfo.CollectionId = 100
+
+	// Create snapshot for collection 200
+	snap3 := createTestSnapshotDataForMeta()
+	snap3.SnapshotInfo.Id = 3
+	snap3.SnapshotInfo.Name = "snap_c"
+	snap3.SnapshotInfo.CollectionId = 200
+
+	// Save all snapshots
+	cleanup := saveTestSnapshots(t, sm, snap1, snap2, snap3)
+	// Must cleanup before re-mocking SaveSnapshot below
+	cleanup()
+
+	// Mock catalog.SaveSnapshot (for marking as Deleting)
+	mock0 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mock0.UnPatch()
+
+	// Mock catalog.DropSnapshot
+	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mock1.UnPatch()
+
+	// Mock SnapshotWriter.Drop
+	mock2 := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mock2.UnPatch()
+
+	// Act
+	err := sm.DropSnapshotsByCollection(ctx, int64(100))
+
+	// Assert
+	assert.NoError(t, err)
+
+	// Verify collection 100 snapshots are gone
+	_, exists := sm.snapshotID2Info.Get(int64(1))
+	assert.False(t, exists, "snapshot 1 should be deleted")
+	_, exists = sm.snapshotID2Info.Get(int64(2))
+	assert.False(t, exists, "snapshot 2 should be deleted")
+
+	// Verify collection 100 is gone from secondary indexes
+	names100, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	assert.NoError(t, err)
+	assert.Len(t, names100, 0, "collection 100 should have no snapshots")
+
+	// Verify collection 200 snapshot remains
+	info3, exists := sm.snapshotID2Info.Get(int64(3))
+	assert.True(t, exists, "snapshot 3 should remain")
+	assert.Equal(t, "snap_c", info3.GetName())
+
+	names200, err := sm.ListSnapshots(ctx, int64(200), int64(0))
+	assert.NoError(t, err)
+	assert.Len(t, names200, 1)
+	assert.Contains(t, names200, "snap_c")
+}
+
+func TestSnapshotMeta_DropSnapshotsByCollection_NoopForNonexistentCollection(t *testing.T) {
+	// Should be no-op for collection with no snapshots.
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Act - drop snapshots for collection that has no snapshots
+	err := sm.DropSnapshotsByCollection(ctx, int64(999))
+
+	// Assert
+	assert.NoError(t, err)
+}
+
+// --- Per-Collection Name Uniqueness Tests ---
+
+func TestSnapshotMeta_SameNameDifferentCollections_BothSucceed(t *testing.T) {
+	// Same snapshot name in different collections should both succeed.
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snap1 := createTestSnapshotDataForMeta()
+	snap1.SnapshotInfo.Id = 1
+	snap1.SnapshotInfo.Name = "my_snapshot"
+	snap1.SnapshotInfo.CollectionId = 100
+
+	snap2 := createTestSnapshotDataForMeta()
+	snap2.SnapshotInfo.Id = 2
+	snap2.SnapshotInfo.Name = "my_snapshot"
+	snap2.SnapshotInfo.CollectionId = 200
+
+	cleanup := saveTestSnapshots(t, sm, snap1, snap2)
+	defer cleanup()
+
+	// Assert - both snapshots exist
+	info1, err := sm.GetSnapshot(ctx, int64(100), "my_snapshot")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), info1.GetId())
+	assert.Equal(t, int64(100), info1.GetCollectionId())
+
+	info2, err := sm.GetSnapshot(ctx, int64(200), "my_snapshot")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), info2.GetId())
+	assert.Equal(t, int64(200), info2.GetCollectionId())
+
+	// Both collections should list the snapshot
+	names100, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	assert.NoError(t, err)
+	assert.Len(t, names100, 1)
+	assert.Contains(t, names100, "my_snapshot")
+
+	names200, err := sm.ListSnapshots(ctx, int64(200), int64(0))
+	assert.NoError(t, err)
+	assert.Len(t, names200, 1)
+	assert.Contains(t, names200, "my_snapshot")
+}
+
+func TestSnapshotMeta_SameNameSameCollection_SecondFails(t *testing.T) {
+	// Same snapshot name in same collection should fail on the second one.
+	// The uniqueness check happens in GetSnapshot - if it returns non-nil, the name already exists.
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snap1 := createTestSnapshotDataForMeta()
+	snap1.SnapshotInfo.Id = 1
+	snap1.SnapshotInfo.Name = "duplicate_name"
+	snap1.SnapshotInfo.CollectionId = 100
+
+	cleanup := saveTestSnapshots(t, sm, snap1)
+	defer cleanup()
+
+	// Act - check name uniqueness using GetSnapshot (as the manager does)
+	existingInfo, err := sm.GetSnapshot(ctx, int64(100), "duplicate_name")
+
+	// Assert - name already exists in collection 100
+	assert.NoError(t, err)
+	assert.NotNil(t, existingInfo)
+	assert.Equal(t, int64(1), existingInfo.GetId())
+
+	// Verify the name does NOT exist in a different collection
+	_, err = sm.GetSnapshot(ctx, int64(200), "duplicate_name")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestSnapshotMeta_DropSnapshotsByCollection_PartialFailureReturnsError(t *testing.T) {
+	// DropSnapshotsByCollection tries to delete all snapshots for a collection.
+	// This test verifies that:
+	// 1. Successfully deleted snapshots are cleaned up
+	// 2. Failed snapshots remain in the index
+	// 3. Return value is an aggregated error for partial failures
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snap1 := createTestSnapshotDataForMeta()
+	snap1.SnapshotInfo.Id = 1
+	snap1.SnapshotInfo.Name = "snap_ok"
+	snap1.SnapshotInfo.CollectionId = 100
+
+	snap2 := createTestSnapshotDataForMeta()
+	snap2.SnapshotInfo.Id = 2
+	snap2.SnapshotInfo.Name = "snap_fail"
+	snap2.SnapshotInfo.CollectionId = 100
+
+	cleanup := saveTestSnapshots(t, sm, snap1, snap2)
+	cleanup()
+
+	// Mock catalog.SaveSnapshot to succeed (for marking as Deleting)
+	callCount := 0
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).To(func(_ *kv_datacoord.Catalog, _ context.Context, info *datapb.SnapshotInfo) error {
+		callCount++
+		if info.GetName() == "snap_fail" {
+			return fmt.Errorf("catalog save error")
+		}
+		return nil
+	}).Build()
+	defer mockSave.UnPatch()
+
+	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mockDrop.UnPatch()
+
+	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mockWriter.UnPatch()
+
+	// Act
+	err := sm.DropSnapshotsByCollection(ctx, int64(100))
+
+	// Assert: returns aggregated error for partial failure
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to drop 1/2 snapshots for collection 100")
+
+	// snap_ok should be deleted
+	_, exists := sm.snapshotID2Info.Get(int64(1))
+	assert.False(t, exists, "snap_ok should be deleted")
+
+	// snap_fail should remain (catalog save failed, DropSnapshot returned error)
+	_, exists = sm.snapshotID2Info.Get(int64(2))
+	assert.True(t, exists, "snap_fail should remain after partial failure")
+}
+
+// --- Per-Collection Snapshot Isolation Tests ---
+
+func TestSnapshotMeta_SameNameDifferentCollections(t *testing.T) {
+	// Arrange: two collections (100, 200) each have a snapshot named "backup"
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snap1 := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: 100,
+		Name:         "backup",
+		CreateTs:     1000,
+		S3Location:   "s3://bucket/100/1",
+		PartitionIds: []int64{10},
+	}
+	snap2 := &datapb.SnapshotInfo{
+		Id:           2,
+		CollectionId: 200,
+		Name:         "backup",
+		CreateTs:     2000,
+		S3Location:   "s3://bucket/200/2",
+		PartitionIds: []int64{20},
+	}
+	// Also add a second snapshot for collection 100
+	snap3 := &datapb.SnapshotInfo{
+		Id:           3,
+		CollectionId: 100,
+		Name:         "daily",
+		CreateTs:     3000,
+		S3Location:   "s3://bucket/100/3",
+		PartitionIds: []int64{10},
+	}
+
+	insertTestSnapshot(sm, snap1, []int64{1001}, []int64{2001})
+	insertTestSnapshot(sm, snap2, []int64{1002}, []int64{2002})
+	insertTestSnapshot(sm, snap3, []int64{1003}, []int64{2003})
+
+	// Verify GetSnapshot for collection 100 returns collection 100's snapshot
+	info1, err := sm.GetSnapshot(ctx, 100, "backup")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), info1.GetId())
+	assert.Equal(t, int64(100), info1.GetCollectionId())
+
+	// Verify GetSnapshot for collection 200 returns collection 200's snapshot
+	info2, err := sm.GetSnapshot(ctx, 200, "backup")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), info2.GetId())
+	assert.Equal(t, int64(200), info2.GetCollectionId())
+
+	// Drop snapshot "backup" from collection 100
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mockDrop.UnPatch()
+	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mockWriter.UnPatch()
+
+	err = sm.DropSnapshot(ctx, 100, "backup")
+	require.NoError(t, err)
+
+	// Verify collection 100's "backup" is gone
+	_, err = sm.GetSnapshot(ctx, 100, "backup")
+	assert.Error(t, err)
+
+	// Verify collection 200's "backup" is NOT affected
+	info2After, err := sm.GetSnapshot(ctx, 200, "backup")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), info2After.GetId())
+
+	// Verify ListSnapshots for collection 100 only returns collection 100's remaining snapshot
+	names, err := sm.ListSnapshots(ctx, 100, 0)
+	require.NoError(t, err)
+	assert.Len(t, names, 1)
+	assert.Contains(t, names, "daily")
+	assert.NotContains(t, names, "backup")
+
+	// Verify ListSnapshots for collection 200 still has "backup"
+	names2, err := sm.ListSnapshots(ctx, 200, 0)
+	require.NoError(t, err)
+	assert.Len(t, names2, 1)
+	assert.Contains(t, names2, "backup")
+}
+
+func TestSnapshotMeta_DropSnapshot_CollectionScoped(t *testing.T) {
+	// Arrange: two collections with same-named snapshot
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snapA := &datapb.SnapshotInfo{
+		Id:           10,
+		CollectionId: 300,
+		Name:         "weekly",
+		CreateTs:     1000,
+		S3Location:   "s3://bucket/300/10",
+		PartitionIds: []int64{30},
+	}
+	snapB := &datapb.SnapshotInfo{
+		Id:           20,
+		CollectionId: 400,
+		Name:         "weekly",
+		CreateTs:     2000,
+		S3Location:   "s3://bucket/400/20",
+		PartitionIds: []int64{40},
+	}
+
+	insertTestSnapshot(sm, snapA, []int64{3001}, []int64{4001})
+	insertTestSnapshot(sm, snapB, []int64{3002}, []int64{4002})
+
+	// Mock catalog and writer for drop
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mockDrop.UnPatch()
+	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mockWriter.UnPatch()
+
+	// Act: Drop "weekly" from collection 300
+	err := sm.DropSnapshot(ctx, 300, "weekly")
+	require.NoError(t, err)
+
+	// Assert: collection 300's snapshot is gone
+	_, err = sm.GetSnapshot(ctx, 300, "weekly")
+	assert.Error(t, err)
+
+	// Assert: collection 300 has no snapshots in memory
+	_, exists := sm.snapshotID2Info.Get(int64(10))
+	assert.False(t, exists, "snapshot 10 should be removed from snapshotID2Info")
+	_, exists = sm.snapshotID2RefIndex.Get(int64(10))
+	assert.False(t, exists, "snapshot 10 should be removed from snapshotID2RefIndex")
+
+	// Assert: collection 400's "weekly" is completely unaffected
+	infoB, err := sm.GetSnapshot(ctx, 400, "weekly")
+	require.NoError(t, err)
+	assert.Equal(t, int64(20), infoB.GetId())
+	assert.Equal(t, int64(400), infoB.GetCollectionId())
+
+	// Assert: collection 400's snapshot data is intact in memory
+	_, exists = sm.snapshotID2Info.Get(int64(20))
+	assert.True(t, exists, "snapshot 20 should still exist in snapshotID2Info")
+	refIndex, exists := sm.snapshotID2RefIndex.Get(int64(20))
+	assert.True(t, exists, "snapshot 20 should still exist in snapshotID2RefIndex")
+	assert.True(t, refIndex.ContainsSegment(3002), "snapshot 20 should still reference segment 3002")
+}
+
+func TestSnapshotMeta_ListSnapshots_AllCollections_MultipleCollections(t *testing.T) {
+	// Arrange: snapshots across multiple collections
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	snap1 := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: 100,
+		Name:         "snap_c100_1",
+		CreateTs:     1000,
+		S3Location:   "s3://bucket/100/1",
+		PartitionIds: []int64{10},
+	}
+	snap2 := &datapb.SnapshotInfo{
+		Id:           2,
+		CollectionId: 100,
+		Name:         "snap_c100_2",
+		CreateTs:     2000,
+		S3Location:   "s3://bucket/100/2",
+		PartitionIds: []int64{10},
+	}
+	snap3 := &datapb.SnapshotInfo{
+		Id:           3,
+		CollectionId: 200,
+		Name:         "snap_c200_1",
+		CreateTs:     3000,
+		S3Location:   "s3://bucket/200/3",
+		PartitionIds: []int64{20},
+	}
+	snap4 := &datapb.SnapshotInfo{
+		Id:           4,
+		CollectionId: 300,
+		Name:         "snap_c300_1",
+		CreateTs:     4000,
+		S3Location:   "s3://bucket/300/4",
+		PartitionIds: []int64{30},
+	}
+
+	insertTestSnapshot(sm, snap1, nil, nil)
+	insertTestSnapshot(sm, snap2, nil, nil)
+	insertTestSnapshot(sm, snap3, nil, nil)
+	insertTestSnapshot(sm, snap4, nil, nil)
+
+	// Act: ListSnapshots with collectionID=0 (all collections)
+	names, err := sm.ListSnapshots(ctx, 0, 0)
+	require.NoError(t, err)
+
+	// Assert: all 4 snapshots from all 3 collections are returned
+	assert.Len(t, names, 4)
+	assert.Contains(t, names, "snap_c100_1")
+	assert.Contains(t, names, "snap_c100_2")
+	assert.Contains(t, names, "snap_c200_1")
+	assert.Contains(t, names, "snap_c300_1")
+
+	// Act: ListSnapshots with specific collectionID only returns that collection
+	names100, err := sm.ListSnapshots(ctx, 100, 0)
+	require.NoError(t, err)
+	assert.Len(t, names100, 2)
+	assert.Contains(t, names100, "snap_c100_1")
+	assert.Contains(t, names100, "snap_c100_2")
+
+	names200, err := sm.ListSnapshots(ctx, 200, 0)
+	require.NoError(t, err)
+	assert.Len(t, names200, 1)
+	assert.Contains(t, names200, "snap_c200_1")
+
+	names300, err := sm.ListSnapshots(ctx, 300, 0)
+	require.NoError(t, err)
+	assert.Len(t, names300, 1)
+	assert.Contains(t, names300, "snap_c300_1")
+
+	// Act: ListSnapshots with partition filter across all collections
+	namesP10, err := sm.ListSnapshots(ctx, 0, 10)
+	require.NoError(t, err)
+	assert.Len(t, namesP10, 2)
+	assert.Contains(t, namesP10, "snap_c100_1")
+	assert.Contains(t, namesP10, "snap_c100_2")
 }

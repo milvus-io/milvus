@@ -2438,6 +2438,7 @@ func TestServer_CreateSnapshot_DuplicateName(t *testing.T) {
 		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(func(
 			sm *snapshotManager,
 			ctx context.Context,
+			collectionID int64,
 			name string,
 		) (*datapb.SnapshotInfo, error) {
 			// Return a snapshot to simulate it already exists
@@ -2541,7 +2542,7 @@ func TestServer_DropSnapshot(t *testing.T) {
 
 		// Mock GetSnapshot to return not found error
 		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 				return nil, errors.New("snapshot not found")
 			}).Build()
 		defer mockGetSnapshot.UnPatch()
@@ -2577,7 +2578,7 @@ func TestServer_DropSnapshot(t *testing.T) {
 		// pre-lock check and the post-lock double-check (TOCTOU pattern)
 		callCount := 0
 		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 				callCount++
 				if callCount == 1 {
 					return &datapb.SnapshotInfo{Name: name}, nil
@@ -2615,7 +2616,7 @@ func TestServer_DropSnapshot(t *testing.T) {
 
 		// Mock GetSnapshot to return a valid snapshot (passes existence check)
 		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 				return &datapb.SnapshotInfo{Name: name}, nil
 			}).Build()
 		defer mockGetSnapshot.UnPatch()
@@ -2673,7 +2674,7 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 
 		// Mock DescribeSnapshot to return error
 		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, name string) (*SnapshotData, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*SnapshotData, error) {
 				return nil, errors.New("snapshot not found: " + name)
 			}).Build()
 		defer mockDescribe.UnPatch()
@@ -2696,7 +2697,7 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 
 		// Mock DescribeSnapshot to return snapshot data
 		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, name string) (*SnapshotData, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*SnapshotData, error) {
 				return &SnapshotData{
 					SnapshotInfo: &datapb.SnapshotInfo{
 						Name:         name,
@@ -2731,7 +2732,7 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 
 		// Mock DescribeSnapshot to return snapshot data with collection info
 		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, name string) (*SnapshotData, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*SnapshotData, error) {
 				return &SnapshotData{
 					SnapshotInfo: &datapb.SnapshotInfo{
 						Name:         name,
@@ -2789,7 +2790,7 @@ func TestServer_ListSnapshots(t *testing.T) {
 
 		// Mock ListSnapshots to return empty list
 		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID int64) ([]string, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
 				return []string{}, nil
 			}).Build()
 		defer mockList.UnPatch()
@@ -2813,7 +2814,7 @@ func TestServer_ListSnapshots(t *testing.T) {
 
 		// Mock ListSnapshots to return list
 		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID int64) ([]string, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
 				return []string{"snapshot1", "snapshot2"}, nil
 			}).Build()
 		defer mockList.UnPatch()
@@ -2837,7 +2838,7 @@ func TestServer_ListSnapshots(t *testing.T) {
 
 		// Mock ListSnapshots to return error
 		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID int64) ([]string, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
 				return nil, errors.New("failed to list snapshots")
 			}).Build()
 		defer mockList.UnPatch()
@@ -2866,9 +2867,9 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 		server.stateCode.Store(commonpb.StateCode_Abnormal)
 
 		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
-			Name:           "test_snapshot",
-			DbName:         "default",
-			CollectionName: "new_collection",
+			Name:                 "test_snapshot",
+			TargetDbName:         "default",
+			TargetCollectionName: "new_collection",
 		})
 
 		assert.NoError(t, err)
@@ -2882,9 +2883,9 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
-			Name:           "",
-			DbName:         "default",
-			CollectionName: "new_collection",
+			Name:                 "",
+			TargetDbName:         "default",
+			TargetCollectionName: "new_collection",
 		})
 
 		assert.NoError(t, err)
@@ -2899,9 +2900,9 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
-			Name:           "test_snapshot",
-			DbName:         "default",
-			CollectionName: "",
+			Name:                 "test_snapshot",
+			TargetDbName:         "default",
+			TargetCollectionName: "",
 		})
 
 		assert.NoError(t, err)
@@ -2914,7 +2915,7 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 
 		// Mock ReadSnapshotData to return error
 		mockRead := mockey.Mock((*snapshotManager).ReadSnapshotData).To(
-			func(sm *snapshotManager, ctx context.Context, name string) (*SnapshotData, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*SnapshotData, error) {
 				return nil, errors.New("snapshot not found: " + name)
 			}).Build()
 		defer mockRead.UnPatch()
@@ -2925,9 +2926,9 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
-			Name:           "non_existent_snapshot",
-			DbName:         "default",
-			CollectionName: "new_collection",
+			Name:                 "non_existent_snapshot",
+			TargetDbName:         "default",
+			TargetCollectionName: "new_collection",
 		})
 
 		assert.NoError(t, err)
@@ -2958,7 +2959,7 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 
 		// Mock GetSnapshot to return existing snapshot (no error means it exists)
 		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 				return &datapb.SnapshotInfo{Name: name}, nil
 			}).Build()
 		defer mockGet.UnPatch()
@@ -3581,4 +3582,193 @@ func TestServer_CreateExternalCollection_NoOp(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.False(t, merr.Ok(resp.GetStatus()))
+}
+
+func TestServer_ListSnapshots_WithDbID(t *testing.T) {
+	t.Run("dbID_flows_through_when_collectionID_is_zero", func(t *testing.T) {
+		ctx := context.Background()
+
+		var capturedCollectionID, capturedPartitionID, capturedDbID int64
+		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
+				capturedCollectionID = collectionID
+				capturedPartitionID = partitionID
+				capturedDbID = dbID
+				return []string{"snap1"}, nil
+			}).Build()
+		defer mockList.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.ListSnapshots(ctx, &datapb.ListSnapshotsRequest{
+			CollectionId: 0,
+			DbId:         999,
+		})
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Len(t, resp.GetSnapshots(), 1)
+		assert.Equal(t, int64(0), capturedCollectionID)
+		assert.Equal(t, int64(0), capturedPartitionID)
+		assert.Equal(t, int64(999), capturedDbID)
+	})
+
+	t.Run("dbID_flows_through_with_collectionID", func(t *testing.T) {
+		ctx := context.Background()
+
+		var capturedCollectionID, capturedDbID int64
+		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
+				capturedCollectionID = collectionID
+				capturedDbID = dbID
+				return []string{"snap1", "snap2"}, nil
+			}).Build()
+		defer mockList.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.ListSnapshots(ctx, &datapb.ListSnapshotsRequest{
+			CollectionId: 100,
+			DbId:         888,
+		})
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Len(t, resp.GetSnapshots(), 2)
+		assert.Equal(t, int64(100), capturedCollectionID)
+		assert.Equal(t, int64(888), capturedDbID)
+	})
+}
+
+func TestServer_ListRestoreSnapshotJobs_WithDbID(t *testing.T) {
+	t.Run("dbID_flows_through", func(t *testing.T) {
+		ctx := context.Background()
+
+		var capturedCollectionID, capturedDbID int64
+		mockList := mockey.Mock((*snapshotManager).ListRestoreJobs).To(
+			func(sm *snapshotManager, ctx context.Context, collectionIDFilter, dbID int64) ([]*datapb.RestoreSnapshotInfo, error) {
+				capturedCollectionID = collectionIDFilter
+				capturedDbID = dbID
+				return []*datapb.RestoreSnapshotInfo{
+					{JobId: 1},
+				}, nil
+			}).Build()
+		defer mockList.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{
+			CollectionId: 100,
+			DbId:         777,
+		})
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Len(t, resp.GetJobs(), 1)
+		assert.Equal(t, int64(100), capturedCollectionID)
+		assert.Equal(t, int64(777), capturedDbID)
+	})
+
+	t.Run("dbID_zero_no_filter", func(t *testing.T) {
+		ctx := context.Background()
+
+		var capturedDbID int64
+		mockList := mockey.Mock((*snapshotManager).ListRestoreJobs).To(
+			func(sm *snapshotManager, ctx context.Context, collectionIDFilter, dbID int64) ([]*datapb.RestoreSnapshotInfo, error) {
+				capturedDbID = dbID
+				return []*datapb.RestoreSnapshotInfo{}, nil
+			}).Build()
+		defer mockList.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{
+			CollectionId: 0,
+			DbId:         0,
+		})
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Empty(t, resp.GetJobs())
+		assert.Equal(t, int64(0), capturedDbID)
+	})
+}
+
+func TestServer_RestoreSnapshot_SourceCollectionID(t *testing.T) {
+	t.Run("source_collection_id_passed_correctly", func(t *testing.T) {
+		ctx := context.Background()
+
+		var capturedSourceCollectionID int64
+		var capturedSnapshotName, capturedTargetCollName, capturedTargetDbName string
+		mockRestore := mockey.Mock((*snapshotManager).RestoreSnapshot).To(
+			func(sm *snapshotManager, ctx context.Context, sourceCollectionID int64, snapshotName, targetCollectionName, targetDbName string, startBroadcaster StartBroadcasterFunc, rollback RollbackFunc, validateResources ValidateResourcesFunc) (int64, error) {
+				capturedSourceCollectionID = sourceCollectionID
+				capturedSnapshotName = snapshotName
+				capturedTargetCollName = targetCollectionName
+				capturedTargetDbName = targetDbName
+				return 42, nil
+			}).Build()
+		defer mockRestore.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
+			Name:                 "my_snapshot",
+			SourceCollectionId:   12345,
+			TargetDbName:         "test_db",
+			TargetCollectionName: "restored_collection",
+		})
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int64(42), resp.GetJobId())
+		assert.Equal(t, int64(12345), capturedSourceCollectionID)
+		assert.Equal(t, "my_snapshot", capturedSnapshotName)
+		assert.Equal(t, "restored_collection", capturedTargetCollName)
+		assert.Equal(t, "test_db", capturedTargetDbName)
+	})
+
+	t.Run("source_collection_id_zero", func(t *testing.T) {
+		ctx := context.Background()
+
+		var capturedSourceCollectionID int64
+		mockRestore := mockey.Mock((*snapshotManager).RestoreSnapshot).To(
+			func(sm *snapshotManager, ctx context.Context, sourceCollectionID int64, snapshotName, targetCollectionName, targetDbName string, startBroadcaster StartBroadcasterFunc, rollback RollbackFunc, validateResources ValidateResourcesFunc) (int64, error) {
+				capturedSourceCollectionID = sourceCollectionID
+				return 99, nil
+			}).Build()
+		defer mockRestore.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
+			Name:                 "my_snapshot",
+			SourceCollectionId:   0,
+			TargetDbName:         "default",
+			TargetCollectionName: "restored_collection",
+		})
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int64(99), resp.GetJobId())
+		assert.Equal(t, int64(0), capturedSourceCollectionID)
+	})
 }

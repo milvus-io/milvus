@@ -49,16 +49,37 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 // dropSnapshotV2AckCallback handles the callback for DropSnapshot DDL message.
 func (s *DDLCallbacks) dropSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultDropSnapshotMessageV2) error {
 	header := result.Message.Header()
-	log := log.Ctx(ctx).With(zap.String("snapshotName", header.Name))
+	log := log.Ctx(ctx).With(
+		zap.String("snapshotName", header.Name),
+		zap.Int64("collectionID", header.CollectionId),
+	)
 	log.Info("dropSnapshotV2AckCallback received")
 
 	// Delete snapshot using SnapshotManager interface (idempotent)
-	if err := s.snapshotManager.DropSnapshot(ctx, header.Name); err != nil {
+	if err := s.snapshotManager.DropSnapshot(ctx, header.CollectionId, header.Name); err != nil {
 		log.Error("failed to drop snapshot via DDL callback", zap.Error(err))
 		return err
 	}
 
 	log.Info("snapshot dropped successfully via DDL callback")
+	return nil
+}
+
+// dropSnapshotsByCollectionV2AckCallback handles the callback for DropSnapshotsByCollection DDL message.
+// Called during drop collection cascade to clean up all snapshots of the collection.
+func (s *DDLCallbacks) dropSnapshotsByCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultDropSnapshotsByCollectionMessageV2) error {
+	msg := result.Message
+	collectionID := msg.Header().GetCollectionId()
+
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+	log.Info("dropSnapshotsByCollectionV2AckCallback received")
+
+	if err := s.snapshotManager.DropSnapshotsByCollection(ctx, collectionID); err != nil {
+		log.Error("failed to drop snapshots by collection in callback", zap.Error(err))
+		return err
+	}
+
+	log.Info("dropSnapshotsByCollectionV2AckCallback completed")
 	return nil
 }
 
@@ -77,7 +98,7 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 
 	// Restore data (create copy segment job)
 	// Use the pre-allocated jobID from the WAL message for idempotency
-	jobID, err := s.snapshotManager.RestoreData(ctx, header.SnapshotName, header.CollectionId, header.JobId)
+	jobID, err := s.snapshotManager.RestoreData(ctx, header.SourceCollectionId, header.SnapshotName, header.CollectionId, header.JobId)
 	if err != nil {
 		log.Error("failed to restore data", zap.Error(err))
 		return err

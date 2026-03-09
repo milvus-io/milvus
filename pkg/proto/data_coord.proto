@@ -116,7 +116,6 @@ service DataCoord {
   rpc RestoreSnapshot(RestoreSnapshotRequest) returns(RestoreSnapshotResponse){}
   rpc GetRestoreSnapshotState(GetRestoreSnapshotStateRequest) returns(GetRestoreSnapshotStateResponse){}
   rpc ListRestoreSnapshotJobs(ListRestoreSnapshotJobsRequest) returns(ListRestoreSnapshotJobsResponse){}
-
   // batch update manifest
   rpc BatchUpdateManifest(BatchUpdateManifestRequest) returns(common.Status){}
 
@@ -1224,6 +1223,9 @@ message CopySegmentJob {
 
   // Optional snapshot name for restore snapshot use case
   string snapshot_name = 16;
+
+  // Source collection ID for per-collection snapshot name lookup
+  int64 source_collection_id = 17;
 }
 
 message ImportJob {
@@ -1487,12 +1489,14 @@ message CreateSnapshotRequest {
 message DropSnapshotRequest {
   common.MsgBase base = 1;
   string name = 2; // snapshot name
+  int64 collection_id = 3; // collection id for per-collection name uniqueness
 }
 
 message ListSnapshotsRequest {
   common.MsgBase base = 1;
   int64 collection_id = 2; // collection id, if collection_id is 0, it will list all snapshots.
   int64 partition_id = 3; // partition id, if partition_id is 0, it will list all snapshots.
+  int64 db_id = 4; // filter by database, 0 means no filter
 }
 
 // return all snapshots for the given collection or partition
@@ -1580,13 +1584,14 @@ message RestoreSnapshotInfo {
   string reason = 6; // error reason if failed
   uint64 time_cost = 7; // time cost in milliseconds
   uint64 start_time = 8; // start time in milliseconds since Unix epoch
+  int64 db_id = 9; // database id of the target collection
 }
 
 message DescribeSnapshotRequest {
   common.MsgBase base = 1;
   string name = 2; // snapshot name
-
   bool include_collection_info = 3; // if include_collection_info is true, it will return collection info.
+  int64 collection_id = 4; // collection id for per-collection name uniqueness
 }
 
 // return snapshot basic info and snapshot data info
@@ -1603,11 +1608,9 @@ message DescribeSnapshotResponse {
 message RestoreSnapshotRequest {
   common.MsgBase base = 1;
   string name = 2; // snapshot name
-  reserved 3; // previously: collection_id (removed, DataCoord creates collection)
-  reserved 4; // previously: create_indexes (handled by RootCoord DDL callback)
-  reserved 5; // previously: job_id (DataCoord allocates internally)
-  string db_name = 6; // target database name
-  string collection_name = 7; // target collection name (must not exist)
+  string target_db_name = 3; // target database name (where to restore to)
+  string target_collection_name = 4; // target collection name (must not exist)
+  int64 source_collection_id = 5; // source collection id for per-collection snapshot name lookup
 }
 
 message RestoreSnapshotResponse {
@@ -1629,7 +1632,7 @@ message GetRestoreSnapshotStateResponse {
 message ListRestoreSnapshotJobsRequest {
   common.MsgBase base = 1;
   int64 collection_id = 2; // filter by collection id, empty for all
-
+  int64 db_id = 3; // filter by database, 0 means no filter
 }
 
 message ListRestoreSnapshotJobsResponse {

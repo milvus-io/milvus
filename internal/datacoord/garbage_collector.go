@@ -1642,60 +1642,58 @@ func (gc *garbageCollector) recyclePendingSnapshots(ctx context.Context, signal 
 		return
 	}
 
-	if len(pendingSnapshots) == 0 {
-		return
+	if len(pendingSnapshots) > 0 {
+		log.Info("found pending snapshots to cleanup", zap.Int("count", len(pendingSnapshots)))
+		cleanedCount := 0
+
+		for _, snapshot := range pendingSnapshots {
+			snapshotLog := log.With(
+				zap.String("snapshotName", snapshot.GetName()),
+				zap.Int64("snapshotID", snapshot.GetId()),
+				zap.Int64("collectionID", snapshot.GetCollectionId()),
+			)
+
+			gc.ackSignal(signal)
+			// Compute paths from collection_id + snapshot_id
+			manifestDir, metadataPath := GetSnapshotPaths(
+				gc.option.cli.RootPath(),
+				snapshot.GetCollectionId(),
+				snapshot.GetId(),
+			)
+
+			snapshotLog.Info("cleaning up pending snapshot",
+				zap.String("manifestDir", manifestDir),
+				zap.String("metadataPath", metadataPath))
+
+			// Delete manifest directory using RemoveWithPrefix (no list needed)
+			// This removes all segment manifest files: manifests/{snapshot_id}/*.avro
+			if err := gc.option.cli.RemoveWithPrefix(ctx, manifestDir); err != nil {
+				snapshotLog.Warn("failed to remove pending snapshot manifest directory", zap.Error(err))
+				// Keep catalog record for retry in next GC cycle.
+				continue
+			}
+
+			// Delete metadata file
+			if err := gc.option.cli.Remove(ctx, metadataPath); err != nil {
+				snapshotLog.Warn("failed to remove pending snapshot metadata file", zap.Error(err))
+				// Keep catalog record for retry in next GC cycle.
+				continue
+			}
+
+			// Delete etcd record
+			if err := snapshotMeta.CleanupPendingSnapshot(ctx, snapshot); err != nil {
+				snapshotLog.Warn("failed to drop pending snapshot from catalog", zap.Error(err))
+				continue
+			}
+
+			snapshotLog.Info("successfully cleaned up pending snapshot")
+			cleanedCount++
+		}
+
+		log.Info("pending snapshots cleanup completed",
+			zap.Int("totalPending", len(pendingSnapshots)),
+			zap.Int("cleanedCount", cleanedCount))
 	}
-
-	log.Info("found pending snapshots to cleanup", zap.Int("count", len(pendingSnapshots)))
-	cleanedCount := 0
-
-	for _, snapshot := range pendingSnapshots {
-		snapshotLog := log.With(
-			zap.String("snapshotName", snapshot.GetName()),
-			zap.Int64("snapshotID", snapshot.GetId()),
-			zap.Int64("collectionID", snapshot.GetCollectionId()),
-		)
-
-		gc.ackSignal(signal)
-		// Compute paths from collection_id + snapshot_id
-		manifestDir, metadataPath := GetSnapshotPaths(
-			gc.option.cli.RootPath(),
-			snapshot.GetCollectionId(),
-			snapshot.GetId(),
-		)
-
-		snapshotLog.Info("cleaning up pending snapshot",
-			zap.String("manifestDir", manifestDir),
-			zap.String("metadataPath", metadataPath))
-
-		// Delete manifest directory using RemoveWithPrefix (no list needed)
-		// This removes all segment manifest files: manifests/{snapshot_id}/*.avro
-		if err := gc.option.cli.RemoveWithPrefix(ctx, manifestDir); err != nil {
-			snapshotLog.Warn("failed to remove pending snapshot manifest directory", zap.Error(err))
-			// Keep catalog record for retry in next GC cycle.
-			continue
-		}
-
-		// Delete metadata file
-		if err := gc.option.cli.Remove(ctx, metadataPath); err != nil {
-			snapshotLog.Warn("failed to remove pending snapshot metadata file", zap.Error(err))
-			// Keep catalog record for retry in next GC cycle.
-			continue
-		}
-
-		// Delete etcd record
-		if err := snapshotMeta.CleanupPendingSnapshot(ctx, snapshot); err != nil {
-			snapshotLog.Warn("failed to drop pending snapshot from catalog", zap.Error(err))
-			continue
-		}
-
-		snapshotLog.Info("successfully cleaned up pending snapshot")
-		cleanedCount++
-	}
-
-	log.Info("pending snapshots cleanup completed",
-		zap.Int("totalPending", len(pendingSnapshots)),
-		zap.Int("cleanedCount", cleanedCount))
 
 	// Clean up DELETING snapshots (two-phase delete cleanup)
 	// These are snapshots that were marked for deletion but S3 cleanup failed
@@ -1751,6 +1749,65 @@ func (gc *garbageCollector) recyclePendingSnapshots(ctx context.Context, signal 
 		log.Info("deleting snapshots cleanup completed",
 			zap.Int("totalDeleting", len(deletingSnapshots)),
 			zap.Int("cleanedCount", deletingCleanedCount))
+	}
+
+	// GC fallback: Clean up orphan snapshots whose collection was dropped.
+	// This handles cases where the cascade callback (dropCollectionV1AckCallback)
+	// failed to clean up snapshots for a dropped collection.
+	orphanCollections := typeutil.NewSet[int64]()
+	snapshotMeta.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
+		// Include all non-Deleting states for orphan detection.
+		// Deleting snapshots are already handled by the cleanup above.
+		if info.GetState() != datapb.SnapshotState_SnapshotStateDeleting {
+			orphanCollections.Insert(info.GetCollectionId())
+		}
+		return true
+	})
+
+	if orphanCollections.Len() > 0 {
+		orphanCleanedCount := 0
+		for _, collectionID := range orphanCollections.Collect() {
+			gc.ackSignal(signal)
+
+			if ctx.Err() != nil {
+				log.Warn("context canceled, stop orphan snapshot cleanup")
+				break
+			}
+
+			timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
+			cancel()
+			if err != nil {
+				log.Warn("failed to check collection existence for orphan snapshot cleanup",
+					zap.Int64("collectionID", collectionID),
+					zap.Error(err))
+				continue
+			}
+			if has {
+				// Collection still exists, not an orphan
+				continue
+			}
+
+			log.Info("found orphan snapshots for dropped collection, cleaning up",
+				zap.Int64("collectionID", collectionID))
+
+			if err := snapshotMeta.DropSnapshotsByCollection(ctx, collectionID); err != nil {
+				log.Warn("failed to drop orphan snapshots for collection",
+					zap.Int64("collectionID", collectionID),
+					zap.Error(err))
+				continue
+			}
+
+			log.Info("successfully cleaned up orphan snapshots for dropped collection",
+				zap.Int64("collectionID", collectionID))
+			orphanCleanedCount++
+		}
+
+		if orphanCleanedCount > 0 {
+			log.Info("orphan snapshots cleanup completed",
+				zap.Int("totalOrphanCollections", orphanCollections.Len()),
+				zap.Int("cleanedCount", orphanCleanedCount))
+		}
 	}
 
 	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
