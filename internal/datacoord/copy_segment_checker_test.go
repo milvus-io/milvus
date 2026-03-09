@@ -81,7 +81,7 @@ func (s *CopySegmentCheckerSuite) SetupTest() {
 		Schema: newTestSchema(),
 	})
 
-	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil)
+	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil, nil)
 	s.NoError(err)
 
 	s.checker = NewCopySegmentChecker(

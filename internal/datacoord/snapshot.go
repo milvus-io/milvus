@@ -123,7 +123,7 @@ func getManifestSchemaByVersion(version int) (avro.Schema, error) {
 //   - Collection: Full collection schema and properties
 //   - Segments: Detailed segment information including binlog paths
 //   - Indexes: Index definitions for the collection
-//   - SegmentIDs/IndexIDs: Pre-computed ID lists for fast reload without reading Avro files
+//   - SegmentIDs/BuildIDs: Pre-computed ID lists for fast reload without reading Avro files
 type SnapshotData struct {
 	// SnapshotInfo contains core snapshot metadata from protobuf definition.
 	SnapshotInfo *datapb.SnapshotInfo
@@ -138,9 +138,6 @@ type SnapshotData struct {
 	// Populated from metadata.json when includeSegments=false to avoid reading heavy Avro files.
 	// This enables quick DataCoord startup by deferring full segment loading.
 	SegmentIDs []int64
-	// IndexIDs is a pre-computed list of index IDs for fast reload.
-	// Similar purpose as SegmentIDs for optimizing startup performance.
-	IndexIDs []int64
 	// BuildIDs is a pre-computed list of index build IDs for precise GC protection.
 	// Each buildID uniquely identifies an index build task, enabling GC to check
 	// if specific index files are referenced by a snapshot without path parsing.
@@ -580,7 +577,6 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath str
 		ManifestList:          manifestPaths,
 		Storagev2ManifestList: storagev2Manifests,
 		SegmentIds:            snapshot.SegmentIDs,
-		IndexIds:              snapshot.IndexIDs,
 		BuildIds:              snapshot.BuildIDs,
 	}
 
@@ -777,7 +773,6 @@ func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath stri
 		Indexes:      metadata.GetIndexes(),
 		// Pre-computed ID lists available even without full segment loading
 		SegmentIDs: metadata.GetSegmentIds(),
-		IndexIDs:   metadata.GetIndexIds(),
 		BuildIDs:   metadata.GetBuildIds(),
 	}
 

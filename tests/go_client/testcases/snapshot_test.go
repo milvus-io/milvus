@@ -1234,3 +1234,148 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 	err = mc.DropSnapshot(ctx, dropSnapshotOpt)
 	common.CheckErr(t, err, true)
 }
+
+// TestSnapshotRestoreDropAndRestoreAgain tests:
+// 1. Create collection A, insert data, create snapshot A1
+// 2. Restore A1 to collection B, verify both A and B can load and query/search
+// 3. Drop collection B, restore A1 again to collection C
+// 4. Verify both A and C can load and query/search
+func TestSnapshotRestoreDropAndRestoreAgain(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	insertBatchSize := 3000
+
+	// Step 1: Create collection A and insert data
+	collNameA := common.GenRandomString(snapshotPrefix, 6)
+	schema := client.SimpleCreateCollectionOptions(collNameA, common.DefaultDim)
+	schema.WithAutoID(false)
+	err := mc.CreateCollection(ctx, schema)
+	common.CheckErr(t, err, true)
+
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collNameA))
+	common.CheckErr(t, err, true)
+
+	insertOpt := hp.TNewDataOption().TWithNb(insertBatchSize)
+	_, insertRes := hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), insertOpt)
+	require.Equal(t, insertBatchSize, insertRes.IDs.Len())
+
+	_, err = mc.Flush(ctx, client.NewFlushOption(collNameA))
+	common.CheckErr(t, err, true)
+	time.Sleep(10 * time.Second)
+
+	// Verify data count in A
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(collNameA).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	count, _ := queryRes.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(insertBatchSize), count)
+	log.Info("Collection A data inserted", zap.String("collection", collNameA), zap.Int64("count", count))
+
+	// Step 2: Create snapshot A1
+	snapshotName := fmt.Sprintf("snapshot_%s", common.GenRandomString(snapshotPrefix, 6))
+	createOpt := client.NewCreateSnapshotOption(snapshotName, collNameA).
+		WithDescription("Snapshot for drop-and-restore-again test")
+	err = mc.CreateSnapshot(ctx, createOpt)
+	common.CheckErr(t, err, true)
+	log.Info("Snapshot created", zap.String("snapshot", snapshotName))
+
+	// Step 3: Restore A1 to collection B
+	collNameB := fmt.Sprintf("restored_B_%s", collNameA)
+	restoreOptB := client.NewRestoreSnapshotOption(snapshotName, collNameB)
+	jobIDB, err := mc.RestoreSnapshot(ctx, restoreOptB)
+	common.CheckErr(t, err, true)
+
+	_, err = waitForRestoreComplete(ctx, mc, jobIDB, 2*time.Minute)
+	common.CheckErr(t, err, true)
+	log.Info("Restored snapshot to collection B", zap.String("collection", collNameB))
+
+	// Step 4: Verify both A and B can load, query, and search
+	// Load B
+	loadTaskB, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collNameB).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTaskB.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	// Query count on A
+	queryResA, err := mc.Query(ctx, client.NewQueryOption(collNameA).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	countA, _ := queryResA.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(insertBatchSize), countA)
+
+	// Query count on B
+	queryResB, err := mc.Query(ctx, client.NewQueryOption(collNameB).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	countB, _ := queryResB.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(insertBatchSize), countB)
+
+	// Search on A
+	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+	searchResA, err := mc.Search(ctx, client.NewSearchOption(collNameA, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchResA, common.DefaultNq, common.DefaultLimit)
+
+	// Search on B
+	searchResB, err := mc.Search(ctx, client.NewSearchOption(collNameB, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchResB, common.DefaultNq, common.DefaultLimit)
+	log.Info("Both A and B verified: query and search OK")
+
+	// Step 5: Drop collection B
+	err = mc.DropCollection(ctx, client.NewDropCollectionOption(collNameB))
+	common.CheckErr(t, err, true)
+	time.Sleep(5 * time.Second)
+
+	hasBAfterDrop, err := mc.HasCollection(ctx, client.NewHasCollectionOption(collNameB))
+	common.CheckErr(t, err, true)
+	require.False(t, hasBAfterDrop)
+	log.Info("Collection B dropped", zap.String("collection", collNameB))
+
+	// Step 6: Restore A1 again to collection C
+	collNameC := fmt.Sprintf("restored_C_%s", collNameA)
+	restoreOptC := client.NewRestoreSnapshotOption(snapshotName, collNameC)
+	jobIDC, err := mc.RestoreSnapshot(ctx, restoreOptC)
+	common.CheckErr(t, err, true)
+
+	_, err = waitForRestoreComplete(ctx, mc, jobIDC, 2*time.Minute)
+	common.CheckErr(t, err, true)
+	log.Info("Restored snapshot to collection C", zap.String("collection", collNameC))
+
+	// Step 7: Verify both A and C can load, query, and search
+	// Load C
+	loadTaskC, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collNameC).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTaskC.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	// Query count on A
+	queryResA2, err := mc.Query(ctx, client.NewQueryOption(collNameA).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	countA2, _ := queryResA2.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(insertBatchSize), countA2)
+
+	// Query count on C
+	queryResC, err := mc.Query(ctx, client.NewQueryOption(collNameC).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	countC, _ := queryResC.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(insertBatchSize), countC)
+
+	// Search on A
+	searchResA2, err := mc.Search(ctx, client.NewSearchOption(collNameA, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchResA2, common.DefaultNq, common.DefaultLimit)
+
+	// Search on C
+	searchResC, err := mc.Search(ctx, client.NewSearchOption(collNameC, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchResC, common.DefaultNq, common.DefaultLimit)
+	log.Info("Both A and C verified: query and search OK")
+
+	// Clean up
+	dropSnapshotOpt2 := client.NewDropSnapshotOption(snapshotName)
+	err = mc.DropSnapshot(ctx, dropSnapshotOpt2)
+	common.CheckErr(t, err, true)
+	log.Info("Test completed successfully",
+		zap.String("collectionA", collNameA),
+		zap.String("snapshot", snapshotName),
+		zap.String("collectionC", collNameC))
+}

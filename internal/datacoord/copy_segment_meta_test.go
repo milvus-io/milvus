@@ -74,7 +74,7 @@ func (s *CopySegmentMetaSuite) SetupTest() {
 		Schema: newTestSchema(),
 	})
 
-	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil)
+	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil, nil)
 	s.NoError(err)
 }
 
@@ -103,7 +103,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_Success() {
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	s.NoError(err)
 
-	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil)
+	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
 	s.NoError(err)
 	s.NotNil(copyMeta)
 }
@@ -112,7 +112,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_ListJobsError() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, errors.New("list jobs error"))
 
-	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, nil, nil)
+	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, nil, nil, nil)
 	s.Error(err)
 	s.Nil(copyMeta)
 	s.Contains(err.Error(), "list jobs error")
@@ -123,7 +123,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_ListTasksError() {
 	catalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, errors.New("list tasks error"))
 
-	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, nil, nil)
+	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, nil, nil, nil)
 	s.Error(err)
 	s.Nil(copyMeta)
 	s.Contains(err.Error(), "list tasks error")
@@ -164,7 +164,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreJobs() {
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	s.NoError(err)
 
-	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil)
+	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
 	s.NoError(err)
 
 	// Verify jobs are restored
@@ -214,7 +214,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreTasks() {
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	s.NoError(err)
 
-	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil)
+	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
 	s.NoError(err)
 
 	// Verify tasks are restored
@@ -1019,7 +1019,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_CrashRecoveryRefFiltering(
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	s.NoError(err)
 
-	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil)
+	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
 	s.NoError(err)
 
 	// Only active (Pending+Executing) jobs should contribute to ref count
