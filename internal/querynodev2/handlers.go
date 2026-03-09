@@ -280,8 +280,7 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
 	}()
 
-	reducer := segments.CreateInternalReducer(req, collection.Schema())
-	resp, err := reducer.Reduce(ctx, results)
+	resp, err := segments.RunDelegatorQueryPipeline(ctx, req, collection.Schema(), results)
 	if err != nil {
 		return nil, err
 	}

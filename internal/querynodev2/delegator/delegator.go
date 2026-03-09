@@ -325,6 +325,7 @@ func (sd *shardDelegator) shallowCopyRetrieveRequest(req *internalpb.RetrieveReq
 		GroupByFieldIds:              req.GroupByFieldIds, // Shallow copy: Same underlying slice
 		Aggregates:                   req.Aggregates,      // Shallow copy: Same underlying slice of pointers
 		EntityTtlPhysicalTime:        req.EntityTtlPhysicalTime,
+		OrderByFields:                req.OrderByFields, // Shallow copy: Same underlying slice of pointers
 	}
 }
 
