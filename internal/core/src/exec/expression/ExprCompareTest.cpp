@@ -1079,7 +1079,7 @@ TEST_P(ExprTest, TestReorder) {
     schema->AddDebugField("int32", DataType::INT32);
     schema->AddDebugField("int321", DataType::INT32);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    schema->AddDebugField("int641", DataType::INT64);
+    auto int64_1_fid = schema->AddDebugField("int641", DataType::INT64);
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("float1", DataType::FLOAT);
     schema->AddDebugField("double", DataType::DOUBLE);

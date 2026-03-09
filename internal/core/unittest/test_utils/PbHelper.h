@@ -21,7 +21,7 @@ serialize(const Message* msg) {
     auto l = msg->ByteSizeLong();
     std::vector<uint8_t> ret(l);
     auto ok = msg->SerializeToArray(ret.data(), l);
-    ASSERT_TRUE(ok);
+    EXPECT_TRUE(ok);
     return ret;
 }
 

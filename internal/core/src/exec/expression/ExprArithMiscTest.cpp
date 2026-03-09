@@ -1762,7 +1762,7 @@ TEST_P(ExprTest, TestRefactorExprs) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    schema->AddDebugField("int81", DataType::INT8);
+    auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
     schema->AddDebugField("int161", DataType::INT16);
     auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
