@@ -157,6 +157,16 @@ func (r *FFIPackedReader) ReadNext() (arrow.Record, error) {
 		return nil, fmt.Errorf("failed to read next record: %w", err)
 	}
 
+	// Validate schema consistency on first record to catch type mismatches early
+	// before they cause SIGSEGV in downstream processing
+	if !r.schemaValidated {
+		if err := ValidateSchemaConsistency(r.schema, rec.Schema()); err != nil {
+			rec.Release()
+			return nil, err
+		}
+		r.schemaValidated = true
+	}
+
 	return rec, nil
 }
 
