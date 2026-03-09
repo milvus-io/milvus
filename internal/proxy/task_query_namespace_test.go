@@ -11,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -35,7 +34,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 					{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 					{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
 				},
-				Properties: []*commonpb.KeyValuePair{{Key: common.NamespaceEnabledKey, Value: "true"}},
+				EnableNamespace: true,
 			}
 			return newSchemaInfo(schema), nil
 		}).Build()
@@ -66,7 +65,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
 			},
-			Properties: []*commonpb.KeyValuePair{{Key: common.NamespaceEnabledKey, Value: "true"}},
+			EnableNamespace: true,
 		})
 		// Skip partition name translation to avoid meta fetch
 		task.reQuery = true
