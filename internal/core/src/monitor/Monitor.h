@@ -99,9 +99,13 @@ DECLARE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_all);
 
 // json stats metrics
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_json_stats_latency);
-DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_term_query);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_shredding);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_shared);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_load);
+
+// json filter performance metrics
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_json_filter_latency);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_json_filter_latency_bruteforce);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_json_filter_latency_json_stats);
 
 }  // namespace milvus::monitor
