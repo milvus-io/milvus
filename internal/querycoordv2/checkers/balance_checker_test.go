@@ -423,7 +423,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_EmptyReplicas(t *testin
 	config := balanceConfig{}
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 
-	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, []int64{}, config, false)
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, []int64{}, config, false, false)
 
 	assert.Empty(t, segmentTasks)
 	assert.Empty(t, channelTasks)
@@ -493,7 +493,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_Success(t *testing.T) {
 	defer mockPrintPlans.UnPatch()
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
-	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false)
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false, false)
 
 	assert.Len(t, segmentTasks, 1)
 	assert.Len(t, channelTasks, 1)
@@ -512,7 +512,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NilReplica(t *testing.T
 	defer mockReplicaGet.UnPatch()
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
-	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false)
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false, false)
 
 	assert.Empty(t, segmentTasks)
 	assert.Empty(t, channelTasks)
@@ -573,7 +573,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_StoppingBalanceHighPrio
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	// Call with isStoppingBalance=true
-	checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, true)
+	checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, true, false)
 
 	// Verify LoadPriority is set to HIGH for stopping balance
 	assert.Len(t, capturedPlans, 1)
@@ -632,7 +632,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NormalBalanceLowPriorit
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	// Call with isStoppingBalance=false
-	checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false)
+	checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false, false)
 
 	// Verify LoadPriority is set to LOW for normal balance
 	assert.Len(t, capturedPlans, 1)
