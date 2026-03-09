@@ -465,8 +465,11 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		}
 	})
 
-	if collectionName == "" {
-		collectionName = collection.Schema.GetName()
+	realName := collection.Schema.GetName()
+	originalName := collectionName
+	isAlias := realName != "" && realName != collectionName
+	if collectionName == "" || isAlias {
+		collectionName = realName
 	}
 	if database == "" {
 		log.Ctx(ctx).Warn("database is empty, use default database name", zap.String("collectionName", collectionName), zap.Stack("stack"))
@@ -509,7 +512,17 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		m.collInfo[database] = make(map[string]*collectionInfo)
 	}
 
+
 	replicateID, _ := common.GetReplicateID(collection.Properties)
+
+	if isAlias {
+		// Caller passed an alias; record the alias→realName mapping so
+		// subsequent ResolveCollectionAlias calls hit Level 2 cache.
+		m.setAliasLocked(database, originalName, &aliasEntry{collectionName: realName, cachedAt: time.Now()})
+		// Remove any stale collInfo entry that was previously cached under the alias key.
+		delete(m.collInfo[database], originalName)
+	}
+
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:                collection.CollectionID,
 		schema:                schemaInfo,
@@ -710,8 +723,13 @@ func (m *MetaCache) RemoveAlias(ctx context.Context, database, alias string) {
 }
 
 func (m *MetaCache) ResolveCollectionAlias(ctx context.Context, database, nameOrAlias string) (string, error) {
-	// Level 1: Found in collection cache, return as-is
-	if _, ok := m.getCollection(database, nameOrAlias, 0); ok {
+	// Level 1: Found in collection cache — but the key might be an alias because
+	// DescribeCollection accepts aliases and update() caches under the caller's name.
+	// Compare with the schema's real collection name to detect this.
+	if collInfo, ok := m.getCollection(database, nameOrAlias, 0); ok {
+		if realName := collInfo.schema.CollectionSchema.GetName(); realName != "" && realName != nameOrAlias {
+			return realName, nil
+		}
 		return nameOrAlias, nil
 	}
 
@@ -984,7 +1002,17 @@ func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID Uniqu
 				if version == 0 || curVersion <= version {
 					delete(m.collInfo[database], k)
 					collNames = append(collNames, k)
+<<<<<<< HEAD
 					m.removeAliasesForCollectionLocked(database, k)
+=======
+					m.sfGlobal.Forget(buildSfKeyByName(database, k))
+					m.sfGlobal.Forget(buildSfKeyById(database, v.collID))
+					realName := k
+					if v.schema != nil && v.schema.CollectionSchema.GetName() != "" {
+						realName = v.schema.CollectionSchema.GetName()
+					}
+					m.removeAliasesForCollectionLocked(database, realName)
+>>>>>>> c19d6728c6 (fix: fix RBAC grant cleanup on drop and migration on rename)
 				}
 			}
 		}
