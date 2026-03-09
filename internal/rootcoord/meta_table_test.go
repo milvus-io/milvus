@@ -1194,6 +1194,9 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 			mock.Anything, // model.Collection
 			mock.AnythingOfType("uint64"),
 		).Return(nil)
+		catalog.On("DeleteGrantByCollectionName",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
 			names:   newNameDb(),
@@ -1233,7 +1236,6 @@ func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {
 			dbName2Meta: map[string]*model.Database{
 				"testdb": {ID: 1, Name: "testdb"},
 			},
-			fileResourceRefCnt: make(map[int64]int),
 		}
 		channel.ResetStaticPChannelStatsManager()
 		channel.RecoverPChannelStatsManager([]string{})
@@ -1264,7 +1266,6 @@ func TestMetaTable_DropCollection_GrantCleanup(t *testing.T) {
 			dbName2Meta: map[string]*model.Database{
 				"default": {ID: 1, Name: "default"},
 			},
-			fileResourceRefCnt: make(map[int64]int),
 		}
 		channel.ResetStaticPChannelStatsManager()
 		channel.RecoverPChannelStatsManager([]string{})

@@ -512,7 +512,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		m.collInfo[database] = make(map[string]*collectionInfo)
 	}
 
-
 	replicateID, _ := common.GetReplicateID(collection.Properties)
 
 	if isAlias {
