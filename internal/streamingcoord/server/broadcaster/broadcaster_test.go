@@ -49,8 +49,8 @@ func TestBroadcaster(t *testing.T) {
 	mb := mock_balancer.NewMockBalancer(t)
 	mb.EXPECT().ReplicateRole().Return(replicateutil.RolePrimary)
 	mb.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
-		time.Sleep(100 * time.Second)
-		return nil
+		<-ctx.Done()
+		return ctx.Err()
 	})
 	balance.Register(mb)
 	registry.RegisterDropCollectionV1AckCallback(func(ctx context.Context, msg message.BroadcastResultDropCollectionMessageV1) error {
@@ -420,8 +420,8 @@ func TestWithSecondaryClusterResourceKey(t *testing.T) {
 		mb := mock_balancer.NewMockBalancer(t)
 		mb.EXPECT().ReplicateRole().Return(replicateutil.RoleSecondary).Maybe()
 		mb.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
-			time.Sleep(100 * time.Second)
-			return nil
+			<-ctx.Done()
+			return ctx.Err()
 		}).Maybe()
 		balance.Register(mb)
 
@@ -456,8 +456,8 @@ func TestWithSecondaryClusterResourceKey(t *testing.T) {
 		mb := mock_balancer.NewMockBalancer(t)
 		mb.EXPECT().ReplicateRole().Return(replicateutil.RolePrimary).Maybe()
 		mb.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
-			time.Sleep(100 * time.Second)
-			return nil
+			<-ctx.Done()
+			return ctx.Err()
 		}).Maybe()
 		balance.Register(mb)
 
@@ -492,8 +492,8 @@ func TestWithSecondaryClusterResourceKey(t *testing.T) {
 		mb := mock_balancer.NewMockBalancer(t)
 		mb.EXPECT().ReplicateRole().Return(replicateutil.RoleSecondary).Maybe()
 		mb.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
-			time.Sleep(100 * time.Second)
-			return nil
+			<-ctx.Done()
+			return ctx.Err()
 		}).Maybe()
 		balance.Register(mb)
 
