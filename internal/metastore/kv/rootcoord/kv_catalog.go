@@ -1442,9 +1442,14 @@ func (kc *Catalog) DeleteGrantByCollectionName(ctx context.Context, tenant strin
 			continue
 		}
 		grantDB, grantObj := funcutil.SplitObjectName(grantInfos[2])
-		if grantObj == collectionName && grantDB == dbName {
-			// Use exact deletion for the grantee key
-			exactRemoveKeys = append(exactRemoveKeys, key)
+		if grantObj == collectionName && (grantDB == dbName || grantDB == util.AnyWord) {
+			// Reconstruct logical key (without etcd rootPath) for deletion.
+			// LoadWithPrefix returns full etcd keys (with rootPath prefix),
+			// but MultiSaveAndRemove prepends rootPath again, so we must
+			// use the logical key to avoid double-prefix.
+			logicalKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
+				fmt.Sprintf("%s/%s/%s", grantInfos[0], grantInfos[1], grantInfos[2]))
+			exactRemoveKeys = append(exactRemoveKeys, logicalKey)
 			// Use prefix deletion for the granteeID key (has sub-keys)
 			granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, values[i]+"/")
 			prefixRemoveKeys = append(prefixRemoveKeys, granteeIDKey)
@@ -1498,18 +1503,29 @@ func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string
 			continue
 		}
 		grantDB, grantObj := funcutil.SplitObjectName(grantInfos[2])
-		if grantObj == oldName && grantDB == oldDBName {
+		if grantObj == oldName && (grantDB == oldDBName || grantDB == util.AnyWord) {
 			oldIdStr := values[i]
 
 			// Build new key with new collection name and recompute idStr
 			// to avoid sharing permission space with a future collection
 			// that reuses the old name.
-			newObjName := funcutil.CombineObjectName(newDBName, newName)
+			// Preserve the original dbName (e.g., keep "*" for wildcard grants).
+			migrateDB := newDBName
+			if grantDB == util.AnyWord {
+				migrateDB = util.AnyWord
+			}
+			newObjName := funcutil.CombineObjectName(migrateDB, newName)
 			newKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
 				fmt.Sprintf("%s/%s/%s", grantInfos[0], grantInfos[1], newObjName))
 			newIdStr := crypto.MD5(newKey)
 			saves[newKey] = newIdStr
-			removeKeys = append(removeKeys, key)
+			// Reconstruct logical key (without etcd rootPath) for deletion.
+			// LoadWithPrefix returns full etcd keys (with rootPath prefix),
+			// but MultiSaveAndRemove prepends rootPath again, so we must
+			// use the logical key to avoid double-prefix.
+			oldKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
+				fmt.Sprintf("%s/%s/%s", grantInfos[0], grantInfos[1], grantInfos[2]))
+			removeKeys = append(removeKeys, oldKey)
 
 			// Migrate GranteeIDPrefix entries from oldIdStr to newIdStr
 			oldGranteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, oldIdStr+"/")
@@ -1520,11 +1536,21 @@ func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string
 				continue
 			}
 			for j, idKey := range idKeys {
-				privilegeName := idKey[len(oldGranteeIDKey):]
+				// Use AfterN to extract privilege name correctly regardless of
+				// etcd rootPath prefix in the returned key.
+				privilegeName := typeutil.After(idKey, oldGranteeIDKey)
+				if privilegeName == "" {
+					log.Ctx(ctx).Warn("failed to extract privilege name from grantee id key",
+						zap.String("idKey", idKey), zap.String("prefix", oldGranteeIDKey))
+					continue
+				}
 				newIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant,
 					fmt.Sprintf("%s/%s", newIdStr, privilegeName))
 				saves[newIDKey] = idValues[j]
-				removeKeys = append(removeKeys, idKey)
+				// Reconstruct logical key for deletion
+				oldIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant,
+					fmt.Sprintf("%s/%s", oldIdStr, privilegeName))
+				removeKeys = append(removeKeys, oldIDKey)
 			}
 		}
 	}

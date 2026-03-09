@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -130,7 +129,15 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 		}
 	}
 	// add the collection tombstone to the sweeper.
-	c.tombstoneSweeper.AddTombstone(newCollectionTombstone(c.meta, c.broker, header.CollectionId, c.proxyClientManager))
+	c.tombstoneSweeper.AddTombstone(newCollectionTombstone(c.meta, c.broker, header.CollectionId))
+	// DropCollection already deleted grants for the dropped collection.
+	// Refresh the RBAC policy cache on all proxies so they stop using stale grant entries.
+	if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+		OpType: int32(typeutil.CacheRefresh),
+	}); err != nil {
+		log.Ctx(ctx).Warn("failed to refresh RBAC policy cache after collection drop, skipping",
+			zap.Int64("collectionID", header.CollectionId), zap.Error(err))
+	}
 	// expire the collection meta cache on proxy.
 	return c.ExpireCaches(ctx, ce.NewBuilder().WithLegacyProxyCollectionMetaCache(
 		ce.OptLPCMDBName(body.DbName),
@@ -140,20 +147,18 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 }
 
 // newCollectionTombstone creates a new collection tombstone.
-func newCollectionTombstone(meta IMetaTable, broker Broker, collectionID int64, proxyClientManager proxyutil.ProxyClientManagerInterface) *collectionTombstone {
+func newCollectionTombstone(meta IMetaTable, broker Broker, collectionID int64) *collectionTombstone {
 	return &collectionTombstone{
-		meta:               meta,
-		broker:             broker,
-		collectionID:       collectionID,
-		proxyClientManager: proxyClientManager,
+		meta:         meta,
+		broker:       broker,
+		collectionID: collectionID,
 	}
 }
 
 type collectionTombstone struct {
-	meta               IMetaTable
-	broker             Broker
-	collectionID       int64
-	proxyClientManager proxyutil.ProxyClientManagerInterface
+	meta         IMetaTable
+	broker       Broker
+	collectionID int64
 }
 
 func (t *collectionTombstone) ID() string {
@@ -165,16 +170,5 @@ func (t *collectionTombstone) ConfirmCanBeRemoved(ctx context.Context) (bool, er
 }
 
 func (t *collectionTombstone) Remove(ctx context.Context) error {
-	if err := t.meta.RemoveCollection(ctx, t.collectionID, 0); err != nil {
-		return err
-	}
-	// RemoveCollection deletes grants associated with the dropped collection.
-	// Refresh the RBAC policy cache on all proxies so they stop using stale grant entries.
-	if err := t.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-		OpType: int32(typeutil.CacheRefresh),
-	}); err != nil {
-		log.Ctx(ctx).Warn("failed to refresh RBAC policy cache after collection removal, skipping",
-			zap.Int64("collectionID", t.collectionID), zap.Error(err))
-	}
-	return nil
+	return t.meta.RemoveCollection(ctx, t.collectionID, 0)
 }
