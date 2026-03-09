@@ -17,6 +17,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -41,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
