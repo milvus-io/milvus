@@ -466,6 +466,7 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingLoad() {
 	s.delegator.deleteBuffer.RegisterL0(l0Segment)
 
 	seg.EXPECT().ID().Return(10000)
+	seg.EXPECT().Collection().Return(s.collectionID)
 	seg.EXPECT().Partition().Return(100)
 	s.loader.EXPECT().LoadDeltaLogs(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, seg segments.Segment, loadInfo *querypb.SegmentLoadInfo) error {
 		fb := loadInfo.GetDeltalogs()
