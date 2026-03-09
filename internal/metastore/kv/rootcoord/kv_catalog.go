@@ -1506,6 +1506,17 @@ func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string
 		if grantObj == oldName && (grantDB == oldDBName || grantDB == util.AnyWord) {
 			oldIdStr := values[i]
 
+			// Load GranteeIDPrefix entries FIRST, before queuing the parent key
+			// for migration. If this load fails, we skip both parent and child
+			// to avoid half-migration (parent migrated, children lost).
+			oldGranteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, oldIdStr+"/")
+			idKeys, idValues, loadErr := kc.Txn.LoadWithPrefix(ctx, oldGranteeIDKey)
+			if loadErr != nil {
+				log.Ctx(ctx).Warn("fail to load grantee id entries for migration, skipping this grant entirely",
+					zap.String("key", oldGranteeIDKey), zap.Error(loadErr))
+				continue
+			}
+
 			// Build new key with new collection name and recompute idStr
 			// to avoid sharing permission space with a future collection
 			// that reuses the old name.
@@ -1528,13 +1539,6 @@ func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string
 			removeKeys = append(removeKeys, oldKey)
 
 			// Migrate GranteeIDPrefix entries from oldIdStr to newIdStr
-			oldGranteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, oldIdStr+"/")
-			idKeys, idValues, loadErr := kc.Txn.LoadWithPrefix(ctx, oldGranteeIDKey)
-			if loadErr != nil {
-				log.Ctx(ctx).Warn("fail to load grantee id entries for migration",
-					zap.String("key", oldGranteeIDKey), zap.Error(loadErr))
-				continue
-			}
 			for j, idKey := range idKeys {
 				// Use AfterN to extract privilege name correctly regardless of
 				// etcd rootPath prefix in the returned key.

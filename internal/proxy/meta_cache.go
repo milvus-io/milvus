@@ -467,7 +467,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 
 	realName := collection.Schema.GetName()
 	originalName := collectionName
-	isAlias := realName != "" && realName != collectionName
+	isAlias := collectionName != "" && realName != "" && realName != collectionName
 	if collectionName == "" || isAlias {
 		collectionName = realName
 	}
