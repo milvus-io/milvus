@@ -1509,13 +1509,22 @@ GetFieldDatasFromManifest(
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
 
+    // Determine the column name to use: external fields use their external name,
+    // internal fields use the numeric field ID string.
+    std::string column_name;
+    const auto& ext_field = field_meta.field_schema.external_field();
+    if (!ext_field.empty()) {
+        column_name = ext_field;
+    } else {
+        column_name = std::to_string(field_meta.field_id);
+    }
+
     // TODO remove manual check after loon support read null for non-exists field
     bool field_exists = false;
-    const auto field_id_to_find = std::to_string(field_meta.field_id);
     for (size_t i = 0; i < column_groups->size() && !field_exists; i++) {
         auto column_group = column_groups->at(i);
         for (const auto& column : column_group->columns) {
-            if (column == field_id_to_find) {
+            if (column == column_name) {
                 field_exists = true;
                 break;
             }
@@ -1525,8 +1534,7 @@ GetFieldDatasFromManifest(
         return {};
     }
 
-    std::string field_id_str = std::to_string(field_meta.field_id);
-    std::vector<std::string> needed_columns = {field_id_str};
+    std::vector<std::string> needed_columns = {column_name};
 
     // Create arrow schema from field meta
     std::shared_ptr<arrow::Schema> arrow_schema;
@@ -1552,8 +1560,7 @@ GetFieldDatasFromManifest(
     }
 
     auto updated_schema = std::make_shared<arrow::Schema>(
-        arrow::Schema({arrow_schema->field(0)->WithName(
-            std::to_string((field_meta.field_id)))}));
+        arrow::Schema({arrow_schema->field(0)->WithName(column_name)}));
 
     auto reader = milvus_storage::api::Reader::create(
         column_groups,
@@ -1589,7 +1596,7 @@ GetFieldDatasFromManifest(
         }
 
         auto chunked_array = std::make_shared<arrow::ChunkedArray>(
-            batch->GetColumnByName(field_id_str));
+            batch->GetColumnByName(column_name));
         auto field_data = CreateFieldData(data_type.value(),
                                           element_type.value(),
                                           batch->schema()->field(0)->nullable(),

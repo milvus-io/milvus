@@ -46,6 +46,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -572,10 +573,11 @@ func (t *UpdateExternalTask) balanceFragmentsToSegments(ctx context.Context, fra
 		}
 
 		seg := &datapb.SegmentInfo{
-			ID:           segmentID,
-			CollectionID: t.req.GetCollectionID(),
-			NumOfRows:    bin.rowCount,
-			ManifestPath: manifestPath,
+			ID:             segmentID,
+			CollectionID:   t.req.GetCollectionID(),
+			NumOfRows:      bin.rowCount,
+			ManifestPath:   manifestPath,
+			StorageVersion: storage.StorageV3,
 		}
 		result = append(result, seg)
 

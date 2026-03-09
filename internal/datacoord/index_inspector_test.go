@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -166,6 +167,153 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 
 	scheduler.EXPECT().Enqueue(mock.Anything).Return()
 	inspector.reloadFromMeta()
+}
+
+func TestIndexInspector_isExternalCollection(t *testing.T) {
+	ctx := context.Background()
+	notifyChan := make(chan int64, 1)
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	handler := NewNMockHandler(t)
+	storageCli := mocks.NewChunkManager(t)
+	versionManager := newIndexEngineVersionManager()
+
+	m := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		indexMeta: &indexMeta{
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+
+	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
+
+	t.Run("collection not found", func(t *testing.T) {
+		assert.False(t, inspector.isExternalCollection(999))
+	})
+
+	t.Run("normal collection is not external", func(t *testing.T) {
+		m.collections.Insert(10, &collectionInfo{
+			ID: 10,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{Name: "pk", FieldID: 100, DataType: schemapb.DataType_Int64},
+				},
+			},
+		})
+		assert.False(t, inspector.isExternalCollection(10))
+	})
+
+	t.Run("external collection is external", func(t *testing.T) {
+		m.collections.Insert(20, &collectionInfo{
+			ID: 20,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"},
+				},
+			},
+		})
+		assert.True(t, inspector.isExternalCollection(20))
+	})
+}
+
+func TestIndexInspector_CreateIndexesForSegment_ExternalUnsorted(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "true")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
+	}()
+
+	ctx := context.Background()
+	notifyChan := make(chan int64, 1)
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	handler := NewNMockHandler(t)
+	storageCli := mocks.NewChunkManager(t)
+	versionManager := newIndexEngineVersionManager()
+	catalog := mocks2.NewDataCoordCatalog(t)
+
+	m := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		indexMeta: &indexMeta{
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			catalog:          catalog,
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+
+	m.indexMeta.indexes[2] = map[UniqueID]*model.Index{
+		5: {
+			CollectionID: 2,
+			FieldID:      101,
+			IndexID:      5,
+			IndexName:    indexName,
+		},
+	}
+
+	inspector := newIndexInspector(ctx, notifyChan, m, scheduler, alloc, handler, storageCli, versionManager)
+
+	t.Run("normal unsorted segment is skipped", func(t *testing.T) {
+		m.collections.Insert(2, &collectionInfo{
+			ID: 2,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{Name: "pk", FieldID: 100, DataType: schemapb.DataType_Int64},
+				},
+			},
+		})
+
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: 2,
+				State:        commonpb.SegmentState_Flushed,
+				IsSorted:     false,
+			},
+		}
+		m.segments.SetSegment(segment.GetID(), segment)
+
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.NoError(t, err)
+		// No index should be created because segment is unsorted and collection is not external
+		assert.True(t, m.indexMeta.IsUnIndexedSegment(2, 1))
+	})
+
+	t.Run("external unsorted segment is not skipped", func(t *testing.T) {
+		m.collections.Insert(2, &collectionInfo{
+			ID: 2,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"},
+				},
+			},
+		})
+
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: 2,
+				State:        commonpb.SegmentState_Flushed,
+				IsSorted:     false,
+			},
+		}
+		m.segments.SetSegment(segment.GetID(), segment)
+
+		alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
+		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+		scheduler.EXPECT().Enqueue(mock.Anything).Return()
+
+		err := inspector.createIndexesForSegment(ctx, segment)
+		assert.NoError(t, err)
+	})
 }
 
 func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {

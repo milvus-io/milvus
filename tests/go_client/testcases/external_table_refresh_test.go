@@ -259,12 +259,65 @@ func indexAndLoadCollection(t *testing.T, mc *base.MilvusClient, ctx context.Con
 	t.Helper()
 	idx := index.NewAutoIndex(entity.L2)
 	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, vecFieldName, idx))
-	if err == nil {
-		idxCtx, idxCancel := context.WithTimeout(ctx, 30*time.Second)
-		_ = idxTask.Await(idxCtx)
-		idxCancel()
+	common.CheckErr(t, err, true)
+	err = idxTask.Await(ctx)
+	common.CheckErr(t, err, true)
+	t.Log("Vector index created on " + vecFieldName)
+
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+	t.Log("Collection loaded")
+}
+
+// indexAndLoadCollectionWithScalarAndVector creates scalar indexes on id and value fields,
+// a vector index on the embedding field, verifies all indexes are built successfully,
+// and then loads the collection.
+func indexAndLoadCollectionWithScalarAndVector(t *testing.T, mc *base.MilvusClient, ctx context.Context, collName string, totalRows int64) {
+	t.Helper()
+
+	// Create scalar index on "id" field
+	idIdx := index.NewAutoIndex(entity.IP)
+	idIdxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "id", idIdx))
+	common.CheckErr(t, err, true)
+	err = idIdxTask.Await(ctx)
+	common.CheckErr(t, err, true)
+	t.Log("Scalar index created on id field")
+
+	// Create scalar index on "value" field
+	valIdx := index.NewAutoIndex(entity.IP)
+	valIdxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "value", valIdx))
+	common.CheckErr(t, err, true)
+	err = valIdxTask.Await(ctx)
+	common.CheckErr(t, err, true)
+	t.Log("Scalar index created on value field")
+
+	// Create vector index on "embedding" field
+	vecIdx := index.NewAutoIndex(entity.L2)
+	vecIdxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "embedding", vecIdx))
+	common.CheckErr(t, err, true)
+	err = vecIdxTask.Await(ctx)
+	common.CheckErr(t, err, true)
+	t.Log("Vector index created on embedding field")
+
+	// Verify all indexes via DescribeIndex
+	for _, fieldName := range []string{"id", "value", "embedding"} {
+		descIdx, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(collName, fieldName))
+		common.CheckErr(t, err, true)
+		require.Equal(t, index.IndexState(3), descIdx.State,
+			"index on %s should be Finished (state=3)", fieldName) // 3 = IndexState_Finished
+		require.Equal(t, totalRows, descIdx.TotalRows,
+			"index on %s: TotalRows should be %d", fieldName, totalRows)
+		require.Equal(t, totalRows, descIdx.IndexedRows,
+			"index on %s: IndexedRows should be %d", fieldName, totalRows)
+		require.Equal(t, int64(0), descIdx.PendingIndexRows,
+			"index on %s: PendingIndexRows should be 0", fieldName)
+		t.Logf("Index on %s: state=%d totalRows=%d indexedRows=%d pendingRows=%d",
+			fieldName, descIdx.State, descIdx.TotalRows, descIdx.IndexedRows, descIdx.PendingIndexRows)
 	}
 
+	// Load collection
 	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
 	common.CheckErr(t, err, true)
 	err = loadTask.Await(ctx)
@@ -568,34 +621,9 @@ func TestExternalCollectionLoadAndQuery(t *testing.T) {
 indexAndLoad:
 
 	// ---------------------------------------------------------------
-	// Step 4: Create index on vector field
+	// Step 4: Create scalar + vector indexes and load collection
 	// ---------------------------------------------------------------
-	// External collections store data in external storage (e.g., MinIO parquet files)
-	// and load via ExternalFieldChunkedColumn. The standard index builder may not be
-	// able to access external segment data, so we attempt indexing but skip if it
-	// does not complete quickly (external segments can still be searched via brute-force).
-	idx := index.NewAutoIndex(entity.L2)
-	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "embedding", idx))
-	if err == nil {
-		idxCtx, idxCancel := context.WithTimeout(ctx, 30*time.Second)
-		if idxErr := idxTask.Await(idxCtx); idxErr != nil {
-			t.Logf("Index build did not complete in time (expected for external collections): %v", idxErr)
-		} else {
-			t.Log("Index created on embedding field")
-		}
-		idxCancel()
-	} else {
-		t.Logf("CreateIndex returned error (may be expected for external collections): %v", err)
-	}
-
-	// ---------------------------------------------------------------
-	// Step 5: Load collection
-	// ---------------------------------------------------------------
-	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
-	common.CheckErr(t, err, true)
-	err = loadTask.Await(ctx)
-	common.CheckErr(t, err, true)
-	t.Log("Collection loaded")
+	indexAndLoadCollectionWithScalarAndVector(t, mc, ctx, collName, totalExpectedRows)
 
 	// ---------------------------------------------------------------
 	// Step 6: Query count(*)
@@ -1222,7 +1250,7 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 1: Generate Lance dataset on MinIO
 	// ---------------------------------------------------------------
-	const totalRows = 2000
+	const totalRows = 100000
 	s3URI := fmt.Sprintf("s3://%s/%s/%s", minioCfg.bucket, minioCfg.rootPath, extPath)
 	generateLanceDataOnMinIO(t, s3URI, totalRows, 0)
 
@@ -1289,9 +1317,9 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 	t.Logf("Refresh complete: row_count=%d", rowCount)
 
 	// ---------------------------------------------------------------
-	// Step 4: Create index and load collection
+	// Step 4: Create scalar + vector indexes and load collection
 	// ---------------------------------------------------------------
-	indexAndLoadCollection(t, mc, ctx, collName, "embedding")
+	indexAndLoadCollectionWithScalarAndVector(t, mc, ctx, collName, totalRows)
 
 	// ---------------------------------------------------------------
 	// Step 5: Query count(*)
@@ -1329,11 +1357,44 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 		"value for id=42 should be 42*1.5=63.0")
 
 	// ---------------------------------------------------------------
-	// Step 7: Search with vector
+	// Step 6b: Verify data correctness — sample rows across the range
+	// ---------------------------------------------------------------
+	sampleIDs := []int64{0, 1, 999, 50000, 99999}
+	for _, sid := range sampleIDs {
+		sampleRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+			WithConsistencyLevel(entity.ClStrong).
+			WithFilter(fmt.Sprintf("id == %d", sid)).
+			WithOutputFields("id", "value"))
+		common.CheckErr(t, err, true)
+		require.Equal(t, 1, sampleRes.GetColumn("id").Len(),
+			"should find exactly 1 row for id=%d", sid)
+		sampleVal, err := sampleRes.GetColumn("value").GetAsDouble(0)
+		require.NoError(t, err)
+		require.InDelta(t, float64(sid)*1.5, sampleVal, 0.01,
+			"value for id=%d should be %f", sid, float64(sid)*1.5)
+	}
+	t.Logf("Verified %d sample rows across id range", len(sampleIDs))
+
+	// ---------------------------------------------------------------
+	// Step 6c: Verify large range query
+	// ---------------------------------------------------------------
+	largeRangeRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id >= 50000 && id < 60000").
+		WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	rangeCount, err := largeRangeRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(10000), rangeCount,
+		"id in [50000, 60000) should return 10000 rows")
+	t.Logf("Large range query [50000, 60000) returned %d rows", rangeCount)
+
+	// ---------------------------------------------------------------
+	// Step 7: Search with vector — verify nearest neighbor is id=0
 	// ---------------------------------------------------------------
 	vec := make([]float32, testVecDim)
 	for i := range vec {
-		vec[i] = float32(i) * 0.1
+		vec[i] = float32(i) * 0.1 // same as id=0's embedding
 	}
 	searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 5,
 		[]entity.Vector{entity.FloatVector(vec)}).
@@ -1344,7 +1405,9 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 
 	require.Equal(t, 1, len(searchRes), "should have 1 result set")
 	require.Greater(t, searchRes[0].ResultCount, 0, "search should return results")
-	t.Logf("Search returned %d results", searchRes[0].ResultCount)
+	nearestID, _ := searchRes[0].GetColumn("id").GetAsInt64(0)
+	nearestVal, _ := searchRes[0].GetColumn("value").GetAsDouble(0)
+	t.Logf("Search: nearest neighbor id=%d value=%.2f", nearestID, nearestVal)
 
 	// ---------------------------------------------------------------
 	// Step 8: Search with filter (hybrid search)
@@ -1353,8 +1416,8 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 		[]entity.Vector{entity.FloatVector(vec)}).
 		WithConsistencyLevel(entity.ClStrong).
 		WithANNSField("embedding").
-		WithFilter("id >= 500 && id < 1000").
-		WithOutputFields("id"))
+		WithFilter("id >= 50000 && id < 60000").
+		WithOutputFields("id", "value"))
 	common.CheckErr(t, err, true)
 
 	require.Equal(t, 1, len(hybridRes))
@@ -1362,10 +1425,10 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 	hybridIDCol := hybridRes[0].GetColumn("id")
 	for i := 0; i < hybridIDCol.Len(); i++ {
 		val, _ := hybridIDCol.GetAsInt64(i)
-		require.GreaterOrEqual(t, val, int64(500))
-		require.Less(t, val, int64(1000))
+		require.GreaterOrEqual(t, val, int64(50000))
+		require.Less(t, val, int64(60000))
 	}
-	t.Logf("Hybrid search (id in [500,1000)) returned %d results", hybridRes[0].ResultCount)
+	t.Logf("Hybrid search (id in [50000,60000)) returned %d results with correct values", hybridRes[0].ResultCount)
 
 	t.Log("Lance format external collection test passed!")
 }
@@ -1427,7 +1490,7 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 1: Generate vortex dataset on MinIO
 	// ---------------------------------------------------------------
-	const totalRows = 2000
+	const totalRows = 100000
 	generateVortexDataOnMinIO(t, pythonBin, extPath, totalRows, testVecDim)
 
 	t.Cleanup(func() {
@@ -1491,9 +1554,9 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 	t.Logf("Refresh complete: row_count=%d", rowCount)
 
 	// ---------------------------------------------------------------
-	// Step 4: Create index and load collection
+	// Step 4: Create scalar + vector indexes and load collection
 	// ---------------------------------------------------------------
-	indexAndLoadCollection(t, mc, ctx, collName, "embedding")
+	indexAndLoadCollectionWithScalarAndVector(t, mc, ctx, collName, totalRows)
 
 	// ---------------------------------------------------------------
 	// Step 5: Query count(*)
@@ -1530,11 +1593,44 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 		"value for id=42 should be 42*1.5=63.0")
 
 	// ---------------------------------------------------------------
-	// Step 7: Search with vector
+	// Step 6b: Verify data correctness — sample rows across the range
+	// ---------------------------------------------------------------
+	sampleIDs := []int64{0, 1, 999, 50000, 99999}
+	for _, sid := range sampleIDs {
+		sampleRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+			WithConsistencyLevel(entity.ClStrong).
+			WithFilter(fmt.Sprintf("id == %d", sid)).
+			WithOutputFields("id", "value"))
+		common.CheckErr(t, err, true)
+		require.Equal(t, 1, sampleRes.GetColumn("id").Len(),
+			"should find exactly 1 row for id=%d", sid)
+		sampleVal, err := sampleRes.GetColumn("value").GetAsDouble(0)
+		require.NoError(t, err)
+		require.InDelta(t, float64(sid)*1.5, sampleVal, 0.01,
+			"value for id=%d should be %f", sid, float64(sid)*1.5)
+	}
+	t.Logf("Verified %d sample rows across id range", len(sampleIDs))
+
+	// ---------------------------------------------------------------
+	// Step 6c: Verify large range query
+	// ---------------------------------------------------------------
+	largeRangeRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithConsistencyLevel(entity.ClStrong).
+		WithFilter("id >= 50000 && id < 60000").
+		WithOutputFields(common.QueryCountFieldName))
+	common.CheckErr(t, err, true)
+	rangeCount, err := largeRangeRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+	require.NoError(t, err)
+	require.Equal(t, int64(10000), rangeCount,
+		"id in [50000, 60000) should return 10000 rows")
+	t.Logf("Large range query [50000, 60000) returned %d rows", rangeCount)
+
+	// ---------------------------------------------------------------
+	// Step 7: Search with vector — verify nearest neighbor is id=0
 	// ---------------------------------------------------------------
 	vec := make([]float32, testVecDim)
 	for i := range vec {
-		vec[i] = float32(i) * 0.1
+		vec[i] = float32(i) * 0.1 // same as id=0's embedding
 	}
 	searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 5,
 		[]entity.Vector{entity.FloatVector(vec)}).
@@ -1545,7 +1641,9 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 
 	require.Equal(t, 1, len(searchRes), "should have 1 result set")
 	require.Greater(t, searchRes[0].ResultCount, 0, "search should return results")
-	t.Logf("Search returned %d results", searchRes[0].ResultCount)
+	nearestID, _ := searchRes[0].GetColumn("id").GetAsInt64(0)
+	nearestVal, _ := searchRes[0].GetColumn("value").GetAsDouble(0)
+	t.Logf("Search: nearest neighbor id=%d value=%.2f", nearestID, nearestVal)
 
 	// ---------------------------------------------------------------
 	// Step 8: Search with filter (hybrid search)
@@ -1554,8 +1652,8 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 		[]entity.Vector{entity.FloatVector(vec)}).
 		WithConsistencyLevel(entity.ClStrong).
 		WithANNSField("embedding").
-		WithFilter("id >= 500 && id < 1000").
-		WithOutputFields("id"))
+		WithFilter("id >= 50000 && id < 60000").
+		WithOutputFields("id", "value"))
 	common.CheckErr(t, err, true)
 
 	require.Equal(t, 1, len(hybridRes))
@@ -1563,10 +1661,10 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 	hybridIDCol := hybridRes[0].GetColumn("id")
 	for i := 0; i < hybridIDCol.Len(); i++ {
 		val, _ := hybridIDCol.GetAsInt64(i)
-		require.GreaterOrEqual(t, val, int64(500))
-		require.Less(t, val, int64(1000))
+		require.GreaterOrEqual(t, val, int64(50000))
+		require.Less(t, val, int64(60000))
 	}
-	t.Logf("Hybrid search (id in [500,1000)) returned %d results", hybridRes[0].ResultCount)
+	t.Logf("Hybrid search (id in [50000,60000)) returned %d results with correct values", hybridRes[0].ResultCount)
 
 	t.Log("Vortex format external collection test passed!")
 }
