@@ -58,6 +58,7 @@ type Collection struct {
 	FileResourceIds      []int64
 	ExternalSource       string
 	ExternalSpec         string
+	DoPhysicalBackfill   bool
 }
 
 type ShardInfo struct {
@@ -100,6 +101,7 @@ func (c *Collection) ShallowClone() *Collection {
 		FileResourceIds:      c.FileResourceIds,
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
+		DoPhysicalBackfill:   c.DoPhysicalBackfill,
 	}
 }
 
@@ -141,6 +143,7 @@ func (c *Collection) Clone() *Collection {
 		FileResourceIds:      slices.Clone(c.FileResourceIds),
 		ExternalSource:       c.ExternalSource,
 		ExternalSpec:         c.ExternalSpec,
+		DoPhysicalBackfill:   c.DoPhysicalBackfill,
 	}
 }
 
@@ -193,6 +196,7 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.SchemaVersion = updates.Schema.Version
 			c.ExternalSource = updates.Schema.ExternalSource
 			c.ExternalSpec = updates.Schema.ExternalSpec
+			c.DoPhysicalBackfill = updates.Schema.DoPhysicalBackfill
 		}
 	}
 }
@@ -254,6 +258,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		FileResourceIds:      coll.Schema.GetFileResourceIds(),
 		ExternalSource:       coll.Schema.ExternalSource,
 		ExternalSpec:         coll.Schema.ExternalSpec,
+		DoPhysicalBackfill:   coll.Schema.DoPhysicalBackfill,
 	}
 }
 
@@ -309,6 +314,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		FileResourceIds:    coll.FileResourceIds,
 		ExternalSource:     coll.ExternalSource,
 		ExternalSpec:       coll.ExternalSpec,
+		DoPhysicalBackfill: coll.DoPhysicalBackfill,
 	}
 
 	if c.withFields {

@@ -729,7 +729,7 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 
 // Note: The returned model.Collection is read-only. Do NOT modify it directly,
 // as it may cause unexpected behavior or inconsistencies.
-func filterUnavailable(coll *model.Collection) *model.Collection {
+func filterUnavailablePartition(coll *model.Collection) *model.Collection {
 	clone := coll.ShallowClone()
 	// pick available partitions.
 	clone.Partitions = make([]*model.Partition, 0, len(coll.Partitions))
@@ -756,7 +756,7 @@ func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collec
 	if !coll.Available() {
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
-	return filterUnavailable(coll), nil
+	return filterUnavailablePartition(coll), nil
 }
 
 // getCollectionByIDInternal get collection by collection id without lock.
@@ -769,7 +769,7 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 
 	var coll *model.Collection
 	coll, ok := mt.collID2Meta[collectionID]
-	if !ok || coll == nil || !coll.Available() || coll.CreateTime > ts {
+	if !ok || coll == nil || !coll.Available() || coll.UpdateTimestamp > ts {
 		// travel meta information from catalog.
 		ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 		db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
@@ -796,7 +796,7 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 		return nil, merr.WrapErrCollectionNotFound(dbName, coll.Name)
 	}
 
-	return filterUnavailable(coll), nil
+	return filterUnavailablePartition(coll), nil
 }
 
 func (mt *MetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp) (*model.Collection, error) {
@@ -873,7 +873,7 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 	if coll == nil || !coll.Available() {
 		return nil, merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName)
 	}
-	return filterUnavailable(coll), nil
+	return filterUnavailablePartition(coll), nil
 }
 
 func (mt *MetaTable) GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
@@ -1019,7 +1019,6 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		// collection not exists, return directly.
 		return errAlterCollectionNotFound
 	}
-
 	oldColl := coll.Clone()
 	newColl := coll.Clone()
 	newColl.ApplyUpdates(header, body)
@@ -1067,6 +1066,8 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		zap.Int64("oldCollectionID", oldColl.CollectionID),
 		zap.Bool("dbChanged", dbChanged),
 		zap.Uint64("ts", newColl.UpdateTimestamp),
+		zap.Bool("doPhysicalBackfill", newColl.DoPhysicalBackfill),
+		zap.Int32("schemaVersion", newColl.SchemaVersion),
 	)
 	return nil
 }

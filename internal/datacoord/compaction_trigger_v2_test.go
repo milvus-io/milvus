@@ -64,7 +64,7 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	versionManager := NewMockVersionManager(s.T())
 	versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
 	s.versionManager = versionManager
-	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.inspector, s.meta, s.versionManager)
+	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.inspector, s.meta, nil, s.versionManager)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {

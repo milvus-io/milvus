@@ -230,6 +230,19 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInf
 	return coll, nil
 }
 
+func (t *compactionTrigger) checkGroupSchemaVersionConsistent(group chanPartSegments, coll *collectionInfo) bool {
+	if len(group.segments) == 0 {
+		return true
+	}
+	collectionSchemaVersion := coll.Schema.GetVersion()
+	for _, segment := range group.segments {
+		if segment.GetSchemaVersion() != collectionSchemaVersion {
+			return false
+		}
+	}
+	return true
+}
+
 func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
 	if coll == nil {
 		return false
@@ -371,6 +384,14 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			if signal.collectionID != 0 {
 				return err
 			}
+			continue
+		}
+
+		if !t.checkGroupSchemaVersionConsistent(group, coll) {
+			log.Debug("segments in group have schema versions not matching collection schema version, skip this group for mix compaction",
+				zap.Int64("collectionID", group.collectionID),
+				zap.Int64("partitionID", group.partitionID),
+				zap.String("channel", group.channelName))
 			continue
 		}
 
