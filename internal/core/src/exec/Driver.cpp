@@ -44,6 +44,7 @@
 #include "exec/operator/RescoresNode.h"
 #include "exec/operator/SearchGroupByNode.h"
 #include "exec/operator/VectorSearchNode.h"
+#include "exec/operator/QueryOrderByNode.h"
 #include "fmt/core.h"
 #include "folly/Executor.h"
 #include "folly/Unit.h"
@@ -115,6 +116,12 @@ DriverFactory::CreateDriver(
             tracer::AddEvent("create_operator: ProjectNode");
             operators.push_back(
                 std::make_unique<PhyProjectNode>(id, ctx.get(), projectNode));
+        } else if (auto orderByNode =
+                       std::dynamic_pointer_cast<const plan::OrderByNode>(
+                           plannode)) {
+            tracer::AddEvent("create_operator: QueryOrderByNode");
+            operators.push_back(std::make_unique<PhyQueryOrderByNode>(
+                id, ctx.get(), orderByNode));
         } else if (auto samplenode =
                        std::dynamic_pointer_cast<const plan::RandomSampleNode>(
                            plannode)) {

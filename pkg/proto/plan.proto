@@ -335,12 +335,20 @@ message Aggregate {
   int64 field_id = 2;
 }
 
+// OrderByField specifies a single field for ORDER BY sorting
+message OrderByField {
+  int64 field_id = 1;      // Field ID to sort by
+  bool ascending = 2;      // true for ASC (default), false for DESC
+  bool nulls_first = 3;    // true for NULLS FIRST, false for NULLS LAST (default)
+}
+
 message QueryPlanNode {
   Expr predicates = 1;
   bool is_count = 2;
   int64 limit = 3;
   repeated int64 group_by_field_ids = 4;
   repeated Aggregate aggregates = 5;
+  repeated OrderByField order_by_fields = 6;  // ORDER BY specifications
 };
 
 enum FunctionType{
