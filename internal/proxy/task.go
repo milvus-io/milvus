@@ -1283,7 +1283,7 @@ func checkVectorIndexExist(ctx context.Context, dbName, collectionName string, c
 		CollectionID: collectionID,
 		IndexName:    "",
 	})
-	if err = merr.CheckRPCCall(indexResponse, err); err != nil {
+	if err = merr.CheckRPCCall(indexResponse, err); !errors.Is(err, merr.ErrIndexNotFound) && err != nil {
 		return "", merr.WrapErrServiceInternal("describe index failed", err.Error())
 	}
 	for _, index := range indexResponse.IndexInfos {
@@ -1294,6 +1294,34 @@ func checkVectorIndexExist(ctx context.Context, dbName, collectionName string, c
 		}
 	}
 	return "", nil
+}
+
+// detectBoolPropChange detects whether a boolean collection property is being
+// changed via Properties or DeleteKeys. parseFn validates and parses the new
+// value when the key is found in Properties.
+func detectBoolPropChange(
+	oldValue bool,
+	propKey string,
+	properties []*commonpb.KeyValuePair,
+	deleteKeys []string,
+	parseFn func() (bool, error),
+) (newValue bool, changed bool, err error) {
+	newValue = oldValue
+	if _, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(propKey, properties); ok {
+		newValue, err = parseFn()
+		if err != nil {
+			return false, false, err
+		}
+		changed = oldValue != newValue
+	}
+	for _, key := range deleteKeys {
+		if key == propKey {
+			newValue = false
+			changed = oldValue != newValue
+			break
+		}
+	}
+	return newValue, changed, nil
 }
 
 func validatePartitionKeyIsolation(ctx context.Context, colName string, isPartitionKeyEnabled bool, props ...*commonpb.KeyValuePair) (bool, error) {
@@ -1416,31 +1444,35 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	oldIsoValue := collBasicInfo.partitionKeyIsolation
-	newIsoValue := oldIsoValue
-	isoChanged := false
-
-	// Only treat partition key isolation as changed when the request explicitly alters it.
-	if _, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(common.PartitionKeyIsolationKey, t.Properties); ok {
-		newIsoValue, err = validatePartitionKeyIsolation(ctx, t.CollectionName, isPartitionKeyMode, t.Properties...)
-		if err != nil {
-			return err
-		}
-		isoChanged = oldIsoValue != newIsoValue
-	}
-	for _, key := range t.GetDeleteKeys() {
-		if key == common.PartitionKeyIsolationKey {
-			newIsoValue = false
-			isoChanged = oldIsoValue != newIsoValue
-			break
-		}
+	newIsoValue, isoChanged, err := detectBoolPropChange(
+		collBasicInfo.partitionKeyIsolation, common.PartitionKeyIsolationKey,
+		t.Properties, t.GetDeleteKeys(),
+		func() (bool, error) {
+			return validatePartitionKeyIsolation(ctx, t.CollectionName, isPartitionKeyMode, t.Properties...)
+		},
+	)
+	if err != nil {
+		return err
 	}
 
-	log.Ctx(ctx).Info("alter collection pre check with partition key isolation",
+	newBigTopK, bigTopKChanged, err := detectBoolPropChange(
+		collBasicInfo.bigTopKOptimization, common.BigTopKOptimizationEnabledKey,
+		t.Properties, t.GetDeleteKeys(),
+		func() (bool, error) {
+			return common.IsBigTopKOptimizationEnabled(t.Properties...)
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	log.Ctx(ctx).Info("alter collection pre check with partition key isolation/big topk optimization",
 		zap.String("collectionName", t.CollectionName),
 		zap.Bool("isPartitionKeyMode", isPartitionKeyMode),
 		zap.Bool("newIsoValue", newIsoValue),
-		zap.Bool("oldIsoValue", oldIsoValue))
+		zap.Bool("oldIsoValue", collBasicInfo.partitionKeyIsolation),
+		zap.Bool("newBigTopKOptimizationValue", newBigTopK),
+		zap.Bool("oldBigTopKOptimizationValue", collBasicInfo.bigTopKOptimization))
 
 	// if the isolation/bigTopKOptimization flag in properties is not set, meta cache will assign partitionKeyIsolation/bigTopKOptimization in collection info to false
 	//   - None|false -> false, skip
@@ -1448,39 +1480,18 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	//   - true -> false, check if the collection has vector index
 	//   - false -> true, check if the collection has vector index
 	//   - true -> true, skip
-	if isoChanged {
+	if isoChanged || bigTopKChanged {
 		if vecField, err := checkVectorIndexExist(ctx, t.GetDbName(), t.CollectionName, t.CollectionID, t.mixCoord); err != nil {
 			return err
 		} else if vecField != "" {
-			return merr.WrapErrIndexDuplicate(vecField,
-				"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
-		}
-	}
-
-	// check if bigTopK optimization mode is being changed while a vector index exists
-	oldBigTopK := collBasicInfo.bigTopKOptimization
-	newBigTopK := oldBigTopK
-	bigTopKChanged := false
-	if _, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(common.BigTopKOptimizationEnabledKey, t.Properties); ok {
-		newBigTopK, err = common.IsBigTopKOptimizationEnabled(t.Properties...)
-		if err != nil {
-			return err
-		}
-		bigTopKChanged = oldBigTopK != newBigTopK
-	}
-	for _, key := range t.GetDeleteKeys() {
-		if key == common.BigTopKOptimizationEnabledKey {
-			newBigTopK = false
-			bigTopKChanged = oldBigTopK != newBigTopK
-			break
-		}
-	}
-	if bigTopKChanged {
-		if vecField, err := checkVectorIndexExist(ctx, t.GetDbName(), t.CollectionName, t.CollectionID, t.mixCoord); err != nil {
-			return err
-		} else if vecField != "" {
-			return merr.WrapErrIndexDuplicate(vecField,
-				"can not alter "+common.BigTopKOptimizationEnabledKey+" if the collection already has a vector index. Please drop the index first")
+			if isoChanged {
+				return merr.WrapErrIndexDuplicate(vecField,
+					"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
+			}
+			if bigTopKChanged {
+				return merr.WrapErrIndexDuplicate(vecField,
+					"can not alter "+common.BigTopKOptimizationEnabledKey+" if the collection already has a vector index. Please drop the index first")
+			}
 		}
 	}
 

@@ -2142,11 +2142,17 @@ func Test_BigTopKLimit(t *testing.T) {
 
 func Test_MaxQueryResultWindow(t *testing.T) {
 	paramtable.Init()
-	assert.Nil(t, validateMaxQueryResultWindow(0, 16384))
-	assert.Nil(t, validateMaxQueryResultWindow(0, 1))
-	assert.Error(t, validateMaxQueryResultWindow(0, 16385))
-	assert.Error(t, validateMaxQueryResultWindow(0, 0))
-	assert.Error(t, validateMaxQueryResultWindow(1, 0))
+	assert.Nil(t, validateMaxQueryResultWindow(0, 16384, false))
+	assert.Nil(t, validateMaxQueryResultWindow(0, 1, false))
+	assert.Error(t, validateMaxQueryResultWindow(0, 16385, false))
+	assert.Error(t, validateMaxQueryResultWindow(0, 0, false))
+	assert.Error(t, validateMaxQueryResultWindow(1, 0, false))
+
+	Params.Save(Params.QuotaConfig.BigMaxQueryResultWindow.Key, "1000000")
+	defer Params.Reset(Params.QuotaConfig.BigMaxQueryResultWindow.Key)
+	assert.Nil(t, validateMaxQueryResultWindow(0, 16385, true))
+	assert.Nil(t, validateMaxQueryResultWindow(0, 1000000, true))
+	assert.Error(t, validateMaxQueryResultWindow(0, 1000001, true))
 }
 
 func Test_GetPartitionProgressFailed(t *testing.T) {

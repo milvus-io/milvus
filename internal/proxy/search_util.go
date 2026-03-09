@@ -577,7 +577,7 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 }
 
 // parseRankParams get limit and offset from rankParams, both are optional.
-func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) (*rankParams, error) {
+func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, bigTopKEnabled bool) (*rankParams, error) {
 	var (
 		limit        int64
 		offset       int64
@@ -603,7 +603,7 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 	}
 
 	// validate max result window.
-	if err = validateMaxQueryResultWindow(offset, limit); err != nil {
+	if err = validateMaxQueryResultWindow(offset, limit, bigTopKEnabled); err != nil {
 		return nil, fmt.Errorf("invalid max query result window, %w", err)
 	}
 

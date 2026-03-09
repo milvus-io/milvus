@@ -3169,7 +3169,7 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			Key:   LimitKey,
 			Value: "100",
 		})
-		testRankParams, err := parseRankParams(testRankParamsPairs, schema)
+		testRankParams, err := parseRankParams(testRankParamsPairs, schema, false)
 		assert.NoError(t, err)
 
 		// 2. parse search params for sub request in hybridsearch
@@ -3872,7 +3872,7 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 				},
 			)
 
-			parsedRankParams, err := parseRankParams(rankParams, schema)
+			parsedRankParams, err := parseRankParams(rankParams, schema, false)
 			assert.NoError(t, err)
 
 			searchParams := createSearchParams("embeddings_list")

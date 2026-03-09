@@ -127,6 +127,7 @@ type quotaConfig struct {
 	BigTopKLimit                   ParamItem `refreshable:"true"`
 	NQLimit                        ParamItem `refreshable:"true"`
 	MaxQueryResultWindow           ParamItem `refreshable:"true"`
+	BigMaxQueryResultWindow        ParamItem `refreshable:"true"`
 	MaxOutputSize                  ParamItem `refreshable:"true"`
 	MaxInsertSize                  ParamItem `refreshable:"true"`
 	MaxResourceGroupNumOfQueryNode ParamItem `refreshable:"true"`
@@ -1483,6 +1484,14 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 		Doc:          `Query limit, which applies on: maximum of offset + limit`,
 	}
 	p.MaxQueryResultWindow.Init(base.mgr)
+
+	p.BigMaxQueryResultWindow = ParamItem{
+		Key:          "quotaAndLimits.limits.bigMaxQueryResultWindow",
+		Version:      "2.6.13",
+		DefaultValue: "1000000",
+		Doc:          `Query limit for collections with bigTopK optimization enabled, which applies on: maximum of offset + limit`,
+	}
+	p.BigMaxQueryResultWindow.Init(base.mgr)
 
 	p.MaxOutputSize = ParamItem{
 		Key:          "quotaAndLimits.limits.maxOutputSize",
