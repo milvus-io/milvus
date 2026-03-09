@@ -724,8 +724,10 @@ func (m *MetaCache) ResolveCollectionAlias(ctx context.Context, database, nameOr
 	// DescribeCollection accepts aliases and update() caches under the caller's name.
 	// Compare with the schema's real collection name to detect this.
 	if collInfo, ok := m.getCollection(database, nameOrAlias, 0); ok {
-		if realName := collInfo.schema.CollectionSchema.GetName(); realName != "" && realName != nameOrAlias {
-			return realName, nil
+		if collInfo.schema != nil {
+			if realName := collInfo.schema.GetName(); realName != "" && realName != nameOrAlias {
+				return realName, nil
+			}
 		}
 		return nameOrAlias, nil
 	}
@@ -1017,8 +1019,8 @@ func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID Uniqu
 					m.sfGlobal.Forget(buildSfKeyByName(database, k))
 					m.sfGlobal.Forget(buildSfKeyById(database, v.collID))
 					realName := k
-					if v.schema != nil && v.schema.CollectionSchema.GetName() != "" {
-						realName = v.schema.CollectionSchema.GetName()
+					if v.schema != nil && v.schema.GetName() != "" {
+						realName = v.schema.GetName()
 					}
 					m.removeAliasesForCollectionLocked(database, realName)
 				}
