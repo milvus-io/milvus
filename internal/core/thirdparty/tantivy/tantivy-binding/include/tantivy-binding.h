@@ -534,6 +534,8 @@ RustResult tantivy_set_analyzer_options(const char *params);
 
 bool tantivy_index_exist(const char *path);
 
+void tantivy_set_log_level(const char *level);
+
 RustResult tantivy_compute_phrase_match_slop(const char *tokenizer_params,
                                              const char *query,
                                              const char *data,
