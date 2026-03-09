@@ -1194,6 +1194,9 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 			mock.Anything, // model.Collection
 			mock.AnythingOfType("uint64"),
 		).Return(nil)
+		catalog.On("DeleteGrantByCollectionName",
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
 			names:   newNameDb(),
