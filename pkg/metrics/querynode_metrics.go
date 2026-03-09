@@ -18,6 +18,7 @@ package metrics
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -901,6 +902,22 @@ var (
 			collectionIDLabelName,
 			reasonLabelName,
 		})
+
+	// Pool metric descriptors (used by PoolMetricsCollector)
+	QueryNodePoolCapacityDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, typeutil.QueryNodeRole, "pool_capacity"),
+		"Configured capacity (max goroutines) of the pool",
+		[]string{nodeIDLabelName, poolNameLabelName}, nil)
+
+	QueryNodePoolActiveThreadsDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, typeutil.QueryNodeRole, "pool_active_threads"),
+		"Number of currently running goroutines in the pool",
+		[]string{nodeIDLabelName, poolNameLabelName}, nil)
+
+	QueryNodePoolQueueDepthDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(milvusNamespace, typeutil.QueryNodeRole, "pool_queue_depth"),
+		"Number of tasks waiting in the pool queue",
+		[]string{nodeIDLabelName, poolNameLabelName}, nil)
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -979,6 +996,8 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeTwoStageFilterLatency)
 	registry.MustRegister(QueryNodeTwoStageSearchLatency)
 	registry.MustRegister(QueryNodeTwoStageSearchFallbackCount)
+	// Pool metrics collector (pull model — collectFn set later via SetPoolCollectFn)
+	registry.MustRegister(&poolMetricsCollector{})
 	// Add cgo metrics
 	RegisterCGOMetrics(registry)
 
@@ -1010,4 +1029,55 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 	QueryNodeTwoStageFilterLatency.DeletePartialMatch(labels)
 	QueryNodeTwoStageSearchLatency.DeletePartialMatch(labels)
 	QueryNodeTwoStageSearchFallbackCount.DeletePartialMatch(labels)
+}
+
+// PoolStats holds the snapshot of a single pool's state.
+type PoolStats struct {
+	Name    string
+	Cap     int
+	Running int
+	Waiting int
+}
+
+// poolCollectFn is the function set later by SetPoolCollectFn.
+// Accessed atomically via sync.Once guard in SetPoolCollectFn and nil check in Collect.
+var (
+	poolCollectorNodeID    string
+	poolCollectorCollectFn func() []PoolStats
+	poolCollectorMu        sync.Mutex
+)
+
+// SetPoolCollectFn sets the callback used by the poolMetricsCollector.
+// Called from QueryNode.Start() after pools are initialized.
+func SetPoolCollectFn(nodeID string, fn func() []PoolStats) {
+	poolCollectorMu.Lock()
+	defer poolCollectorMu.Unlock()
+	poolCollectorNodeID = nodeID
+	poolCollectorCollectFn = fn
+}
+
+// poolMetricsCollector implements prometheus.Collector using pull model.
+// Registered once in RegisterQueryNode. collectFn is set later via SetPoolCollectFn.
+type poolMetricsCollector struct{}
+
+func (c *poolMetricsCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- QueryNodePoolCapacityDesc
+	ch <- QueryNodePoolActiveThreadsDesc
+	ch <- QueryNodePoolQueueDepthDesc
+}
+
+func (c *poolMetricsCollector) Collect(ch chan<- prometheus.Metric) {
+	poolCollectorMu.Lock()
+	fn := poolCollectorCollectFn
+	nodeID := poolCollectorNodeID
+	poolCollectorMu.Unlock()
+
+	if fn == nil {
+		return
+	}
+	for _, s := range fn() {
+		ch <- prometheus.MustNewConstMetric(QueryNodePoolCapacityDesc, prometheus.GaugeValue, float64(s.Cap), nodeID, s.Name)
+		ch <- prometheus.MustNewConstMetric(QueryNodePoolActiveThreadsDesc, prometheus.GaugeValue, float64(s.Running), nodeID, s.Name)
+		ch <- prometheus.MustNewConstMetric(QueryNodePoolQueueDepthDesc, prometheus.GaugeValue, float64(s.Waiting), nodeID, s.Name)
+	}
 }
