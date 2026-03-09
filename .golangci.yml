@@ -1,5 +1,5 @@
 run:
-  go: "1.22"
+  go: "1.24"
   build-tags:
     - dynamic
     - test
