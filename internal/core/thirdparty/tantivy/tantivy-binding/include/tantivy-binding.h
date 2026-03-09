@@ -510,6 +510,8 @@ RustResult tantivy_create_text_writer(const char *field_name,
                                       uintptr_t overall_memory_budget_in_bytes,
                                       bool in_ram);
 
+void tantivy_set_log_level(const char *level);
+
 void free_rust_string(const char *ptr);
 
 void *tantivy_create_token_stream(void *tokenizer, const char *text);
@@ -533,8 +535,6 @@ void tantivy_free_analyzer(void *tokenizer);
 RustResult tantivy_set_analyzer_options(const char *params);
 
 bool tantivy_index_exist(const char *path);
-
-void tantivy_set_log_level(const char *level);
 
 RustResult tantivy_compute_phrase_match_slop(const char *tokenizer_params,
                                              const char *query,
