@@ -196,9 +196,13 @@ HuaweiCloudSTSCredentialsClient::callHuaweiCloudSTS(
     auto httpResponseCode = resp->GetResponseCode();
     if (httpResponseCode != Aws::Http::HttpResponseCode::OK &&
         httpResponseCode != Aws::Http::HttpResponseCode::CREATED) {
+        std::ostringstream errBody;
+        errBody << resp->GetResponseBody().rdbuf();
+        auto bodyStr = errBody.str();
         result.errorMessage =
             "Huawei Cloud STS security token request failed with HTTP code: " +
-            std::to_string(static_cast<int>(httpResponseCode));
+            std::to_string(static_cast<int>(httpResponseCode)) +
+            ", body: " + bodyStr.substr(0, 200);
         return result;
     }
     std::ostringstream oss;
@@ -209,6 +213,12 @@ HuaweiCloudSTSCredentialsClient::callHuaweiCloudSTS(
         return result;
     }
     Aws::Utils::Json::JsonValue jsonValue(credentialsStr);
+    if (!jsonValue.WasParseSuccessful()) {
+        result.errorMessage =
+            "Failed to parse STS response as JSON: " +
+            std::string(credentialsStr.substr(0, 200).c_str());
+        return result;
+    }
     auto json = jsonValue.View();
     auto rootNode = json.GetObject("credential");
 
@@ -221,11 +231,21 @@ HuaweiCloudSTSCredentialsClient::callHuaweiCloudSTS(
     result.credentials.SetSessionToken(rootNode.GetString("securitytoken"));
 
     auto expiresAt = rootNode.GetString("expires_at");
-    if (!expiresAt.empty()) {
-        result.credentials.SetExpiration(Aws::Utils::DateTime(
-            Aws::Utils::StringUtils::Trim(expiresAt.c_str()).c_str(),
-            Aws::Utils::DateFormat::ISO_8601));
+    if (expiresAt.empty()) {
+        result.errorMessage =
+            "STS response missing 'expires_at' field, rejecting credentials";
+        return result;
     }
+    auto parsedExpiration = Aws::Utils::DateTime(
+        Aws::Utils::StringUtils::Trim(expiresAt.c_str()).c_str(),
+        Aws::Utils::DateFormat::ISO_8601);
+    if (!parsedExpiration.WasParseSuccessful()) {
+        result.errorMessage =
+            "STS response 'expires_at' field has invalid format: " +
+            std::string(expiresAt.c_str());
+        return result;
+    }
+    result.credentials.SetExpiration(parsedExpiration);
     result.success = true;
     return result;
 }
