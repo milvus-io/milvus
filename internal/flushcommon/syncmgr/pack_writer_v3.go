@@ -211,14 +211,12 @@ func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack) (str
 		return "", err
 	}
 
-	// Build deltalog path
-	deltaPath := metautil.BuildDeltaLogPath(
-		bw.storageConfig.GetRootPath(),
-		pack.collectionID,
-		pack.partitionID,
-		pack.segmentID,
-		logID,
-	)
+	// Build deltalog path under basePath/_delta/
+	basePath, _, err := packed.UnmarshalManfestPath(bw.manifestPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse manifest path: %w", err)
+	}
+	deltaPath := metautil.BuildDeltaLogPathV3(basePath, logID)
 
 	// Create deltalog writer with V2 storage
 	writer, err := storage.NewDeltalogWriter(
