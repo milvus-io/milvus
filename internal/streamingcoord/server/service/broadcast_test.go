@@ -73,7 +73,7 @@ func TestBroadcastService(t *testing.T) {
 		},
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is stored and called later
 	reached := make(chan struct{})
 	done := make(chan struct{})
 	mb.EXPECT().Ack(mock.Anything, mock.Anything).Unset()

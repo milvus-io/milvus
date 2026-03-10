@@ -210,7 +210,7 @@ func (d *Dispatcher) Handle(signal signal) {
 	log.Debug("get signal")
 	switch signal {
 	case start:
-		d.ctx, d.cancel = context.WithCancel(context.Background())
+		d.ctx, d.cancel = context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is stored and called later
 		d.wg.Add(1)
 		go d.work()
 	case pause:
@@ -218,7 +218,7 @@ func (d *Dispatcher) Handle(signal signal) {
 		d.cancel()
 		d.wg.Wait()
 	case resume:
-		d.ctx, d.cancel = context.WithCancel(context.Background())
+		d.ctx, d.cancel = context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is stored and called later
 		d.wg.Add(1)
 		go d.work()
 	case terminate:
