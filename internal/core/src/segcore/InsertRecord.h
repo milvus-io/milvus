@@ -12,6 +12,7 @@
 #pragma once
 
 #include <algorithm>
+#include <numeric>
 #include <cstddef>
 #include <memory>
 #include <mutex>
@@ -921,6 +922,9 @@ class InsertRecordSealed {
         switch (data_type) {
             case DataType::INT64: {
                 auto num_chunk = data->num_chunks();
+                std::vector<int64_t> chunk_ids(num_chunk);
+                std::iota(chunk_ids.begin(), chunk_ids.end(), 0);
+                data->PrefetchChunks(nullptr, chunk_ids);
                 for (int i = 0; i < num_chunk; ++i) {
                     auto pw = data->DataOfChunk(nullptr, i);
                     auto pks = reinterpret_cast<const int64_t*>(pw.get());
@@ -966,6 +970,13 @@ class InsertRecordSealed {
         all_pks.reserve(total_rows);
 
         auto num_chunk = data->num_chunks();
+        // Prefetch all chunks so that subsequent sequential
+        // DataOfChunk() calls hit the cache instead of blocking
+        // on HIGH pool downloads one at a time.
+        std::vector<int64_t> chunk_ids(num_chunk);
+        std::iota(chunk_ids.begin(), chunk_ids.end(), 0);
+        data->PrefetchChunks(nullptr, chunk_ids);
+
         for (int i = 0; i < num_chunk; ++i) {
             auto pw = data->DataOfChunk(nullptr, i);
             auto pks = reinterpret_cast<const int64_t*>(pw.get());
