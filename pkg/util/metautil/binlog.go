@@ -67,6 +67,13 @@ func BuildDeltaLogPath(rootPath string, collectionID, partitionID, segmentID, lo
 	return path.Join(rootPath, common.SegmentDeltaLogPath, k)
 }
 
+// BuildDeltaLogPathV3 builds a deltalog path under the segment's basePath/_delta/ directory.
+// This places the deltalog alongside the insert data instead of under a separate delta_log/ prefix.
+// The resulting path is: {basePath}/_delta/{logID}
+func BuildDeltaLogPathV3(basePath string, logID typeutil.UniqueID) string {
+	return path.Join(basePath, "_delta", strconv.FormatInt(logID, 10))
+}
+
 func GetSegmentIDFromDeltaLogPath(logPath string) typeutil.UniqueID {
 	return getSegmentIDFromPath(logPath, 2)
 }
