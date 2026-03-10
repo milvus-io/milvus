@@ -40,6 +40,7 @@ type AutoIndexConfig struct {
 	SparseIndexParams      ParamItem  `refreshable:"true"`
 	BinaryIndexParams      ParamItem  `refreshable:"true"`
 	DeduplicateIndexParams ParamItem  `refreshable:"true"`
+	BigTopKIndexParams     ParamItem  `refreshable:"true"`
 	EnableDeduplicateIndex ParamItem  `refreshable:"true"`
 	PrepareParams          ParamItem  `refreshable:"true"`
 	LoadAdaptParams        ParamItem  `refreshable:"true"`
@@ -61,8 +62,6 @@ type AutoIndexConfig struct {
 	ScalarTimestampTzIndexType ParamItem `refreshable:"true"`
 
 	BitmapCardinalityLimit ParamItem `refreshable:"true"`
-
-	BigTopKIndexParams ParamItem `refreshable:"true"`
 }
 
 const (
@@ -140,6 +139,15 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		PanicIfEmpty: false,
 	}
 	p.EnableDeduplicateIndex.Init(base.mgr)
+
+	p.BigTopKIndexParams = ParamItem{
+		Key:          "autoIndex.params.bigTopK.build",
+		Version:      "2.6.13",
+		DefaultValue: `{"nlist": 128, "index_type": "IVF_SQ8", "metric_type": "COSINE"}`,
+		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.bigTopK.build"),
+		Export:       true,
+	}
+	p.BigTopKIndexParams.Init(base.mgr)
 
 	p.PrepareParams = ParamItem{
 		Key:     "autoIndex.params.prepare",
@@ -296,15 +304,6 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		},
 	}
 	p.ScalarVarcharIndexType.Init(base.mgr)
-
-	p.BigTopKIndexParams = ParamItem{
-		Key:          "autoIndex.params.bigTopK.build",
-		Version:      "2.6.12",
-		DefaultValue: `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`,
-		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.bigTopK.build"),
-		Export:       true,
-	}
-	p.BigTopKIndexParams.Init(base.mgr)
 
 	p.ScalarBoolIndexType = ParamItem{
 		Version: "2.4.0",
