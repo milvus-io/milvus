@@ -5701,6 +5701,19 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	}
 	req.Base.MsgType = commonpb.MsgType_OperatePrivilegeV2
 	req.Grantor.User = &milvuspb.UserEntity{Name: curUser}
+
+	// Resolve alias to actual collection name so grants are stored under the real name
+	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
+		req.CollectionName != util.AnyWord && req.CollectionName != "" {
+		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.DbName, req.CollectionName)
+		if resolveErr != nil {
+			log.Warn("failed to resolve collection alias for privilege operation",
+				zap.String("collectionName", req.CollectionName), zap.String("dbName", req.DbName), zap.Error(resolveErr))
+			return merr.Status(resolveErr), nil
+		}
+		req.CollectionName = resolved
+	}
+
 	request := &milvuspb.OperatePrivilegeRequest{
 		Entity: &milvuspb.GrantEntity{
 			Role:       req.Role,
@@ -5761,6 +5774,20 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 		return merr.Status(err), nil
 	}
 	req.Entity.Grantor.User = &milvuspb.UserEntity{Name: curUser}
+
+	// Resolve alias to actual collection name so grants are stored under the real name
+	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
+		req.Entity.Object != nil && req.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
+		req.Entity.ObjectName != util.AnyWord && req.Entity.ObjectName != "" {
+		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
+		if resolveErr != nil {
+			log.Warn("failed to resolve collection alias for privilege operation",
+				zap.String("objectName", req.Entity.ObjectName), zap.String("dbName", req.Entity.DbName), zap.Error(resolveErr))
+			return merr.Status(resolveErr), nil
+		}
+		req.Entity.ObjectName = resolved
+	}
+
 	result, err := node.mixCoord.OperatePrivilege(ctx, req)
 	if err != nil {
 		log.Warn("fail to operate privilege", zap.Error(err))
@@ -5832,6 +5859,21 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 		req.Base = &commonpb.MsgBase{}
 	}
 	req.Base.MsgType = commonpb.MsgType_SelectGrant
+
+	// Resolve alias to actual collection name so query matches grants stored under real names
+	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
+		req.Entity != nil && req.Entity.Object != nil && req.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
+		req.Entity.ObjectName != util.AnyWord && req.Entity.ObjectName != "" {
+		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
+		if resolveErr != nil {
+			log.Warn("failed to resolve collection alias for select grant",
+				zap.String("objectName", req.Entity.ObjectName), zap.String("dbName", req.Entity.DbName), zap.Error(resolveErr))
+			return &milvuspb.SelectGrantResponse{
+				Status: merr.Status(resolveErr),
+			}, nil
+		}
+		req.Entity.ObjectName = resolved
+	}
 
 	result, err := node.mixCoord.SelectGrant(ctx, req)
 	if err != nil {
