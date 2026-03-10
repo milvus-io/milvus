@@ -502,6 +502,14 @@ func (q *QuotaCenter) collectMetrics() error {
 			collectionMetrics = cm.Collections
 		}
 
+		// Add collection IDs from DataCoord collectionMetrics to collections,
+		// to avoid empty collections caused by DataNode not reporting CollectionIDs.
+		if collectionMetrics != nil {
+			for collectionID := range collectionMetrics {
+				collections.Insert(collectionID)
+			}
+		}
+
 		collections.Range(func(collectionID int64) bool {
 			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
 			if getErr != nil {
