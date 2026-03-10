@@ -2107,7 +2107,8 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 
 	t.Run("dynamic field with ValidData merges correctly", func(t *testing.T) {
 		// Upsert 3 rows: IDs 1,2 (update), 3 (insert)
-		// User provides dynamic field $meta with ValidData already set (as PreExecute would do)
+		// User provides dynamic field $meta WITHOUT ValidData
+		// queryPreExecute will auto-fill ValidData with all-true before merge
 		meta1, _ := json.Marshal(map[string]interface{}{"color": "gold"})
 		meta2, _ := json.Marshal(map[string]interface{}{"color": "silver"})
 		meta3, _ := json.Marshal(map[string]interface{}{"color": "bronze"})
@@ -2126,7 +2127,7 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
 					JsonData: &schemapb.JSONArray{Data: [][]byte{meta1, meta2, meta3}},
 				}}},
-				ValidData: []bool{true, true, true}, // Set by PreExecute before queryPreExecute
+				// No ValidData — queryPreExecute auto-fills with all-true
 			},
 		}
 
@@ -2193,9 +2194,9 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		assert.Equal(t, 3, len(metaField.GetValidData()), "ValidData length should match row count")
 	})
 
-	t.Run("dynamic field without ValidData causes merge mismatch", func(t *testing.T) {
-		// This test demonstrates the bug: when $meta has NO ValidData,
-		// the merge logic produces mismatched ValidData length
+	t.Run("dynamic field without ValidData is auto-filled by queryPreExecute", func(t *testing.T) {
+		// This test verifies the fix: when $meta has NO ValidData (SDK behavior),
+		// queryPreExecute auto-fills it with all-true, so merge produces correct length
 		meta1, _ := json.Marshal(map[string]interface{}{"color": "gold"})
 		meta2, _ := json.Marshal(map[string]interface{}{"color": "silver"})
 		meta3, _ := json.Marshal(map[string]interface{}{"color": "bronze"})
@@ -2214,7 +2215,7 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
 					JsonData: &schemapb.JSONArray{Data: [][]byte{meta1, meta2, meta3}},
 				}}},
-				// NO ValidData — simulates SDK behavior before PreExecute fix
+				// NO ValidData — queryPreExecute will auto-fill
 			},
 		}
 
@@ -2265,8 +2266,7 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		err := task.queryPreExecute(context.Background())
 		assert.NoError(t, err)
 
-		// Without the fix in PreExecute, $meta ValidData would be length 2 (only from update path)
-		// instead of 3 (matching data length). This mismatch would cause FillWithDefaultValue to fail.
+		// queryPreExecute auto-fills ValidData on $meta, so merge produces correct length 3
 		var metaField *schemapb.FieldData
 		for _, f := range task.insertFieldData {
 			if f.GetFieldName() == common.MetaFieldName {
@@ -2277,151 +2277,8 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		assert.NotNil(t, metaField)
 		metaData := metaField.GetScalars().GetJsonData().GetData()
 		assert.Equal(t, 3, len(metaData), "merged $meta should have 3 rows")
-		// Without ValidData on src, ValidData length will be 2 (only from update path)
-		// This demonstrates the bug that PreExecute fix prevents
 		validData := metaField.GetValidData()
-		if len(validData) > 0 {
-			assert.Equal(t, 2, len(validData),
-				"without PreExecute fix, ValidData length is 2 (only from update path), not 3")
-		}
-	})
-}
-
-func TestPreExecute_SetsDynamicFieldValidData(t *testing.T) {
-	t.Run("sets ValidData on dynamic field without ValidData", func(t *testing.T) {
-		meta, _ := json.Marshal(map[string]interface{}{"color": "gold"})
-		fieldsData := []*schemapb.FieldData{
-			{
-				FieldName: "id", Type: schemapb.DataType_Int64,
-				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}},
-			},
-			{
-				FieldName: common.MetaFieldName, Type: schemapb.DataType_JSON, IsDynamic: true,
-				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
-					JsonData: &schemapb.JSONArray{Data: [][]byte{meta, meta, meta}},
-				}}},
-				// No ValidData
-			},
-		}
-
-		task := &upsertTask{
-			req: &milvuspb.UpsertRequest{
-				PartialUpdate: true,
-			},
-			upsertMsg: &msgstream.UpsertMsg{
-				InsertMsg: &msgstream.InsertMsg{
-					InsertRequest: &msgpb.InsertRequest{
-						FieldsData: fieldsData,
-						NumRows:    3,
-						Version:    msgpb.InsertDataVersion_ColumnBased,
-					},
-				},
-			},
-		}
-
-		// Simulate the ValidData-setting logic from PreExecute
-		for _, fd := range task.upsertMsg.InsertMsg.GetFieldsData() {
-			if fd.GetIsDynamic() && len(fd.GetValidData()) == 0 {
-				nRows := int(task.upsertMsg.InsertMsg.NRows())
-				validData := make([]bool, nRows)
-				for i := range validData {
-					validData[i] = true
-				}
-				fd.ValidData = validData
-				break
-			}
-		}
-
-		// Verify ValidData was set
-		dynamicField := fieldsData[1]
-		assert.Equal(t, 3, len(dynamicField.GetValidData()))
-		for _, v := range dynamicField.GetValidData() {
-			assert.True(t, v)
-		}
-	})
-
-	t.Run("preserves existing ValidData on dynamic field", func(t *testing.T) {
-		meta, _ := json.Marshal(map[string]interface{}{"color": "gold"})
-		existingValidData := []bool{true, false, true}
-		fieldsData := []*schemapb.FieldData{
-			{
-				FieldName: common.MetaFieldName, Type: schemapb.DataType_JSON, IsDynamic: true,
-				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{
-					JsonData: &schemapb.JSONArray{Data: [][]byte{meta, meta, meta}},
-				}}},
-				ValidData: existingValidData,
-			},
-		}
-
-		task := &upsertTask{
-			req: &milvuspb.UpsertRequest{
-				PartialUpdate: true,
-			},
-			upsertMsg: &msgstream.UpsertMsg{
-				InsertMsg: &msgstream.InsertMsg{
-					InsertRequest: &msgpb.InsertRequest{
-						FieldsData: fieldsData,
-						NumRows:    3,
-						Version:    msgpb.InsertDataVersion_ColumnBased,
-					},
-				},
-			},
-		}
-
-		// Simulate the ValidData-setting logic
-		for _, fd := range task.upsertMsg.InsertMsg.GetFieldsData() {
-			if fd.GetIsDynamic() && len(fd.GetValidData()) == 0 {
-				nRows := int(task.upsertMsg.InsertMsg.NRows())
-				validData := make([]bool, nRows)
-				for i := range validData {
-					validData[i] = true
-				}
-				fd.ValidData = validData
-				break
-			}
-		}
-
-		// ValidData should NOT be overwritten
-		assert.Equal(t, existingValidData, fieldsData[0].GetValidData())
-	})
-
-	t.Run("no-op when no dynamic field exists", func(t *testing.T) {
-		fieldsData := []*schemapb.FieldData{
-			{
-				FieldName: "id", Type: schemapb.DataType_Int64,
-				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}},
-			},
-		}
-
-		task := &upsertTask{
-			req: &milvuspb.UpsertRequest{
-				PartialUpdate: true,
-			},
-			upsertMsg: &msgstream.UpsertMsg{
-				InsertMsg: &msgstream.InsertMsg{
-					InsertRequest: &msgpb.InsertRequest{
-						FieldsData: fieldsData,
-						NumRows:    3,
-						Version:    msgpb.InsertDataVersion_ColumnBased,
-					},
-				},
-			},
-		}
-
-		// Simulate the ValidData-setting logic
-		for _, fd := range task.upsertMsg.InsertMsg.GetFieldsData() {
-			if fd.GetIsDynamic() && len(fd.GetValidData()) == 0 {
-				nRows := int(task.upsertMsg.InsertMsg.NRows())
-				validData := make([]bool, nRows)
-				for i := range validData {
-					validData[i] = true
-				}
-				fd.ValidData = validData
-				break
-			}
-		}
-
-		// No field should have ValidData set
-		assert.Equal(t, 0, len(fieldsData[0].GetValidData()))
+		assert.Equal(t, 3, len(validData),
+			"queryPreExecute auto-fills ValidData, merge produces correct length 3")
 	})
 }
