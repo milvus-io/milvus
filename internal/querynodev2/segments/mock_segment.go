@@ -2225,39 +2225,6 @@ func (_c *MockSegment_Unpin_Call) RunAndReturn(run func()) *MockSegment_Unpin_Ca
 	return _c
 }
 
-// UpdatePkCandidate provides a mock function with given fields: pks
-func (_m *MockSegment) UpdatePkCandidate(pks []storage.PrimaryKey) {
-	_m.Called(pks)
-}
-
-// MockSegment_UpdatePkCandidate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdatePkCandidate'
-type MockSegment_UpdatePkCandidate_Call struct {
-	*mock.Call
-}
-
-// UpdatePkCandidate is a helper method to define mock.On call
-//   - pks []storage.PrimaryKey
-func (_e *MockSegment_Expecter) UpdatePkCandidate(pks interface{}) *MockSegment_UpdatePkCandidate_Call {
-	return &MockSegment_UpdatePkCandidate_Call{Call: _e.mock.On("UpdatePkCandidate", pks)}
-}
-
-func (_c *MockSegment_UpdatePkCandidate_Call) Run(run func(pks []storage.PrimaryKey)) *MockSegment_UpdatePkCandidate_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]storage.PrimaryKey))
-	})
-	return _c
-}
-
-func (_c *MockSegment_UpdatePkCandidate_Call) Return() *MockSegment_UpdatePkCandidate_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockSegment_UpdatePkCandidate_Call) RunAndReturn(run func([]storage.PrimaryKey)) *MockSegment_UpdatePkCandidate_Call {
-	_c.Run(run)
-	return _c
-}
-
 // UpdateBM25Stats provides a mock function with given fields: stats
 func (_m *MockSegment) UpdateBM25Stats(stats map[int64]*storage.BM25Stats) {
 	_m.Called(stats)
@@ -2287,6 +2254,39 @@ func (_c *MockSegment_UpdateBM25Stats_Call) Return() *MockSegment_UpdateBM25Stat
 }
 
 func (_c *MockSegment_UpdateBM25Stats_Call) RunAndReturn(run func(map[int64]*storage.BM25Stats)) *MockSegment_UpdateBM25Stats_Call {
+	_c.Run(run)
+	return _c
+}
+
+// UpdatePkCandidate provides a mock function with given fields: pks
+func (_m *MockSegment) UpdatePkCandidate(pks []storage.PrimaryKey) {
+	_m.Called(pks)
+}
+
+// MockSegment_UpdatePkCandidate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdatePkCandidate'
+type MockSegment_UpdatePkCandidate_Call struct {
+	*mock.Call
+}
+
+// UpdatePkCandidate is a helper method to define mock.On call
+//   - pks []storage.PrimaryKey
+func (_e *MockSegment_Expecter) UpdatePkCandidate(pks interface{}) *MockSegment_UpdatePkCandidate_Call {
+	return &MockSegment_UpdatePkCandidate_Call{Call: _e.mock.On("UpdatePkCandidate", pks)}
+}
+
+func (_c *MockSegment_UpdatePkCandidate_Call) Run(run func(pks []storage.PrimaryKey)) *MockSegment_UpdatePkCandidate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]storage.PrimaryKey))
+	})
+	return _c
+}
+
+func (_c *MockSegment_UpdatePkCandidate_Call) Return() *MockSegment_UpdatePkCandidate_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegment_UpdatePkCandidate_Call) RunAndReturn(run func([]storage.PrimaryKey)) *MockSegment_UpdatePkCandidate_Call {
 	_c.Run(run)
 	return _c
 }
