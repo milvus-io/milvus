@@ -3286,6 +3286,7 @@ type queryNodeConfig struct {
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
 	EnableGeometryCache           ParamItem `refreshable:"false"`
+	MaxGroupByGroups              ParamItem `refreshable:"false"`
 
 	// TODO(tiered storage 2) this should be refreshable?
 	TieredWarmupScalarField         ParamItem `refreshable:"false"`
@@ -3900,6 +3901,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.EnableGeometryCache.Init(base.mgr)
+
+	p.MaxGroupByGroups = ParamItem{
+		Key:          "queryNode.segcore.maxGroupByGroups",
+		Version:      "2.6.0",
+		DefaultValue: "100000",
+		Doc:          "Maximum number of groups allowed in GROUP BY aggregation per segment. Exceeding this limit fails the query.",
+		Export:       true,
+	}
+	p.MaxGroupByGroups.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",

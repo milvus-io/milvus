@@ -156,6 +156,16 @@ class SegcoreConfig {
         return enable_geometry_cache_;
     }
 
+    int64_t
+    get_max_group_by_groups() const {
+        return max_group_by_groups_;
+    }
+
+    void
+    set_max_group_by_groups(int64_t v) {
+        max_group_by_groups_ = v;
+    }
+
     void
     set_interim_index_mem_expansion_rate(float rate) {
         interim_index_mem_expansion_rate_ = rate;
@@ -186,6 +196,7 @@ class SegcoreConfig {
     inline static bool refine_with_quant_flag_ = false;
     inline static bool enable_geometry_cache_ = false;
     inline static float interim_index_mem_expansion_rate_ = 1.15f;
+    inline static int64_t max_group_by_groups_ = 100000;
 };
 
 }  // namespace milvus::segcore

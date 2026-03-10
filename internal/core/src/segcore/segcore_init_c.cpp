@@ -115,6 +115,13 @@ SegcoreSetInterimIndexMemExpansionRate(const float value) {
 }
 
 extern "C" void
+SegcoreSetMaxGroupByGroups(const int64_t value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_max_group_by_groups(value);
+}
+
+extern "C" void
 SegcoreSetSubDim(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
