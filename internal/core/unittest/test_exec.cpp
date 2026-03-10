@@ -56,6 +56,11 @@ using namespace milvus;
 using namespace milvus::exec;
 using namespace milvus::query;
 using namespace milvus::segcore;
+
+class TaskTest : public testing::TestWithParam<DataType> {
+ protected:
+    void
+    SetUp() override {
         using namespace milvus;
         using namespace milvus::query;
         using namespace milvus::segcore;

@@ -811,7 +811,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		}
 
 		if enableMultipleVectorFields && len(vecFields) > 1 {
-			return nil, nil, 0, false, 0, errors.New("multiple anns_fields exist, please specify a anns_field in search_params")
+			return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, errors.New("multiple anns_fields exist, please specify a anns_field in search_params")
 		}
 		annsFieldName = vecFields[0].Name
 	}
@@ -820,7 +820,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT,err
 	}
 	if searchInfo.collectionID > 0 && searchInfo.collectionID != t.GetCollectionID() {
-		return nil, nil, 0, false, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
+		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
 			"alias or database may have been changed: %d", searchInfo.collectionID, t.GetCollectionID())
 	}
 

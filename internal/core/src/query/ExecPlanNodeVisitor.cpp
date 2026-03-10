@@ -28,6 +28,7 @@
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
 #include "query/PlanImpl.h"
+#include "query/PlanProto.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
 

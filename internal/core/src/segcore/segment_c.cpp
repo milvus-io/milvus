@@ -281,7 +281,7 @@ AsyncSearch(CTraceContext c_trace,
     auto plan = static_cast<milvus::query::Plan*>(c_plan);
     auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
         c_placeholder_group);
-    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+
     auto future = milvus::futures::Future<milvus::SearchResult>::async(
         milvus::futures::getGlobalCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
@@ -318,9 +318,6 @@ AsyncSearch(CTraceContext c_trace,
                 }
             }
             milvus::SearchResult* result = search_result.release();
-
-            span->End();
-            milvus::tracer::CloseRootSpan();
             return result;
         });
 
