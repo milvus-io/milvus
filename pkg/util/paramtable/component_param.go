@@ -304,7 +304,7 @@ type commonConfig struct {
 	BloomFilterType           ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
 	BloomFilterApplyBatchSize ParamItem `refreshable:"true"`
-	BloomFilterMmapEnabled   ParamItem `refreshable:"false"`
+	BloomFilterMmapEnabled    ParamItem `refreshable:"false"`
 	PanicWhenPluginFail       ParamItem `refreshable:"false"`
 
 	UsePartitionKeyAsClusteringKey ParamItem `refreshable:"true"`

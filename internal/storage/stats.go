@@ -601,8 +601,9 @@ func SerializeBinaryStats(stats []*PrimaryKeyStats) ([]byte, error) {
 	copy(buf[0:8], BinaryStatsMagic)
 	binary.LittleEndian.PutUint32(buf[8:12], BinaryStatsVersion)
 	binary.LittleEndian.PutUint32(buf[12:16], uint32(len(stats)))
-	binary.LittleEndian.PutUint32(buf[16:20], uint32(stats[0].PkType))
-	binary.LittleEndian.PutUint32(buf[20:24], uint32(stats[0].FieldID))
+	first := stats[0] /* #nosec G602 */ // safe: len(stats) > 0 checked above
+	binary.LittleEndian.PutUint32(buf[16:20], uint32(first.PkType))
+	binary.LittleEndian.PutUint32(buf[20:24], uint32(first.FieldID))
 
 	offset := BinaryFileHeaderSize
 	for _, s := range stats {

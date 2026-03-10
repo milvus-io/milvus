@@ -92,7 +92,7 @@ func (m *PkStatsMmapManager) loadFileBacked(remotePath string, data []byte) ([]b
 		return nil, errors.Wrapf(err, "failed to create cache directory %s", dir)
 	}
 
-	if err := os.WriteFile(localPath, data, 0o644); err != nil {
+	if err := os.WriteFile(localPath, data, 0o600); err != nil {
 		return nil, errors.Wrapf(err, "failed to write cache file %s", localPath)
 	}
 

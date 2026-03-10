@@ -32,7 +32,7 @@ func TestIsBinaryStatsFormat(t *testing.T) {
 	assert.False(t, IsBinaryStatsFormat(nil))
 	assert.False(t, IsBinaryStatsFormat([]byte{}))
 	assert.False(t, IsBinaryStatsFormat([]byte(`[{"fieldID":100}]`)))
-	assert.True(t, IsBinaryStatsFormat([]byte("milvupks" + "xxxxxxxx")))
+	assert.True(t, IsBinaryStatsFormat([]byte("milvupks"+"xxxxxxxx")))
 }
 
 func TestSerializeDeserializeBinaryStats_Int64(t *testing.T) {
