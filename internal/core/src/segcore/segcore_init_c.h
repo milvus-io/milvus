@@ -62,6 +62,9 @@ SegcoreSetDenseVectorInterminIndexRefineWithQuantFlag(const bool);
 void
 SegcoreSetInterimIndexMemExpansionRate(const float);
 
+void
+SegcoreSetMaxGroupByGroups(const int64_t);
+
 // return value must be freed by the caller
 char*
 SegcoreSetSimdType(const char*);

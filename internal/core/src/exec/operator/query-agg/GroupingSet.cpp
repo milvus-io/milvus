@@ -27,6 +27,7 @@
 #include "exec/operator/query-agg/AggregateInfo.h"
 #include "exec/operator/query-agg/RowContainer.h"
 #include "folly/Range.h"
+#include "segcore/SegcoreConfig.h"
 
 namespace milvus {
 namespace exec {
@@ -248,8 +249,10 @@ initializeAggregates(const std::vector<AggregateInfo>& aggregates,
 
 void
 GroupingSet::createHashTable() {
-    hash_table_ =
-        std::make_unique<HashTable>(std::move(hashers_), accumulators());
+    auto maxGroups =
+        segcore::SegcoreConfig::default_config().get_max_group_by_groups();
+    hash_table_ = std::make_unique<HashTable>(
+        std::move(hashers_), accumulators(), maxGroups);
     auto& rows = *(hash_table_->rows());
     initializeAggregates(aggregates_, rows);
     lookup_ = std::make_unique<HashLookup>(hash_table_->hashers());
