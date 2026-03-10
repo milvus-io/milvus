@@ -327,6 +327,10 @@ func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error 
 	idx := -1
 	for i, field := range t.schema.Fields {
 		if field.GetIsClusteringKey() {
+			if !typeutil.IsClusteringKeyType(field.GetDataType()) {
+				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
+					fmt.Sprintf("clustering key field %s has unsupported data type %s", field.Name, field.GetDataType().String()))
+			}
 			if typeutil.IsVectorType(field.GetDataType()) &&
 				!paramtable.Get().CommonCfg.EnableVectorClusteringKey.GetAsBool() {
 				return merr.WrapErrCollectionVectorClusteringKeyNotAllowed(t.CollectionName)
