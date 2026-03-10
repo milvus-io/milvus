@@ -65,6 +65,8 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	C.SegcoreInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
 
+	C.LogOpenSSLFIPSStatus()
+
 	// update log level based on current setup
 	UpdateLogLevel(paramtable.Get().LogCfg.Level.GetValue())
 

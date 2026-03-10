@@ -33,10 +33,14 @@ COPY ./configs/ /milvus/configs/
 
 COPY ./lib/ /milvus/lib/
 
+RUN openssl fipsinstall -out /milvus/configs/ssl/fipsmodule.cnf -module /milvus/lib/ossl-modules/fips.so
+
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:/milvus/lib/libjemalloc.so
 ENV MALLOC_CONF=background_thread:true
+ENV OPENSSL_CONF=/milvus/configs/ssl/openssl-fips.cnf
+ENV OPENSSL_MODULES=/milvus/lib/ossl-modules
 
 ENTRYPOINT ["/tini", "--"]
 
