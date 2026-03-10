@@ -58,7 +58,8 @@ case "${unameOut}" in
       # shared library dependencies (e.g. libfolly_exception_tracer.so has no
       # RPATH and depends on libfolly_exception_tracer_base.so)
       export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$MILVUS_LIB_DIRS"
-      export RPATH=$MILVUS_LIB_DIRS;;
+      export RPATH=$MILVUS_LIB_DIRS  # runtime lib dirs; GO_RPATH_FLAG uses this for Go linker
+      export GO_RPATH_FLAG="-r ${RPATH}";;
     Darwin*)
       # detect llvm version by valid list (supports LLVM 15-17)
       # Note: LLVM 18 is NOT supported because Conan 1.x cannot handle the newer
@@ -109,12 +110,16 @@ case "${unameOut}" in
 
       export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}:$ROOT_DIR/internal/core/output/lib/pkgconfig"
       export DYLD_LIBRARY_PATH=$ROOT_DIR/cmake_build/lib:$ROOT_DIR/internal/core/output/lib
-      export RPATH=$DYLD_LIBRARY_PATH;;
+      export RPATH=$DYLD_LIBRARY_PATH  # kept for compatibility; not used by Go linker on macOS
+      # macOS uses DYLD_LIBRARY_PATH for runtime library resolution;
+      # Go linker's -r flag (ELF rpath) is not supported on Mach-O.
+      export GO_RPATH_FLAG="";;
     MINGW*)
       extra_path=$(cygpath -w "$ROOT_DIR/internal/core/output/lib")
       export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:+$PKG_CONFIG_PATH;}${extra_path}\pkgconfig"
       export LD_LIBRARY_PATH=$extra_path
-      export RPATH=$LD_LIBRARY_PATH;;
+      export RPATH=$LD_LIBRARY_PATH  # runtime lib dirs; GO_RPATH_FLAG uses this for Go linker
+      export GO_RPATH_FLAG="-r ${RPATH}";;
     *)
       echo "does not supported"
 esac

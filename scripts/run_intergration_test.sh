@@ -47,7 +47,7 @@ TEST_CMD_WITH_ARGS=(
     -covermode=atomic
     -caseTimeout=20m
     -timeout=60m
-    -ldflags="-r ${RPATH}"
+    -ldflags="${GO_RPATH_FLAG}"
 )
 
 function test_cmd() {

@@ -56,7 +56,7 @@ for d in cmd/tools internal pkg client; do
         -coverprofile="$PROFILE" \
         -covermode=atomic \
         -p "$PARALLEL" \
-        -ldflags="-r ${RPATH}" \
+        -ldflags="${GO_RPATH_FLAG}" \
         ./...
 
     if [ -f "$PROFILE" ]; then
