@@ -1299,6 +1299,7 @@ func checkVectorIndexExist(ctx context.Context, dbName, collectionName string, c
 // detectBoolPropChange detects whether a boolean collection property is being
 // changed via Properties or DeleteKeys. parseFn validates and parses the new
 // value when the key is found in Properties.
+// only one of properties or deleteKeys should be provided
 func detectBoolPropChange(
 	oldValue bool,
 	propKey string,
@@ -1306,6 +1307,7 @@ func detectBoolPropChange(
 	deleteKeys []string,
 	parseFn func() (bool, error),
 ) (newValue bool, changed bool, err error) {
+	// this is duplicated with the check in alterCollectionTask PreExecute
 	if len(properties) > 0 && len(deleteKeys) > 0 {
 		return false, false, merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
 	}

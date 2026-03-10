@@ -118,6 +118,17 @@ func adjustAutoIndexParamsByDataType(config map[string]string, dataType schemapb
 	return adjusted
 }
 
+func getDenseFloatAutoIndexParams(collectionProperties []*commonpb.KeyValuePair) (map[string]string, error) {
+	bigTopKOptimizationEnabled, err := common.IsBigTopKOptimizationEnabled(collectionProperties...)
+	if err != nil {
+		return nil, err
+	}
+	if bigTopKOptimizationEnabled {
+		return Params.AutoIndexConfig.BigTopKIndexParams.GetAsJSONMap(), nil
+	}
+	return Params.AutoIndexConfig.IndexParams.GetAsJSONMap(), nil
+}
+
 type createIndexTask struct {
 	baseTask
 	Condition
@@ -335,17 +346,9 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsDenseFloatVectorType(cit.fieldSchema.ElementType)) {
-				var autoIndexParams map[string]string
-				bigTopKOptimizationEnabled, err := common.IsBigTopKOptimizationEnabled(cit.collectionProperties...)
+				autoIndexParams, err := getDenseFloatAutoIndexParams(cit.collectionProperties)
 				if err != nil {
 					return err
-				}
-				if bigTopKOptimizationEnabled {
-					// Use BigTopK-optimized index params
-					autoIndexParams = Params.AutoIndexConfig.BigTopKIndexParams.GetAsJSONMap()
-				} else {
-					// Use regular autoindex float vector index params
-					autoIndexParams = Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
 				}
 				// override float vector index params by autoindex
 				// filter incompatible refine_type for fp16/bf16 vectors
@@ -443,16 +446,10 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			var config map[string]string
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsDenseFloatVectorType(cit.fieldSchema.ElementType)) {
-				bigTopKOptimizationEnabled, err := common.IsBigTopKOptimizationEnabled(cit.collectionProperties...)
+				var err error
+				config, err = getDenseFloatAutoIndexParams(cit.collectionProperties)
 				if err != nil {
 					return err
-				}
-				if bigTopKOptimizationEnabled {
-					// Use BigTopK-optimized index params
-					config = Params.AutoIndexConfig.BigTopKIndexParams.GetAsJSONMap()
-				} else {
-					// Use regular autoindex float vector index params
-					config = Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
 				}
 				// filter incompatible refine_type for fp16/bf16 vectors
 				dataType := cit.fieldSchema.DataType
