@@ -22,6 +22,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -583,4 +584,31 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 
 func TestRetrieve(t *testing.T) {
 	suite.Run(t, new(RetrieveSuite))
+}
+
+func TestShouldEnableIgnoreNonPkWithGroupBy(t *testing.T) {
+	t.Run("plain multi segment", func(t *testing.T) {
+		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{
+			Limit: 10,
+		}}
+		assert.True(t, shouldEnableIgnoreNonPk(req, 3, true))
+	})
+
+	t.Run("group by multi segment", func(t *testing.T) {
+		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{
+			Limit:           10,
+			GroupByFieldIds: []int64{100},
+			Aggregates: []*planpb.Aggregate{
+				{Op: planpb.AggregateOp_count, FieldId: 500},
+			},
+		}}
+		assert.False(t, shouldEnableIgnoreNonPk(req, 3, true))
+	})
+
+	t.Run("single segment", func(t *testing.T) {
+		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{
+			Limit: 10,
+		}}
+		assert.False(t, shouldEnableIgnoreNonPk(req, 1, true))
+	})
 }

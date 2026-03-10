@@ -1,42 +1,13 @@
 package segments
 
 import (
-	"context"
-
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
-
-type internalReducer interface {
-	Reduce(context.Context, []*internalpb.RetrieveResults) (*internalpb.RetrieveResults, error)
-}
-
-func CreateInternalReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema) internalReducer {
-	if len(req.GetReq().GetAggregates()) > 0 || len(req.GetReq().GetGroupByFieldIds()) > 0 {
-		return NewInternalAggReducer(req.GetReq().GetGroupByFieldIds(), req.GetReq().GetAggregates(), req.GetReq().GetLimit(), schema)
-	}
-	return newDefaultLimitReducer(req, schema)
-}
-
-type segCoreReducer interface {
-	Reduce(context.Context, []*segcorepb.RetrieveResults, []Segment, *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)
-}
-
-func CreateSegCoreReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, manager *Manager) segCoreReducer {
-	if len(req.GetReq().GetGroupByFieldIds()) > 0 || len(req.GetReq().GetAggregates()) > 0 {
-		return NewSegcoreAggReducer(req.GetReq().GetGroupByFieldIds(), req.GetReq().GetAggregates(), req.GetReq().GetLimit(), schema)
-	}
-
-	return newDefaultLimitReducerSegcore(req, schema, manager)
-}
 
 type TimestampedRetrieveResult[T interface {
 	typeutil.ResultWithID

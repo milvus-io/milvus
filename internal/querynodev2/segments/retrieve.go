@@ -46,7 +46,7 @@ type RetrieveSegmentResult struct {
 func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, error) {
 	resultCh := make(chan RetrieveSegmentResult, len(segments))
 
-	plan.SetIgnoreNonPk(len(segments) > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && plan.ShouldIgnoreNonPk())
+	plan.SetIgnoreNonPk(shouldEnableIgnoreNonPk(req, len(segments), plan.ShouldIgnoreNonPk()))
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
@@ -100,6 +100,11 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		results = append(results, r)
 	}
 	return results, nil
+}
+
+func shouldEnableIgnoreNonPk(req *querypb.QueryRequest, segmentNum int, planShouldIgnoreNonPk bool) bool {
+	hasGroupBy := len(req.GetReq().GetGroupByFieldIds()) > 0 || len(req.GetReq().GetAggregates()) > 0
+	return !hasGroupBy && segmentNum > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && planShouldIgnoreNonPk
 }
 
 func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {

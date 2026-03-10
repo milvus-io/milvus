@@ -117,3 +117,7 @@ func ToReduceType(val int32) IReduceType {
 func ShouldUseInputLimit(reduceType IReduceType) bool {
 	return reduceType == IReduceNoOrder || reduceType == IReduceInOrder
 }
+
+func IsOrderByReduce(reduceType IReduceType) bool {
+	return reduceType == IReduceInOrder || reduceType == IReduceInOrderForBest
+}
