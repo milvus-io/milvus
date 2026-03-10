@@ -23,51 +23,18 @@ type l0CompactionPolicy struct {
 
 	activeCollections *activeCollections
 	allocator         allocator.Allocator
-
-	// key: collectionID, value: reference count
-	skipCompactionCollections map[int64]int
-	skipLocker                sync.RWMutex
 }
 
 func newL0CompactionPolicy(meta *meta, allocator allocator.Allocator) *l0CompactionPolicy {
 	return &l0CompactionPolicy{
-		meta:                      meta,
-		activeCollections:         newActiveCollections(),
-		allocator:                 allocator,
-		skipCompactionCollections: make(map[int64]int),
+		meta:              meta,
+		activeCollections: newActiveCollections(),
+		allocator:         allocator,
 	}
 }
 
 func (policy *l0CompactionPolicy) Enable() bool {
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool()
-}
-
-func (policy *l0CompactionPolicy) AddSkipCollection(collectionID UniqueID) {
-	policy.skipLocker.Lock()
-	defer policy.skipLocker.Unlock()
-
-	if _, ok := policy.skipCompactionCollections[collectionID]; !ok {
-		policy.skipCompactionCollections[collectionID] = 1
-	} else {
-		policy.skipCompactionCollections[collectionID]++
-	}
-}
-
-func (policy *l0CompactionPolicy) RemoveSkipCollection(collectionID UniqueID) {
-	policy.skipLocker.Lock()
-	defer policy.skipLocker.Unlock()
-	refCount := policy.skipCompactionCollections[collectionID]
-	if refCount > 1 {
-		policy.skipCompactionCollections[collectionID]--
-	} else {
-		delete(policy.skipCompactionCollections, collectionID)
-	}
-}
-
-func (policy *l0CompactionPolicy) isSkipCollection(collectionID UniqueID) bool {
-	policy.skipLocker.RLock()
-	defer policy.skipLocker.RUnlock()
-	return policy.skipCompactionCollections[collectionID] > 0
 }
 
 // Notify policy to record the active updated(when adding a new L0 segment) collections.
@@ -94,10 +61,6 @@ func (policy *l0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 	}
 	events = make(map[CompactionTriggerType][]CompactionView)
 	for collID, segments := range latestCollSegs {
-		if policy.isSkipCollection(collID) {
-			continue
-		}
-
 		collection := policy.meta.GetCollection(collID)
 		if collection == nil {
 			continue
@@ -135,9 +98,6 @@ func (policy *l0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 func (policy *l0CompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64) ([]CompactionView, int64, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 	log.Info("start trigger collection l0 compaction")
-	if policy.isSkipCollection(collectionID) {
-		return nil, 0, merr.WrapErrCollectionNotLoaded(collectionID, "the collection being paused by importing cannot do force l0 compaction")
-	}
 	collection := policy.meta.GetCollection(collectionID)
 	if collection == nil {
 		log.Warn("collection not found in meta")
