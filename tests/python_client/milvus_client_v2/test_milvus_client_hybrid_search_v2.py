@@ -647,7 +647,10 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                                                   "output_fields": [self.primary_key_field_name,
                                                                     self.string_field_name]})[0]
             for i in range(nq):
-                assert hybrid_res[i].ids == search_res[i].ids
+                # Compare as sets: when scores are tied the tie-breaking order
+                # is non-deterministic across architectures (x86 vs ARM) and
+                # runs, so asserting a strict ordered list is flaky.
+                assert set(hybrid_res[i].ids) == set(search_res[i].ids)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_search_RRFRanker_default_parameter(self):
