@@ -892,6 +892,7 @@ TEST(FilterOnlySearchTest, CSearchFilterOnlyBasic) {
                                          folly::CancellationToken(),
                                          0,
                                          0,
+                                         0,
                                          true);
 
     // Verify filter-only results
@@ -950,6 +951,7 @@ TEST(FilterOnlySearchTest, CSearchFilterOnlyNoFilter) {
                                          nullptr,
                                          MAX_TIMESTAMP,
                                          folly::CancellationToken(),
+                                         0,
                                          0,
                                          0,
                                          true);
@@ -1013,6 +1015,7 @@ TEST(FilterOnlySearchTest, CSearchFilterOnlyNoMatch) {
                                          nullptr,
                                          MAX_TIMESTAMP,
                                          folly::CancellationToken(),
+                                         0,
                                          0,
                                          0,
                                          true);
@@ -1177,6 +1180,7 @@ TEST(FilterOnlySearchTest, CSearchFilterOnlyEmptySegment) {
                                          nullptr,
                                          MAX_TIMESTAMP,
                                          folly::CancellationToken(),
+                                         0,
                                          0,
                                          0,
                                          true);

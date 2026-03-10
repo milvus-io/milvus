@@ -226,8 +226,15 @@ CSearch(CSegmentInterface c_segment,
         uint64_t timestamp,
         CSearchResult* result,
         bool filter_only = false) {
-    auto future = AsyncSearch(
-        {}, c_segment, c_plan, c_placeholder_group, timestamp, 0, 0, 0, filter_only);
+    auto future = AsyncSearch({},
+                              c_segment,
+                              c_plan,
+                              c_placeholder_group,
+                              timestamp,
+                              0,
+                              0,
+                              0,
+                              filter_only);
     auto futurePtr = static_cast<milvus::futures::IFuture*>(
         static_cast<void*>(static_cast<CFuture*>(future)));
 

@@ -293,12 +293,11 @@ AsyncSearch(CTraceContext c_trace,
          consistency_level,
          collection_ttl,
          entity_ttl_physical_time_us,
-        filter_only](folly::CancellationToken cancel_token) {
+         filter_only](folly::CancellationToken cancel_token) {
             // save trace context into search_info
             auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
             trace_ctx.traceID = c_trace.traceID;
             trace_ctx.traceFlags = c_trace.traceFlags;
-
 
             segment->LazyCheckSchema(plan->schema_);
 
