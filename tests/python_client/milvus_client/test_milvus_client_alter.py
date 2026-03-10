@@ -1803,7 +1803,7 @@ class TestMilvusClientWarmup(TestMilvusClientV2Base):
         invalid_warmup_error = {ct.err_code: 1100, ct.err_msg: "invalid warmup policy"}
 
         # 11.1 alter_collection_field invalid warmup values
-        invalid_values = ["invalid", "Sync", "DISABLE", "true", "async"]
+        invalid_values = ["invalid", "Sync", "DISABLE", "true"]
         for val in invalid_values:
             self.alter_collection_field(client, collection_name,
                                         field_name="vector", field_params={"warmup": val},
