@@ -159,14 +159,18 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.SearchRequest.DbID = 0 // todo
 	t.SearchRequest.CollectionID = collID
 	log := log.Ctx(ctx).With(zap.Int64("collID", collID), zap.String("collName", collectionName))
-
-	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, collID)
+	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
-		log.Warn("Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
-			zap.String("collectionName", collectionName), zap.Int64("collectionID", collID), zap.Error(err))
+		log.Warn("get collection schema failed", zap.Error(err))
 		return err
 	}
-	t.schema = collectionInfo.schema
+
+	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
+	if err2 != nil {
+		log.Warn("Proxy::searchTask::PreExecute failed to GetCollectionInfo from cache",
+			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID), zap.Error(err2))
+		return err2
+	}
 	t.bigTopKOptimization = collectionInfo.bigTopKOptimization
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
