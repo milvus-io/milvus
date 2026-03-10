@@ -133,7 +133,7 @@ func TestOnEvent(t *testing.T) {
 
 	client := v3client.New(e.Server)
 
-	dir, _ := os.MkdirTemp("", "milvus")
+	dir := t.TempDir()
 	yamlFile := path.Join(dir, "milvus.yaml")
 	os.WriteFile(yamlFile, []byte("a.b: \"\""), 0o600)
 	mgr, _ := Init(WithEnvSource(formatKey),
