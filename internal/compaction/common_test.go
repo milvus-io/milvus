@@ -18,7 +18,6 @@ package compaction
 
 import (
 	"context"
-	"io"
 	"path/filepath"
 	"testing"
 
@@ -508,6 +507,6 @@ func (s *CommonSuite) TestComposeDeleteFromDeltalogsV2() {
 
 		segment := &datapb.CompactionSegmentBinlogs{Manifest: manifestPath}
 		_, err := ComposeDeleteFromDeltalogs(ctx, schemapb.DataType_Int64, segment, options...)
-		s.ErrorIs(err, io.EOF)
+		s.NoError(err)
 	})
 }

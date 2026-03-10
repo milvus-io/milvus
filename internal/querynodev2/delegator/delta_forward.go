@@ -119,7 +119,12 @@ func (sd *shardDelegator) addL0GrowingBF(ctx context.Context, segment segments.S
 func (sd *shardDelegator) addL0ForGrowingLoad(ctx context.Context, segment segments.Segment) error {
 	deltalogs := sd.getLevel0Deltalogs(segment.Partition())
 	log.Info("forwarding L0 via loader...", zap.Int64("segmentID", segment.ID()), zap.Int("deltalogsNum", len(deltalogs)))
-	return sd.loader.LoadDeltaLogs(ctx, segment, deltalogs)
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    segment.ID(),
+		CollectionID: segment.Collection(),
+		Deltalogs:    deltalogs,
+	}
+	return sd.loader.LoadDeltaLogs(ctx, segment, loadInfo)
 }
 
 func (sd *shardDelegator) forwardL0ByBF(ctx context.Context,

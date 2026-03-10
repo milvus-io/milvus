@@ -17,6 +17,7 @@
 #include "plan/PlanNodeIdGenerator.h"
 #include "test_utils/storage_test_utils.h"
 #include "exec/expression/function/FunctionFactory.h"
+#include "exec/operator/query-agg/CountAggregateBase.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 
@@ -466,10 +467,21 @@ TEST_P(QueryAggTest, CountAggTest) {
 
 TEST_P(QueryAggTest, GlobalCountAggTest) {
     std::vector<milvus::plan::PlanNodePtr> sources;
-    //set up mvcc_node + agg_node: global aggregation no need project column
+    // MvccNode -> ProjectNode (empty fields) -> AggNode
+    // ProjectNode is always created in production (PlanProto.cpp),
+    // so tests should match that code path.
     PlanNodePtr mvcc_node = std::make_shared<milvus::plan::MvccNode>(
         milvus::plan::GetNextPlanNodeId(), sources);
     sources = std::vector<milvus::plan::PlanNodePtr>{mvcc_node};
+
+    PlanNodePtr project_node = std::make_shared<milvus::plan::ProjectNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<FieldId>{},
+        std::vector<std::string>{},
+        std::vector<DataType>{},
+        sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{project_node};
+
     std::string agg_name = "count";
     std::vector<plan::AggregationNode::Aggregate> aggregates;
     //  count(*)
@@ -520,6 +532,17 @@ TEST_P(QueryAggTest, GlobalCountEmptyTest) {
         milvus::plan::GetNextPlanNodeId(), always_false_expr, sources);
     sources = std::vector<milvus::plan::PlanNodePtr>{filter_node};
 
+    // ProjectNode with empty field list to consume the filter bitmap,
+    // matching the production code path (PlanProto.cpp always creates
+    // ProjectNode when aggregation is present).
+    PlanNodePtr project_node = std::make_shared<milvus::plan::ProjectNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<FieldId>{},
+        std::vector<std::string>{},
+        std::vector<DataType>{},
+        sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{project_node};
+
     std::string agg_name = "count";
     std::vector<plan::AggregationNode::Aggregate> aggregates;
     //  count(*)
@@ -550,6 +573,142 @@ TEST_P(QueryAggTest, GlobalCountEmptyTest) {
     auto actual_count = field_data.scalars().long_data().data(0);
     EXPECT_EQ(0, actual_count);
     // count(*) will get zero if no valid input into agg node
+}
+
+// Regression test for #47509: count(*) returns wrong result when queried
+// together with count(nullable_field) in global aggregation (no GROUP BY).
+// Before fix, populateTempVectors had a buggy special case that passed the
+// nullable field column to count(*), making count(*) == count(field).
+TEST_P(QueryAggTest, GlobalCountStarWithCountField) {
+    auto nullable = GetParam();
+    std::vector<milvus::plan::PlanNodePtr> sources;
+
+    // MvccNode
+    PlanNodePtr mvcc_node = std::make_shared<milvus::plan::MvccNode>(
+        milvus::plan::GetNextPlanNodeId(), sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{mvcc_node};
+
+    // ProjectNode with double field (for count(double))
+    auto double_id = field_map_[double_field];
+    PlanNodePtr project_node = std::make_shared<milvus::plan::ProjectNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<FieldId>{double_id},
+        std::vector<std::string>{double_field},
+        std::vector<DataType>{DataType::DOUBLE},
+        sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{project_node};
+
+    // Global aggregation: count(*), count(double)
+    std::string agg_name = "count";
+    std::vector<plan::AggregationNode::Aggregate> aggregates;
+    // count(*)
+    {
+        auto call = std::make_shared<const expr::CallExpr>(
+            agg_name, std::vector<expr::TypedExprPtr>{}, nullptr);
+        aggregates.emplace_back(plan::AggregationNode::Aggregate{call});
+        aggregates.back().resultType_ =
+            GetAggResultType(agg_name, DataType::NONE);
+    }
+    // count(double)
+    {
+        auto agg_input = std::make_shared<expr::FieldAccessTypeExpr>(
+            DataType::DOUBLE, double_field, double_id);
+        auto call = std::make_shared<const expr::CallExpr>(
+            agg_name, std::vector<expr::TypedExprPtr>{agg_input}, nullptr);
+        aggregates.emplace_back(plan::AggregationNode::Aggregate{call});
+        aggregates.back().rawInputTypes_.emplace_back(DataType::DOUBLE);
+        aggregates.back().resultType_ =
+            GetAggResultType(agg_name, DataType::DOUBLE);
+    }
+
+    PlanNodePtr agg_node = std::make_shared<plan::AggregationNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<expr::FieldAccessTypeExprPtr>{},
+        std::vector<std::string>{agg_name, agg_name},
+        std::move(aggregates),
+        sources);
+
+    auto retrieve_plan = createRetrievePlan(schema_, agg_node, num_rows_);
+    auto retrieve_results = segment_->Retrieve(nullptr,
+                                               retrieve_plan.get(),
+                                               MAX_TIMESTAMP,
+                                               DEFAULT_MAX_OUTPUT_SIZE,
+                                               false);
+
+    ASSERT_EQ(retrieve_results->fields_data_size(), 2);
+    auto count_star =
+        retrieve_results->fields_data(0).scalars().long_data().data(0);
+    auto count_double =
+        retrieve_results->fields_data(1).scalars().long_data().data(0);
+
+    std::cout << "GlobalCountStarWithCountField: count(*)=" << count_star
+              << " count(double)=" << count_double << " nullable=" << nullable
+              << std::endl;
+
+    // count(*) must equal total rows regardless of nullable
+    EXPECT_EQ(count_star, num_rows_);
+
+    if (nullable) {
+        // count(nullable_field) should be less than count(*)
+        EXPECT_LT(count_double, count_star);
+        EXPECT_GT(count_double, 0);
+    } else {
+        EXPECT_EQ(count_double, num_rows_);
+    }
+}
+
+// Test ProjectNode with empty field list: when only count(*) is requested,
+// ProjectNode has no fields to project but must still correctly report the
+// row count via resize(selected_count).
+TEST_P(QueryAggTest, CountStarOnlyGlobalWithProjectNode) {
+    std::vector<milvus::plan::PlanNodePtr> sources;
+
+    // MvccNode
+    PlanNodePtr mvcc_node = std::make_shared<milvus::plan::MvccNode>(
+        milvus::plan::GetNextPlanNodeId(), sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{mvcc_node};
+
+    // Empty ProjectNode (no fields projected)
+    PlanNodePtr project_node = std::make_shared<milvus::plan::ProjectNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<FieldId>{},
+        std::vector<std::string>{},
+        std::vector<DataType>{},
+        sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{project_node};
+
+    // Global count(*)
+    std::string agg_name = "count";
+    std::vector<plan::AggregationNode::Aggregate> aggregates;
+    {
+        auto call = std::make_shared<const expr::CallExpr>(
+            agg_name, std::vector<expr::TypedExprPtr>{}, nullptr);
+        aggregates.emplace_back(plan::AggregationNode::Aggregate{call});
+        aggregates.back().resultType_ =
+            GetAggResultType(agg_name, DataType::NONE);
+    }
+
+    PlanNodePtr agg_node = std::make_shared<plan::AggregationNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<expr::FieldAccessTypeExprPtr>{},
+        std::vector<std::string>{agg_name},
+        std::move(aggregates),
+        sources);
+
+    auto retrieve_plan = createRetrievePlan(schema_, agg_node, num_rows_);
+    auto retrieve_results = segment_->Retrieve(nullptr,
+                                               retrieve_plan.get(),
+                                               MAX_TIMESTAMP,
+                                               DEFAULT_MAX_OUTPUT_SIZE,
+                                               false);
+
+    ASSERT_EQ(retrieve_results->fields_data_size(), 1);
+    auto& field_data = retrieve_results->fields_data(0);
+    ASSERT_EQ(field_data.scalars().long_data().data_size(), 1);
+    auto actual_count = field_data.scalars().long_data().data(0);
+    std::cout << "CountStarOnlyGlobalWithProjectNode: count=" << actual_count
+              << std::endl;
+    EXPECT_EQ(num_rows_, actual_count);
 }
 
 // Test aggregation through segment->Retrieve() API to cover
@@ -633,4 +792,262 @@ TEST_P(QueryAggTest, RetrieveAggregationWithValidityBitmap) {
     // Verify the data values are present
     ASSERT_TRUE(field_data.has_scalars());
     EXPECT_GT(data_size, 0) << "Should have result data";
+}
+
+// ============================================================
+// Direct unit tests for CountAggregate optimized paths
+// ============================================================
+
+// Helper: allocate a group row buffer with int64_t accumulator at given offset.
+// Layout: [nullByte(1)] [padding(7)] [int64_t accumulator]
+// Total 16 bytes, accumulator at offset 8 (8-byte aligned).
+struct CountAggTestHelper {
+    static constexpr int32_t kAccOffset = 8;
+    static constexpr int32_t kNullByte = 0;
+    static constexpr uint8_t kNullMask = 1;
+    static constexpr int32_t kRowSizeOffset = 0;
+    static constexpr size_t kRowSize = 16;
+
+    static void
+    setupAggregate(milvus::exec::CountAggregate& agg) {
+        agg.setOffsets(kAccOffset, kNullByte, kNullMask, kRowSizeOffset);
+    }
+
+    static std::vector<char>
+    makeGroupRow() {
+        return std::vector<char>(kRowSize, 0);
+    }
+
+    static int64_t
+    getCount(const std::vector<char>& row) {
+        return *reinterpret_cast<const int64_t*>(row.data() + kAccOffset);
+    }
+};
+
+// addSingleGroupRawInput: all valid (nullCount == 0)
+TEST(CountAggregateTest, SingleGroupAllValid) {
+    milvus::exec::CountAggregate agg;
+    CountAggTestHelper::setupAggregate(agg);
+
+    auto row = CountAggTestHelper::makeGroupRow();
+    char* group = row.data();
+    const std::vector<milvus::vector_size_t> indices = {0};
+    agg.initializeNewGroups(&group, indices);
+
+    // 100 rows, all valid
+    auto col =
+        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 100);
+    std::vector<milvus::VectorPtr> input = {col};
+    agg.addSingleGroupRawInput(group, 100, input);
+
+    EXPECT_EQ(CountAggTestHelper::getCount(row), 100);
+}
+
+// addSingleGroupRawInput: all null
+TEST(CountAggregateTest, SingleGroupAllNull) {
+    milvus::exec::CountAggregate agg;
+    CountAggTestHelper::setupAggregate(agg);
+
+    auto row = CountAggTestHelper::makeGroupRow();
+    char* group = row.data();
+    const std::vector<milvus::vector_size_t> indices = {0};
+    agg.initializeNewGroups(&group, indices);
+
+    auto col =
+        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 100);
+    for (size_t i = 0; i < 100; i++) {
+        col->nullAt(i);
+    }
+    std::vector<milvus::VectorPtr> input = {col};
+    agg.addSingleGroupRawInput(group, 100, input);
+
+    EXPECT_EQ(CountAggTestHelper::getCount(row), 0);
+}
+
+// addSingleGroupRawInput: mixed nulls
+TEST(CountAggregateTest, SingleGroupMixedNulls) {
+    milvus::exec::CountAggregate agg;
+    CountAggTestHelper::setupAggregate(agg);
+
+    auto row = CountAggTestHelper::makeGroupRow();
+    char* group = row.data();
+    const std::vector<milvus::vector_size_t> indices = {0};
+    agg.initializeNewGroups(&group, indices);
+
+    // 100 rows, even indices are null
+    auto col =
+        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 100);
+    for (size_t i = 0; i < 100; i += 2) {
+        col->nullAt(i);
+    }
+    std::vector<milvus::VectorPtr> input = {col};
+    agg.addSingleGroupRawInput(group, 100, input);
+
+    EXPECT_EQ(CountAggTestHelper::getCount(row), 50);
+}
+
+// addSingleGroupRawInput: single row valid
+TEST(CountAggregateTest, SingleGroupSingleRow) {
+    milvus::exec::CountAggregate agg;
+    CountAggTestHelper::setupAggregate(agg);
+
+    auto row = CountAggTestHelper::makeGroupRow();
+    char* group = row.data();
+    const std::vector<milvus::vector_size_t> indices = {0};
+    agg.initializeNewGroups(&group, indices);
+
+    auto col =
+        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 1);
+    std::vector<milvus::VectorPtr> input = {col};
+    agg.addSingleGroupRawInput(group, 1, input);
+
+    EXPECT_EQ(CountAggTestHelper::getCount(row), 1);
+}
+
+// addSingleGroupRawInput: non-64-multiple size (e.g., 65 rows)
+TEST(CountAggregateTest, SingleGroupNon64Multiple) {
+    milvus::exec::CountAggregate agg;
+    CountAggTestHelper::setupAggregate(agg);
+
+    auto row = CountAggTestHelper::makeGroupRow();
+    char* group = row.data();
+    const std::vector<milvus::vector_size_t> indices = {0};
+    agg.initializeNewGroups(&group, indices);
+
+    // 65 rows, last row is null
+    auto col =
+        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 65);
+    col->nullAt(64);
+    std::vector<milvus::VectorPtr> input = {col};
+    agg.addSingleGroupRawInput(group, 65, input);
+
+    EXPECT_EQ(CountAggTestHelper::getCount(row), 64);
+}
+
+// addRawInput (GROUP BY): all valid, multiple groups
+TEST(CountAggregateTest, GroupByAllValid) {
+    milvus::exec::CountAggregate agg;
+    CountAggTestHelper::setupAggregate(agg);
+
+    // 3 groups
+    auto g0 = CountAggTestHelper::makeGroupRow();
+    auto g1 = CountAggTestHelper::makeGroupRow();
+    auto g2 = CountAggTestHelper::makeGroupRow();
+    std::vector<char*> groups_vec = {
+        g0.data(), g1.data(), g2.data(), g0.data(), g1.data(), g2.data()};
+    char** groups = groups_vec.data();
+
+    const std::vector<milvus::vector_size_t> indices = {0, 1, 2};
+    char* init_groups[] = {g0.data(), g1.data(), g2.data()};
+    agg.initializeNewGroups(init_groups, indices);
+
+    // 6 rows, all valid, round-robin across 3 groups
+    auto col =
+        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 6);
+    std::vector<milvus::VectorPtr> input = {col};
+    agg.addRawInput(groups, 6, input);
+
+    EXPECT_EQ(CountAggTestHelper::getCount(g0), 2);
+    EXPECT_EQ(CountAggTestHelper::getCount(g1), 2);
+    EXPECT_EQ(CountAggTestHelper::getCount(g2), 2);
+}
+
+// addRawInput (GROUP BY): mixed nulls with multiple groups
+TEST(CountAggregateTest, GroupByMixedNulls) {
+    milvus::exec::CountAggregate agg;
+    CountAggTestHelper::setupAggregate(agg);
+
+    auto g0 = CountAggTestHelper::makeGroupRow();
+    auto g1 = CountAggTestHelper::makeGroupRow();
+    // rows: [g0, g1, g0, g1, g0, g1]
+    // nulls: row 1 and 4 are null
+    std::vector<char*> groups_vec = {
+        g0.data(), g1.data(), g0.data(), g1.data(), g0.data(), g1.data()};
+    char** groups = groups_vec.data();
+
+    const std::vector<milvus::vector_size_t> indices = {0, 1};
+    char* init_groups[] = {g0.data(), g1.data()};
+    agg.initializeNewGroups(init_groups, indices);
+
+    auto col =
+        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 6);
+    col->nullAt(1);  // g1 row null
+    col->nullAt(4);  // g0 row null
+    std::vector<milvus::VectorPtr> input = {col};
+    agg.addRawInput(groups, 6, input);
+
+    // g0: rows 0,2,4 -> row 4 null -> count 2
+    // g1: rows 1,3,5 -> row 1 null -> count 2
+    EXPECT_EQ(CountAggTestHelper::getCount(g0), 2);
+    EXPECT_EQ(CountAggTestHelper::getCount(g1), 2);
+}
+
+// addRawInput (GROUP BY): all null
+TEST(CountAggregateTest, GroupByAllNull) {
+    milvus::exec::CountAggregate agg;
+    CountAggTestHelper::setupAggregate(agg);
+
+    auto g0 = CountAggTestHelper::makeGroupRow();
+    std::vector<char*> groups_vec = {g0.data(), g0.data(), g0.data()};
+    char** groups = groups_vec.data();
+
+    const std::vector<milvus::vector_size_t> indices = {0};
+    char* init_groups[] = {g0.data()};
+    agg.initializeNewGroups(init_groups, indices);
+
+    auto col =
+        std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64, 3);
+    col->nullAt(0);
+    col->nullAt(1);
+    col->nullAt(2);
+    std::vector<milvus::VectorPtr> input = {col};
+    agg.addRawInput(groups, 3, input);
+
+    EXPECT_EQ(CountAggTestHelper::getCount(g0), 0);
+}
+
+// addRawInput (GROUP BY): non-64-multiple size with mixed nulls
+TEST(CountAggregateTest, GroupByNon64Multiple) {
+    milvus::exec::CountAggregate agg;
+    CountAggTestHelper::setupAggregate(agg);
+
+    auto g0 = CountAggTestHelper::makeGroupRow();
+    const std::vector<milvus::vector_size_t> indices = {0};
+    char* init_groups[] = {g0.data()};
+    agg.initializeNewGroups(init_groups, indices);
+
+    // 65 rows all in one group, row 63 and 64 are null
+    const int numRows = 65;
+    std::vector<char*> groups_vec(numRows, g0.data());
+    char** groups = groups_vec.data();
+
+    auto col = std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64,
+                                                      numRows);
+    col->nullAt(63);
+    col->nullAt(64);
+    std::vector<milvus::VectorPtr> input = {col};
+    agg.addRawInput(groups, numRows, input);
+
+    EXPECT_EQ(CountAggTestHelper::getCount(g0), 63);
+}
+
+// Contract test: nullCount()-based path matches ValidAt() semantics
+TEST(CountAggregateTest, NullCountMatchesValidAt) {
+    // Verify that size() - nullCount() equals the number of ValidAt()==true
+    for (int size : {1, 7, 63, 64, 65, 127, 128, 129, 200}) {
+        auto col = std::make_shared<milvus::ColumnVector>(
+            milvus::DataType::INT64, size);
+        // null every 3rd element
+        for (int i = 0; i < size; i += 3) {
+            col->nullAt(i);
+        }
+        int64_t validAtCount = 0;
+        for (int i = 0; i < size; i++) {
+            if (col->ValidAt(i))
+                validAtCount++;
+        }
+        EXPECT_EQ(col->size() - static_cast<int64_t>(col->nullCount()),
+                  validAtCount)
+            << "Mismatch at size=" << size;
+    }
 }

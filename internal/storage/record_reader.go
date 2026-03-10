@@ -94,7 +94,12 @@ func (ir *IterativeRecordReader) Close() error {
 	return nil
 }
 
-func (ir *IterativeRecordReader) Next() (Record, error) {
+func (ir *IterativeRecordReader) Next() (rec Record, err error) {
+	defer func() {
+		if x := recover(); x != nil {
+			rec, err = nil, fmt.Errorf("internal error recovered: %v", x)
+		}
+	}()
 	if ir.cur == nil {
 		r, err := ir.iterate()
 		if err != nil {
@@ -102,7 +107,7 @@ func (ir *IterativeRecordReader) Next() (Record, error) {
 		}
 		ir.cur = r
 	}
-	rec, err := ir.cur.Next()
+	rec, err = ir.cur.Next()
 	if err == io.EOF {
 		closeErr := ir.cur.Close()
 		if closeErr != nil {

@@ -241,7 +241,7 @@ type commonConfig struct {
 	BeamWidthRatio                      ParamItem `refreshable:"true"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
-	EnableNamespace                     ParamItem `refreshable:"false"`
+	ParquetStatsSkipIndex               ParamItem `refreshable:"true"`
 
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
@@ -619,14 +619,14 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
 
-	p.EnableNamespace = ParamItem{
-		Key:          "common.namespace.enabled",
+	p.ParquetStatsSkipIndex = ParamItem{
+		Key:          "common.parquetStatsSkipIndex.enabled",
 		Version:      "2.6.0",
 		DefaultValue: "false",
-		Doc:          "whether to enable namespace, this parameter may be deprecated in the future. Just keep it for compatibility.",
+		Doc:          "whether to skip parquet stats index when reading; set true to enable skipping.",
 		Export:       true,
 	}
-	p.EnableNamespace.Init(base.mgr)
+	p.ParquetStatsSkipIndex.Init(base.mgr)
 
 	p.StorageType = ParamItem{
 		Key:          "common.storageType",
@@ -976,7 +976,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.UseLoonFFI = ParamItem{
 		Key:          "common.storage.useLoonFFI",
 		Version:      "2.6.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Export:       true,
 	}
 	p.UseLoonFFI.Init(base.mgr)
@@ -1928,6 +1928,7 @@ type proxyConfig struct {
 	MustUsePartitionKey             ParamItem `refreshable:"true"`
 	SkipAutoIDCheck                 ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck           ParamItem `refreshable:"true"`
+	ResolveAliasForPrivilege        ParamItem `refreshable:"true"`
 	MaxVarCharLength                ParamItem `refreshable:"false"`
 	MaxTextLength                   ParamItem `refreshable:"false"`
 	MaxResultEntries                ParamItem `refreshable:"true"`
@@ -2369,6 +2370,15 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall skip partition key check when inserting data",
 	}
 	p.SkipPartitionKeyCheck.Init(base.mgr)
+
+	p.ResolveAliasForPrivilege = ParamItem{
+		Key:          "proxy.resolveAliasForPrivilege",
+		Version:      "2.6.9",
+		DefaultValue: "true",
+		Doc:          "switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks",
+		Export:       true,
+	}
+	p.ResolveAliasForPrivilege.Init(base.mgr)
 
 	p.MaxVarCharLength = ParamItem{
 		Key:          "proxy.maxVarCharLength",
@@ -3196,7 +3206,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.QueryNodeTaskParallelismFactor = ParamItem{
 		Key:          "queryCoord.queryNodeTaskParallelismFactor",
 		Version:      "2.5.14",
-		DefaultValue: "1",
+		DefaultValue: "20",
 		Doc:          "the parallelism factor for query node task, which permit query node execute cpuNum * parallelismFactor tasks in parallel",
 		Export:       false,
 	}
@@ -3358,6 +3368,7 @@ type queryNodeConfig struct {
 	IoPoolSize                  ParamItem `refreshable:"false"`
 	DeltaDataExpansionRate      ParamItem `refreshable:"true"`
 	JSONKeyStatsExpansionFactor ParamItem `refreshable:"true"`
+	TextIndexExpansionFactor    ParamItem `refreshable:"true"`
 	DiskSizeFetchInterval       ParamItem `refreshable:"false"`
 
 	// schedule task policy.
@@ -3460,9 +3471,10 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Version:      "2.6.0",
 		DefaultValue: "sync",
 		Forbidden:    true,
-		Doc: `options: sync, disable.
+		Doc: `options: sync, async, disable.
 Specifies the timing for warming up the Tiered Storage cache.
 - "sync": data will be loaded into the cache before a segment is considered loaded.
+- "async": data will be loaded into the cache asynchronously in the background after a segment is loaded.
 - "disable": data will not be proactively loaded into the cache, and loaded only if needed by search/query tasks.
 Defaults to "sync", except for vector field which defaults to "disable".`,
 		Export: true,
@@ -4359,6 +4371,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.JSONKeyStatsExpansionFactor.Init(base.mgr)
 
+	p.TextIndexExpansionFactor = ParamItem{
+		Key:          "querynode.textIndexExpansionFactor",
+		Version:      "2.6.8",
+		DefaultValue: "1.0",
+		Doc:          "the expansion factor for text match index memory size estimation during segment loading",
+	}
+	p.TextIndexExpansionFactor.Init(base.mgr)
+
 	p.DiskSizeFetchInterval = ParamItem{
 		Key:          "querynode.diskSizeFetchInterval",
 		Version:      "2.5.0",
@@ -4718,10 +4738,11 @@ type dataCoordConfig struct {
 	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
 	CopySegmentJobTimeout           ParamItem `refreshable:"true"`
 
-	ExternalCollectionCheckInterval ParamItem `refreshable:"true"`
-	ExternalCollectionJobTimeout    ParamItem `refreshable:"true"`
-	ExternalCollectionJobRetention  ParamItem `refreshable:"true"`
-	ExternalCollectionDropRatioWarn ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
+	ExternalCollectionCheckInterval    ParamItem `refreshable:"true"`
+	ExternalCollectionJobTimeout       ParamItem `refreshable:"true"`
+	ExternalCollectionJobRetention     ParamItem `refreshable:"true"`
+	ExternalCollectionDropRatioWarn    ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
+	ExternalCollectionPreAllocSegments ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -5879,6 +5900,15 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.ExternalCollectionDropRatioWarn.Init(base.mgr)
 
+	p.ExternalCollectionPreAllocSegments = ParamItem{
+		Key:          "dataCoord.externalCollectionPreAllocSegments",
+		Version:      "2.6.8",
+		Doc:          "The number of segment IDs to pre-allocate for each external collection refresh task.",
+		DefaultValue: "1000",
+		PanicIfEmpty: false,
+	}
+	p.ExternalCollectionPreAllocSegments.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -6182,6 +6212,9 @@ type dataNodeConfig struct {
 
 	WorkerSlotUnit      ParamItem `refreshable:"true"`
 	StandaloneSlotRatio ParamItem `refreshable:"false"`
+
+	// external collection
+	ExternalCollectionTargetRowsPerSegment ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -6650,6 +6683,15 @@ if this parameter <= 0, will set it as 10`,
 		Doc:          "Offline task slot ratio in standalone mode",
 	}
 	p.StandaloneSlotRatio.Init(base.mgr)
+
+	p.ExternalCollectionTargetRowsPerSegment = ParamItem{
+		Key:          "dataNode.externalCollection.targetRowsPerSegment",
+		Version:      "2.6.0",
+		DefaultValue: "1000000",
+		Doc:          "Target number of rows per segment for external collections",
+		Export:       false,
+	}
+	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
 }
 
 type streamingConfig struct {

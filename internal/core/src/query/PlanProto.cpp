@@ -112,7 +112,7 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
                 // check if hints is valid
                 ThrowInfo(ConfigInvalid,
                           "hints: {} not supported",
-                          search_info.search_params_[HINTS]);
+                          search_info.search_params_[HINTS].dump());
             }
         }
     }
@@ -288,8 +288,11 @@ BuildProjectAndAggregationNodes(
     std::vector<milvus::DataType> project_type_list) {
     plan::PlanNodePtr plannode = sources.empty() ? nullptr : sources[0];
 
-    // Build ProjectNode if needed
-    if (!project_id_list.empty()) {
+    // Always build ProjectNode when aggregation is present.
+    // ProjectNode consumes the MVCC bitmap from upstream and materializes
+    // filtered rows, so AggregationNode always receives input where
+    // size() == number of existing rows (needed for count(*)).
+    {
         auto project_field_id_list = std::vector<FieldId>(
             project_id_list.begin(), project_id_list.end());
         plannode = std::make_shared<plan::ProjectNode>(
@@ -433,8 +436,21 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
         }
     } else {
-        // no filter, force set iterative filter hint to false, go with normal vector search path
+        // No user filter. Force non-iterative: the iterative path requires
+        // a FilterNode for row-by-row post-filtering, which doesn't apply
+        // here (TTL uses bitmap pre-filtering via FilterBitsNode).
         plan_node->search_info_.iterative_filter_execution = false;
+
+        // When entity-level TTL is enabled, add an AlwaysTrueExpr so that
+        // CompileExpressions injects the TTL bitmap filter at runtime.
+        // (issue #47977)
+        if (schema->get_ttl_field_id().has_value()) {
+            auto always_true_expr = std::make_shared<expr::AlwaysTrueExpr>();
+            plannode = std::make_shared<plan::FilterBitsNode>(
+                milvus::plan::GetNextPlanNodeId(), always_true_expr);
+            sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+        }
+
         plannode = std::make_shared<milvus::plan::MvccNode>(
             milvus::plan::GetNextPlanNodeId(), sources);
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};

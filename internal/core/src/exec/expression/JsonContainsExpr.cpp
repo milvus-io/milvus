@@ -32,9 +32,11 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/type_c.h"
+#include "common/ScopedTimer.h"
 #include "exec/expression/EvalCtx.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
+#include "monitor/Monitor.h"
 #include "index/ScalarIndex.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "index/json_stats/utils.h"
@@ -51,6 +53,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         "PhyJsonContainsFilterExpr::Eval", tracer::GetRootSpan(), true);
     span.GetSpan()->SetAttribute("data_type",
                                  static_cast<int>(expr_->column_.data_type_));
+    span.GetSpan()->SetAttribute("json_filter_expr_type", "json_contains");
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
@@ -332,8 +335,15 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
     FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ &&
         CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+        milvus::ScopedTimer timer("json_contains_by_stats", [this](double us) {
+            json_filter_stats_latency_us_ += us;
+        });
         return ExecJsonContainsByStats<ExprValueType>();
     }
+
+    milvus::ScopedTimer timer("json_contains_bruteforce", [this](double us) {
+        json_filter_bruteforce_latency_us_ += us;
+    });
 
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
@@ -495,6 +505,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
         TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
         // process shredding data for ARRAY type (non-shared)
         {
+            milvus::ScopedTimer timer(
+                "json_contains_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
             auto target_field = index->GetShreddingField(
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
@@ -543,8 +556,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
                 }
             }
         };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
@@ -563,8 +581,16 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
     FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ &&
         CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+        milvus::ScopedTimer timer(
+            "json_contains_array_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecJsonContainsArrayByStats();
     }
+
+    milvus::ScopedTimer timer(
+        "json_contains_array_bruteforce",
+        [this](double us) { json_filter_bruteforce_latency_us_ += us; });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -711,6 +737,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
 
         // process shredding data for ARRAY type (non-shared)
         {
+            milvus::ScopedTimer timer(
+                "json_contains_array_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
             auto target_field = index->GetShreddingField(
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
@@ -749,8 +778,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
             }
             return false;
         };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_array_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
@@ -875,8 +909,16 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ &&
         CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+        milvus::ScopedTimer timer(
+            "json_contains_all_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecJsonContainsAllByStats<ExprValueType>();
     }
+
+    milvus::ScopedTimer timer(
+        "json_contains_all_bruteforce",
+        [this](double us) { json_filter_bruteforce_latency_us_ += us; });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -1038,6 +1080,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
         TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
         // process shredding data for ARRAY type (non-shared)
         {
+            milvus::ScopedTimer timer(
+                "json_contains_all_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
             auto target_field = index->GetShreddingField(
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
@@ -1096,8 +1141,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
             }
             res_view[row_offset] = tmp_elements.empty();
         };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_all_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
@@ -1116,8 +1166,16 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
     FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ &&
         CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+        milvus::ScopedTimer timer(
+            "json_contains_all_difftype_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecJsonContainsAllWithDiffTypeByStats();
     }
+
+    milvus::ScopedTimer timer(
+        "json_contains_all_difftype_bruteforce",
+        [this](double us) { json_filter_bruteforce_latency_us_ += us; });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -1323,6 +1381,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
 
         // process shredding data for ARRAY type (non-shared)
         {
+            milvus::ScopedTimer timer(
+                "json_contains_all_difftype_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
             auto target_field = index->GetShreddingField(
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
@@ -1431,8 +1492,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
             }
             res_view[row_offset] = tmp_elements_index.size() == 0;
         };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_all_difftype_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
@@ -1451,8 +1517,16 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
     FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ &&
         CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+        milvus::ScopedTimer timer(
+            "json_contains_all_array_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecJsonContainsAllArrayByStats();
     }
+
+    milvus::ScopedTimer timer(
+        "json_contains_all_array_bruteforce",
+        [this](double us) { json_filter_bruteforce_latency_us_ += us; });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -1599,6 +1673,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
 
         // process shredding data for ARRAY type (non-shared)
         {
+            milvus::ScopedTimer timer(
+                "json_contains_all_array_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
             auto target_field = index->GetShreddingField(
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
@@ -1644,8 +1721,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
             res_view[row_offset] =
                 exist_elements_index.size() == elements.size();
         };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_all_array_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
@@ -1664,8 +1746,16 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
     FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ &&
         CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+        milvus::ScopedTimer timer(
+            "json_contains_difftype_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecJsonContainsWithDiffTypeByStats();
     }
+
+    milvus::ScopedTimer timer(
+        "json_contains_difftype_bruteforce",
+        [this](double us) { json_filter_bruteforce_latency_us_ += us; });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -1855,6 +1945,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
 
         // process shredding data for ARRAY type (non-shared)
         {
+            milvus::ScopedTimer timer(
+                "json_contains_difftype_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
             auto target_field = index->GetShreddingField(
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
@@ -1954,8 +2047,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                 }
             }
         };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_difftype_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
@@ -2022,31 +2120,60 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
         elements.insert(GetValueWithCastNumber<GetType>(element));
     }
     boost::container::vector<GetType> elems(elements.begin(), elements.end());
+
+    // Get array offsets for nested index (needed for element-to-row conversion)
+    auto array_offsets = segment_->GetArrayOffsets(expr_->column_.field_id_);
+
     auto execute_sub_batch =
-        [this](Index* index_ptr,
-               const boost::container::vector<GetType>& vals) {
-            switch (expr_->op_) {
-                case proto::plan::JSONContainsExpr_JSONOp_Contains:
-                case proto::plan::JSONContainsExpr_JSONOp_ContainsAny: {
-                    return index_ptr->In(vals.size(), vals.data());
-                }
-                case proto::plan::JSONContainsExpr_JSONOp_ContainsAll: {
-                    TargetBitmap result(index_ptr->Count());
-                    result.set();
-                    for (size_t i = 0; i < vals.size(); i++) {
-                        auto sub = index_ptr->In(1, &vals[i]);
-                        result &= sub;
-                    }
-                    return result;
-                }
-                default:
-                    ThrowInfo(
-                        ExprInvalid,
-                        "unsupported array contains type {}",
-                        proto::plan::JSONContainsExpr_JSONOp_Name(expr_->op_));
+        [this, &array_offsets](
+            Index* index_ptr,
+            const boost::container::vector<GetType>& vals) -> TargetBitmap {
+        // Query helper: for nested index, convert element-level to row-level
+        auto query_in = [&](size_t n, const GetType* data) -> TargetBitmap {
+            auto element_bitset = index_ptr->In(n, data);
+            if (!index_ptr->IsNestedIndex()) {
+                return element_bitset;
             }
+            AssertInfo(array_offsets != nullptr,
+                       "array offsets not found for field {}",
+                       expr_->column_.field_id_.get());
+            return array_offsets->ForEachRowElementRange(
+                [&element_bitset](int32_t elem_start, int32_t elem_end) {
+                    for (int32_t i = elem_start; i < elem_end; ++i) {
+                        if (element_bitset[i]) {
+                            return true;
+                        }
+                    }
+                    return false;
+                },
+                0,
+                active_count_);
         };
-    auto res = ProcessIndexChunks<GetType>(execute_sub_batch, elems);
+
+        switch (expr_->op_) {
+            case proto::plan::JSONContainsExpr_JSONOp_Contains:
+            case proto::plan::JSONContainsExpr_JSONOp_ContainsAny:
+                return query_in(vals.size(), vals.data());
+
+            case proto::plan::JSONContainsExpr_JSONOp_ContainsAll: {
+                TargetBitmap result(active_count_);
+                result.set();
+                for (size_t i = 0; i < vals.size(); i++) {
+                    result &= query_in(1, &vals[i]);
+                }
+                return result;
+            }
+            default:
+                ThrowInfo(
+                    ExprInvalid,
+                    "unsupported array contains type {}",
+                    proto::plan::JSONContainsExpr_JSONOp_Name(expr_->op_));
+        }
+    };
+
+    // Use WithRowLevel version since func handles element-to-row conversion for nested index
+    auto res =
+        ProcessIndexChunksWithRowLevel<GetType>(execute_sub_batch, elems);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",

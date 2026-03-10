@@ -506,7 +506,7 @@ DiskFileManagerImpl::CacheRawDataToDisk(const Config& config) {
     auto storage_version =
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
-    if (storage_version == STORAGE_V2) {
+    if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
         return cache_raw_data_to_disk_storage_v2<DataType>(config);
     }
     return cache_raw_data_to_disk_internal<DataType>(config);
@@ -1081,7 +1081,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
     }
 
     std::vector<std::vector<std::string>> remote_files_storage_v2;
-    if (storage_version == STORAGE_V2) {
+    if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
         auto segment_insert_files =
             index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
                 config, SEGMENT_INSERT_FILES_KEY);
@@ -1123,7 +1123,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
 
         std::vector<FieldDataPtr> field_datas;
         // fetch scalar data from storage v2
-        if (storage_version == STORAGE_V2) {
+        if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
             field_datas = GetFieldDatasFromStorageV2(remote_files_storage_v2,
                                                      field_id,
                                                      field_type,

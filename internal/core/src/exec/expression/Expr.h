@@ -133,12 +133,6 @@ class Expr {
         return inputs_;
     }
 
-    using SkipNamespaceFunc = std::function<bool(int64_t chunk_id)>;
-    virtual void
-    SetNamespaceSkipFunc(SkipNamespaceFunc skip_namespace_func) {
-        namespace_skip_func_ = std::move(skip_namespace_func);
-    }
-
  protected:
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
@@ -148,10 +142,6 @@ class Expr {
     // whether we have offset input and do expr filtering on these data
     // default is false which means we will do expr filtering on the total segment data
     bool has_offset_input_ = false;
-    // check if we can skip a chunk for namespace field.
-    // if there's no namespace field, this is std::nullopt.
-    // TODO: for expression like f1 > 1 and f2 > 2, we can use skip function of f1 when evaluating f2.
-    std::optional<SkipNamespaceFunc> namespace_skip_func_;
 };
 
 using ExprPtr = std::shared_ptr<milvus::exec::Expr>;
@@ -190,6 +180,8 @@ class SegmentExpr : public Expr {
                         batch_size_));
         InitSegmentExpr();
     }
+
+    virtual ~SegmentExpr();
 
     void
     InitSegmentExpr() {
@@ -438,9 +430,7 @@ class SegmentExpr : public Expr {
         auto pw = segment_->get_batch_views<T>(
             op_ctx_, field_id_, 0, current_data_chunk_pos_, need_size);
         auto views_info = pw.get();
-        if ((!skip_func || !skip_func(skip_index, field_id_, 0)) &&
-            (!namespace_skip_func_.has_value() ||
-             !namespace_skip_func_.value()(0))) {
+        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             // first is the raw data, second is valid_data
             // use valid_data to see if raw data is null
             if constexpr (NeedSegmentOffsets) {
@@ -495,9 +485,7 @@ class SegmentExpr : public Expr {
         auto pw =
             segment_->get_views_by_offsets<T>(op_ctx_, field_id_, 0, *input);
         auto [data_vec, valid_data] = pw.get();
-        if ((!skip_func || !skip_func(skip_index, field_id_, 0)) &&
-            (!namespace_skip_func_.has_value() ||
-             !namespace_skip_func_.value()(0))) {
+        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             func(data_vec.data(),
                  valid_data.data(),
                  nullptr,
@@ -556,9 +544,7 @@ class SegmentExpr : public Expr {
         auto valid_result = index_ptr->IsNotNull();
         auto batch_size = input->size();
 
-        if ((!skip_func || !skip_func(skip_index, field_id_, 0)) &&
-            (!namespace_skip_func_.has_value() ||
-             !namespace_skip_func_.value()(0))) {
+        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             for (auto i = 0; i < batch_size; ++i) {
                 auto offset = (*input)[i];
                 auto raw = index_ptr->Reverse_Lookup(offset);
@@ -624,10 +610,8 @@ class SegmentExpr : public Expr {
                             chunk_id,
                             {int32_t(chunk_offset)});
                         auto [data_vec, valid_data] = pw.get();
-                        if ((!skip_func ||
-                             !skip_func(skip_index, field_id_, chunk_id)) &&
-                            (!namespace_skip_func_.has_value() ||
-                             !namespace_skip_func_.value()(chunk_id))) {
+                        if (!skip_func ||
+                            !skip_func(skip_index, field_id_, chunk_id)) {
                             func.template operator()<FilterType::random>(
                                 data_vec.data(),
                                 valid_data.data(),
@@ -659,10 +643,8 @@ class SegmentExpr : public Expr {
                     if (valid_data != nullptr) {
                         valid_data += chunk_offset;
                     }
-                    if ((!skip_func ||
-                         !skip_func(skip_index, field_id_, chunk_id)) &&
-                        (!namespace_skip_func_.has_value() ||
-                         !namespace_skip_func_.value()(chunk_id))) {
+                    if (!skip_func ||
+                        !skip_func(skip_index, field_id_, chunk_id)) {
                         func.template operator()<FilterType::random>(
                             data,
                             valid_data,
@@ -691,9 +673,7 @@ class SegmentExpr : public Expr {
                 auto chunk = pw.get();
                 const T* data = chunk.data();
                 const bool* valid_data = chunk.valid_data();
-                if ((!skip_func || !skip_func(skip_index, field_id_, 0)) &&
-                    (!namespace_skip_func_.has_value() ||
-                     !namespace_skip_func_.value()(0))) {
+                if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
                     func.template operator()<FilterType::random>(data,
                                                                  valid_data,
                                                                  input->data(),
@@ -719,10 +699,7 @@ class SegmentExpr : public Expr {
                 if (valid_data != nullptr) {
                     valid_data += chunk_offset;
                 }
-                if ((!skip_func ||
-                     !skip_func(skip_index, field_id_, chunk_id)) &&
-                    (!namespace_skip_func_.has_value() ||
-                     !namespace_skip_func_.value()(chunk_id))) {
+                if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
                     func.template operator()<FilterType::random>(
                         data,
                         valid_data,
@@ -820,10 +797,8 @@ class SegmentExpr : public Expr {
                 for (size_t j = 0; j < offsets.size(); j++) {
                     size_t result_idx = batch_start + j;
 
-                    if ((!skip_func ||
-                         !skip_func(skip_index, field_id_, chunk_id)) &&
-                        (!namespace_skip_func_.has_value() ||
-                         !namespace_skip_func_.value()(chunk_id))) {
+                    if (!skip_func ||
+                        !skip_func(skip_index, field_id_, chunk_id)) {
                         // Extract element from ArrayView
                         auto value =
                             array_vec[j].template get_data<ElementType>(
@@ -880,10 +855,7 @@ class SegmentExpr : public Expr {
                     valid_data += chunk_offset;
                 }
 
-                if ((!skip_func ||
-                     !skip_func(skip_index, field_id_, chunk_id)) &&
-                    (!namespace_skip_func_.has_value() ||
-                     !namespace_skip_func_.value()(chunk_id))) {
+                if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
                     // Extract element from Array
                     auto value = array_ptr->get_data<ElementType>(elem_idx);
                     bool is_valid = !valid_data || valid_data[0];
@@ -949,9 +921,7 @@ class SegmentExpr : public Expr {
                 continue;
 
             auto& skip_index = segment_->GetSkipIndex();
-            if ((!skip_func || !skip_func(skip_index, field_id_, i)) &&
-                (!namespace_skip_func_.has_value() ||
-                 !namespace_skip_func_.value()(i))) {
+            if ((!skip_func || !skip_func(skip_index, field_id_, i))) {
                 if (segment_->type() == SegmentType::Sealed) {
                     auto pw = segment_->get_batch_views<ArrayView>(
                         op_ctx_, field_id_, i, data_pos, size);
@@ -1202,9 +1172,7 @@ class SegmentExpr : public Expr {
             if (valid_data != nullptr) {
                 valid_data += data_pos;
             }
-            if ((!skip_func || !skip_func(skip_index, field_id_, i)) &&
-                (!namespace_skip_func_.has_value() ||
-                 !namespace_skip_func_.value()(i))) {
+            if (!skip_func || !skip_func(skip_index, field_id_, i)) {
                 const T* data = chunk.data() + data_pos;
 
                 if constexpr (NeedSegmentOffsets) {
@@ -1320,9 +1288,7 @@ class SegmentExpr : public Expr {
                 segment_offsets_array[j] = static_cast<int32_t>(offset);
             }
             auto& skip_index = segment_->GetSkipIndex();
-            if ((!skip_func || !skip_func(skip_index, field_id_, i)) &&
-                (!namespace_skip_func_.has_value() ||
-                 !namespace_skip_func_.value()(i))) {
+            if (!skip_func || !skip_func(skip_index, field_id_, i)) {
                 bool is_seal = false;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json> ||
@@ -1521,9 +1487,27 @@ class SegmentExpr : public Expr {
         return processed_size;
     }
 
+    // ProcessIndexChunks: execute index query and batch results
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
     ProcessIndexChunks(FUNC func, const ValTypes&... values) {
+        return ProcessIndexChunksImpl<T>(func, false, values...);
+    }
+
+    // ProcessIndexChunks with func_returns_row_level flag
+    // func_returns_row_level: if true, func returns row-level bitset even for nested index
+    //   (used when func already handles element-to-row conversion internally)
+    template <typename T, typename FUNC, typename... ValTypes>
+    VectorPtr
+    ProcessIndexChunksWithRowLevel(FUNC func, const ValTypes&... values) {
+        return ProcessIndexChunksImpl<T>(func, true, values...);
+    }
+
+    template <typename T, typename FUNC, typename... ValTypes>
+    VectorPtr
+    ProcessIndexChunksImpl(FUNC func,
+                           bool func_returns_row_level,
+                           const ValTypes&... values) {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
                 IndexInnerType;
@@ -1566,17 +1550,29 @@ class SegmentExpr : public Expr {
 
             cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
                 std::move(func(index_ptr, values...)));
-            cached_index_chunk_valid_res_ =
-                std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
             cached_index_chunk_id_ = 0;
             cached_is_nested_index_ = index_ptr->IsNestedIndex();
+
+            if (cached_is_nested_index_ && func_returns_row_level) {
+                // TODO(SpadeA): now, nested index is only supported for Struct which
+                // does not support null now.
+                cached_index_chunk_valid_res_ =
+                    std::make_shared<TargetBitmap>(active_count_, true);
+            } else {
+                cached_index_chunk_valid_res_ =
+                    std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
+            }
         }
 
         TargetBitmap result;
         TargetBitmap valid_result;
 
-        if (cached_is_nested_index_) {
-            // Nested index: batch by rows, return corresponding elements
+        // If func already returns row-level bitset, skip element-to-row conversion
+        bool need_element_slicing =
+            cached_is_nested_index_ && !func_returns_row_level;
+
+        if (need_element_slicing) {
+            // Nested index with element-level result: batch by rows, slice elements
             auto array_offsets = segment_->GetArrayOffsets(field_id_);
 
             auto data_pos = current_index_chunk_pos_;
@@ -1594,7 +1590,7 @@ class SegmentExpr : public Expr {
 
             current_index_chunk_pos_ = data_pos + batch_rows;
         } else {
-            // Normal index: batch by rows
+            // Normal index or row-level result: batch by rows directly
             auto data_pos = current_index_chunk_pos_;
             auto size =
                 std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
@@ -2106,6 +2102,13 @@ class SegmentExpr : public Expr {
 
     // Cache for ngram Phase1 result (index query, before post-filter).
     std::shared_ptr<TargetBitmap> cached_phase1_res_{nullptr};
+
+    // Accumulated latency for JSON filter metrics (in microseconds).
+    // These are recorded in destructor (converted to ms) to avoid per-batch metric overhead.
+    double json_filter_bruteforce_latency_us_{0.0};
+    double json_filter_stats_latency_us_{0.0};
+    double json_stats_shredding_latency_us_{0.0};
+    double json_stats_shared_latency_us_{0.0};
 };
 
 bool

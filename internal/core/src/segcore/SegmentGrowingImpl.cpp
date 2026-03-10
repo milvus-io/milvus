@@ -2010,7 +2010,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
 
-    auto arrow_schema = schema_->ConvertToArrowSchema();
+    auto arrow_schema = schema_->ConvertToLoonArrowSchema();
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
 

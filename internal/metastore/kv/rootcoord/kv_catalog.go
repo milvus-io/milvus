@@ -1421,6 +1421,153 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 	return entities, nil
 }
 
+func (kc *Catalog) DeleteGrantByCollectionName(ctx context.Context, tenant string, dbName string, collectionName string) error {
+	granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+	keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeKey)
+	if err != nil {
+		log.Ctx(ctx).Warn("fail to load grant privilege entities for collection cleanup",
+			zap.String("key", granteeKey), zap.Error(err))
+		return err
+	}
+
+	var exactRemoveKeys []string
+	var prefixRemoveKeys []string
+	for i, key := range keys {
+		grantInfos := typeutil.AfterN(key, granteeKey+"/", "/")
+		if len(grantInfos) != 3 {
+			continue
+		}
+		// grantInfos: [role, objectType, dbName.objectName]
+		if grantInfos[1] != "Collection" {
+			continue
+		}
+		grantDB, grantObj := funcutil.SplitObjectName(grantInfos[2])
+		if grantObj == collectionName && grantDB == dbName {
+			// Reconstruct logical key (without etcd rootPath) for deletion.
+			// LoadWithPrefix returns full etcd keys (with rootPath prefix),
+			// but MultiSaveAndRemove prepends rootPath again, so we must
+			// use the logical key to avoid double-prefix.
+			logicalKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
+				fmt.Sprintf("%s/%s/%s", grantInfos[0], grantInfos[1], grantInfos[2]))
+			exactRemoveKeys = append(exactRemoveKeys, logicalKey)
+			// Use prefix deletion for the granteeID key (has sub-keys)
+			granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, values[i]+"/")
+			prefixRemoveKeys = append(prefixRemoveKeys, granteeIDKey)
+		}
+	}
+
+	if len(exactRemoveKeys) == 0 && len(prefixRemoveKeys) == 0 {
+		return nil
+	}
+
+	// Use prefix deletion for granteeID keys (which have sub-keys underneath).
+	if len(prefixRemoveKeys) > 0 {
+		if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, nil, prefixRemoveKeys); err != nil {
+			log.Ctx(ctx).Warn("fail to remove granteeID entries for collection",
+				zap.String("dbName", dbName), zap.String("collectionName", collectionName), zap.Error(err))
+			return err
+		}
+	}
+
+	// Use exact deletion for grantee keys (leaf keys with no sub-keys).
+	// Avoid MultiSaveAndRemoveWithPrefix here to prevent accidentally matching
+	// keys like col1_backup when removing col1.
+	if len(exactRemoveKeys) > 0 {
+		if err = kc.Txn.MultiSaveAndRemove(ctx, nil, exactRemoveKeys); err != nil {
+			log.Ctx(ctx).Warn("fail to remove grantee entries for collection",
+				zap.String("dbName", dbName), zap.String("collectionName", collectionName), zap.Error(err))
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string, oldDBName string, oldName string, newDBName string, newName string) error {
+	granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+	keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeKey)
+	if err != nil {
+		log.Ctx(ctx).Warn("fail to load grant privilege entities for collection migration",
+			zap.String("key", granteeKey), zap.Error(err))
+		return err
+	}
+
+	saves := make(map[string]string)
+	var removeKeys []string
+	for i, key := range keys {
+		grantInfos := typeutil.AfterN(key, granteeKey+"/", "/")
+		if len(grantInfos) != 3 {
+			continue
+		}
+		if grantInfos[1] != "Collection" {
+			continue
+		}
+		grantDB, grantObj := funcutil.SplitObjectName(grantInfos[2])
+		if grantObj == oldName && grantDB == oldDBName {
+			oldIdStr := values[i]
+
+			// Load GranteeIDPrefix entries FIRST, before queuing the parent key
+			// for migration. If this load fails, we skip both parent and child
+			// to avoid half-migration (parent migrated, children lost).
+			oldGranteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, oldIdStr+"/")
+			idKeys, idValues, loadErr := kc.Txn.LoadWithPrefix(ctx, oldGranteeIDKey)
+			if loadErr != nil {
+				log.Ctx(ctx).Warn("fail to load grantee id entries for migration, skipping this grant entirely",
+					zap.String("key", oldGranteeIDKey), zap.Error(loadErr))
+				continue
+			}
+
+			// Build new key with new collection name and recompute idStr
+			// to avoid sharing permission space with a future collection
+			// that reuses the old name.
+			newObjName := funcutil.CombineObjectName(newDBName, newName)
+			newKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
+				fmt.Sprintf("%s/%s/%s", grantInfos[0], grantInfos[1], newObjName))
+			newIdStr := crypto.MD5(newKey)
+			saves[newKey] = newIdStr
+			// Reconstruct logical key (without etcd rootPath) for deletion.
+			// LoadWithPrefix returns full etcd keys (with rootPath prefix),
+			// but MultiSaveAndRemove prepends rootPath again, so we must
+			// use the logical key to avoid double-prefix.
+			oldKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
+				fmt.Sprintf("%s/%s/%s", grantInfos[0], grantInfos[1], grantInfos[2]))
+			removeKeys = append(removeKeys, oldKey)
+
+			// Migrate GranteeIDPrefix entries from oldIdStr to newIdStr
+			for j, idKey := range idKeys {
+				// Use AfterN to extract privilege name correctly regardless of
+				// etcd rootPath prefix in the returned key.
+				privilegeName := typeutil.After(idKey, oldGranteeIDKey)
+				if privilegeName == "" {
+					log.Ctx(ctx).Warn("failed to extract privilege name from grantee id key",
+						zap.String("idKey", idKey), zap.String("prefix", oldGranteeIDKey))
+					continue
+				}
+				newIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant,
+					fmt.Sprintf("%s/%s", newIdStr, privilegeName))
+				saves[newIDKey] = idValues[j]
+				// Reconstruct logical key for deletion
+				oldIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant,
+					fmt.Sprintf("%s/%s", oldIdStr, privilegeName))
+				removeKeys = append(removeKeys, oldIDKey)
+			}
+		}
+	}
+
+	if len(removeKeys) == 0 {
+		return nil
+	}
+
+	// Use MultiSaveAndRemove (exact deletion) instead of prefix-based deletion
+	// to avoid accidentally matching keys like col1_backup when removing col1
+	if err = kc.Txn.MultiSaveAndRemove(ctx, saves, removeKeys); err != nil {
+		log.Ctx(ctx).Warn("fail to migrate grants for renamed collection",
+			zap.String("oldDBName", oldDBName), zap.String("oldName", oldName),
+			zap.String("newDBName", newDBName), zap.String("newName", newName), zap.Error(err))
+	}
+	return err
+}
+
 func (kc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
 	var (
 		k          = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, role.Name+"/")

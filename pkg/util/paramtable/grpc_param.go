@@ -76,10 +76,13 @@ type grpcConfig struct {
 	ServerPemPath ParamItem `refreshable:"false"`
 	ServerKeyPath ParamItem `refreshable:"false"`
 	CaPemPath     ParamItem `refreshable:"false"`
+
+	base *BaseTable // stored for dynamic per-cluster TLS lookups
 }
 
 func (p *grpcConfig) init(domain string, base *BaseTable) {
 	p.Domain = domain
+	p.base = base
 	p.IPItem = ParamItem{
 		Key:     p.Domain + ".ip",
 		Version: "2.3.3",
@@ -133,6 +136,17 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Export:  true,
 	}
 	p.CaPemPath.Init(base.mgr)
+}
+
+// GetClusterTLSConfig returns per-cluster outbound TLS cert paths for CDC connections.
+// Reads from tls.clusters.<clusterID>.{caPemPath,clientPemPath,clientKeyPath}.
+// Returns empty strings if the cluster has no TLS config.
+func (p *grpcConfig) GetClusterTLSConfig(clusterID string) (caPemPath, clientPemPath, clientKeyPath string) {
+	prefix := "tls.clusters." + clusterID + "."
+	caPemPath = p.base.Get(prefix + "caPemPath")
+	clientPemPath = p.base.Get(prefix + "clientPemPath")
+	clientKeyPath = p.base.Get(prefix + "clientKeyPath")
+	return
 }
 
 // GetAddress return grpc address

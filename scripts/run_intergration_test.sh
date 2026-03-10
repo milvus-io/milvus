@@ -45,8 +45,9 @@ TEST_CMD_WITH_ARGS=(
     -coverpkg=./...
     -coverprofile=profile.out
     -covermode=atomic
-    -caseTimeout=20m 
+    -caseTimeout=20m
     -timeout=60m
+    -ldflags="-r ${RPATH}"
 )
 
 function test_cmd() {

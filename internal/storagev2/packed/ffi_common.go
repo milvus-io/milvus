@@ -140,6 +140,56 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyFSRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
 
+	// Add extfs.default.* properties (mirrors string fields from fs.* with extfs.default.* prefix)
+	const extfsPrefix = "extfs.default."
+	if storageConfig.GetStorageType() != "" {
+		keys = append(keys, extfsPrefix+"storage_type")
+		values = append(values, storageConfig.GetStorageType())
+	}
+	if storageConfig.GetStorageType() == "local" {
+		keys = append(keys, extfsPrefix+"bucket_name")
+		values = append(values, "local")
+	} else if storageConfig.GetBucketName() != "" {
+		keys = append(keys, extfsPrefix+"bucket_name")
+		values = append(values, storageConfig.GetBucketName())
+	}
+	if storageConfig.GetAddress() != "" {
+		keys = append(keys, extfsPrefix+"address")
+		values = append(values, storageConfig.GetAddress())
+	}
+	if storageConfig.GetRootPath() != "" {
+		keys = append(keys, extfsPrefix+"root_path")
+		values = append(values, storageConfig.GetRootPath())
+	}
+	if storageConfig.GetAccessKeyID() != "" {
+		keys = append(keys, extfsPrefix+"access_key_id")
+		values = append(values, storageConfig.GetAccessKeyID())
+	}
+	if storageConfig.GetSecretAccessKey() != "" {
+		keys = append(keys, extfsPrefix+"access_key_value")
+		values = append(values, storageConfig.GetSecretAccessKey())
+	}
+	if storageConfig.GetCloudProvider() != "" {
+		keys = append(keys, extfsPrefix+"cloud_provider")
+		values = append(values, storageConfig.GetCloudProvider())
+	}
+	if storageConfig.GetIAMEndpoint() != "" {
+		keys = append(keys, extfsPrefix+"iam_endpoint")
+		values = append(values, storageConfig.GetIAMEndpoint())
+	}
+	if storageConfig.GetRegion() != "" {
+		keys = append(keys, extfsPrefix+"region")
+		values = append(values, storageConfig.GetRegion())
+	}
+	if storageConfig.GetSslCACert() != "" {
+		keys = append(keys, extfsPrefix+"ssl_ca_cert")
+		values = append(values, storageConfig.GetSslCACert())
+	}
+	if storageConfig.GetGcpCredentialJSON() != "" {
+		keys = append(keys, extfsPrefix+"gcp_credential_json")
+		values = append(values, storageConfig.GetGcpCredentialJSON())
+	}
+
 	// Add extra kvs
 	for k, v := range extraKVs {
 		keys = append(keys, k)
@@ -184,6 +234,13 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	return properties, nil
 }
 
+// FreeProperties releases a C-allocated LoonProperties object.
+func FreeProperties(props *C.LoonProperties) {
+	if props != nil {
+		C.loon_properties_free(props)
+	}
+}
+
 func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 	defer C.loon_ffi_free_result(&ffiResult)
 	if C.loon_ffi_is_success(&ffiResult) == 0 {
@@ -193,7 +250,7 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 			errStr = C.GoString(errMsg)
 		}
 
-		return fmt.Errorf("failed to create properties: %s", errStr)
+		return fmt.Errorf("FFI operation failed: %s", errStr)
 	}
 	return nil
 }
@@ -204,10 +261,14 @@ type ManifestJSON struct {
 }
 
 func MarshalManifestPath(basePath string, version int64) string {
-	bs, _ := json.Marshal(ManifestJSON{
+	bs, err := json.Marshal(ManifestJSON{
 		ManifestVersion: version,
 		BasePath:        basePath,
 	})
+	if err != nil {
+		// json.Marshal on string+int64 struct should never fail, but log if it does
+		return fmt.Sprintf(`{"ver":%d,"base_path":"%s"}`, version, basePath)
+	}
 	return string(bs)
 }
 

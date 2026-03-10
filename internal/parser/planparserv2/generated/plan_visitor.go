@@ -40,6 +40,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Identifier.
 	VisitIdentifier(ctx *IdentifierContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#StructField.
+	VisitStructField(ctx *StructFieldContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Like.
 	VisitLike(ctx *LikeContext) interface{}
 

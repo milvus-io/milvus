@@ -382,6 +382,17 @@ SegmentInternalInterface::get_real_count() const {
         milvus::plan::GetNextPlanNodeId());
     sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
 
+    // ProjectNode consumes the MVCC bitmap and materializes valid rows.
+    // Without it, AggregationNode would see input->size() == total rows
+    // instead of the actual valid row count after MVCC filtering.
+    plannode = std::make_shared<milvus::plan::ProjectNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<FieldId>{},
+        std::vector<std::string>{},
+        std::vector<DataType>{},
+        sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
     std::string agg_name = "count";
     std::vector<plan::AggregationNode::Aggregate> aggregates;
     {
@@ -470,49 +481,6 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
         auto size = field_info.first * field_info.second + field_size;
         field_info.first = field_info.first + num_rows;
         field_info.second = size / field_info.first;
-    }
-}
-
-void
-SegmentInternalInterface::timestamp_filter(BitsetType& bitset,
-                                           Timestamp timestamp) const {
-    auto& timestamps = get_timestamps();
-    auto cnt = bitset.size();
-    if (timestamps[cnt - 1] <= timestamp) {
-        // no need to filter out anything.
-        return;
-    }
-
-    auto pilot = upper_bound(timestamps, 0, cnt, timestamp);
-    // offset bigger than pilot should be filtered out.
-    auto offset = pilot;
-    while (offset < cnt) {
-        bitset[offset] = false;
-
-        const auto next_offset = bitset.find_next(offset);
-        if (!next_offset.has_value()) {
-            return;
-        }
-        offset = next_offset.value();
-    }
-}
-
-void
-SegmentInternalInterface::timestamp_filter(BitsetType& bitset,
-                                           const std::vector<int64_t>& offsets,
-                                           Timestamp timestamp) const {
-    auto& timestamps = get_timestamps();
-    auto cnt = bitset.size();
-    if (timestamps[cnt - 1] <= timestamp) {
-        // no need to filter out anything.
-        return;
-    }
-
-    // point query, faster than binary search.
-    for (auto& offset : offsets) {
-        if (timestamps[offset] > timestamp) {
-            bitset.set(offset, true);
-        }
     }
 }
 

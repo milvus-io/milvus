@@ -49,6 +49,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "fmt/core.h"
+#include "google/cloud/internal/rest_client.h"
 #include "google/cloud/storage/oauth2/compute_engine_credentials.h"
 #include "google/cloud/version.h"
 #include "log/Log.h"
@@ -63,6 +64,22 @@ namespace milvus::storage {
 
 std::atomic<size_t> MinioChunkManager::init_count_(0);
 std::mutex MinioChunkManager::client_mutex_;
+
+void
+ConfigureGoogleCloudIAMHttpClientFactory(Aws::SDKOptions& sdk_options) {
+    sdk_options.httpOptions.httpClientFactory_create_fn = []() {
+        auto credentials =
+            std::make_shared<google::cloud::oauth2_internal::
+                                 GOOGLE_CLOUD_CPP_NS::ComputeEngineCredentials>(
+                google::cloud::Options{},
+                [](google::cloud::Options const& opts) {
+                    return google::cloud::rest_internal::MakeDefaultRestClient(
+                        "", opts);
+                });
+        return Aws::MakeShared<GoogleHttpClientFactory>(
+            GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
+    };
+}
 
 static void
 SwallowHandler(int signal) {
@@ -126,20 +143,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type,
         sigaddset(&psa.sa_mask, SIGPIPE);
         sigaction(SIGPIPE, &psa, 0);
         if (type == RemoteStorageType::GOOGLE_CLOUD && useIAM) {
-            sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
-                auto client_factory = [](google::cloud::Options const& opts)
-                    -> std::unique_ptr<
-                        google::cloud::rest_internal::RestClient> {
-                    return google::cloud::rest_internal::MakeDefaultRestClient(
-                        {}, opts);
-                };
-                auto credentials = std::make_shared<
-                    google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::
-                        ComputeEngineCredentials>(google::cloud::Options{},
-                                                  client_factory);
-                return Aws::MakeShared<GoogleHttpClientFactory>(
-                    GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
-            };
+            ConfigureGoogleCloudIAMHttpClientFactory(sdk_options_);
         }
         LOG_INFO("init aws with log level:{}", log_level_str);
         auto get_aws_log_level = [](const std::string& level_str) {

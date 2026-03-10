@@ -57,6 +57,7 @@ class SumAggregateBase
 
     void
     addSingleGroupRawInput(char* group,
+                           int64_t numRows,
                            const std::vector<VectorPtr>& input) override {
         BaseAggregate::template updateOneGroup<TAccumulator>(
             group, input[0], &updateSingleValue<TAccumulator>);

@@ -71,7 +71,8 @@ type Executor struct {
 	executedFlag     chan struct{}
 }
 
-func NewExecutor(meta *meta.Meta,
+func NewExecutor(nodeID int64,
+	meta *meta.Meta,
 	dist *meta.DistributionManager,
 	broker meta.Broker,
 	targetMgr meta.TargetManagerInterface,
@@ -79,6 +80,7 @@ func NewExecutor(meta *meta.Meta,
 	nodeMgr *session.NodeManager,
 ) *Executor {
 	return &Executor{
+		nodeID:    nodeID,
 		doneCh:    make(chan struct{}),
 		meta:      meta,
 		dist:      dist,
@@ -444,6 +446,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	}
 
 	version := ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst)
+
 	req := packSubChannelRequest(
 		task,
 		action,

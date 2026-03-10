@@ -341,11 +341,11 @@ func TestWarmupPolicy(t *testing.T) {
 		// Valid values
 		assert.NoError(t, ValidateWarmupPolicy(WarmupSync))
 		assert.NoError(t, ValidateWarmupPolicy(WarmupDisable))
+		assert.NoError(t, ValidateWarmupPolicy(WarmupAsync))
 
 		// Invalid values
 		assert.Error(t, ValidateWarmupPolicy("invalid"))
 		assert.Error(t, ValidateWarmupPolicy(""))
-		assert.Error(t, ValidateWarmupPolicy("async"))
 	})
 
 	t.Run("IsWarmupKey", func(t *testing.T) {

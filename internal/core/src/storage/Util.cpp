@@ -1179,6 +1179,7 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
             std::string(storage_config.gcp_credential_json);
         conf.use_custom_part_upload = true;
         conf.max_connections = storage_config.max_connections;
+        conf.tls_min_version = storage_config.tls_min_version;
     }
     return StorageV2FSCache::Instance().Get(conf);
 }
@@ -1587,8 +1588,8 @@ GetFieldDatasFromManifest(
             continue;
         }
 
-        auto chunked_array =
-            std::make_shared<arrow::ChunkedArray>(batch->column(0));
+        auto chunked_array = std::make_shared<arrow::ChunkedArray>(
+            batch->GetColumnByName(field_id_str));
         auto field_data = CreateFieldData(data_type.value(),
                                           element_type.value(),
                                           batch->schema()->field(0)->nullable(),

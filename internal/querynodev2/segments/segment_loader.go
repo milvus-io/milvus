@@ -29,7 +29,6 @@ import (
 	"io"
 	"math"
 	"path"
-	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -53,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
@@ -80,7 +80,7 @@ type Loader interface {
 
 	// LoadDeltaLogs load deltalog and write delta data into provided segment.
 	// it also executes resource protection logic in case of OOM.
-	LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error
+	LoadDeltaLogs(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error
 
 	// LoadBloomFilterSet loads needed statslog for RemoteSegment.
 	LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
@@ -155,6 +155,7 @@ type resourceEstimateFactor struct {
 	tempSegmentIndexFactor          float64
 	deltaDataExpansionFactor        float64
 	jsonKeyStatsExpansionFactor     float64
+	textIndexExpansionFactor        float64
 	TieredEvictionEnabled           bool
 	TieredEvictableMemoryCacheRatio float64
 	TieredEvictableDiskCacheRatio   float64
@@ -290,7 +291,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			s.Release(context.Background())
 			return true
 		})
-		debug.FreeOSMemory()
 	}()
 
 	for _, info := range infos {
@@ -366,7 +366,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 				return errors.Wrap(err, "At LoadSegment")
 			}
 		}
-		if err = loader.loadDeltalogs(ctx, segment, loadInfo.GetDeltalogs()); err != nil {
+		if err = loader.loadDeltalogs(ctx, segment, loadInfo); err != nil {
 			return errors.Wrap(err, "At LoadDeltaLogs")
 		}
 
@@ -1014,10 +1014,6 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	}
 	pkField := GetPkField(collection.Schema())
 
-	// TODO(xige-16): Optimize the data loading process and reduce data copying
-	// for now, there will be multiple copies in the process of data loading into segCore
-	defer debug.FreeOSMemory()
-
 	if segment.Type() == SegmentTypeSealed {
 		if err := loader.loadSealedSegment(ctx, loadInfo, segment); err != nil {
 			return err
@@ -1283,7 +1279,8 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 
 // loadDeltalogs performs the internal actions of `LoadDeltaLogs`
 // this function does not perform resource check and is meant be used among other load APIs.
-func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error {
+func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error {
+	deltaLogs := loadInfo.GetDeltalogs()
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadDeltalogs-%d", segment.ID()))
 	defer sp.End()
 	log := log.Ctx(ctx).With(
@@ -1316,6 +1313,35 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return err
 	}
 
+	readDeltaRecords := func(reader storage.RecordReader) error {
+		defer reader.Close()
+		for {
+			dl, err := reader.Next()
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return err
+			}
+
+			for i := 0; i < dl.Len(); i++ {
+				var pk storage.PrimaryKey
+				switch pkField.DataType {
+				case schemapb.DataType_Int64:
+					pk = storage.NewInt64PrimaryKey(dl.Column(0).(*array.Int64).Value(i))
+				case schemapb.DataType_VarChar:
+					pk = storage.NewVarCharPrimaryKey(dl.Column(0).(*array.String).Value(i))
+				}
+				ts := typeutil.Timestamp(dl.Column(1).(*array.Int64).Value(i))
+				err = deltaData.Append(pk, ts)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+
 	for _, deltalog := range deltaLogs {
 		err := func() error {
 			opts := []storage.RwOption{
@@ -1332,36 +1358,30 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 			if err != nil {
 				return err
 			}
-			defer reader.Close()
-
-			for {
-				dl, err := reader.Next()
-				if err != nil {
-					if err == io.EOF {
-						break
-					}
-					return err
-				}
-
-				for i := 0; i < dl.Len(); i++ {
-					var pk storage.PrimaryKey
-					switch pkField.DataType {
-					case schemapb.DataType_Int64:
-						pk = storage.NewInt64PrimaryKey(dl.Column(0).(*array.Int64).Value(i))
-					case schemapb.DataType_VarChar:
-						pk = storage.NewVarCharPrimaryKey(dl.Column(0).(*array.String).Value(i))
-					}
-					ts := typeutil.Timestamp(dl.Column(1).(*array.Int64).Value(i))
-					err = deltaData.Append(pk, ts)
-					if err != nil {
-						return err
-					}
-				}
-			}
-			return nil
+			return readDeltaRecords(reader)
 		}()
 		if err != nil {
 			return err
+		}
+	}
+
+	// Read deltalogs from manifest for StorageV3 segments
+	if manifestPath := loadInfo.GetManifestPath(); manifestPath != "" {
+		reader, err := storage.NewDeltalogReaderFromManifest(
+			pkField.DataType,
+			manifestPath,
+			storage.WithStorageConfig(createStorageConfig()),
+			storage.WithVersion(storage.StorageV2),
+		)
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				return err
+			}
+			// io.EOF means no deltalogs in manifest, not an error
+		} else {
+			if err := readDeltaRecords(reader); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1376,12 +1396,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 
 // LoadDeltaLogs load deltalog and write delta data into provided segment.
 // it also executes resource protection logic in case of OOM.
-func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment, deltaLogs []*datapb.FieldBinlog) error {
-	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:    segment.ID(),
-		CollectionID: segment.Collection(),
-		Deltalogs:    deltaLogs,
-	}
+func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment, loadInfo *querypb.SegmentLoadInfo) error {
 	// Check memory & storage limit
 	requestResourceResult, err := loader.requestResource(ctx, loadInfo)
 	if err != nil {
@@ -1389,7 +1404,35 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		return err
 	}
 	defer loader.freeRequestResource(requestResourceResult)
-	return loader.loadDeltalogs(ctx, segment, deltaLogs)
+	return loader.loadDeltalogs(ctx, segment, loadInfo)
+}
+
+func createStorageConfig() *indexpb.StorageConfig {
+	params := paramtable.Get()
+	if params.CommonCfg.StorageType.GetValue() == "local" {
+		return &indexpb.StorageConfig{
+			RootPath:    params.LocalStorageCfg.Path.GetValue(),
+			StorageType: params.CommonCfg.StorageType.GetValue(),
+		}
+	}
+	return &indexpb.StorageConfig{
+		Address:           params.MinioCfg.Address.GetValue(),
+		AccessKeyID:       params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKey:   params.MinioCfg.SecretAccessKey.GetValue(),
+		UseSSL:            params.MinioCfg.UseSSL.GetAsBool(),
+		SslCACert:         params.MinioCfg.SslCACert.GetValue(),
+		BucketName:        params.MinioCfg.BucketName.GetValue(),
+		RootPath:          params.MinioCfg.RootPath.GetValue(),
+		UseIAM:            params.MinioCfg.UseIAM.GetAsBool(),
+		IAMEndpoint:       params.MinioCfg.IAMEndpoint.GetValue(),
+		StorageType:       params.CommonCfg.StorageType.GetValue(),
+		Region:            params.MinioCfg.Region.GetValue(),
+		UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
+		CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
+		RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
+		SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
+	}
 }
 
 func (loader *segmentLoader) patchEntryNumber(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo) error {
@@ -1497,6 +1540,7 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 	// so we need to estimate the final resource usage of the segments
 	finalFactor := resourceEstimateFactor{
 		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		textIndexExpansionFactor:        paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
 		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
 		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
 		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
@@ -1580,6 +1624,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		tempSegmentIndexFactor:      paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
 		deltaDataExpansionFactor:    paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
 		jsonKeyStatsExpansionFactor: paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.GetAsFloat(),
+		textIndexExpansionFactor:    paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
 		TieredEvictionEnabled:       paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
 	}
 	maxSegmentSize := uint64(0)
@@ -1841,6 +1886,18 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		segmentInevictableMemorySize += uint64(float64(memSize) * expansionFactor)
 	}
 
+	// PART 5: calculate logical resource usage of text index stats data
+	// Text match indexes are evictable (support_eviction=true in caching layer).
+	// Text match index mmap is driven by scalar_field_enable_mmap (same as raw scalar data).
+	textIndexMmapEnable := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+	for _, textStats := range loadInfo.GetTextStatsLogs() {
+		if textIndexMmapEnable {
+			segmentEvictableDiskSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+		} else {
+			segmentEvictableMemorySize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+		}
+	}
+
 	log.Debug("estimate logical resoure usage result",
 		zap.Int64("segmentID", loadInfo.GetSegmentID()),
 		zap.Uint64("segmentInevictableMemorySize", segmentInevictableMemorySize),
@@ -2082,6 +2139,25 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 	rowCount := uint64(loadInfo.GetNumOfRows())
 	for range len(schema.GetStructArrayFields()) {
 		structArrayOffsetsSize += 4*rowCount + 4*rowCount*10
+	}
+
+	// PART 7: calculate size of text index stats data
+	// text index data is managed by the caching layer when tiered eviction is enabled,
+	// so it only needs to be included when tiered eviction is disabled.
+	// Text match index mmap is driven by scalar_field_enable_mmap (same as raw scalar data).
+	// memory_size = sum of Tantivy index file sizes (same value as C++ ByteSize() after load),
+	// so 1.0x is the baseline; textIndexExpansionFactor allows tuning if needed.
+	textIndexMmapEnable := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+	for _, textStats := range loadInfo.GetTextStatsLogs() {
+		if textIndexMmapEnable {
+			if !multiplyFactor.TieredEvictionEnabled {
+				segDiskLoadingSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+			}
+		} else {
+			if !multiplyFactor.TieredEvictionEnabled {
+				segMemoryLoadingSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+			}
+		}
 	}
 
 	return &ResourceUsage{

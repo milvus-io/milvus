@@ -361,6 +361,123 @@ func TestQueryTask_all(t *testing.T) {
 		// from the second page, the mvccTs is set to the sessionTs init in the first page
 		assert.Equal(t, enqueTs, qt.GetMvccTimestamp())
 	})
+
+	t.Run("test count(*) with aggregation validation rules", func(t *testing.T) {
+		// Test cases for the two validation rule fixes:
+		// 1. Aggregation queries exempt from "empty expression needs limit" check (#47326)
+		// 2. count(*) pagination only blocked when no GROUP BY (#47326)
+
+		makeTask := func(exprStr string, outputFields []string, limitValue int64, groupByField string) *queryTask {
+			queryParams := []*commonpb.KeyValuePair{
+				{Key: IgnoreGrowingKey, Value: "false"},
+			}
+			if limitValue > 0 {
+				queryParams = append(queryParams, &commonpb.KeyValuePair{
+					Key:   LimitKey,
+					Value: fmt.Sprintf("%d", limitValue),
+				})
+			}
+			if groupByField != "" {
+				queryParams = append(queryParams, &commonpb.KeyValuePair{
+					Key:   QueryGroupByFieldsKey,
+					Value: groupByField,
+				})
+			}
+			task := &queryTask{
+				Condition: NewTaskCondition(ctx),
+				RetrieveRequest: &internalpb.RetrieveRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:  commonpb.MsgType_Retrieve,
+						SourceID: paramtable.GetNodeID(),
+					},
+					CollectionID:   collectionID,
+					OutputFieldsId: make([]int64, 0),
+				},
+				ctx: ctx,
+				result: &milvuspb.QueryResults{
+					Status:     merr.Success(),
+					FieldsData: []*schemapb.FieldData{},
+				},
+				request: &milvuspb.QueryRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:  commonpb.MsgType_Retrieve,
+						SourceID: paramtable.GetNodeID(),
+					},
+					CollectionName: collectionName,
+					Expr:           exprStr,
+					OutputFields:   outputFields,
+					QueryParams:    queryParams,
+				},
+				mixCoord:       qc,
+				lb:             lb,
+				shardclientMgr: mgr,
+			}
+			task.OnEnqueue()
+			return task
+		}
+
+		// Case 1: count(*) + GROUP BY + limit → should PASS
+		{
+			task := makeTask(
+				expr,
+				[]string{testInt64Field, "count(*)"},
+				100,
+				testInt64Field,
+			)
+			err := task.PreExecute(ctx)
+			assert.NoError(t, err, "count(*) with GROUP BY and limit should be allowed")
+		}
+
+		// Case 2: count(*) + GROUP BY + no limit → should PASS
+		{
+			task := makeTask(
+				expr,
+				[]string{testInt64Field, "count(*)"},
+				0,
+				testInt64Field,
+			)
+			err := task.PreExecute(ctx)
+			assert.NoError(t, err, "count(*) with GROUP BY and no limit should be allowed")
+		}
+
+		// Case 3: count(*) + no GROUP BY + limit → should FAIL
+		{
+			task := makeTask(
+				expr,
+				[]string{"count(*)"},
+				100,
+				"",
+			)
+			err := task.PreExecute(ctx)
+			assert.Error(t, err, "count(*) without GROUP BY with limit should fail")
+			assert.Contains(t, err.Error(), "count entities with pagination is not allowed")
+		}
+
+		// Case 4: aggregation + empty expr + no limit → should PASS
+		{
+			task := makeTask(
+				"",
+				[]string{testInt64Field, "count(*)"},
+				0,
+				testInt64Field,
+			)
+			err := task.PreExecute(ctx)
+			assert.NoError(t, err, "aggregation with empty expr and no limit should be allowed")
+		}
+
+		// Case 5: non-aggregation + empty expr + no limit → should FAIL
+		{
+			task := makeTask(
+				"",
+				[]string{testInt64Field},
+				0,
+				"",
+			)
+			err := task.PreExecute(ctx)
+			assert.Error(t, err, "non-aggregation with empty expr and no limit should fail")
+			assert.Contains(t, err.Error(), "empty expression should be used with limit")
+		}
+	})
 }
 
 func Test_translateToOutputFieldIDs(t *testing.T) {

@@ -257,13 +257,21 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 				return nil, err
 			}
 
-			path := metautil.BuildDeltaLogPath(
-				t.compactionParams.StorageConfig.GetRootPath(), segment.GetCollectionID(), segment.GetPartitionID(), segment.GetSegmentID(), logID)
-
 			// Use V2 storage for segments with manifest, V1 otherwise
 			storageVersion := storage.StorageV1
+			var path string
 			if segment.GetManifest() != "" {
 				storageVersion = storage.StorageV2
+				// V3: build deltalog path under basePath/_delta/
+				basePath, _, err := packed.UnmarshalManfestPath(segment.GetManifest())
+				if err != nil {
+					log.Warn("L0 compaction failed to parse manifest path", zap.Int64("segmentID", segmentID), zap.Error(err))
+					return nil, err
+				}
+				path = metautil.BuildDeltaLogPathV3(basePath, logID)
+			} else {
+				path = metautil.BuildDeltaLogPath(
+					t.compactionParams.StorageConfig.GetRootPath(), segment.GetCollectionID(), segment.GetPartitionID(), segment.GetSegmentID(), logID)
 			}
 
 			writer, err := storage.NewDeltalogWriter(ctx,
