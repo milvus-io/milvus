@@ -2374,7 +2374,7 @@ please adjust in embedded Milvus: false`,
 	p.ResolveAliasForPrivilege = ParamItem{
 		Key:          "proxy.resolveAliasForPrivilege",
 		Version:      "2.6.9",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks",
 		Export:       true,
 	}
