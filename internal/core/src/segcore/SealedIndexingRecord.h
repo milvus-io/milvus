@@ -54,7 +54,13 @@ struct SealedIndexingRecord {
     void
     drop_field_indexing(FieldId field_id) {
         std::unique_lock lck(mutex_);
-        field_indexings_.erase(field_id);
+        auto it = field_indexings_.find(field_id);
+        if (it != field_indexings_.end()) {
+            if (it->second && it->second->indexing_) {
+                it->second->indexing_->CancelWarmup();
+            }
+            field_indexings_.erase(it);
+        }
     }
 
     bool
@@ -66,6 +72,11 @@ struct SealedIndexingRecord {
     void
     clear() {
         std::unique_lock lck(mutex_);
+        for (auto& [_, entry] : field_indexings_) {
+            if (entry && entry->indexing_) {
+                entry->indexing_->CancelWarmup();
+            }
+        }
         field_indexings_.clear();
     }
 
