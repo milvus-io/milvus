@@ -1270,6 +1270,58 @@ func Test_checkEmbeddingListIndex(t *testing.T) {
 	})
 }
 
+func Test_arrayOfVector_nonEmbListMetric_indexCompat(t *testing.T) {
+	// When an ArrayOfVector field uses a non-EmbList metric (e.g., COSINE),
+	// each embedding is indexed independently. The index should only need to
+	// support the element vector type, not the EmbeddingList capability.
+	// This means indexes like IVF_PQ that don't have the EMB_LIST flag
+	// should still work with ArrayOfVector + COSINE.
+	t.Run("ArrayOfVector with COSINE should accept IVF_FLAT", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+					{Key: common.MetricTypeKey, Value: metric.COSINE},
+					{Key: "nlist", Value: "128"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:     101,
+				Name:        "vec_field",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+	})
+
+	t.Run("ArrayOfVector with MaxSimCosine should accept HNSW", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "HNSW"},
+					{Key: common.MetricTypeKey, Value: metric.MaxSimCosine},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:     101,
+				Name:        "vec_field",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+	})
+}
+
 func Test_ngram_parseIndexParams(t *testing.T) {
 	t.Run("valid ngram index params", func(t *testing.T) {
 		cit := &createIndexTask{

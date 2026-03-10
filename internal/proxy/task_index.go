@@ -641,8 +641,20 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 		return fmt.Errorf("invalid index type: %s", indexType)
 	}
 
+	// For ArrayOfVector with non-EmbList metrics (e.g., COSINE, L2, IP), each embedding
+	// in the array is indexed independently as a regular vector. The index only needs to
+	// support the element vector type, not the EmbeddingList capability.
+	// Resolve the effective data type used for index compatibility checks.
+	effectiveDataType := field.DataType
+	effectiveElementType := field.ElementType
+	if typeutil.IsArrayOfVectorType(field.DataType) &&
+		!funcutil.SliceContain(indexparamcheck.EmbListMetrics, indexParams[common.MetricTypeKey]) {
+		effectiveDataType = field.ElementType
+		effectiveElementType = schemapb.DataType_None
+	}
+
 	if typeutil.IsVectorType(field.DataType) && indexType != indexparamcheck.AutoIndex {
-		exist := CheckVecIndexWithDataTypeExist(indexType, field.DataType, field.ElementType)
+		exist := CheckVecIndexWithDataTypeExist(indexType, effectiveDataType, effectiveElementType)
 		if !exist {
 			return fmt.Errorf("data type %s can't build with this index %s", schemapb.DataType_name[int32(field.GetDataType())], indexType)
 		}
@@ -656,12 +668,15 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 		}
 	}
 
-	if err := checker.CheckValidDataType(indexType, field); err != nil {
+	if err := checker.CheckValidDataType(indexType, &schemapb.FieldSchema{
+		DataType:    effectiveDataType,
+		ElementType: effectiveElementType,
+	}); err != nil {
 		log.Ctx(ctx).Info("create index with invalid data type", zap.Error(err), zap.String("data_type", field.GetDataType().String()))
 		return err
 	}
 
-	if err := checker.CheckTrain(field.DataType, field.ElementType, indexParams); err != nil {
+	if err := checker.CheckTrain(effectiveDataType, effectiveElementType, indexParams); err != nil {
 		log.Ctx(ctx).Info("create index with invalid parameters", zap.Error(err))
 		return err
 	}
