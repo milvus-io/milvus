@@ -1022,7 +1022,7 @@ type LoadTextIndexInfo struct {
 	LoadPriority commonpb.LoadPriority `protobuf:"varint,8,opt,name=load_priority,json=loadPriority,proto3,enum=milvus.proto.common.LoadPriority" json:"load_priority,omitempty"`
 	EnableMmap   bool                  `protobuf:"varint,9,opt,name=enable_mmap,json=enableMmap,proto3" json:"enable_mmap,omitempty"`
 	IndexSize    int64                 `protobuf:"varint,10,opt,name=index_size,json=indexSize,proto3" json:"index_size,omitempty"`
-	WarmupPolicy string                `protobuf:"bytes,12,opt,name=warmup_policy,json=warmupPolicy,proto3" json:"warmup_policy,omitempty"` // "disable" or "sync", empty means use global config
+	WarmupPolicy string                `protobuf:"bytes,12,opt,name=warmup_policy,json=warmupPolicy,proto3" json:"warmup_policy,omitempty"` // "disable", "sync" or "async", empty means use global config
 }
 
 func (x *LoadTextIndexInfo) Reset() {
@@ -1150,7 +1150,7 @@ type LoadJsonKeyIndexInfo struct {
 	EnableMmap   bool                  `protobuf:"varint,9,opt,name=enable_mmap,json=enableMmap,proto3" json:"enable_mmap,omitempty"`
 	MmapDirPath  string                `protobuf:"bytes,10,opt,name=mmap_dir_path,json=mmapDirPath,proto3" json:"mmap_dir_path,omitempty"`
 	StatsSize    int64                 `protobuf:"varint,11,opt,name=stats_size,json=statsSize,proto3" json:"stats_size,omitempty"`
-	WarmupPolicy string                `protobuf:"bytes,12,opt,name=warmup_policy,json=warmupPolicy,proto3" json:"warmup_policy,omitempty"` // "disable" or "sync", empty means use global config
+	WarmupPolicy string                `protobuf:"bytes,12,opt,name=warmup_policy,json=warmupPolicy,proto3" json:"warmup_policy,omitempty"` // "disable", "sync", or "async"; empty means use global config
 }
 
 func (x *LoadJsonKeyIndexInfo) Reset() {
