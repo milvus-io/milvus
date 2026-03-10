@@ -19,8 +19,9 @@ default_vector_field_name = "vector"
 default_float_field_name = ct.default_float_field_name
 default_string_field_name = ct.default_string_field_name
 
-# RBAC propagation delay (seconds) after grant/revoke operations
-RBAC_PROPAGATION_WAIT = 10
+# RBAC propagation polling config
+RBAC_POLL_INTERVAL = 2      # seconds between polls
+RBAC_POLL_TIMEOUT = 30      # max seconds to wait for propagation
 
 
 @pytest.mark.tags(CaseLabel.RBAC)
@@ -180,9 +181,50 @@ class TestRbacAliasBase(TestMilvusClientV2Base):
                     f"Unexpected privilege '{priv}' on '{collection_name}' for role '{role_name}', " \
                     f"found: {found_privileges}"
 
+    def _wait_for_grant_propagated(self, client, role_name, collection_name, expected_privileges,
+                                    timeout=RBAC_POLL_TIMEOUT, interval=RBAC_POLL_INTERVAL):
+        """Poll describe_role until expected privileges are visible on collection_name."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            res, ok = self.describe_role(client, role_name, check_task=CheckTasks.check_nothing)
+            if ok and res and isinstance(res, dict):
+                found = {p.get('privilege') for p in res.get('privileges', [])
+                         if p.get('object_name') == collection_name}
+                if all(priv in found for priv in expected_privileges):
+                    return True
+            time.sleep(interval)
+        log.warning(f"Grant propagation timeout: {expected_privileges} on '{collection_name}' "
+                    f"for role '{role_name}' not visible after {timeout}s")
+        return False
+
+    def _grant_and_wait(self, client, role_name, privilege, collection_name, **kwargs):
+        """Grant privilege, then poll until propagated (replaces fixed sleep)."""
+        self.grant_privilege_v2(client, role_name, privilege, collection_name, **kwargs)
+        self._wait_for_grant_propagated(client, role_name, collection_name, [privilege])
+
+    def _revoke_and_wait(self, client, role_name, privilege, collection_name, **kwargs):
+        """Revoke privilege, then poll until revoked (replaces fixed sleep)."""
+        self.revoke_privilege_v2(client, role_name, privilege, collection_name, **kwargs)
+        self._wait_for_grant_revoked(client, role_name, collection_name, [privilege])
+
+    def _wait_for_grant_revoked(self, client, role_name, collection_name, revoked_privileges,
+                                 timeout=RBAC_POLL_TIMEOUT, interval=RBAC_POLL_INTERVAL):
+        """Poll describe_role until revoked privileges are no longer visible."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            res, ok = self.describe_role(client, role_name, check_task=CheckTasks.check_nothing)
+            if ok and res and isinstance(res, dict):
+                found = {p.get('privilege') for p in res.get('privileges', [])
+                         if p.get('object_name') == collection_name}
+                if not any(priv in found for priv in revoked_privileges):
+                    return True
+            time.sleep(interval)
+        log.warning(f"Revoke propagation timeout: {revoked_privileges} on '{collection_name}' "
+                    f"for role '{role_name}' still visible after {timeout}s")
+        return False
+
 
 @pytest.mark.xdist_group("TestRbacAliasShared")
-@pytest.mark.skip(reason="RBAC alias resolution need fix and debug")
 class TestRbacAliasSharedCollection(TestRbacAliasBase):
     """Tests sharing one collection. Each test creates its own alias/user/role.
 
@@ -241,8 +283,7 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self._create_alias_with_tracking(client, self.collection_name, alias_name)
 
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Search", self.collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Search", self.collection_name)
 
         uri = f"http://{host}:{port}"
         restricted_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
@@ -263,8 +304,7 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self._create_alias_with_tracking(client, self.collection_name, alias_name)
 
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Search", self.collection_b_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Search", self.collection_b_name)
 
         uri = f"http://{host}:{port}"
         restricted_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
@@ -286,8 +326,7 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self._create_alias_with_tracking(client, self.collection_name, alias_name)
 
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Search", self.collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Search", self.collection_name)
 
         uri = f"http://{host}:{port}"
         restricted_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
@@ -307,8 +346,7 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self._create_alias_with_tracking(client, self.collection_name, alias_name)
 
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Search", "*")
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Search", "*")
 
         uri = f"http://{host}:{port}"
         restricted_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
@@ -329,8 +367,7 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self._create_alias_with_tracking(client, self.collection_name, alias2)
 
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Search", self.collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Search", self.collection_name)
 
         uri = f"http://{host}:{port}"
         restricted_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
@@ -353,7 +390,7 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         user_name, password, role_name = self._setup_restricted_user_role(client)
         # v1 API: grant_privilege(client, role, object_type, privilege, object_name)
         self.grant_privilege(client, role_name, "Collection", "Search", alias_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._wait_for_grant_propagated(client, role_name, self.collection_name, ["Search"])
 
         # verify grant is stored on real collection (v1 API also normalizes)
         self._assert_role_has_privilege_on_collection(client, role_name, self.collection_name,
@@ -382,7 +419,7 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         user_name, password, role_name = self._setup_restricted_user_role(client)
         # grant Search using alias name — should be normalized to real collection
         self.grant_privilege_v2(client, role_name, "Search", alias_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._wait_for_grant_propagated(client, role_name, self.collection_name, ["Search"])
 
         # describe_role → should show grant on real collection name
         self._assert_role_has_privilege_on_collection(client, role_name, self.collection_name,
@@ -412,14 +449,13 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
 
         # grant via alias
         self.grant_privilege_v2(client, role_name, "Search", alias_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._wait_for_grant_propagated(client, role_name, self.collection_name, ["Search"])
 
         # describe_role → grant should be on real collection (not alias name)
         self._assert_role_has_privilege_on_collection(client, role_name, self.collection_name,
                                                        ["Search"], should_exist=True)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48061")
     def test_rbac_alias_query_via_alias(self, host, port):
         """
         target: TC-L1-27 — verify Query works via alias with grant on real collection
@@ -432,8 +468,7 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self._create_alias_with_tracking(client, self.collection_name, alias_name)
 
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Query", self.collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Query", self.collection_name)
 
         uri = f"http://{host}:{port}"
         restricted_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
@@ -447,7 +482,6 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
                    output_fields=[default_primary_key_field_name], limit=default_limit)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48061")
     def test_rbac_alias_insert_via_alias(self, host, port):
         """
         target: TC-L1-28 — verify Insert works via alias with grant on real collection
@@ -460,8 +494,7 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self._create_alias_with_tracking(client, self.collection_name, alias_name)
 
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Insert", self.collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Insert", self.collection_name)
 
         uri = f"http://{host}:{port}"
         restricted_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
@@ -474,7 +507,6 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self.insert(restricted_client, alias_name, rows)
 
 
-@pytest.mark.skip(reason="RBAC alias resolution need fix and debug")
 class TestRbacAliasIndependent(TestRbacAliasBase):
     """Tests that modify collection/alias/grant state — each creates its own resources.
 
@@ -485,7 +517,6 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48071")
     def test_rbac_alias_cache_stale_after_grant_revoke_cycle(self, host, port):
         """
         target: TC-L1-26 — verify alias search works after grant-revoke-re-grant on same collection
@@ -508,8 +539,7 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
 
         # === Round 1: grant → search via alias → revoke ===
         user1, pwd1, role1 = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role1, "Search", collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role1, "Search", collection_name)
 
         uri = f"http://{host}:{port}"
         client1, _ = self.init_milvus_client(uri=uri, user=user1, password=pwd1)
@@ -517,13 +547,11 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         self.search(client1, alias_name, search_vectors, limit=default_limit)
 
         # Teardown round 1: revoke and drop
-        self.revoke_privilege_v2(client, role1, "Search", collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._revoke_and_wait(client, role1, "Search", collection_name)
 
         # === Round 2: new role + new user, same collection + same alias ===
         user2, pwd2, role2 = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role2, "Search", collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role2, "Search", collection_name)
 
         client2, _ = self.init_milvus_client(uri=uri, user=user2, password=pwd2)
 
@@ -569,7 +597,10 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         # create role with Search on db1.collA only
         user_name, password, role_name = self._setup_restricted_user_role(client)
         self.grant_privilege_v2(client, role_name, "Search", collection_name, db_name=db1)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        # cross-db grant: poll in the granted db context
+        self.using_database(client, db1)
+        self._wait_for_grant_propagated(client, role_name, collection_name, ["Search"])
+        self.using_database(client, "default")
 
         # connect as restricted user to db1 → search via alias should succeed
         uri = f"http://{host}:{port}"
@@ -604,8 +635,7 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
 
         # create role with Search on real collection
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Search", collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Search", collection_name)
 
         # connect as restricted user, search via alias → success
         uri = f"http://{host}:{port}"
@@ -643,8 +673,7 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
 
         # create role with Search on real collection
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Search", collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Search", collection_name)
 
         # connect as restricted user, search via both aliases → fill cache
         uri = f"http://{host}:{port}"
@@ -689,7 +718,8 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         user_name, password, role_name = self._setup_restricted_user_role(client)
         self.grant_privilege_v2(client, role_name, "Search", collection_a)
         self.grant_privilege_v2(client, role_name, "Search", collection_b)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._wait_for_grant_propagated(client, role_name, collection_a, ["Search"])
+        self._wait_for_grant_propagated(client, role_name, collection_b, ["Search"])
 
         # connect as restricted user
         uri = f"http://{host}:{port}"
@@ -748,8 +778,7 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
 
         # RBAC verification: grant Search on real collection, access via aliasY
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Search", collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Search", collection_name)
 
         uri = f"http://{host}:{port}"
         restricted_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
@@ -776,16 +805,15 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
 
         # create role, grant Search on real collection
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Search", collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Search", collection_name)
 
         # verify grant exists
         self._assert_role_has_privilege_on_collection(client, role_name, collection_name,
                                                        ["Search"], should_exist=True)
 
-        # revoke via alias name
+        # revoke via alias name (alias normalized to real collection)
         self.revoke_privilege_v2(client, role_name, "Search", alias_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._wait_for_grant_revoked(client, role_name, collection_name, ["Search"])
 
         # verify grant removed
         self._assert_role_has_privilege_on_collection(client, role_name, collection_name,
@@ -824,11 +852,11 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         # create role, grant Search via alias (normalized to collectionA)
         user_name, password, role_name = self._setup_restricted_user_role(client)
         self.grant_privilege_v2(client, role_name, "Search", alias_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._wait_for_grant_propagated(client, role_name, collection_a, ["Search"])
 
         # alter alias → collectionB
         self.alter_alias(client, collection_b, alias_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        time.sleep(5)
 
         # connect as restricted user
         uri = f"http://{host}:{port}"
@@ -867,8 +895,7 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
 
         # create role with Search on collectionA only
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Search", collection_a)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Search", collection_a)
 
         # connect as restricted user
         uri = f"http://{host}:{port}"
@@ -880,14 +907,13 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
 
         # admin alters alias to collectionB
         self.alter_alias(client, collection_b, alias_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        time.sleep(5)
 
         # search via alias → MUST be denied (alias → collectionB, no grant on B)
         self.search(restricted_client, alias_name, search_vectors, limit=default_limit,
                     check_task=CheckTasks.check_permission_deny)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48062")
     def test_rbac_old_grant_not_leaked_to_new_collection(self, host, port):
         """
         target: TC-SEC-02 — verify old grants don't leak to newly created same-name collection
@@ -906,8 +932,7 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         self._insert_data(client, collection_name)
 
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Search", collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Search", collection_name)
 
         # verify access works
         uri = f"http://{host}:{port}"
@@ -921,14 +946,13 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         # create new collection with same name
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         self._insert_data(client, collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        time.sleep(5)  # wait for RBAC cache to reflect collection drop
 
         # search with old user on new collection → should be denied
         self.search(restricted_client, collection_name, search_vectors, limit=default_limit,
                     check_task=CheckTasks.check_permission_deny)
 
 
-@pytest.mark.skip(reason="RBAC alias resolution need fix and debug")
 class TestRbacGrantCleanup(TestRbacAliasBase):
     """Test grant cleanup on collection drop (Sub-feature 3).
 
@@ -938,7 +962,6 @@ class TestRbacGrantCleanup(TestRbacAliasBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48062")
     def test_rbac_grant_cleanup_on_collection_drop(self, host, port):
         """
         target: TC-L0-04 — verify grants are cleaned up when collection is dropped
@@ -961,7 +984,8 @@ class TestRbacGrantCleanup(TestRbacAliasBase):
         self.grant_privilege_v2(client, role1, "Insert", collection_name)
         self.grant_privilege_v2(client, role1, "Search", collection_name)
         self.grant_privilege_v2(client, role2, "Query", collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._wait_for_grant_propagated(client, role1, collection_name, ["Insert", "Search"])
+        self._wait_for_grant_propagated(client, role2, collection_name, ["Query"])
 
         # verify grants exist before drop
         self._assert_role_has_privilege_on_collection(client, role1, collection_name,
@@ -979,7 +1003,6 @@ class TestRbacGrantCleanup(TestRbacAliasBase):
                                                        ["Query"], should_exist=False)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48062")
     def test_rbac_grant_cleanup_exact_match(self, host, port):
         """
         target: TC-L1-13 — verify grant cleanup uses exact match, not prefix match
@@ -1000,7 +1023,8 @@ class TestRbacGrantCleanup(TestRbacAliasBase):
         self._create_role_with_tracking(client, role_name)
         self.grant_privilege_v2(client, role_name, "Search", col1)
         self.grant_privilege_v2(client, role_name, "Search", col1_backup)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._wait_for_grant_propagated(client, role_name, col1, ["Search"])
+        self._wait_for_grant_propagated(client, role_name, col1_backup, ["Search"])
 
         # verify both have grants
         self._assert_role_has_privilege_on_collection(client, role_name, col1,
@@ -1018,7 +1042,6 @@ class TestRbacGrantCleanup(TestRbacAliasBase):
                                                        ["Search"], should_exist=True)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48062")
     def test_rbac_grant_cleanup_multiple_privilege_types(self, host, port):
         """
         target: TC-L1-14 — verify all privilege types are cleaned up on collection drop
@@ -1039,7 +1062,7 @@ class TestRbacGrantCleanup(TestRbacAliasBase):
         privileges = ["Insert", "Search", "Query", "Load", "CreateIndex"]
         for priv in privileges:
             self.grant_privilege_v2(client, role_name, priv, collection_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._wait_for_grant_propagated(client, role_name, collection_name, privileges)
 
         # verify all grants exist
         self._assert_role_has_privilege_on_collection(client, role_name, collection_name,
@@ -1053,7 +1076,6 @@ class TestRbacGrantCleanup(TestRbacAliasBase):
                                                        privileges, should_exist=False)
 
 
-@pytest.mark.skip(reason="RBAC alias resolution need fix and debug")
 class TestRbacGrantMigration(TestRbacAliasBase):
     """Test grant migration on collection rename (Sub-feature 4).
 
@@ -1063,7 +1085,6 @@ class TestRbacGrantMigration(TestRbacAliasBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48062")
     def test_rbac_grant_migration_on_rename(self, host, port):
         """
         target: TC-L0-05 — verify grants migrate to new name on collection rename
@@ -1082,8 +1103,7 @@ class TestRbacGrantMigration(TestRbacAliasBase):
         self._insert_data(client, old_name)
 
         user_name, password, role_name = self._setup_restricted_user_role(client)
-        self.grant_privilege_v2(client, role_name, "Search", old_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Search", old_name)
 
         # verify grant exists on old_name
         self._assert_role_has_privilege_on_collection(client, role_name, old_name,
@@ -1098,15 +1118,14 @@ class TestRbacGrantMigration(TestRbacAliasBase):
         self._assert_role_has_privilege_on_collection(client, role_name, old_name,
                                                        ["Search"], should_exist=False)
 
-        # verify restricted user can search new_name
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        # verify restricted user can search new_name (grant already migrated, poll for propagation)
+        self._wait_for_grant_propagated(client, role_name, new_name, ["Search"])
         uri = f"http://{host}:{port}"
         restricted_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
         search_vectors = cf.gen_vectors(1, default_dim)
         self.search(restricted_client, new_name, search_vectors, limit=default_limit)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48062")
     def test_rbac_grant_migration_multiple_roles(self, host, port):
         """
         target: TC-L1-16 — verify all roles' grants migrate on rename
@@ -1129,7 +1148,8 @@ class TestRbacGrantMigration(TestRbacAliasBase):
         self.grant_privilege_v2(client, role1, "Insert", old_name)
         self.grant_privilege_v2(client, role1, "Search", old_name)
         self.grant_privilege_v2(client, role2, "Query", old_name)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._wait_for_grant_propagated(client, role1, old_name, ["Insert", "Search"])
+        self._wait_for_grant_propagated(client, role2, old_name, ["Query"])
 
         # rename
         self.rename_collection(client, old_name, new_name)
@@ -1147,7 +1167,6 @@ class TestRbacGrantMigration(TestRbacAliasBase):
                                                        ["Query"], should_exist=False)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48062")
     def test_rbac_grant_migration_exact_match(self, host, port):
         """
         target: TC-L1-17 — verify grant migration uses exact match, no prefix collision
@@ -1169,7 +1188,8 @@ class TestRbacGrantMigration(TestRbacAliasBase):
         self._create_role_with_tracking(client, role_name)
         self.grant_privilege_v2(client, role_name, "Search", old)
         self.grant_privilege_v2(client, role_name, "Insert", old_backup)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._wait_for_grant_propagated(client, role_name, old, ["Search"])
+        self._wait_for_grant_propagated(client, role_name, old_backup, ["Insert"])
 
         # rename old → new
         self.rename_collection(client, old, new)
@@ -1182,7 +1202,6 @@ class TestRbacGrantMigration(TestRbacAliasBase):
                                                        ["Insert"], should_exist=True)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48062")
     def test_rbac_grant_migration_consecutive_renames(self, host, port):
         """
         target: TC-L1-19 — verify grants follow consecutive renames
@@ -1201,8 +1220,7 @@ class TestRbacGrantMigration(TestRbacAliasBase):
 
         role_name = cf.gen_unique_str(role_pre)
         self._create_role_with_tracking(client, role_name)
-        self.grant_privilege_v2(client, role_name, "Search", name_a)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._grant_and_wait(client, role_name, "Search", name_a)
 
         # rename A → B
         self.rename_collection(client, name_a, name_b)
@@ -1219,7 +1237,6 @@ class TestRbacGrantMigration(TestRbacAliasBase):
                                                        ["Search"], should_exist=False)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48062")
     def test_rbac_grant_migration_grantee_id_recomputation(self, host, port):
         """
         target: TC-L1-22 — verify GranteeID recomputation prevents old grant leaking to new same-name collection
@@ -1241,7 +1258,7 @@ class TestRbacGrantMigration(TestRbacAliasBase):
         user_name, password, role_name = self._setup_restricted_user_role(client)
         self.grant_privilege_v2(client, role_name, "Insert", coll_a)
         self.grant_privilege_v2(client, role_name, "Search", coll_a)
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        self._wait_for_grant_propagated(client, role_name, coll_a, ["Insert", "Search"])
 
         # rename collA → collB
         self.rename_collection(client, coll_a, coll_b)
@@ -1259,7 +1276,8 @@ class TestRbacGrantMigration(TestRbacAliasBase):
                                                        ["Insert", "Search"], should_exist=False)
 
         # verify restricted user cannot search new collA
-        time.sleep(RBAC_PROPAGATION_WAIT)
+        # grant migrated to coll_b on rename, poll until visible there
+        self._wait_for_grant_propagated(client, role_name, coll_b, ["Insert", "Search"])
         uri = f"http://{host}:{port}"
         restricted_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
         search_vectors = cf.gen_vectors(1, default_dim)
