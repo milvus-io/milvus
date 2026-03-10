@@ -9,7 +9,7 @@ import threading
 import uuid
 import json
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 from prettytable import PrettyTable
 import functools
 from collections import Counter
@@ -263,6 +263,7 @@ class Op(Enum):
     rename_collection = 'rename_collection'
     snapshot = 'snapshot'
     restore_snapshot = 'restore_snapshot'
+    entity_ttl = 'entity_ttl'
     unknown = 'unknown'
 
 
@@ -3000,6 +3001,201 @@ class AddVectorFieldChecker(Checker):
         while self._keep_running:
             self.run_task()
             sleep(constants.WAIT_PER_OP * 6)
+
+
+class EntityTTLChecker(Checker):
+    """Check entity-level TTL correctness in a dependent thread.
+
+    Inserts data into 4 TTL buckets with fixed expiry times.
+    Periodically verifies that expired buckets have count==0
+    and alive buckets have count==total_inserted.
+    """
+
+    BUCKETS = {
+        "30s": 30,
+        "5m": 300,
+        "10m": 600,
+        "never": None,
+    }
+    TTL_GRACE_SECONDS = 5
+    VERIFY_INTERVAL = 25
+    FLUSH_INTERVAL = 15
+    COMPACT_INTERVAL = 30
+    INSERT_NB = 10
+    DIM = 128
+
+    def __init__(self, collection_name=None, **kwargs):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("EntityTTLChecker_")
+
+        # Build TTL-specific schema
+        from pymilvus import CollectionSchema as CS, FieldSchema
+        schema = CS(fields=[
+            FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, auto_id=True),
+            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=self.DIM),
+            FieldSchema(name="bucket", dtype=DataType.VARCHAR, max_length=16),
+            FieldSchema(name="ttl", dtype=DataType.TIMESTAMPTZ, nullable=True),
+        ], enable_dynamic_field=False)
+
+        # Skip default data insertion — we manage our own inserts
+        super().__init__(collection_name=collection_name, schema=schema,
+                         insert_data=False, dim=self.DIM, **kwargs)
+
+        # Set collection TTL properties
+        self.milvus_client.alter_collection_properties(
+            collection_name=self.c_name,
+            properties={"ttl_field": "ttl", "timezone": "UTC"},
+        )
+
+        # Fixed expiry times per bucket (set once at start)
+        self.start_time = time.time()
+        self.bucket_expiry = {}
+        for bucket_name, ttl_seconds in self.BUCKETS.items():
+            if ttl_seconds is not None:
+                self.bucket_expiry[bucket_name] = self.start_time + ttl_seconds
+            else:
+                self.bucket_expiry[bucket_name] = None  # never expires
+
+        # Track total inserted per bucket
+        self.inserted_counts = {b: 0 for b in self.BUCKETS}
+        self._counts_lock = threading.Lock()
+
+        log.info(f"EntityTTLChecker initialized: collection={self.c_name}, "
+                 f"bucket_expiry={self.bucket_expiry}")
+
+    def _get_ttl_value(self, bucket_name):
+        """Get the fixed TTL timestamp string for a bucket."""
+        expiry = self.bucket_expiry[bucket_name]
+        if expiry is None:
+            return None
+        return datetime.fromtimestamp(expiry, tz=timezone.utc).isoformat()
+
+    def _is_expired(self, bucket_name):
+        """Check if a bucket's data should have expired (with grace window)."""
+        expiry = self.bucket_expiry[bucket_name]
+        if expiry is None:
+            return False
+        return time.time() > expiry + self.TTL_GRACE_SECONDS
+
+    def _insert_random_bucket(self):
+        """Insert INSERT_NB rows into a random bucket."""
+        bucket_name = random.choice(list(self.BUCKETS.keys()))
+        ttl_value = self._get_ttl_value(bucket_name)
+        vectors = cf.gen_vectors(self.INSERT_NB, self.DIM)
+        rows = [{"vector": list(vectors[i]), "bucket": bucket_name,
+                 "ttl": ttl_value} for i in range(self.INSERT_NB)]
+        try:
+            self.milvus_client.insert(collection_name=self.c_name, data=rows,
+                                      timeout=timeout)
+            with self._counts_lock:
+                self.inserted_counts[bucket_name] += self.INSERT_NB
+            log.debug(f"EntityTTLChecker inserted {self.INSERT_NB} rows into bucket '{bucket_name}'")
+        except Exception as e:
+            log.warning(f"EntityTTLChecker insert failed: {e}")
+
+    def _do_flush(self):
+        """Best-effort flush."""
+        try:
+            self.milvus_client.flush(collection_name=self.c_name, timeout=timeout)
+            log.debug("EntityTTLChecker flush done")
+        except Exception as e:
+            log.warning(f"EntityTTLChecker flush failed: {e}")
+
+    def _do_compact(self):
+        """Best-effort compact."""
+        try:
+            self.milvus_client.compact(collection_name=self.c_name, timeout=timeout)
+            log.debug("EntityTTLChecker compact done")
+        except Exception as e:
+            log.warning(f"EntityTTLChecker compact failed: {e}")
+
+    @trace()
+    def verify_ttl(self):
+        """Verify TTL correctness for all buckets.
+
+        Returns (result_dict, success_bool).
+        """
+        results = {}
+        all_ok = True
+
+        for bucket_name in self.BUCKETS:
+            try:
+                res = self.milvus_client.query(
+                    collection_name=self.c_name,
+                    filter=f'bucket == "{bucket_name}"',
+                    output_fields=["count(*)"],
+                    consistency_level="Strong",
+                    timeout=query_timeout,
+                )
+                actual_count = res[0].get("count(*)", -1) if res else -1
+            except Exception as e:
+                log.warning(f"EntityTTLChecker query for bucket '{bucket_name}' failed: {e}")
+                results[bucket_name] = {"error": str(e)}
+                all_ok = False
+                continue
+
+            with self._counts_lock:
+                total_inserted = self.inserted_counts[bucket_name]
+
+            expired = self._is_expired(bucket_name)
+
+            if expired:
+                # All data should be gone
+                expected = 0
+                ok = actual_count == 0
+                if not ok:
+                    log.error(f"EntityTTLChecker bucket '{bucket_name}': "
+                              f"expected 0 (expired), got {actual_count}")
+                    all_ok = False
+            else:
+                # All data should be present
+                expected = total_inserted
+                ok = actual_count == expected
+                if not ok:
+                    log.error(f"EntityTTLChecker bucket '{bucket_name}': "
+                              f"expected {expected}, got {actual_count}")
+                    all_ok = False
+
+            results[bucket_name] = {
+                "expected": expected, "actual": actual_count,
+                "expired": expired, "ok": ok,
+            }
+
+        log.info(f"EntityTTLChecker verify: {results}")
+        return results, all_ok
+
+    @exception_handler()
+    def run_task(self):
+        res, result = self.verify_ttl()
+        return res, result
+
+    def keep_running(self):
+        last_flush = time.time()
+        last_compact = time.time()
+        last_verify = time.time()
+
+        while self._keep_running:
+            # Insert into a random bucket on every iteration
+            self._insert_random_bucket()
+
+            now = time.time()
+
+            # Flush every 15s
+            if now - last_flush >= self.FLUSH_INTERVAL:
+                self._do_flush()
+                last_flush = now
+
+            # Compact every 30s
+            if now - last_compact >= self.COMPACT_INTERVAL:
+                self._do_compact()
+                last_compact = now
+
+            # Verify every 25s (traced operation)
+            if now - last_verify >= self.VERIFY_INTERVAL:
+                self.run_task()
+                last_verify = now
+
+            sleep(constants.WAIT_PER_OP / 10)
 
 
 class TestResultAnalyzer(unittest.TestCase):
