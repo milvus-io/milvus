@@ -101,7 +101,7 @@ SetExprResCacheCapacityBytes(int64_t bytes) {
 void
 LogOpenSSLFIPSStatus() {
     std::call_once(fipsFlag, []() {
-        LOG_INFO("OpenSSL FIPS mode: {}",
+        LOG_INFO("Milvus FIPS in OpenSSL: {}",
                  EVP_default_properties_is_fips_enabled(NULL) ? "enabled"
                                                               : "disabled");
     });
