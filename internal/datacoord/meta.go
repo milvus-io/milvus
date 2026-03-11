@@ -1249,7 +1249,7 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
-		basePath, currentVer, err := packed.UnmarshalManfestPath(segment.ManifestPath)
+		basePath, currentVer, err := packed.UnmarshalManifestPath(segment.ManifestPath)
 		if err != nil {
 			log.Ctx(context.TODO()).Warn("meta update: update manifest version failed - unmarshal error",
 				zap.Int64("segmentID", segmentID), zap.Error(err))
