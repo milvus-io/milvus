@@ -2581,8 +2581,8 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	}
 	server.stateCode.Store(commonpb.StateCode_Abnormal)
 
-	// Test initMessageCallback
-	server.initMessageCallback()
+	registry.ResetRegistration()
+	RegisterDDLCallbacks(server)
 
 	// Test Import message ack callback
 	importMsg := message.NewImportMessageBuilderV1().

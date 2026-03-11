@@ -121,9 +121,6 @@ func (s *broadcastServceImpl) forwardImportToDataCoord(ctx context.Context, msg 
 
 	// Call DataCoord.ImportV2
 	resp, err := mixCoordClient.ImportV2(ctx, importReq)
-	if err != nil {
-		return nil, err
-	}
 	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, err
 	}

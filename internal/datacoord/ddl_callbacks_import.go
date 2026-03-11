@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -40,11 +39,10 @@ import (
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 	body := result.Message.MustBody()
 
-	// Get database ID from database name
-	// Note: In ack callback, we get dbName from the broadcast message
-	dbName := body.GetDbName()
-	if dbName == "" {
-		dbName = util.DefaultDBName
+	// Ensure Schema.DbName is populated from the broadcast message's DbName,
+	// matching the behavior in master where this was set before calling ImportV2.
+	if body.Schema != nil {
+		body.Schema.DbName = body.DbName
 	}
 
 	// Process each vchannel with its own TimeTick (not deprecated MsgBase)
