@@ -1087,6 +1087,96 @@ func TestTaskQuery_functions(t *testing.T) {
 				assert.Equal(t, []int64{2, 3}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 			})
 
+			t.Run("element-level offset should skip by element count not doc count", func(t *testing.T) {
+				// Doc layout:
+				//   pk=1: 3 elements [0,1,2]
+				//   pk=2: 2 elements [0,1]
+				//   pk=3: 1 element  [0]
+				// Total: 6 elements
+				//
+				// Query: offset=3, limit=3
+				// Correct (element-level offset):
+				//   Skip 3 elements (all from pk=1) → return pk=2 (2 elem) + pk=3 (1 elem) = 3 elements
+				// Bug (doc-level offset):
+				//   Skip 3 docs (pk=1, pk=2, pk=3) → nothing left → empty result
+				r := makeElementLevelResult([]int64{1, 2, 3}, [][]int32{{0, 1, 2}, {0, 1}, {0}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: 3, offset: 3})
+				assert.NoError(t, err)
+				pks := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+				assert.Equal(t, []int64{2, 3}, pks, "offset=3 should skip 3 elements (all of pk=1), returning pk=2 and pk=3")
+				assert.Equal(t, 2, len(result.GetElementIndices()))
+				assert.Equal(t, []int64{0, 1}, result.GetElementIndices()[0].GetIndices().GetData())
+				assert.Equal(t, []int64{0}, result.GetElementIndices()[1].GetIndices().GetData())
+			})
+
+			t.Run("element-level offset falls mid-document trims elements", func(t *testing.T) {
+				// Doc layout:
+				//   pk=1: 3 elements [0,1,2]
+				//   pk=2: 2 elements [3,4]
+				// Total: 5 elements
+				//
+				// Query: offset=2, limit=10
+				// offset=2 falls in the middle of pk=1 (which has 3 elements).
+				// Should skip elements [0,1] of pk=1, keep element [2].
+				// Result: pk=1 with trimmed indices [2], pk=2 with [3,4] → 3 elements total
+				r := makeElementLevelResult([]int64{1, 2}, [][]int32{{0, 1, 2}, {3, 4}})
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r},
+					&queryParams{limit: 10, offset: 2})
+				assert.NoError(t, err)
+				pks := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+				assert.Equal(t, []int64{1, 2}, pks, "both docs should be present since offset lands mid-doc on pk=1")
+				assert.Equal(t, 2, len(result.GetElementIndices()))
+				// pk=1: original [0,1,2], trimmed first 2 → [2]
+				assert.Equal(t, []int64{2}, result.GetElementIndices()[0].GetIndices().GetData())
+				// pk=2: unchanged [3,4]
+				assert.Equal(t, []int64{3, 4}, result.GetElementIndices()[1].GetIndices().GetData())
+			})
+
+			t.Run("element-level offset+limit pagination consistency", func(t *testing.T) {
+				// Verify that two consecutive pages cover all elements without gap or overlap.
+				// Doc layout (across 2 shards):
+				//   shard0: pk=1 (2 elements [0,1]), pk=3 (1 element [0])
+				//   shard1: pk=2 (3 elements [0,1,2]), pk=4 (2 elements [0,1])
+				// Merged by PK: pk=1(2), pk=2(3), pk=3(1), pk=4(2) → total 8 elements
+				r1 := makeElementLevelResult([]int64{1, 3}, [][]int32{{0, 1}, {0}})
+				r2 := makeElementLevelResult([]int64{2, 4}, [][]int32{{0, 1, 2}, {0, 1}})
+
+				// Page 1: offset=0, limit=5 → first 5 elements
+				page1, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: 5, offset: 0})
+				assert.NoError(t, err)
+				page1PKs := page1.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+
+				// Page 2: offset=5, limit=5 → next 3 elements (only 8 total)
+				// Recreate results since cursors are consumed
+				r1 = makeElementLevelResult([]int64{1, 3}, [][]int32{{0, 1}, {0}})
+				r2 = makeElementLevelResult([]int64{2, 4}, [][]int32{{0, 1, 2}, {0, 1}})
+				page2, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: 5, offset: 5})
+				assert.NoError(t, err)
+				page2PKs := page2.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+
+				// Count total elements across both pages
+				page1ElemCount := 0
+				for _, ei := range page1.GetElementIndices() {
+					page1ElemCount += len(ei.GetIndices().GetData())
+				}
+				page2ElemCount := 0
+				for _, ei := range page2.GetElementIndices() {
+					page2ElemCount += len(ei.GetIndices().GetData())
+				}
+
+				// The two pages together should cover exactly 8 elements total
+				assert.Equal(t, 8, page1ElemCount+page2ElemCount,
+					"page1 (%v, %d elems) + page2 (%v, %d elems) should cover all 8 elements",
+					page1PKs, page1ElemCount, page2PKs, page2ElemCount)
+			})
+
 			t.Run("element-level validation: inconsistent flag", func(t *testing.T) {
 				r1 := makeElementLevelResult([]int64{1}, [][]int32{{0, 1}})
 				r2 := &internalpb.RetrieveResults{

@@ -904,7 +904,8 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		idxComputers[i] = typeutil.NewFieldDataIdxComputer(vr.GetFieldsData())
 	}
 
-	var limit int = -1
+	// Used in element-level query to limit the number of elements returned
+	var elementLimit int = -1
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
 		// IReduceInOrderForBest will try to get as many results as possible
 		// so loopEnd in this case will be set to the sum of all results' size
@@ -913,16 +914,29 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 			if !isElementLevel {
 				loopEnd = int(queryParams.limit)
 			}
-			limit = int(queryParams.limit)
+			elementLimit = int(queryParams.limit)
 		}
 	}
 
 	// handle offset
 	if queryParams != nil && queryParams.offset > 0 {
-		for i := int64(0); i < queryParams.offset; i++ {
+		var skipped int64
+		for skipped < queryParams.offset {
 			sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
 			if sel == -1 || (reduce.ShouldStopWhenDrained(queryParams.reduceType) && drainOneResult) {
 				return ret, nil
+			}
+			if isElementLevel {
+				elemIndices := validRetrieveResults[sel].GetElementIndices()[cursors[sel]]
+				indicesCount := int64(len(elemIndices.GetIndices()))
+				if skipped+indicesCount > queryParams.offset {
+					elemIndices.Indices = elemIndices.Indices[queryParams.offset-skipped:]
+					break
+				} else {
+					skipped += indicesCount
+				}
+			} else {
+				skipped++
 			}
 			cursors[sel]++
 		}
@@ -932,7 +946,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	var retSize int64
 	var availableCount int // for element-level: element count; for doc-level: doc count
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for j := 0; j < loopEnd && (limit == -1 || availableCount < limit); j++ {
+	for j := 0; j < loopEnd && (elementLimit == -1 || availableCount < elementLimit); j++ {
 		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
 		if sel == -1 || (reduce.ShouldStopWhenDrained(queryParams.reduceType) && drainOneResult) {
 			break
