@@ -518,7 +518,11 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(loopEnd))
 	cursors := make([]int64, len(validRetrieveResults))
-	idTsMap := make(map[any]int64, limit*len(validRetrieveResults))
+	mapCap := 0
+	if limit > 0 {
+		mapCap = limit * len(validRetrieveResults)
+	}
+	idTsMap := make(map[any]int64, mapCap)
 
 	var availableCount int // for doc-level: doc count; for element-level: element count
 	var retSize int64

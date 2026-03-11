@@ -245,6 +245,7 @@ class OffsetOrderedMap : public OffsetMap {
         int64_t hit_num = 0;  // avoid counting the number everytime.
         auto size = bitset.size();
         int64_t cnt = size - bitset.count();
+        auto more_hit_than_limit = cnt > limit;
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
@@ -267,7 +268,7 @@ class OffsetOrderedMap : public OffsetMap {
                 }
             }
         }
-        return {seg_offsets, it != map_.end()};
+        return {seg_offsets, more_hit_than_limit && it != map_.end()};
     }
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
@@ -280,11 +281,18 @@ class OffsetOrderedMap : public OffsetMap {
 
         int64_t hit_num = 0;
         auto element_size = static_cast<int64_t>(element_bitset.size());
+        // Clamp limit to the actual number of matching elements,
+        // same as find_first_n_by_index does for doc-level queries.
+        int64_t cnt = element_size - element_bitset.count();
+        auto more_hit_than_limit = cnt > limit;
+        limit = std::min(limit, cnt);
 
         // Traverse map_ in PK order
         auto it = map_.begin();
         for (; hit_num < limit && it != map_.end(); ++it) {
-            // For each PK, traverse from back to front (latest offset first)
+            // For each PK, traverse from back to front to obtain the latest offset.
+            // Same as find_first_n_by_index: only use the first (newest) offset
+            // that has matching elements, then break to avoid returning stale versions.
             for (int i = it->second.size() - 1; i >= 0 && hit_num < limit;
                  --i) {
                 auto doc_offset = it->second[i];
@@ -312,11 +320,13 @@ class OffsetOrderedMap : public OffsetMap {
                 if (!matching_indices.empty()) {
                     doc_offsets.push_back(doc_offset);
                     element_indices.push_back(std::move(matching_indices));
+                    // PK hit, no need to continue traversing older offsets with the same PK.
+                    break;
                 }
             }
         }
 
-        bool has_more = (it != map_.end()) || (hit_num >= limit);
+        bool has_more = more_hit_than_limit && (it != map_.end());
         return {std::move(doc_offsets), std::move(element_indices), has_more};
     }
 
@@ -519,6 +529,11 @@ class OffsetOrderedArray : public OffsetMap {
 
         int64_t hit_num = 0;
         auto element_size = static_cast<int64_t>(element_bitset.size());
+        // Clamp limit to the actual number of matching elements,
+        // same as find_first_n_by_index does for doc-level queries.
+        int64_t cnt = element_size - element_bitset.count();
+        auto more_hit_than_limit = cnt > limit;
+        limit = std::min(limit, cnt);
 
         // Traverse array_ in PK order (already sorted)
         auto it = array_.begin();
@@ -551,7 +566,7 @@ class OffsetOrderedArray : public OffsetMap {
             }
         }
 
-        bool has_more = (it != array_.end()) || (hit_num >= limit);
+        bool has_more = more_hit_than_limit && (it != array_.end());
         return {std::move(doc_offsets), std::move(element_indices), has_more};
     }
 

@@ -252,7 +252,101 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first_n_element) {
     }
 }
 
+TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first_n_element_has_more) {
+    // Test has_more correctness when limit exactly equals total matching
+    // elements. Previously, has_more used (it != end) || (hit_num >= limit)
+    // which incorrectly returned true when all data was exhausted.
+
+    int num = 3;
+    int array_len = 2;
+    // Insert docs with deterministic PKs for reproducibility
+    std::vector<TypeParam> data;
+    for (int i = 0; i < num; i++) {
+        TypeParam pk;
+        if constexpr (std::is_same_v<std::string, TypeParam>) {
+            pk = std::to_string(i);
+        } else {
+            pk = static_cast<TypeParam>(i);
+        }
+        this->insert(pk);
+        data.push_back(pk);
+    }
+    this->seal();
+
+    // Build ArrayOffsets: each doc has array_len elements
+    // doc0: [elem0, elem1], doc1: [elem2, elem3], doc2: [elem4, elem5]
+    std::vector<int32_t> element_row_ids;
+    std::vector<int32_t> row_to_element_start = {0};
+    for (int doc = 0; doc < num; doc++) {
+        for (int e = 0; e < array_len; e++) {
+            element_row_ids.push_back(doc);
+        }
+        row_to_element_start.push_back(
+            static_cast<int32_t>((doc + 1) * array_len));
+    }
+    auto array_offsets = std::make_shared<ArrayOffsetsSealed>(
+        std::move(element_row_ids), std::move(row_to_element_start));
+
+    int total_elements = num * array_len;  // 6
+
+    // Case 1: limit == total matching elements (aligned on doc boundary)
+    // All 6 elements pass, limit=6 → should return all, has_more=false
+    {
+        BitsetType all(total_elements);
+        all.reset();
+        BitsetTypeView view(all.data(), total_elements);
+        auto [doc_offsets, elem_indices, has_more] =
+            this->map_.find_first_n_element(
+                total_elements, view, array_offsets);
+        int collected = 0;
+        for (auto& indices : elem_indices) {
+            collected += indices.size();
+        }
+        ASSERT_EQ(collected, total_elements);
+        ASSERT_FALSE(has_more) << "has_more should be false when limit equals "
+                                  "total matching elements";
+    }
+
+    // Case 2: limit == total matching elements (NOT aligned on doc boundary)
+    // Only elem_idx=0 per doc passes → 3 matching elements, limit=3
+    {
+        BitsetType partial(total_elements);
+        partial.set();
+        for (int doc = 0; doc < num; doc++) {
+            partial.reset(doc *
+                          array_len);  // only first element per doc passes
+        }
+        BitsetTypeView view(partial.data(), total_elements);
+        auto [doc_offsets, elem_indices, has_more] =
+            this->map_.find_first_n_element(num, view, array_offsets);
+        int collected = 0;
+        for (auto& indices : elem_indices) {
+            collected += indices.size();
+        }
+        ASSERT_EQ(collected, num);
+        ASSERT_FALSE(has_more) << "has_more should be false when limit equals "
+                                  "total matching elements (non-aligned)";
+    }
+
+    // Case 3: limit < total matching elements → has_more=true
+    {
+        BitsetType all(total_elements);
+        all.reset();
+        BitsetTypeView view(all.data(), total_elements);
+        auto [doc_offsets, elem_indices, has_more] =
+            this->map_.find_first_n_element(3, view, array_offsets);
+        int collected = 0;
+        for (auto& indices : elem_indices) {
+            collected += indices.size();
+        }
+        ASSERT_EQ(collected, 3);
+        ASSERT_TRUE(has_more)
+            << "has_more should be true when more elements remain";
+    }
+}
+
 REGISTER_TYPED_TEST_SUITE_P(TypedOffsetOrderedArrayTest,
                             find_first_n,
-                            find_first_n_element);
+                            find_first_n_element,
+                            find_first_n_element_has_more);
 INSTANTIATE_TYPED_TEST_SUITE_P(Prefix, TypedOffsetOrderedArrayTest, TypeOfPks);
