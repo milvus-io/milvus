@@ -49,3 +49,26 @@ func TestBaseTable_SaveFiresEvent(t *testing.T) {
 		t.Fatalf("expected config event to be fired on Save()")
 	}
 }
+
+func TestBaseTable_SaveGroupEvictsCachedValue(t *testing.T) {
+	bt := NewBaseTable(SkipRemote(true), SkipEnv(true))
+
+	const key = "traceexporter"
+
+	err := bt.Save("trace.exporter", "stdout")
+	assert.NoError(t, err)
+
+	ok := bt.mgr.CASCachedValue(key, "stdout", "cached-value")
+	assert.True(t, ok)
+
+	val, exist := bt.mgr.GetCachedValue(key)
+	assert.True(t, exist)
+	assert.Equal(t, "cached-value", val)
+
+	err = bt.SaveGroup(map[string]string{key: "otlp"})
+	assert.NoError(t, err)
+
+	_, exist = bt.mgr.GetCachedValue(key)
+	assert.False(t, exist)
+	assert.Equal(t, "otlp", bt.Get("trace.exporter"))
+}

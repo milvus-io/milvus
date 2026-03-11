@@ -93,7 +93,7 @@ func (es EnvSource) GetSourceName() string {
 	return "EnvironmentSource"
 }
 
-func (es EnvSource) SetManager(m ConfigManager) {
+func (es EnvSource) SetManager(m *Manager) {
 }
 
 func (es EnvSource) SetEventHandler(eh EventHandler) {

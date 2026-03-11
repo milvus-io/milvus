@@ -106,9 +106,11 @@ func NewManager() *Manager {
 		immutableKeys: typeutil.NewConcurrentSet[string](),
 		configCache:   make(map[string]any),
 	}
+	// Clear the entire config cache on any config change event.
+	// We clear all (not just the changed key) because a param's computed value
+	// may depend on multiple config keys (see #35572).
 	resetConfigCacheFunc := NewHandler("reset.config.cache", func(event *Event) {
-		keyToRemove := strings.NewReplacer("/", ".").Replace(event.Key)
-		manager.EvictCachedValue(keyToRemove)
+		manager.EvictCachedValue(event.Key)
 	})
 	manager.Dispatcher.RegisterForKeyPrefix("", resetConfigCacheFunc)
 	return manager
@@ -146,15 +148,6 @@ func (m *Manager) EvictCachedValue(key string) {
 	clear(m.configCache)
 }
 
-func (m *Manager) EvictCacheValueByFormat(keys ...string) {
-	if len(keys) == 0 {
-		return
-	}
-	m.cacheMutex.Lock()
-	defer m.cacheMutex.Unlock()
-	// cause param'value may rely on other params, so we need to evict all the cached value when config is changed
-	clear(m.configCache)
-}
 
 func (m *Manager) GetConfig(key string) (string, string, error) {
 	realKey := formatKey(key)

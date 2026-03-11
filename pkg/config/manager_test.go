@@ -301,6 +301,30 @@ func TestCachedConfig(t *testing.T) {
 	}
 }
 
+func TestFileRefreshWithoutChangesKeepsCachedConfig(t *testing.T) {
+	dir := t.TempDir()
+	yamlFile := path.Join(dir, "milvus.yaml")
+	err := os.WriteFile(yamlFile, []byte("a.b: aaa"), 0o600)
+	require.NoError(t, err)
+
+	mgr, err := Init(WithFilesSource(&FileInfo{
+		Files:           []string{yamlFile},
+		RefreshInterval: 10 * time.Millisecond,
+	}))
+	require.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+
+	ok := mgr.CASCachedValue("a.b", "aaa", "cached-value")
+	require.True(t, ok)
+
+	time.Sleep(150 * time.Millisecond)
+
+	val, exist := mgr.GetCachedValue("a.b")
+	require.True(t, exist)
+	assert.Equal(t, "cached-value", val)
+}
+
 type ErrSource struct{}
 
 func (e ErrSource) Close() {
@@ -320,7 +344,7 @@ func (ErrSource) GetPriority() int {
 	return 2
 }
 
-func (ErrSource) SetManager(m ConfigManager) {
+func (ErrSource) SetManager(m *Manager) {
 }
 
 // GetSourceName implements Source

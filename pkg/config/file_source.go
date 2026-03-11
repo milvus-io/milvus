@@ -23,7 +23,6 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v2"
 
@@ -37,7 +36,7 @@ type FileSource struct {
 
 	updateMu        sync.Mutex
 	configRefresher *refresher
-	manager         ConfigManager
+	manager         *Manager
 }
 
 func NewFileSource(fileInfo *FileInfo) *FileSource {
@@ -93,7 +92,7 @@ func (fs *FileSource) Close() {
 	fs.configRefresher.stop()
 }
 
-func (fs *FileSource) SetManager(m ConfigManager) {
+func (fs *FileSource) SetManager(m *Manager) {
 	fs.Lock()
 	defer fs.Unlock()
 	fs.manager = m
@@ -175,9 +174,6 @@ func (fs *FileSource) update(configs map[string]string) error {
 	}
 	fs.configs = configs
 	fs.Unlock()
-	if fs.manager != nil {
-		fs.manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
-	}
 
 	fs.configRefresher.fireEvents(events...)
 	return nil

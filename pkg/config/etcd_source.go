@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -45,7 +44,7 @@ type EtcdSource struct {
 
 	updateMu        sync.Mutex
 	configRefresher *refresher
-	manager         ConfigManager
+	manager         *Manager
 }
 
 func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
@@ -117,7 +116,7 @@ func (es *EtcdSource) Close() {
 	es.configRefresher.stop()
 }
 
-func (es *EtcdSource) SetManager(m ConfigManager) {
+func (es *EtcdSource) SetManager(m *Manager) {
 	es.Lock()
 	defer es.Unlock()
 	es.manager = m
@@ -181,9 +180,6 @@ func (es *EtcdSource) update(configs map[string]string) error {
 	}
 	es.currentConfigs = configs
 	es.Unlock()
-	if es.manager != nil {
-		es.manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
-	}
 
 	es.configRefresher.fireEvents(events...)
 	return nil
