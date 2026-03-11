@@ -153,4 +153,9 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 			)
 		}
 	}
+
+	// Add unused nodes to the replica promptly.
+	for _, collectionID := range collections {
+		utils.RecoverReplicaOfCollection(ctx, ob.meta, collectionID)
+	}
 }

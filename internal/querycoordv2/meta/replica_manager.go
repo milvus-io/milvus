@@ -44,6 +44,7 @@ type ReplicaManager struct {
 	replicas      map[typeutil.UniqueID]*Replica
 	coll2Replicas map[typeutil.UniqueID]*collectionReplicas // typeutil.UniqueSet
 	catalog       metastore.QueryCoordCatalog
+	distMgr       *DistributionManager
 }
 
 // collectionReplicas maintains collection secondary index mapping
@@ -77,7 +78,13 @@ func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.Quer
 		replicas:      make(map[int64]*Replica),
 		coll2Replicas: make(map[int64]*collectionReplicas),
 		catalog:       catalog,
+		distMgr:       nil,
 	}
+}
+
+// set distribution manager
+func (m *ReplicaManager) SetDistributionManager(distMgr *DistributionManager) {
+	m.distMgr = distMgr
 }
 
 // Recover recovers the replicas for given collections from meta store
@@ -418,7 +425,7 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 	// recover node by resource group.
 	helper.RangeOverResourceGroup(func(replicaHelper *replicasInSameRGAssignmentHelper) {
 		replicaHelper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
-			roNodes := assignment.GetNewRONodes()
+			roNodes := assignment.GetNewRONodesHeuristic(m.distMgr, m.replicas[assignment.GetReplicaID()])
 			recoverableNodes, incomingNodeCount := assignment.GetRecoverNodesAndIncomingNodeCount()
 			// There may be not enough incoming nodes for current replica,
 			// Even we filtering the nodes that are used by other replica of same collection in other resource group,

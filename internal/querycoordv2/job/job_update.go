@@ -160,6 +160,9 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	// 6. recover node distribution among replicas
 	utils.RecoverReplicaOfCollection(job.ctx, job.meta, job.collectionID)
 
+	// Remove RONodes with empty channel/segment from the replica.
+	job.meta.ResourceManager.HandleNodeChangeOnReplica()
+
 	// 7. update replica number in meta
 	err = job.meta.UpdateReplicaNumber(job.ctx, job.collectionID, job.newReplicaNumber, job.userSpecifiedReplicaMode)
 	if err != nil {

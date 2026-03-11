@@ -469,6 +469,9 @@ func (s *Server) initMeta() error {
 		ChannelDistManager: meta.NewChannelDistManager(),
 		LeaderViewManager:  meta.NewLeaderViewManager(),
 	}
+
+	s.meta.ReplicaManager.SetDistributionManager(s.dist)
+
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
 	err = s.targetMgr.Recover(s.ctx, s.store)
 	if err != nil {
