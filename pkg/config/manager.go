@@ -142,6 +142,9 @@ func (m *Manager) EvictCachedValue(key string) {
 }
 
 func (m *Manager) EvictCacheValueByFormat(keys ...string) {
+	if len(keys) == 0 {
+		return
+	}
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
 	// cause param'value may rely on other params, so we need to evict all the cached value when config is changed
