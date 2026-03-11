@@ -1168,8 +1168,7 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
         client = self._client()
 
         # Try to mix regular field (c3) with aggregation - c3 is not in group_by_fields
-        # Note: The error message is not precise enough, should be improved (see GitHub issue)
-        error = {ct.err_code: 65535, ct.err_msg: "no indices found for output field"}
+        error = {ct.err_code: 65535, ct.err_msg: "is not allowed in output_fields"}
         self.query(
             client,
             self.collection_name,

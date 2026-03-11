@@ -401,6 +401,9 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		t.RetrieveRequest.OutputFieldsId = emptyOutputFields
 		t.plan.OutputFieldIds = emptyOutputFields
 		t.aggregationFieldMap = agg.NewAggregationFieldMap(originalOuputFields, t.queryParams.groupByFields, t.userAggregates)
+		if err := t.aggregationFieldMap.Validate(); err != nil {
+			return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg(err.Error()))
+		}
 	} else {
 		outputFieldIDs, err := translateToOutputFieldIDs(t.translatedOutputFields, schema.CollectionSchema)
 		if err != nil {

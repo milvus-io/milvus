@@ -8,8 +8,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -650,6 +653,160 @@ func (s *AggReduceSuite) TestSegCoreAggReduceGlobalAgg() {
 	s.Equal(1, len(reducedRes.GetFieldsData()[1].GetScalars().GetLongData().GetData()))
 	s.Equal(int64(460), reducedRes.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
 	s.Equal(int64(250), reducedRes.GetFieldsData()[1].GetScalars().GetLongData().GetData()[0])
+}
+
+// TestCreateReducerGroupByOnlyPushesDownLimit verifies that when only GROUP BY
+// is present (no aggregation), the user limit IS pushed down to QN level.
+// Uses 2 results to exercise the multi-result path where canEarlyStop=true.
+func (s *AggReduceSuite) TestCreateReducerGroupByOnlyPushesDownLimit() {
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "gk", DataType: schemapb.DataType_Int64},
+		},
+	}
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			GroupByFieldIds: []int64{101},
+			Limit:           3,
+		},
+	}
+
+	// Group-by only: limit should be pushed down
+	segcoreReducer := CreateSegCoreReducer(req, schema, nil)
+	s.IsType(&SegcoreAggReducer{}, segcoreReducer)
+	internalReducer := CreateInternalReducer(req, schema)
+	s.IsType(&InternalAggReducer{}, internalReducer)
+
+	// Two segment results with distinct keys (no aggregation, just group-by dedup).
+	// Segment 1: keys {1,2,3,4,5}, Segment 2: keys {6,7,8,9,10}
+	// Total 10 distinct groups, but groupLimit=3 → early-stop should kick in.
+	seg1 := agg.AggResult2internalResult(agg.NewAggregationResult([]*schemapb.FieldData{
+		{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5}},
+					},
+				},
+			},
+		},
+	}, 5))
+	seg2 := agg.AggResult2internalResult(agg.NewAggregationResult([]*schemapb.FieldData{
+		{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{6, 7, 8, 9, 10}},
+					},
+				},
+			},
+		},
+	}, 5))
+
+	reduced, err := internalReducer.(*InternalAggReducer).Reduce(context.Background(),
+		[]*internalpb.RetrieveResults{seg1, seg2})
+	s.NoError(err)
+	s.NotNil(reduced)
+	// groupLimit=3: multi-result path with canEarlyStop=true should produce at most 3 groups
+	keys := reduced.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+	s.LessOrEqual(len(keys), 3)
+}
+
+// TestCreateReducerWithAggDisablesLimitPushDown verifies that when aggregation
+// is present, limit is NOT pushed down (set to -1) to avoid incorrect aggregation.
+// Uses 2 results with overlapping keys to exercise the multi-result merge path.
+func (s *AggReduceSuite) TestCreateReducerWithAggDisablesLimitPushDown() {
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "gk", DataType: schemapb.DataType_Int64},
+			{FieldID: 102, Name: "val", DataType: schemapb.DataType_Int64},
+		},
+	}
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			GroupByFieldIds: []int64{101},
+			Aggregates: []*planpb.Aggregate{
+				{Op: planpb.AggregateOp_sum, FieldId: 102},
+			},
+			Limit: 2,
+		},
+	}
+
+	// Group-by + aggregation: limit should NOT be pushed down (groupLimit=-1 at QN)
+	internalReducer := CreateInternalReducer(req, schema)
+	s.IsType(&InternalAggReducer{}, internalReducer)
+
+	// Two segment results with overlapping key=1.
+	// Segment 1: {1:10, 2:20, 3:30}, Segment 2: {1:100, 4:40, 5:50}
+	// If limit were wrongly pushed down (groupLimit=2), early-stop could miss key=1
+	// from segment 2, producing SUM=10 instead of 110.
+	seg1 := agg.AggResult2internalResult(agg.NewAggregationResult([]*schemapb.FieldData{
+		{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}},
+					},
+				},
+			},
+		},
+		{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}},
+					},
+				},
+			},
+		},
+	}, 3))
+	seg2 := agg.AggResult2internalResult(agg.NewAggregationResult([]*schemapb.FieldData{
+		{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1, 4, 5}},
+					},
+				},
+			},
+		},
+		{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{100, 40, 50}},
+					},
+				},
+			},
+		},
+	}, 3))
+
+	reduced, err := internalReducer.(*InternalAggReducer).Reduce(context.Background(),
+		[]*internalpb.RetrieveResults{seg1, seg2})
+	s.NoError(err)
+	s.NotNil(reduced)
+	// With aggregation, QN level groupLimit=-1 → all 5 distinct groups must survive,
+	// and key=1 must have the fully merged SUM(10+100)=110.
+	keys := reduced.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+	vals := reduced.GetFieldsData()[1].GetScalars().GetLongData().GetData()
+	s.Equal(5, len(keys))
+	aggMap := make(map[int64]int64, len(keys))
+	for i := range keys {
+		aggMap[keys[i]] = vals[i]
+	}
+	s.Equal(int64(110), aggMap[1], "key=1 SUM must be 10+100=110, not partially merged")
+	s.Equal(int64(20), aggMap[2])
+	s.Equal(int64(30), aggMap[3])
+	s.Equal(int64(40), aggMap[4])
+	s.Equal(int64(50), aggMap[5])
 }
 
 func TestAggReduce(t *testing.T) {

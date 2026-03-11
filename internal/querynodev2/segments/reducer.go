@@ -21,7 +21,15 @@ type internalReducer interface {
 
 func CreateInternalReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema) internalReducer {
 	if len(req.GetReq().GetAggregates()) > 0 || len(req.GetReq().GetGroupByFieldIds()) > 0 {
-		return NewInternalAggReducer(req.GetReq().GetGroupByFieldIds(), req.GetReq().GetAggregates(), req.GetReq().GetLimit(), schema)
+		groupLimit := req.GetReq().GetLimit()
+		if len(req.GetReq().GetAggregates()) > 0 {
+			// When aggregation exists, do not push down limit — intermediate
+			// reduce with limit produces incorrect aggregation values when the
+			// same group key exists across multiple shards. Only the final
+			// Proxy-level reduce should truncate.
+			groupLimit = -1
+		}
+		return NewInternalAggReducer(req.GetReq().GetGroupByFieldIds(), req.GetReq().GetAggregates(), groupLimit, schema)
 	}
 	return newDefaultLimitReducer(req, schema)
 }
@@ -32,7 +40,15 @@ type segCoreReducer interface {
 
 func CreateSegCoreReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, manager *Manager) segCoreReducer {
 	if len(req.GetReq().GetGroupByFieldIds()) > 0 || len(req.GetReq().GetAggregates()) > 0 {
-		return NewSegcoreAggReducer(req.GetReq().GetGroupByFieldIds(), req.GetReq().GetAggregates(), req.GetReq().GetLimit(), schema)
+		groupLimit := req.GetReq().GetLimit()
+		if len(req.GetReq().GetAggregates()) > 0 {
+			// When aggregation exists, do not push down limit — intermediate
+			// reduce with limit produces incorrect aggregation values when the
+			// same group key exists across multiple segments. Only the final
+			// Proxy-level reduce should truncate.
+			groupLimit = -1
+		}
+		return NewSegcoreAggReducer(req.GetReq().GetGroupByFieldIds(), req.GetReq().GetAggregates(), groupLimit, schema)
 	}
 
 	return newDefaultLimitReducerSegcore(req, schema, manager)

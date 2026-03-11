@@ -42,7 +42,7 @@ func (reducer *MilvusAggReducer) Reduce(results []*internalpb.RetrieveResults) (
 	for i := 0; i < fieldCount; i++ {
 		indices := reducer.outputMap.IndexesAt(i)
 		if len(indices) == 0 {
-			return nil, fmt.Errorf("no indices found for output field at index %d", i)
+			return nil, fmt.Errorf("field '%s' is not allowed in output_fields: only group_by fields and aggregation results are permitted", reducer.outputMap.NameAt(i))
 		} else if len(indices) == 1 {
 			// Single index: direct copy (non-avg aggregation or group-by field)
 			reOrganizedFieldDatas[i] = reducedFieldDatas[indices[0]]
