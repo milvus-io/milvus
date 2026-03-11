@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"sync"
 	"time"
 
@@ -29,9 +30,14 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -415,6 +421,13 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 		}
 	}
 
+	var manifestPath string
+	if req.StorageVersion == storage.StorageV3 {
+		k := metautil.JoinIDPath(req.CollectionID, req.PartitionID, req.SegmentID)
+		basePath := path.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
+		manifestPath = packed.MarshalManifestPath(basePath, -1)
+	}
+
 	segmentInfo := &datapb.SegmentInfo{
 		ID:                   req.SegmentID,
 		CollectionID:         req.CollectionID,
@@ -427,6 +440,7 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 		LastExpireTime:       0,
 		StorageVersion:       req.StorageVersion,
 		IsCreatedByStreaming: req.IsCreatedByStreaming,
+		ManifestPath:         manifestPath,
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	if err := s.meta.AddSegment(ctx, segment); err != nil {

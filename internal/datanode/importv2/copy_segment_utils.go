@@ -106,7 +106,7 @@ func transformManifestPath(
 	source *datapb.CopySegmentSource,
 	target *datapb.CopySegmentTarget,
 ) (string, error) {
-	basePath, version, err := packed.UnmarshalManfestPath(manifestPath)
+	basePath, version, err := packed.UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to unmarshal manifest path: %w", err)
 	}
@@ -215,7 +215,7 @@ func collectSegmentFiles(
 				source.GetStorageVersion(), source.GetSegmentId())
 		}
 
-		basePath, _, err := packed.UnmarshalManfestPath(manifestPath)
+		basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unmarshal manifest path %q for segment %d: %w", manifestPath, source.GetSegmentId(), err)
 		}

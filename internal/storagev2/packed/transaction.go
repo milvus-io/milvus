@@ -55,7 +55,7 @@ func AddDeltaLogsToManifest(
 		return manifestPath, nil
 	}
 
-	basePath, version, err := UnmarshalManfestPath(manifestPath)
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse manifest path: %w", err)
 	}
@@ -120,7 +120,7 @@ func GetDeltaLogPathsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 ) ([]string, error) {
-	basePath, version, err := UnmarshalManfestPath(manifestPath)
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse manifest path: %w", err)
 	}

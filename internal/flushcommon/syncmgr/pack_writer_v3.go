@@ -160,7 +160,7 @@ func (bw *BulkPackWriterV3) writeInsertsIntoStorage(ctx context.Context,
 		return result
 	}
 
-	basePath, version, err := packed.UnmarshalManfestPath(bw.manifestPath)
+	basePath, version, err := packed.UnmarshalManifestPath(bw.manifestPath)
 	if err != nil {
 		return nil, "", err
 	}
@@ -212,7 +212,7 @@ func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack) (str
 	}
 
 	// Build deltalog path under basePath/_delta/
-	basePath, _, err := packed.UnmarshalManfestPath(bw.manifestPath)
+	basePath, _, err := packed.UnmarshalManifestPath(bw.manifestPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse manifest path: %w", err)
 	}

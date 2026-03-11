@@ -345,25 +345,25 @@ func TestMarshalUnmarshalManifestPath(t *testing.T) {
 	marshaled := MarshalManifestPath(original, version)
 	assert.NotEmpty(t, marshaled)
 
-	basePath, ver, err := UnmarshalManfestPath(marshaled)
+	basePath, ver, err := UnmarshalManifestPath(marshaled)
 	assert.NoError(t, err)
 	assert.Equal(t, original, basePath)
 	assert.Equal(t, version, ver)
 }
 
 func TestUnmarshalManifestPath_InvalidJSON(t *testing.T) {
-	_, _, err := UnmarshalManfestPath("not valid json")
+	_, _, err := UnmarshalManifestPath("not valid json")
 	assert.Error(t, err)
 }
 
 func TestUnmarshalManifestPath_EmptyString(t *testing.T) {
-	_, _, err := UnmarshalManfestPath("")
+	_, _, err := UnmarshalManifestPath("")
 	assert.Error(t, err)
 }
 
 func TestMarshalManifestPath_EmptyBasePath(t *testing.T) {
 	marshaled := MarshalManifestPath("", 0)
-	basePath, ver, err := UnmarshalManfestPath(marshaled)
+	basePath, ver, err := UnmarshalManifestPath(marshaled)
 	assert.NoError(t, err)
 	assert.Equal(t, "", basePath)
 	assert.Equal(t, int64(0), ver)

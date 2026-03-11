@@ -181,7 +181,7 @@ func ReadFragmentsFromManifest(
 	storageConfig *indexpb.StorageConfig,
 ) ([]Fragment, error) {
 	// 1. Parse manifest path to get base path
-	basePath, _, err := UnmarshalManfestPath(manifestPath)
+	basePath, _, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse manifest path: %w", err)
 	}

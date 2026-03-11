@@ -1150,7 +1150,7 @@ func TestTransformManifestPath(t *testing.T) {
 	targetManifest, err := transformManifestPath(sourceManifest, source, target)
 	assert.NoError(t, err)
 
-	basePath, version, err := packed.UnmarshalManfestPath(targetManifest)
+	basePath, version, err := packed.UnmarshalManifestPath(targetManifest)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(2), version)
 	assert.Contains(t, basePath, "111")
