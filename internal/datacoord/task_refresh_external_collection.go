@@ -140,6 +140,28 @@ func (t *refreshExternalCollectionTask) UpdateStateWithMeta(state indexpb.JobSta
 		return err
 	}
 	t.SetState(state, failReason)
+
+	// When task reaches a terminal state, aggregate and persist job state immediately.
+	// This eliminates the race window where HasActiveJob still sees InProgress
+	// while all tasks have already completed (checker loop updates every 10s).
+	if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
+		jobState, _ := t.refreshMeta.AggregateJobStateFromTasks(t.GetJobId())
+		if jobState == indexpb.JobState_JobStateFinished || jobState == indexpb.JobState_JobStateFailed {
+			jobFailReason := ""
+			if jobState == indexpb.JobState_JobStateFailed {
+				jobFailReason = failReason
+			}
+			if err := t.refreshMeta.UpdateJobState(t.GetJobId(), jobState, jobFailReason); err != nil {
+				log.Warn("failed to eagerly update job state after task completion",
+					zap.Int64("taskID", t.GetTaskId()),
+					zap.Int64("jobID", t.GetJobId()),
+					zap.String("jobState", jobState.String()),
+					zap.Error(err))
+				// Non-fatal: checker loop will eventually update the job state
+			}
+		}
+	}
+
 	return nil
 }
 
