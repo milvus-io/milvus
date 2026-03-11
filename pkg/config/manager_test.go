@@ -25,6 +25,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 	"golang.org/x/sync/errgroup"
@@ -126,15 +127,14 @@ func TestBasic(t *testing.T) {
 
 func TestOnEvent(t *testing.T) {
 	cfg, _ := embed.ConfigFromFile("../../configs/advanced/etcd.yaml")
-	cfg.Dir = "/tmp/milvus/test"
+	cfg.Dir = t.TempDir()
 	e, err := embed.StartEtcd(cfg)
 	assert.NoError(t, err)
 	defer e.Close()
-	defer os.RemoveAll(cfg.Dir)
 
 	client := v3client.New(e.Server)
 
-	dir, _ := os.MkdirTemp("", "milvus")
+	dir := t.TempDir()
 	yamlFile := path.Join(dir, "milvus.yaml")
 	os.WriteFile(yamlFile, []byte("a.b: \"\""), 0o600)
 	mgr, _ := Init(WithEnvSource(formatKey),
@@ -150,8 +150,7 @@ func TestOnEvent(t *testing.T) {
 	os.WriteFile(yamlFile, []byte("a.b: aaa"), 0o600)
 	assert.Eventually(t, func() bool {
 		_, value, err := mgr.GetConfig("a.b")
-		assert.NoError(t, err)
-		return value == "aaa"
+		return err == nil && value == "aaa"
 	}, time.Second*5, time.Second)
 
 	ctx := context.Background()
@@ -159,29 +158,25 @@ func TestOnEvent(t *testing.T) {
 
 	assert.Eventually(t, func() bool {
 		_, value, err := mgr.GetConfig("a.b")
-		assert.NoError(t, err)
-		return value == "bbb"
+		return err == nil && value == "bbb"
 	}, time.Second*5, time.Second)
 
 	client.KV.Put(ctx, "test/config/a/b", "ccc")
 	assert.Eventually(t, func() bool {
 		_, value, err := mgr.GetConfig("a.b")
-		assert.NoError(t, err)
-		return value == "ccc"
+		return err == nil && value == "ccc"
 	}, time.Second*5, time.Second)
 
 	os.WriteFile(yamlFile, []byte("a.b: ddd"), 0o600)
 	assert.Eventually(t, func() bool {
 		_, value, err := mgr.GetConfig("a.b")
-		assert.NoError(t, err)
-		return value == "ccc"
+		return err == nil && value == "ccc"
 	}, time.Second*5, time.Second)
 
 	client.KV.Delete(ctx, "test/config/a/b")
 	assert.Eventually(t, func() bool {
 		_, value, err := mgr.GetConfig("a.b")
-		assert.NoError(t, err)
-		return value == "ddd"
+		return err == nil && value == "ddd"
 	}, time.Second*5, time.Second)
 }
 
@@ -238,13 +233,12 @@ func TestDeadlock(t *testing.T) {
 
 func TestCachedConfig(t *testing.T) {
 	cfg, _ := embed.ConfigFromFile("../../configs/advanced/etcd.yaml")
-	cfg.Dir = "/tmp/milvus/test"
+	cfg.Dir = t.TempDir()
 	e, err := embed.StartEtcd(cfg)
 	assert.NoError(t, err)
 	defer e.Close()
-	defer os.RemoveAll(cfg.Dir)
 
-	dir, _ := os.MkdirTemp("", "milvus")
+	dir := t.TempDir()
 	yamlFile := path.Join(dir, "milvus.yaml")
 	os.WriteFile(yamlFile, []byte("a.b: aaa"), 0o600)
 	mgr, _ := Init(WithEnvSource(formatKey),
@@ -262,31 +256,35 @@ func TestCachedConfig(t *testing.T) {
 		time.Sleep(time.Second)
 		_, exist := mgr.GetCachedValue("a.b")
 		assert.False(t, exist)
-		mgr.CASCachedValue("a.b", "aaa", "aaa")
+		ok := mgr.CASCachedValue("a.b", "aaa", "aaa")
+		require.True(t, ok)
 		val, exist := mgr.GetCachedValue("a.b")
-		assert.True(t, exist)
+		require.True(t, exist)
 		assert.Equal(t, "aaa", val.(string))
 
 		// after refresh, the cached value should be reset
 		os.WriteFile(yamlFile, []byte("a.b: xxx"), 0o600)
-		time.Sleep(time.Second)
-		_, exist = mgr.GetCachedValue("a.b")
-		assert.False(t, exist)
+		assert.Eventually(t, func() bool {
+			_, exist = mgr.GetCachedValue("a.b")
+			return !exist
+		}, 5*time.Second, 100*time.Millisecond)
 	}
 	client := v3client.New(e.Server)
 	{
 		_, exist := mgr.GetCachedValue("c.d")
 		assert.False(t, exist)
-		mgr.CASCachedValue("cd", "", "xxx")
+		ok := mgr.CASCachedValue("cd", "", "xxx")
+		require.True(t, ok)
 		_, exist = mgr.GetCachedValue("cd")
 		assert.True(t, exist)
 
 		// after refresh, the cached value should be reset
 		ctx := context.Background()
 		client.KV.Put(ctx, "test/config/c/d", "www")
-		time.Sleep(time.Second)
-		_, exist = mgr.GetCachedValue("cd")
-		assert.False(t, exist)
+		assert.Eventually(t, func() bool {
+			_, exist = mgr.GetCachedValue("cd")
+			return !exist
+		}, 5*time.Second, 100*time.Millisecond)
 	}
 }
 
