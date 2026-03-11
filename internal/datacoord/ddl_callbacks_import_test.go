@@ -563,12 +563,9 @@ type mockBalancerImpl struct {
 }
 
 func (m *mockBalancerImpl) GetLatestChannelAssignment() (*channel.WatchChannelAssignmentsCallbackParam, error) {
-	// Add some operations to ensure the function is long enough for mockey to patch
+	// Ensure the function body is long enough for mockey to patch
 	result := &channel.WatchChannelAssignmentsCallbackParam{}
-	if result != nil {
-		return result, nil
-	}
-	return nil, nil
+	return result, nil
 }
 
 // mockBroadcastAPIImpl is a mock implementation for broadcaster.BroadcastAPI interface

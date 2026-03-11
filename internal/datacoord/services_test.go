@@ -3106,7 +3106,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			meta: &meta{segments: NewSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
-		server.initMessageCallback()
+		RegisterDDLCallbacks(server)
 
 		msg := message.NewBatchUpdateManifestMessageBuilderV2().
 			WithHeader(&message.BatchUpdateManifestMessageHeader{
@@ -3141,7 +3141,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			meta: &meta{segments: NewSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
-		server.initMessageCallback()
+		RegisterDDLCallbacks(server)
 
 		msg := message.NewBatchUpdateManifestMessageBuilderV2().
 			WithHeader(&message.BatchUpdateManifestMessageHeader{
@@ -3177,7 +3177,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			meta: &meta{segments: NewSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
-		server.initMessageCallback()
+		RegisterDDLCallbacks(server)
 
 		msg := message.NewBatchUpdateManifestMessageBuilderV2().
 			WithHeader(&message.BatchUpdateManifestMessageHeader{

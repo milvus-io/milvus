@@ -1810,15 +1810,20 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		return resp, nil
 	}
 
-	// Allocate job ID
-	if s.allocator == nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed("allocator not initialized"))
-		return resp, nil
-	}
-	jobID, _, err := s.allocator.AllocN(1)
-	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("failed to allocate job ID: %v", err)))
-		return resp, nil
+	// Use the incoming JobID if provided (backward compat: old proxy allocates jobID
+	// before sending broadcast RPC, which is forwarded here with the original jobID).
+	// Otherwise allocate a new one.
+	jobID := in.GetJobID()
+	if jobID == 0 {
+		if s.allocator == nil {
+			resp.Status = merr.Status(merr.WrapErrImportFailed("allocator not initialized"))
+			return resp, nil
+		}
+		jobID, _, err = s.allocator.AllocN(1)
+		if err != nil {
+			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("failed to allocate job ID: %v", err)))
+			return resp, nil
+		}
 	}
 
 	// Broadcast the import message
