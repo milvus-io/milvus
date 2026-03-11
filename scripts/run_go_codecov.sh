@@ -61,6 +61,7 @@ for d in cmd/tools internal pkg client; do
         "-gcflags=./...=-N -l" \
         -race \
         -tags dynamic,test \
+        -vet=off \
         -v \
         -failfast \
         -buildvcs=false \
