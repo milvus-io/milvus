@@ -1500,12 +1500,27 @@ class TestQueryTextMatch(TestcaseBase):
                 if i + batch_size < len(df)
                 else data[i: len(df)]
             )
-        time.sleep(3)
-        # analyze the croup
+        # Use server-side analyzer to get tokens consistent with what Milvus indexes
         text_fields = ["word", "sentence", "paragraph", "text"]
         wf_map = {}
         for field in text_fields:
-            wf_map[field] = cf.analyze_documents(df[field].tolist(), language=language)
+            wf_map[field] = cf.analyze_documents_with_analyzer_params(
+                df[field].tolist(), analyzer_params
+            )
+
+        # Wait for growing-segment BM25 index to be ready.
+        # Poll every 1s (up to 30s) using the top token from the "word" field.
+        probe_token = wf_map["word"].most_common(1)[0][0]
+        probe_expr = f"text_match(word, '{probe_token}')"
+        ready = False
+        for _ in range(30):
+            res, _ = collection_w.query(expr=probe_expr, output_fields=["id"])
+            if len(res) > 0:
+                ready = True
+                break
+            time.sleep(1)
+        assert ready, f"Growing segment BM25 index not ready within 30s (probe token: '{probe_token}')"
+
         # query single field for one token
         for field in text_fields:
             most_common_tokens = wf_map[field].most_common(10)
