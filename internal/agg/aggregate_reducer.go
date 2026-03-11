@@ -285,6 +285,9 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 	}
 
 	if len(results) == 1 {
+		if reducer.groupLimit > 0 {
+			return truncateAggResult(results[0], reducer.groupLimit), nil
+		}
 		return results[0], nil
 	}
 
@@ -345,14 +348,18 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 	}
 
 	// 2. compute hash values for all rows in the result retrieved
+	// When aggregation exists, we must merge ALL rows across all shards before
+	// truncating — early-stop would produce incorrect aggregation values (e.g.,
+	// SUM/COUNT only from partial shards). When no aggregation exists (group-by
+	// only), early-stop is safe since there are no values to merge.
+	hasAgg := numAggs > 0
+	canEarlyStop := !hasAgg && reducer.groupLimit > 0
 	var totalRowCount int64 = 0
 processResults:
 	for _, result := range results {
-		// Check limit before processing each shard to avoid unnecessary work
-		if reducer.groupLimit != -1 && totalRowCount >= reducer.groupLimit {
+		if canEarlyStop && totalRowCount >= reducer.groupLimit {
 			break processResults
 		}
-
 		if result == nil {
 			return nil, fmt.Errorf("input result from any sources cannot be nil")
 		}
@@ -386,8 +393,7 @@ processResults:
 		}
 
 		for row := 0; row < rowCount; row++ {
-			// Check limit before processing each row to avoid unnecessary hashing and copying
-			if reducer.groupLimit != -1 && totalRowCount >= reducer.groupLimit {
+			if canEarlyStop && totalRowCount >= reducer.groupLimit {
 				break processResults
 			}
 			rowFieldValues := make([]*FieldValue, outputColumnCount)
@@ -440,7 +446,8 @@ processResults:
 			return nil, err
 		}
 	}
-	return reducedResult, nil
+	// Apply groupLimit truncation after full merge to ensure correct aggregation
+	return truncateAggResult(reducedResult, reducer.groupLimit), nil
 }
 
 func InternalResult2AggResult(results []*internalpb.RetrieveResults) []*AggregationResult {

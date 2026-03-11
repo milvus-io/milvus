@@ -496,6 +496,18 @@ func (aggMap *AggregationFieldMap) NameAt(idx int) string {
 	return aggMap.userOriginalOutputFields[idx]
 }
 
+// Validate checks that every user-requested output field maps to at least one
+// internal field index. Returns an error identifying the first unmapped field.
+func (aggMap *AggregationFieldMap) Validate() error {
+	for i, indices := range aggMap.userOriginalOutputFieldIdxes {
+		if len(indices) == 0 {
+			return fmt.Errorf("field '%s' is not allowed in output_fields for GROUP BY queries: "+
+				"only group_by fields and aggregation results are permitted", aggMap.userOriginalOutputFields[i])
+		}
+	}
+	return nil
+}
+
 func NewAggregationFieldMap(originalUserOutputFields []string, groupByFields []string, aggs []AggregateBase) *AggregationFieldMap {
 	numGroupingKeys := len(groupByFields)
 
@@ -608,4 +620,62 @@ func ComputeAvgFromSumAndCount(sumFieldData *schemapb.FieldData, countFieldData 
 
 	result.GetScalars().GetDoubleData().Data = resultData
 	return result, nil
+}
+
+// truncateFieldData truncates a FieldData to at most limit rows in place.
+// Only scalar types used in aggregation are supported; unsupported types are left unchanged.
+func truncateFieldData(fd *schemapb.FieldData, limit int) {
+	if fd == nil || limit <= 0 {
+		return
+	}
+	if len(fd.ValidData) > limit {
+		fd.ValidData = fd.ValidData[:limit]
+	}
+	scalars := fd.GetScalars()
+	if scalars == nil {
+		return
+	}
+	switch data := scalars.Data.(type) {
+	case *schemapb.ScalarField_BoolData:
+		if d := data.BoolData; d != nil && len(d.Data) > limit {
+			d.Data = d.Data[:limit]
+		}
+	case *schemapb.ScalarField_IntData:
+		if d := data.IntData; d != nil && len(d.Data) > limit {
+			d.Data = d.Data[:limit]
+		}
+	case *schemapb.ScalarField_LongData:
+		if d := data.LongData; d != nil && len(d.Data) > limit {
+			d.Data = d.Data[:limit]
+		}
+	case *schemapb.ScalarField_TimestamptzData:
+		if d := data.TimestamptzData; d != nil && len(d.Data) > limit {
+			d.Data = d.Data[:limit]
+		}
+	case *schemapb.ScalarField_FloatData:
+		if d := data.FloatData; d != nil && len(d.Data) > limit {
+			d.Data = d.Data[:limit]
+		}
+	case *schemapb.ScalarField_DoubleData:
+		if d := data.DoubleData; d != nil && len(d.Data) > limit {
+			d.Data = d.Data[:limit]
+		}
+	case *schemapb.ScalarField_StringData:
+		if d := data.StringData; d != nil && len(d.Data) > limit {
+			d.Data = d.Data[:limit]
+		}
+	}
+}
+
+// truncateAggResult truncates an AggregationResult to at most limit groups in place.
+// The input result's fieldDatas slices are modified directly.
+func truncateAggResult(result *AggregationResult, limit int64) *AggregationResult {
+	if result == nil || limit <= 0 {
+		return result
+	}
+	l := int(limit)
+	for _, fd := range result.GetFieldDatas() {
+		truncateFieldData(fd, l)
+	}
+	return result
 }

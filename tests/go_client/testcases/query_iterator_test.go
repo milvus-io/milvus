@@ -175,7 +175,7 @@ func TestQueryIteratorInvalid(t *testing.T) {
 
 	// query iterator with count(*)
 	_, errOutput := mc.QueryIterator(ctx, client.NewQueryIteratorOption(schema.CollectionName).WithOutputFields(common.QueryCountFieldName))
-	common.CheckErr(t, errOutput, false, "count entities with pagination is not allowed", "count(*)")
+	common.CheckErr(t, errOutput, false, "not allowed in output_fields")
 
 	// query iterator with invalid batch size
 	for _, batch := range []int{-1, 0} {
