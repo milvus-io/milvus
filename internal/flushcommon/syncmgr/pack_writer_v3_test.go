@@ -171,7 +171,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_Write() {
 	gotInserts, _, _, _, writtenManifestPath, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
 	s.Equal(gotInserts[0].Binlogs[0].GetEntriesNum(), int64(rows))
-	writtenBasePath, revision, err := packed.UnmarshalManfestPath(writtenManifestPath)
+	writtenBasePath, revision, err := packed.UnmarshalManifestPath(writtenManifestPath)
 	s.NoError(err)
 	s.Equal(basePath, writtenBasePath)
 	s.Greater(revision, int64(0))
@@ -322,7 +322,7 @@ func (s *PackWriterV3Suite) TestWriteWithDeleteData() {
 	// For V3, deltas are nil since deltalogs are stored in manifest
 	s.Nil(gotDeletes)
 	// Verify manifest was updated (version should be > -1)
-	_, revision, err := packed.UnmarshalManfestPath(writtenManifestPath)
+	_, revision, err := packed.UnmarshalManifestPath(writtenManifestPath)
 	s.NoError(err)
 	s.Greater(revision, int64(-1))
 }

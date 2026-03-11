@@ -263,7 +263,7 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 			if segment.GetManifest() != "" {
 				storageVersion = storage.StorageV2
 				// V3: build deltalog path under basePath/_delta/
-				basePath, _, err := packed.UnmarshalManfestPath(segment.GetManifest())
+				basePath, _, err := packed.UnmarshalManifestPath(segment.GetManifest())
 				if err != nil {
 					log.Warn("L0 compaction failed to parse manifest path", zap.Int64("segmentID", segmentID), zap.Error(err))
 					return nil, err
