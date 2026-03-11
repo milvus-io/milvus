@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -241,6 +242,29 @@ func (s *ErrSuite) TestIsHealthyOrStopping() {
 	for _, tc := range cases {
 		s.Run(tc.code.String(), func() {
 			s.Equal(tc.expect, IsHealthyOrStopping(tc.code) == nil)
+		})
+	}
+}
+
+func TestNewIOErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       milvusError
+		code      int32
+		retriable bool
+	}{
+		{"PermissionDenied", ErrIoPermissionDenied, 1005, false},
+		{"BucketNotFound", ErrIoBucketNotFound, 1006, false},
+		{"InvalidCredentials", ErrIoInvalidCredentials, 1007, false},
+		{"InvalidArgument", ErrIoInvalidArgument, 1010, false},
+		{"InvalidRange", ErrIoInvalidRange, 1011, false},
+		{"EntityTooLarge", ErrIoEntityTooLarge, 1012, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.code, tt.err.errCode)
+			assert.Equal(t, tt.retriable, tt.err.retriable)
 		})
 	}
 }
