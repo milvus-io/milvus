@@ -100,7 +100,7 @@ func (policy *storageVersionUpgradePolicy) triggerOneCollection(ctx context.Cont
 		return nil, nil
 	}
 
-	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties, paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
+	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
 		log.Warn("failed to apply storageVersionUpgradePolicy, get collection ttl failed")
 		return nil, err
