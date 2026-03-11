@@ -95,6 +95,7 @@ func CheckAutoIndexConfig() {
 	CheckAutoIndexHelper(autoIndexCfg.BinaryIndexParams.Key, autoIndexCfg.BinaryIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector)
 	CheckAutoIndexHelper(autoIndexCfg.BinaryIndexParams.Key, autoIndexCfg.DeduplicateIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector)
 	CheckAutoIndexHelper(autoIndexCfg.SparseIndexParams.Key, autoIndexCfg.SparseIndexParams.GetAsJSONMap(), schemapb.DataType_SparseFloatVector)
+	CheckAutoIndexHelper(autoIndexCfg.BigTopKIndexParams.Key, autoIndexCfg.BigTopKIndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector)
 }
 
 func ValidateParamTable() {
