@@ -807,7 +807,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	if err != nil || len(annsFieldName) == 0 {
 		vecFields := typeutil.GetVectorFieldSchemas(t.schema.CollectionSchema)
 		if len(vecFields) == 0 {
-			return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT,errors.New(AnnsFieldKey + " not found in schema")
+			return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, errors.New(AnnsFieldKey + " not found in schema")
 		}
 
 		if enableMultipleVectorFields && len(vecFields) > 1 {
@@ -817,7 +817,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 	}
 	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
 	if err != nil {
-		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT,err
+		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, err
 	}
 	if searchInfo.collectionID > 0 && searchInfo.collectionID != t.GetCollectionID() {
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+

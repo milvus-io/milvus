@@ -83,7 +83,7 @@ type SearchRequest struct {
 	consistencyLevel      commonpb.ConsistencyLevel
 	collectionTTL         typeutil.Timestamp
 	entityTTLPhysicalTime typeutil.Timestamp
-	filterOnly        bool // If true, only execute filter and return valid count (for two-stage search Stage 1)
+	filterOnly            bool // If true, only execute filter and return valid count (for two-stage search Stage 1)
 }
 
 func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
@@ -130,7 +130,7 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		consistencyLevel:      req.GetReq().GetConsistencyLevel(),
 		collectionTTL:         req.GetReq().GetCollectionTtlTimestamps(),
 		entityTTLPhysicalTime: req.GetReq().GetEntityTtlPhysicalTime(),
-		filterOnly:        req.GetFilterOnly(),
+		filterOnly:            req.GetFilterOnly(),
 	}, nil
 }
 

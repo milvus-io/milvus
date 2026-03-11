@@ -100,11 +100,11 @@ type OrderByField struct {
 }
 
 type SearchInfo struct {
-	planInfo      *planpb.QueryInfo
-	offset        int64
-	isIterator    bool
-	collectionID  int64
-	orderByFields []OrderByField
+	planInfo        *planpb.QueryInfo
+	offset          int64
+	isIterator      bool
+	collectionID    int64
+	orderByFields   []OrderByField
 	iterativeFilter bool
 }
 
@@ -585,10 +585,10 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			JsonType:             jsonType,
 			StrictCast:           strictCast,
 		},
-		offset:        offset,
-		isIterator:    isIterator,
-		collectionID:  collectionId,
-		orderByFields: orderByFields,
+		offset:          offset,
+		isIterator:      isIterator,
+		collectionID:    collectionId,
+		orderByFields:   orderByFields,
 		iterativeFilter: isIterativeFilter,
 	}, nil
 }
