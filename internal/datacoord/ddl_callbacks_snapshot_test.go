@@ -504,7 +504,7 @@ func buildValidateTestServer(t *testing.T, snapshotFound bool) *Server {
 // buildBaseSnapshotData creates a SnapshotData with a default partition and one index.
 func buildBaseSnapshotData() *SnapshotData {
 	return &SnapshotData{
-		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1"},
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
 		Collection: &datapb.CollectionDescription{
 			Partitions: map[string]int64{"_default": 1},
 		},
@@ -682,7 +682,7 @@ func TestValidateRestoreSnapshotResources_SuccessNoIndexes(t *testing.T) {
 
 	// No indexes in snapshot data
 	snapshotData := &SnapshotData{
-		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1"},
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
 		Collection: &datapb.CollectionDescription{
 			Partitions: map[string]int64{"_default": 1},
 		},
@@ -709,7 +709,7 @@ func TestValidateRestoreSnapshotResources_MultiplePartitionsAndIndexes(t *testin
 	defer m3.UnPatch()
 
 	snapshotData := &SnapshotData{
-		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1"},
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
 		Collection: &datapb.CollectionDescription{
 			Partitions: map[string]int64{
 				"_default": 1,
