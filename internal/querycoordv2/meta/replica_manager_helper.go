@@ -217,6 +217,42 @@ func (s *replicaAssignmentInfo) GetNewRONodes() []int64 {
 	return newRONodes
 }
 
+// Prioritize retaining the shard leader in the replicas.
+func (s *replicaAssignmentInfo) GetNewRONodesHeuristic(distMgr *DistributionManager, replica *Replica) []int64 {
+	if distMgr == nil {
+		return s.GetNewRONodes()
+	}
+	newRONodes := make([]int64, 0, s.newRONodes.Len())
+	// not in current resource group must be set ro.
+	for nodeID := range s.newRONodes {
+		newRONodes = append(newRONodes, nodeID)
+	}
+
+	// too much node is occupied by current replica, then set some node to ro.
+	if s.rwNodes.Len() > s.expectedNodeCount {
+		cnt := s.rwNodes.Len() - s.expectedNodeCount
+		type nodeScore struct {
+			nodeID int64
+			score  int
+		}
+		var scoredNodes []nodeScore = make([]nodeScore, 0, s.rwNodes.Len())
+		const weight = 10000
+		s.rwNodes.Range(func(node int64) bool {
+			channels := distMgr.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), WithNodeID2Channel(node))
+			segments := distMgr.SegmentDistManager.GetByFilter(WithCollectionID(replica.GetCollectionID()), WithNodeID(node))
+			scoredNodes = append(scoredNodes, nodeScore{nodeID: node, score: len(channels)*weight + len(segments)})
+			return true
+		})
+		sort.Slice(scoredNodes, func(i, j int) bool {
+			return scoredNodes[i].score < scoredNodes[j].score
+		})
+		for i := 0; i < cnt; i++ {
+			newRONodes = append(newRONodes, scoredNodes[i].nodeID)
+		}
+	}
+	return newRONodes
+}
+
 // GetRecoverNodesAndIncomingNodeCount returns the recoverable ro nodes and incoming node count for these replica.
 func (s *replicaAssignmentInfo) GetRecoverNodesAndIncomingNodeCount() (recoverNodes []int64, incomingNodeCount int) {
 	recoverNodes = make([]int64, 0, s.recoverableRONodes.Len())

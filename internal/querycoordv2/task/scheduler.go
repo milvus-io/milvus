@@ -791,6 +791,11 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		scheduler.remove(task)
 	}
 
+	// After completing the migration task, check whether RONodes with empty channels/segments need to be migrated out of the replica.
+	if len(toRemove) > 0 {
+		scheduler.meta.ResourceManager.HandleNodeChangeOnReplica()
+	}
+
 	scheduler.updateTaskMetrics()
 
 	log.Info("processed tasks",

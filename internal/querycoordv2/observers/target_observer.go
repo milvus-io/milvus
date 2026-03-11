@@ -393,6 +393,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		return false
 	}
 
+	allChannelsReady := true
 	collectionReadyLeaders := make([]*meta.LeaderView, 0)
 	for channel := range channelNames {
 		channelReadyLeaders := lo.Filter(ob.distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel)), func(leader *meta.LeaderView, _ int) bool {
@@ -405,7 +406,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 				zap.Int("readyReplicaNum", len(channelReadyLeaders)),
 				zap.String("channelName", channel),
 			)
-			return false
+			allChannelsReady = false
 		}
 		collectionReadyLeaders = append(collectionReadyLeaders, channelReadyLeaders...)
 	}
@@ -444,7 +445,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 			return false
 		}
 	}
-	return true
+	return allChannelsReady
 }
 
 func (ob *TargetObserver) sync(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, diffs []*querypb.SyncAction,

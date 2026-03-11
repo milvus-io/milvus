@@ -512,6 +512,12 @@ func (rm *ResourceManager) handleNodeDown(ctx context.Context, node int64) {
 	)
 }
 
+func (rm *ResourceManager) HandleNodeChangeOnReplica() {
+	rm.rwmutex.Lock()
+	defer rm.rwmutex.Unlock()
+	rm.nodeChangedNotifier.NotifyAll()
+}
+
 func (rm *ResourceManager) HandleNodeStopping(ctx context.Context, node int64) {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
