@@ -586,6 +586,9 @@ queryNode:
   queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
   enableSegmentFilter: true # Enable delegator-side segment filtering using PK predicates (min/max + bloom filter).
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
+  adaptiveFilterStrategy:
+    enabled: true # enable cost-based adaptive selection between pre-filter and iterative-filter per segment
+    threshold: 0.5 # selectivity threshold above which iterative filter is preferred (0.0-1.0)
   workerPooling:
     size: 10 # the size for worker querynode client pool
   idfOracle:
