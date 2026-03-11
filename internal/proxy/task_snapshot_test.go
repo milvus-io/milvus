@@ -213,13 +213,53 @@ func TestDropSnapshotTask_OnEnqueue_Success(t *testing.T) {
 func TestDropSnapshotTask_PreExecute(t *testing.T) {
 	task := &dropSnapshotTask{
 		req: &milvuspb.DropSnapshotRequest{
+			Name:           "test_snapshot",
+			DbName:         "default",
+			CollectionName: "test_collection",
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), task.collectionID)
+}
+
+func TestDropSnapshotTask_PreExecute_MissingCollectionName(t *testing.T) {
+	task := &dropSnapshotTask{
+		req: &milvuspb.DropSnapshotRequest{
 			Name: "test_snapshot",
 		},
 	}
 
 	err := task.PreExecute(context.Background())
 
-	assert.NoError(t, err) // PreExecute should always succeed for drop
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collection_name is required")
+}
+
+func TestDropSnapshotTask_PreExecute_CollectionNotFound(t *testing.T) {
+	task := &dropSnapshotTask{
+		req: &milvuspb.DropSnapshotRequest{
+			Name:           "test_snapshot",
+			DbName:         "default",
+			CollectionName: "nonexistent_collection",
+		},
+	}
+
+	globalMetaCache = &MetaCache{}
+	expectedError := errors.New("collection not found")
+	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(0), expectedError).Build()
+	defer mockGetCollectionID.UnPatch()
+
+	err := task.PreExecute(context.Background())
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "collection not found")
 }
 
 func TestDropSnapshotTask_Execute_Success(t *testing.T) {
@@ -451,7 +491,8 @@ func TestListSnapshotsTask_PreExecute_Success(t *testing.T) {
 
 	// Initialize globalMetaCache
 	globalMetaCache = &MetaCache{}
-	// Mock globalMetaCache calls
+	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 1}, nil).Build()
+	defer mockGetDBInfo.UnPatch()
 	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 	defer mockGetCollectionID.UnPatch()
 
@@ -764,8 +805,9 @@ func TestSnapshotTasks_PreExecute_InvalidNames(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				task := &restoreSnapshotTask{
 					req: &milvuspb.RestoreSnapshotRequest{
-						Name:           "valid_snapshot",
-						CollectionName: tc.collectionName,
+						Name:                 "valid_snapshot",
+						CollectionName:       "source_collection",
+						TargetCollectionName: tc.collectionName,
 					},
 				}
 
@@ -822,9 +864,15 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				task := &dropSnapshotTask{
 					req: &milvuspb.DropSnapshotRequest{
-						Name: tc.snapshotName,
+						Name:           tc.snapshotName,
+						DbName:         "default",
+						CollectionName: "test_collection",
 					},
 				}
+
+				globalMetaCache = &MetaCache{}
+				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+				defer mockGetCollectionID.UnPatch()
 
 				err := task.PreExecute(context.Background())
 
@@ -839,9 +887,15 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				task := &describeSnapshotTask{
 					req: &milvuspb.DescribeSnapshotRequest{
-						Name: tc.snapshotName,
+						Name:           tc.snapshotName,
+						DbName:         "default",
+						CollectionName: "test_collection",
 					},
 				}
+
+				globalMetaCache = &MetaCache{}
+				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+				defer mockGetCollectionID.UnPatch()
 
 				err := task.PreExecute(context.Background())
 
@@ -853,24 +907,29 @@ func TestSnapshotTasks_PreExecute_ValidNames(t *testing.T) {
 	// Test RestoreSnapshotTask
 	t.Run("RestoreSnapshotTask", func(t *testing.T) {
 		testCases := []struct {
-			name           string
-			snapshotName   string
-			collectionName string
+			name                 string
+			snapshotName         string
+			collectionName       string
+			targetCollectionName string
 		}{
-			{"both valid", "snapshot_1", "collection_1"},
-			{"empty collection name", "snapshot_1", ""}, // Empty collection name is allowed
-			{"with underscores", "_snapshot", "_collection"},
-			{"mixed", "Snap_123", "Coll_456"},
+			{"both valid", "snapshot_1", "collection_1", "target_coll"},
+			{"with underscores", "_snapshot", "_collection", "_target"},
+			{"mixed", "Snap_123", "Coll_456", "Target_789"},
 		}
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				task := &restoreSnapshotTask{
 					req: &milvuspb.RestoreSnapshotRequest{
-						Name:           tc.snapshotName,
-						CollectionName: tc.collectionName,
+						Name:                 tc.snapshotName,
+						CollectionName:       tc.collectionName,
+						TargetCollectionName: tc.targetCollectionName,
 					},
 				}
+
+				globalMetaCache = &MetaCache{}
+				mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+				defer mockGetCollectionID.UnPatch()
 
 				err := task.PreExecute(context.Background())
 
@@ -889,6 +948,10 @@ func TestListSnapshotsTask_PreExecute_EmptyCollectionName(t *testing.T) {
 			CollectionName: "", // Empty collection name should list all snapshots
 		},
 	}
+
+	globalMetaCache = &MetaCache{}
+	mockGetDBInfo := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 1}, nil).Build()
+	defer mockGetDBInfo.UnPatch()
 
 	err := task.PreExecute(context.Background())
 
