@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -37,31 +36,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
-// RegisterImportCallbacks registers the import callbacks.
-func RegisterImportCallbacks(s *Server) {
-	registry.RegisterImportV1AckCallback(func(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
-		return s.importV1AckCallback(ctx, result)
-	})
-
-	registry.RegisterBatchUpdateManifestV2AckCallback(func(ctx context.Context, result message.BroadcastResultBatchUpdateManifestMessageV2) error {
-		body := result.Message.MustBody()
-		var operators []UpdateOperator
-		for _, item := range body.GetItems() {
-			operators = append(operators, UpdateManifestVersion(item.GetSegmentId(), item.GetManifestVersion()))
-		}
-		if len(operators) > 0 {
-			if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
-				log.Ctx(ctx).Warn("batch update manifest version failed", zap.Error(err))
-				return err
-			}
-		}
-		log.Ctx(ctx).Info("batch update manifest version handled", zap.Int("itemCount", len(body.GetItems())))
-		return nil
-	})
-}
-
 // importV1AckCallback handles the ack callback for import messages.
-func (s *Server) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
+func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 	body := result.Message.MustBody()
 
 	// Get database ID from database name
@@ -83,7 +59,7 @@ func (s *Server) importV1AckCallback(ctx context.Context, result message.Broadca
 
 	// Call createImportJobFromAck directly instead of ImportV2
 	// ImportV2 is only for proxy broadcast, not for ack callback
-	importResp, err := s.createImportJobFromAck(ctx, &internalpb.ImportRequestInternal{
+	importResp, err := c.createImportJobFromAck(ctx, &internalpb.ImportRequestInternal{
 		DbID:           0, // already deprecated.
 		CollectionID:   body.GetCollectionID(),
 		CollectionName: body.GetCollectionName(),
