@@ -654,6 +654,11 @@ func (s *Server) watchNodes(revision int64) {
 		case event, ok := <-s.sessionWatcher.EventChannel():
 			if !ok {
 				// ErrCompacted is handled inside SessionWatcher
+				if s.ctx.Err() != nil {
+					// Context is cancelled; channel closed during normal shutdown.
+					log.Info("stop watching nodes, QueryCoord stopped (watcher closed during stop)")
+					return
+				}
 				log.Warn("Session Watcher channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
 				go s.Stop()
 				if s.session.IsTriggerKill() {

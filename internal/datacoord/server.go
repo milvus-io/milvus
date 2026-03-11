@@ -895,6 +895,11 @@ func (s *Server) watchService(ctx context.Context) {
 			return
 		case event, ok := <-s.dnSessionWatcher.EventChannel():
 			if !ok {
+				if ctx.Err() != nil {
+					// Context is cancelled; channel closed during normal shutdown.
+					log.Info("watch service shutdown (dn watcher closed during stop)")
+					return
+				}
 				s.stopServiceWatch()
 				return
 			}
@@ -908,6 +913,11 @@ func (s *Server) watchService(ctx context.Context) {
 			}
 		case event, ok := <-s.qnSessionWatcher.EventChannel():
 			if !ok {
+				if ctx.Err() != nil {
+					// Context is cancelled; channel closed during normal shutdown.
+					log.Info("watch service shutdown (qn watcher closed during stop)")
+					return
+				}
 				s.stopServiceWatch()
 				return
 			}
