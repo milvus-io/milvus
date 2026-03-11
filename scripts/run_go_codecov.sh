@@ -46,7 +46,7 @@ for d in cmd/tools internal pkg client; do
     echo -e "-----------------------------------\nRunning test cases under $d with -p $PARALLEL ..."
 
     $TEST_CMD \
-        "-gcflags=all=-N -l" \
+        "-gcflags=./...=-N -l" \
         -race \
         -tags dynamic,test \
         -v \

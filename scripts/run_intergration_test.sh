@@ -35,7 +35,7 @@ fi
 
 TEST_CMD_WITH_ARGS=(
     $TEST_CMD
-    "-gcflags=all=-N -l"
+    "-gcflags=./...=-N -l"
     -race
     -tags dynamic,test
     -v
