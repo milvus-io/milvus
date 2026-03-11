@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -668,10 +669,14 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 		}
 	}
 
-	if err := checker.CheckValidDataType(indexType, &schemapb.FieldSchema{
-		DataType:    effectiveDataType,
-		ElementType: effectiveElementType,
-	}); err != nil {
+	effectiveField := field
+	if effectiveDataType != field.DataType {
+		effectiveField = proto.Clone(field).(*schemapb.FieldSchema)
+		effectiveField.DataType = effectiveDataType
+		effectiveField.ElementType = effectiveElementType
+	}
+
+	if err := checker.CheckValidDataType(indexType, effectiveField); err != nil {
 		log.Ctx(ctx).Info("create index with invalid data type", zap.Error(err), zap.String("data_type", field.GetDataType().String()))
 		return err
 	}
