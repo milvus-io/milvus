@@ -968,7 +968,7 @@ func TestSnapshotManager_BuildChannelMapping_GetChannelsError(t *testing.T) {
 
 // --- Test RestoreSnapshot ---
 
-func TestRestoreSnapshot_ValidationFailsCloseBroadcasterBeforeRollback(t *testing.T) {
+func TestRestoreSnapshot_ValidationFailsRollbackWithoutBroadcaster(t *testing.T) {
 	ctx := context.Background()
 
 	// Track call order
@@ -994,25 +994,13 @@ func TestRestoreSnapshot_ValidationFailsCloseBroadcasterBeforeRollback(t *testin
 	m4 := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
 	defer m4.UnPatch()
 
-	mockAlloc := allocator.NewMockAllocator(t)
-	mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(999), nil)
+	sm := &snapshotManager{}
 
-	sm := &snapshotManager{
-		allocator: mockAlloc,
-	}
-
-	// Mock broadcaster that tracks Close calls
-	closeCalled := 0
-	mockBroadcaster := &mockBroadcastAPI{
-		closeFn: func() {
-			closeCalled++
-			callOrder = append(callOrder, "close")
-		},
-	}
-
+	// startBroadcaster should NOT be called because validation (Phase 4)
+	// happens before broadcaster start (Phase 5) in RestoreSnapshot
 	startBroadcaster := func(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
 		callOrder = append(callOrder, "start_broadcaster")
-		return mockBroadcaster, nil
+		return &mockBroadcastAPI{}, nil
 	}
 
 	rollbackCalled := false
@@ -1037,11 +1025,9 @@ func TestRestoreSnapshot_ValidationFailsCloseBroadcasterBeforeRollback(t *testin
 	assert.Contains(t, err.Error(), "resource validation failed")
 	assert.True(t, rollbackCalled)
 
-	// Key assertion: Close must happen BEFORE rollback
-	assert.Equal(t, []string{"start_broadcaster", "validate", "close", "rollback"}, callOrder)
-
-	// Close called exactly once (not double-closed by defer)
-	assert.Equal(t, 1, closeCalled)
+	// Validation fails before broadcaster is started (Phase 4 < Phase 5),
+	// so only validate and rollback are called
+	assert.Equal(t, []string{"validate", "rollback"}, callOrder)
 }
 
 func TestRestoreSnapshot_ValidationFailsRollbackAlsoFails(t *testing.T) {
@@ -1062,16 +1048,11 @@ func TestRestoreSnapshot_ValidationFailsRollbackAlsoFails(t *testing.T) {
 	m4 := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
 	defer m4.UnPatch()
 
-	mockAlloc := allocator.NewMockAllocator(t)
-	mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(999), nil)
-
-	sm := &snapshotManager{allocator: mockAlloc}
-
-	closeCalled := 0
-	mockBcast := &mockBroadcastAPI{closeFn: func() { closeCalled++ }}
+	// No allocator needed — validation fails before AllocID is called
+	sm := &snapshotManager{}
 
 	startBroadcaster := func(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
-		return mockBcast, nil
+		return &mockBroadcastAPI{}, nil
 	}
 	rollback := func(ctx context.Context, dbName, collName string) error {
 		return errors.New("rollback failed too")
@@ -1086,8 +1067,6 @@ func TestRestoreSnapshot_ValidationFailsRollbackAlsoFails(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), jobID)
 	assert.Contains(t, err.Error(), "resource validation failed")
-	// Broadcaster closed once despite rollback also failing
-	assert.Equal(t, 1, closeCalled)
 }
 
 func TestRestoreSnapshot_ValidationPassesThenBroadcastSucceeds(t *testing.T) {
