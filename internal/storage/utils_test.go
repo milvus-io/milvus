@@ -2835,3 +2835,310 @@ func TestInsertDataWithStructAndMissingField(t *testing.T) {
 		assert.False(t, valid, "nullable field should have all null values")
 	}
 }
+
+func TestMergeMolField(t *testing.T) {
+	t.Run("merge into empty InsertData", func(t *testing.T) {
+		data := &InsertData{
+			Data: make(map[FieldID]FieldData),
+		}
+		fid := FieldID(200)
+		field := &MolFieldData{
+			Data:      [][]byte{[]byte("CCO"), []byte("c1ccccc1")},
+			ValidData: nil,
+			Nullable:  false,
+		}
+		mergeMolField(data, fid, field)
+
+		result, ok := data.Data[fid]
+		assert.True(t, ok)
+		molResult := result.(*MolFieldData)
+		assert.Equal(t, [][]byte{[]byte("CCO"), []byte("c1ccccc1")}, molResult.Data)
+		assert.Nil(t, molResult.ValidData)
+		assert.False(t, molResult.Nullable)
+	})
+
+	t.Run("merge into existing InsertData", func(t *testing.T) {
+		data := &InsertData{
+			Data: map[FieldID]FieldData{
+				200: &MolFieldData{
+					Data:      [][]byte{[]byte("CCO")},
+					ValidData: []bool{true},
+					Nullable:  true,
+				},
+			},
+		}
+		fid := FieldID(200)
+		field := &MolFieldData{
+			Data:      [][]byte{[]byte("c1ccccc1"), []byte("CC(=O)O")},
+			ValidData: []bool{true, false},
+			Nullable:  true,
+		}
+		mergeMolField(data, fid, field)
+
+		result := data.Data[fid].(*MolFieldData)
+		assert.Equal(t, [][]byte{[]byte("CCO"), []byte("c1ccccc1"), []byte("CC(=O)O")}, result.Data)
+		assert.Equal(t, []bool{true, true, false}, result.ValidData)
+		assert.True(t, result.Nullable)
+	})
+}
+
+func TestMergeInsertData_WithMol(t *testing.T) {
+	t.Run("empty data in buffer with mol", func(t *testing.T) {
+		d1 := &InsertData{
+			Data:  make(map[FieldID]FieldData),
+			Infos: []BlobInfo{},
+		}
+		molFieldID := FieldID(200)
+		d2 := &InsertData{
+			Data: map[int64]FieldData{
+				molFieldID: &MolFieldData{
+					Data:      [][]byte{[]byte("CCO"), []byte("c1ccccc1")},
+					ValidData: nil,
+					Nullable:  false,
+				},
+			},
+			Infos: nil,
+		}
+
+		MergeInsertData(d1, d2)
+
+		f, ok := d1.Data[molFieldID]
+		assert.True(t, ok)
+		molData := f.(*MolFieldData)
+		assert.Equal(t, [][]byte{[]byte("CCO"), []byte("c1ccccc1")}, molData.Data)
+	})
+
+	t.Run("normal case with mol", func(t *testing.T) {
+		molFieldID := FieldID(200)
+		d1 := &InsertData{
+			Data: map[int64]FieldData{
+				molFieldID: &MolFieldData{
+					Data:      [][]byte{[]byte("CCO")},
+					ValidData: nil,
+					Nullable:  false,
+				},
+			},
+			Infos: nil,
+		}
+		d2 := &InsertData{
+			Data: map[int64]FieldData{
+				molFieldID: &MolFieldData{
+					Data:      [][]byte{[]byte("c1ccccc1"), []byte("CC(=O)O")},
+					ValidData: nil,
+					Nullable:  false,
+				},
+			},
+			Infos: nil,
+		}
+
+		MergeInsertData(d1, d2)
+
+		f, ok := d1.Data[molFieldID]
+		assert.True(t, ok)
+		molData := f.(*MolFieldData)
+		assert.Equal(t, [][]byte{[]byte("CCO"), []byte("c1ccccc1"), []byte("CC(=O)O")}, molData.Data)
+	})
+}
+
+func TestTransferInsertDataToInsertRecord_WithMol(t *testing.T) {
+	molFieldID := int64(200)
+	insertData := &InsertData{
+		Data: map[int64]FieldData{
+			molFieldID: &MolFieldData{
+				Data:      [][]byte{[]byte("CCO"), []byte("c1ccccc1"), []byte("CC(=O)O")},
+				ValidData: []bool{true, true, false},
+				Nullable:  true,
+			},
+		},
+	}
+
+	record, err := TransferInsertDataToInsertRecord(insertData)
+	assert.NoError(t, err)
+	assert.NotNil(t, record)
+
+	var molFieldData *schemapb.FieldData
+	for _, fd := range record.FieldsData {
+		if fd.FieldId == molFieldID {
+			molFieldData = fd
+			break
+		}
+	}
+	assert.NotNil(t, molFieldData)
+	assert.Equal(t, schemapb.DataType_Mol, molFieldData.Type)
+	assert.Equal(t, molFieldID, molFieldData.FieldId)
+
+	molArray := molFieldData.GetScalars().GetMolData()
+	assert.NotNil(t, molArray)
+	assert.Equal(t, 3, len(molArray.Data))
+	assert.EqualValues(t, []byte("CCO"), molArray.Data[0])
+	assert.EqualValues(t, []byte("c1ccccc1"), molArray.Data[1])
+	assert.EqualValues(t, []byte("CC(=O)O"), molArray.Data[2])
+	assert.Equal(t, []bool{true, true, false}, molFieldData.ValidData)
+}
+
+func TestColumnBasedInsertMsgToInsertData_WithMol(t *testing.T) {
+	numRows := 3
+	schema := &schemapb.CollectionSchema{
+		Name: "test_mol",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      common.RowIDField,
+				Name:         common.RowIDFieldName,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: false,
+			},
+			{
+				FieldID:      common.TimeStampField,
+				Name:         common.TimeStampFieldName,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: false,
+			},
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:  101,
+				Name:     "mol_field",
+				DataType: schemapb.DataType_Mol,
+			},
+		},
+	}
+
+	msg := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{},
+		InsertRequest: &msgpb.InsertRequest{
+			Base:       &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
+			NumRows:    uint64(numRows),
+			Version:    msgpb.InsertDataVersion_ColumnBased,
+			RowIDs:     []int64{1, 2, 3},
+			Timestamps: []uint64{100, 200, 300},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "pk",
+					FieldId:   100,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}},
+							},
+						},
+					},
+				},
+				{
+					Type:      schemapb.DataType_Mol,
+					FieldName: "mol_field",
+					FieldId:   101,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_MolData{
+								MolData: &schemapb.MolArray{
+									Data: [][]byte{[]byte("CCO"), []byte("c1ccccc1"), []byte("CC(=O)O")},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	insertData, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+	assert.NoError(t, err)
+	assert.NotNil(t, insertData)
+
+	molField, ok := insertData.Data[101]
+	assert.True(t, ok)
+	molFieldData := molField.(*MolFieldData)
+	assert.Equal(t, 3, molFieldData.RowNum())
+	assert.EqualValues(t, []byte("CCO"), molFieldData.Data[0])
+	assert.EqualValues(t, []byte("c1ccccc1"), molFieldData.Data[1])
+	assert.EqualValues(t, []byte("CC(=O)O"), molFieldData.Data[2])
+}
+
+func TestColumnBasedInsertMsgToInsertData_WithMolNullable(t *testing.T) {
+	numRows := 3
+	schema := &schemapb.CollectionSchema{
+		Name: "test_mol_nullable",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      common.RowIDField,
+				Name:         common.RowIDFieldName,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: false,
+			},
+			{
+				FieldID:      common.TimeStampField,
+				Name:         common.TimeStampFieldName,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: false,
+			},
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:  101,
+				Name:     "mol_field",
+				DataType: schemapb.DataType_Mol,
+				Nullable: true,
+			},
+		},
+	}
+
+	msg := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{},
+		InsertRequest: &msgpb.InsertRequest{
+			Base:       &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
+			NumRows:    uint64(numRows),
+			Version:    msgpb.InsertDataVersion_ColumnBased,
+			RowIDs:     []int64{1, 2, 3},
+			Timestamps: []uint64{100, 200, 300},
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "pk",
+					FieldId:   100,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}},
+							},
+						},
+					},
+				},
+				{
+					Type:      schemapb.DataType_Mol,
+					FieldName: "mol_field",
+					FieldId:   101,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_MolData{
+								MolData: &schemapb.MolArray{
+									Data: [][]byte{[]byte("CCO"), []byte(""), []byte("CC(=O)O")},
+								},
+							},
+						},
+					},
+					ValidData: []bool{true, false, true},
+				},
+			},
+		},
+	}
+
+	insertData, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+	assert.NoError(t, err)
+	assert.NotNil(t, insertData)
+
+	molField, ok := insertData.Data[101]
+	assert.True(t, ok)
+	molFieldData := molField.(*MolFieldData)
+	assert.Equal(t, 3, molFieldData.RowNum())
+	assert.Equal(t, []bool{true, false, true}, molFieldData.ValidData)
+	assert.True(t, molFieldData.Nullable)
+}

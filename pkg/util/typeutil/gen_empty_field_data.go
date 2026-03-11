@@ -137,6 +137,20 @@ func genEmptyGeometryFieldData(field *schemapb.FieldSchema) *schemapb.FieldData 
 	}
 }
 
+func genEmptyMolFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      field.GetDataType(),
+		FieldName: field.GetName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_MolData{MolData: &schemapb.MolArray{Data: nil}},
+			},
+		},
+		FieldId:   field.GetFieldID(),
+		IsDynamic: field.GetIsDynamic(),
+	}
+}
+
 func genEmptyBinaryVectorFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error) {
 	dim, err := GetDim(field)
 	if err != nil {
@@ -308,6 +322,8 @@ func GenEmptyFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error)
 		return genEmptyJSONFieldData(field), nil
 	case schemapb.DataType_Geometry:
 		return genEmptyGeometryFieldData(field), nil
+	case schemapb.DataType_Mol:
+		return genEmptyMolFieldData(field), nil
 	case schemapb.DataType_BinaryVector:
 		return genEmptyBinaryVectorFieldData(field)
 	case schemapb.DataType_FloatVector:

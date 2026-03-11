@@ -470,6 +470,54 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		w.ReleasePayloadWriter()
 	})
 
+	t.Run("TestAddMol", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddOneMolToPayload([]byte("CCO"), true)
+		assert.NoError(t, err)
+		err = w.AddOneMolToPayload([]byte("c1ccccc1"), true)
+		assert.NoError(t, err)
+		err = w.AddOneMolToPayload([]byte("CC(=O)O"), true)
+		assert.NoError(t, err)
+		err = w.AddDataToPayloadForUT([]byte("C(=O)N"), nil)
+		assert.NoError(t, err)
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+		length, err := w.GetPayloadLengthFromWriter()
+		assert.NoError(t, err)
+		assert.Equal(t, length, 4)
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_Mol, buffer, false)
+		assert.NoError(t, err)
+		length, err = r.GetPayloadLengthFromReader()
+		assert.NoError(t, err)
+		assert.Equal(t, length, 4)
+
+		molData, valids, err := r.GetMolFromPayload()
+		assert.NoError(t, err)
+		assert.Nil(t, valids)
+
+		assert.EqualValues(t, []byte("CCO"), molData[0])
+		assert.EqualValues(t, []byte("c1ccccc1"), molData[1])
+		assert.EqualValues(t, []byte("CC(=O)O"), molData[2])
+		assert.EqualValues(t, []byte("C(=O)N"), molData[3])
+
+		iMol, valids, _, err := r.GetDataFromPayload()
+		molData = iMol.([][]byte)
+		assert.NoError(t, err)
+		assert.Nil(t, valids)
+		assert.EqualValues(t, []byte("CCO"), molData[0])
+		assert.EqualValues(t, []byte("c1ccccc1"), molData[1])
+		assert.EqualValues(t, []byte("CC(=O)O"), molData[2])
+		assert.EqualValues(t, []byte("C(=O)N"), molData[3])
+		r.ReleasePayloadReader()
+		w.ReleasePayloadWriter()
+	})
+
 	t.Run("TestBinaryVector", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_BinaryVector, WithDim(8))
 		require.Nil(t, err)
@@ -1707,6 +1755,90 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
+	t.Run("TestAddMol with wrong valids", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddOneMolToPayload([]byte("CCO"), false)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("TestAddMol after finish", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddOneMolToPayload([]byte("CCO"), true)
+		assert.NoError(t, err)
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+
+		err = w.AddOneMolToPayload([]byte("CC"), true)
+		assert.Error(t, err)
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestAddMol with wrong builder type", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Int32)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddOneMolToPayload([]byte("CCO"), true)
+		assert.Error(t, err)
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestGetMolFromPayload with wrong type", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_VarChar)
+		require.Nil(t, err)
+		err = w.AddOneStringToPayload("hello", true)
+		assert.NoError(t, err)
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_VarChar, buffer, false)
+		assert.NoError(t, err)
+		_, _, err = r.GetMolFromPayload()
+		assert.Error(t, err)
+		r.ReleasePayloadReader()
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestAddMol with wrong data type", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol)
+		require.Nil(t, err)
+		err = w.AddDataToPayloadForUT("not bytes", nil)
+		assert.Error(t, err)
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestAddMol with wrong valid data length", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol)
+		require.Nil(t, err)
+		err = w.AddDataToPayloadForUT([]byte("CCO"), []bool{true, false})
+		assert.Error(t, err)
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestAddMol nullable without valid data", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol, WithNullable(true))
+		require.Nil(t, err)
+		err = w.AddDataToPayloadForUT([]byte("CCO"), nil)
+		assert.Error(t, err)
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestAddMol not nullable with valid data", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol)
+		require.Nil(t, err)
+		err = w.AddDataToPayloadForUT([]byte("CCO"), []bool{true})
+		assert.Error(t, err)
+		w.ReleasePayloadWriter()
+	})
+
 	t.Run("TestVectorArray", func(t *testing.T) {
 		dim := 4
 		w, err := NewPayloadWriter(
@@ -2229,6 +2361,54 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 		assert.EqualValues(t, []byte(``), json[1])
 		assert.EqualValues(t, []byte(`{"3":"3"}`), json[2])
 		assert.EqualValues(t, []byte(``), json[3])
+		assert.Equal(t, []bool{true, false, true, false}, valids)
+		r.ReleasePayloadReader()
+		w.ReleasePayloadWriter()
+	})
+
+	t.Run("TestAddMol", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Mol, WithNullable(true))
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddOneMolToPayload([]byte("CCO"), true)
+		assert.NoError(t, err)
+		err = w.AddOneMolToPayload([]byte("c1ccccc1"), false)
+		assert.NoError(t, err)
+		err = w.AddOneMolToPayload([]byte("CC(=O)O"), true)
+		assert.NoError(t, err)
+		err = w.AddDataToPayloadForUT([]byte("C(=O)N"), []bool{false})
+		assert.NoError(t, err)
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+		length, err := w.GetPayloadLengthFromWriter()
+		assert.NoError(t, err)
+		assert.Equal(t, length, 4)
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_Mol, buffer, true)
+		assert.NoError(t, err)
+		length, err = r.GetPayloadLengthFromReader()
+		assert.NoError(t, err)
+		assert.Equal(t, length, 4)
+
+		molData, valids, err := r.GetMolFromPayload()
+		assert.NoError(t, err)
+
+		assert.EqualValues(t, []byte("CCO"), molData[0])
+		assert.EqualValues(t, []byte(""), molData[1])
+		assert.EqualValues(t, []byte("CC(=O)O"), molData[2])
+		assert.EqualValues(t, []byte(""), molData[3])
+		assert.Equal(t, []bool{true, false, true, false}, valids)
+
+		iMol, valids, _, err := r.GetDataFromPayload()
+		molData = iMol.([][]byte)
+		assert.NoError(t, err)
+		assert.EqualValues(t, []byte("CCO"), molData[0])
+		assert.EqualValues(t, []byte(""), molData[1])
+		assert.EqualValues(t, []byte("CC(=O)O"), molData[2])
+		assert.EqualValues(t, []byte(""), molData[3])
 		assert.Equal(t, []bool{true, false, true, false}, valids)
 		r.ReleasePayloadReader()
 		w.ReleasePayloadWriter()
