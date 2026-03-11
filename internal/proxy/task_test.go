@@ -2964,6 +2964,12 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 				},
 			},
 		}), nil)
+		cache.On("GetCollectionInfo",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("int64"),
+		).Return(&collectionInfo{}, nil)
 		globalMetaCache = cache
 		cit.req.ExtraParams = []*commonpb.KeyValuePair{
 			{
@@ -3000,6 +3006,12 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(UniqueID(100), nil)
+		cache.On("GetCollectionInfo",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("int64"),
+		).Return(&collectionInfo{}, nil)
 		globalMetaCache = cache
 
 		for i := 0; i < 256; i++ {
@@ -4519,6 +4531,34 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
 }
 
+func mockVectorIndexForCollection(t *testing.T, ctx context.Context, qc *MixCoordMock, colName string) {
+	t.Helper()
+
+	resp, err := qc.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: dbName, CollectionName: colName})
+	assert.NoError(t, err)
+
+	var vecFieldID int64
+	for _, field := range resp.Schema.Fields {
+		if field.DataType == schemapb.DataType_FloatVector {
+			vecFieldID = field.FieldID
+			break
+		}
+	}
+	assert.NotEqual(t, int64(0), vecFieldID)
+
+	qc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
+		return &indexpb.DescribeIndexResponse{
+			Status: merr.Success(),
+			IndexInfos: []*indexpb.IndexInfo{
+				{FieldID: vecFieldID},
+			},
+		}, nil
+	}
+	t.Cleanup(func() {
+		qc.DescribeIndexFunc = nil
+	})
+}
+
 func TestTaskPartitionKeyIsolation(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
@@ -4672,7 +4712,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("alter collection without isolation", func(t *testing.T) {
+	t.Run("alter collection without isolation property should succeed", func(t *testing.T) {
 		colName := collectionName + "AlterNoIso"
 		createIsoCollection(colName, true, false, true)
 		alterTask := alterCollectionTask{
@@ -4702,34 +4742,219 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		assert.ErrorContains(t, alterTask.PreExecute(ctx), "partition key isolation mode is enabled but current Milvus does not support it")
 	})
 
-	t.Run("alter collection with vec index and isolation", func(t *testing.T) {
+	t.Run("alter isolation with vector index should fail", func(t *testing.T) {
 		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 		colName := collectionName + "AlterVecIndex"
 		createIsoCollection(colName, true, true, false)
-		resp, err := qc.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: dbName, CollectionName: colName})
-		assert.NoError(t, err)
-		var vecFieldID int64 = 0
-		for _, field := range resp.Schema.Fields {
-			if field.DataType == schemapb.DataType_FloatVector {
-				vecFieldID = field.FieldID
-				break
-			}
-		}
-		assert.NotEqual(t, vecFieldID, int64(0))
-		qc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
-			return &indexpb.DescribeIndexResponse{
-				Status: merr.Success(),
-				IndexInfos: []*indexpb.IndexInfo{
-					{
-						FieldID: vecFieldID,
-					},
-				},
-			}, nil
-		}
+		mockVectorIndexForCollection(t, ctx, qc, colName)
 		alterTask := getAlterCollectionTask(colName, false)
 		assert.ErrorContains(t, alterTask.PreExecute(ctx),
 			"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
+	})
+
+	t.Run("delete isolation property with vector index should fail", func(t *testing.T) {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		colName := collectionName + "DeleteIsoWithIdx"
+		createIsoCollection(colName, true, true, false)
+		mockVectorIndexForCollection(t, ctx, qc, colName)
+		alterTask := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{common.PartitionKeyIsolationKey},
+			},
+			mixCoord: qc,
+		}
+		err = alterTask.PreExecute(ctx)
+		assert.ErrorContains(t, err,
+			"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
+	})
+
+	t.Run("delete isolation property without vector index should succeed", func(t *testing.T) {
+		colName := collectionName + "DeleteIsoNoIdx"
+		createIsoCollection(colName, true, true, false)
+		alterTask := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{common.PartitionKeyIsolationKey},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter unrelated property with isolation enabled should not check index", func(t *testing.T) {
+		paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
+		defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
+		colName := collectionName + "AlterOtherPropWithIso"
+		createIsoCollection(colName, true, true, false)
+		mockVectorIndexForCollection(t, ctx, qc, colName)
+		alterTask := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "3600"}},
+			},
+			mixCoord: qc,
+		}
+		err = alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestAlterCollectionBigTopKOptimization(t *testing.T) {
+	qc := NewMixCoordMock()
+	ctx := context.Background()
+	err := InitMetaCache(ctx, qc)
+	assert.NoError(t, err)
+	prefix := "TestBigTopKOptimization"
+
+	getSchema := func(colName string) *schemapb.CollectionSchema {
+		fieldName2Type := make(map[string]schemapb.DataType)
+		fieldName2Type["fvec_field"] = schemapb.DataType_FloatVector
+		fieldName2Type["int64_field"] = schemapb.DataType_Int64
+		return constructCollectionSchemaByDataType(colName, fieldName2Type, "int64_field", false)
+	}
+
+	createCollection := func(colName string, bigTopKEnabled bool) {
+		schema := getSchema(colName)
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		props := []*commonpb.KeyValuePair{}
+		if bigTopKEnabled {
+			props = append(props, &commonpb.KeyValuePair{Key: common.BigTopKOptimizationEnabledKey, Value: "true"})
+		}
+		createColReq := &milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateCollection,
+				MsgID:     100,
+				Timestamp: 100,
+			},
+			DbName:         dbName,
+			CollectionName: colName,
+			Schema:         marshaledSchema,
+			ShardsNum:      1,
+			Properties:     props,
+		}
+		stats, err := qc.CreateCollection(ctx, createColReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, stats.ErrorCode)
+	}
+
+	t.Run("alter bigTopK from false to true without vector index", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName, false)
+		alterTask := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.BigTopKOptimizationEnabledKey, Value: "true"}},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter bigTopK from true to false without vector index", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName, true)
+		alterTask := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.BigTopKOptimizationEnabledKey, Value: "false"}},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter bigTopK from false to true with vector index should fail", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName, false)
+		mockVectorIndexForCollection(t, ctx, qc, colName)
+		alterTask := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.BigTopKOptimizationEnabledKey, Value: "true"}},
+			},
+			mixCoord: qc,
+		}
+		err = alterTask.PreExecute(ctx)
+		assert.ErrorContains(t, err,
+			"can not alter bigtopk_optimization.enabled if the collection already has a vector index. Please drop the index first")
+	})
+
+	t.Run("alter bigTopK from true to false with vector index should fail", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName, true)
+		mockVectorIndexForCollection(t, ctx, qc, colName)
+		alterTask := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.BigTopKOptimizationEnabledKey, Value: "false"}},
+			},
+			mixCoord: qc,
+		}
+		err = alterTask.PreExecute(ctx)
+		assert.ErrorContains(t, err,
+			"can not alter bigtopk_optimization.enabled if the collection already has a vector index. Please drop the index first")
+	})
+
+	t.Run("delete bigTopK property with vector index should fail", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName, true)
+		mockVectorIndexForCollection(t, ctx, qc, colName)
+		alterTask := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{common.BigTopKOptimizationEnabledKey},
+			},
+			mixCoord: qc,
+		}
+		err = alterTask.PreExecute(ctx)
+		assert.ErrorContains(t, err,
+			"can not alter bigtopk_optimization.enabled if the collection already has a vector index. Please drop the index first")
+	})
+
+	t.Run("delete bigTopK property without vector index should succeed", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName, true)
+		alterTask := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{common.BigTopKOptimizationEnabledKey},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter unrelated property with bigTopK enabled should not check index", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName, true)
+		mockVectorIndexForCollection(t, ctx, qc, colName)
+		alterTask := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "3600"}},
+			},
+			mixCoord: qc,
+		}
+		err = alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
 	})
 }
 

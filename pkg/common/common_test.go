@@ -478,6 +478,50 @@ func TestWarmupPolicy(t *testing.T) {
 	})
 }
 
+func TestIsBigTopKOptimizationEnabled(t *testing.T) {
+	t.Run("returns true when enabled", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: BigTopKOptimizationEnabledKey, Value: "true"},
+		}
+		enabled, err := IsBigTopKOptimizationEnabled(kvs...)
+		assert.NoError(t, err)
+		assert.True(t, enabled)
+	})
+
+	t.Run("returns false when disabled", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: BigTopKOptimizationEnabledKey, Value: "false"},
+		}
+		enabled, err := IsBigTopKOptimizationEnabled(kvs...)
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+	})
+
+	t.Run("returns false when not present", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: "other.key", Value: "true"},
+		}
+		enabled, err := IsBigTopKOptimizationEnabled(kvs...)
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+	})
+
+	t.Run("returns false for empty kvs", func(t *testing.T) {
+		enabled, err := IsBigTopKOptimizationEnabled()
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+	})
+
+	t.Run("returns false for invalid value", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: BigTopKOptimizationEnabledKey, Value: "invalid"},
+		}
+		enabled, err := IsBigTopKOptimizationEnabled(kvs...)
+		assert.Error(t, err)
+		assert.False(t, enabled)
+	})
+}
+
 func TestWKTWKBConversion(t *testing.T) {
 	testCases := []struct {
 		name string
