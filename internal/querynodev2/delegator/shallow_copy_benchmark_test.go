@@ -57,9 +57,6 @@ func createTestQueryRequest() *querypb.QueryRequest {
 			ConsistencyLevel:             commonpb.ConsistencyLevel_Bounded,
 			IsIterator:                   false,
 			CollectionTtlTimestamps:      0,
-			GroupByFieldIds:              []int64{100, 101},
-			Aggregates:                   nil,
-			EntityTtlPhysicalTime:        0,
 		},
 		DmlChannels:     []string{"channel1", "channel2"},
 		SegmentIDs:      []int64{1001, 1002, 1003, 1004, 1005},
@@ -126,9 +123,6 @@ func shallowCopyRetrieveRequest(req *internalpb.RetrieveRequest, targetID int64)
 		ConsistencyLevel:             req.ConsistencyLevel,
 		IsIterator:                   req.IsIterator,
 		CollectionTtlTimestamps:      req.CollectionTtlTimestamps,
-		GroupByFieldIds:              req.GroupByFieldIds,
-		Aggregates:                   req.Aggregates,
-		EntityTtlPhysicalTime:        req.EntityTtlPhysicalTime,
 	}
 }
 

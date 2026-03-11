@@ -320,9 +320,6 @@ func (sd *shardDelegator) shallowCopyRetrieveRequest(req *internalpb.RetrieveReq
 		ConsistencyLevel:             req.ConsistencyLevel,
 		IsIterator:                   req.IsIterator,
 		CollectionTtlTimestamps:      req.CollectionTtlTimestamps,
-		GroupByFieldIds:              req.GroupByFieldIds, // Shallow copy: Same underlying slice
-		Aggregates:                   req.Aggregates,      // Shallow copy: Same underlying slice of pointers
-		EntityTtlPhysicalTime:        req.EntityTtlPhysicalTime,
 	}
 }
 
