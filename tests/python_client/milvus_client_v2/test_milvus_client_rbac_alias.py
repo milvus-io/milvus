@@ -268,7 +268,6 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
             self.drop_collection(c, self.collection_b_name)
         request.addfinalizer(teardown)
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_rbac_alias_access_with_real_collection_grant(self, host, port):
         """
         target: TC-L0-01 — verify alias access works when user has privilege on real collection
@@ -290,7 +289,6 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         search_vectors = cf.gen_vectors(1, default_dim)
         self.search(restricted_client, alias_name, search_vectors, limit=default_limit)
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_rbac_alias_access_denied_without_real_collection_grant(self, host, port):
         """
         target: TC-L0-02 — verify alias access denied when user has no privilege on real collection
@@ -312,7 +310,6 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self.search(restricted_client, alias_name, search_vectors, limit=default_limit,
                     check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_alias_search_via_alias(self, host, port):
         """
         target: TC-L1-01 — verify Search works via alias with grant on real collection
@@ -334,7 +331,6 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self.search(restricted_client, alias_name, search_vectors, limit=default_limit)
         self.search(restricted_client, self.collection_name, search_vectors, limit=default_limit)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_alias_wildcard_privilege(self, host, port):
         """
         target: TC-L1-02 — verify wildcard '*' privilege covers alias access
@@ -353,7 +349,6 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         search_vectors = cf.gen_vectors(1, default_dim)
         self.search(restricted_client, alias_name, search_vectors, limit=default_limit)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_alias_multiple_aliases_same_collection(self, host, port):
         """
         target: TC-L1-03 — verify multiple aliases pointing to same collection have consistent RBAC
@@ -376,7 +371,6 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self.search(restricted_client, alias2, search_vectors, limit=default_limit)
         self.search(restricted_client, self.collection_name, search_vectors, limit=default_limit)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_alias_v1_grant_also_normalized(self, host, port):
         """
         target: TC-L1-05 — verify v1 grant_privilege on alias name is also normalized to real collection
@@ -402,7 +396,6 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self.search(restricted_client, alias_name, search_vectors, limit=default_limit)
         self.search(restricted_client, self.collection_name, search_vectors, limit=default_limit)
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_rbac_grant_via_alias_normalized_to_real_collection(self, host, port):
         """
         target: TC-L0-06 — verify grant via alias name is normalized to real collection name
@@ -431,7 +424,6 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self.search(restricted_client, self.collection_name, search_vectors, limit=default_limit)
         self.search(restricted_client, alias_name, search_vectors, limit=default_limit)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_select_grant_via_alias(self, host, port):
         """
         target: TC-L1-24 — verify describe_role resolves alias when querying grants
@@ -455,7 +447,6 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
         self._assert_role_has_privilege_on_collection(client, role_name, self.collection_name,
                                                        ["Search"], should_exist=True)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_alias_query_via_alias(self, host, port):
         """
         target: TC-L1-27 — verify Query works via alias with grant on real collection
@@ -481,7 +472,6 @@ class TestRbacAliasSharedCollection(TestRbacAliasBase):
                    filter=f"{default_primary_key_field_name} >= 0",
                    output_fields=[default_primary_key_field_name], limit=default_limit)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_alias_insert_via_alias(self, host, port):
         """
         target: TC-L1-28 — verify Insert works via alias with grant on real collection
@@ -516,7 +506,6 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
     - Test creates aliases via alias (CreateAlias with alias as collection_name)
     """
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_alias_cache_stale_after_grant_revoke_cycle(self, host, port):
         """
         target: TC-L1-26 — verify alias search works after grant-revoke-re-grant on same collection
@@ -561,7 +550,6 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         # search via alias → should also succeed (but fails due to stale cache)
         self.search(client2, alias_name, search_vectors, limit=default_limit)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_alias_cross_database(self, host, port):
         """
         target: TC-L1-07 — verify alias resolution is database-scoped
@@ -615,7 +603,6 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         self.search(client_db2, alias_name, search_vectors, limit=default_limit,
                     check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_alias_cache_invalidation_on_drop_alias(self, host, port):
         """
         target: TC-L1-08 — verify cache invalidation when alias is dropped
@@ -650,7 +637,6 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         self.search(restricted_client, alias_name, search_vectors, limit=default_limit,
                     check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_alias_cache_invalidation_on_collection_drop(self, host, port):
         """
         target: TC-L1-09 — verify all alias caches invalidated when collection is dropped
@@ -693,7 +679,6 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         self.search(restricted_client, alias2, search_vectors, limit=default_limit,
                     check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_alias_cache_invalidation_on_alter_alias(self, host, port):
         """
         target: TC-L1-11 — verify cache updates when alias is altered to point to different collection
@@ -747,7 +732,6 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         assert res_before[0][0].get("count(*)") != res_after[0][0].get("count(*)"), \
             "collectionA and collectionB should have different data counts"
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_create_alias_resolves_collection_name(self, host, port):
         """
         target: TC-L1-20 — verify CreateAlias resolves alias in collection_name, and RBAC
@@ -785,7 +769,6 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         search_vectors = cf.gen_vectors(1, default_dim)
         self.search(restricted_client, alias_y, search_vectors, limit=default_limit)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_revoke_via_alias(self, host, port):
         """
         target: TC-L1-23 — verify revoke via alias name works
@@ -826,7 +809,6 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         self.search(restricted_client, collection_name, search_vectors, limit=default_limit,
                     check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_alias_redirect_grant_does_not_follow(self, host, port):
         """
         target: TC-L1-25 — verify alias redirect does not move grant (write-time normalization safety)
@@ -870,7 +852,6 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         # search via collectionA → succeed (grant is on collectionA)
         self.search(restricted_client, collection_a, search_vectors, limit=default_limit)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_alias_redirect_privilege_escalation(self, host, port):
         """
         target: TC-SEC-01 — verify alias redirect cannot be used for privilege escalation
@@ -913,7 +894,6 @@ class TestRbacAliasIndependent(TestRbacAliasBase):
         self.search(restricted_client, alias_name, search_vectors, limit=default_limit,
                     check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_old_grant_not_leaked_to_new_collection(self, host, port):
         """
         target: TC-SEC-02 — verify old grants don't leak to newly created same-name collection
@@ -961,7 +941,6 @@ class TestRbacGrantCleanup(TestRbacAliasBase):
     - Test checks exact-match deletion (no prefix collision) and multi-privilege cleanup
     """
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_rbac_grant_cleanup_on_collection_drop(self, host, port):
         """
         target: TC-L0-04 — verify grants are cleaned up when collection is dropped
@@ -1002,7 +981,6 @@ class TestRbacGrantCleanup(TestRbacAliasBase):
         self._assert_role_has_privilege_on_collection(client, role2, collection_name,
                                                        ["Query"], should_exist=False)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_grant_cleanup_exact_match(self, host, port):
         """
         target: TC-L1-13 — verify grant cleanup uses exact match, not prefix match
@@ -1041,7 +1019,6 @@ class TestRbacGrantCleanup(TestRbacAliasBase):
         self._assert_role_has_privilege_on_collection(client, role_name, col1_backup,
                                                        ["Search"], should_exist=True)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_grant_cleanup_multiple_privilege_types(self, host, port):
         """
         target: TC-L1-14 — verify all privilege types are cleaned up on collection drop
@@ -1084,7 +1061,6 @@ class TestRbacGrantMigration(TestRbacAliasBase):
     - Test checks exact-match migration, consecutive renames, GranteeID recomputation
     """
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_rbac_grant_migration_on_rename(self, host, port):
         """
         target: TC-L0-05 — verify grants migrate to new name on collection rename
@@ -1125,7 +1101,6 @@ class TestRbacGrantMigration(TestRbacAliasBase):
         search_vectors = cf.gen_vectors(1, default_dim)
         self.search(restricted_client, new_name, search_vectors, limit=default_limit)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_grant_migration_multiple_roles(self, host, port):
         """
         target: TC-L1-16 — verify all roles' grants migrate on rename
@@ -1166,7 +1141,6 @@ class TestRbacGrantMigration(TestRbacAliasBase):
         self._assert_role_has_privilege_on_collection(client, role2, old_name,
                                                        ["Query"], should_exist=False)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_grant_migration_exact_match(self, host, port):
         """
         target: TC-L1-17 — verify grant migration uses exact match, no prefix collision
@@ -1201,7 +1175,6 @@ class TestRbacGrantMigration(TestRbacAliasBase):
         self._assert_role_has_privilege_on_collection(client, role_name, old_backup,
                                                        ["Insert"], should_exist=True)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_grant_migration_consecutive_renames(self, host, port):
         """
         target: TC-L1-19 — verify grants follow consecutive renames
@@ -1236,7 +1209,6 @@ class TestRbacGrantMigration(TestRbacAliasBase):
         self._assert_role_has_privilege_on_collection(client, role_name, name_b,
                                                        ["Search"], should_exist=False)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_rbac_grant_migration_grantee_id_recomputation(self, host, port):
         """
         target: TC-L1-22 — verify GranteeID recomputation prevents old grant leaking to new same-name collection
