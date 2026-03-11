@@ -675,8 +675,15 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
 
     if (!has_offset_input_ &&
         CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+        milvus::ScopedTimer timer(
+            "unary_range_json_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecRangeVisitorImplJsonByStats<ExprValueType>();
     }
+
+    milvus::ScopedTimer timer("unary_range_json_bruteforce", [this](double us) {
+        json_filter_bruteforce_latency_us_ += us;
+    });
 
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
@@ -1048,10 +1055,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
 
         {
             milvus::ScopedTimer timer(
-                "unary_json_stats_shredding_data", [](double ms) {
-                    milvus::monitor::internal_json_stats_latency_shredding
-                        .Observe(ms);
-                });
+                "unary_json_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
 
             if constexpr (std::is_same_v<GetType, bool>) {
                 try_execute(milvus::index::JSONType::BOOL,
@@ -1265,10 +1270,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
 
         {
             milvus::ScopedTimer timer(
-                "unary_json_stats_shared_data", [](double ms) {
-                    milvus::monitor::internal_json_stats_latency_shared.Observe(
-                        ms);
-                });
+                "unary_json_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
 
             index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
