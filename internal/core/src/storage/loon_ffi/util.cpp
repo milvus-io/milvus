@@ -42,10 +42,21 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     std::vector<const char*> keys;
     std::vector<const char*> values;
 
+    // Lance's BuildEndpointUrl defaults to HTTPS when no scheme is present.
+    // Prepend http:// when SSL is not enabled so that Lance sets allow_http=true.
+    std::string fs_address;
+    if (c_storage_config.address != nullptr) {
+        fs_address = c_storage_config.address;
+        if (!c_storage_config.useSSL &&
+            fs_address.find("://") == std::string::npos) {
+            fs_address = "http://" + fs_address;
+        }
+    }
+
     // Add non-null string fields
     if (c_storage_config.address != nullptr) {
         keys.emplace_back(PROPERTY_FS_ADDRESS);
-        values.emplace_back(c_storage_config.address);
+        values.emplace_back(fs_address.c_str());
     }
     if (c_storage_config.bucket_name != nullptr) {
         keys.emplace_back(PROPERTY_FS_BUCKET_NAME);
@@ -122,6 +133,67 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         keys.emplace_back(PROPERTY_FS_TLS_MIN_VERSION);
         values.emplace_back(c_storage_config.tls_min_version);
     }
+    // Add extfs.default.* properties for external collection filesystem resolution
+    if (c_storage_config.storage_type != nullptr) {
+        keys.emplace_back("extfs.default.storage_type");
+        values.emplace_back(c_storage_config.storage_type);
+        if (std::string(c_storage_config.storage_type) == "local") {
+            keys.emplace_back("extfs.default.bucket_name");
+            values.emplace_back("local");
+        } else if (c_storage_config.bucket_name != nullptr) {
+            keys.emplace_back("extfs.default.bucket_name");
+            values.emplace_back(c_storage_config.bucket_name);
+        }
+    }
+    if (c_storage_config.address != nullptr) {
+        keys.emplace_back("extfs.default.address");
+        values.emplace_back(fs_address.c_str());
+    }
+    if (c_storage_config.root_path != nullptr) {
+        keys.emplace_back("extfs.default.root_path");
+        values.emplace_back(c_storage_config.root_path);
+    }
+    if (c_storage_config.access_key_id != nullptr) {
+        keys.emplace_back("extfs.default.access_key_id");
+        values.emplace_back(c_storage_config.access_key_id);
+    }
+    if (c_storage_config.access_key_value != nullptr) {
+        keys.emplace_back("extfs.default.access_key_value");
+        values.emplace_back(c_storage_config.access_key_value);
+    }
+    if (c_storage_config.cloud_provider != nullptr) {
+        keys.emplace_back("extfs.default.cloud_provider");
+        values.emplace_back(c_storage_config.cloud_provider);
+    }
+    if (c_storage_config.iam_endpoint != nullptr) {
+        keys.emplace_back("extfs.default.iam_endpoint");
+        values.emplace_back(c_storage_config.iam_endpoint);
+    }
+    if (c_storage_config.region != nullptr) {
+        keys.emplace_back("extfs.default.region");
+        values.emplace_back(c_storage_config.region);
+    }
+    if (c_storage_config.sslCACert != nullptr) {
+        keys.emplace_back("extfs.default.ssl_ca_cert");
+        values.emplace_back(c_storage_config.sslCACert);
+    }
+    if (c_storage_config.gcp_credential_json != nullptr) {
+        keys.emplace_back("extfs.default.gcp_credential_json");
+        values.emplace_back(c_storage_config.gcp_credential_json);
+    }
+    // Temporarily disabled: extfs.default.* boolean properties.
+    // extfs.* keys are not registered in property_infos, so
+    // ConvertFFIProperties stores them as std::string instead of bool.
+    // ExtractExternalFsProperties copies them as-is to fs.*, causing
+    // GetValue<bool> type mismatch. Omitting lets defaults be used.
+    // TODO: re-enable once milvus-storage fixes ExtractExternalFsProperties.
+    //
+    // keys.emplace_back("extfs.default.use_ssl");
+    // values.emplace_back(c_storage_config.useSSL ? "true" : "false");
+    // keys.emplace_back("extfs.default.use_iam");
+    // values.emplace_back(c_storage_config.useIAM ? "true" : "false");
+    // keys.emplace_back("extfs.default.use_virtual_host");
+    // values.emplace_back(c_storage_config.useVirtualHost ? "true" : "false");
 
     // Create Properties using FFI
     auto properties = std::make_shared<LoonProperties>();
@@ -144,10 +216,21 @@ std::shared_ptr<milvus_storage::api::Properties>
 MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     auto properties_map = std::make_shared<milvus_storage::api::Properties>();
 
+    // Lance's BuildEndpointUrl defaults to HTTPS when no scheme is present.
+    // Prepend http:// when SSL is not enabled so that Lance sets allow_http=true.
+    std::string fs_address_internal;
+    if (c_storage_config.address != nullptr) {
+        fs_address_internal = c_storage_config.address;
+        if (!c_storage_config.useSSL &&
+            fs_address_internal.find("://") == std::string::npos) {
+            fs_address_internal = "http://" + fs_address_internal;
+        }
+    }
+
     // Add non-null string fields
     if (c_storage_config.address != nullptr) {
         milvus_storage::api::SetValue(
-            *properties_map, PROPERTY_FS_ADDRESS, c_storage_config.address);
+            *properties_map, PROPERTY_FS_ADDRESS, fs_address_internal.c_str());
     }
     if (c_storage_config.bucket_name != nullptr) {
         milvus_storage::api::SetValue(*properties_map,
@@ -235,6 +318,82 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
                                       PROPERTY_FS_TLS_MIN_VERSION,
                                       c_storage_config.tls_min_version);
     }
+    // Add extfs.default.* properties for external collection filesystem resolution.
+    // When segments reference absolute URIs (e.g., aws://host/bucket/path),
+    // the storage layer matches against extfs.* configs to find credentials.
+    if (c_storage_config.storage_type != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.storage_type",
+                                      c_storage_config.storage_type);
+        if (std::string(c_storage_config.storage_type) == "local") {
+            milvus_storage::api::SetValue(
+                *properties_map, "extfs.default.bucket_name", "local");
+        } else if (c_storage_config.bucket_name != nullptr) {
+            milvus_storage::api::SetValue(*properties_map,
+                                          "extfs.default.bucket_name",
+                                          c_storage_config.bucket_name);
+        }
+    }
+    if (c_storage_config.address != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.address",
+                                      fs_address_internal.c_str());
+    }
+    if (c_storage_config.root_path != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.root_path",
+                                      c_storage_config.root_path);
+    }
+    if (c_storage_config.access_key_id != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.access_key_id",
+                                      c_storage_config.access_key_id);
+    }
+    if (c_storage_config.access_key_value != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.access_key_value",
+                                      c_storage_config.access_key_value);
+    }
+    if (c_storage_config.cloud_provider != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.cloud_provider",
+                                      c_storage_config.cloud_provider);
+    }
+    if (c_storage_config.iam_endpoint != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.iam_endpoint",
+                                      c_storage_config.iam_endpoint);
+    }
+    if (c_storage_config.region != nullptr) {
+        milvus_storage::api::SetValue(
+            *properties_map, "extfs.default.region", c_storage_config.region);
+    }
+    if (c_storage_config.sslCACert != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.ssl_ca_cert",
+                                      c_storage_config.sslCACert);
+    }
+    if (c_storage_config.gcp_credential_json != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      "extfs.default.gcp_credential_json",
+                                      c_storage_config.gcp_credential_json);
+    }
+    // Temporarily disabled: extfs.default.* boolean properties.
+    // extfs.* keys are not registered in property_infos, so SetValue stores
+    // them as std::string("false") instead of bool(false). When
+    // ExtractExternalFsProperties copies them to fs.*, GetValue<bool> fails
+    // with type mismatch. Omitting lets defaults be used.
+    // TODO: re-enable once milvus-storage fixes ExtractExternalFsProperties.
+    //
+    // milvus_storage::api::SetValue(
+    //     *properties_map, "extfs.default.use_ssl",
+    //     c_storage_config.useSSL ? "true" : "false");
+    // milvus_storage::api::SetValue(
+    //     *properties_map, "extfs.default.use_iam",
+    //     c_storage_config.useIAM ? "true" : "false");
+    // milvus_storage::api::SetValue(
+    //     *properties_map, "extfs.default.use_virtual_host",
+    //     c_storage_config.useVirtualHost ? "true" : "false");
 
     return properties_map;
 }

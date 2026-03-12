@@ -134,24 +134,19 @@ func (pko *pkOracle) Range(fn func(candidate Candidate) bool) {
 	})
 }
 
-// RefundRemoved refunds resources for BloomFilterSet candidates.
-// For candidates that are not BloomFilterSet (e.g., LocalSegment), this is a no-op.
+// RefundRemoved refunds resources for removed candidates.
 func (pko *pkOracle) RefundRemoved(candidates []Candidate) {
 	for _, candidate := range candidates {
-		if bfs, ok := candidate.(*BloomFilterSet); ok {
-			bfs.Refund()
-		}
+		candidate.Refund()
 	}
 }
 
-// RemoveAndRefundAll removes all candidates and refunds resources for BloomFilterSet candidates.
+// RemoveAndRefundAll removes all candidates and refunds their resources.
 // Used during shutdown to clean up and refund resources.
 func (pko *pkOracle) RemoveAndRefundAll() {
 	removed := pko.Remove()
 	for _, candidate := range removed {
-		if bfs, ok := candidate.(*BloomFilterSet); ok {
-			bfs.Refund()
-		}
+		candidate.Refund()
 	}
 }
 

@@ -105,13 +105,13 @@ func (s *BloomFilterSet) Stats() *storage.PkStatistics {
 	return s.currentStat
 }
 
-// Have BloomFilter exist
-func (s *BloomFilterSet) BloomFilterExist() bool {
+// PkCandidateExist reports whether bloom filter data has been loaded (current or historical).
+func (s *BloomFilterSet) PkCandidateExist() bool {
 	return s.currentStat != nil || s.historyStats != nil
 }
 
-// UpdateBloomFilter updates currentStats with provided pks.
-func (s *BloomFilterSet) UpdateBloomFilter(pks []storage.PrimaryKey) {
+// UpdatePkCandidate updates currentStats with provided pks.
+func (s *BloomFilterSet) UpdatePkCandidate(pks []storage.PrimaryKey) {
 	s.statsMutex.Lock()
 	defer s.statsMutex.Unlock()
 
