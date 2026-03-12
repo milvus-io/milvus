@@ -413,20 +413,23 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 
 	pool := segments.GetBM25LoadPool()
 
-	future := pool.Submit(func() (any, error) {
-		for _, info := range infos {
-			if err := sd.idfOracle.LoadSealed(ctx, info.GetSegmentID(), info.GetBm25Logs(), sd.loader.GetChunkManager()); err != nil {
+	cm := sd.loader.GetChunkManager()
+	futures := make([]*conc.Future[any], 0, len(infos))
+	for _, info := range infos {
+		info := info
+		futures = append(futures, pool.Submit(func() (any, error) {
+			if err := sd.idfOracle.LoadSealed(ctx, info.GetSegmentID(), info.GetBm25Logs(), cm); err != nil {
 				log.Warn("failed to load bm25 stats for segment",
 					zap.Int64("collectionID", req.GetCollectionID()),
 					zap.Int64("segmentID", info.GetSegmentID()),
 					zap.Error(err))
 				return nil, err
 			}
-		}
-		return nil, nil
-	})
+			return nil, nil
+		}))
+	}
 
-	err := conc.BlockOnAll(future)
+	err := conc.BlockOnAll(futures...)
 	if err != nil {
 		log.Warn("failed to load bm25 stats", zap.Error(err))
 		return err

@@ -1150,6 +1150,51 @@ func (loader *segmentLoader) filterBM25Stats(fieldBinlogs []*datapb.FieldBinlog)
 	return result
 }
 
+func (loader *segmentLoader) loadBm25Stats(ctx context.Context, segmentID int64, stats map[int64]*storage.BM25Stats, binlogPaths map[int64][]string) error {
+	log := log.Ctx(ctx).With(
+		zap.Int64("segmentID", segmentID),
+	)
+	if len(binlogPaths) == 0 {
+		log.Info("there are no bm25 stats logs saved with segment")
+		return nil
+	}
+
+	pathList := []string{}
+	fieldList := []int64{}
+	fieldOffset := []int{}
+	for fieldId, logpaths := range binlogPaths {
+		pathList = append(pathList, logpaths...)
+		fieldList = append(fieldList, fieldId)
+		fieldOffset = append(fieldOffset, len(logpaths))
+	}
+
+	startTs := time.Now()
+	values, err := loader.cm.MultiRead(ctx, pathList)
+	if err != nil {
+		return err
+	}
+
+	cnt := 0
+	for i, fieldID := range fieldList {
+		newStats, ok := stats[fieldID]
+		if !ok {
+			newStats = storage.NewBM25Stats()
+			stats[fieldID] = newStats
+		}
+
+		for j := 0; j < fieldOffset[i]; j++ {
+			err := newStats.Deserialize(values[cnt+j])
+			if err != nil {
+				return err
+			}
+		}
+		cnt += fieldOffset[i]
+		log.Info("Successfully load bm25 stats", zap.Duration("time", time.Since(startTs)), zap.Int64("numRow", newStats.NumRow()), zap.Int64("fieldID", fieldID))
+	}
+
+	return nil
+}
+
 func loadSealedSegmentFields(ctx context.Context, collection *Collection, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64) error {
 	runningGroup, _ := errgroup.WithContext(ctx)
 	for _, field := range fields {
