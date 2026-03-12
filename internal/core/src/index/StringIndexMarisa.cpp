@@ -303,7 +303,7 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
 
 const TargetBitmap
 StringIndexMarisa::In(size_t n, const std::string* values) {
-    tracer::AutoSpan span("StringIndexMarisa::In", tracer::GetRootSpan());
+    // tracer::AutoSpan span("StringIndexMarisa::In", tracer::GetRootSpan());
     TargetBitmap bitset(str_ids_.size());
     for (size_t i = 0; i < n; i++) {
         auto str = values[i];
@@ -320,7 +320,7 @@ StringIndexMarisa::In(size_t n, const std::string* values) {
 
 const TargetBitmap
 StringIndexMarisa::NotIn(size_t n, const std::string* values) {
-    tracer::AutoSpan span("StringIndexMarisa::NotIn", tracer::GetRootSpan());
+    // tracer::AutoSpan span("StringIndexMarisa::NotIn", tracer::GetRootSpan());
     TargetBitmap bitset(str_ids_.size(), true);
     for (size_t i = 0; i < n; i++) {
         auto str = values[i];
@@ -339,7 +339,7 @@ StringIndexMarisa::NotIn(size_t n, const std::string* values) {
 
 const TargetBitmap
 StringIndexMarisa::IsNull() {
-    tracer::AutoSpan span("StringIndexMarisa::IsNull", tracer::GetRootSpan());
+    // tracer::AutoSpan span("StringIndexMarisa::IsNull", tracer::GetRootSpan());
     TargetBitmap bitset(str_ids_.size());
     SetNull(bitset);
     return bitset;
@@ -347,7 +347,7 @@ StringIndexMarisa::IsNull() {
 
 void
 StringIndexMarisa::SetNull(TargetBitmap& bitset) {
-    tracer::AutoSpan span("StringIndexMarisa::SetNull", tracer::GetRootSpan());
+    // tracer::AutoSpan span("StringIndexMarisa::SetNull", tracer::GetRootSpan());
     for (size_t i = 0; i < bitset.size(); i++) {
         if (str_ids_[i] == MARISA_NULL_KEY_ID) {
             bitset.set(i);
@@ -357,8 +357,8 @@ StringIndexMarisa::SetNull(TargetBitmap& bitset) {
 
 void
 StringIndexMarisa::ResetNull(TargetBitmap& bitset) {
-    tracer::AutoSpan span("StringIndexMarisa::ResetNull",
-                          tracer::GetRootSpan());
+    // tracer::AutoSpan span("StringIndexMarisa::ResetNull",
+                          // tracer::GetRootSpan());
     for (size_t i = 0; i < bitset.size(); i++) {
         if (str_ids_[i] == MARISA_NULL_KEY_ID) {
             bitset.reset(i);
@@ -368,8 +368,8 @@ StringIndexMarisa::ResetNull(TargetBitmap& bitset) {
 
 TargetBitmap
 StringIndexMarisa::IsNotNull() {
-    tracer::AutoSpan span("StringIndexMarisa::IsNotNull",
-                          tracer::GetRootSpan());
+    // tracer::AutoSpan span("StringIndexMarisa::IsNotNull",
+                          // tracer::GetRootSpan());
     TargetBitmap bitset(str_ids_.size());
     for (size_t i = 0; i < bitset.size(); i++) {
         if (str_ids_[i] != MARISA_NULL_KEY_ID) {
@@ -381,7 +381,7 @@ StringIndexMarisa::IsNotNull() {
 
 const TargetBitmap
 StringIndexMarisa::Range(std::string value, OpType op) {
-    tracer::AutoSpan span("StringIndexMarisa::Range", tracer::GetRootSpan());
+    // tracer::AutoSpan span("StringIndexMarisa::Range", tracer::GetRootSpan());
     auto count = Count();
     TargetBitmap bitset(count);
     std::vector<size_t> ids;
@@ -504,7 +504,7 @@ StringIndexMarisa::Range(std::string lower_bound_value,
                          bool lb_inclusive,
                          std::string upper_bound_value,
                          bool ub_inclusive) {
-    tracer::AutoSpan span("StringIndexMarisa::Range", tracer::GetRootSpan());
+    // tracer::AutoSpan span("StringIndexMarisa::Range", tracer::GetRootSpan());
     auto count = Count();
     TargetBitmap bitset(count);
     if (lower_bound_value.compare(upper_bound_value) > 0 ||
@@ -556,8 +556,8 @@ StringIndexMarisa::Range(std::string lower_bound_value,
 
 const TargetBitmap
 StringIndexMarisa::PrefixMatch(std::string_view prefix) {
-    tracer::AutoSpan span("StringIndexMarisa::PrefixMatch",
-                          tracer::GetRootSpan());
+    // tracer::AutoSpan span("StringIndexMarisa::PrefixMatch",
+                          // tracer::GetRootSpan());
     TargetBitmap bitset(str_ids_.size());
     auto matched = prefix_match(prefix);
     for (const auto str_id : matched) {
@@ -610,8 +610,8 @@ StringIndexMarisa::lookup(const std::string_view str) {
 
 std::vector<size_t>
 StringIndexMarisa::prefix_match(const std::string_view prefix) {
-    tracer::AutoSpan span("StringIndexMarisa::prefix_match",
-                          tracer::GetRootSpan());
+    // tracer::AutoSpan span("StringIndexMarisa::prefix_match",
+                          // tracer::GetRootSpan());
     std::vector<size_t> ret;
     marisa::Agent agent;
     agent.set_query(prefix.data());
@@ -622,8 +622,8 @@ StringIndexMarisa::prefix_match(const std::string_view prefix) {
 }
 std::optional<std::string>
 StringIndexMarisa::Reverse_Lookup(size_t offset) const {
-    tracer::AutoSpan span("StringIndexMarisa::Reverse_Lookup",
-                          tracer::GetRootSpan());
+    // tracer::AutoSpan span("StringIndexMarisa::Reverse_Lookup",
+                          // tracer::GetRootSpan());
     AssertInfo(offset < str_ids_.size(), "out of range of total count");
     marisa::Agent agent;
     if (str_ids_[offset] < 0) {

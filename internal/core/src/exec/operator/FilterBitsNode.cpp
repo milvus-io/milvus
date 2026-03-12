@@ -67,9 +67,9 @@ PhyFilterBitsNode::GetOutput() {
         return nullptr;
     }
 
-    tracer::AutoSpan span(
-        "PhyFilterBitsNode::Execute", tracer::GetRootSpan(), true);
-    tracer::AddEvent(fmt::format("input_rows: {}", need_process_rows_));
+    // tracer::AutoSpan span(
+        // "PhyFilterBitsNode::Execute", tracer::GetRootSpan(), true);
+    // tracer::AddEvent(fmt::format("input_rows: {}", need_process_rows_));
 
     std::chrono::high_resolution_clock::time_point scalar_start =
         std::chrono::high_resolution_clock::now();

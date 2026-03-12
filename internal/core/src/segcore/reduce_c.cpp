@@ -98,8 +98,8 @@ ReduceSearchResultsAndFillData(CTraceContext c_trace,
         AssertInfo(num_segments > 0, "num_segments must be greater than 0");
         auto trace_ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
-        milvus::tracer::AutoSpan span(
-            "ReduceSearchResultsAndFillData", &trace_ctx, true);
+        // milvus::tracer::AutoSpan span(
+            // "ReduceSearchResultsAndFillData", &trace_ctx, true);
         std::vector<SearchResult*> search_results(num_segments);
         for (int i = 0; i < num_segments; ++i) {
             search_results[i] = static_cast<SearchResult*>(c_search_results[i]);
