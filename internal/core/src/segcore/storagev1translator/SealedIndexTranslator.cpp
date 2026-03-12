@@ -11,6 +11,7 @@
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/Meta.h"
+#include "index/Utils.h"
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "segcore/Types.h"
@@ -152,8 +153,20 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
     // Check for cancellation before loading index data
     CheckCancellation(ctx, segment_id, "LoadIndex");
 
-    LOG_INFO("load index with configs: {}", config_.dump());
-    index->Load(ctx_, config_);
+    // Check scalar index engine version for V3 routing
+    auto scalar_version =
+        milvus::index::GetValueFromConfig<int32_t>(
+            config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
+    if (scalar_version >= 3 && !IsVectorDataType(index_info_.field_type)) {
+        config_[milvus::index::COLLECTION_ID] =
+            file_manager_context_.fieldDataMeta.collection_id;
+        LOG_INFO("load V3 scalar index with configs: {}", config_.dump());
+        index->LoadV3(config_);
+    } else {
+        LOG_INFO("load index with configs: {}", config_.dump());
+        index->Load(ctx_, config_);
+    }
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
         result;

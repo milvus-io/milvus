@@ -10,12 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+#include <cstddef>
 #include <cstdint>
-#include <vector>
-#include <string>
-#include <unordered_map>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace milvus::storage {
 namespace plugin {
@@ -45,32 +44,46 @@ class ICipherPlugin : public IPlugin {
     Update(int64_t ez_id, int64_t coll_id, const std::string& key) = 0;
 
     virtual std::pair<std::shared_ptr<IEncryptor>, std::string>
-    GetEncryptor(int64_t ez_id, int64_t coll_id) = 0;
+    GetEncryptor(int64_t ez_id, int64_t coll_id) const = 0;
 
     virtual std::shared_ptr<IDecryptor>
     GetDecryptor(int64_t ez_id,
                  int64_t coll_id,
-                 const std::string& safeKey) = 0;
+                 const std::string& safeKey) const = 0;
 };
 
 class IEncryptor {
  public:
     virtual ~IEncryptor() = default;
-    virtual std::string
-    Encrypt(const std::string& plaintext) = 0;
 
     virtual std::string
-    GetKey() = 0;
+    Encrypt(const std::string& plaintext) const = 0;
+
+    virtual std::string
+    Encrypt(std::string_view plaintext) const = 0;
+
+    virtual std::string
+    Encrypt(const void* data, size_t len) const = 0;
+
+    virtual std::string
+    GetKey() const = 0;
 };
 
 class IDecryptor {
  public:
     virtual ~IDecryptor() = default;
-    virtual std::string
-    Decrypt(const std::string& ciphertext) = 0;
 
     virtual std::string
-    GetKey() = 0;
+    Decrypt(const std::string& ciphertext) const = 0;
+
+    virtual std::string
+    Decrypt(std::string_view ciphertext) const = 0;
+
+    virtual std::string
+    Decrypt(const void* data, size_t len) const = 0;
+
+    virtual std::string
+    GetKey() const = 0;
 };
 
 }  // namespace plugin
