@@ -710,7 +710,7 @@ class TestGroupSearch(TestMilvusClientV2Base):
                     group_by_field=grpby_field,
                     check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("grpby_nonexist_field", ["nonexist_field", 21])
     def test_search_group_by_non_exit_field_on_dynamic_enabled_collection(self, grpby_nonexist_field):
         """
