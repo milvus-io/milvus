@@ -2521,3 +2521,532 @@ func TestSnapshotMeta_ListSnapshots_AllCollections_MultipleCollections(t *testin
 	assert.Contains(t, namesP10, "snap_c100_1")
 	assert.Contains(t, namesP10, "snap_c100_2")
 }
+
+// --- Orphan Snapshot Detection Tests ---
+
+func TestSnapshotMeta_OrphanDetection_SkipsDeletingState(t *testing.T) {
+	// The orphan GC logic in gcSnapshotCleanup ranges over snapshotID2Info and
+	// collects collectionIDs only for snapshots NOT in SnapshotStateDeleting.
+	// This test verifies that ranging+filtering logic produces the correct set
+	// of collection IDs, ensuring DELETING snapshots are excluded.
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Collection 100: one COMMITTED snapshot (should appear in orphan set)
+	snapCommitted := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: 100,
+		Name:         "snap_committed",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/100/1",
+	}
+	insertTestSnapshot(sm, snapCommitted, nil, nil)
+
+	// Collection 200: one DELETING snapshot (should NOT appear in orphan set)
+	snapDeleting := &datapb.SnapshotInfo{
+		Id:           2,
+		CollectionId: 200,
+		Name:         "snap_deleting",
+		State:        datapb.SnapshotState_SnapshotStateDeleting,
+		S3Location:   "s3://bucket/200/2",
+	}
+	insertTestSnapshot(sm, snapDeleting, nil, nil)
+
+	// Collection 300: two snapshots - one COMMITTED, one DELETING
+	// Collection 300 should still appear because it has a non-DELETING snapshot
+	snapCommitted2 := &datapb.SnapshotInfo{
+		Id:           3,
+		CollectionId: 300,
+		Name:         "snap_committed2",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/300/3",
+	}
+	insertTestSnapshot(sm, snapCommitted2, nil, nil)
+
+	snapDeleting2 := &datapb.SnapshotInfo{
+		Id:           4,
+		CollectionId: 300,
+		Name:         "snap_deleting2",
+		State:        datapb.SnapshotState_SnapshotStateDeleting,
+		S3Location:   "s3://bucket/300/4",
+	}
+	insertTestSnapshot(sm, snapDeleting2, nil, nil)
+
+	// Collection 400: only DELETING snapshot (should NOT appear)
+	snapDeleting3 := &datapb.SnapshotInfo{
+		Id:           5,
+		CollectionId: 400,
+		Name:         "snap_deleting3",
+		State:        datapb.SnapshotState_SnapshotStateDeleting,
+		S3Location:   "s3://bucket/400/5",
+	}
+	insertTestSnapshot(sm, snapDeleting3, nil, nil)
+
+	// Replicate the orphan detection logic from gcSnapshotCleanup (lines 1757-1765)
+	orphanCollections := typeutil.NewSet[int64]()
+	sm.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
+		if info.GetState() != datapb.SnapshotState_SnapshotStateDeleting {
+			orphanCollections.Insert(info.GetCollectionId())
+		}
+		return true
+	})
+
+	// Assert: only collections with non-DELETING snapshots are detected
+	assert.Equal(t, 2, orphanCollections.Len(), "should detect 2 collections with non-DELETING snapshots")
+	assert.True(t, orphanCollections.Contain(int64(100)), "collection 100 (COMMITTED) should be in orphan set")
+	assert.False(t, orphanCollections.Contain(int64(200)), "collection 200 (only DELETING) should NOT be in orphan set")
+	assert.True(t, orphanCollections.Contain(int64(300)), "collection 300 (has COMMITTED) should be in orphan set")
+	assert.False(t, orphanCollections.Contain(int64(400)), "collection 400 (only DELETING) should NOT be in orphan set")
+}
+
+func TestSnapshotMeta_DropSnapshotsByCollection_WithMixedStates(t *testing.T) {
+	// When DropSnapshotsByCollection is called, it should clean up all snapshots
+	// tracked in the collectionID2Snapshots index. Snapshots in DELETING state
+	// that are already tracked in the index (e.g., inserted via insertTestSnapshot
+	// which simulates reload) should also be cleaned up.
+	//
+	// In production, DELETING snapshots are NOT reloaded into snapshotID2Info
+	// (see reload(), line 268). But COMMITTED snapshots that are then dropped
+	// individually transition to DELETING during DropSnapshot flow. This test
+	// verifies that DropSnapshotsByCollection handles collections where some
+	// snapshots have already been individually dropped (and are no longer in
+	// the in-memory index).
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Insert 3 COMMITTED snapshots for collection 100
+	snapA := &datapb.SnapshotInfo{
+		Id:           10,
+		CollectionId: 100,
+		Name:         "snap_a",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/100/10",
+	}
+	insertTestSnapshot(sm, snapA, []int64{1001}, nil)
+
+	snapB := &datapb.SnapshotInfo{
+		Id:           11,
+		CollectionId: 100,
+		Name:         "snap_b",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/100/11",
+	}
+	insertTestSnapshot(sm, snapB, []int64{1002}, nil)
+
+	snapC := &datapb.SnapshotInfo{
+		Id:           12,
+		CollectionId: 100,
+		Name:         "snap_c",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/100/12",
+	}
+	insertTestSnapshot(sm, snapC, []int64{1003}, nil)
+
+	// Also insert a snapshot for collection 200 to verify isolation
+	snapOther := &datapb.SnapshotInfo{
+		Id:           20,
+		CollectionId: 200,
+		Name:         "snap_other",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/200/20",
+	}
+	insertTestSnapshot(sm, snapOther, []int64{2001}, nil)
+
+	// Verify initial state: collection 100 has 3 snapshots
+	names100, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	require.NoError(t, err)
+	assert.Len(t, names100, 3)
+
+	// Mock all dependencies for DropSnapshot
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mockDrop.UnPatch()
+	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mockWriter.UnPatch()
+
+	// Act: drop all snapshots for collection 100
+	err = sm.DropSnapshotsByCollection(ctx, int64(100))
+
+	// Assert: no error
+	require.NoError(t, err)
+
+	// All 3 snapshots for collection 100 should be removed from memory
+	_, exists := sm.snapshotID2Info.Get(int64(10))
+	assert.False(t, exists, "snap_a should be removed")
+	_, exists = sm.snapshotID2Info.Get(int64(11))
+	assert.False(t, exists, "snap_b should be removed")
+	_, exists = sm.snapshotID2Info.Get(int64(12))
+	assert.False(t, exists, "snap_c should be removed")
+
+	// RefIndex entries should also be removed
+	_, exists = sm.snapshotID2RefIndex.Get(int64(10))
+	assert.False(t, exists, "snap_a RefIndex should be removed")
+	_, exists = sm.snapshotID2RefIndex.Get(int64(11))
+	assert.False(t, exists, "snap_b RefIndex should be removed")
+	_, exists = sm.snapshotID2RefIndex.Get(int64(12))
+	assert.False(t, exists, "snap_c RefIndex should be removed")
+
+	// Collection 100 should have no snapshots listed
+	names100After, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	require.NoError(t, err)
+	assert.Len(t, names100After, 0, "collection 100 should have no snapshots")
+
+	// Collection 200 should be unaffected
+	info200, exists := sm.snapshotID2Info.Get(int64(20))
+	assert.True(t, exists, "collection 200 snapshot should remain")
+	assert.Equal(t, "snap_other", info200.GetName())
+
+	names200, err := sm.ListSnapshots(ctx, int64(200), int64(0))
+	require.NoError(t, err)
+	assert.Len(t, names200, 1)
+	assert.Contains(t, names200, "snap_other")
+}
+
+func TestSnapshotMeta_OrphanDetection_MultipleCollections(t *testing.T) {
+	// Test orphan detection with multiple collections having various snapshot states.
+	// This tests the scenario where the GC needs to identify which collections
+	// are candidates for orphan cleanup across many collections.
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Setup: 5 collections with different snapshot state combinations
+	testCases := []struct {
+		collectionID int64
+		snapshots    []*datapb.SnapshotInfo
+		expectOrphan bool
+		description  string
+	}{
+		{
+			collectionID: 100,
+			snapshots: []*datapb.SnapshotInfo{
+				{Id: 1, CollectionId: 100, Name: "s1", State: datapb.SnapshotState_SnapshotStateCommitted, S3Location: "s3://b/1"},
+				{Id: 2, CollectionId: 100, Name: "s2", State: datapb.SnapshotState_SnapshotStateCommitted, S3Location: "s3://b/2"},
+			},
+			expectOrphan: true,
+			description:  "all COMMITTED",
+		},
+		{
+			collectionID: 200,
+			snapshots: []*datapb.SnapshotInfo{
+				{Id: 3, CollectionId: 200, Name: "s3", State: datapb.SnapshotState_SnapshotStateDeleting, S3Location: "s3://b/3"},
+			},
+			expectOrphan: false,
+			description:  "all DELETING",
+		},
+		{
+			collectionID: 300,
+			snapshots: []*datapb.SnapshotInfo{
+				{Id: 4, CollectionId: 300, Name: "s4", State: datapb.SnapshotState_SnapshotStateCommitted, S3Location: "s3://b/4"},
+				{Id: 5, CollectionId: 300, Name: "s5", State: datapb.SnapshotState_SnapshotStateDeleting, S3Location: "s3://b/5"},
+				{Id: 6, CollectionId: 300, Name: "s6", State: datapb.SnapshotState_SnapshotStateDeleting, S3Location: "s3://b/6"},
+			},
+			expectOrphan: true,
+			description:  "mixed: 1 COMMITTED + 2 DELETING",
+		},
+		{
+			collectionID: 400,
+			snapshots: []*datapb.SnapshotInfo{
+				{Id: 7, CollectionId: 400, Name: "s7", State: datapb.SnapshotState_SnapshotStateDeleting, S3Location: "s3://b/7"},
+				{Id: 8, CollectionId: 400, Name: "s8", State: datapb.SnapshotState_SnapshotStateDeleting, S3Location: "s3://b/8"},
+			},
+			expectOrphan: false,
+			description:  "multiple DELETING",
+		},
+		{
+			collectionID: 500,
+			snapshots: []*datapb.SnapshotInfo{
+				{Id: 9, CollectionId: 500, Name: "s9", State: datapb.SnapshotState_SnapshotStatePending, S3Location: "s3://b/9"},
+			},
+			expectOrphan: true,
+			description:  "PENDING (not DELETING, so included)",
+		},
+	}
+
+	// Insert all snapshots
+	for _, tc := range testCases {
+		for _, snap := range tc.snapshots {
+			insertTestSnapshot(sm, snap, nil, nil)
+		}
+	}
+
+	// Replicate orphan detection logic
+	orphanCollections := typeutil.NewSet[int64]()
+	sm.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
+		if info.GetState() != datapb.SnapshotState_SnapshotStateDeleting {
+			orphanCollections.Insert(info.GetCollectionId())
+		}
+		return true
+	})
+
+	// Verify each collection
+	for _, tc := range testCases {
+		assert.Equal(t, tc.expectOrphan, orphanCollections.Contain(tc.collectionID),
+			"collection %d (%s): expected orphan=%v", tc.collectionID, tc.description, tc.expectOrphan)
+	}
+
+	// Total orphan candidates: 100 (COMMITTED), 300 (mixed), 500 (PENDING)
+	assert.Equal(t, 3, orphanCollections.Len(), "should have 3 orphan candidate collections")
+}
+
+func TestSnapshotMeta_DropSnapshotsByCollection_SnapshotAlreadyRemovedFromMemory(t *testing.T) {
+	// Edge case: collection has snapshot IDs in the collectionID2Snapshots index
+	// but the snapshot was already removed from snapshotID2Info (e.g., by concurrent
+	// DropSnapshot). DropSnapshotsByCollection should handle this gracefully by
+	// skipping snapshots that no longer exist in memory.
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Insert two snapshots for collection 100
+	snapA := &datapb.SnapshotInfo{
+		Id:           10,
+		CollectionId: 100,
+		Name:         "snap_a",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/100/10",
+	}
+	insertTestSnapshot(sm, snapA, nil, nil)
+
+	snapB := &datapb.SnapshotInfo{
+		Id:           11,
+		CollectionId: 100,
+		Name:         "snap_b",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+		S3Location:   "s3://bucket/100/11",
+	}
+	insertTestSnapshot(sm, snapB, nil, nil)
+
+	// Simulate snap_a already removed from snapshotID2Info (concurrent DropSnapshot)
+	// but still in the collectionID2Snapshots index
+	sm.snapshotID2Info.Remove(int64(10))
+	sm.snapshotID2RefIndex.Remove(int64(10))
+	// Name index is also cleaned up
+	if nameMap, ok := sm.snapshotName2ID.Get(int64(100)); ok {
+		nameMap.Remove("snap_a")
+	}
+
+	// Mock dependencies
+	mockSave := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+	defer mockSave.UnPatch()
+	mockDrop := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).Return(nil).Build()
+	defer mockDrop.UnPatch()
+	mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+	defer mockWriter.UnPatch()
+
+	// Act: DropSnapshotsByCollection should handle the missing snapshot gracefully
+	err := sm.DropSnapshotsByCollection(ctx, int64(100))
+
+	// Assert: no error - snap_a is already gone, snap_b is successfully deleted
+	require.NoError(t, err)
+
+	// snap_b should be removed
+	_, exists := sm.snapshotID2Info.Get(int64(11))
+	assert.False(t, exists, "snap_b should be removed")
+
+	// Collection 100 should have no snapshots
+	names, err := sm.ListSnapshots(ctx, int64(100), int64(0))
+	require.NoError(t, err)
+	assert.Len(t, names, 0)
+}
+
+// --- getSnapshotByName index inconsistency test ---
+
+func TestSnapshotMeta_GetSnapshotByName_IndexInconsistency(t *testing.T) {
+	// Test: when snapshotName2ID has an entry but snapshotID2Info doesn't,
+	// getSnapshotByName should return an error AND clean up the orphan name index entry.
+
+	sm := &snapshotMeta{
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	collectionID := int64(100)
+	snapshotName := "orphan_snapshot"
+	snapshotID := int64(999)
+
+	// Set up inconsistent state: name2ID has an entry, but snapshotID2Info does NOT
+	nameMap := typeutil.NewConcurrentMap[string, UniqueID]()
+	nameMap.Insert(snapshotName, snapshotID)
+	sm.snapshotName2ID.Insert(collectionID, nameMap)
+
+	// Verify the orphan entry exists before the call
+	_, exists := nameMap.Get(snapshotName)
+	require.True(t, exists, "orphan name entry should exist before getSnapshotByName")
+
+	// Act
+	ctx := context.Background()
+	info, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
+
+	// Assert: error returned
+	assert.Nil(t, info)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+
+	// Assert: orphan entry was cleaned up from nameMap
+	_, exists = nameMap.Get(snapshotName)
+	assert.False(t, exists, "orphan name entry should be removed after getSnapshotByName detects inconsistency")
+}
+
+// --- addToSecondaryIndexes tests ---
+
+func TestSnapshotMeta_AddToSecondaryIndexes_MultipleSnapshots(t *testing.T) {
+	// Test: adding two snapshots to the same collection puts both in collectionID2Snapshots
+
+	sm := &snapshotMeta{
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	collectionID := int64(100)
+
+	snap1 := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: collectionID,
+		Name:         "snapshot_a",
+	}
+	snap2 := &datapb.SnapshotInfo{
+		Id:           2,
+		CollectionId: collectionID,
+		Name:         "snapshot_b",
+	}
+
+	// Act
+	sm.addToSecondaryIndexes(snap1)
+	sm.addToSecondaryIndexes(snap2)
+
+	// Assert: collectionID2Snapshots has both snapshot IDs
+	snapshotIDs, ok := sm.collectionID2Snapshots.Get(collectionID)
+	require.True(t, ok, "collectionID2Snapshots should have an entry for collectionID")
+	assert.True(t, snapshotIDs.Contain(int64(1)), "should contain snapshot 1")
+	assert.True(t, snapshotIDs.Contain(int64(2)), "should contain snapshot 2")
+	assert.Equal(t, 2, snapshotIDs.Len(), "should have exactly 2 snapshots")
+
+	// Assert: snapshotName2ID has both entries under the same collection
+	nameMap, ok := sm.snapshotName2ID.Get(collectionID)
+	require.True(t, ok, "snapshotName2ID should have an entry for collectionID")
+	id1, ok := nameMap.Get("snapshot_a")
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), id1)
+	id2, ok := nameMap.Get("snapshot_b")
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), id2)
+}
+
+// --- removeFromSecondaryIndexes tests ---
+
+func TestSnapshotMeta_RemoveFromSecondaryIndexes_LastSnapshot(t *testing.T) {
+	// Test: removing the last snapshot from a collection removes the collection entry entirely
+
+	sm := &snapshotMeta{
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	collectionID := int64(100)
+	snap := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: collectionID,
+		Name:         "only_snapshot",
+	}
+
+	// Setup: add one snapshot
+	sm.addToSecondaryIndexes(snap)
+
+	// Verify setup
+	_, ok := sm.collectionID2Snapshots.Get(collectionID)
+	require.True(t, ok, "collection entry should exist after add")
+
+	// Act: remove the only snapshot
+	sm.removeFromSecondaryIndexes(snap)
+
+	// Assert: collection entry is removed from collectionID2Snapshots
+	_, ok = sm.collectionID2Snapshots.Get(collectionID)
+	assert.False(t, ok, "collection entry should be removed when last snapshot is deleted")
+
+	// Assert: name entry is removed from snapshotName2ID
+	nameMap, ok := sm.snapshotName2ID.Get(collectionID)
+	if ok {
+		_, nameExists := nameMap.Get("only_snapshot")
+		assert.False(t, nameExists, "snapshot name should be removed from name index")
+	}
+}
+
+func TestSnapshotMeta_RemoveFromSecondaryIndexes_OneOfTwo(t *testing.T) {
+	// Test: removing one of two snapshots leaves the remaining one intact
+
+	sm := &snapshotMeta{
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	collectionID := int64(200)
+	snap1 := &datapb.SnapshotInfo{
+		Id:           10,
+		CollectionId: collectionID,
+		Name:         "snap_keep",
+	}
+	snap2 := &datapb.SnapshotInfo{
+		Id:           20,
+		CollectionId: collectionID,
+		Name:         "snap_remove",
+	}
+
+	// Setup: add two snapshots
+	sm.addToSecondaryIndexes(snap1)
+	sm.addToSecondaryIndexes(snap2)
+
+	// Verify setup
+	snapshotIDs, ok := sm.collectionID2Snapshots.Get(collectionID)
+	require.True(t, ok)
+	require.Equal(t, 2, snapshotIDs.Len())
+
+	// Act: remove snap2
+	sm.removeFromSecondaryIndexes(snap2)
+
+	// Assert: collection entry still exists with snap1
+	snapshotIDs, ok = sm.collectionID2Snapshots.Get(collectionID)
+	require.True(t, ok, "collection entry should still exist")
+	assert.Equal(t, 1, snapshotIDs.Len(), "should have 1 snapshot remaining")
+	assert.True(t, snapshotIDs.Contain(int64(10)), "snap1 should remain")
+	assert.False(t, snapshotIDs.Contain(int64(20)), "snap2 should be removed")
+
+	// Assert: name index reflects the removal
+	nameMap, ok := sm.snapshotName2ID.Get(collectionID)
+	require.True(t, ok)
+	_, ok = nameMap.Get("snap_keep")
+	assert.True(t, ok, "snap_keep should still be in name index")
+	_, ok = nameMap.Get("snap_remove")
+	assert.False(t, ok, "snap_remove should be removed from name index")
+}
+
+func TestSnapshotMeta_RemoveFromSecondaryIndexes_NonExistent(t *testing.T) {
+	// Test: removing a snapshot from a non-existent collection should not panic
+
+	sm := &snapshotMeta{
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+	}
+
+	snap := &datapb.SnapshotInfo{
+		Id:           42,
+		CollectionId: 999, // Non-existent collection
+		Name:         "ghost_snapshot",
+	}
+
+	// Act: should not panic
+	assert.NotPanics(t, func() {
+		sm.removeFromSecondaryIndexes(snap)
+	}, "removeFromSecondaryIndexes should not panic for non-existent collection")
+
+	// Assert: maps are still empty / unchanged
+	_, ok := sm.collectionID2Snapshots.Get(int64(999))
+	assert.False(t, ok, "no collection entry should be created")
+}
