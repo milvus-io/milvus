@@ -148,7 +148,7 @@ TEST(Float16, GetVector) {
     auto metricType = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto random = schema->AddDebugField("random", DataType::DOUBLE);
+    schema->AddDebugField("random", DataType::DOUBLE);
     auto vec = schema->AddDebugField(
         "embeddings", DataType::VECTOR_FLOAT16, 128, metricType);
     schema->set_primary_field_id(pk);
@@ -278,7 +278,6 @@ TEST(Float16, ExecWithPredicate) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     auto sr = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
-    int topk = 5;
 
     query::Json json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
@@ -366,7 +365,7 @@ TEST(BFloat16, GetVector) {
     auto metricType = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto random = schema->AddDebugField("random", DataType::DOUBLE);
+    schema->AddDebugField("random", DataType::DOUBLE);
     auto vec = schema->AddDebugField(
         "embeddings", DataType::VECTOR_BFLOAT16, 128, metricType);
     schema->set_primary_field_id(pk);
@@ -495,7 +494,6 @@ TEST(BFloat16, ExecWithPredicate) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp timestamp = 1000000;
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
-    int topk = 5;
 
     query::Json json = SearchResultToJson(*sr);
     std::cout << json.dump(2);

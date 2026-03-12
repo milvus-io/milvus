@@ -66,12 +66,12 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
     void
-    MoveCursor() {
+    MoveCursor() override {
         if (segment_->type() == SegmentType::Sealed) {
             SegmentExpr::MoveCursor();
         }

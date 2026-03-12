@@ -298,7 +298,6 @@ TEST(Query, ExecEmpty) {
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
 
-    int64_t N = ROW_COUNT;
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
 
     ScopedSchemaHandle handle(*schema);
@@ -436,7 +435,6 @@ TEST(Query, ExecWithoutPredicate) {
 TEST(Query, InnerProduct) {
     int64_t N = 100000;
     constexpr auto dim = 16;
-    constexpr auto topk = 10;
     auto num_queries = 5;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
@@ -811,7 +809,7 @@ TEST(Query, ExecWithPredicateBinary) {
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_BINARY, 512, knowhere::metric::JACCARD);
-    auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
+    schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 

@@ -90,7 +90,7 @@ class PhyLogicalBinaryExpr : public Expr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 

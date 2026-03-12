@@ -380,12 +380,10 @@ class IndexingRecord {
 
     void
     Initialize(const Schema& schema, const InsertRecord<false>* insert_record) {
-        int offset_id = 0;
         auto enable_growing_mmap = storage::MmapManager::GetInstance()
                                        .GetMmapConfig()
                                        .GetEnableGrowingMmap();
         for (auto& [field_id, field_meta] : schema.get_fields()) {
-            ++offset_id;
             if (field_meta.is_vector() &&
                 segcore_config_.get_enable_interim_segment_index() &&
                 !enable_growing_mmap) {

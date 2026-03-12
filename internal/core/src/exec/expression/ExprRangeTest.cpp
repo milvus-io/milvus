@@ -116,7 +116,7 @@ TEST_P(ExprTest, TestRange) {
     };
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
@@ -297,14 +297,13 @@ TEST_P(ExprTest, TestRangeNullable) {
              }},
         };
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto nullable_fid =
         schema->AddDebugField("nullable", DataType::INT64, true);
 
-    auto nullable_fid_pre_check =
-        schema->AddDebugField("pre_check", DataType::INT8, true);
+    schema->AddDebugField("pre_check", DataType::INT8, true);
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;

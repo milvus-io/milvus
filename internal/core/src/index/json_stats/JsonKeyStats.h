@@ -84,6 +84,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
     ~JsonKeyStats() override;
 
+    using ScalarIndex<std::string>::BuildWithFieldData;
+
  public:
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas, bool nullable);
@@ -558,7 +560,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     bool
     IsFloat(const std::string& str) {
         try {
-            float d = std::stof(str);
+            std::stof(str);
             return true;
         } catch (...) {
             return false;
@@ -568,7 +570,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     bool
     IsDouble(const std::string& str) {
         try {
-            double d = std::stod(str);
+            std::stod(str);
             return true;
         } catch (...) {
             return false;

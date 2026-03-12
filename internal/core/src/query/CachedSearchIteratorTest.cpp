@@ -70,19 +70,17 @@ class CachedSearchIteratorTest
  protected:
     SearchInfo
     GetDefaultNormalSearchInfo() {
-        return SearchInfo{
-            .topk_ = kBatchSize,
-            .round_decimal_ = -1,
-            .metric_type_ = std::get<1>(GetParam()),
-            .search_params_ =
-                {
-                    {knowhere::indexparam::EF, std::to_string(kHnswEf)},
-                },
-            .iterator_v2_info_ =
-                SearchIteratorV2Info{
-                    .batch_size = kBatchSize,
-                },
+        SearchInfo info;
+        info.topk_ = kBatchSize;
+        info.round_decimal_ = -1;
+        info.metric_type_ = std::get<1>(GetParam());
+        info.search_params_ = {
+            {knowhere::indexparam::EF, std::to_string(kHnswEf)},
         };
+        SearchIteratorV2Info iter_info;
+        iter_info.batch_size = kBatchSize;
+        info.iterator_v2_info_ = iter_info;
+        return info;
     }
 
     static DataType data_type_;
@@ -287,12 +285,12 @@ class CachedSearchIteratorTest
         knowhere_query_dataset_ =
             knowhere::GenDataSet(nq_, dim_, query_dataset_.data());
         search_dataset_ = dataset::SearchDataset{
-            .metric_type = kMetricType,
-            .num_queries = nq_,
-            .topk = kBatchSize,
-            .round_decimal = -1,
-            .dim = dim_,
-            .query_data = query_dataset_.data(),
+            kMetricType,
+            nq_,
+            kBatchSize,
+            -1,
+            dim_,
+            query_dataset_.data(),
         };
 
         BuildIndex();
@@ -661,29 +659,37 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidSearchInfo) {
         DispatchIterator(std::get<0>(GetParam()), SearchInfo{}, nullptr),
         SegcoreError);
 
-    EXPECT_THROW(
-        DispatchIterator(
-            std::get<0>(GetParam()), SearchInfo{.metric_type_ = ""}, nullptr),
-        SegcoreError);
+    {
+        SearchInfo si;
+        si.metric_type_ = "";
+        EXPECT_THROW(DispatchIterator(std::get<0>(GetParam()), si, nullptr),
+                     SegcoreError);
+    }
 
-    EXPECT_THROW(DispatchIterator(std::get<0>(GetParam()),
-                                  SearchInfo{.metric_type_ = metric_type_},
-                                  nullptr),
-                 SegcoreError);
+    {
+        SearchInfo si;
+        si.metric_type_ = metric_type_;
+        EXPECT_THROW(DispatchIterator(std::get<0>(GetParam()), si, nullptr),
+                     SegcoreError);
+    }
 
-    EXPECT_THROW(DispatchIterator(std::get<0>(GetParam()),
-                                  SearchInfo{.metric_type_ = metric_type_,
-                                             .iterator_v2_info_ = {}},
-                                  nullptr),
-                 SegcoreError);
+    {
+        SearchInfo si;
+        si.metric_type_ = metric_type_;
+        si.iterator_v2_info_ = SearchIteratorV2Info{};
+        EXPECT_THROW(DispatchIterator(std::get<0>(GetParam()), si, nullptr),
+                     SegcoreError);
+    }
 
-    EXPECT_THROW(
-        DispatchIterator(std::get<0>(GetParam()),
-                         SearchInfo{.metric_type_ = metric_type_,
-                                    .iterator_v2_info_ =
-                                        SearchIteratorV2Info{.batch_size = 0}},
-                         nullptr),
-        SegcoreError);
+    {
+        SearchInfo si;
+        si.metric_type_ = metric_type_;
+        SearchIteratorV2Info iter_info;
+        iter_info.batch_size = 0;
+        si.iterator_v2_info_ = iter_info;
+        EXPECT_THROW(DispatchIterator(std::get<0>(GetParam()), si, nullptr),
+                     SegcoreError);
+    }
 }
 
 TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
@@ -759,7 +765,6 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
     constexpr int64_t chunk_rows = 100;      // logical rows per chunk
     constexpr int64_t valid_per_chunk = 50;  // even rows valid, odd null
     constexpr int64_t num_chunks = 2;
-    constexpr int64_t total_rows = chunk_rows * num_chunks;
     constexpr int64_t total_valid = valid_per_chunk * num_chunks;
     constexpr int64_t batch_size = 10;
 
@@ -841,23 +846,21 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
     BitsetView search_bitview(search_bitset);
 
     dataset::SearchDataset search_dataset{
-        .metric_type = knowhere::metric::L2,
-        .num_queries = 1,
-        .topk = batch_size,
-        .round_decimal = -1,
-        .dim = dim,
-        .query_data = query_data.data(),
+        knowhere::metric::L2,
+        1,
+        batch_size,
+        -1,
+        dim,
+        query_data.data(),
     };
 
-    SearchInfo search_info{
-        .topk_ = batch_size,
-        .round_decimal_ = -1,
-        .metric_type_ = knowhere::metric::L2,
-        .iterator_v2_info_ =
-            SearchIteratorV2Info{
-                .batch_size = batch_size,
-            },
-    };
+    SearchInfo search_info;
+    search_info.topk_ = batch_size;
+    search_info.round_decimal_ = -1;
+    search_info.metric_type_ = knowhere::metric::L2;
+    SearchIteratorV2Info iter_v2_info;
+    iter_v2_info.batch_size = batch_size;
+    search_info.iterator_v2_info_ = iter_v2_info;
 
     // Create CachedSearchIterator - this tests Fix 1:
     // The lambda should use valid_count_per_chunk[chunk_id] as chunk_size

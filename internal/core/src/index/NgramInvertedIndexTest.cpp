@@ -160,11 +160,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         config[milvus::index::INDEX_TYPE] = milvus::index::INVERTED_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
 
-        auto ngram_params = index::NgramParams{
-            .loading_index = false,
-            .min_gram = 2,
-            .max_gram = 4,
-        };
+        auto ngram_params = index::NgramParams{false, 2, 4};
         auto index =
             std::make_shared<index::NgramInvertedIndex>(ctx, ngram_params);
         index->Build(config);
@@ -183,11 +179,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
 
-        auto ngram_params = index::NgramParams{
-            .loading_index = true,
-            .min_gram = 2,
-            .max_gram = 4,
-        };
+        auto ngram_params = index::NgramParams{true, 2, 4};
         auto index =
             std::make_unique<index::NgramInvertedIndex>(ctx, ngram_params);
         index->Load(milvus::tracer::TraceContext{}, config);
@@ -486,11 +478,7 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
         config[milvus::index::INDEX_TYPE] = milvus::index::INVERTED_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
 
-        auto ngram_params = index::NgramParams{
-            .loading_index = false,
-            .min_gram = 2,
-            .max_gram = 4,
-        };
+        auto ngram_params = index::NgramParams{false, 2, 4};
         auto index =
             std::make_shared<index::NgramInvertedIndex>(ctx, ngram_params);
         index->Build(config);
@@ -829,16 +817,12 @@ TEST(NgramIndex, TestNgramJson) {
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
-    index::CreateIndexInfo create_index_info{
-        .index_type = index::INVERTED_INDEX_TYPE,
-        .json_cast_type = JsonCastType::FromString("VARCHAR"),
-        .json_path = json_path,
-        .ngram_params = std::optional<index::NgramParams>{index::NgramParams{
-            .loading_index = false,
-            .min_gram = 2,
-            .max_gram = 3,
-        }},
-    };
+    index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index::INVERTED_INDEX_TYPE;
+    create_index_info.json_cast_type = JsonCastType::FromString("VARCHAR");
+    create_index_info.json_path = json_path;
+    create_index_info.ngram_params =
+        std::optional<index::NgramParams>{index::NgramParams{false, 2, 3}};
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
         create_index_info, file_manager_ctx);
 
@@ -967,16 +951,12 @@ TEST(NgramIndex, TestJsonNonLikeExpressionsWithNgram) {
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
-    index::CreateIndexInfo create_index_info{
-        .index_type = index::INVERTED_INDEX_TYPE,
-        .json_cast_type = JsonCastType::FromString("VARCHAR"),
-        .json_path = json_path,
-        .ngram_params = std::optional<index::NgramParams>{index::NgramParams{
-            .loading_index = false,
-            .min_gram = 2,
-            .max_gram = 4,
-        }},
-    };
+    index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index::INVERTED_INDEX_TYPE;
+    create_index_info.json_cast_type = JsonCastType::FromString("VARCHAR");
+    create_index_info.json_path = json_path;
+    create_index_info.ngram_params =
+        std::optional<index::NgramParams>{index::NgramParams{false, 2, 4}};
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
         create_index_info, file_manager_ctx);
 

@@ -429,14 +429,14 @@ TEST(GroupBY, SealedData) {
     //0. prepare schema
     int dim = 64;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8, true);
-    auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    schema->AddDebugField("int16", DataType::INT16);
+    schema->AddDebugField("int32", DataType::INT32);
+    schema->AddDebugField("int64", DataType::INT64);
     auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
+    schema->AddDebugField("bool", DataType::BOOL);
     schema->set_primary_field_id(str_fid);
     size_t N = 100;
 
@@ -520,9 +520,9 @@ TEST(GroupBY, Reduce) {
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8, false);
     auto bool_fid = schema->AddDebugField("bool", DataType::BOOL, false);
     auto string_fid = schema->AddDebugField("string", DataType::VARCHAR, false);
-    auto fp16_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec_fp16", DataType::VECTOR_FLOAT16, dim, knowhere::metric::L2);
-    auto bf16_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec_bf16", DataType::VECTOR_BFLOAT16, dim, knowhere::metric::L2);
     schema->set_primary_field_id(int64_fid);
 
@@ -653,7 +653,7 @@ TEST(GroupBY, GrowingRawData) {
     auto metric_type = knowhere::metric::L2;
     auto int64_field_id = schema->AddDebugField("int64", DataType::INT64);
     auto int32_field_id = schema->AddDebugField("int32", DataType::INT32);
-    auto vec_field_id = schema->AddDebugField(
+    schema->AddDebugField(
         "embeddings", DataType::VECTOR_FLOAT, 128, metric_type);
     schema->set_primary_field_id(int64_field_id);
 

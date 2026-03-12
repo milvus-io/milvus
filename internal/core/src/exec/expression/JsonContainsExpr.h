@@ -478,7 +478,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 

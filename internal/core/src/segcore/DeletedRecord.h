@@ -322,7 +322,7 @@ class DeletedRecord {
                     std::unique_lock<std::shared_mutex> lock(snap_lock_);
                     if (dump_ts == last_dump_ts) {
                         // only update
-                        snapshots_.back().second = std::move(bitmap.clone());
+                        snapshots_.back().second = bitmap.clone();
                         Assert(it != accessor.end() && it.good());
                         snap_next_pos_.back() = *it;
                     } else {
