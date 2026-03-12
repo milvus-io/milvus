@@ -396,9 +396,13 @@ func streamOneFile(ctx context.Context, cm storage.ChunkManager, remotePath, loc
 	defer f.Close()
 
 	if parseInto != nil {
-		tee := io.TeeReader(reader, f)
+		bw := bufio.NewWriter(f)
+		tee := io.TeeReader(reader, bw)
 		err = parseInto.DeserializeFromReader(tee)
 		if err != nil {
+			return 0, err
+		}
+		if err := bw.Flush(); err != nil {
 			return 0, err
 		}
 		if err := f.Sync(); err != nil {
@@ -423,7 +427,7 @@ func streamOneFile(ctx context.Context, cm storage.ChunkManager, remotePath, loc
 
 // filterBM25Logs extracts binlog paths from FieldBinlog, grouped by fieldID.
 func filterBM25Logs(fieldBinlogs []*datapb.FieldBinlog) map[int64][]string {
-	result := make(map[int64][]string, 0)
+	result := make(map[int64][]string)
 	for _, fieldBinlog := range fieldBinlogs {
 		logpaths := []string{}
 		for _, binlog := range fieldBinlog.GetBinlogs() {

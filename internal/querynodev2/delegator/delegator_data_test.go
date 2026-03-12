@@ -634,7 +634,6 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 			},
 		}, segmentEntryCoreFields(sealed[0].Segments))
 	})
-
 }
 
 func (s *DelegatorDataSuite) TestLoadSegments() {

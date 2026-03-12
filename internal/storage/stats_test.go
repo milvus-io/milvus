@@ -262,11 +262,11 @@ func TestBM25Stats_DeserializeFromReader(t *testing.T) {
 	t.Run("truncated_value", func(t *testing.T) {
 		// Valid header + key but truncated value
 		buf := new(bytes.Buffer)
-		binary.Write(buf, common.Endian, int32(0))  // version
+		binary.Write(buf, common.Endian, int32(0))   // version
 		binary.Write(buf, common.Endian, int64(1))   // numRow
 		binary.Write(buf, common.Endian, int64(1))   // numToken
-		binary.Write(buf, common.Endian, uint32(42))  // key
-		binary.Write(buf, common.Endian, int16(1))    // truncated value (2 bytes instead of 4)
+		binary.Write(buf, common.Endian, uint32(42)) // key
+		binary.Write(buf, common.Endian, int16(1))   // truncated value (2 bytes instead of 4)
 
 		restored := NewBM25Stats()
 		err := restored.DeserializeFromReader(buf)
