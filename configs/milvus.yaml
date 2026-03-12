@@ -595,7 +595,7 @@ queryNode:
     enableDisk: true
   adaptiveFilterStrategy:
     enabled: true # enable cost-based adaptive selection between pre-filter and iterative-filter per segment
-    threshold: 0.5 # selectivity threshold above which iterative filter is preferred (0.0-1.0)
+    threshold: 0.5 # selectivity threshold above which iterative filter is preferred over pre-filter (0.0–1.0)
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:
