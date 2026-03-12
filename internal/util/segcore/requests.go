@@ -102,7 +102,7 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 			C.SetFieldWarmupPolicy(cLoadFieldDataInfo, cFieldID, C.CacheWarmupPolicy(fieldWarmupPolicy))
 		}
 	}
-	C.SetLoadPriority(cLoadFieldDataInfo, C.int32_t(req.LoadPriority))
+	C.SetLoadPriority(cLoadFieldDataInfo, C.int32_t(commonpb.LoadPriority_HIGH))
 
 	return &cLoadFieldDataRequest{
 		cLoadFieldDataInfo: cLoadFieldDataInfo,

@@ -390,7 +390,7 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.Se
 		TextStatsLogs:    convertTextIndexStats(src.GetTextStatsLogs()),
 		Bm25Logs:         convertFieldBinlogs(src.GetBm25Logs()),
 		JsonKeyStatsLogs: convertJSONKeyStats(src.GetJsonKeyStatsLogs()),
-		Priority:         src.GetPriority(),
+		Priority:         commonpb.LoadPriority_HIGH,
 		ManifestPath:     src.GetManifestPath(),
 	}
 }
