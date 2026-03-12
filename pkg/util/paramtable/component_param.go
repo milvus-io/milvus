@@ -3458,19 +3458,20 @@ type queryNodeConfig struct {
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 
 	// Idf Oracle
-	IDFEnableDisk ParamItem `refreshable:"true"`
+	IDFPreload ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
-	p.IDFEnableDisk = ParamItem{
-		Key:          "queryNode.idfOracle.enableDisk",
-		Version:      "2.6.0",
+	p.IDFPreload = ParamItem{
+		Key:          "queryNode.idfOracle.preload",
+		Version:      "2.6.8",
 		Export:       true,
 		DefaultValue: "true",
+		Doc:          "Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.",
 	}
-	p.IDFEnableDisk.Init(base.mgr)
+	p.IDFPreload.Init(base.mgr)
 
 	p.SoPath = ParamItem{
 		Key:          "queryNode.soPath",
