@@ -1,11 +1,16 @@
 import sys
 import time
 from typing import Optional
+
+import grpc
 from pymilvus import MilvusClient, DataType
+from pymilvus.orm.connections import connections
+from pymilvus.grpc_gen import milvus_pb2_grpc
 
 sys.path.append("..")
 from check.func_check import ResponseChecker
 from utils.api_request import api_request
+from utils.trace_interceptor import TraceInterceptor
 from utils.wrapper import trace
 from utils.util_log import test_log as log
 from common import common_func as cf, common_type as ct
@@ -19,6 +24,20 @@ class TestMilvusClientV2Base(Base):
 
     # milvus_client = None
     active_trace = False
+    _current_test_name = None
+    _trace_interceptor = None
+
+    def setup_method(self, method):
+        self._current_test_name = method.__name__
+        super().setup_method(method)
+
+    def teardown_method(self, method):
+        if self._trace_interceptor:
+            log.info(
+                f"[TRACE] trace_id_prefix={self._trace_interceptor.trace_prefix}  "
+                f"test={method.__name__}"
+            )
+        super().teardown_method(method)
 
     def init_async_milvus_client(self):
         uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
@@ -40,9 +59,25 @@ class TestMilvusClientV2Base(Base):
             uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
         res, is_succ = self.init_milvus_client(uri=uri, token=cf.param_info.param_token, active_trace=active_trace, **kwargs)
         if is_succ:
-            # self.milvus_client = res
             log.info(f"server version: {res.get_server_version()}")
+            self._inject_trace_interceptor(res)
         return res
+
+    def _inject_trace_interceptor(self, client):
+        """Inject TraceInterceptor into the MilvusClient's underlying gRPC channel."""
+        test_name = self._current_test_name or "unknown"
+        self._trace_interceptor = TraceInterceptor(test_name)
+        try:
+            handler = connections._fetch_handler(client._using)
+            # Save the original channel on first injection to avoid stacking interceptors
+            if not hasattr(handler, '_original_channel'):
+                handler._original_channel = handler._final_channel
+            handler._final_channel = grpc.intercept_channel(
+                handler._original_channel, self._trace_interceptor
+            )
+            handler._stub = milvus_pb2_grpc.MilvusServiceStub(handler._final_channel)
+        except Exception as e:
+            log.warning(f"[TRACE] failed to inject trace interceptor: {e}")
 
     def init_milvus_client(self, uri, user="", password="", db_name="", token="", timeout=None,
                            check_task=None, check_items=None, active_trace=False, **kwargs):
