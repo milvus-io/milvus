@@ -3049,6 +3049,11 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
     // drop index, must after reload binlog
     if (!diff.indexes_to_drop.empty()) {
         for (auto field_id : diff.indexes_to_drop) {
+            // Skip drop if this field already has a replacement or new index loaded
+            if (diff.indexes_to_replace.count(field_id) > 0 ||
+                diff.indexes_to_load.count(field_id) > 0) {
+                continue;
+            }
             DropIndex(field_id);
         }
     }
