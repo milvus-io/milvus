@@ -133,7 +133,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			// panic here, insert failure
 			panic(err)
 		}
-		growing.UpdateBloomFilter(insertData.PrimaryKeys)
+		growing.UpdatePkCandidate(insertData.PrimaryKeys)
 
 		if newGrowingSegment {
 			sd.growingSegmentLock.Lock()

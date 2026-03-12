@@ -436,6 +436,12 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// External collections must be single-shard: the refresh mechanism assigns all
+	// segments to VChannelNames[0], so multiple shards would leave segments orphaned.
+	if isExternalCollection && t.ShardsNum > 1 {
+		return fmt.Errorf("external collection does not support multiple shards, got ShardsNum=%d", t.ShardsNum)
+	}
+
 	if t.ShardsNum > Params.ProxyCfg.MaxShardNum.GetAsInt32() {
 		return fmt.Errorf("maximum shards's number should be limited to %d", Params.ProxyCfg.MaxShardNum.GetAsInt())
 	}
@@ -459,11 +465,16 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// validate primary key definition when needed
-	if !isExternalCollection {
-		if err := validatePrimaryKey(t.schema); err != nil {
+	// For external collections, inject virtual PK field if no PK exists
+	if isExternalCollection {
+		if err := injectVirtualPKForExternalCollection(t.schema); err != nil {
 			return err
 		}
+	}
+
+	// validate primary key definition
+	if err := validatePrimaryKey(t.schema); err != nil {
+		return err
 	}
 
 	// validate dynamic field

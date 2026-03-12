@@ -86,11 +86,11 @@ type baseSegment struct {
 	collection *Collection
 	version    *atomic.Int64
 
-	segmentType    SegmentType
-	bloomFilterSet *pkoracle.BloomFilterSet
-	loadInfo       *atomic.Pointer[querypb.SegmentLoadInfo]
-	skipGrowingBF  bool // Skip generating or maintaining BF for growing segments; deletion checks will be handled in segcore.
-	channel        metautil.Channel
+	segmentType   SegmentType
+	pkCandidate   pkoracle.Candidate // PK candidate: BloomFilterSet for regular collections, ExternalSegmentCandidate for external collections
+	loadInfo      *atomic.Pointer[querypb.SegmentLoadInfo]
+	skipGrowingBF bool // Skip generating or maintaining BF for growing segments; deletion checks will be handled in segcore.
+	channel       metautil.Channel
 
 	bm25Stats map[int64]*storage.BM25Stats
 
@@ -105,14 +105,14 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 		return baseSegment{}, err
 	}
 	bs := baseSegment{
-		collection:     collection,
-		loadInfo:       atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
-		version:        atomic.NewInt64(version),
-		segmentType:    segmentType,
-		bloomFilterSet: pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
-		bm25Stats:      make(map[int64]*storage.BM25Stats),
-		channel:        channel,
-		skipGrowingBF:  segmentType == SegmentTypeGrowing && paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF.GetAsBool(),
+		collection:    collection,
+		loadInfo:      atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
+		version:       atomic.NewInt64(version),
+		segmentType:   segmentType,
+		pkCandidate:   pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
+		bm25Stats:     make(map[int64]*storage.BM25Stats),
+		channel:       channel,
+		skipGrowingBF: segmentType == SegmentTypeGrowing && paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF.GetAsBool(),
 
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 		needUpdatedVersion: atomic.NewInt64(0),
@@ -177,19 +177,45 @@ func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
 	return s.loadInfo.Load()
 }
 
-func (s *baseSegment) SetBloomFilter(bf *pkoracle.BloomFilterSet) {
-	s.bloomFilterSet = bf
+func (s *baseSegment) SetPKCandidate(candidate pkoracle.Candidate) {
+	s.pkCandidate = candidate
 }
 
-func (s *baseSegment) BloomFilterExist() bool {
-	return s.bloomFilterSet.BloomFilterExist()
+// PkCandidateExist implements pkoracle.Candidate — reports whether PK data has been loaded.
+func (s *baseSegment) PkCandidateExist() bool {
+	return s.pkCandidate != nil && s.pkCandidate.PkCandidateExist()
 }
 
-func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
+// UpdatePkCandidate feeds new primary keys into the PK candidate.
+func (s *baseSegment) UpdatePkCandidate(pks []storage.PrimaryKey) {
 	if s.skipGrowingBF {
 		return
 	}
-	s.bloomFilterSet.UpdateBloomFilter(pks)
+	if s.pkCandidate != nil {
+		s.pkCandidate.UpdatePkCandidate(pks)
+	}
+}
+
+// Stats implements pkoracle.Candidate — returns PK statistics (min/max PK).
+func (s *baseSegment) Stats() *storage.PkStatistics {
+	if s.pkCandidate != nil {
+		return s.pkCandidate.Stats()
+	}
+	return nil
+}
+
+// Charge implements pkoracle.Candidate — charges memory resources.
+func (s *baseSegment) Charge() {
+	if s.pkCandidate != nil {
+		s.pkCandidate.Charge()
+	}
+}
+
+// Refund implements pkoracle.Candidate — releases memory resources.
+func (s *baseSegment) Refund() {
+	if s.pkCandidate != nil {
+		s.pkCandidate.Refund()
+	}
 }
 
 func (s *baseSegment) UpdateBM25Stats(stats map[int64]*storage.BM25Stats) {
@@ -213,21 +239,28 @@ func (s *baseSegment) MayPkExist(pk *storage.LocationsCache) bool {
 	if s.skipGrowingBF {
 		return true
 	}
-	return s.bloomFilterSet.MayPkExist(pk)
+	if s.pkCandidate == nil {
+		return true // No candidate, assume PK might exist
+	}
+	return s.pkCandidate.MayPkExist(pk)
 }
 
 func (s *baseSegment) GetMinPk() *storage.PrimaryKey {
-	if s.bloomFilterSet.Stats() == nil {
-		return nil
+	if s.pkCandidate != nil {
+		if stats := s.pkCandidate.Stats(); stats != nil {
+			return &stats.MinPK
+		}
 	}
-	return &s.bloomFilterSet.Stats().MinPK
+	return nil
 }
 
 func (s *baseSegment) GetMaxPk() *storage.PrimaryKey {
-	if s.bloomFilterSet.Stats() == nil {
-		return nil
+	if s.pkCandidate != nil {
+		if stats := s.pkCandidate.Stats(); stats != nil {
+			return &stats.MaxPK
+		}
 	}
-	return &s.bloomFilterSet.Stats().MaxPK
+	return nil
 }
 
 func (s *baseSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
@@ -238,7 +271,7 @@ func (s *baseSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
 		}
 		return allPositive
 	}
-	return s.bloomFilterSet.BatchPkExist(lc)
+	return s.pkCandidate.BatchPkExist(lc)
 }
 
 // ResourceUsageEstimate returns the final estimated resource usage of the segment.
@@ -484,18 +517,17 @@ func (s *LocalSegment) LastDeltaTimestamp() uint64 {
 	return s.lastDeltaTimestamp.Load()
 }
 
-// UpdateBloomFilter updates bloom filter with provided pks and charges resource if BF is newly created.
-// This overrides baseSegment.UpdateBloomFilter to handle resource charging for growing segments.
-func (s *LocalSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
+// UpdatePkCandidate updates the PK candidate with provided pks and charges resource.
+// Overrides baseSegment.UpdatePkCandidate to handle resource charging for growing segments.
+func (s *LocalSegment) UpdatePkCandidate(pks []storage.PrimaryKey) {
 	if s.skipGrowingBF {
 		return
 	}
 
-	// Update bloom filter (may create new BF if not exist)
-	s.bloomFilterSet.UpdateBloomFilter(pks)
+	s.pkCandidate.UpdatePkCandidate(pks)
 
-	// Charge bloom filter resource (safe to call multiple times - only charges once)
-	s.bloomFilterSet.Charge()
+	// Charge resource (safe to call multiple times - only charges once)
+	s.pkCandidate.Charge()
 }
 
 func (s *LocalSegment) GetIndexByID(indexID int64) *IndexedFieldInfo {
@@ -1321,8 +1353,8 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 	// usage := s.ResourceUsageEstimate()
 	// s.manager.SubLogicalResource(usage)
 
-	// Refund bloom filter resource
-	s.bloomFilterSet.Refund()
+	// Refund PK candidate resource
+	s.pkCandidate.Refund()
 
 	binlogSize := s.binlogSize.Load()
 	if binlogSize > 0 {

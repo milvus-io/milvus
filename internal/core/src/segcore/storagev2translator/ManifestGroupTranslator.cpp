@@ -42,6 +42,7 @@
 #include "fmt/core.h"
 #include "glog/logging.h"
 #include "log/Log.h"
+#include "milvus-storage/common/constants.h"
 #include "milvus-storage/reader.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
@@ -50,6 +51,87 @@
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
+
+// Convert LIST or FIXED_SIZE_LIST arrays to FixedSizeBinary.
+// External parquet files store vectors in list format; Milvus expects
+// FixedSizeBinary (raw bytes). Supports all fixed-width vector types
+// (FLOAT, FLOAT16, BFLOAT16, BINARY, INT8). Returns the input unchanged
+// if already FixedSizeBinary.
+static arrow::ArrayVector
+NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
+                                       const milvus::FieldMeta& field_meta) {
+    int dim = field_meta.get_dim();
+    int byte_width = GetDataTypeSize(field_meta.get_data_type(), dim);
+    auto fsb_type = arrow::fixed_size_binary(byte_width);
+
+    arrow::ArrayVector result;
+    result.reserve(arrays.size());
+
+    for (const auto& array : arrays) {
+        auto type_id = array->type_id();
+        if (type_id == arrow::Type::FIXED_SIZE_BINARY) {
+            result.push_back(array);
+            continue;
+        }
+
+        int64_t num_rows = array->length();
+        AssertInfo(array->null_count() == 0,
+                   "Null values in vector columns are not supported for "
+                   "external collections, field: {}",
+                   field_meta.get_name().get());
+        auto buffer_result = arrow::AllocateBuffer(num_rows * byte_width);
+        AssertInfo(buffer_result.ok(),
+                   "Failed to allocate buffer for vector normalization");
+        auto buffer = std::move(*buffer_result);
+        auto dst = buffer->mutable_data();
+
+        if (type_id == arrow::Type::LIST) {
+            auto list_array = std::static_pointer_cast<arrow::ListArray>(array);
+            auto values = list_array->values();
+            int elem_bit_width = values->type()->bit_width();
+            AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
+                       "Vector list element must be fixed-width byte-aligned "
+                       "type, got bit_width={}",
+                       elem_bit_width);
+            int elem_byte_size = elem_bit_width / 8;
+            auto raw = reinterpret_cast<const uint8_t*>(
+                values->data()->buffers[1]->data());
+            for (int64_t i = 0; i < num_rows; i++) {
+                auto offset = list_array->value_offset(i);
+                memcpy(dst + i * byte_width,
+                       raw + offset * elem_byte_size,
+                       byte_width);
+            }
+        } else if (type_id == arrow::Type::FIXED_SIZE_LIST) {
+            auto fsl_array =
+                std::static_pointer_cast<arrow::FixedSizeListArray>(array);
+            auto values = fsl_array->values();
+            int elem_bit_width = values->type()->bit_width();
+            AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
+                       "Vector list element must be fixed-width byte-aligned "
+                       "type, got bit_width={}",
+                       elem_bit_width);
+            int elem_byte_size = elem_bit_width / 8;
+            auto raw = reinterpret_cast<const uint8_t*>(
+                values->data()->buffers[1]->data());
+            for (int64_t i = 0; i < num_rows; i++) {
+                auto offset = fsl_array->value_offset(i);
+                memcpy(dst + i * byte_width,
+                       raw + offset * elem_byte_size,
+                       byte_width);
+            }
+        } else {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "Unsupported arrow type for vector normalization: {}",
+                      array->type()->ToString());
+        }
+
+        auto fsb_array = std::make_shared<arrow::FixedSizeBinaryArray>(
+            fsb_type, num_rows, std::move(buffer));
+        result.push_back(std::move(fsb_array));
+    }
+    return result;
+}
 
 ManifestGroupTranslator::ManifestGroupTranslator(
     int64_t segment_id,
@@ -106,13 +188,16 @@ ManifestGroupTranslator::ManifestGroupTranslator(
       load_priority_(load_priority) {
     auto chunk_size_result = chunk_reader_->get_chunk_size();
     if (!chunk_size_result.ok()) {
-        throw std::runtime_error("get row group size failed");
+        throw std::runtime_error(
+            fmt::format("get row group size failed: {}",
+                        chunk_size_result.status().ToString()));
     }
     const auto& row_group_sizes = chunk_size_result.ValueOrDie();
 
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
-        throw std::runtime_error("get row group rows failed");
+        throw std::runtime_error(fmt::format("get row group rows failed: {}",
+                                             rows_result.status().ToString()));
     }
     const auto& row_group_rows = rows_result.ValueOrDie();
 
@@ -304,11 +389,32 @@ ManifestGroupTranslator::load_group_chunk(
     std::vector<arrow::ArrayVector> array_vecs;
     array_vecs.reserve(schema->num_fields());
 
-    // Iterate through fields to get field_id and create chunk
+    // Iterate through fields to get field_id and create chunk.
+    // Normal collections store field IDs as column names (numeric strings).
+    // External collections use original column names, so we fall back to
+    // matching against external field names when stoll fails.
     for (int i = 0; i < schema->num_fields(); ++i) {
-        // column name here is field id (ChunkReader stores field IDs as column names)
         auto column_name = schema->field(i)->name();
-        auto field_id = std::stoll(column_name);
+        int64_t field_id = -1;
+        try {
+            field_id = std::stoll(column_name);
+        } catch (const std::exception&) {
+            // External collection fallback: resolve by column name
+            for (const auto& [fid, meta] : field_metas_) {
+                if (meta.is_external_field() &&
+                    meta.get_external_field() == column_name) {
+                    field_id = fid.get();
+                    break;
+                }
+            }
+            AssertInfo(
+                field_id >= 0,
+                fmt::format(
+                    "[StorageV2] translator {} field {} not a numeric field ID "
+                    "and not found as external field",
+                    key_,
+                    column_name));
+        }
 
         auto fid = milvus::FieldId(field_id);
         if (fid == RowFieldID) {
@@ -335,6 +441,20 @@ ManifestGroupTranslator::load_group_chunk(
         field_ids.push_back(fid);
         field_metas.push_back(field_meta);
         array_vecs.push_back(std::move(merged_array_vec));
+    }
+
+    // Normalize vector arrays from LIST/FIXED_SIZE_LIST to FixedSizeBinary.
+    // External parquet files use list-of-float format; Milvus expects
+    // FixedSizeBinary. No-op for normal collections (already FixedSizeBinary).
+    for (size_t idx = 0; idx < field_ids.size(); ++idx) {
+        if (IsVectorDataType(field_metas[idx].get_data_type()) &&
+            !IsSparseFloatVectorDataType(field_metas[idx].get_data_type()) &&
+            !IsVectorArrayDataType(field_metas[idx].get_data_type()) &&
+            !array_vecs[idx].empty() &&
+            array_vecs[idx][0]->type_id() != arrow::Type::FIXED_SIZE_BINARY) {
+            array_vecs[idx] = NormalizeVectorArraysToFixedSizeBinary(
+                array_vecs[idx], field_metas[idx]);
+        }
     }
 
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
