@@ -931,7 +931,7 @@ func TestReplicateServiceAlterReplicateConfigMessage(t *testing.T) {
 				{SourceClusterId: "primary", TargetClusterId: "by-dev"},
 			},
 		}
-		replicateMsgs := createReplicateAlterConfigMessages(newConfig)
+		replicateMsgs := createSimpleReplicateAlterConfigMessages(newConfig)
 		for _, msg := range replicateMsgs {
 			_, err := rs.Append(context.Background(), msg)
 			assert.NoError(t, err)
@@ -957,7 +957,7 @@ func TestReplicateServiceAlterReplicateConfigMessage(t *testing.T) {
 				{ClusterId: "primary", Pchannels: []string{"primary-rootcoord-dml_0", "primary-rootcoord-dml_1"}},
 			},
 		}
-		replicateMsgs := createReplicateAlterConfigMessages(newConfig)
+		replicateMsgs := createSimpleReplicateAlterConfigMessages(newConfig)
 		for _, msg := range replicateMsgs {
 			_, err := rs.Append(context.Background(), msg)
 			assert.NoError(t, err)
@@ -1055,7 +1055,7 @@ func TestReplicateServiceAlterReplicateConfigMessage(t *testing.T) {
 				{SourceClusterId: "by-dev", TargetClusterId: "nonexistent"},
 			},
 		}
-		replicateMsgs := createReplicateAlterConfigMessages(invalidConfig)
+		replicateMsgs := createSimpleReplicateAlterConfigMessages(invalidConfig)
 		_, err := rs.Append(context.Background(), replicateMsgs[0])
 		assert.Error(t, err)
 	})
@@ -1208,7 +1208,7 @@ func TestReplicateServiceGetConfigError(t *testing.T) {
 	assert.Contains(t, err.Error(), "config unavailable")
 }
 
-func createReplicateAlterConfigMessages(newConfig *commonpb.ReplicateConfiguration) []message.ReplicateMutableMessage {
+func createSimpleReplicateAlterConfigMessages(newConfig *commonpb.ReplicateConfiguration) []message.ReplicateMutableMessage {
 	alterMsg := message.NewAlterReplicateConfigMessageBuilderV2().
 		WithHeader(&message.AlterReplicateConfigMessageHeader{
 			ReplicateConfiguration: newConfig,

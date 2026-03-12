@@ -23,8 +23,8 @@ var ErrNotHandledByReplicateManager = errors.New("not handled by replicate manag
 type ReplicateManagerRecoverParam struct {
 	ChannelInfo            types.PChannelInfo
 	CurrentClusterID       string
-	InitialRecoverSnapshot *recovery.RecoverySnapshot       // the initial recover snapshot of the replicate manager.
-	SalvageCheckpoint      *utility.ReplicateCheckpoint     // loaded from etcd, captured during force promote
+	InitialRecoverSnapshot *recovery.RecoverySnapshot   // the initial recover snapshot of the replicate manager.
+	SalvageCheckpoint      *utility.ReplicateCheckpoint // loaded from etcd, captured during force promote
 }
 
 // RecoverReplicateManager recovers the replicate manager from the initial recover snapshot.
