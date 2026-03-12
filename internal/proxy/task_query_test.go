@@ -1236,7 +1236,8 @@ func TestTaskQuery_functions(t *testing.T) {
 				// r1: PK=1 (2 elems), PK=3 (1 elem)
 				// r2: PK=2 (3 elems), PK=4 (1 elem)
 				// Merged order by PK: 1,2,3,4
-				// limit=4 counts elements: PK1(2) + PK2(3) = 5 >= 4, stop after PK2
+				// IReduceInOrderForBest does not use input limit for elements
+				// Stops when r1 drains after PK3 (ShouldStopWhenDrained=true)
 				r1 := makeElementLevelResult([]int64{1, 3}, [][]int32{{0, 1}, {2}})
 				r1.HasMoreResult = true
 				r2 := makeElementLevelResult([]int64{2, 4}, [][]int32{{0, 1, 2}, {1}})
@@ -1245,15 +1246,18 @@ func TestTaskQuery_functions(t *testing.T) {
 					[]*internalpb.RetrieveResults{r1, r2},
 					&queryParams{limit: 4, reduceType: reduce.IReduceInOrderForBest})
 				assert.NoError(t, err)
-				// PK1 has 2 elements (count=2 < 4), PK2 has 3 elements (count=2 < 4, process, count=5)
-				// Both PK1 and PK2 included
+				// IReduceInOrderForBest does not enforce element limit (ShouldUseInputLimit=false)
+				// It stops when one result is drained (ShouldStopWhenDrained=true)
+				// r1 drains after PK3, so result is {1, 2, 3}
 				pks := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()
-				assert.Equal(t, []int64{1, 2}, pks)
-				assert.Equal(t, 2, len(result.GetElementIndices()))
+				assert.Equal(t, []int64{1, 2, 3}, pks)
+				assert.Equal(t, 3, len(result.GetElementIndices()))
 			})
 
 			t.Run("element-level with IReduceInOrderForBest drains one result", func(t *testing.T) {
-				// r1 has no more, r2 has more → should stop when r1 drains
+				// r1 has no more (HasMoreResult=false), r2 has more (HasMoreResult=true)
+				// drainResult only triggers when HasMoreResult=true, so r1 draining
+				// does not stop the loop — it's safe to continue with r2's remaining PKs
 				r1 := makeElementLevelResult([]int64{1}, [][]int32{{0, 1}})
 				r1.HasMoreResult = false
 				r2 := makeElementLevelResult([]int64{2, 4}, [][]int32{{0}, {1, 2}})
@@ -1262,11 +1266,11 @@ func TestTaskQuery_functions(t *testing.T) {
 					[]*internalpb.RetrieveResults{r1, r2},
 					&queryParams{limit: 10, reduceType: reduce.IReduceInOrderForBest})
 				assert.NoError(t, err)
-				// r1 drains after PK1, ShouldStopWhenDrained=true → stops
-				// Only PK1 is returned
+				// r1 HasMoreResult=false, so drain does not trigger stop
+				// All PKs are returned: 1, 2, 4
 				pks := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()
-				assert.Equal(t, []int64{1}, pks)
-				assert.Equal(t, 1, len(result.GetElementIndices()))
+				assert.Equal(t, []int64{1, 2, 4}, pks)
+				assert.Equal(t, 3, len(result.GetElementIndices()))
 			})
 		})
 	})
