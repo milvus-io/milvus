@@ -1328,6 +1328,13 @@ func TestSecondValidateNonSameError(t *testing.T) {
 	mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
 	streaming.SetWALForTest(mw)
 
+	// Mock channel.GetClusterChannels to avoid blocking on unregistered singleton.
+	mockGetClusterChannels := mockey.Mock(channel.GetClusterChannels).Return(message.ClusterChannels{
+		Channels:       []string{"by-dev-1"},
+		ControlChannel: "by-dev-1_vcchan",
+	}).Build()
+	defer mockGetClusterChannels.UnPatch()
+
 	callCount := 0
 	b := mock_balancer.NewMockBalancer(t)
 	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
