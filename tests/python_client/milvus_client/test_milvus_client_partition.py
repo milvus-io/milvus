@@ -93,7 +93,7 @@ class TestMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str("partition_not_exist")
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 2. create partition
         error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default]"
@@ -110,7 +110,7 @@ class TestMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
         error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}"}
@@ -125,7 +125,7 @@ class TestMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_names = [cf.gen_unique_str(partition_prefix), cf.gen_unique_str(partition_prefix)]
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
@@ -142,7 +142,7 @@ class TestMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_nums = 4095
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
@@ -189,7 +189,7 @@ class TestMilvusClientPartitionValid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -243,7 +243,7 @@ class TestMilvusClientPartitionValid(TestMilvusClientV2Base):
         expected: create partition successfully with only one partition created
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
@@ -269,7 +269,7 @@ class TestMilvusClientPartitionValid(TestMilvusClientV2Base):
         expected: drop successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str("partition_not_exist")
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
@@ -283,8 +283,8 @@ class TestMilvusClientPartitionValid(TestMilvusClientV2Base):
         expected: drop successfully without any operations
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
-        another_collection_name = cf.gen_unique_str("another")
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        another_collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
@@ -300,8 +300,8 @@ class TestMilvusClientPartitionValid(TestMilvusClientV2Base):
         expected: drop successfully without any operations
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
-        another_collection_name = cf.gen_unique_str("another")
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        another_collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
@@ -369,7 +369,7 @@ class TestMilvusClientDropPartitionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str("partition_not_exist")
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 2. create partition
         error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default]"
@@ -386,7 +386,7 @@ class TestMilvusClientDropPartitionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
         error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}."}
@@ -401,7 +401,7 @@ class TestMilvusClientDropPartitionInvalid(TestMilvusClientV2Base):
         expected: raise ParamError
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
         error = {ct.err_code: 1, ct.err_msg: "`partition_name` value None is illegal"}
         self.drop_partition(client, collection_name, None,
@@ -415,7 +415,7 @@ class TestMilvusClientDropPartitionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_names = [cf.gen_unique_str(partition_prefix), cf.gen_unique_str(partition_prefix)]
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
@@ -482,7 +482,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str("partition_not_exist")
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 2. create partition
         error = {ct.err_code: 999, ct.err_msg: f"collection not found[database=default]"
@@ -500,7 +500,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
         error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}. The first character of a "
@@ -517,7 +517,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
         partition_name = ["12-s"]
@@ -534,7 +534,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_names = []
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
@@ -550,7 +550,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         not_exist_partition = cf.gen_unique_str("partition_not_exist")
         partition_names = ["_default", not_exist_partition]
         # 2. create partition
@@ -568,7 +568,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str("partition_not_exist")
         # 2. create partition
         error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
@@ -652,7 +652,7 @@ class TestMilvusClientReleasePartitionValid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         partition_names = ["_default", partition_name]
         # 1. create collection
@@ -671,7 +671,7 @@ class TestMilvusClientReleasePartitionValid(TestMilvusClientV2Base):
         expected: releasing an unloaded partition should succeed and be idempotent
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -691,7 +691,7 @@ class TestMilvusClientReleasePartitionValid(TestMilvusClientV2Base):
         expected: Releasing a partition after the collection is unloaded should succeed and be idempotent
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -709,7 +709,7 @@ class TestMilvusClientReleasePartitionValid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -727,7 +727,7 @@ class TestMilvusClientReleasePartitionValid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -794,7 +794,7 @@ class TestMilvusClientListPartitionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str("partition_not_exist")
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 2. create partition
         error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default]"
                                                f"[collection={collection_name}]"}
@@ -860,7 +860,7 @@ class TestMilvusClientHasPartitionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str("partition_not_exist")
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 2. create partition
         error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default]"
@@ -877,7 +877,7 @@ class TestMilvusClientHasPartitionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
         error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}"}
@@ -892,7 +892,7 @@ class TestMilvusClientHasPartitionInvalid(TestMilvusClientV2Base):
         expected: raise ParamError
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
         error = {ct.err_code: 1, ct.err_msg: "`partition_name` value None is illegal"}
         self.has_partition(client, collection_name, None,
@@ -906,7 +906,7 @@ class TestMilvusClientHasPartitionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = "a".join("a" for i in range(256))
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
@@ -923,7 +923,7 @@ class TestMilvusClientHasPartitionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_names = [cf.gen_unique_str(partition_prefix), cf.gen_unique_str(partition_prefix)]
         # 2. create partition
         self.create_collection(client, collection_name, default_dim)
@@ -939,7 +939,7 @@ class TestMilvusClientHasPartitionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str("partition_not_exist")
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
@@ -980,7 +980,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         expected: drop successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str("nonexisted")
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(prefix)
         error = {ct.err_code: 1100, ct.err_msg: f"collection not found[database=default]"
                                                 f"[collection={collection_name}]"}
@@ -1011,7 +1011,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. load partition
@@ -1027,7 +1027,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         expected: returns an error indicating the partition is not found
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str("nonexisted")
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -1044,7 +1044,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         expected: drop successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = "a".join("a" for i in range(256))
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -1061,7 +1061,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         expected: drop successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -1107,7 +1107,7 @@ class TestMilvusClientLoadPartitionValid(TestMilvusClientV2Base):
         expected: drop successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         partition_names = ["_default", partition_name]
         # 1. create collection
@@ -1125,7 +1125,7 @@ class TestMilvusClientLoadPartitionValid(TestMilvusClientV2Base):
         expected: drop successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -1143,7 +1143,7 @@ class TestMilvusClientLoadPartitionValid(TestMilvusClientV2Base):
         expected: drop successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str(partition_prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
