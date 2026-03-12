@@ -404,7 +404,8 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 	return nil
 }
 
-// load bm25 stats for sealed segments
+// load bm25 stats for sealed segments.
+// idf oracle owns the full lifecycle: download, disk write, register, cleanup.
 func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.SegmentLoadInfo, req *querypb.LoadSegmentsRequest) error {
 	if sd.idfOracle == nil {
 		return nil
@@ -413,31 +414,15 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 	pool := segments.GetBM25LoadPool()
 
 	future := pool.Submit(func() (any, error) {
-		bm25Stats, err := sd.loader.LoadBM25Stats(ctx, req.GetCollectionID(), infos...)
-		if err != nil {
-			log.Warn("failed to load bm25 stats for segment", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
-			return nil, err
-		}
-
-		if bm25Stats != nil {
-			bm25Stats.Range(func(segmentID int64, stats map[int64]*storage.BM25Stats) bool {
-				log.Info("register sealed segment bm25 stats into idforacle",
-					zap.Int64("segmentID", segmentID),
-				)
-				err = sd.idfOracle.RegisterSealed(segmentID, stats)
-				if err != nil {
-					log.Warn("failed to register sealed segment bm25 stats into idforacle", zap.Error(err))
-					return false
-				}
-				return true
-			})
-
-			if err != nil {
-				log.Warn("failed to register sealed segment bm25 stats into idforacle", zap.Error(err))
+		for _, info := range infos {
+			if err := sd.idfOracle.LoadSealed(ctx, info.GetSegmentID(), info.GetBm25Logs(), sd.loader.GetChunkManager()); err != nil {
+				log.Warn("failed to load bm25 stats for segment",
+					zap.Int64("collectionID", req.GetCollectionID()),
+					zap.Int64("segmentID", info.GetSegmentID()),
+					zap.Error(err))
 				return nil, err
 			}
 		}
-
 		return nil, nil
 	})
 

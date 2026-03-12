@@ -435,41 +435,6 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 	}
 }
 
-func (suite *SegmentLoaderSuite) TestLoadBm25Stats() {
-	suite.SetupBM25()
-	msgLength := 1
-	sparseFieldID := mock_segcore.SimpleSparseFloatVectorField.ID
-	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
-
-	for i := 0; i < suite.segmentNum; i++ {
-		segmentID := suite.segmentID + int64(i)
-
-		bm25logs, err := mock_segcore.SaveBM25Log(suite.collectionID, suite.partitionID, segmentID, sparseFieldID, msgLength, suite.chunkManager)
-		suite.NoError(err)
-
-		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
-			SegmentID:     segmentID,
-			PartitionID:   suite.partitionID,
-			CollectionID:  suite.collectionID,
-			Bm25Logs:      []*datapb.FieldBinlog{bm25logs},
-			NumOfRows:     int64(msgLength),
-			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-		})
-	}
-
-	statsMap, err := suite.loader.LoadBM25Stats(context.Background(), suite.collectionID, loadInfos...)
-	suite.NoError(err)
-
-	for i := 0; i < suite.segmentNum; i++ {
-		segmentID := suite.segmentID + int64(i)
-		stats, ok := statsMap.Get(segmentID)
-		suite.True(ok)
-		fieldStats, ok := stats[sparseFieldID]
-		suite.True(ok)
-		suite.Equal(int64(msgLength), fieldStats.NumRow())
-	}
-}
-
 func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
 	ctx := context.Background()
 	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
