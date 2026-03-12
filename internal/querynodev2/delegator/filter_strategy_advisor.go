@@ -282,7 +282,7 @@ func estimateEqualSelectivity(fieldStat *storage.FieldStats, val storage.ScalarF
 	if ndv <= 0 {
 		return defaultSelectivity
 	}
-	return math.Min(1.0/float64(ndv), 1.0)
+	return math.Min(1.0/ndv, 1.0)
 }
 
 func estimateNDV(fieldStat *storage.FieldStats) float64 {

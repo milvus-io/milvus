@@ -586,15 +586,16 @@ queryNode:
   queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
   enableSegmentFilter: true # Enable delegator-side segment filtering using PK predicates (min/max + bloom filter).
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
-  adaptiveFilterStrategy:
-    enabled: true # enable cost-based adaptive selection between pre-filter and iterative-filter per segment
-    threshold: 0.5 # selectivity threshold above which iterative filter is preferred (0.0-1.0)
   workerPooling:
     size: 10 # the size for worker querynode client pool
   idfOracle:
     preload: true # Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.
     readBufferSize: 4194304 # Read buffer size in bytes for streaming BM25 stats from remote storage. Reduces per-read overhead through the storage SDK.
     bm25StatsBytesPerEntry: 20 # Estimated memory cost (bytes) per entry in BM25 stats rowsWithToken map for memory accounting. Empirical measurement: 12-19.5 bytes/entry depending on map fill ratio. Increase if cache eviction is too lax; decrease to load more segments concurrently.
+    enableDisk: true
+  adaptiveFilterStrategy:
+    enabled: true # enable cost-based adaptive selection between pre-filter and iterative-filter per segment
+    threshold: 0.5 # selectivity threshold above which iterative filter is preferred (0.0-1.0)
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:
