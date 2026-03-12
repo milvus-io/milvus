@@ -124,6 +124,12 @@ const (
 	SiliconflowAKEnvStr string = "MILVUS_SILICONFLOW_API_KEY"
 )
 
+// Gemini
+
+const (
+	GeminiAKEnvStr string = "MILVUS_GEMINI_API_KEY"
+)
+
 // TEI and vllm
 
 const (
