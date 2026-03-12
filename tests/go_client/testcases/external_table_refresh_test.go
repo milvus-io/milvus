@@ -208,7 +208,7 @@ func generateMultiTypeParquetBytes(numRows int64, startID int64) ([]byte, error)
 
 // --- Helpers ---
 
-func uploadParquetToMinIO(t *testing.T, ctx context.Context, mc *miniogo.Client, bucket, objectKey string, data []byte) {
+func uploadParquetToMinIO(ctx context.Context, t *testing.T, mc *miniogo.Client, bucket, objectKey string, data []byte) {
 	t.Helper()
 	_, err := mc.PutObject(ctx, bucket, objectKey,
 		bytes.NewReader(data), int64(len(data)),
@@ -217,7 +217,7 @@ func uploadParquetToMinIO(t *testing.T, ctx context.Context, mc *miniogo.Client,
 	t.Logf("Uploaded %s/%s (%d bytes)", bucket, objectKey, len(data))
 }
 
-func waitForRefreshComplete(t *testing.T, mc *base.MilvusClient, ctx context.Context, jobID int64, timeout time.Duration) {
+func waitForRefreshComplete(ctx context.Context, t *testing.T, mc *base.MilvusClient, jobID int64, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
 	ticker := time.NewTicker(2 * time.Second)
@@ -243,7 +243,7 @@ func waitForRefreshComplete(t *testing.T, mc *base.MilvusClient, ctx context.Con
 	}
 }
 
-func refreshAndWait(t *testing.T, mc *base.MilvusClient, ctx context.Context, collName string) int64 {
+func refreshAndWait(ctx context.Context, t *testing.T, mc *base.MilvusClient, collName string) int64 {
 	t.Helper()
 	refreshResult, err := mc.RefreshExternalCollection(ctx,
 		client.NewRefreshExternalCollectionOption(collName))
@@ -251,11 +251,11 @@ func refreshAndWait(t *testing.T, mc *base.MilvusClient, ctx context.Context, co
 	require.Greater(t, refreshResult.JobID, int64(0))
 	t.Logf("Started refresh job: %d", refreshResult.JobID)
 
-	waitForRefreshComplete(t, mc, ctx, refreshResult.JobID, 120*time.Second)
+	waitForRefreshComplete(ctx, t, mc, refreshResult.JobID, 120*time.Second)
 	return refreshResult.JobID
 }
 
-func indexAndLoadCollection(t *testing.T, mc *base.MilvusClient, ctx context.Context, collName, vecFieldName string) {
+func indexAndLoadCollection(ctx context.Context, t *testing.T, mc *base.MilvusClient, collName, vecFieldName string) {
 	t.Helper()
 	idx := index.NewAutoIndex(entity.L2)
 	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, vecFieldName, idx))
@@ -274,7 +274,7 @@ func indexAndLoadCollection(t *testing.T, mc *base.MilvusClient, ctx context.Con
 // indexAndLoadCollectionWithScalarAndVector creates scalar indexes on id and value fields,
 // a vector index on the embedding field, verifies all indexes are built successfully,
 // and then loads the collection.
-func indexAndLoadCollectionWithScalarAndVector(t *testing.T, mc *base.MilvusClient, ctx context.Context, collName string, totalRows int64) {
+func indexAndLoadCollectionWithScalarAndVector(ctx context.Context, t *testing.T, mc *base.MilvusClient, collName string, totalRows int64) {
 	t.Helper()
 
 	// Create scalar index on "id" field
@@ -623,7 +623,7 @@ indexAndLoad:
 	// ---------------------------------------------------------------
 	// Step 4: Create scalar + vector indexes and load collection
 	// ---------------------------------------------------------------
-	indexAndLoadCollectionWithScalarAndVector(t, mc, ctx, collName, totalExpectedRows)
+	indexAndLoadCollectionWithScalarAndVector(ctx, t, mc, collName, totalExpectedRows)
 
 	// ---------------------------------------------------------------
 	// Step 6: Query count(*)
@@ -782,8 +782,8 @@ func TestExternalCollectionIncrementalRefresh(t *testing.T) {
 	data1, err := generateParquetBytes(500, 500) // ids 500-999
 	require.NoError(t, err)
 
-	uploadParquetToMinIO(t, ctx, minioClient, minioCfg.bucket, extPath+"/data0.parquet", data0)
-	uploadParquetToMinIO(t, ctx, minioClient, minioCfg.bucket, extPath+"/data1.parquet", data1)
+	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, extPath+"/data0.parquet", data0)
+	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, extPath+"/data1.parquet", data1)
 
 	// ---------------------------------------------------------------
 	// Create external collection
@@ -803,8 +803,8 @@ func TestExternalCollectionIncrementalRefresh(t *testing.T) {
 	// ---------------------------------------------------------------
 	// First refresh + load
 	// ---------------------------------------------------------------
-	refreshAndWait(t, mc, ctx, collName)
-	indexAndLoadCollection(t, mc, ctx, collName, "embedding")
+	refreshAndWait(ctx, t, mc, collName)
+	indexAndLoadCollection(ctx, t, mc, collName, "embedding")
 
 	// Verify: count = 1000
 	countRes, err := mc.Query(ctx, client.NewQueryOption(collName).
@@ -838,10 +838,10 @@ func TestExternalCollectionIncrementalRefresh(t *testing.T) {
 	// Upload data2.parquet (ids 2000-2299, 300 rows)
 	data2, err := generateParquetBytes(300, 2000)
 	require.NoError(t, err)
-	uploadParquetToMinIO(t, ctx, minioClient, minioCfg.bucket, extPath+"/data2.parquet", data2)
+	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, extPath+"/data2.parquet", data2)
 
 	// Second refresh
-	refreshAndWait(t, mc, ctx, collName)
+	refreshAndWait(ctx, t, mc, collName)
 
 	// Verify collection stats: count = 500 + 300 = 800
 	stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(collName))
@@ -855,7 +855,7 @@ func TestExternalCollectionIncrementalRefresh(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Phase 3: Reload and verify data correctness
 	// ---------------------------------------------------------------
-	indexAndLoadCollection(t, mc, ctx, collName, "embedding")
+	indexAndLoadCollection(ctx, t, mc, collName, "embedding")
 
 	// Verify total count = 800
 	countRes2, err := mc.Query(ctx, client.NewQueryOption(collName).
@@ -940,7 +940,7 @@ func TestExternalCollectionMultipleDataTypes(t *testing.T) {
 	const numRows = int64(100)
 	data, err := generateMultiTypeParquetBytes(numRows, 0)
 	require.NoError(t, err)
-	uploadParquetToMinIO(t, ctx, minioClient, minioCfg.bucket, extPath+"/data.parquet", data)
+	uploadParquetToMinIO(ctx, t, minioClient, minioCfg.bucket, extPath+"/data.parquet", data)
 
 	// ---------------------------------------------------------------
 	// Step 2: Create external collection with multi-type schema
@@ -966,8 +966,8 @@ func TestExternalCollectionMultipleDataTypes(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 3: Refresh + load
 	// ---------------------------------------------------------------
-	refreshAndWait(t, mc, ctx, collName)
-	indexAndLoadCollection(t, mc, ctx, collName, "embedding")
+	refreshAndWait(ctx, t, mc, collName)
+	indexAndLoadCollection(ctx, t, mc, collName, "embedding")
 
 	// ---------------------------------------------------------------
 	// Step 4: Verify count(*)
@@ -1303,7 +1303,7 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 3: Refresh and wait for completion
 	// ---------------------------------------------------------------
-	refreshAndWait(t, mc, ctx, collName)
+	refreshAndWait(ctx, t, mc, collName)
 
 	// Verify row count via stats
 	stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(collName))
@@ -1319,7 +1319,7 @@ func TestExternalCollectionLanceFormat(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 4: Create scalar + vector indexes and load collection
 	// ---------------------------------------------------------------
-	indexAndLoadCollectionWithScalarAndVector(t, mc, ctx, collName, totalRows)
+	indexAndLoadCollectionWithScalarAndVector(ctx, t, mc, collName, totalRows)
 
 	// ---------------------------------------------------------------
 	// Step 5: Query count(*)
@@ -1541,7 +1541,7 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 3: Refresh and wait for completion
 	// ---------------------------------------------------------------
-	refreshAndWait(t, mc, ctx, collName)
+	refreshAndWait(ctx, t, mc, collName)
 
 	stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(collName))
 	common.CheckErr(t, err, true)
@@ -1556,7 +1556,7 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 4: Create scalar + vector indexes and load collection
 	// ---------------------------------------------------------------
-	indexAndLoadCollectionWithScalarAndVector(t, mc, ctx, collName, totalRows)
+	indexAndLoadCollectionWithScalarAndVector(ctx, t, mc, collName, totalRows)
 
 	// ---------------------------------------------------------------
 	// Step 5: Query count(*)
