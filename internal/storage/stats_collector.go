@@ -142,6 +142,31 @@ func (c *PkStatsCollector) Digest(
 	}, nil
 }
 
+// SerializeBlob serializes the collected PK statistics into a Blob without
+// writing to storage. Returns nil if no stats were collected.
+// Also returns the PK field ID for use in path construction.
+func (c *PkStatsCollector) SerializeBlob(rowNum int64) (*Blob, int64, error) {
+	if c.pkstats == nil {
+		return nil, 0, nil
+	}
+
+	codec := NewInsertCodecWithSchema(&etcdpb.CollectionMeta{
+		ID:     c.collectionID,
+		Schema: c.schema,
+	})
+	blob, err := codec.SerializePkStats(c.pkstats, rowNum)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	pkField, err := typeutil.GetPrimaryFieldSchema(c.schema)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return blob, pkField.GetFieldID(), nil
+}
+
 // NewPkStatsCollector creates a new primary key stats collector
 func NewPkStatsCollector(
 	collectionID UniqueID,
@@ -256,6 +281,28 @@ func (c *Bm25StatsCollector) Digest(
 		return nil, err
 	}
 
+	return result, nil
+}
+
+// SerializeBlobs serializes the collected BM25 statistics into Blobs without
+// writing to storage. Returns nil if no BM25 stats were collected.
+// The map key is the field ID.
+func (c *Bm25StatsCollector) SerializeBlobs() (map[int64]*Blob, error) {
+	if len(c.bm25Stats) == 0 {
+		return nil, nil
+	}
+
+	result := make(map[int64]*Blob, len(c.bm25Stats))
+	for fieldID, stats := range c.bm25Stats {
+		data, err := stats.Serialize()
+		if err != nil {
+			return nil, err
+		}
+		result[fieldID] = &Blob{
+			Value:      data,
+			MemorySize: int64(len(data)),
+		}
+	}
 	return result, nil
 }
 

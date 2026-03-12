@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
@@ -73,8 +74,9 @@ type statsTask struct {
 	binlogIO io.BinlogIO
 	cm       storage.ChunkManager
 
-	logIDOffset int64
-	currentTime time.Time
+	logIDOffset  int64
+	currentTime  time.Time
+	manifestPath string // current manifest version, updated after each AddStatsToManifest
 }
 
 type BuildIndexOptions struct {
@@ -272,14 +274,44 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		return nil, err
 	}
 
-	statsLogs := []*datapb.FieldBinlog{stats}
-	if err := binlog.CompressFieldBinlogs(statsLogs); err != nil {
-		return nil, err
+	// For V3 segments, register bloom filter and BM25 stats in manifest.
+	// After registration, stats/bm25stats are set to nil so the legacy
+	// binlog-compress path below is skipped for these fields.
+	if st.manifestPath != "" {
+		var statEntries []packed.StatEntry
+		if stats != nil {
+			statEntries = append(statEntries, packed.FieldBinlogStatEntry("bloom_filter", stats.GetFieldID(), stats))
+		}
+		for fieldID, bm25stat := range bm25stats {
+			statEntries = append(statEntries, packed.FieldBinlogStatEntry("bm25", fieldID, bm25stat))
+		}
+
+		if len(statEntries) > 0 {
+			newManifest, err := packed.AddStatsToManifest(
+				st.manifestPath, st.req.GetStorageConfig(), statEntries)
+			if err != nil {
+				return nil, fmt.Errorf("failed to add stats to manifest: %w", err)
+			}
+			st.manifestPath = newManifest
+		}
+		stats = nil
+		bm25stats = nil
 	}
 
-	bm25StatsLogs := lo.Values(bm25stats)
-	if err := binlog.CompressFieldBinlogs(bm25StatsLogs); err != nil {
-		return nil, err
+	var statsLogs []*datapb.FieldBinlog
+	if stats != nil {
+		statsLogs = []*datapb.FieldBinlog{stats}
+		if err := binlog.CompressFieldBinlogs(statsLogs); err != nil {
+			return nil, err
+		}
+	}
+
+	var bm25StatsLogs []*datapb.FieldBinlog
+	if len(bm25stats) > 0 {
+		bm25StatsLogs = lo.Values(bm25stats)
+		if err := binlog.CompressFieldBinlogs(bm25StatsLogs); err != nil {
+			return nil, err
+		}
 	}
 
 	st.manager.StorePKSortStatsResult(st.req.GetClusterID(),
@@ -312,6 +344,7 @@ func (st *statsTask) Execute(ctx context.Context) error {
 	ctx, span := otel.Tracer(typeutil.IndexNodeRole).Start(ctx, fmt.Sprintf("Stats-Execute-%s-%d", st.req.GetClusterID(), st.req.GetTaskID()))
 	defer span.End()
 
+	st.manifestPath = st.req.GetManifestPath()
 	insertLogs := st.req.GetInsertLogs()
 	var err error
 	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort {
@@ -551,6 +584,18 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		return err
 	}
 
+	// When manifest_path is set, register text index stats in manifest
+	if st.manifestPath != "" && len(textIndexLogs) > 0 {
+		statEntries := packed.TextIndexStatEntries(textIndexLogs, st.req.GetCurrentScalarIndexVersion())
+		newManifest, err := packed.AddStatsToManifest(
+			st.manifestPath, st.req.GetStorageConfig(), statEntries)
+		if err != nil {
+			return fmt.Errorf("failed to add text index stats to manifest: %w", err)
+		}
+		st.manifestPath = newManifest
+		clear(textIndexLogs)
+	}
+
 	st.manager.StoreStatsTextIndexResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
 		st.req.GetCollectionID(),
@@ -691,6 +736,18 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 
 	if err := eg.Wait(); err != nil {
 		return err
+	}
+
+	// When manifest_path is set, register JSON key stats in manifest
+	if st.manifestPath != "" && len(jsonKeyIndexStats) > 0 {
+		statEntries := packed.JSONKeyStatEntries(jsonKeyIndexStats)
+		newManifest, err := packed.AddStatsToManifest(
+			st.manifestPath, st.req.GetStorageConfig(), statEntries)
+		if err != nil {
+			return fmt.Errorf("failed to add JSON key stats to manifest: %w", err)
+		}
+		st.manifestPath = newManifest
+		clear(jsonKeyIndexStats)
 	}
 
 	totalElapse := st.tr.RecordSpan()

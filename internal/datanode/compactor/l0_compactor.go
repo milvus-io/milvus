@@ -491,6 +491,7 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 		segment := segment
 		innerCtx := ctx
 		future := pool.Submit(func() (any, error) {
+			// Decompress fills in LogPath from LogID for legacy segments; no-op for V3.
 			err := binlog.DecompressBinLogWithRootPath(
 				t.compactionParams.StorageConfig.GetRootPath(),
 				storage.StatsBinlog,
@@ -505,12 +506,25 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 					zap.Error(err))
 				return err, err
 			}
-			pks, err := compaction.LoadStats(innerCtx, t.cm,
-				t.plan.GetSchema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
+
+			pkField, err := typeutil.GetPrimaryFieldSchema(t.plan.GetSchema())
+			if err != nil {
+				return err, err
+			}
+
+			resolver := packed.NewStatsResolver(segment.GetManifest(), t.compactionParams.StorageConfig).
+				WithStatslogs(segment.GetField2StatslogPaths())
+			paths, err := resolver.BloomFilterPaths(pkField.GetFieldID())
+			if err != nil {
+				return err, err
+			}
+
+			pks, err := compaction.LoadStatsFromPaths(innerCtx, t.cm, segment.GetSegmentID(), paths)
 			if err != nil {
 				log.Warn("failed to load segment stats log",
 					zap.Int64("planID", t.plan.GetPlanID()),
 					zap.String("type", t.plan.GetType().String()),
+					zap.Int64("segmentID", segment.GetSegmentID()),
 					zap.Error(err))
 				return err, err
 			}

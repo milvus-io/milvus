@@ -632,6 +632,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithMetaCache(wb.metaCache).
 		WithSchema(schema).
 		WithSyncPack(pack).
+		WithStorageConfig(packed.CreateStorageConfig()).
 		WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second))
 	return task, nil
 }

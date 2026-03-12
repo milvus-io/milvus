@@ -645,6 +645,13 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Strings("bm25logs", stringifyBinlogs(req.GetField2Bm25LogPaths())),
 	)
 
+	// Validate manifest segment after update
+	if segment := s.meta.GetSegment(ctx, req.GetSegmentID()); segment != nil {
+		if msg := ValidateManifestSegment(segment); msg != "" {
+			log.Warn("manifest segment validation warning", zap.String("detail", msg))
+		}
+	}
+
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
 		metrics.DataCoordSizeStoredL0Segment.WithLabelValues(fmt.Sprint(req.GetCollectionID())).Observe(calculateL0SegmentSize(req.GetField2StatslogPaths()))
 

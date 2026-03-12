@@ -20,7 +20,9 @@ import (
 	"context"
 	"io"
 	"math"
+	"path"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -35,9 +38,11 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -348,6 +353,78 @@ func (s *PackedBinlogRecordSuite) TestAllocIDExhausedError() {
 		s.NoError(err)
 		err = w.Write(rec)
 		s.Error(err)
+	}
+}
+
+// TestV3StatsWrittenUnderBasePath verifies the regression fix: for V3
+// (manifest-based) storage, bloom filter stats must be written to
+// basePath/_stats/bloom_filter.{fieldID}/{id}, NOT to stats_log/.
+// Before the fix, writeStats() was called, placing files at
+// {rootPath}/stats_log/... which caused a mangled path on read-back.
+func (s *PackedBinlogRecordSuite) TestV3StatsWrittenUnderBasePath() {
+	dir := s.T().TempDir()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, dir)
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+		paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	}()
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+	columnGroups := []storagecommon.ColumnGroup{
+		{GroupID: 0, Columns: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, Fields: []int64{0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 101}},
+	}
+	wOption := []RwOption{
+		WithVersion(StorageV3),
+		WithColumnGroups(columnGroups),
+		WithStorageConfig(storageConfig),
+		WithUploader(func(ctx context.Context, kvs map[string][]byte) error { return nil }),
+	}
+
+	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum, wOption...)
+	require.NoError(s.T(), err)
+
+	blobs, err := generateTestData(10)
+	require.NoError(s.T(), err)
+	reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
+	require.NoError(s.T(), err)
+	defer reader.Close()
+	for i := 0; i < 10; i++ {
+		v, err := reader.NextValue()
+		require.NoError(s.T(), err)
+		rec, err := ValueSerializer([]*Value{*v}, s.schema)
+		require.NoError(s.T(), err)
+		require.NoError(s.T(), w.Write(rec))
+	}
+	require.NoError(s.T(), w.Close())
+
+	_, statsLog, _, manifestPath, _ := w.GetLogs()
+
+	// For V3: stats are in the manifest, not in a separate FieldBinlog.
+	assert.Nil(s.T(), statsLog, "V3 statsLog must be nil; stats are stored in the manifest")
+	require.NotEmpty(s.T(), manifestPath, "V3 manifest path must be non-empty")
+
+	// The manifest must contain bloom filter stats with paths under basePath/_stats/.
+	stats, err := packed.GetManifestStats(manifestPath, storageConfig)
+	require.NoError(s.T(), err)
+
+	pkField, err := typeutil.GetPrimaryFieldSchema(s.schema)
+	require.NoError(s.T(), err)
+	bfKey := "bloom_filter." + strconv.FormatInt(pkField.GetFieldID(), 10)
+	bfStat, ok := stats[bfKey]
+	require.True(s.T(), ok, "manifest must contain bloom filter stats under key %q", bfKey)
+	require.NotEmpty(s.T(), bfStat.Paths)
+
+	basePath := path.Join(common.SegmentInsertLogPath,
+		metautil.JoinIDPath(s.collectionID, s.partitionID, s.segmentID))
+	for _, p := range bfStat.Paths {
+		assert.True(s.T(), strings.HasPrefix(p, basePath+"/_stats/"),
+			"bloom filter stat path %q must be under basePath/_stats/, got path outside basePath", p)
+		assert.NotContains(s.T(), p, "stats_log",
+			"bloom filter stat path must not use legacy stats_log/ layout")
 	}
 }
 
