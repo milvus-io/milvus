@@ -1627,10 +1627,11 @@ func TestGetCompactionState(t *testing.T) {
 
 		mockHandler := NewMockCompactionInspector(t)
 		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{
-			state: commonpb.CompactionState_Completed,
+			state:        commonpb.CompactionState_Completed,
+			completedCnt: 1,
 		})
 		svr.compactionInspector = mockHandler
-		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
+		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 1})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, commonpb.CompactionState_Completed, resp.GetState())
@@ -1671,6 +1672,47 @@ func TestGetCompactionState(t *testing.T) {
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	t.Run("test get compaction state with invalid compactionID", func(t *testing.T) {
+		svr := &Server{}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+
+		// Test with compactionID = -1
+		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{
+			CompactionID: -1,
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+
+		// Test with compactionID = 0
+		resp, err = svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{
+			CompactionID: 0,
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+	})
+
+	t.Run("test get compaction state with non-existent compactionID", func(t *testing.T) {
+		svr := &Server{}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+
+		mockHandler := NewMockCompactionInspector(t)
+		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{
+			state:        commonpb.CompactionState_Completed,
+			executingCnt: 0,
+			completedCnt: 0,
+			failedCnt:    0,
+			timeoutCnt:   0,
+			mergeInfos:   nil,
+		})
+		svr.compactionInspector = mockHandler
+
+		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{
+			CompactionID: 999999,
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
 	})
 }
 
@@ -1788,6 +1830,47 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	t.Run("test get compaction state with plans with invalid compactionID", func(t *testing.T) {
+		svr := &Server{}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+
+		// Test with compactionID = -1
+		resp, err := svr.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
+			CompactionID: -1,
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+
+		// Test with compactionID = 0
+		resp, err = svr.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
+			CompactionID: 0,
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+	})
+
+	t.Run("test get compaction state with plans with non-existent compactionID", func(t *testing.T) {
+		svr := &Server{}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+
+		mockHandler := NewMockCompactionInspector(t)
+		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{
+			state:        commonpb.CompactionState_Completed,
+			executingCnt: 0,
+			completedCnt: 0,
+			failedCnt:    0,
+			timeoutCnt:   0,
+			mergeInfos:   nil,
+		})
+		svr.compactionInspector = mockHandler
+
+		resp, err := svr.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
+			CompactionID: 999999,
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
 	})
 }
 
