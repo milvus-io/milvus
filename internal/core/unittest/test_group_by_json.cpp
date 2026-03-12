@@ -224,7 +224,7 @@ TEST(GroupBYJSON, GrowingRawData) {
     auto metric_type = knowhere::metric::L2;
     auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
     auto json_fid = schema->AddDebugField("json_field", DataType::JSON);
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "embeddings", DataType::VECTOR_FLOAT, dim, metric_type);
     schema->set_primary_field_id(str_fid);
 

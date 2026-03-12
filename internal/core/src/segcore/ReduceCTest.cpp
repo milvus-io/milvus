@@ -92,11 +92,7 @@ TEST(CApiTest, ReduceSearchResultsAndFillDataCost) {
     CSearchResultDataBlobs c_search_result_data_blobs;
     uint8_t trace_id[16] = {0};
     uint8_t span_id[8] = {0};
-    CTraceContext trace{
-        .traceID = trace_id,
-        .spanID = span_id,
-        .traceFlags = 0,
-    };
+    CTraceContext trace{trace_id, span_id, 0};
     auto st = ReduceSearchResultsAndFillData(trace,
                                              &c_search_result_data_blobs,
                                              plan,

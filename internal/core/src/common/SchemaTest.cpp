@@ -440,8 +440,7 @@ TEST_F(SchemaTest, ConvertToLoonArrowSchemaFieldNamesAreFieldIds) {
 TEST_F(SchemaTest, ConvertToLoonArrowSchemaVsConvertToArrowSchema) {
     auto pk_id = schema_->AddDebugField("pk_field", DataType::INT64, false);
     schema_->set_primary_field_id(pk_id);
-    auto varchar_id =
-        schema_->AddDebugField("varchar_field", DataType::VARCHAR, true);
+    schema_->AddDebugField("varchar_field", DataType::VARCHAR, true);
 
     auto arrow_schema = schema_->ConvertToArrowSchema();
     auto loon_schema = schema_->ConvertToLoonArrowSchema();

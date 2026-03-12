@@ -1099,10 +1099,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
             }
         }
         // process shared data
-        auto shared_executor = [this, &elements, &res_view](
-                                   milvus::BsonView bson,
-                                   uint32_t row_offset,
-                                   uint32_t value_offset) {
+        auto shared_executor = [&elements, &res_view](milvus::BsonView bson,
+                                                      uint32_t row_offset,
+                                                      uint32_t value_offset) {
             auto val = bson.ParseAsArrayAtOffset(value_offset);
 
             if (!val.has_value()) {
@@ -1191,10 +1190,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
 
     auto elements = expr_->vals_;
     std::unordered_set<int> elements_index;
-    int i = 0;
-    for (auto& element : elements) {
+    for (int i = 0; i < static_cast<int>(elements.size()); i++) {
         elements_index.insert(i);
-        i++;
     }
 
     int processed_cursor = 0;
@@ -1354,10 +1351,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto elements = expr_->vals_;
     std::set<int> elements_index;
-    int i = 0;
-    for (auto& element : elements) {
+    for (int i = 0; i < static_cast<int>(elements.size()); i++) {
         elements_index.insert(i);
-        i++;
     }
     if (elements.empty()) {
         MoveCursor();
@@ -1772,10 +1767,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
 
     auto elements = expr_->vals_;
     std::unordered_set<int> elements_index;
-    int i = 0;
-    for (auto& element : elements) {
+    for (int i = 0; i < static_cast<int>(elements.size()); i++) {
         elements_index.insert(i);
-        i++;
     }
 
     size_t processed_cursor = 0;

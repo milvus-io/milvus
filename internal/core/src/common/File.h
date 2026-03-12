@@ -129,6 +129,7 @@ class File {
             }
             default: {
                 AssertInfo(false, "invalid file flags: {}", flags);
+                return "rb";  // unreachable, suppress -Wreturn-type
             }
         }
     }

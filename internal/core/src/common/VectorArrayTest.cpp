@@ -33,12 +33,6 @@ TEST(VectorArray, TestSchema) {
     milvus_pb::schema::CollectionSchema proto;
     proto.set_name("col");
     proto.set_description("asdfhsalkgfhsadg");
-    auto dim = 16;
-    bool bool_default_value = true;
-    int32_t int_default_value = 20;
-    int64_t long_default_value = 20;
-    float float_default_value = 20;
-    double double_default_value = 20;
     std::string varchar_dafualt_vlaue = "20";
 
     {

@@ -371,7 +371,6 @@ CreateFileManager(const ChunkManagerPtr& cm,
     // field_id: 100, index_build_id: 1000, index_version: 1
     IndexMeta index_meta = {
         3, 100, 1000, 1, "opt_fields", "field_name", DataType::VECTOR_FLOAT, 1};
-    int64_t slice_size = milvus::FILE_SLICE_SIZE;
     return std::make_shared<DiskFileManagerImpl>(storage::FileManagerContext(
         kOptVecFieldDataMeta, index_meta, cm, std::move(fs)));
 }

@@ -273,7 +273,7 @@ TEST(Expr, TestArrayRange) {
 
         };
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto long_array_fid =
@@ -398,7 +398,7 @@ TEST(Expr, TestArrayEqual) {
              }},
         };
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto long_array_fid =
@@ -479,7 +479,7 @@ TEST(Expr, TestArrayNullExpr) {
             {"long_array is null", [](bool v) { return !v; }},
         };
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto long_array_fid = schema->AddDebugField(
@@ -1077,7 +1077,7 @@ TEST(Expr, TestArrayContainsEmptyValues) {
 
 TEST(Expr, TestArrayBinaryArith) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto int_array_fid =
@@ -1640,7 +1640,7 @@ TEST(Expr, TestArrayStringMatch) {
 
 TEST(Expr, TestArrayInTerm) {
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("id", DataType::INT64);
     auto long_array_fid =
