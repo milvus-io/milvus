@@ -9,13 +9,24 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <atomic>
+#include <chrono>
 #include <aws/core/auth/AWSCredentialsProvider.h>
+#include <memory>
+
 #include "HuaweiCloudSTSClient.h"
+#include "aws/core/auth/AWSCredentials.h"
+#include "aws/core/utils/memory/AWSMemory.h"
+#include "aws/core/utils/memory/stl/AWSString.h"
+
+class HuaweiCloudCredentialsProviderTestHelper;
 
 namespace Aws {
 namespace Auth {
 class HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider
     : public AWSCredentialsProvider {
+    friend class ::HuaweiCloudCredentialsProviderTestHelper;
+
  public:
     HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider();
     AWSCredentials
@@ -28,8 +39,6 @@ class HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider
  private:
     void
     RefreshIfExpired();
-    Aws::String
-    CalculateQueryString() const;
 
     Aws::UniquePtr<Aws::Internal::HuaweiCloudSTSCredentialsClient> m_client;
     Aws::Auth::AWSCredentials m_credentials;
@@ -40,8 +49,17 @@ class HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider
     Aws::String m_sessionName;
     Aws::String m_token;
     bool m_initialized;
+    bool m_lastReloadFailed = false;
+    std::chrono::steady_clock::time_point m_lastFailedReloadTime;
+    static constexpr int RELOAD_COOLDOWN_SECONDS = 30;
+    static constexpr int RELOAD_COOLDOWN_SECONDS_URGENT = 5;
+    std::atomic<uint64_t> m_stsSuccessCount{0};
+    std::atomic<uint64_t> m_stsFailureCount{0};
+
     bool
     ExpiresSoon() const;
+    bool
+    IsInCooldown() const;
 };
 }  // namespace Auth
 }  // namespace Aws
