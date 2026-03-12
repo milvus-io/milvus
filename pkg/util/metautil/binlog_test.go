@@ -142,6 +142,37 @@ func TestParseInsertLogPath(t *testing.T) {
 	}
 }
 
+func TestBuildDeltaLogPathV3(t *testing.T) {
+	tests := []struct {
+		name     string
+		basePath string
+		logID    typeutil.UniqueID
+		expected string
+	}{
+		{
+			name:     "basic path",
+			basePath: "rootPath/insert_log/123/456/789",
+			logID:    1001,
+			expected: "rootPath/insert_log/123/456/789/_delta/1001",
+		},
+		{
+			name:     "absolute path",
+			basePath: "/data/insert_log/100/200/300",
+			logID:    42,
+			expected: "/data/insert_log/100/200/300/_delta/42",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := BuildDeltaLogPathV3(tt.basePath, tt.logID)
+			if result != tt.expected {
+				t.Errorf("BuildDeltaLogPathV3() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestExtractTextLogFilenames(t *testing.T) {
 	textStatsLogs := map[int64]*datapb.TextIndexStats{
 		100: {

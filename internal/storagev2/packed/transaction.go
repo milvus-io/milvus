@@ -55,7 +55,7 @@ func AddDeltaLogsToManifest(
 		return manifestPath, nil
 	}
 
-	basePath, version, err := UnmarshalManfestPath(manifestPath)
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse manifest path: %w", err)
 	}
@@ -120,7 +120,7 @@ func GetDeltaLogPathsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 ) ([]string, error) {
-	basePath, version, err := UnmarshalManfestPath(manifestPath)
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse manifest path: %w", err)
 	}
@@ -170,15 +170,23 @@ func GetDeltaLogPathsFromManifest(
 	return paths, nil
 }
 
-// toRelativePath converts a full path to a path relative to the base path.
-// The deltalog path format is: {rootPath}/delta_log/{collectionID}/{partitionID}/{segmentID}/{logID}
-// The basePath format is: {rootPath}/insert_log/{collectionID}/{partitionID}/{segmentID}
-//
+// toRelativePath converts a full path to a path relative to basePath/_delta/.
 // The C loon library stores delta log paths relative to basePath/_delta/ (the kDeltaPath convention).
 // When deserializing, it prepends basePath/_delta/ to the relative path and normalizes.
-// So we need baseDepth + 1 levels of "../" (the +1 accounts for the _delta/ subdirectory).
+//
+// For V3 delta paths ({basePath}/_delta/{logID}), the file is already under basePath/_delta/,
+// so the relative path is simply the filename ({logID}).
+//
+// For legacy delta paths ({rootPath}/delta_log/{collID}/{partID}/{segID}/{logID}),
+// we need baseDepth + 1 levels of "../" to escape basePath/_delta/ back to rootPath.
 func toRelativePath(fullPath, basePath, rootPath string) string {
-	// If fullPath starts with rootPath, make it relative to basePath/_delta/
+	// V3 path: if fullPath is under basePath/_delta/, just return the filename
+	deltaDir := filepath.Join(basePath, "_delta") + "/"
+	if strings.HasPrefix(fullPath, deltaDir) {
+		return strings.TrimPrefix(fullPath, deltaDir)
+	}
+
+	// Legacy path: compute relative path from basePath/_delta/ via "../" traversal
 	if strings.HasPrefix(fullPath, rootPath) {
 		// Get the path relative to rootPath for both
 		fullRel := strings.TrimPrefix(fullPath, rootPath)

@@ -241,7 +241,7 @@ type commonConfig struct {
 	BeamWidthRatio                      ParamItem `refreshable:"true"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
-	EnableNamespace                     ParamItem `refreshable:"false"`
+	ParquetStatsSkipIndex               ParamItem `refreshable:"true"`
 
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
@@ -619,14 +619,14 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
 
-	p.EnableNamespace = ParamItem{
-		Key:          "common.namespace.enabled",
+	p.ParquetStatsSkipIndex = ParamItem{
+		Key:          "common.parquetStatsSkipIndex.enabled",
 		Version:      "2.6.0",
 		DefaultValue: "false",
-		Doc:          "whether to enable namespace, this parameter may be deprecated in the future. Just keep it for compatibility.",
+		Doc:          "whether to skip parquet stats index when reading; set true to enable skipping.",
 		Export:       true,
 	}
-	p.EnableNamespace.Init(base.mgr)
+	p.ParquetStatsSkipIndex.Init(base.mgr)
 
 	p.StorageType = ParamItem{
 		Key:          "common.storageType",
@@ -976,7 +976,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.UseLoonFFI = ParamItem{
 		Key:          "common.storage.useLoonFFI",
 		Version:      "2.6.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Export:       true,
 	}
 	p.UseLoonFFI.Init(base.mgr)
@@ -2374,7 +2374,7 @@ please adjust in embedded Milvus: false`,
 	p.ResolveAliasForPrivilege = ParamItem{
 		Key:          "proxy.resolveAliasForPrivilege",
 		Version:      "2.6.9",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks",
 		Export:       true,
 	}
@@ -3475,9 +3475,10 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Version:      "2.6.0",
 		DefaultValue: "sync",
 		Forbidden:    true,
-		Doc: `options: sync, disable.
+		Doc: `options: sync, async, disable.
 Specifies the timing for warming up the Tiered Storage cache.
 - "sync": data will be loaded into the cache before a segment is considered loaded.
+- "async": data will be loaded into the cache asynchronously in the background after a segment is loaded.
 - "disable": data will not be proactively loaded into the cache, and loaded only if needed by search/query tasks.
 Defaults to "sync", except for vector field which defaults to "disable".`,
 		Export: true,

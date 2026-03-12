@@ -22,6 +22,7 @@
 #include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "log/Log.h"
+#include "tantivy-binding.h"
 
 namespace milvus {
 
@@ -114,6 +115,7 @@ SetLogLevel(const char* level) {
             gflags::SetCommandLineOption("minloglevel", "2");
         }
     }
+    tantivy_set_log_level(level);
 }
 
 }  // namespace milvus

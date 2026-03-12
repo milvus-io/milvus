@@ -169,7 +169,7 @@ Requirements:
   ```bash
   Go: >= 1.21
   CMake: >= 3.26.4 && CMake < 4
-  GCC: 9.5
+  GCC: >= 11
   Python: > 3.8 and  <= 3.11
   ```
 

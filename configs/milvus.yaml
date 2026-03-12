@@ -337,7 +337,7 @@ proxy:
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
-  resolveAliasForPrivilege: false # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
+  resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
   # maximum number of result entries, typically Nq * TopK * GroupSize. 
   # It costs additional memory and time to process a large number of result entries. 
   # If the number of result entries exceeds this limit, the search will be rejected.
@@ -487,9 +487,10 @@ queryNode:
     enableGeometryCache: false # Enable geometry cache for geometry data
     tieredStorage:
       warmup:
-        # options: sync, disable.
+        # options: sync, async, disable.
         # Specifies the timing for warming up the Tiered Storage cache.
         # - "sync": data will be loaded into the cache before a segment is considered loaded.
+        # - "async": data will be loaded into the cache asynchronously in the background after a segment is loaded.
         # - "disable": data will not be proactively loaded into the cache, and loaded only if needed by search/query tasks.
         # Defaults to "sync", except for vector field which defaults to "disable".
         scalarField: sync
@@ -941,8 +942,8 @@ common:
     BeamWidthRatio: 4
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
-  namespace:
-    enabled: false # whether to enable namespace, this parameter may be deprecated in the future. Just keep it for compatibility.
+  parquetStatsSkipIndex:
+    enabled: false # whether to skip parquet stats index when reading; set true to enable skipping.
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
@@ -1030,7 +1031,7 @@ common:
       splitByAvgSize:
         enabled: true # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
-    useLoonFFI: false
+    useLoonFFI: true
   traceLogMode: 0 # trace request info
   bloomFilterSize: 100000 # bloom filter initial size
   bloomFilterType: BlockedBloomFilter # bloom filter type, support BasicBloomFilter and BlockedBloomFilter

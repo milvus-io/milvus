@@ -661,7 +661,7 @@ func (c *Core) restore(ctx context.Context) error {
 			// CollectionCreating is a deprecated status,
 			// we cannot promise the coordinator handle it correctly, so just treat it as a tombstone.
 			if coll.State == pb.CollectionState_CollectionDropping || coll.State == pb.CollectionState_CollectionCreating {
-				c.tombstoneSweeper.AddTombstone(newCollectionTombstone(c.meta, c.broker, coll.CollectionID, c.proxyClientManager))
+				c.tombstoneSweeper.AddTombstone(newCollectionTombstone(c.meta, c.broker, coll.CollectionID))
 				continue
 			}
 			for _, part := range coll.Partitions {
@@ -1130,6 +1130,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		StructArrayFields:  model.MarshalStructArrayFieldModels(collInfo.StructArrayFields),
 		Functions:          model.MarshalFunctionModels(collInfo.Functions),
 		EnableDynamicField: collInfo.EnableDynamicField,
+		EnableNamespace:    collInfo.EnableNamespace,
 		Properties:         collInfo.Properties,
 		FileResourceIds:    collInfo.FileResourceIds,
 		ExternalSource:     collInfo.ExternalSource,

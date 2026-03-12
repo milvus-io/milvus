@@ -126,11 +126,18 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         num_rows_ = GetNumRowsUntilChunk().back();
     }
 
-    virtual ~ChunkedColumnBase() = default;
+    virtual ~ChunkedColumnBase() {
+        slot_->CancelWarmup();
+    }
 
     void
     ManualEvictCache() const override {
         slot_->ManualEvictAll();
+    }
+
+    void
+    CancelWarmup() override {
+        slot_->CancelWarmup();
     }
 
     PinWrapper<const char*>

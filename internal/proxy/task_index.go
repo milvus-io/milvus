@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -118,6 +119,17 @@ func adjustAutoIndexParamsByDataType(config map[string]string, dataType schemapb
 	return adjusted
 }
 
+func getDenseFloatAutoIndexParams(collectionProperties []*commonpb.KeyValuePair) (map[string]string, error) {
+	bigTopKOptimizationEnabled, err := common.IsBigTopKOptimizationEnabled(collectionProperties...)
+	if err != nil {
+		return nil, err
+	}
+	if bigTopKOptimizationEnabled {
+		return Params.AutoIndexConfig.BigTopKIndexParams.GetAsJSONMap(), nil
+	}
+	return Params.AutoIndexConfig.IndexParams.GetAsJSONMap(), nil
+}
+
 type createIndexTask struct {
 	baseTask
 	Condition
@@ -135,6 +147,7 @@ type createIndexTask struct {
 	functionSchema                   *schemapb.FunctionSchema
 	fieldSchema                      *schemapb.FieldSchema
 	userAutoIndexMetricTypeSpecified bool
+	collectionProperties             []*commonpb.KeyValuePair
 }
 
 func (cit *createIndexTask) TraceCtx() context.Context {
@@ -334,13 +347,17 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsDenseFloatVectorType(cit.fieldSchema.ElementType)) {
+				autoIndexParams, err := getDenseFloatAutoIndexParams(cit.collectionProperties)
+				if err != nil {
+					return err
+				}
 				// override float vector index params by autoindex
 				// filter incompatible refine_type for fp16/bf16 vectors
 				dataType := cit.fieldSchema.DataType
 				if typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {
 					dataType = cit.fieldSchema.ElementType
 				}
-				autoIndexParams := adjustAutoIndexParamsByDataType(Params.AutoIndexConfig.IndexParams.GetAsJSONMap(), dataType)
+				autoIndexParams = adjustAutoIndexParamsByDataType(autoIndexParams, dataType)
 				for k, v := range autoIndexParams {
 					indexParamsMap[k] = v
 				}
@@ -430,13 +447,17 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			var config map[string]string
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsDenseFloatVectorType(cit.fieldSchema.ElementType)) {
-				// override float vector index params by autoindex
+				var err error
+				config, err = getDenseFloatAutoIndexParams(cit.collectionProperties)
+				if err != nil {
+					return err
+				}
 				// filter incompatible refine_type for fp16/bf16 vectors
 				dataType := cit.fieldSchema.DataType
 				if typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {
 					dataType = cit.fieldSchema.ElementType
 				}
-				config = adjustAutoIndexParamsByDataType(Params.AutoIndexConfig.IndexParams.GetAsJSONMap(), dataType)
+				config = adjustAutoIndexParamsByDataType(config, dataType)
 			} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsSparseFloatVectorType(cit.fieldSchema.ElementType)) {
 				// override sparse float vector index params by autoindex
@@ -641,8 +662,20 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 		return fmt.Errorf("invalid index type: %s", indexType)
 	}
 
+	// For ArrayOfVector with non-EmbList metrics (e.g., COSINE, L2, IP), each embedding
+	// in the array is indexed independently as a regular vector. The index only needs to
+	// support the element vector type, not the EmbeddingList capability.
+	// Resolve the effective data type used for index compatibility checks.
+	effectiveDataType := field.DataType
+	effectiveElementType := field.ElementType
+	if typeutil.IsArrayOfVectorType(field.DataType) &&
+		!funcutil.SliceContain(indexparamcheck.EmbListMetrics, indexParams[common.MetricTypeKey]) {
+		effectiveDataType = field.ElementType
+		effectiveElementType = schemapb.DataType_None
+	}
+
 	if typeutil.IsVectorType(field.DataType) && indexType != indexparamcheck.AutoIndex {
-		exist := CheckVecIndexWithDataTypeExist(indexType, field.DataType, field.ElementType)
+		exist := CheckVecIndexWithDataTypeExist(indexType, effectiveDataType, effectiveElementType)
 		if !exist {
 			return fmt.Errorf("data type %s can't build with this index %s", schemapb.DataType_name[int32(field.GetDataType())], indexType)
 		}
@@ -656,12 +689,19 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 		}
 	}
 
-	if err := checker.CheckValidDataType(indexType, field); err != nil {
+	effectiveField := field
+	if effectiveDataType != field.DataType {
+		effectiveField = proto.Clone(field).(*schemapb.FieldSchema)
+		effectiveField.DataType = effectiveDataType
+		effectiveField.ElementType = effectiveElementType
+	}
+
+	if err := checker.CheckValidDataType(indexType, effectiveField); err != nil {
 		log.Ctx(ctx).Info("create index with invalid data type", zap.Error(err), zap.String("data_type", field.GetDataType().String()))
 		return err
 	}
 
-	if err := checker.CheckTrain(field.DataType, field.ElementType, indexParams); err != nil {
+	if err := checker.CheckTrain(effectiveDataType, effectiveElementType, indexParams); err != nil {
 		log.Ctx(ctx).Info("create index with invalid parameters", zap.Error(err))
 		return err
 	}
@@ -677,6 +717,12 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	cit.collectionID = collID
+
+	collInfo, err := globalMetaCache.GetCollectionInfo(ctx, cit.req.GetDbName(), cit.req.GetCollectionName(), cit.collectionID)
+	if err != nil {
+		return err
+	}
+	cit.collectionProperties = collInfo.properties
 
 	if err = validateIndexName(cit.req.GetIndexName()); err != nil {
 		return err
