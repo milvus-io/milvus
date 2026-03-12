@@ -87,8 +87,8 @@ type Loader interface {
 	// LoadBloomFilterSet loads needed statslog for RemoteSegment.
 	LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error)
 
-	// LoadBM25Stats loads BM25 statslog for RemoteSegment
-	LoadBM25Stats(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) (*typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats], error)
+	// GetChunkManager returns the chunk manager for remote storage access.
+	GetChunkManager() storage.ChunkManager
 
 	// LoadIndex append index for segment and remove vector binlogs.
 	LoadIndex(ctx context.Context,
@@ -633,49 +633,8 @@ func (loader *segmentLoader) waitSegmentLoadDone(ctx context.Context, segmentTyp
 	return nil
 }
 
-func (loader *segmentLoader) LoadBM25Stats(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) (*typeutil.ConcurrentMap[int64, map[int64]*storage.BM25Stats], error) {
-	segmentNum := len(infos)
-	if segmentNum == 0 {
-		return nil, nil
-	}
-
-	log.Info("start loading bm25 stats for remote...", zap.Int64("collectionID", collectionID), zap.Int("segmentNum", segmentNum))
-
-	loadedStats := typeutil.NewConcurrentMap[int64, map[int64]*storage.BM25Stats]()
-	loadRemoteBM25Func := func(idx int) error {
-		loadInfo := infos[idx]
-		segmentID := loadInfo.SegmentID
-		stats := make(map[int64]*storage.BM25Stats)
-
-		log.Info("loading bm25 stats for remote...", zap.Int64("collectionID", collectionID), zap.Int64("segment", segmentID))
-		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
-		if err != nil {
-			log.Warn("load remote segment bm25 stats paths failed",
-				zap.Int64("segmentID", segmentID),
-				zap.Error(err),
-			)
-			return err
-		}
-		err = loader.loadBm25Stats(ctx, segmentID, stats, logpaths)
-		if err != nil {
-			log.Warn("load remote segment bm25 stats failed",
-				zap.Int64("segmentID", segmentID),
-				zap.Error(err),
-			)
-			return err
-		}
-		loadedStats.Insert(segmentID, stats)
-		return nil
-	}
-
-	err := funcutil.ProcessFuncParallel(segmentNum, segmentNum, loadRemoteBM25Func, "loadRemoteBM25Func")
-	if err != nil {
-		// no partial success here
-		log.Warn("failed to load bm25 stats for remote segment", zap.Int64("collectionID", collectionID), zap.Error(err))
-		return nil, err
-	}
-
-	return loadedStats, nil
+func (loader *segmentLoader) GetChunkManager() storage.ChunkManager {
+	return loader.cm
 }
 
 // load single bloom filter
@@ -1239,29 +1198,6 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 	return nil
 }
 
-func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalSegment, indexInfo *querypb.FieldIndexInfo) error {
-	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
-
-	for _, indexPath := range indexInfo.IndexFilePaths {
-		if path.Base(indexPath) != storage.IndexParamsKey {
-			filteredPaths = append(filteredPaths, indexPath)
-		}
-	}
-
-	indexInfo.IndexFilePaths = filteredPaths
-	fieldType, err := loader.getFieldType(segment.Collection(), indexInfo.FieldID)
-	if err != nil {
-		return err
-	}
-
-	collection := loader.manager.Collection.Get(segment.Collection())
-	if collection == nil {
-		return merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load field index")
-	}
-
-	return segment.LoadIndex(ctx, indexInfo, fieldType)
-}
-
 func (loader *segmentLoader) loadBm25Stats(ctx context.Context, segmentID int64, stats map[int64]*storage.BM25Stats, binlogPaths map[int64][]string) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("segmentID", segmentID),
@@ -1305,6 +1241,29 @@ func (loader *segmentLoader) loadBm25Stats(ctx context.Context, segmentID int64,
 	}
 
 	return nil
+}
+
+func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalSegment, indexInfo *querypb.FieldIndexInfo) error {
+	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
+
+	for _, indexPath := range indexInfo.IndexFilePaths {
+		if path.Base(indexPath) != storage.IndexParamsKey {
+			filteredPaths = append(filteredPaths, indexPath)
+		}
+	}
+
+	indexInfo.IndexFilePaths = filteredPaths
+	fieldType, err := loader.getFieldType(segment.Collection(), indexInfo.FieldID)
+	if err != nil {
+		return err
+	}
+
+	collection := loader.manager.Collection.Get(segment.Collection())
+	if collection == nil {
+		return merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load field index")
+	}
+
+	return segment.LoadIndex(ctx, indexInfo, fieldType)
 }
 
 func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int64, bfs *pkoracle.BloomFilterSet,

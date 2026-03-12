@@ -584,7 +584,7 @@ queryNode:
   workerPooling:
     size: 10 # the size for worker querynode client pool
   idfOracle:
-    enableDisk: true
+    preload: true # Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:
