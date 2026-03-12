@@ -1180,7 +1180,7 @@ func checkPythonDeps(pythonBin string, packages ...string) error {
 		return fmt.Errorf("%s not found in PATH: %w", pythonBin, err)
 	}
 	for _, pkg := range packages {
-		cmd := exec.Command(pythonBin, "-c", fmt.Sprintf("import %s", pkg))
+		cmd := exec.Command(pythonBin, "-c", fmt.Sprintf("import %s", pkg)) // #nosec G204
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("python package %q not importable via %s: %s (%w)", pkg, pythonBin, string(out), err)
 		}
@@ -1198,7 +1198,7 @@ func findPython3ForVortex() (string, error) {
 		if err != nil {
 			continue
 		}
-		out, err := exec.Command(path, "-c",
+		out, err := exec.Command(path, "-c", // #nosec G204
 			"import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Output()
 		if err != nil {
 			continue
