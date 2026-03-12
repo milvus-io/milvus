@@ -116,11 +116,8 @@ class GroupChunkTranslator
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list_;
     std::vector<size_t> file_row_group_prefix_sum_;
     SchemaPtr schema_;
-    bool is_sorted_by_pk_;
-    ChunkedSegmentSealedImpl* chunked_segment_;
     std::unique_ptr<milvus::segcore::InsertRecord<true>> ir_;
     GroupCTMeta meta_;
-    int64_t timestamp_offet_;
     bool use_mmap_;
     bool mmap_populate_;
     milvus::proto::common::LoadPriority load_priority_{

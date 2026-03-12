@@ -94,7 +94,7 @@ class SumAggregateBase
     static void updateSingleValue(TData& result, TData value) {
         if constexpr (std::is_same_v<TData, double> ||
                       std::is_same_v<TData, float> ||
-                      std::is_same_v<TData, int64_t> && Overflow) {
+                      (std::is_same_v<TData, int64_t> && Overflow)) {
             result += value;
         } else {
             result = checkPlus(result, value);

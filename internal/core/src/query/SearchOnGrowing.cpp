@@ -63,7 +63,6 @@ FloatSegmentIndexSearch(const segcore::SegmentGrowingImpl& segment,
                         SearchResult& search_result) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
-    auto& record = segment.get_insert_record();
 
     auto vecfield_id = info.field_id_;
     auto& field = schema[vecfield_id];

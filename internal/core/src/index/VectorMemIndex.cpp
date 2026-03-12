@@ -771,7 +771,6 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         for (auto& item : meta_data[META]) {
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
-            auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
             auto HandleBatch = [&](int index) {
                 auto start_load2_mem = std::chrono::system_clock::now();
                 auto batch_data =
@@ -878,7 +877,6 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
             deserialize_duration)
             .count());
 
-    auto dim = index_.Dim();
     this->SetDim(index_.Dim());
 
     // Restore valid_data for nullable vector support

@@ -154,15 +154,14 @@ struct ParquetWriterFactory {
         context.builders = std::move(builders.first);
         context.builders_map = std::move(builders.second);
         context.kv_metadata = CreateParquetKVMetadata(column_map);
-        context.column_groups =
-            std::move(ColumnGroupingStrategyFactory::CreateStrategy(
-                          ColumnGroupingStrategyType::DEFAULT)
-                          ->CreateGroups(TableStatsInfo{
-                              context.schema,
-                              column_map,
-                          }));
+        context.column_groups = ColumnGroupingStrategyFactory::CreateStrategy(
+                                    ColumnGroupingStrategyType::DEFAULT)
+                                    ->CreateGroups(TableStatsInfo{
+                                        context.schema,
+                                        column_map,
+                                    });
         auto column_group_id = 0;
-        for (const auto& group : context.column_groups) {
+        for ([[maybe_unused]] const auto& group : context.column_groups) {
             auto file_log_id = 0;
             context.file_paths.push_back(CreateColumnGroupParquetPath(
                 path_prefix, column_group_id, file_log_id));
@@ -250,7 +249,7 @@ class JsonStatsParquetWriter {
     std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>> builders_map_;
     size_t unflushed_row_count_{0};
     size_t all_row_count_{0};
-    size_t current_row_count_{0};
+    [[maybe_unused]] size_t current_row_count_{0};
 };
 
 }  // namespace milvus::index

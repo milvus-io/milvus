@@ -827,7 +827,6 @@ TEST_P(GrowingTest, FillVectorArrayData) {
     auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
     int64_t per_batch = 1000;
     int64_t n_batch = 3;
-    int64_t dim = 128;
     for (int64_t i = 0; i < n_batch; i++) {
         auto dataset = DataGen(schema, per_batch);
 
@@ -895,7 +894,6 @@ TEST(GrowingTest, LoadVectorArrayData) {
         std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
 
     int64_t dataset_size = 1000;
-    int64_t dim = 128;
     auto dataset = DataGen(schema, dataset_size);
     auto segment_growing =
         CreateGrowingWithFieldDataLoaded(schema, metaPtr, config, dataset);
@@ -968,7 +966,6 @@ TEST(GrowingTest, SearchVectorArray) {
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(100000, std::move(fieldMap));
     auto segment = CreateGrowingSegment(schema, metaPtr, 1, config);
-    auto segmentImplPtr = dynamic_cast<SegmentGrowingImpl*>(segment.get());
 
     // Insert data
     int64_t N = 100;
@@ -1272,8 +1269,7 @@ TEST(Growing, EmptySegmentResourceEstimation) {
     auto schema = std::make_shared<Schema>();
     auto dim = 128;
     auto metric_type = knowhere::metric::L2;
-    auto vec_fid =
-        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
+    schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk_fid);
 
@@ -1291,8 +1287,7 @@ TEST(Growing, ResourceEstimationAfterInsert) {
     auto schema = std::make_shared<Schema>();
     auto dim = 128;
     auto metric_type = knowhere::metric::L2;
-    auto vec_fid =
-        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
+    schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk_fid);
 
@@ -1328,8 +1323,7 @@ TEST(Growing, ResourceIncrementsWithMoreInserts) {
     auto schema = std::make_shared<Schema>();
     auto dim = 128;
     auto metric_type = knowhere::metric::L2;
-    auto vec_fid =
-        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
+    schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk_fid);
 
@@ -1367,8 +1361,7 @@ TEST(Growing, ResourceTrackingAfterDelete) {
     auto schema = std::make_shared<Schema>();
     auto dim = 64;
     auto metric_type = knowhere::metric::L2;
-    auto vec_fid =
-        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
+    schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk_fid);
 
@@ -1405,8 +1398,7 @@ TEST(Growing, ConcurrentInsertResourceTracking) {
     auto schema = std::make_shared<Schema>();
     auto dim = 32;
     auto metric_type = knowhere::metric::L2;
-    auto vec_fid =
-        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
+    schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk_fid);
 
@@ -1452,11 +1444,10 @@ TEST(Growing, MultipleFieldsResourceEstimation) {
     auto schema = std::make_shared<Schema>();
     auto dim = 64;
     auto metric_type = knowhere::metric::L2;
-    auto vec_fid =
-        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
+    schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
-    auto double_fid = schema->AddDebugField("score", DataType::DOUBLE);
+    schema->AddDebugField("age", DataType::FLOAT);
+    schema->AddDebugField("score", DataType::DOUBLE);
     schema->set_primary_field_id(pk_fid);
 
     auto segment = CreateGrowingSegment(schema, empty_index_meta);

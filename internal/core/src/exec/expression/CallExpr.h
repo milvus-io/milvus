@@ -73,7 +73,7 @@ class PhyCallExpr : public Expr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
@@ -92,8 +92,6 @@ class PhyCallExpr : public Expr {
 
     int64_t active_count_{0};
     int64_t num_chunk_{0};
-    int64_t current_chunk_id_{0};
-    int64_t current_chunk_pos_{0};
     int64_t size_per_chunk_{0};
 
     const segcore::SegmentInternalInterface* segment_;

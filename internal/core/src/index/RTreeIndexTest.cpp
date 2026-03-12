@@ -156,10 +156,7 @@ class RTreeIndexTest : public ::testing::Test {
         // set geometry data type in field schema for index schema checks
         field_meta_.field_schema.set_data_type(
             ::milvus::proto::schema::DataType::Geometry);
-        index_meta_ = milvus::storage::IndexMeta{.segment_id = 1,
-                                                 .field_id = 100,
-                                                 .build_id = 1,
-                                                 .index_version = 1};
+        index_meta_ = milvus::storage::IndexMeta{1, 100, 1, 1};
     }
 
     void
@@ -745,7 +742,7 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
     auto schema = std::make_shared<Schema>();
     auto pk_id = schema->AddDebugField("id", DataType::INT64);
     auto dim = 16;
-    auto vec_id = schema->AddDebugField(
+    schema->AddDebugField(
         "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
     auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
     schema->set_primary_field_id(pk_id);

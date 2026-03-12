@@ -41,8 +41,7 @@ class FieldChunkMetricsTranslatorFromStatistics
                 CacheWarmupPolicy::CacheWarmupPolicy_Disable,
                 false) {
         for (auto& statistic : statistics) {
-            cells_.emplace_back(
-                std::move(builder_.Build(data_type_, statistic)));
+            cells_.emplace_back(builder_.Build(data_type_, statistic));
         }
     }
 

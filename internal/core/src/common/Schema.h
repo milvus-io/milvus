@@ -400,7 +400,7 @@ class Schema {
         for (auto field_id : field_ids_) {
             fields.emplace_back(field_id.get());
         }
-        return std::move(fields);
+        return fields;
     }
 
  public:

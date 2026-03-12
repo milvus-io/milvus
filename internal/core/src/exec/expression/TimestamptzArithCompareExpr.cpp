@@ -105,7 +105,6 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             proto::plan::Interval interval) {
         const int64_t compare_us = compare_value;
         for (int i = 0; i < size; ++i) {
-            auto offset = (offsets) ? offsets[i] : i;
             const int64_t current_ts_us = data[i];
             const int op_sign =
                 (arith_op == proto::plan::ArithOpType::Add) ? 1 : -1;

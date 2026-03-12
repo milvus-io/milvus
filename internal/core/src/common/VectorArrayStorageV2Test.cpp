@@ -267,7 +267,7 @@ class TestVectorArrayStorageV2 : public testing::Test {
     TearDown() override {
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
-        fs->DeleteDir("test_data");
+        (void)fs->DeleteDir("test_data");
     }
 
  protected:

@@ -336,8 +336,6 @@ TEST_P(VectorArrayChunkWriterParameterizedTest, SizeConsistencyWithSlice) {
         {7, 1},  // last row
     };
 
-    int test_byte_width = GetByteWidth(data_type(), test_dim);
-
     for (const auto& [offset, length] : slices) {
         auto sliced = std::static_pointer_cast<arrow::ListArray>(
             original_array->Slice(offset, length));

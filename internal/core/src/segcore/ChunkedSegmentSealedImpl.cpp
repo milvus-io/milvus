@@ -1756,7 +1756,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
         column->BulkRawJsonAt(
             op_ctx,
             [&](Json json, size_t offset, bool is_valid) {
-                dst->at(offset) = std::move(std::string(json.data()));
+                dst->at(offset) = std::string(json.data());
             },
             seg_offsets,
             count);
@@ -1765,7 +1765,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
         column->BulkRawStringAt(
             op_ctx,
             [dst](std::string_view value, size_t offset, bool is_valid) {
-                dst->at(offset) = std::move(std::string(value));
+                dst->at(offset) = std::string(value);
             },
             seg_offsets,
             count);
@@ -2389,7 +2389,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(
 bool
 ChunkedSegmentSealedImpl::HasIndex(FieldId field_id) const {
     std::shared_lock lck(mutex_);
-    return get_bit(index_ready_bitset_, field_id) |
+    return get_bit(index_ready_bitset_, field_id) ||
            get_bit(binlog_index_bitset_, field_id);
 }
 
@@ -2790,8 +2790,8 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             auto old_column = get_column(field_id);
             if (old_column && !enable_mmap) {
                 if (!is_proxy_column ||
-                    is_proxy_column &&
-                        field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID) {
+                    (is_proxy_column &&
+                     field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID)) {
                     stats_.mem_size -= old_column->DataByteSize();
                 }
             }
@@ -2827,8 +2827,8 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
     if (!enable_mmap) {
         if (!is_proxy_column ||
-            is_proxy_column &&
-                field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID) {
+            (is_proxy_column &&
+             field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID)) {
             stats_.mem_size += column->DataByteSize();
         }
         if (IsVariableDataType(data_type)) {
@@ -3338,7 +3338,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             is_vector = true;
         }
         std::shared_lock lck(mutex_);
-        auto iter = index_has_raw_data_.find(field_id);
 
         // if field has mmap setting, use it
         // - mmap setting at collection level, then all field are the same
@@ -3496,7 +3495,6 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
         field_id_to_index_info,
     milvus::OpContext* op_ctx,
     bool is_replace) {
-    auto num_rows = segment_load_info_.GetNumOfRows();
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<void>> load_index_futures;
     load_index_futures.reserve(field_id_to_index_info.size());
@@ -3510,7 +3508,6 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
                                        trace_ctx,
                                        field_id,
                                        load_index_info_ptr,
-                                       num_rows,
                                        op_ctx,
                                        is_replace]() mutable -> void {
                 // Early exit if cancelled while queued

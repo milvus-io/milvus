@@ -404,6 +404,7 @@ TestBuildIndex(int N, int cardinality, int index_type) {
             return index;
         }
     }
+    throw std::invalid_argument("unsupported index_type");
 }
 
 template <typename T>

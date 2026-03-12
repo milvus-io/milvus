@@ -237,7 +237,7 @@ class PhyCompareFilterExpr : public Expr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
@@ -307,7 +307,6 @@ class PhyCompareFilterExpr : public Expr {
                              const ValTypes&... values) {
         int64_t size = input->size();
         int64_t processed_size = 0;
-        const auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
         if (segment_chunk_reader_.segment_->is_chunked() ||
             segment_chunk_reader_.segment_->type() == SegmentType::Growing) {
             for (auto i = 0; i < size; ++i) {

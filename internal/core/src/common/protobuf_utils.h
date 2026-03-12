@@ -39,7 +39,7 @@ template <typename T>
 using ProtoRepeated = google::protobuf::RepeatedPtrField<T>;
 using ProtoParams = ProtoRepeated<proto::common::KeyValuePair>;
 
-static std::map<string, string>
+[[maybe_unused]] static std::map<string, string>
 RepeatedKeyValToMap(
     const google::protobuf::RepeatedPtrField<proto::common::KeyValuePair>&
         kvs) {
@@ -61,7 +61,7 @@ RepeatedKeyValToMap(
  *         - first: whether the key was found.
  *         - second: the parsed boolean value (true if value is "true", case-insensitive).
  */
-static std::pair<bool, bool>
+[[maybe_unused]] static std::pair<bool, bool>
 GetBoolFromRepeatedKVs(
     const google::protobuf::RepeatedPtrField<proto::common::KeyValuePair>& kvs,
     const std::string& key) {
@@ -85,7 +85,7 @@ GetBoolFromRepeatedKVs(
  * @param key The key to look for.
  * @return std::optional<std::string> containing the value if found, std::nullopt otherwise.
  */
-static std::optional<std::string>
+[[maybe_unused]] static std::optional<std::string>
 GetStringFromRepeatedKVs(
     const google::protobuf::RepeatedPtrField<proto::common::KeyValuePair>& kvs,
     const std::string& key) {

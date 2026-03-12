@@ -82,12 +82,10 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
             ::parquet::default_writer_properties());
         EXPECT_TRUE(result.ok());
         auto writer = result.ValueOrDie();
-        int64_t total_rows = 0;
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema_, per_batch);
             auto record_batch =
                 ConvertToArrowRecordBatch(dataset, dim, arrow_schema_);
-            total_rows += record_batch->num_rows();
 
             EXPECT_TRUE(writer->Write(record_batch).ok());
         }
@@ -367,12 +365,6 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
             file_idx, fr->file_metadata()->GetRowGroupMetadataVector());
         auto status = fr->Close();
         AssertInfo(status.ok(), "failed to close file reader");
-    }
-
-    // For each cell, sum the byte sizes of all row groups it contains
-    size_t total_row_groups = 0;
-    for (auto rg_count : expected_row_groups_per_file) {
-        total_row_groups += rg_count;
     }
 
     for (size_t cid = 0; cid < translator->num_cells(); ++cid) {
