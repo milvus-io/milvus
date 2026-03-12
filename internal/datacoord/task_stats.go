@@ -367,6 +367,27 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
 			break
 		}
+	case indexpb.StatsSubJob_Sort:
+		// For V2 segments (no manifest), persist statsLogs and bm25Logs.
+		// For V3 segments (manifest set), stats are already in manifest.
+		segment := st.meta.GetHealthySegment(ctx, st.GetTargetSegmentID())
+		if segment != nil && segment.GetManifestPath() == "" {
+			var operators []SegmentOperator
+			if len(result.GetStatsLogs()) > 0 {
+				operators = append(operators, SetStatslogs(result.GetStatsLogs()))
+			}
+			if len(result.GetBm25Logs()) > 0 {
+				operators = append(operators, SetBm25Statslogs(result.GetBm25Logs()))
+			}
+			if len(operators) > 0 {
+				err = st.meta.UpdateSegment(st.GetTargetSegmentID(), operators...)
+				if err != nil {
+					log.Ctx(ctx).Warn("save sort stats result failed", zap.Int64("taskID", st.GetTaskID()),
+						zap.Int64("segmentID", st.GetTargetSegmentID()), zap.Error(err))
+					break
+				}
+			}
+		}
 	case indexpb.StatsSubJob_BM25Job:
 	// bm25 logs are generated during with segment flush.
 	default:
