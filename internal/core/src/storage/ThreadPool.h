@@ -16,24 +16,19 @@
 
 #pragma once
 
-#include <stddef.h>
 #include <stdint.h>
 #include <algorithm>
 #include <atomic>
-#include <cassert>
-#include <condition_variable>
+#include <cmath>
 #include <functional>
 #include <future>
 #include <memory>
-#include <mutex>
-#include <ostream>
 #include <string>
-#include <thread>
-#include <unordered_map>
 #include <utility>
 
-#include "SafeQueue.h"
-#include "glog/logging.h"
+#include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/executors/thread_factory/NamedThreadFactory.h>
+
 #include "log/Log.h"
 
 namespace milvus {
@@ -64,30 +59,9 @@ InitCpuNum(const int core);
 
 class ThreadPool {
  public:
-    explicit ThreadPool(const float thread_core_coefficient, std::string name)
-        : shutdown_(false), name_(std::move(name)) {
-        idle_threads_size_ = 0;
-        current_threads_size_ = 0;
-        min_threads_size_ = 1;
-        max_threads_size_.store(std::max(
-            1,
-            static_cast<int>(std::round(CPU_NUM * thread_core_coefficient))));
+    explicit ThreadPool(const float thread_core_coefficient, std::string name);
 
-        // only IO pool will set large limit, but the CPU helps nothing to IO operations,
-        // we need to limit the max thread num, each thread will download 16~64 MiB data,
-        // according to our benchmark, 16 threads is enough to saturate the network bandwidth.
-        if (max_threads_size_.load() > 16) {
-            max_threads_size_.store(16);
-        }
-        LOG_INFO("Init thread pool:{}", name_)
-            << " with min worker num:" << min_threads_size_
-            << " and max worker num:" << max_threads_size_.load();
-        Init();
-    }
-
-    ~ThreadPool() {
-        ShutDown();
-    }
+    ~ThreadPool();
 
     ThreadPool(const ThreadPool&) = delete;
     ThreadPool(ThreadPool&&) = delete;
@@ -96,80 +70,33 @@ class ThreadPool {
     ThreadPool&
     operator=(ThreadPool&&) = delete;
 
+    template <typename F, typename... Args>
+    auto
+    Submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
+        using ReturnType = decltype(f(args...));
+        auto task = std::make_shared<std::packaged_task<ReturnType()>>(
+            std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+        auto future = task->get_future();
+        executor_->add([task]() { (*task)(); });
+        return future;
+    }
+
+    size_t
+    GetThreadNum();
+
+    size_t
+    GetMaxThreadNum();
+
     void
-    Init();
+    Resize(int new_size);
 
     void
     ShutDown();
 
-    size_t
-    GetThreadNum() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return current_threads_size_;
-    }
-
-    size_t
-    GetMaxThreadNum() {
-        return max_threads_size_.load();
-    }
-
-    template <typename F, typename... Args>
-    auto
-    Submit(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
-        std::function<decltype(f(args...))()> func =
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...);
-        auto task_ptr =
-            std::make_shared<std::packaged_task<decltype(f(args...))()>>(func);
-
-        std::function<void()> wrap_func = [task_ptr]() { (*task_ptr)(); };
-
-        work_queue_.enqueue(wrap_func);
-
-        std::lock_guard<std::mutex> lock(mutex_);
-
-        if (idle_threads_size_ > 0) {
-            condition_lock_.notify_one();
-        } else if (current_threads_size_ < max_threads_size_.load()) {
-            // Dynamic increase thread number
-            std::thread t(&ThreadPool::Worker, this);
-            assert(threads_.find(t.get_id()) == threads_.end());
-            threads_[t.get_id()] = std::move(t);
-            current_threads_size_++;
-        }
-
-        return task_ptr->get_future();
-    }
-
-    void
-    Worker();
-
-    void
-    FinishThreads();
-
-    void
-    Resize(int new_size) {
-        //no need to hold mutex here as we don't require
-        //max_threads_size to take effect instantly, just guaranteed atomic
-        new_size = std::max(1, new_size);
-        if (new_size > 16) {
-            new_size = 16;
-        }
-        max_threads_size_.store(new_size);
-    }
-
- public:
-    int min_threads_size_;
-    int idle_threads_size_;
-    int current_threads_size_;
-    std::atomic<int> max_threads_size_;
-    bool shutdown_;
-    static constexpr size_t WAIT_SECONDS = 2;
-    SafeQueue<std::function<void()>> work_queue_;
-    std::unordered_map<std::thread::id, std::thread> threads_;
-    SafeQueue<std::thread::id> need_finish_threads_;
-    std::mutex mutex_;
-    std::condition_variable condition_lock_;
+ private:
+    std::unique_ptr<folly::CPUThreadPoolExecutor> executor_;
     std::string name_;
+    std::atomic<int> max_threads_size_;
 };
 
 }  // namespace milvus
