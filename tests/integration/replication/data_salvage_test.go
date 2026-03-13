@@ -178,11 +178,10 @@ func (s *DataSalvageSuite) TestDumpMessagesBasic() {
 	s.NotNil(infoResp.GetCheckpoint())
 	s.NotNil(infoResp.GetCheckpoint().GetMessageId())
 
-	// Dump messages from start position
+	// Dump messages from start position (exclusive - messages after the checkpoint)
 	stream, err := s.Cluster.MilvusClient.DumpMessages(ctx, &milvuspb.DumpMessagesRequest{
-		Pchannel:               pchannel,
-		StartMessageId:         infoResp.GetCheckpoint().GetMessageId(),
-		StartPositionExclusive: false, // Include start position
+		Pchannel:       pchannel,
+		StartMessageId: infoResp.GetCheckpoint().GetMessageId(),
 	})
 	s.NoError(err)
 

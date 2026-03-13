@@ -7241,7 +7241,6 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 		zap.String("pchannel", req.GetPchannel()),
 		zap.Uint64("startTimetick", req.GetStartTimetick()),
 		zap.Uint64("endTimetick", req.GetEndTimetick()),
-		zap.Bool("startPositionExclusive", req.GetStartPositionExclusive()),
 	)
 	logger.Info("DumpMessages received")
 
@@ -7249,21 +7248,15 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 	if req.GetPchannel() == "" {
 		return merr.WrapErrParameterMissing("pchannel")
 	}
-	if req.GetStartMessageId() == nil || len(req.GetStartMessageId().GetMessageId()) == 0 {
+	if req.GetStartMessageId() == nil || len(req.GetStartMessageId().GetId()) == 0 {
 		return merr.WrapErrParameterMissing("start_message_id")
 	}
 
-	startMsgID := message.MustUnmarshalMessageID(req.GetStartMessageId().GetMessageId())
+	startMsgID := message.MustUnmarshalMessageID(req.GetStartMessageId().GetId())
 
-	// Determine deliver policy based on start_position_exclusive
-	var deliverPolicy options.DeliverPolicy
-	if req.GetStartPositionExclusive() {
-		// Exclusive: dump messages AFTER start_message_id
-		deliverPolicy = options.DeliverPolicyStartAfter(startMsgID)
-	} else {
-		// Inclusive: include start_message_id itself
-		deliverPolicy = options.DeliverPolicyStartFrom(startMsgID)
-	}
+	// Use exclusive start position (dump messages AFTER start_message_id)
+	// This is appropriate for salvage scenarios where start_message_id is the last synced message
+	deliverPolicy := options.DeliverPolicyStartAfter(startMsgID)
 
 	// Create a channel-based message handler
 	msgCh := make(adaptor.ChanMessageHandler, 16)
