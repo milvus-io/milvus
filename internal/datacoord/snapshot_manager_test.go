@@ -91,11 +91,57 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "test description")
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "test description", 0)
 
 	// Verify
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1001), snapshotID)
+}
+
+func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup mocks
+	mockAllocator := allocator.NewMockAllocator(t)
+	mockHandler := NewNMockHandler(t)
+
+	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(2001), nil).Once()
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			CollectionId: 100,
+		},
+		Segments: []*datapb.SegmentDescription{
+			{SegmentId: 1, NumOfRows: 100},
+		},
+	}
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(snapshotData, nil).Once()
+
+	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+		return nil, errors.New("not found")
+	}).Build()
+	defer mockGetSnapshot.UnPatch()
+
+	mockSaveSnapshot := mockey.Mock((*snapshotMeta).SaveSnapshot).To(func(sm *snapshotMeta, ctx context.Context, data *SnapshotData) error {
+		// Verify compaction expire time is set
+		assert.True(t, data.SnapshotInfo.CompactionExpireTime > 0)
+		return nil
+	}).Build()
+	defer mockSaveSnapshot.UnPatch()
+
+	sm := NewSnapshotManager(
+		nil,
+		&snapshotMeta{},
+		nil,
+		mockAllocator,
+		mockHandler,
+		nil,
+		nil,
+	)
+
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "protected_snap", "with protection", 3600)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2001), snapshotID)
 }
 
 func TestSnapshotManager_CreateSnapshot_DuplicateName(t *testing.T) {
@@ -118,7 +164,7 @@ func TestSnapshotManager_CreateSnapshot_DuplicateName(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "existing_snapshot", "description")
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "existing_snapshot", "description", 0)
 
 	// Verify
 	assert.Error(t, err)
@@ -152,7 +198,7 @@ func TestSnapshotManager_CreateSnapshot_AllocatorError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description")
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0)
 
 	// Verify
 	assert.Error(t, err)
@@ -189,7 +235,7 @@ func TestSnapshotManager_CreateSnapshot_GenSnapshotError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description")
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0)
 
 	// Verify
 	assert.Error(t, err)
@@ -234,7 +280,7 @@ func TestSnapshotManager_CreateSnapshot_SaveError(t *testing.T) {
 	)
 
 	// Execute
-	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description")
+	snapshotID, err := sm.CreateSnapshot(ctx, 100, "test_snapshot", "description", 0)
 
 	// Verify
 	assert.Error(t, err)

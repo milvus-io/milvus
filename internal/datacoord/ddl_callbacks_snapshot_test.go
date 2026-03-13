@@ -48,11 +48,13 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 		ctx context.Context,
 		collectionID int64,
 		name, description string,
+		compactionProtectionSeconds int64,
 	) (int64, error) {
 		createSnapshotCalled = true
 		assert.Equal(t, int64(100), collectionID)
 		assert.Equal(t, "test_snapshot", name)
 		assert.Equal(t, "test description", description)
+		assert.Equal(t, int64(3600), compactionProtectionSeconds)
 		return 1001, nil
 	}).Build()
 	defer mockCreateSnapshot.UnPatch()
@@ -66,9 +68,10 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_Success(t *testing.T) {
 	// Create test broadcast result using message builder
 	broadcastMsg := message.NewCreateSnapshotMessageBuilderV2().
 		WithHeader(&message.CreateSnapshotMessageHeader{
-			CollectionId: 100,
-			Name:         "test_snapshot",
-			Description:  "test description",
+			CollectionId:                100,
+			Name:                        "test_snapshot",
+			Description:                 "test description",
+			CompactionProtectionSeconds: 3600,
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
 		WithBroadcast([]string{"control_channel"}).
@@ -100,6 +103,7 @@ func TestDDLCallbacks_CreateSnapshotV2AckCallback_CreateError(t *testing.T) {
 		ctx context.Context,
 		collectionID int64,
 		name, description string,
+		compactionProtectionSeconds int64,
 	) (int64, error) {
 		return 0, expectedErr
 	}).Build()
