@@ -444,10 +444,12 @@ ManifestGroupTranslator::load_group_chunk(
     }
 
     // Normalize vector arrays from LIST/FIXED_SIZE_LIST to FixedSizeBinary.
-    // External parquet files use list-of-float format; Milvus expects
-    // FixedSizeBinary. No-op for normal collections (already FixedSizeBinary).
+    // External parquet files store vectors as list-of-float; Milvus expects
+    // FixedSizeBinary. Only run for external fields — normal collections
+    // already store vectors as FIXED_SIZE_BINARY (or BINARY for nullable).
     for (size_t idx = 0; idx < field_ids.size(); ++idx) {
-        if (IsVectorDataType(field_metas[idx].get_data_type()) &&
+        if (field_metas[idx].is_external_field() &&
+            IsVectorDataType(field_metas[idx].get_data_type()) &&
             !IsSparseFloatVectorDataType(field_metas[idx].get_data_type()) &&
             !IsVectorArrayDataType(field_metas[idx].get_data_type()) &&
             !array_vecs[idx].empty() &&
