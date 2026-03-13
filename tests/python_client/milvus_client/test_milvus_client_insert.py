@@ -749,6 +749,47 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_with_pk_varchar_auto_id_true(self):
+        """
+        target: test insert with pk varchar and auto id true
+        method: set pk varchar max length < 18, insert data
+        expected: varchar pk supports auto_id=true
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        rng = np.random.default_rng()
+
+        # 1. Create schema with varchar pk (max_length=6) and auto_id=True
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=6,
+                         is_primary=True, auto_id=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+
+        # 2. Create collection
+        self.create_collection(client, collection_name, schema=schema)
+
+        # 3. Insert 2 rows (no pk field since auto_id=True)
+        rows = [{default_vector_field_name: list(rng.random(default_dim).astype(np.float32))}
+                for _ in range(2)]
+        res = self.insert(client, collection_name, data=rows)[0]
+        assert res['insert_count'] == 2
+
+        # 4. Create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+
+        # 5. Query to verify inserted data has auto-generated ids
+        results = self.query(client, collection_name, filter="", limit=10)[0]
+        assert len(results) == 2
+        for r in results:
+            assert ct.default_string_field_name in r
+            assert len(r[ct.default_string_field_name]) > 0
+
+        self.drop_collection(client, collection_name)
+
 class TestMilvusClientInsertValid(TestMilvusClientV2Base):
     """ Test case of search interface """
 
@@ -1193,7 +1234,7 @@ class TestInsertOperation(TestMilvusClientV2Base):
         expected: the collection row count equals to nq
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name_1 = cf.gen_unique_str("partition1")
         partition_name_2 = cf.gen_unique_str("partition2")
         
@@ -1223,9 +1264,9 @@ class TestInsertOperation(TestMilvusClientV2Base):
         expected: the collection insert count equals to nq
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name = cf.gen_unique_str("partition")
-        
+
         self.create_collection(client, collection_name, default_dim)
         self.create_partition(client, collection_name, partition_name)
         
@@ -1595,10 +1636,14 @@ class TestInsertOperation(TestMilvusClientV2Base):
         
         results_1 = self.insert(client, collection_name, rows)[0]
         assert results_1['insert_count'] == nb
-        
+
         results_2 = self.insert(client, collection_name, rows)[0]
         assert results_2['insert_count'] == nb
-        
+
+        # Verify primary keys are unique across two inserts
+        all_ids = results_1['ids'] + results_2['ids']
+        assert len(set(all_ids)) == nb * 2
+
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
         assert num_entities.get("row_count", None) == nb * 2
@@ -1652,8 +1697,8 @@ class TestInsertOperation(TestMilvusClientV2Base):
         expected: assert num entities
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
-        
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
         # Create schema with auto_id=True and specific primary field
         schema = self.create_schema(client, auto_id=True, enable_dynamic_field=True)[0]
         if pk_field == ct.default_int64_field_name:
@@ -2653,4 +2698,60 @@ class TestMilvusClientInsertArray(TestMilvusClientV2Base):
         error = {ct.err_code: 999, ct.err_msg: err_msg}
         self.insert(client, collection_name, data=rows, check_task=CheckTasks.err_res, check_items=error)
 
+        self.drop_collection(client, collection_name)
+
+
+class TestInsertParams(TestMilvusClientV2Base):
+    """ Test case of Insert interface """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_insert_row_data(self):
+        """
+        target: test insert row-based data
+        method: 1.create collection 2.insert row data
+        expected: assert num entities
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i,
+                 default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0,
+                 default_string_field_name: str(i)} for i in range(default_nb)]
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == default_nb
+        assert sorted(results['ids']) == list(range(default_nb))
+        # 3. verify num entities
+        self.flush(client, collection_name)
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats.get("row_count", None) == default_nb
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_insert_single_row(self):
+        """
+        target: test insert single entity
+        method: 1.create collection 2.insert one row
+        expected: assert insert_count and num_entities equal 1
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. insert single row
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: 0,
+                 default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: 0.0,
+                 default_string_field_name: "0"}]
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == 1
+        assert results['ids'] == [0]
+        # 3. verify num entities
+        self.flush(client, collection_name)
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats.get("row_count", None) == 1
         self.drop_collection(client, collection_name)
