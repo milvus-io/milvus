@@ -111,6 +111,23 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 				return errors.Wrap(err, "failed to drop collection index")
 			}
 
+			// 2.5. best-effort drop all snapshots of this collection
+			dropSnapshotsMsg := message.NewDropSnapshotsByCollectionMessageBuilderV2().
+				WithHeader(&message.DropSnapshotsByCollectionMessageHeader{
+					CollectionId: collectionID,
+				}).
+				WithBody(&message.DropSnapshotsByCollectionMessageBody{}).
+				WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+				MustBuildBroadcast().
+				WithBroadcastID(msg.BroadcastHeader().BroadcastID)
+
+			if err := registry.CallMessageAckCallback(ctx, dropSnapshotsMsg, map[string]*message.AppendResult{
+				streaming.WAL().ControlChannel(): result,
+			}); err != nil {
+				log.Ctx(ctx).Warn("best-effort drop collection snapshots failed, will be cleaned up by GC",
+					zap.Int64("collectionID", collectionID), zap.Error(err))
+			}
+
 			// 3. drop the collection meta itself.
 			if err := c.meta.DropCollection(ctx, collectionID, result.TimeTick); err != nil {
 				return errors.Wrap(err, "failed to drop collection")

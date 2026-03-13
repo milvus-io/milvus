@@ -121,6 +121,7 @@ type CopySegmentJob interface {
 	GetCopiedSegments() int64
 	GetTotalRows() int64
 	GetSnapshotName() string
+	GetSourceCollectionId() int64
 	GetTR() *timerecord.TimeRecorder
 	Clone() CopySegmentJob
 }

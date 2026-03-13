@@ -101,40 +101,47 @@ type SnapshotManager interface {
 	//   - error: If name already exists, allocation fails, or save fails
 	CreateSnapshot(ctx context.Context, collectionID int64, name, description string) (int64, error)
 
-	// DropSnapshot deletes an existing snapshot by name.
+	// DropSnapshot deletes an existing snapshot by name within a collection.
 	// It removes the snapshot from memory cache, etcd, and S3 storage.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
-	//   - name: Name of the snapshot to delete
+	//   - collectionID: Collection ID to scope the snapshot lookup
+	//   - name: Name of the snapshot to delete (unique within collection)
 	//
 	// Returns:
 	//   - error: If snapshot not found or deletion fails
-	DropSnapshot(ctx context.Context, name string) error
+	DropSnapshot(ctx context.Context, collectionID int64, name string) error
 
-	// GetSnapshot retrieves basic snapshot metadata by name.
+	// DropSnapshotsByCollection deletes all snapshots for a collection.
+	// Used during drop collection cascade cleanup.
+	DropSnapshotsByCollection(ctx context.Context, collectionID int64) error
+
+	// GetSnapshot retrieves basic snapshot metadata by name within a collection.
 	// This is a lightweight operation that only reads from memory cache.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
-	//   - name: Name of the snapshot
+	//   - collectionID: Collection ID to scope the snapshot lookup
+	//   - name: Name of the snapshot (unique within collection)
 	//
 	// Returns:
 	//   - snapshotInfo: Basic snapshot metadata (id, name, collection_id, etc.)
 	//   - error: If snapshot not found
-	GetSnapshot(ctx context.Context, name string) (*datapb.SnapshotInfo, error)
+	GetSnapshot(ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error)
 
-	// DescribeSnapshot retrieves detailed information about a snapshot.
+	// DescribeSnapshot retrieves detailed information about a snapshot within a collection.
 	// It reads the complete snapshot data from S3, including segments, indexes, and schema.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
-	//   - name: Name of the snapshot to describe
+	//   - collectionID: Collection ID to scope the snapshot lookup
+	//   - name: Name of the snapshot to describe (unique within collection)
 	//
 	// Returns:
 	//   - snapshotData: Complete snapshot data with collection info and index info
 	//   - error: If snapshot not found or read fails
-	DescribeSnapshot(ctx context.Context, name string) (*SnapshotData, error)
+	DescribeSnapshot(ctx context.Context, collectionID int64, name string) (*SnapshotData, error)
 
 	// ListSnapshots returns a list of snapshot names for the specified collection/partition.
 	//
@@ -146,7 +153,7 @@ type SnapshotManager interface {
 	// Returns:
 	//   - snapshots: List of snapshot names
 	//   - error: If listing fails
-	ListSnapshots(ctx context.Context, collectionID, partitionID int64) ([]string, error)
+	ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error)
 
 	// Restore operations
 
@@ -156,7 +163,8 @@ type SnapshotManager interface {
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
-	//   - snapshotName: Name of the snapshot to restore
+	//   - collectionID: Source collection ID for per-collection snapshot name lookup
+	//   - snapshotName: Name of the snapshot to restore (unique within collection)
 	//   - targetCollectionName: Name for the restored collection
 	//   - targetDbName: Database name for the restored collection
 	//   - startBroadcaster: Function to start a broadcaster for DDL operations
@@ -168,6 +176,7 @@ type SnapshotManager interface {
 	//   - error: If any step fails
 	RestoreSnapshot(
 		ctx context.Context,
+		sourceCollectionID int64,
 		snapshotName string,
 		targetCollectionName string,
 		targetDbName string,
@@ -218,14 +227,15 @@ type SnapshotManager interface {
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
-	//   - snapshotName: Name of the snapshot to restore
+	//   - sourceCollectionID: Source collection ID for per-collection snapshot name lookup
+	//   - snapshotName: Name of the snapshot to restore (unique within source collection)
 	//   - collectionID: ID of the target collection (already created)
 	//   - jobID: Pre-allocated job ID for idempotency (from WAL message)
 	//
 	// Returns:
 	//   - jobID: The restore job ID (same as input if job created, or existing job ID)
 	//   - error: If mapping fails or job creation fails
-	RestoreData(ctx context.Context, snapshotName string, collectionID int64, jobID int64) (int64, error)
+	RestoreData(ctx context.Context, sourceCollectionID int64, snapshotName string, collectionID int64, jobID int64) (int64, error)
 
 	// Restore state query
 
@@ -234,12 +244,13 @@ type SnapshotManager interface {
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
-	//   - snapshotName: Name of the snapshot to read
+	//   - collectionID: Collection ID to scope the snapshot lookup
+	//   - snapshotName: Name of the snapshot to read (unique within collection)
 	//
 	// Returns:
 	//   - snapshotData: Complete snapshot data including segments, indexes, schema
 	//   - error: If snapshot not found or read fails
-	ReadSnapshotData(ctx context.Context, snapshotName string) (*SnapshotData, error)
+	ReadSnapshotData(ctx context.Context, collectionID int64, snapshotName string) (*SnapshotData, error)
 
 	// GetRestoreState retrieves the current state of a restore job.
 	//
@@ -252,16 +263,17 @@ type SnapshotManager interface {
 	//   - error: If job not found
 	GetRestoreState(ctx context.Context, jobID int64) (*datapb.RestoreSnapshotInfo, error)
 
-	// ListRestoreJobs returns a list of all restore jobs, optionally filtered by collection ID.
+	// ListRestoreJobs returns a list of all restore jobs, optionally filtered by collection ID or database ID.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
 	//   - collectionIDFilter: Filter by collection ID (0 = all jobs)
+	//   - dbID: Filter by database ID (0 = no filter)
 	//
 	// Returns:
 	//   - restoreInfos: List of restore job information
 	//   - error: If listing fails
-	ListRestoreJobs(ctx context.Context, collectionIDFilter int64) ([]*datapb.RestoreSnapshotInfo, error)
+	ListRestoreJobs(ctx context.Context, collectionIDFilter, dbID int64) ([]*datapb.RestoreSnapshotInfo, error)
 
 	// Snapshot restore reference tracking
 	//
@@ -352,8 +364,8 @@ func (sm *snapshotManager) CreateSnapshot(
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.String("name", name))
 	log.Info("create snapshot request received", zap.String("description", description))
 
-	// Validate snapshot name uniqueness (protected by createSnapshotMu)
-	if _, err := sm.snapshotMeta.GetSnapshot(ctx, name); err == nil {
+	// Validate snapshot name uniqueness within collection (protected by createSnapshotMu)
+	if _, err := sm.snapshotMeta.GetSnapshot(ctx, collectionID, name); err == nil {
 		return 0, merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", name)
 	}
 
@@ -388,18 +400,18 @@ func (sm *snapshotManager) CreateSnapshot(
 
 // DropSnapshot deletes an existing snapshot by name.
 // This operation is idempotent - if the snapshot doesn't exist, it returns nil.
-func (sm *snapshotManager) DropSnapshot(ctx context.Context, name string) error {
-	log := log.Ctx(ctx).With(zap.String("snapshot", name))
+func (sm *snapshotManager) DropSnapshot(ctx context.Context, collectionID int64, name string) error {
+	log := log.Ctx(ctx).With(zap.String("snapshot", name), zap.Int64("collectionID", collectionID))
 	log.Info("drop snapshot request received")
 
 	// Check if snapshot exists first (idempotent)
-	if _, err := sm.snapshotMeta.GetSnapshot(ctx, name); err != nil {
+	if _, err := sm.snapshotMeta.GetSnapshot(ctx, collectionID, name); err != nil {
 		log.Info("snapshot not found, skip drop (idempotent)")
 		return nil
 	}
 
 	// Delete snapshot
-	if err := sm.snapshotMeta.DropSnapshot(ctx, name); err != nil {
+	if err := sm.snapshotMeta.DropSnapshot(ctx, collectionID, name); err != nil {
 		log.Error("failed to drop snapshot", zap.Error(err))
 		return err
 	}
@@ -408,18 +420,32 @@ func (sm *snapshotManager) DropSnapshot(ctx context.Context, name string) error 
 	return nil
 }
 
-// GetSnapshot retrieves basic snapshot metadata by name.
-func (sm *snapshotManager) GetSnapshot(ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
-	return sm.snapshotMeta.GetSnapshot(ctx, name)
+// DropSnapshotsByCollection deletes all snapshots for a collection.
+func (sm *snapshotManager) DropSnapshotsByCollection(ctx context.Context, collectionID int64) error {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+	log.Info("drop all snapshots for collection")
+
+	if err := sm.snapshotMeta.DropSnapshotsByCollection(ctx, collectionID); err != nil {
+		log.Error("failed to drop snapshots for collection", zap.Error(err))
+		return err
+	}
+
+	log.Info("all snapshots dropped for collection")
+	return nil
 }
 
-// DescribeSnapshot retrieves detailed information about a snapshot.
-func (sm *snapshotManager) DescribeSnapshot(ctx context.Context, name string) (*SnapshotData, error) {
-	log := log.Ctx(ctx).With(zap.String("snapshotName", name))
+// GetSnapshot retrieves basic snapshot metadata by name within a collection.
+func (sm *snapshotManager) GetSnapshot(ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
+	return sm.snapshotMeta.GetSnapshot(ctx, collectionID, name)
+}
+
+// DescribeSnapshot retrieves detailed information about a snapshot within a collection.
+func (sm *snapshotManager) DescribeSnapshot(ctx context.Context, collectionID int64, name string) (*SnapshotData, error) {
+	log := log.Ctx(ctx).With(zap.String("snapshotName", name), zap.Int64("collectionID", collectionID))
 	log.Info("describe snapshot request received")
 
 	// Read snapshot data with full segment information
-	snapshotData, err := sm.snapshotMeta.ReadSnapshotData(ctx, name, false)
+	snapshotData, err := sm.snapshotMeta.ReadSnapshotData(ctx, collectionID, name, false)
 	if err != nil {
 		log.Error("failed to read snapshot data", zap.Error(err))
 		return nil, err
@@ -429,11 +455,24 @@ func (sm *snapshotManager) DescribeSnapshot(ctx context.Context, name string) (*
 }
 
 // ListSnapshots returns a list of snapshot names for the specified collection/partition.
-func (sm *snapshotManager) ListSnapshots(ctx context.Context, collectionID, partitionID int64) ([]string, error) {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+func (sm *snapshotManager) ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.Int64("dbID", dbID))
 	log.Info("list snapshots request received")
 
-	// List snapshots
+	// When dbID is specified and collectionID is not, aggregate snapshots across all collections in the database.
+	if dbID != 0 && collectionID == 0 {
+		var allSnapshots []string
+		for collID := range sm.getDBCollectionIDs(dbID) {
+			snapshots, err := sm.snapshotMeta.ListSnapshots(ctx, collID, partitionID)
+			if err != nil {
+				log.Error("failed to list snapshots for collection", zap.Int64("collID", collID), zap.Error(err))
+				return nil, err
+			}
+			allSnapshots = append(allSnapshots, snapshots...)
+		}
+		return allSnapshots, nil
+	}
+
 	snapshots, err := sm.snapshotMeta.ListSnapshots(ctx, collectionID, partitionID)
 	if err != nil {
 		log.Error("failed to list snapshots", zap.Error(err))
@@ -514,6 +553,7 @@ func (sm *snapshotManager) validateCMEKCompatibility(
 // validates resources under the lock, and broadcasts the restore message.
 func (sm *snapshotManager) RestoreSnapshot(
 	ctx context.Context,
+	sourceCollectionID int64,
 	snapshotName string,
 	targetCollectionName string,
 	targetDbName string,
@@ -523,12 +563,13 @@ func (sm *snapshotManager) RestoreSnapshot(
 ) (int64, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("snapshotName", snapshotName),
+		zap.Int64("sourceCollectionID", sourceCollectionID),
 		zap.String("targetCollection", targetCollectionName),
 		zap.String("targetDb", targetDbName),
 	)
 
 	// Phase 1: Read snapshot data
-	snapshotData, err := sm.ReadSnapshotData(ctx, snapshotName)
+	snapshotData, err := sm.ReadSnapshotData(ctx, sourceCollectionID, snapshotName)
 	if err != nil {
 		return 0, fmt.Errorf("failed to read snapshot data: %w", err)
 	}
@@ -604,9 +645,10 @@ func (sm *snapshotManager) RestoreSnapshot(
 
 	msg := message.NewRestoreSnapshotMessageBuilderV2().
 		WithHeader(&message.RestoreSnapshotMessageHeader{
-			SnapshotName: snapshotName,
-			CollectionId: collectionID,
-			JobId:        jobID,
+			SnapshotName:       snapshotName,
+			CollectionId:       collectionID,
+			JobId:              jobID,
+			SourceCollectionId: sourceCollectionID,
 		}).
 		WithBody(&message.RestoreSnapshotMessageBody{}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
@@ -777,12 +819,14 @@ func (sm *snapshotManager) RestoreIndexes(
 //  4. Create copy segment job
 func (sm *snapshotManager) RestoreData(
 	ctx context.Context,
+	sourceCollectionID int64,
 	snapshotName string,
 	collectionID int64,
 	jobID int64,
 ) (int64, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("snapshot", snapshotName),
+		zap.Int64("sourceCollectionID", sourceCollectionID),
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("jobID", jobID),
 	)
@@ -796,7 +840,7 @@ func (sm *snapshotManager) RestoreData(
 		return jobID, nil
 	}
 
-	snapshotData, err := sm.ReadSnapshotData(ctx, snapshotName)
+	snapshotData, err := sm.ReadSnapshotData(ctx, sourceCollectionID, snapshotName)
 	if err != nil {
 		log.Error("failed to read snapshot data", zap.Error(err))
 		return 0, fmt.Errorf("failed to read snapshot data: %w", err)
@@ -1100,9 +1144,10 @@ func (sm *snapshotManager) createRestoreJob(
 				{Key: "copy_index", Value: "true"},
 				{Key: "source_type", Value: "snapshot"},
 			},
-			TotalSegments: int64(len(idMappings)),
-			TotalRows:     totalRows,
-			SnapshotName:  snapshotData.SnapshotInfo.GetName(),
+			TotalSegments:      int64(len(idMappings)),
+			TotalRows:          totalRows,
+			SnapshotName:       snapshotData.SnapshotInfo.GetName(),
+			SourceCollectionId: snapshotData.SnapshotInfo.GetCollectionId(),
 		},
 		tr: timerecord.NewTimeRecorder("copy segment job"),
 	}
@@ -1137,8 +1182,8 @@ func (sm *snapshotManager) createRestoreJob(
 
 // ReadSnapshotData reads snapshot data from storage.
 // This is a convenience wrapper for snapshotMeta.ReadSnapshotData.
-func (sm *snapshotManager) ReadSnapshotData(ctx context.Context, snapshotName string) (*SnapshotData, error) {
-	return sm.snapshotMeta.ReadSnapshotData(ctx, snapshotName, true)
+func (sm *snapshotManager) ReadSnapshotData(ctx context.Context, collectionID int64, snapshotName string) (*SnapshotData, error) {
+	return sm.snapshotMeta.ReadSnapshotData(ctx, collectionID, snapshotName, true)
 }
 
 // GetRestoreState retrieves the current state of a restore job.
@@ -1163,19 +1208,30 @@ func (sm *snapshotManager) GetRestoreState(ctx context.Context, jobID int64) (*d
 	return restoreInfo, nil
 }
 
-// ListRestoreJobs returns a list of all restore jobs, optionally filtered by collection ID.
+// ListRestoreJobs returns a list of all restore jobs, optionally filtered by collection ID or database ID.
 func (sm *snapshotManager) ListRestoreJobs(
 	ctx context.Context,
-	collectionIDFilter int64,
+	collectionIDFilter, dbID int64,
 ) ([]*datapb.RestoreSnapshotInfo, error) {
 	// Get all jobs
 	jobs := sm.copySegmentMeta.GetJobBy(ctx)
 
-	// Filter by collection and build restore info list
+	// Build a set of collection IDs in the database for db-level filtering
+	var dbCollections map[int64]struct{}
+	if dbID != 0 && collectionIDFilter == 0 {
+		dbCollections = sm.getDBCollectionIDs(dbID)
+	}
+
+	// Filter by collection/database and build restore info list
 	restoreInfos := make([]*datapb.RestoreSnapshotInfo, 0)
 	for _, job := range jobs {
 		if collectionIDFilter != 0 && job.GetCollectionId() != collectionIDFilter {
 			continue
+		}
+		if dbCollections != nil {
+			if _, ok := dbCollections[job.GetCollectionId()]; !ok {
+				continue
+			}
 		}
 
 		restoreInfos = append(restoreInfos, sm.buildRestoreInfo(job))
@@ -1183,7 +1239,8 @@ func (sm *snapshotManager) ListRestoreJobs(
 
 	log.Ctx(ctx).Info("list restore jobs completed",
 		zap.Int("totalJobs", len(restoreInfos)),
-		zap.Int64("filterCollectionId", collectionIDFilter))
+		zap.Int64("filterCollectionId", collectionIDFilter),
+		zap.Int64("filterDbId", dbID))
 
 	return restoreInfos, nil
 }
@@ -1198,6 +1255,18 @@ func (sm *snapshotManager) GetSnapshotRestoreRefCount(snapshotName string) int32
 // Common Helper Functions (private)
 // ============================================================================
 
+// getDBCollectionIDs returns the set of collection IDs belonging to a database.
+// Used by ListSnapshots and ListRestoreJobs for database-level filtering.
+func (sm *snapshotManager) getDBCollectionIDs(dbID int64) map[int64]struct{} {
+	result := make(map[int64]struct{})
+	for _, coll := range sm.meta.GetCollections() {
+		if coll.DatabaseID == dbID {
+			result[coll.ID] = struct{}{}
+		}
+	}
+	return result
+}
+
 // buildRestoreInfo constructs a RestoreSnapshotInfo from a CopySegmentJob.
 // This centralizes the conversion logic to eliminate code duplication.
 func (sm *snapshotManager) buildRestoreInfo(job CopySegmentJob) *datapb.RestoreSnapshotInfo {
@@ -1205,6 +1274,7 @@ func (sm *snapshotManager) buildRestoreInfo(job CopySegmentJob) *datapb.RestoreS
 		JobId:        job.GetJobId(),
 		SnapshotName: job.GetSnapshotName(),
 		CollectionId: job.GetCollectionId(),
+		DbId:         job.GetDbId(),
 		State:        sm.convertJobState(job.GetState()),
 		Progress:     sm.calculateProgress(job),
 		Reason:       job.GetReason(),

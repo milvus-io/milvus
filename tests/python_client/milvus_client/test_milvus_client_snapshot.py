@@ -36,6 +36,7 @@ default_float_field_name = ct.default_float_field_name
 default_string_field_name = ct.default_string_field_name
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotDefault(TestMilvusClientV2Base):
     """Test snapshot basic operations - L0 smoke tests"""
 
@@ -131,6 +132,7 @@ class TestMilvusClientSnapshotDefault(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientV2Base):
     """Test create_snapshot with invalid parameters - L1"""
 
@@ -228,6 +230,7 @@ class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
     """Test drop_snapshot with invalid parameters - L1"""
 
@@ -276,6 +279,7 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotListDescribe(TestMilvusClientV2Base):
     """Test list_snapshots and describe_snapshot - L1"""
 
@@ -383,6 +387,7 @@ class TestMilvusClientSnapshotListDescribe(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientV2Base):
     """Test restore_snapshot with invalid parameters - L1"""
 
@@ -428,6 +433,7 @@ class TestMilvusClientSnapshotRestoreInvalid(TestMilvusClientV2Base):
         self.drop_snapshot(client, snapshot_name)
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotRestoreState(TestMilvusClientV2Base):
     """Test get_restore_snapshot_state and list_restore_snapshot_jobs - L1"""
 
@@ -458,6 +464,7 @@ class TestMilvusClientSnapshotRestoreState(TestMilvusClientV2Base):
         assert isinstance(jobs, list), "list_restore_snapshot_jobs should return a list"
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
     """Test snapshot with various data types - L2"""
 
@@ -694,6 +701,7 @@ class TestMilvusClientSnapshotDataTypes(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
     """Test snapshot with partitions - L2"""
 
@@ -802,6 +810,7 @@ class TestMilvusClientSnapshotPartition(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
     """Test snapshot with data operations - L2"""
 
@@ -997,6 +1006,7 @@ class TestMilvusClientSnapshotDataOperations(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotIndex(TestMilvusClientV2Base):
     """Test snapshot with various index types - L2"""
 
@@ -1055,6 +1065,7 @@ class TestMilvusClientSnapshotIndex(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
     """Test snapshot data integrity - verify actual data content, not just counts"""
 
@@ -1217,6 +1228,7 @@ class TestMilvusClientSnapshotDataIntegrity(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
     """Test snapshot boundary conditions and edge cases"""
 
@@ -1447,6 +1459,7 @@ class TestMilvusClientSnapshotBoundary(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
     """Test snapshot negative scenarios and error handling"""
 
@@ -1575,6 +1588,7 @@ class TestMilvusClientSnapshotNegative(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
     """
     L2 Test - Snapshot with all data types matrix testing
@@ -1860,6 +1874,7 @@ class TestMilvusClientSnapshotAllDataTypes(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
     """
     L2 Test - Snapshot with all index types testing
@@ -2147,6 +2162,7 @@ class TestMilvusClientSnapshotAllIndexTypes(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
     """
     L2 Test - Snapshot with collection properties testing
@@ -2353,6 +2369,7 @@ class TestMilvusClientSnapshotCollectionProperties(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
     """
     L2 Test - Snapshot after various data operations
@@ -2824,6 +2841,7 @@ class TestMilvusClientSnapshotDataOperationsExtended(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.skip(reason="pymilvus SDK does not yet support collection_name for snapshot APIs")
 class TestMilvusClientSnapshotConcurrency(TestMilvusClientV2Base):
     """
     Test concurrent operations for snapshot feature.

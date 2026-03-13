@@ -88,7 +88,7 @@ func TestCreateSnapshot(t *testing.T) {
 	require.Contains(t, snapshots, snapshotName)
 
 	// Describe the snapshot
-	describeOpt := client.NewDescribeSnapshotOption(snapshotName)
+	describeOpt := client.NewDescribeSnapshotOption(snapshotName, collName)
 	resp, err := mc.DescribeSnapshot(ctx, describeOpt)
 	common.CheckErr(t, err, true)
 	require.Equal(t, snapshotName, resp.GetName())
@@ -97,7 +97,7 @@ func TestCreateSnapshot(t *testing.T) {
 	require.Greater(t, resp.GetCreateTs(), int64(0))
 
 	// Clean up
-	dropOpt := client.NewDropSnapshotOption(snapshotName)
+	dropOpt := client.NewDropSnapshotOption(snapshotName, collName)
 	err = mc.DropSnapshot(ctx, dropOpt)
 	common.CheckErr(t, err, true)
 }
@@ -174,7 +174,7 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	require.Contains(t, snapshots, snapshotName)
 
 	// print snapshot info
-	describeOpt := client.NewDescribeSnapshotOption(snapshotName)
+	describeOpt := client.NewDescribeSnapshotOption(snapshotName, collName)
 	snapshotInfo, err := mc.DescribeSnapshot(ctx, describeOpt)
 	common.CheckErr(t, err, true)
 	require.Equal(t, snapshotName, snapshotInfo.GetName())
@@ -197,7 +197,7 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 
 	// Step 4: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
-	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
+	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, collName, restoredCollName)
 	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
 
@@ -228,7 +228,7 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	require.Equal(t, int64(100000), count)
 
 	// Clean up
-	dropOpt := client.NewDropSnapshotOption(snapshotName)
+	dropOpt := client.NewDropSnapshotOption(snapshotName, collName)
 	err = mc.DropSnapshot(ctx, dropOpt)
 	common.CheckErr(t, err, true)
 }
@@ -312,7 +312,7 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	require.Contains(t, snapshots, snapshotName)
 
 	// print snapshot info
-	describeOpt := client.NewDescribeSnapshotOption(snapshotName)
+	describeOpt := client.NewDescribeSnapshotOption(snapshotName, collName)
 	snapshotInfo, err := mc.DescribeSnapshot(ctx, describeOpt)
 	common.CheckErr(t, err, true)
 	require.Equal(t, snapshotName, snapshotInfo.GetName())
@@ -335,7 +335,7 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 
 	// Step 4: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
-	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
+	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, collName, restoredCollName)
 	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
 
@@ -367,7 +367,7 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	}
 
 	// Clean up
-	dropOpt := client.NewDropSnapshotOption(snapshotName)
+	dropOpt := client.NewDropSnapshotOption(snapshotName, collName)
 	err = mc.DropSnapshot(ctx, dropOpt)
 	common.CheckErr(t, err, true)
 }
@@ -508,7 +508,7 @@ func TestSnapshotRestoreWithMultiFields(t *testing.T) {
 	require.Contains(t, snapshots, snapshotName)
 
 	// Print snapshot info
-	describeOpt := client.NewDescribeSnapshotOption(snapshotName)
+	describeOpt := client.NewDescribeSnapshotOption(snapshotName, collName)
 	snapshotInfo, err := mc.DescribeSnapshot(ctx, describeOpt)
 	common.CheckErr(t, err, true)
 	require.Equal(t, snapshotName, snapshotInfo.GetName())
@@ -527,7 +527,7 @@ func TestSnapshotRestoreWithMultiFields(t *testing.T) {
 
 	// Step 6: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
-	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
+	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, collName, restoredCollName)
 	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
 
@@ -562,7 +562,7 @@ func TestSnapshotRestoreWithMultiFields(t *testing.T) {
 	require.True(t, restoredColl.Schema.EnableDynamicField)
 
 	// Clean up
-	dropOpt := client.NewDropSnapshotOption(snapshotName)
+	dropOpt := client.NewDropSnapshotOption(snapshotName, collName)
 	err = mc.DropSnapshot(ctx, dropOpt)
 	common.CheckErr(t, err, true)
 }
@@ -674,7 +674,7 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 	require.Contains(t, snapshots, snapshotName)
 
 	// Print snapshot info
-	describeOpt := client.NewDescribeSnapshotOption(snapshotName)
+	describeOpt := client.NewDescribeSnapshotOption(snapshotName, collName)
 	snapshotInfo, err := mc.DescribeSnapshot(ctx, describeOpt)
 	common.CheckErr(t, err, true)
 	require.Equal(t, snapshotName, snapshotInfo.GetName())
@@ -682,7 +682,7 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 
 	// Step 8: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
-	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
+	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, collName, restoredCollName)
 	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
 
@@ -820,7 +820,7 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 		zap.Int("partition_count", len(partitions)))
 
 	// Clean up
-	dropOpt := client.NewDropSnapshotOption(snapshotName)
+	dropOpt := client.NewDropSnapshotOption(snapshotName, collName)
 	err = mc.DropSnapshot(ctx, dropOpt)
 	common.CheckErr(t, err, true)
 }
@@ -970,7 +970,7 @@ func TestSnapshotRestoreWithJSONStats(t *testing.T) {
 	require.Contains(t, snapshots, snapshotName)
 
 	// Describe snapshot
-	describeOpt := client.NewDescribeSnapshotOption(snapshotName)
+	describeOpt := client.NewDescribeSnapshotOption(snapshotName, collName)
 	snapshotInfo, err := mc.DescribeSnapshot(ctx, describeOpt)
 	common.CheckErr(t, err, true)
 	require.Equal(t, snapshotName, snapshotInfo.GetName())
@@ -986,7 +986,7 @@ func TestSnapshotRestoreWithJSONStats(t *testing.T) {
 
 	// Step 8: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
-	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
+	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, collName, restoredCollName)
 	log.Info("Restoring snapshot", zap.String("target_collection", restoredCollName))
 	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
@@ -1019,7 +1019,7 @@ func TestSnapshotRestoreWithJSONStats(t *testing.T) {
 	log.Info("Restored collection data verified", zap.Int64("count", restoredCount))
 
 	// Clean up
-	dropOpt2 := client.NewDropSnapshotOption(snapshotName)
+	dropOpt2 := client.NewDropSnapshotOption(snapshotName, collName)
 	err = mc.DropSnapshot(ctx, dropOpt2)
 	common.CheckErr(t, err, true)
 }
@@ -1087,7 +1087,7 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 	common.CheckErr(t, err, true)
 	require.Contains(t, snapshots, snapshotName)
 
-	describeOpt := client.NewDescribeSnapshotOption(snapshotName)
+	describeOpt := client.NewDescribeSnapshotOption(snapshotName, collName)
 	snapshotInfo, err := mc.DescribeSnapshot(ctx, describeOpt)
 	common.CheckErr(t, err, true)
 	require.Equal(t, snapshotName, snapshotInfo.GetName())
@@ -1119,7 +1119,7 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 
 	// Restore snapshot to new collection (v1)
 	restoredCollNameV1 := fmt.Sprintf("restored_v1_%s", collName)
-	restoreOptV1 := client.NewRestoreSnapshotOption(snapshotName, restoredCollNameV1)
+	restoreOptV1 := client.NewRestoreSnapshotOption(snapshotName, collName, restoredCollNameV1)
 	log.Info("Restoring snapshot after partition drop", zap.String("target", restoredCollNameV1))
 	jobIDV1, err := mc.RestoreSnapshot(ctx, restoreOptV1)
 	common.CheckErr(t, err, true)
@@ -1179,58 +1179,97 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 	require.False(t, hasOriginal)
 	log.Info("Verified collection is dropped")
 
-	// Restore snapshot to new collection (v2)
+	// After dropping the original collection, snapshots should be cascade-deleted.
+	// Verify that restoring the snapshot from the dropped collection fails.
 	restoredCollNameV2 := fmt.Sprintf("restored_v2_%s", collName)
-	restoreOptV2 := client.NewRestoreSnapshotOption(snapshotName, restoredCollNameV2)
-	log.Info("Restoring snapshot after collection drop", zap.String("target", restoredCollNameV2))
-	jobIDV2, err := mc.RestoreSnapshot(ctx, restoreOptV2)
-	common.CheckErr(t, err, true)
+	restoreOptV2 := client.NewRestoreSnapshotOption(snapshotName, collName, restoredCollNameV2)
+	log.Info("Attempting restore after collection drop (should fail)", zap.String("target", restoredCollNameV2))
+	_, err = mc.RestoreSnapshot(ctx, restoreOptV2)
+	// Expect error: source collection no longer exists
+	require.Error(t, err, "restore should fail after source collection is dropped")
+	log.Info("Correctly rejected restore after collection drop", zap.Error(err))
 
-	// Wait for restore to complete
-	_, err = waitForRestoreComplete(ctx, mc, jobIDV2, 1*time.Minute)
-	common.CheckErr(t, err, true)
-
-	// Verify restored collection v2 exists
+	// Verify restored collection v2 does NOT exist
 	hasV2, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollNameV2))
 	common.CheckErr(t, err, true)
-	require.True(t, hasV2)
-
-	// Load restored collection v2
-	loadTaskV2, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredCollNameV2).WithReplica(1))
-	common.CheckErr(t, err, true)
-	err = loadTaskV2.Await(ctx)
-	common.CheckErr(t, err, true)
-
-	// Verify restored collection v2 has all original data (9000 records)
-	queryResV2, err := mc.Query(ctx,
-		client.NewQueryOption(restoredCollNameV2).
-			WithOutputFields(common.QueryCountFieldName).
-			WithConsistencyLevel(entity.ClStrong))
-	common.CheckErr(t, err, true)
-	restoredCountV2, _ := queryResV2.Fields[0].GetAsInt64(0)
-	require.Equal(t, int64(9000), restoredCountV2)
-	log.Info("Restored collection v2 data verified", zap.Int64("count", restoredCountV2))
-
-	// Verify all partitions are restored
-	restoredPartitionsV2, err := mc.ListPartitions(ctx, client.NewListPartitionOption(restoredCollNameV2))
-	common.CheckErr(t, err, true)
-	filteredPartitionsV2 := make([]string, 0)
-	for _, partName := range restoredPartitionsV2 {
-		if partName != "_default" {
-			filteredPartitionsV2 = append(filteredPartitionsV2, partName)
-		}
-	}
-	sort.Strings(filteredPartitionsV2)
-	require.Equal(t, partitions, filteredPartitionsV2)
-	log.Info("All partitions restored in v2", zap.Strings("partitions", filteredPartitionsV2))
+	require.False(t, hasV2)
 
 	log.Info("Test completed successfully",
 		zap.String("snapshot", snapshotName),
 		zap.String("restored_v1", restoredCollNameV1),
 		zap.String("restored_v2", restoredCollNameV2))
 
+	// No cleanup needed for snapshot - it was cascade-deleted when the collection was dropped.
+}
+
+// TestSnapshotCrossDatabase tests snapshot operations across different databases.
+// Verifies that ListSnapshots with db-level filtering returns only snapshots
+// belonging to collections in the specified database.
+func TestSnapshotCrossDatabase(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// Step 1: Create two databases
+	dbName1 := common.GenRandomString("db1", 4)
+	dbName2 := common.GenRandomString("db2", 4)
+	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName1))
+	common.CheckErr(t, err, true)
+	err = mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName2))
+	common.CheckErr(t, err, true)
+
+	// Step 2: Create collection in db1 and insert data
+	clientDB1 := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), DBName: dbName1})
+	collNameDB1 := common.GenRandomString(snapshotPrefix, 6)
+	err = clientDB1.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collNameDB1, common.DefaultDim))
+	common.CheckErr(t, err, true)
+
+	coll1, err := clientDB1.DescribeCollection(ctx, client.NewDescribeCollectionOption(collNameDB1))
+	common.CheckErr(t, err, true)
+	prepare1, _ := hp.CollPrepare.InsertData(ctx, t, clientDB1, hp.NewInsertParams(coll1.Schema), hp.TNewDataOption())
+	prepare1.FlushData(ctx, t, clientDB1, collNameDB1)
+
+	// Step 3: Create collection in db2 and insert data
+	clientDB2 := hp.CreateMilvusClient(ctx, t, &client.ClientConfig{Address: hp.GetAddr(), DBName: dbName2})
+	collNameDB2 := common.GenRandomString(snapshotPrefix, 6)
+	err = clientDB2.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collNameDB2, common.DefaultDim))
+	common.CheckErr(t, err, true)
+
+	coll2, err := clientDB2.DescribeCollection(ctx, client.NewDescribeCollectionOption(collNameDB2))
+	common.CheckErr(t, err, true)
+	prepare2, _ := hp.CollPrepare.InsertData(ctx, t, clientDB2, hp.NewInsertParams(coll2.Schema), hp.TNewDataOption())
+	prepare2.FlushData(ctx, t, clientDB2, collNameDB2)
+
+	// Step 4: Create snapshots in both databases
+	snapNameDB1 := fmt.Sprintf("snap_db1_%s", common.GenRandomString(snapshotPrefix, 4))
+	snapNameDB2 := fmt.Sprintf("snap_db2_%s", common.GenRandomString(snapshotPrefix, 4))
+
+	err = clientDB1.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapNameDB1, collNameDB1))
+	common.CheckErr(t, err, true)
+
+	err = clientDB2.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapNameDB2, collNameDB2))
+	common.CheckErr(t, err, true)
+
+	// Step 5: List snapshots filtered by db1 — should only see db1 snapshot
+	snapshotsDB1, err := clientDB1.ListSnapshots(ctx, client.NewListSnapshotsOption())
+	common.CheckErr(t, err, true)
+	require.Contains(t, snapshotsDB1, snapNameDB1)
+	require.NotContains(t, snapshotsDB1, snapNameDB2)
+
+	// Step 6: List snapshots filtered by db2 — should only see db2 snapshot
+	snapshotsDB2, err := clientDB2.ListSnapshots(ctx, client.NewListSnapshotsOption())
+	common.CheckErr(t, err, true)
+	require.Contains(t, snapshotsDB2, snapNameDB2)
+	require.NotContains(t, snapshotsDB2, snapNameDB1)
+
+	// Step 7: List snapshots from default db — should see neither
+	snapshotsDefault, err := mc.ListSnapshots(ctx, client.NewListSnapshotsOption())
+	common.CheckErr(t, err, true)
+	require.NotContains(t, snapshotsDefault, snapNameDB1)
+	require.NotContains(t, snapshotsDefault, snapNameDB2)
+
 	// Clean up
-	dropSnapshotOpt := client.NewDropSnapshotOption(snapshotName)
-	err = mc.DropSnapshot(ctx, dropSnapshotOpt)
+	err = clientDB1.DropSnapshot(ctx, client.NewDropSnapshotOption(snapNameDB1, collNameDB1))
+	common.CheckErr(t, err, true)
+	err = clientDB2.DropSnapshot(ctx, client.NewDropSnapshotOption(snapNameDB2, collNameDB2))
 	common.CheckErr(t, err, true)
 }

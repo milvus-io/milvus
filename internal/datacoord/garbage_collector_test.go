@@ -2973,3 +2973,104 @@ func TestGarbageCollector_recycleUnusedJSONStatsFiles_SnapshotReference(t *testi
 	assert.Empty(t, removedFiles,
 		"JSON stats files should not be removed when segment is referenced by snapshot")
 }
+
+func TestGarbageCollector_recyclePendingSnapshots_OrphanCleanup(t *testing.T) {
+	ctx := context.Background()
+
+	setupGCTest := func(t *testing.T, sm *snapshotMeta, broker *broker2.MockBroker) *garbageCollector {
+		m := &meta{
+			snapshotMeta: sm,
+			segments:     &SegmentsInfo{segments: make(map[int64]*SegmentInfo)},
+			channelCPs:   newChannelCps(),
+		}
+		gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: broker})
+		return gc
+	}
+
+	t.Run("orphan_collection_deleted", func(t *testing.T) {
+		// Snapshot belongs to a dropped collection → should be cleaned up
+		sm := createTestSnapshotMeta(t)
+		insertTestSnapshot(sm, &datapb.SnapshotInfo{
+			Id:           1,
+			Name:         "orphan_snap",
+			CollectionId: 100,
+			State:        datapb.SnapshotState_SnapshotStateCommitted,
+		}, nil, nil)
+
+		broker := broker2.NewMockBroker(t)
+		broker.EXPECT().HasCollection(mock.Anything, int64(100)).Return(false, nil).Once()
+		gc := setupGCTest(t, sm, broker)
+
+		// Mock catalog calls to skip pending/deleting cleanup, reach orphan cleanup
+		mockGetPending := mockey.Mock((*snapshotMeta).GetPendingSnapshots).Return(nil, nil).Build()
+		defer mockGetPending.UnPatch()
+		mockGetDeleting := mockey.Mock((*snapshotMeta).GetDeletingSnapshots).Return(nil, nil).Build()
+		defer mockGetDeleting.UnPatch()
+
+		// Mock DropSnapshot internals for DropSnapshotsByCollection
+		mockSave := mockey.Mock((*datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+		defer mockSave.UnPatch()
+		mockDropCatalog := mockey.Mock((*datacoord.Catalog).DropSnapshot).Return(nil).Build()
+		defer mockDropCatalog.UnPatch()
+		mockWriter := mockey.Mock((*SnapshotWriter).Drop).Return(nil).Build()
+		defer mockWriter.UnPatch()
+
+		gc.recyclePendingSnapshots(ctx, nil)
+
+		// Verify orphan snapshot was cleaned up
+		_, exists := sm.snapshotID2Info.Get(int64(1))
+		assert.False(t, exists, "orphan snapshot should be deleted")
+	})
+
+	t.Run("collection_still_exists", func(t *testing.T) {
+		// Snapshot belongs to an active collection → should NOT be cleaned up
+		sm := createTestSnapshotMeta(t)
+		insertTestSnapshot(sm, &datapb.SnapshotInfo{
+			Id:           2,
+			Name:         "active_snap",
+			CollectionId: 200,
+			State:        datapb.SnapshotState_SnapshotStateCommitted,
+		}, nil, nil)
+
+		broker := broker2.NewMockBroker(t)
+		broker.EXPECT().HasCollection(mock.Anything, int64(200)).Return(true, nil).Once()
+		gc := setupGCTest(t, sm, broker)
+
+		mockGetPending := mockey.Mock((*snapshotMeta).GetPendingSnapshots).Return(nil, nil).Build()
+		defer mockGetPending.UnPatch()
+		mockGetDeleting := mockey.Mock((*snapshotMeta).GetDeletingSnapshots).Return(nil, nil).Build()
+		defer mockGetDeleting.UnPatch()
+
+		gc.recyclePendingSnapshots(ctx, nil)
+
+		// Verify snapshot was NOT deleted
+		_, exists := sm.snapshotID2Info.Get(int64(2))
+		assert.True(t, exists, "snapshot of active collection should not be deleted")
+	})
+
+	t.Run("has_collection_error_skips", func(t *testing.T) {
+		// HasCollection returns error → should skip, not delete
+		sm := createTestSnapshotMeta(t)
+		insertTestSnapshot(sm, &datapb.SnapshotInfo{
+			Id:           3,
+			Name:         "err_snap",
+			CollectionId: 300,
+			State:        datapb.SnapshotState_SnapshotStateCommitted,
+		}, nil, nil)
+
+		broker := broker2.NewMockBroker(t)
+		broker.EXPECT().HasCollection(mock.Anything, int64(300)).Return(false, fmt.Errorf("rpc unavailable")).Once()
+		gc := setupGCTest(t, sm, broker)
+
+		mockGetPending := mockey.Mock((*snapshotMeta).GetPendingSnapshots).Return(nil, nil).Build()
+		defer mockGetPending.UnPatch()
+		mockGetDeleting := mockey.Mock((*snapshotMeta).GetDeletingSnapshots).Return(nil, nil).Build()
+		defer mockGetDeleting.UnPatch()
+
+		gc.recyclePendingSnapshots(ctx, nil)
+
+		// Verify snapshot was NOT deleted (error → skip)
+		_, exists := sm.snapshotID2Info.Get(int64(3))
+		assert.True(t, exists, "snapshot should not be deleted when HasCollection fails")
+	})
+}

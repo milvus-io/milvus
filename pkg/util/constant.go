@@ -112,6 +112,11 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListImport.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAddCollectionField.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListSnapshots.String()),
 		},
 		commonpb.ObjectType_Global.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String()),
@@ -163,12 +168,6 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadWrite.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionAdmin.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String()),
-
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateSnapshot.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropSnapshot.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String()),
-			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListSnapshots.String()),
 		},
 		commonpb.ObjectType_User.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
@@ -325,6 +324,8 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeListAliases.String(),
 		commonpb.ObjectPrivilege_PrivilegeGetImportProgress.String(),
 		commonpb.ObjectPrivilege_PrivilegeListImport.String(),
+		commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String(),
+		commonpb.ObjectPrivilege_PrivilegeListSnapshots.String(),
 	})
 
 	CollectionReadWritePrivileges = append(CollectionReadOnlyPrivileges,
@@ -344,6 +345,8 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeDropPartition.String(),
 			commonpb.ObjectPrivilege_PrivilegeAddCollectionField.String(),
 			commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String(),
+			commonpb.ObjectPrivilege_PrivilegeCreateSnapshot.String(),
+			commonpb.ObjectPrivilege_PrivilegeDropSnapshot.String(),
 		})...,
 	)
 
@@ -351,6 +354,7 @@ var (
 		ConvertPrivileges([]string{
 			commonpb.ObjectPrivilege_PrivilegeCreateAlias.String(),
 			commonpb.ObjectPrivilege_PrivilegeDropAlias.String(),
+			commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String(),
 		})...,
 	)
 

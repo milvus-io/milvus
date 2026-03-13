@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -170,8 +172,8 @@ type snapshotMeta struct {
 	snapshotID2RefIndex *typeutil.ConcurrentMap[UniqueID, *SnapshotRefIndex]    // From S3, async loaded
 
 	// Secondary indexes for O(1) lookup performance
-	// snapshotName2ID: snapshot name -> snapshot ID mapping for fast name-based queries
-	snapshotName2ID *typeutil.ConcurrentMap[string, UniqueID]
+	// snapshotName2ID: collection ID -> (snapshot name -> snapshot ID) mapping for fast per-collection name-based queries
+	snapshotName2ID *typeutil.ConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]]
 	// collectionID2Snapshots: collection ID -> set of snapshot IDs for fast collection-based listing
 	collectionID2Snapshots *typeutil.ConcurrentMap[UniqueID, typeutil.UniqueSet]
 	// collectionIndexMu protects read-modify-write operations on collectionID2Snapshots
@@ -212,7 +214,7 @@ func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 		catalog:                catalog,
 		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
 		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
-		snapshotName2ID:        typeutil.NewConcurrentMap[string, UniqueID](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[string, UniqueID]](),
 		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
 		loaderCtx:              loaderCtx,
 		loaderCancel:           loaderCancel,
@@ -476,15 +478,16 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeout control
-//   - snapshotName: Unique name of the snapshot to delete
+//   - collectionID: Collection ID to scope the snapshot lookup
+//   - snapshotName: Name of the snapshot to delete (unique within collection)
 //
 // Returns:
 //   - error: Error if snapshot not found or catalog update fails
-func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) error {
-	log := log.Ctx(ctx).With(zap.String("snapshotName", snapshotName))
+func (sm *snapshotMeta) DropSnapshot(ctx context.Context, collectionID int64, snapshotName string) error {
+	log := log.Ctx(ctx).With(zap.String("snapshotName", snapshotName), zap.Int64("collectionID", collectionID))
 
-	// Step 1: Lookup snapshot by name
-	snapshot, err := sm.getSnapshotByName(ctx, snapshotName)
+	// Step 1: Lookup snapshot by name within collection
+	snapshot, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
 	if err != nil {
 		log.Error("failed to get snapshot by name", zap.Error(err))
 		return err
@@ -524,6 +527,57 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) e
 	}
 
 	log.Info("snapshot deleted successfully", zap.Int64("snapshotID", snapshot.GetId()))
+	return nil
+}
+
+// DropSnapshotsByCollection deletes all snapshots belonging to a collection.
+// Used during drop collection cascade cleanup. Each snapshot goes through the
+// same delete flow as individual DropSnapshot.
+func (sm *snapshotMeta) DropSnapshotsByCollection(ctx context.Context, collectionID int64) error {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
+
+	// Step 1: Get all snapshot IDs for this collection.
+	// Copy IDs under lock since UniqueSet (raw map) is not thread-safe for concurrent read/write.
+	sm.collectionIndexMu.RLock()
+	snapshotIDs, ok := sm.collectionID2Snapshots.Get(collectionID)
+	var ids []int64
+	if ok {
+		ids = snapshotIDs.Collect()
+	}
+	sm.collectionIndexMu.RUnlock()
+	if len(ids) == 0 {
+		log.Info("no snapshots found for collection, skip")
+		return nil
+	}
+
+	// Step 2: Collect snapshot names before deletion (using copied IDs, safe without lock)
+	var snapshotNames []string
+	for _, id := range ids {
+		if info, exists := sm.snapshotID2Info.Get(id); exists {
+			snapshotNames = append(snapshotNames, info.GetName())
+		}
+	}
+
+	// Step 3: Delete each snapshot through the standard flow.
+	// Try best to delete all snapshots, collect errors and return them to the caller.
+	var errs []error
+	for _, name := range snapshotNames {
+		if err := sm.DropSnapshot(ctx, collectionID, name); err != nil {
+			errs = append(errs, err)
+			log.Warn("failed to drop snapshot during collection cleanup, continuing",
+				zap.String("snapshotName", name),
+				zap.Error(err))
+			continue
+		}
+		log.Info("dropped snapshot during collection cleanup",
+			zap.String("snapshotName", name))
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to drop %d/%d snapshots for collection %d: %w",
+			len(errs), len(snapshotNames), collectionID, errors.Join(errs...))
+	}
+
 	return nil
 }
 
@@ -607,8 +661,8 @@ func (sm *snapshotMeta) ListSnapshots(ctx context.Context, collectionID int64, p
 // Returns:
 //   - *datapb.SnapshotInfo: Basic snapshot metadata (name, ID, collection, partitions, S3 location)
 //   - error: Error if snapshot not found
-func (sm *snapshotMeta) GetSnapshot(ctx context.Context, snapshotName string) (*datapb.SnapshotInfo, error) {
-	snapshot, err := sm.getSnapshotByName(ctx, snapshotName)
+func (sm *snapshotMeta) GetSnapshot(ctx context.Context, collectionID int64, snapshotName string) (*datapb.SnapshotInfo, error) {
+	snapshot, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
 	if err != nil {
 		return nil, err
 	}
@@ -639,11 +693,11 @@ func (sm *snapshotMeta) GetSnapshot(ctx context.Context, snapshotName string) (*
 //   - *SnapshotData: Snapshot data (segments only populated when includeSegments=true;
 //     SegmentIDs/IndexIDs always populated for new format snapshots)
 //   - error: Error if snapshot not found or S3 read fails
-func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, snapshotName string, includeSegments bool) (*SnapshotData, error) {
-	log := log.Ctx(ctx).With(zap.String("snapshotName", snapshotName))
+func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64, snapshotName string, includeSegments bool) (*SnapshotData, error) {
+	log := log.Ctx(ctx).With(zap.String("snapshotName", snapshotName), zap.Int64("collectionID", collectionID))
 
 	// Step 1: Get snapshot metadata from memory to find S3 location
-	snapshotInfo, err := sm.getSnapshotByName(ctx, snapshotName)
+	snapshotInfo, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
 	if err != nil {
 		log.Error("failed to get snapshot by name", zap.Error(err))
 		return nil, err
@@ -667,30 +721,36 @@ func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, snapshotName strin
 	return snapshotData, nil
 }
 
-// getSnapshotByName is an internal helper that looks up snapshot metadata by name.
+// getSnapshotByName is an internal helper that looks up snapshot metadata by name within a collection.
 //
-// This uses the snapshotName2ID index for O(1) lookup instead of scanning.
+// This uses the per-collection snapshotName2ID index for O(1) lookup instead of scanning.
 //
 // Parameters:
 //   - ctx: Context for cancellation (currently unused but reserved for future)
-//   - snapshotName: Unique name of the snapshot to find
+//   - collectionID: Collection ID to scope the name lookup
+//   - snapshotName: Name of the snapshot to find (unique within collection)
 //
 // Returns:
 //   - *datapb.SnapshotInfo: Snapshot metadata if found
 //   - error: Error if snapshot not found
-func (sm *snapshotMeta) getSnapshotByName(ctx context.Context, snapshotName string) (*datapb.SnapshotInfo, error) {
-	// O(1) lookup using name index
-	snapshotID, ok := sm.snapshotName2ID.Get(snapshotName)
+func (sm *snapshotMeta) getSnapshotByName(ctx context.Context, collectionID int64, snapshotName string) (*datapb.SnapshotInfo, error) {
+	// O(1) lookup using per-collection name index
+	nameMap, ok := sm.snapshotName2ID.Get(collectionID)
 	if !ok {
-		return nil, fmt.Errorf("snapshot %s not found", snapshotName)
+		return nil, merr.WrapErrParameterInvalidMsg("snapshot %s not found in collection %d", snapshotName, collectionID)
+	}
+
+	snapshotID, ok := nameMap.Get(snapshotName)
+	if !ok {
+		return nil, merr.WrapErrParameterInvalidMsg("snapshot %s not found in collection %d", snapshotName, collectionID)
 	}
 
 	// O(1) lookup from primary index
 	info, ok := sm.snapshotID2Info.Get(snapshotID)
 	if !ok {
 		// Index inconsistency: clean up orphan name index entry
-		sm.snapshotName2ID.Remove(snapshotName)
-		return nil, fmt.Errorf("snapshot %s not found", snapshotName)
+		nameMap.Remove(snapshotName)
+		return nil, merr.WrapErrParameterInvalidMsg("snapshot %s not found in collection %d", snapshotName, collectionID)
 	}
 
 	return info, nil
@@ -874,8 +934,10 @@ func (sm *snapshotMeta) CleanupDeletingSnapshot(ctx context.Context, snapshot *d
 // addToSecondaryIndexes adds a snapshot to the secondary indexes (name and collection).
 // This should be called after inserting into the primary indexes (snapshotID2Info and snapshotID2RefIndex).
 func (sm *snapshotMeta) addToSecondaryIndexes(snapshotInfo *datapb.SnapshotInfo) {
-	// Add to name index (thread-safe via ConcurrentMap)
-	sm.snapshotName2ID.Insert(snapshotInfo.GetName(), snapshotInfo.GetId())
+	// Add to name index (per-collection, thread-safe via ConcurrentMap)
+	collID := snapshotInfo.GetCollectionId()
+	nameMap, _ := sm.snapshotName2ID.GetOrInsert(collID, typeutil.NewConcurrentMap[string, UniqueID]())
+	nameMap.Insert(snapshotInfo.GetName(), snapshotInfo.GetId())
 
 	// Add to collection index (requires lock since UniqueSet is not thread-safe)
 	sm.collectionIndexMu.Lock()
@@ -893,8 +955,12 @@ func (sm *snapshotMeta) addToSecondaryIndexes(snapshotInfo *datapb.SnapshotInfo)
 // removeFromSecondaryIndexes removes a snapshot from the secondary indexes (name and collection).
 // This should be called when removing from the primary indexes (snapshotID2Info and snapshotID2RefIndex).
 func (sm *snapshotMeta) removeFromSecondaryIndexes(snapshotInfo *datapb.SnapshotInfo) {
-	// Remove from name index (thread-safe via ConcurrentMap)
-	sm.snapshotName2ID.Remove(snapshotInfo.GetName())
+	// Remove from name index (per-collection, thread-safe via ConcurrentMap).
+	// Do NOT remove empty nameMap to avoid TOCTOU race with concurrent addToSecondaryIndexes.
+	collID := snapshotInfo.GetCollectionId()
+	if nameMap, ok := sm.snapshotName2ID.Get(collID); ok {
+		nameMap.Remove(snapshotInfo.GetName())
+	}
 
 	// Remove from collection index (requires lock since UniqueSet is not thread-safe)
 	sm.collectionIndexMu.Lock()

@@ -113,6 +113,9 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	registry.RegisterDropLoadConfigV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropLoadConfigMessageV2) error {
 		return nil
 	})
+	registry.RegisterDropSnapshotsByCollectionV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropSnapshotsByCollectionMessageV2) error {
+		return nil
+	})
 
 	wal := mock_streaming.NewMockWALAccesser(t)
 	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()

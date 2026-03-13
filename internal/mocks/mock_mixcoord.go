@@ -10518,8 +10518,7 @@ func (_c *MixCoord_WatchChannels_Call) RunAndReturn(run func(context.Context, *d
 func NewMixCoord(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MixCoord {
+}) *MixCoord {
 	mock := &MixCoord{}
 	mock.Mock.Test(t)
 
