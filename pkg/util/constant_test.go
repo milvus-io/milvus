@@ -37,3 +37,25 @@ func TestGetReplicateConfigurationPrivilege(t *testing.T) {
 	}
 	assert.True(t, found, "PrivilegeGetReplicateConfiguration should be in ClusterReadOnlyPrivileges")
 }
+
+func TestSnapshotPrivilegesInBuiltinGroups(t *testing.T) {
+	describePrivilege := MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeSnapshot.String())
+	listPrivilege := MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListSnapshots.String())
+	createPrivilege := MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateSnapshot.String())
+	dropPrivilege := MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropSnapshot.String())
+	restorePrivilege := MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRestoreSnapshot.String())
+
+	assert.Contains(t, ClusterReadOnlyPrivileges, describePrivilege)
+	assert.Contains(t, ClusterReadOnlyPrivileges, listPrivilege)
+
+	assert.Contains(t, ClusterReadWritePrivileges, describePrivilege)
+	assert.Contains(t, ClusterReadWritePrivileges, listPrivilege)
+	assert.Contains(t, ClusterReadWritePrivileges, createPrivilege)
+	assert.Contains(t, ClusterReadWritePrivileges, dropPrivilege)
+
+	assert.Contains(t, ClusterAdminPrivileges, describePrivilege)
+	assert.Contains(t, ClusterAdminPrivileges, listPrivilege)
+	assert.Contains(t, ClusterAdminPrivileges, createPrivilege)
+	assert.Contains(t, ClusterAdminPrivileges, dropPrivilege)
+	assert.Contains(t, ClusterAdminPrivileges, restorePrivilege)
+}
