@@ -99,6 +99,15 @@ func (cst *createSnapshotTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// Validate compaction protection duration
+	maxCompactionProtectionSeconds := paramtable.Get().DataCoordCfg.SnapshotMaxCompactionProtectionSeconds.GetAsInt64()
+	if cst.req.GetCompactionProtectionSeconds() < 0 {
+		return merr.WrapErrParameterInvalidMsg("compaction_protection_seconds must be non-negative")
+	}
+	if cst.req.GetCompactionProtectionSeconds() > maxCompactionProtectionSeconds {
+		return merr.WrapErrParameterInvalidMsg("compaction_protection_seconds must not exceed %d", maxCompactionProtectionSeconds)
+	}
+
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, cst.req.GetDbName(), cst.req.GetCollectionName())
 	if err != nil {
 		return err
@@ -120,9 +129,10 @@ func (cst *createSnapshotTask) Execute(ctx context.Context) error {
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_CreateSnapshot),
 		),
-		Name:         cst.req.GetName(),
-		Description:  cst.req.GetDescription(),
-		CollectionId: cst.collectionID,
+		Name:                        cst.req.GetName(),
+		Description:                 cst.req.GetDescription(),
+		CollectionId:                cst.collectionID,
+		CompactionProtectionSeconds: cst.req.GetCompactionProtectionSeconds(),
 	})
 	if err = merr.CheckRPCCall(cst.result, err); err != nil {
 		return err

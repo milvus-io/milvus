@@ -140,6 +140,16 @@ func (r *SnapshotRefIndex) IsFailed() bool {
 	return r.loadState == RefIndexStateFailed
 }
 
+// GetSegmentIDs returns a copy of segment IDs referenced by this snapshot.
+func (r *SnapshotRefIndex) GetSegmentIDs() []int64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.segmentIDs == nil {
+		return nil
+	}
+	return r.segmentIDs.Collect()
+}
+
 // snapshotMeta manages snapshot metadata both in memory and persistent storage.
 //
 // This is the central coordinator for snapshot operations, maintaining:
@@ -167,6 +177,16 @@ type snapshotMeta struct {
 	// since UniqueSet (map) is not thread-safe for concurrent modifications.
 	// Uses RWMutex to allow concurrent reads (ListSnapshots) while blocking writes.
 	collectionIndexMu sync.RWMutex
+
+	// Compaction protection: segmentID -> latest protection expiry (Unix seconds).
+	// Protected segments are excluded from compaction candidate selection.
+	// When multiple snapshots reference the same segment, the latest expiry wins.
+	segmentProtectionMu    sync.RWMutex
+	segmentProtectionUntil map[int64]uint64
+	// compactionBlockedCollections: collections with active compaction-protected snapshots
+	// whose RefIndex hasn't been loaded yet. Fail-closed: block compaction for these
+	// collections until RefIndex loads and we know which segments to protect.
+	compactionBlockedCollections typeutil.UniqueSet
 
 	// Background RefIndex loader goroutine control
 	loaderCtx    context.Context
@@ -198,15 +218,17 @@ type snapshotMeta struct {
 func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager) (*snapshotMeta, error) {
 	loaderCtx, loaderCancel := context.WithCancel(context.Background())
 	sm := &snapshotMeta{
-		catalog:                catalog,
-		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
-		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
-		snapshotName2ID:        typeutil.NewConcurrentMap[string, UniqueID](),
-		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
-		loaderCtx:              loaderCtx,
-		loaderCancel:           loaderCancel,
-		reader:                 NewSnapshotReader(chunkManager),
-		writer:                 NewSnapshotWriter(chunkManager),
+		catalog:                      catalog,
+		snapshotID2Info:              typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:          typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:              typeutil.NewConcurrentMap[string, UniqueID](),
+		collectionID2Snapshots:       typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+		segmentProtectionUntil:       make(map[int64]uint64),
+		compactionBlockedCollections: typeutil.NewUniqueSet(),
+		loaderCtx:                    loaderCtx,
+		loaderCancel:                 loaderCancel,
+		reader:                       NewSnapshotReader(chunkManager),
+		writer:                       NewSnapshotWriter(chunkManager),
 	}
 
 	// Reload all snapshots from catalog to populate in-memory cache
@@ -296,6 +318,7 @@ func (sm *snapshotMeta) refIndexLoaderLoop() {
 
 	// Load immediately on startup.
 	sm.loadUnloadedRefIndexes()
+	sm.rebuildAllSegmentProtection()
 
 	timer := time.NewTimer(getInterval())
 	defer timer.Stop()
@@ -306,7 +329,9 @@ func (sm *snapshotMeta) refIndexLoaderLoop() {
 			log.Info("RefIndex loader goroutine stopped")
 			return
 		case <-timer.C:
-			sm.loadUnloadedRefIndexes()
+			if sm.loadUnloadedRefIndexes() {
+				sm.rebuildAllSegmentProtection()
+			}
 			// Reset using the latest refreshable interval.
 			timer.Reset(getInterval())
 		}
@@ -314,7 +339,10 @@ func (sm *snapshotMeta) refIndexLoaderLoop() {
 }
 
 // loadUnloadedRefIndexes loads all RefIndexes that are Pending or Failed.
-func (sm *snapshotMeta) loadUnloadedRefIndexes() {
+// Returns true if any RefIndex state changed (loaded or failed), indicating
+// that callers should rebuild dependent state like segment protection.
+func (sm *snapshotMeta) loadUnloadedRefIndexes() bool {
+	changed := false
 	sm.snapshotID2RefIndex.Range(func(id UniqueID, refIndex *SnapshotRefIndex) bool {
 		if refIndex.IsLoaded() {
 			return true // Already loaded, skip
@@ -338,9 +366,11 @@ func (sm *snapshotMeta) loadUnloadedRefIndexes() {
 				zap.String("name", info.GetName()),
 				zap.Int64("id", id))
 		}
+		changed = true
 
 		return true
 	})
+	return changed
 }
 
 // Close stops the background RefIndex loader goroutine.
@@ -441,13 +471,17 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 	// Build secondary indexes for O(1) lookup
 	sm.addToSecondaryIndexes(snapshot.SnapshotInfo)
 
+	// Update compaction protection for referenced segments
+	sm.updateSegmentProtection(snapshot.SnapshotInfo, segmentIDs)
+
 	// Update catalog with COMMITTED state
 	if err := sm.catalog.SaveSnapshot(ctx, snapshot.SnapshotInfo); err != nil {
 		// Phase 2 failed, but S3 data is written. GC will eventually cleanup.
-		// Remove from memory cache and secondary indexes since commit failed
+		// Remove from memory cache, secondary indexes, and compaction protection since commit failed
 		sm.snapshotID2Info.Remove(snapshot.SnapshotInfo.GetId())
 		sm.snapshotID2RefIndex.Remove(snapshot.SnapshotInfo.GetId())
 		sm.removeFromSecondaryIndexes(snapshot.SnapshotInfo)
+		sm.rebuildSegmentProtection(segmentIDs)
 		log.Error("failed to update snapshot to committed state, pending record left for GC cleanup",
 			zap.Error(err))
 		return fmt.Errorf("failed to update snapshot to committed state: %w", err)
@@ -497,12 +531,25 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) e
 		return err
 	}
 
-	// Step 3: Remove from in-memory cache and secondary indexes (user immediately sees deletion)
+	// Step 3: Collect protected segment IDs before removal (for compaction protection rebuild)
+	var protectedSegmentIDs []int64
+	if snapshot.GetCompactionExpireTime() > 0 {
+		if refIndex, exists := sm.snapshotID2RefIndex.Get(snapshot.GetId()); exists && refIndex.IsLoaded() {
+			protectedSegmentIDs = refIndex.GetSegmentIDs()
+		}
+	}
+
+	// Step 4: Remove from in-memory cache and secondary indexes (user immediately sees deletion)
 	sm.snapshotID2Info.Remove(snapshot.GetId())
 	sm.snapshotID2RefIndex.Remove(snapshot.GetId())
 	sm.removeFromSecondaryIndexes(snapshot)
 
-	// Step 4: Delete S3 data (may fail, GC will retry)
+	// Step 5: Rebuild compaction protection for affected segments
+	if len(protectedSegmentIDs) > 0 {
+		sm.rebuildSegmentProtection(protectedSegmentIDs)
+	}
+
+	// Step 6: Delete S3 data (may fail, GC will retry)
 	if err := sm.writer.Drop(ctx, snapshot.GetS3Location()); err != nil {
 		log.Warn("S3 delete failed, will be cleaned by GC",
 			zap.Int64("snapshotID", snapshot.GetId()),
@@ -512,7 +559,7 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) e
 		return nil
 	}
 
-	// Step 5: Delete catalog record (final cleanup)
+	// Step 7: Delete catalog record (final cleanup)
 	if err := sm.catalog.DropSnapshot(ctx, snapshot.GetCollectionId(), snapshot.GetId()); err != nil {
 		log.Warn("failed to drop snapshot from catalog after S3 cleanup",
 			zap.Int64("snapshotID", snapshot.GetId()),
@@ -944,4 +991,140 @@ func (sm *snapshotMeta) IsRefIndexLoadedForCollection(collectionID int64) bool {
 	})
 	sm.collectionIndexMu.RUnlock()
 	return allLoaded
+}
+
+// IsCollectionCompactionBlocked checks if compaction is blocked for a collection
+// because a protected snapshot's RefIndex hasn't been loaded yet.
+// This implements fail-closed semantics: if we don't know which segments to protect,
+// we block compaction for the entire collection until we do.
+func (sm *snapshotMeta) IsCollectionCompactionBlocked(collectionID int64) bool {
+	sm.segmentProtectionMu.RLock()
+	defer sm.segmentProtectionMu.RUnlock()
+	return sm.compactionBlockedCollections.Contain(collectionID)
+}
+
+// isProtectionActive returns true if the given expiry timestamp represents
+// active (non-zero and not yet expired) compaction protection.
+func isProtectionActive(protectionUntil uint64, now uint64) bool {
+	return protectionUntil > 0 && now < protectionUntil
+}
+
+// upsertMaxProtection sets the protection expiry for a segment to the maximum
+// of the existing and new values. Must be called with segmentProtectionMu held.
+func (sm *snapshotMeta) upsertMaxProtection(segID int64, protectionUntil uint64) {
+	if existing, ok := sm.segmentProtectionUntil[segID]; !ok || protectionUntil > existing {
+		sm.segmentProtectionUntil[segID] = protectionUntil
+	}
+}
+
+// IsSegmentCompactionProtected checks if a segment is protected from compaction
+// by any active snapshot. Returns true if the segment should be excluded from compaction.
+func (sm *snapshotMeta) IsSegmentCompactionProtected(segmentID int64) bool {
+	sm.segmentProtectionMu.RLock()
+	defer sm.segmentProtectionMu.RUnlock()
+	expiryTs, exists := sm.segmentProtectionUntil[segmentID]
+	if !exists {
+		return false
+	}
+	return uint64(time.Now().Unix()) < expiryTs
+}
+
+// updateSegmentProtection updates compaction protection for segments referenced by a snapshot.
+// For each segment, the protection expiry is set to max(existing, newExpiry).
+func (sm *snapshotMeta) updateSegmentProtection(info *datapb.SnapshotInfo, segmentIDs []int64) {
+	protectionUntil := info.GetCompactionExpireTime()
+	if protectionUntil == 0 {
+		return
+	}
+
+	sm.segmentProtectionMu.Lock()
+	defer sm.segmentProtectionMu.Unlock()
+	for _, segID := range segmentIDs {
+		sm.upsertMaxProtection(segID, protectionUntil)
+	}
+
+	log.Info("updated compaction protection for segments",
+		zap.Int64("snapshotID", info.GetId()),
+		zap.Uint64("protectionUntil", protectionUntil),
+		zap.Int("numSegments", len(segmentIDs)))
+}
+
+// rebuildSegmentProtection recalculates compaction protection for the given segments
+// from all remaining snapshots. Called after a snapshot is dropped or commit fails.
+func (sm *snapshotMeta) rebuildSegmentProtection(segmentIDs []int64) {
+	sm.segmentProtectionMu.Lock()
+	defer sm.segmentProtectionMu.Unlock()
+
+	// Clear existing protection for affected segments
+	for _, segID := range segmentIDs {
+		delete(sm.segmentProtectionUntil, segID)
+	}
+
+	// Rebuild from remaining snapshots
+	now := uint64(time.Now().Unix())
+	sm.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
+		protectionUntil := info.GetCompactionExpireTime()
+		if !isProtectionActive(protectionUntil, now) {
+			return true
+		}
+
+		refIndex, exists := sm.snapshotID2RefIndex.Get(id)
+		if !exists || !refIndex.IsLoaded() {
+			return true
+		}
+
+		for _, segID := range segmentIDs {
+			if refIndex.ContainsSegment(segID) {
+				sm.upsertMaxProtection(segID, protectionUntil)
+			}
+		}
+		return true
+	})
+}
+
+// rebuildAllSegmentProtection rebuilds compaction protection for all segments
+// from all snapshots. Called during DataCoord restart after RefIndex loading.
+//
+// Fail-closed design (mirrors GC protection pattern): if a snapshot has active
+// compaction protection but its RefIndex hasn't been loaded yet, we don't know
+// which segments to protect. In this case, we block compaction for the entire
+// collection until the RefIndex loads. This prevents a protection gap during
+// startup where protected segments could be compacted.
+func (sm *snapshotMeta) rebuildAllSegmentProtection() {
+	sm.segmentProtectionMu.Lock()
+	defer sm.segmentProtectionMu.Unlock()
+
+	// Clear all existing protection
+	sm.segmentProtectionUntil = make(map[int64]uint64)
+	blockedCollections := typeutil.NewUniqueSet()
+
+	now := uint64(time.Now().Unix())
+	sm.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
+		protectionUntil := info.GetCompactionExpireTime()
+		if !isProtectionActive(protectionUntil, now) {
+			return true
+		}
+
+		refIndex, exists := sm.snapshotID2RefIndex.Get(id)
+		if !exists || !refIndex.IsLoaded() {
+			// Fail-closed: RefIndex not loaded but snapshot has active protection.
+			// Block compaction for the entire collection until RefIndex loads.
+			blockedCollections.Insert(info.GetCollectionId())
+			log.Info("blocking compaction for collection due to unloaded protected snapshot RefIndex",
+				zap.Int64("snapshotID", id),
+				zap.Int64("collectionID", info.GetCollectionId()),
+				zap.Uint64("protectionUntil", protectionUntil))
+			return true
+		}
+
+		for _, segID := range refIndex.GetSegmentIDs() {
+			sm.upsertMaxProtection(segID, protectionUntil)
+		}
+		return true
+	})
+
+	sm.compactionBlockedCollections = blockedCollections
+	log.Info("rebuilt all segment compaction protection",
+		zap.Int("numProtectedSegments", len(sm.segmentProtectionUntil)),
+		zap.Int("numBlockedCollections", sm.compactionBlockedCollections.Len()))
 }

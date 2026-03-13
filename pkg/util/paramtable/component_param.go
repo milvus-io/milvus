@@ -4808,16 +4808,17 @@ type dataCoordConfig struct {
 	LevelZeroCompactionTriggerDeltalogMaxNum ParamItem `refreshable:"true"`
 
 	// Garbage Collection
-	EnableGarbageCollection      ParamItem `refreshable:"false"`
-	GCInterval                   ParamItem `refreshable:"false"`
-	GCMissingTolerance           ParamItem `refreshable:"false"`
-	GCDropTolerance              ParamItem `refreshable:"false"`
-	GCRemoveConcurrent           ParamItem `refreshable:"false"`
-	GCScanIntervalInHour         ParamItem `refreshable:"false"`
-	GCSlowDownCPUUsageThreshold  ParamItem `refreshable:"false"`
-	SnapshotPendingTimeout       ParamItem `refreshable:"true"`
-	SnapshotRefIndexLoadInterval ParamItem `refreshable:"true"`
-	EnableActiveStandby          ParamItem `refreshable:"false"`
+	EnableGarbageCollection                ParamItem `refreshable:"false"`
+	GCInterval                             ParamItem `refreshable:"false"`
+	GCMissingTolerance                     ParamItem `refreshable:"false"`
+	GCDropTolerance                        ParamItem `refreshable:"false"`
+	GCRemoveConcurrent                     ParamItem `refreshable:"false"`
+	GCScanIntervalInHour                   ParamItem `refreshable:"false"`
+	GCSlowDownCPUUsageThreshold            ParamItem `refreshable:"false"`
+	SnapshotPendingTimeout                 ParamItem `refreshable:"true"`
+	SnapshotRefIndexLoadInterval           ParamItem `refreshable:"true"`
+	SnapshotMaxCompactionProtectionSeconds ParamItem `refreshable:"true"`
+	EnableActiveStandby                    ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode    ParamItem `refreshable:"false"`
 	IndexNodeAddress     ParamItem `refreshable:"false"`
@@ -5683,6 +5684,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Doc:          "The interval for loading snapshot RefIndex from S3",
 	}
 	p.SnapshotRefIndexLoadInterval.Init(base.mgr)
+
+	p.SnapshotMaxCompactionProtectionSeconds = ParamItem{
+		Key:          "dataCoord.snapshot.maxCompactionProtectionSeconds",
+		Version:      "2.6.10",
+		DefaultValue: "604800",
+		Doc:          "Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)",
+		Export:       true,
+	}
+	p.SnapshotMaxCompactionProtectionSeconds.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",

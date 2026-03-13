@@ -2075,7 +2075,8 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	}
 
 	log.Info("receive CreateSnapshot request", zap.String("name", req.GetName()),
-		zap.String("description", req.GetDescription()))
+		zap.String("description", req.GetDescription()),
+		zap.Int64("compactionProtectionSeconds", req.GetCompactionProtectionSeconds()))
 
 	// Check if snapshot name already exists
 	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err == nil {
@@ -2112,9 +2113,10 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	// Snapshot ID is allocated in the callback
 	if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().
 		WithHeader(&message.CreateSnapshotMessageHeader{
-			CollectionId: req.GetCollectionId(),
-			Name:         req.GetName(),
-			Description:  req.GetDescription(),
+			CollectionId:                req.GetCollectionId(),
+			Name:                        req.GetName(),
+			Description:                 req.GetDescription(),
+			CompactionProtectionSeconds: req.GetCompactionProtectionSeconds(),
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).

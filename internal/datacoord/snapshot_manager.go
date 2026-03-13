@@ -99,7 +99,7 @@ type SnapshotManager interface {
 	// Returns:
 	//   - snapshotID: Allocated snapshot ID (0 on error)
 	//   - error: If name already exists, allocation fails, or save fails
-	CreateSnapshot(ctx context.Context, collectionID int64, name, description string) (int64, error)
+	CreateSnapshot(ctx context.Context, collectionID int64, name, description string, compactionProtectionSeconds int64) (int64, error)
 
 	// DropSnapshot deletes an existing snapshot by name.
 	// It removes the snapshot from memory cache, etcd, and S3 storage.
@@ -344,13 +344,16 @@ func (sm *snapshotManager) CreateSnapshot(
 	ctx context.Context,
 	collectionID int64,
 	name, description string,
+	compactionProtectionSeconds int64,
 ) (int64, error) {
 	// Lock to prevent TOCTOU race on snapshot name uniqueness check
 	sm.createSnapshotMu.Lock()
 	defer sm.createSnapshotMu.Unlock()
 
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.String("name", name))
-	log.Info("create snapshot request received", zap.String("description", description))
+	log.Info("create snapshot request received",
+		zap.String("description", description),
+		zap.Int64("compactionProtectionSeconds", compactionProtectionSeconds))
 
 	// Validate snapshot name uniqueness (protected by createSnapshotMu)
 	if _, err := sm.snapshotMeta.GetSnapshot(ctx, name); err == nil {
@@ -375,6 +378,11 @@ func (sm *snapshotManager) CreateSnapshot(
 	snapshotData.SnapshotInfo.Id = snapshotID
 	snapshotData.SnapshotInfo.Name = name
 	snapshotData.SnapshotInfo.Description = description
+
+	// Set compaction protection if requested
+	if compactionProtectionSeconds > 0 {
+		snapshotData.SnapshotInfo.CompactionExpireTime = uint64(time.Now().Unix()) + uint64(compactionProtectionSeconds)
+	}
 
 	// Save to storage
 	if err := sm.snapshotMeta.SaveSnapshot(ctx, snapshotData); err != nil {

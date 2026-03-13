@@ -2225,20 +2225,39 @@ func (m *meta) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID
 	return m.catalog.GcConfirm(ctx, collectionID, partitionID)
 }
 
+// isSegmentCompactionProtected checks if a segment is protected from compaction by a snapshot.
+func (m *meta) isSegmentCompactionProtected(segmentID int64) bool {
+	if m.snapshotMeta == nil {
+		return false
+	}
+	return m.snapshotMeta.IsSegmentCompactionProtected(segmentID)
+}
+
+// isCollectionCompactionBlocked checks if compaction is blocked for a collection
+// because a protected snapshot's RefIndex hasn't been loaded yet (fail-closed).
+func (m *meta) isCollectionCompactionBlocked(collectionID int64) bool {
+	if m.snapshotMeta == nil {
+		return false
+	}
+	return m.snapshotMeta.IsCollectionCompactionBlocked(collectionID)
+}
+
 func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo {
 	allSegs := m.SelectSegments(m.ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
 			isFlushed(segment) && // sealed segment
 			!segment.isCompacting && // not compacting now
-			!segment.GetIsImporting() // not importing now
+			!segment.GetIsImporting() && // not importing now
+			!m.isSegmentCompactionProtected(segment.GetID()) // not protected by snapshot
 	}))
 
 	ret := make(map[int64][]*SegmentInfo)
 	for _, seg := range allSegs {
-		if _, ok := ret[seg.CollectionID]; !ok {
-			ret[seg.CollectionID] = make([]*SegmentInfo, 0)
+		// Fail-closed: skip collections with unloaded protected snapshot RefIndexes.
+		// Check early to avoid grouping segments that will be discarded.
+		if m.isCollectionCompactionBlocked(seg.CollectionID) {
+			continue
 		}
-
 		ret[seg.CollectionID] = append(ret[seg.CollectionID], seg)
 	}
 
