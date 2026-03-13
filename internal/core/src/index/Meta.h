@@ -112,4 +112,8 @@ constexpr const char* DISK_ANN_PREPARE_USE_BFS_CACHE = "use_bfs_cache";
 // DiskAnn query params
 constexpr const char* DISK_ANN_QUERY_LIST = "search_list";
 constexpr const char* DISK_ANN_QUERY_BEAMWIDTH = "beamwidth";
+// UT-only flag: when true, index Upload()/Load() route to V3 paths.
+// In production, V2/V3 routing is handled by callers (ScalarIndexCreator, SealedIndexTranslator).
+// Delete this along with V2 Upload/Load code when V2 compatibility is dropped.
+extern bool kScalarIndexUseV3;
 }  // namespace milvus::index

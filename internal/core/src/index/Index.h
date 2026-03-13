@@ -64,6 +64,16 @@ class IndexBase {
     virtual IndexStatsPtr
     Upload(const Config& config = {}) = 0;
 
+    virtual void
+    LoadV3(const Config& config) {
+        ThrowInfo(Unsupported, "LoadV3 is not supported for this index type");
+    }
+
+    virtual IndexStatsPtr
+    UploadV3(const Config& config) {
+        ThrowInfo(Unsupported, "UploadV3 is not supported for this index type");
+    }
+
     virtual const bool
     HasRawData() const = 0;
 

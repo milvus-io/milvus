@@ -66,8 +66,9 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     schema_ = ctx.fieldDataMeta.field_schema;
-    mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
+    this->file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
+    is_index_file_ = false;
 
     path_ = disk_file_manager_->GetLocalTempTextIndexPrefix();
 
@@ -88,8 +89,9 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx)
     : commit_interval_in_ms_(std::numeric_limits<int64_t>::max()),
       last_commit_time_(stdclock::now()) {
     schema_ = ctx.fieldDataMeta.field_schema;
-    mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
+    this->file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
+    is_index_file_ = false;
     d_type_ = TantivyDataType::Text;
 }
 
@@ -116,9 +118,9 @@ TextMatchIndex::Upload(const Config& config) {
     auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
 
     auto binary_set = Serialize(config);
-    mem_file_manager_->AddTextLog(binary_set);
+    this->file_manager_->AddTextLog(binary_set);
     auto remote_mem_path_to_size =
-        mem_file_manager_->GetRemotePathsToFileSize();
+        this->file_manager_->GetRemotePathsToFileSize();
 
     std::vector<SerializedIndexFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size() +
@@ -129,7 +131,7 @@ TextMatchIndex::Upload(const Config& config) {
     for (auto& file : remote_mem_path_to_size) {
         index_files.emplace_back(file.first, file.second);
     }
-    return IndexStats::New(mem_file_manager_->GetAddedTotalMemSize() +
+    return IndexStats::New(this->file_manager_->GetAddedTotalMemSize() +
                                disk_file_manager_->GetAddedTotalFileSize(),
                            std::move(index_files));
 }
@@ -156,7 +158,7 @@ TextMatchIndex::Load(const Config& config) {
         file.push_back(*it);
         files_value.erase(it);
         auto index_datas =
-            mem_file_manager_->LoadIndexToMemory(file, load_priority);
+            this->file_manager_->LoadIndexToMemory(file, load_priority);
         BinarySet binary_set;
         AssembleIndexDatas(index_datas, binary_set);
         // clear index_datas to free memory early

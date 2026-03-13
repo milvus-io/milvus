@@ -40,6 +40,7 @@ class MilvusConan(ConanFile):
         "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
         "grpc/1.67.1@milvus/dev#5aa62c51bced448b83d7db9e5b3a13c7",
         "rapidjson/cci.20230929#624c0094d741e6a3749d2e44d834b96c",
+        "crc32c/1.1.1",
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
         "xxhash/0.8.3#199e63ab9800302c232d030b27accec0",
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",

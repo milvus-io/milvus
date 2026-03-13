@@ -104,6 +104,13 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
         this->wrapper_->create_reader(set_bitset);
     }
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  private:
     void
     ApplyIterativeNgramFilter(const std::vector<std::string>& sorted_terms,

@@ -21,6 +21,8 @@
 #include <string_view>
 #include <vector>
 
+#include "nlohmann/json_fwd.hpp"
+
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
@@ -290,6 +292,13 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         is_growing_ = is_growing;
     }
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  protected:
     void
     finish();
@@ -321,6 +330,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     virtual void
     RetainTantivyIndexFiles(std::vector<std::string>& index_files);
 
+    // Builds the TANTIVY_META JSON object. Override in subclasses to add
+    // additional fields (e.g., has_non_exist in JsonInvertedIndex).
+    virtual nlohmann::json
+    BuildTantivyMeta(const std::vector<std::string>& file_names, bool has_null);
+
  protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
     TantivyDataType d_type_;
@@ -334,7 +348,6 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      * 3, load phase, we need the index on the disk instead of memory, we use DiskFileManager.CacheIndexToDisk;
      * Btw, this approach can be applied to DiskANN also.
      */
-    MemFileManagerPtr mem_file_manager_;
     DiskFileManagerPtr disk_file_manager_;
 
     folly::SharedMutexWritePriority mutex_{};

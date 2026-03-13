@@ -191,11 +191,17 @@ class RTreeIndex : public ScalarIndex<T> {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  protected:
     void
     finish();
 
- protected:
     std::shared_ptr<RTreeIndexWrapper> wrapper_;
     std::string path_;
     proto::schema::FieldSchema schema_;
