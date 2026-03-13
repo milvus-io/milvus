@@ -78,6 +78,7 @@ type Server struct {
 	tikvCli             *txnkv.Client
 	address             string
 	session             sessionutil.SessionInterface
+	sessionOwned        bool // true when session was created by this server, false when injected via SetSession
 	sessionWatcher      sessionutil.SessionWatcher
 	sessionWatcherMu    sync.Mutex
 	kv                  kv.MetaKv
@@ -163,6 +164,7 @@ func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	if s.session == nil {
 		return errors.New("session is nil, the etcd client connection may have failed")
 	}
+	s.sessionOwned = false // session is injected externally; this server must not trigger kill on its behalf
 	return nil
 }
 
@@ -259,6 +261,7 @@ func (s *Server) initSession() error {
 		s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
 		s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
 		s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
+		s.sessionOwned = true // created by this server; it may trigger kill on unexpected session loss
 	}
 	return nil
 }
@@ -661,7 +664,10 @@ func (s *Server) watchNodes(revision int64) {
 				}
 				log.Warn("Session Watcher channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
 				go s.Stop()
-				if s.session.IsTriggerKill() {
+				// Only trigger kill when this server owns the session. In MixCoord mode
+				// the session is shared; sending SIGINT there would kill the process
+				// during a normal coordinated shutdown.
+				if s.sessionOwned && s.session.IsTriggerKill() {
 					if p, err := os.FindProcess(os.Getpid()); err == nil {
 						p.Signal(syscall.SIGINT)
 					}

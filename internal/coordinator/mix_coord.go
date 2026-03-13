@@ -338,19 +338,12 @@ func (s *mixCoordImpl) Stop() error {
 	s.GracefulStop()
 	log.Info("graceful stop done")
 
-	// Stop datacoord before querycoord: all three components share the same
-	// session object. queryCoordServer.Stop() calls session.Stop(), cancelling
-	// the shared session context. This collapses the etcd watches that the
-	// datacoord's qnSessionWatcher holds, causing an unexpected EventChannel
-	// closure which triggers stopServiceWatch() → SIGINT. By stopping datacoord
-	// first its serverLoop goroutines (including watchService) exit cleanly via
-	// ctx cancellation before the session is torn down.
-	if err := s.datacoordServer.Stop(); err != nil {
-		log.Error("Failed to stop dataCoord", zap.Error(err))
-	}
-
 	if err := s.queryCoordServer.Stop(); err != nil {
 		log.Error("Failed to stop queryCoord", zap.Error(err))
+	}
+
+	if err := s.datacoordServer.Stop(); err != nil {
+		log.Error("Failed to stop dataCoord", zap.Error(err))
 	}
 
 	if err := s.rootcoordServer.Stop(); err != nil {
