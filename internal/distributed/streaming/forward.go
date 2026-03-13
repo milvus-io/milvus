@@ -219,7 +219,7 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 	opts = append(opts, grpc.WithResolvers(rb))
 
 	if paramtable.Get().ProxyGrpcServerCfg.TLSMode.GetAsInt() == 1 || paramtable.Get().ProxyGrpcServerCfg.TLSMode.GetAsInt() == 2 {
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})))
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
