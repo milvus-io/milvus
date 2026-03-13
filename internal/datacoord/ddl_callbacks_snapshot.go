@@ -36,7 +36,7 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 	log.Info("createSnapshotV2AckCallback received")
 
 	// Create snapshot - ID is allocated inside CreateSnapshot
-	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description)
+	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds)
 	if err != nil {
 		log.Error("failed to create snapshot via DDL callback", zap.Error(err))
 		return err
