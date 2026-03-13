@@ -160,7 +160,7 @@ func (si *statsInspector) enableBM25() bool {
 
 func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 ||
-		!segment.GetIsSorted() {
+		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) {
 		return false
 	}
 
@@ -177,7 +177,7 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 
 func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 ||
-		!segment.GetIsSorted() {
+		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) {
 		return false
 	}
 
@@ -218,7 +218,7 @@ func (si *statsInspector) triggerTextStatsTask() {
 			needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 		}
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return seg.GetIsSorted() && needDoTextIndex(seg, needTriggerFieldIDs)
+			return (seg.GetIsSorted() || seg.GetIsSortedByNamespace()) && needDoTextIndex(seg, needTriggerFieldIDs)
 		}))
 
 		resources := []*internalpb.FileResourceInfo{}
@@ -290,7 +290,7 @@ func (si *statsInspector) triggerBM25StatsTask() {
 			}
 		}
 		segments := si.mt.SelectSegments(si.ctx, WithCollection(collection.ID), SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return seg.GetIsSorted() && needDoBM25(seg, needTriggerFieldIDs)
+			return (seg.GetIsSorted() || seg.GetIsSortedByNamespace()) && needDoBM25(seg, needTriggerFieldIDs)
 		}))
 
 		for _, segment := range segments {

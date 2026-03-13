@@ -11,9 +11,18 @@
 
 #pragma once
 
+#include <stdint.h>
+#include <cstddef>
+#include <map>
+#include <string>
+
 #include "common/BitsetView.h"
-#include "query/PlanNode.h"
-#include "query/SearchOnGrowing.h"
+#include "common/OpContext.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/protobuf_utils.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "segcore/SealedIndexingRecord.h"
 
 namespace milvus::query {

@@ -10,8 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <cstdint>
+#include <utility>
 #include <vector>
 
+#include "common/Types.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 #include "segcore/TimestampIndex.h"
 
 using namespace milvus;

@@ -165,7 +165,12 @@ func (s *StreamingForwardSuite) TestBFStreamingForward() {
 
 	delegator := s.delegator
 
-	// Setup distribution
+	// Setup candidates in distribution
+	// empty bfs will not match, CandidateKey always matches
+	// Segment 101 uses CandidateKey which always matches
+	candidateKey := pkoracle.NewCandidateKey(101, 1, commonpb.SegmentState_Sealed)
+
+	// Setup distribution with candidates included from the start
 	delegator.distribution.AddGrowing(SegmentEntry{
 		NodeID:      1,
 		PartitionID: 1,
@@ -175,6 +180,7 @@ func (s *StreamingForwardSuite) TestBFStreamingForward() {
 		NodeID:      1,
 		PartitionID: 1,
 		SegmentID:   101,
+		Candidate:   candidateKey, // Include candidate from the start
 	})
 	delegator.distribution.AddDistributions(SegmentEntry{
 		NodeID:      1,
@@ -188,13 +194,6 @@ func (s *StreamingForwardSuite) TestBFStreamingForward() {
 		DroppedInTarget: nil,
 		Checkpoint:      nil,
 	}, []int64{1})
-
-	// Setup pk oracle
-	// empty bfs will not match
-	delegator.pkOracle.Register(pkoracle.NewBloomFilterSet(100, 10, commonpb.SegmentState_Growing), 1)
-	delegator.pkOracle.Register(pkoracle.NewBloomFilterSet(102, 10, commonpb.SegmentState_Sealed), 1)
-	// candidate key alway match
-	delegator.pkOracle.Register(pkoracle.NewCandidateKey(101, 10, commonpb.SegmentState_Sealed), 1)
 
 	deletedSegment := typeutil.NewConcurrentSet[int64]()
 	mockWorker := cluster.NewMockWorker(s.T())
@@ -248,12 +247,8 @@ func (s *StreamingForwardSuite) TestDirectStreamingForward() {
 		Checkpoint:      nil,
 	}, []int64{1})
 
-	// Setup pk oracle
-	// empty bfs will not match
-	delegator.pkOracle.Register(pkoracle.NewBloomFilterSet(100, 10, commonpb.SegmentState_Growing), 1)
-	delegator.pkOracle.Register(pkoracle.NewBloomFilterSet(102, 10, commonpb.SegmentState_Sealed), 1)
-	// candidate key alway match
-	delegator.pkOracle.Register(pkoracle.NewCandidateKey(101, 10, commonpb.SegmentState_Sealed), 1)
+	// For Direct forward policy, candidates are not used for BF filtering
+	// All segments in distribution are forwarded to
 
 	deletedSegment := typeutil.NewConcurrentSet[int64]()
 	mockWorker := cluster.NewMockWorker(s.T())
@@ -471,8 +466,10 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingLoad() {
 	s.delegator.deleteBuffer.RegisterL0(l0Segment)
 
 	seg.EXPECT().ID().Return(10000)
+	seg.EXPECT().Collection().Return(s.collectionID)
 	seg.EXPECT().Partition().Return(100)
-	s.loader.EXPECT().LoadDeltaLogs(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, seg segments.Segment, fb []*datapb.FieldBinlog) error {
+	s.loader.EXPECT().LoadDeltaLogs(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, seg segments.Segment, loadInfo *querypb.SegmentLoadInfo) error {
+		fb := loadInfo.GetDeltalogs()
 		s.ElementsMatch([]string{"mocked_log_path"}, lo.Flatten(lo.Map(fb, func(fbl *datapb.FieldBinlog, _ int) []string {
 			return lo.Map(fbl.Binlogs, func(bl *datapb.Binlog, _ int) string { return bl.LogPath })
 		})))
@@ -482,7 +479,7 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingLoad() {
 	err = sd.addL0ForGrowing(context.Background(), seg)
 	s.NoError(err)
 
-	s.loader.EXPECT().LoadDeltaLogs(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, seg segments.Segment, fb []*datapb.FieldBinlog) error {
+	s.loader.EXPECT().LoadDeltaLogs(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, seg segments.Segment, loadInfo *querypb.SegmentLoadInfo) error {
 		return errors.New("mocked")
 	}).Once()
 	err = sd.addL0ForGrowing(context.Background(), seg)

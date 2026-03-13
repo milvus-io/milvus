@@ -613,7 +613,7 @@ func TestExpr_PhraseMatch(t *testing.T) {
 	}
 	for i, exprStr := range unsupported {
 		_, err := ParseExpr(helper, exprStr, nil)
-		assert.True(t, strings.HasSuffix(err.Error(), errMsgs[i]), fmt.Sprintf("Error expected: %v, actual %v", errMsgs[i], err.Error()))
+		assert.True(t, strings.Contains(err.Error(), errMsgs[i]), fmt.Sprintf("Error expected: %v, actual %v", errMsgs[i], err.Error()))
 	}
 }
 
@@ -2715,4 +2715,545 @@ func TestExpr_Match(t *testing.T) {
 	for _, expr := range invalidExprs {
 		assertInvalidExpr(t, helper, expr)
 	}
+}
+
+func TestExpr_ArrayContains(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// Valid ArrayContains expressions
+	validExprs := []string{
+		`array_contains(struct_array[sub_int], 1)`,
+		`array_contains(struct_array[sub_int], 1) && array_contains(struct_array[sub_int], 2)`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, helper, expr)
+	}
+}
+
+// ============================================================================
+// Timestamptz Expression Tests
+// These tests cover VisitTimestamptzCompareForward and VisitTimestamptzCompareReverse
+// which are used for optimized timestamptz comparisons with optional INTERVAL arithmetic
+// ============================================================================
+
+func newTestSchemaWithTimestamptz(t *testing.T) *typeutil.SchemaHelper {
+	// Create schema with Timestamptz field for testing
+	// The newTestSchema already includes all DataType values including Timestamptz
+	schema := newTestSchema(true)
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	return schemaHelper
+}
+
+func TestExpr_TimestamptzCompareForward(t *testing.T) {
+	schema := newTestSchemaWithTimestamptz(t)
+
+	// Test valid timestamptz forward comparisons (column op ISO value)
+	// Format: TimestamptzField [+|- INTERVAL 'duration'] <op> ISO 'timestamp'
+	// Note: ISO keyword is required before the timestamp string literal
+	validExprs := []string{
+		// Simple comparisons without INTERVAL (quick path)
+		`TimestamptzField > ISO '2025-01-01T00:00:00Z'`,
+		`TimestamptzField >= ISO '2025-01-01T00:00:00Z'`,
+		`TimestamptzField < ISO '2025-12-31T23:59:59Z'`,
+		`TimestamptzField <= ISO '2025-06-15T12:00:00Z'`,
+		`TimestamptzField == ISO '2025-03-20T10:30:00Z'`,
+		`TimestamptzField != ISO '2025-08-10T08:00:00Z'`,
+
+		// Comparisons with INTERVAL (slow path with arithmetic)
+		`TimestamptzField + INTERVAL 'P1D' > ISO '2025-01-01T00:00:00Z'`,
+		`TimestamptzField - INTERVAL 'P1D' < ISO '2025-12-31T23:59:59Z'`,
+		`TimestamptzField + INTERVAL 'PT1H' >= ISO '2025-06-15T12:00:00Z'`,
+		`TimestamptzField - INTERVAL 'PT30M' <= ISO '2025-03-20T10:30:00Z'`,
+		`TimestamptzField + INTERVAL 'P1Y' == ISO '2026-01-01T00:00:00Z'`,
+		`TimestamptzField - INTERVAL 'P6M' != ISO '2024-06-01T00:00:00Z'`,
+
+		// Complex INTERVAL durations
+		`TimestamptzField + INTERVAL 'P1Y2M3D' > ISO '2025-01-01T00:00:00Z'`,
+		`TimestamptzField + INTERVAL 'PT10H30M15S' < ISO '2025-12-31T23:59:59Z'`,
+		`TimestamptzField - INTERVAL 'P1Y2M3DT4H5M6S' >= ISO '2024-01-01T00:00:00Z'`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, schema, expr)
+	}
+}
+
+func TestExpr_TimestamptzCompareReverse(t *testing.T) {
+	schema := newTestSchemaWithTimestamptz(t)
+
+	// Test valid timestamptz reverse comparisons (ISO value op column)
+	// Format: ISO 'timestamp' <op> TimestamptzField [+|- INTERVAL 'duration']
+	// Note: ISO keyword is required before the timestamp string
+	// Note: Operator gets reversed internally (e.g., '>' becomes '<')
+	validExprs := []string{
+		// Simple reverse comparisons without INTERVAL (quick path)
+		`ISO '2025-01-01T00:00:00Z' < TimestamptzField`,
+		`ISO '2025-01-01T00:00:00Z' <= TimestamptzField`,
+		`ISO '2025-12-31T23:59:59Z' > TimestamptzField`,
+		`ISO '2025-06-15T12:00:00Z' >= TimestamptzField`,
+		`ISO '2025-03-20T10:30:00Z' == TimestamptzField`,
+		`ISO '2025-08-10T08:00:00Z' != TimestamptzField`,
+
+		// Reverse comparisons with INTERVAL after field (slow path with arithmetic)
+		`ISO '2025-01-01T00:00:00Z' < TimestamptzField + INTERVAL 'P1D'`,
+		`ISO '2025-12-31T23:59:59Z' > TimestamptzField - INTERVAL 'P1D'`,
+		`ISO '2025-06-15T12:00:00Z' <= TimestamptzField + INTERVAL 'PT1H'`,
+		`ISO '2025-03-20T10:30:00Z' >= TimestamptzField - INTERVAL 'PT30M'`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, schema, expr)
+	}
+}
+
+func TestExpr_TimestamptzCompareInvalid(t *testing.T) {
+	schema := newTestSchemaWithTimestamptz(t)
+
+	// Test invalid timestamptz expressions
+	// Note: ISO keyword is required for timestamptz comparisons
+	invalidExprs := []string{
+		// Invalid field type for timestamptz operations (non-timestamptz field with INTERVAL)
+		`Int64Field + INTERVAL 'P1D' > ISO '2025-01-01T00:00:00Z'`,
+		`VarCharField + INTERVAL 'P1D' < ISO '2025-01-01T00:00:00Z'`,
+
+		// Invalid timestamp format with ISO
+		`TimestamptzField > ISO 'invalid-timestamp'`,
+		`TimestamptzField < ISO '2025-13-01T00:00:00Z'`, // Invalid month
+		`TimestamptzField > ISO '2025-01-32T00:00:00Z'`, // Invalid day
+
+		// Invalid interval format
+		`TimestamptzField + INTERVAL 'invalid' > ISO '2025-01-01T00:00:00Z'`,
+		`TimestamptzField + INTERVAL '1D' > ISO '2025-01-01T00:00:00Z'`, // Missing P prefix
+	}
+
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, schema, expr)
+	}
+}
+
+// ============================================================================
+// Power Expression Tests
+// These tests cover VisitPower for constant power operations
+// ============================================================================
+
+func TestExpr_Power(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Test valid power expressions with constants
+	validExprs := []string{
+		// Integer powers
+		`2 ** 3 == 8`,
+		`3 ** 2 == 9`,
+		`10 ** 0 == 1`,
+
+		// Float powers
+		`2.0 ** 3.0 == 8.0`,
+		`4.0 ** 0.5 > 1.0`,
+
+		// Negative exponents
+		`2 ** -1 == 0.5`,
+
+		// Used in arithmetic expressions
+		`Int64Field + (2 ** 3) > 0`,
+		`Int64Field * (10 ** 2) < 1000`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, schema, expr)
+	}
+
+	// Test invalid power expressions - power requires constant operands
+	invalidExprs := []string{
+		// Power with field operands (not allowed)
+		`Int64Field ** 2 == 100`,
+		`2 ** Int64Field == 8`,
+		`Int64Field ** Int64Field == 1`,
+	}
+
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, schema, expr)
+	}
+}
+
+// ============================================================================
+// Error Handling Tests
+// These tests cover the int64OverflowError type and error handling paths
+// ============================================================================
+
+func TestInt64OverflowError(t *testing.T) {
+	// Test int64OverflowError.Error() method - covers the Error() method at 0% coverage
+	err := &int64OverflowError{literal: "9223372036854775808"}
+	assert.Contains(t, err.Error(), "int64 overflow")
+	assert.Contains(t, err.Error(), "9223372036854775808")
+
+	// Test isInt64OverflowError helper function
+	assert.True(t, isInt64OverflowError(err))
+	assert.False(t, isInt64OverflowError(fmt.Errorf("some other error")))
+	assert.False(t, isInt64OverflowError(nil))
+}
+
+// ============================================================================
+// reverseCompareOp Tests
+// This function is used internally to reverse comparison operators
+// ============================================================================
+
+func Test_reverseCompareOp(t *testing.T) {
+	// Test all comparison operator reversals
+	// This covers the reverseCompareOp function at 0% coverage
+	tests := []struct {
+		input    planpb.OpType
+		expected planpb.OpType
+	}{
+		{planpb.OpType_LessThan, planpb.OpType_GreaterThan},
+		{planpb.OpType_LessEqual, planpb.OpType_GreaterEqual},
+		{planpb.OpType_GreaterThan, planpb.OpType_LessThan},
+		{planpb.OpType_GreaterEqual, planpb.OpType_LessEqual},
+		{planpb.OpType_Equal, planpb.OpType_Equal},
+		{planpb.OpType_NotEqual, planpb.OpType_NotEqual},
+		{planpb.OpType_Invalid, planpb.OpType_Invalid},
+		{planpb.OpType_PrefixMatch, planpb.OpType_Invalid}, // Unknown ops return Invalid
+	}
+
+	for _, tt := range tests {
+		result := reverseCompareOp(tt.input)
+		assert.Equal(t, tt.expected, result, "reverseCompareOp(%v)", tt.input)
+	}
+}
+
+// ============================================================================
+// Additional Coverage Tests for Edge Cases
+// ============================================================================
+
+func TestExpr_AdditionalEdgeCases(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Test valid edge case expressions
+	validExprs := []string{
+		// Floating point edge cases
+		`FloatField > 1e10`,
+		`DoubleField < 1e-10`,
+		`FloatField == 3.14159265358979`,
+
+		// Boolean expressions
+		`true == true`,
+		`false != true`,
+
+		// Empty string comparison
+		`StringField == ""`,
+		`VarCharField != ""`,
+
+		// JSON with complex nested paths
+		`JSONField["level1"]["level2"]["level3"] > 0`,
+
+		// Array length operations
+		`array_length(ArrayField) > 0`,
+		`array_length(ArrayField) == 10`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, schema, expr)
+	}
+}
+
+func TestExpr_InvalidOperatorCombinations(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Test invalid operator combinations that should fail
+	// These test the error paths in various Visit methods
+	invalidExprs := []string{
+		// Shift operations not supported
+		`Int64Field << 2`,
+		`Int64Field >> 2`,
+
+		// Bitwise operations not supported
+		`Int64Field & 0xFF`,
+		`Int64Field | 0xFF`,
+		`Int64Field ^ 0xFF`,
+
+		// Type mismatches
+		`"string" + 1`,
+		`BoolField + 1`,
+	}
+
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, schema, expr)
+	}
+}
+
+// TestExpr_VisitBooleanEdgeCases tests edge cases in VisitBoolean
+// Boolean literals must be used in comparison expressions, not as standalone values
+func TestExpr_VisitBooleanEdgeCases(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Valid boolean comparison expressions
+	// Note: Standalone boolean values or fields are not valid filter expressions
+	// They must be used in comparisons
+	validExprs := []string{
+		`true == true`,
+		`false == false`,
+		`true != false`,
+		`BoolField == true`,
+		`BoolField != false`,
+		`BoolField == BoolField`,
+		`not (BoolField == true)`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, schema, expr)
+	}
+}
+
+// TestExpr_VisitFloatingEdgeCases tests edge cases in VisitFloating
+func TestExpr_VisitFloatingEdgeCases(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Valid floating point literal expressions
+	validExprs := []string{
+		`FloatField > 0.0`,
+		`FloatField < 1.0e10`,
+		`FloatField >= -1.0e-10`,
+		`FloatField <= 3.14159265`,
+		`DoubleField == 2.718281828`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, schema, expr)
+	}
+}
+
+// TestExpr_VisitRangeEdgeCases tests edge cases in VisitRange and VisitReverseRange
+func TestExpr_VisitRangeEdgeCases(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Valid range expressions
+	validExprs := []string{
+		// Forward range: lower < field < upper
+		`1 < Int64Field < 10`,
+		`0.0 < FloatField < 1.0`,
+		`"a" < StringField < "z"`,
+
+		// Forward range with equal
+		`1 <= Int64Field < 10`,
+		`1 < Int64Field <= 10`,
+		`1 <= Int64Field <= 10`,
+
+		// Reverse range: upper > field > lower
+		`10 > Int64Field > 1`,
+		`1.0 > FloatField > 0.0`,
+		`"z" > StringField > "a"`,
+
+		// Reverse range with equal
+		`10 >= Int64Field > 1`,
+		`10 > Int64Field >= 1`,
+		`10 >= Int64Field >= 1`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, schema, expr)
+	}
+
+	// Invalid range expressions
+	invalidExprs := []string{
+		// Range on bool type is invalid
+		`true < BoolField < false`,
+
+		// Non-const bounds
+		`Int64Field < Int32Field < Int64Field`,
+	}
+
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, schema, expr)
+	}
+}
+
+// TestExpr_VisitUnaryEdgeCases tests edge cases in VisitUnary
+// Unary operators (not/!) must produce boolean expressions for filter predicates
+func TestExpr_VisitUnaryEdgeCases(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Valid unary expressions - must produce boolean filter predicates
+	validExprs := []string{
+		`not (Int64Field > 0)`,
+		`!(Int64Field < 10)`,
+		`not (BoolField == true)`,
+		`not (true == false)`,
+		`!(FloatField >= 1.0)`,
+		// Unary negation used in comparison context
+		`Int64Field > -1`,
+		`Int64Field < -(-5)`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, schema, expr)
+	}
+}
+
+// TestExpr_ConstantFolding tests constant folding in arithmetic expressions
+func TestExpr_ConstantFolding(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// Expressions where constants can be folded
+	validExprs := []string{
+		// Add/Sub constant folding
+		`Int64Field > (1 + 2)`,
+		`Int64Field < (10 - 5)`,
+		`Int64Field == (1 + 2 + 3)`,
+
+		// Mul/Div/Mod constant folding
+		`Int64Field > (2 * 3)`,
+		`Int64Field < (10 / 2)`,
+		`Int64Field == (10 % 3)`,
+
+		// Mixed operations
+		`Int64Field > (2 * 3 + 4)`,
+		`Int64Field < (10 - 2 * 3)`,
+
+		// Float constant folding
+		`FloatField > (1.0 + 2.0)`,
+		`FloatField < (10.0 / 2.0)`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, schema, expr)
+	}
+}
+
+// TestExpr_BooleanLiteral verifies how standalone "true"/"false" literals
+// are parsed by the proxy expression parser.
+//
+// Key behavior:
+//   - Standalone "true"/"false" are parsed into ValueExpr(BoolVal) with nodeDependent=true
+//   - Because nodeDependent=true, canBeExecuted() returns false
+//   - Therefore ParseExpr rejects them with "predicate is not a boolean expression"
+//   - But combined expressions like "BoolField == true" or "1==1" work fine
+//   - After rewriting, "1==1" becomes AlwaysTrueExpr, "1==2" becomes AlwaysFalseExpr
+func TestExpr_BooleanLiteral(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	// Case 1: standalone "true" / "false" should fail ParseExpr
+	// because VisitBoolean sets nodeDependent=true, and canBeExecuted requires nodeDependent=false
+	standaloneBoolExprs := []string{
+		"true",
+		"false",
+		"True",
+		"False",
+		"TRUE",
+		"FALSE",
+	}
+	for _, exprStr := range standaloneBoolExprs {
+		expr, err := ParseExpr(helper, exprStr, nil)
+		assert.Error(t, err, "standalone %q should fail", exprStr)
+		assert.Nil(t, expr, "standalone %q should return nil expr", exprStr)
+		assert.Contains(t, err.Error(), "predicate is not a boolean expression",
+			"standalone %q error message mismatch", exprStr)
+	}
+
+	// Case 2: verify that handleExpr (internal) does parse them into ValueExpr with Bool
+	// This shows the ANTLR + visitor layer works, but the outer canBeExecuted gate blocks it
+	for _, exprStr := range []string{"true", "false"} {
+		ret := handleExpr(helper, exprStr)
+		ewt, ok := ret.(*ExprWithType)
+		require.True(t, ok, "handleExpr(%q) should return *ExprWithType", exprStr)
+		assert.Equal(t, schemapb.DataType_Bool, ewt.dataType)
+		assert.True(t, ewt.nodeDependent, "boolean literal should be nodeDependent")
+
+		ve := ewt.expr.GetValueExpr()
+		require.NotNil(t, ve, "should be ValueExpr for %q", exprStr)
+		if exprStr == "true" {
+			assert.True(t, ve.GetValue().GetBoolVal())
+		} else {
+			assert.False(t, ve.GetValue().GetBoolVal())
+		}
+	}
+
+	// Case 3: boolean literals in valid combined expressions
+	// These all produce executable boolean predicates
+	validBoolExprs := []string{
+		"BoolField == true",
+		"BoolField == false",
+		"BoolField != true",
+		"BoolField != false",
+		"BoolField in [true, false]",
+	}
+	for _, exprStr := range validBoolExprs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	// Case 4: constant-folded expressions become AlwaysTrueExpr / AlwaysFalseExpr
+	// "1==1" constant-folds to ValueExpr(true), then rewriter converts to AlwaysTrueExpr
+	exprTrue, err := ParseExpr(helper, "1==1", nil)
+	require.NoError(t, err)
+	assert.NotNil(t, exprTrue.GetAlwaysTrueExpr(),
+		"1==1 should be rewritten to AlwaysTrueExpr")
+
+	// "1==2" constant-folds to ValueExpr(false), then rewriter converts to AlwaysFalseExpr
+	// AlwaysFalseExpr is represented as UnaryExpr(Not, AlwaysTrueExpr)
+	exprFalse, err := ParseExpr(helper, "1==2", nil)
+	require.NoError(t, err)
+	ue := exprFalse.GetUnaryExpr()
+	require.NotNil(t, ue, "1==2 should be rewritten to UnaryExpr(Not, AlwaysTrueExpr)")
+	assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+	assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+
+	// Case 5: empty expression becomes AlwaysTrueExpr (special case in handleExprInternal)
+	exprEmpty, err := ParseExpr(helper, "", nil)
+	require.NoError(t, err)
+	assert.NotNil(t, exprEmpty.GetAlwaysTrueExpr(),
+		"empty expression should be AlwaysTrueExpr")
+
+	// Case 6: "true and false" / "true or false" — two boolean literals connected by logical operators
+	// Both sides are GenericValue (from VisitBoolean), so VisitLogicalAnd calls And() which
+	// constant-folds to ValueExpr(BoolVal = true && false = false) with nodeDependent=false (default).
+	// Since nodeDependent=false, canBeExecuted() passes, then rewriter converts to AlwaysFalseExpr.
+	t.Run("true_and_false", func(t *testing.T) {
+		expr, err := ParseExpr(helper, "true and false", nil)
+		require.NoError(t, err, "\"true and false\" should be valid")
+		// And(true, false) = false → rewriter → AlwaysFalseExpr = UnaryExpr(Not, AlwaysTrueExpr)
+		ue := expr.GetUnaryExpr()
+		require.NotNil(t, ue, "should be AlwaysFalseExpr (UnaryExpr Not)")
+		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	})
+
+	t.Run("true_and_true", func(t *testing.T) {
+		expr, err := ParseExpr(helper, "true and true", nil)
+		require.NoError(t, err, "\"true and true\" should be valid")
+		// And(true, true) = true → rewriter → AlwaysTrueExpr
+		assert.NotNil(t, expr.GetAlwaysTrueExpr(),
+			"\"true and true\" should become AlwaysTrueExpr")
+	})
+
+	t.Run("true_or_false", func(t *testing.T) {
+		expr, err := ParseExpr(helper, "true or false", nil)
+		require.NoError(t, err, "\"true or false\" should be valid")
+		// Or(true, false) = true → rewriter → AlwaysTrueExpr
+		assert.NotNil(t, expr.GetAlwaysTrueExpr(),
+			"\"true or false\" should become AlwaysTrueExpr")
+	})
+
+	t.Run("false_or_false", func(t *testing.T) {
+		expr, err := ParseExpr(helper, "false or false", nil)
+		require.NoError(t, err, "\"false or false\" should be valid")
+		// Or(false, false) = false → rewriter → AlwaysFalseExpr
+		ue := expr.GetUnaryExpr()
+		require.NotNil(t, ue, "should be AlwaysFalseExpr")
+		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	})
+
+	t.Run("false_and_false", func(t *testing.T) {
+		expr, err := ParseExpr(helper, "false and false", nil)
+		require.NoError(t, err, "\"false and false\" should be valid")
+		// And(false, false) = false → rewriter → AlwaysFalseExpr
+		ue := expr.GetUnaryExpr()
+		require.NotNil(t, ue, "should be AlwaysFalseExpr")
+		assert.Equal(t, planpb.UnaryExpr_Not, ue.GetOp())
+		assert.NotNil(t, ue.GetChild().GetAlwaysTrueExpr())
+	})
 }

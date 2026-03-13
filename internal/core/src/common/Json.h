@@ -34,10 +34,6 @@
 #include "simdjson/dom/element.h"
 #include "simdjson/error.h"
 #include "simdjson/padded_string.h"
-#include "rapidjson/document.h"
-#include "rapidjson/error/en.h"
-#include "rapidjson/writer.h"
-#include "rapidjson/stringbuffer.h"
 
 #define SIMDJSON_CHECK_ERROR(result)               \
     do {                                           \
@@ -51,35 +47,66 @@ isObjectEmpty(simdjson::ondemand::value value);
 bool
 isDocEmpty(simdjson::ondemand::document document);
 
-// function to extract specific keys and convert them to json
-// rapidjson is suitable for extract and reconstruct serialization
-// instead of simdjson which not suitable for serialization
+// Extract specific top-level keys from a JSON string using simdjson ondemand.
+// Uses raw_json() to copy value fragments directly from the source without
+// re-parsing or re-serializing, which is faster than rapidjson or nlohmann.
+// Note: output key order follows source JSON field order (not keys param order).
+// This is safe because JSON objects are unordered per RFC 8259, and downstream
+// consumers (Go protobuf → map) do not depend on key ordering.
 inline std::string
 ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
-    rapidjson::Document doc;
-    doc.Parse(json.c_str());
-    if (doc.HasParseError()) {
+    simdjson::padded_string padded(json);
+    thread_local simdjson::ondemand::parser parser;
+    auto doc = parser.iterate(padded);
+    if (doc.error()) {
         ThrowInfo(ErrorCode::UnexpectedError,
-                  "json parse failed, error:{}",
-                  rapidjson::GetParseError_En(doc.GetParseError()));
+                  "json parse failed: {}",
+                  simdjson::error_message(doc.error()));
     }
 
-    rapidjson::Document result_doc;
-    result_doc.SetObject();
-    rapidjson::Document::AllocatorType& allocator = result_doc.GetAllocator();
+    auto obj = doc.get_object();
+    if (obj.error()) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "ExtractSubJson: input is not a JSON object: {}",
+                  simdjson::error_message(obj.error()));
+    }
 
-    for (const auto& key : keys) {
-        if (doc.HasMember(key.c_str())) {
-            result_doc.AddMember(rapidjson::Value(key.c_str(), allocator),
-                                 doc[key.c_str()],
-                                 allocator);
+    std::string result = "{";
+    result.reserve(json.size());
+    bool first = true;
+    for (auto field : obj) {
+        // escaped_key() returns the key as-is from source (safe for JSON output)
+        std::string_view ek = field.escaped_key();
+        // unescaped_key() resolves escape sequences for correct comparison
+        auto uk = field.unescaped_key();
+        if (uk.error()) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "ExtractSubJson: failed to decode key: {}",
+                      simdjson::error_message(uk.error()));
+        }
+        if (std::find(keys.begin(), keys.end(), uk.value()) != keys.end()) {
+            // raw_json() extracts the original JSON text of the value,
+            // avoiding any re-serialization overhead
+            auto raw = field.value().raw_json();
+            if (raw.error()) {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "ExtractSubJson: failed to extract value for "
+                          "key '{}': {}",
+                          uk.value(),
+                          simdjson::error_message(raw.error()));
+            }
+            if (!first) {
+                result += ',';
+            }
+            result += '"';
+            result += ek;
+            result += "\":";
+            result += raw.value();
+            first = false;
         }
     }
-
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    result_doc.Accept(writer);
-    return buffer.GetString();
+    result += '}';
+    return result;
 }
 
 using document = simdjson::ondemand::document;

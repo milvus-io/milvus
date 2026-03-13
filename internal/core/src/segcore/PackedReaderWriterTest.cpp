@@ -14,20 +14,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <gtest/gtest.h>
-#include "milvus-storage/common/constants.h"
-#include "segcore/packed_writer_c.h"
-#include "segcore/packed_reader_c.h"
-#include "segcore/arrow_fs_c.h"
-#include <arrow/c/bridge.h>
-#include <arrow/c/helpers.h>
-#include <arrow/array.h>
-#include <arrow/record_batch.h>
+#include <arrow/array/array_base.h>
 #include <arrow/array/builder_primitive.h>
-#include "arrow/table_builder.h"
-#include "arrow/type_fwd.h"
+#include <arrow/c/abi.h>
+#include <arrow/c/bridge.h>
+#include <arrow/record_batch.h>
+#include <arrow/result.h>
+#include <arrow/status.h>
+#include <arrow/type.h>
 #include <arrow/util/key_value_metadata.h>
+#include <cstdint>
+#include <memory>
 #include <numeric>
+#include <string>
+#include <vector>
+
+#include "common/common_type_c.h"
+#include "gtest/gtest.h"
+#include "milvus-storage/common/constants.h"
+#include "segcore/arrow_fs_c.h"
+#include "segcore/column_groups_c.h"
+#include "segcore/packed_reader_c.h"
+#include "segcore/packed_writer_c.h"
+#include "test_utils/Constants.h"
 
 TEST(CPackedTest, PackedWriterAndReader) {
     std::vector<int64_t> test_data(5);
@@ -56,8 +65,10 @@ TEST(CPackedTest, PackedWriterAndReader) {
     ASSERT_TRUE(arrow::ExportSchema(*origin_schema, &c_origin_schema).ok());
 
     const int64_t buffer_size = 10 * 1024 * 1024;
-    char* path = const_cast<char*>("/tmp");
-    char* paths[] = {const_cast<char*>("/tmp/0")};
+    std::string root_path = TestLocalPath;
+    std::string file_path = TestLocalPath + "0";
+    char* path = const_cast<char*>(root_path.c_str());
+    char* paths[] = {const_cast<char*>(file_path.c_str())};
     int64_t part_upload_size = 0;
 
     CColumnSplits cgs = NewCColumnSplits();

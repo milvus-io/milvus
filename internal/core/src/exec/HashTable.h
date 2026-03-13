@@ -14,15 +14,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #pragma once
-#include <vector>
-#include <memory>
-#include <array>
+#ifdef __SSE2__
+#include <emmintrin.h>
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#endif
+#include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <iosfwd>
+#include <memory>
+#include <utility>
+#include <vector>
 
 #include "VectorHasher.h"
-#include "exec/operator/query-agg/RowContainer.h"
-#include "xsimd/xsimd.hpp"
 #include "common/BitUtil.h"
+#include "common/EasyAssert.h"
+#include "common/Types.h"
+#include "common/Vector.h"
+#include "exec/operator/query-agg/RowContainer.h"
+#include "folly/CPortability.h"
+#include "xsimd/xsimd.hpp"
 
 namespace milvus {
 namespace exec {
@@ -224,7 +236,7 @@ class HashTable : public BaseHashTable {
 
         TagVector tags_;
         char pointers_[sizeof(TagVector) * kPointerSize];
-        char padding_[16];
+        [[maybe_unused]] char padding_[16];
     };
     static_assert(sizeof(Bucket) == 128);
     static constexpr uint64_t kBucketSize = sizeof(Bucket);
@@ -330,7 +342,7 @@ class HashTable : public BaseHashTable {
     int64_t sizeMask_{0};
     int8_t sizeBits_;
 
-    int64_t numRehashes_{0};
+    [[maybe_unused]] int64_t numRehashes_{0};
     char* table_ = nullptr;
 
     HashMode

@@ -166,6 +166,11 @@ func (s *Server) registerHTTPServer() {
 	metricsGinHandler := gin.Default()
 	apiv1 := metricsGinHandler.Group(apiPathPrefix)
 	apiv1.Use(httpserver.RequestHandlerFunc)
+	// Add authentication middleware if authorization is enabled
+	// This ensures the metrics port follows the same security policy as the main HTTP server
+	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		apiv1.Use(authenticate)
+	}
 	handlers := httpserver.NewHandlers(s.proxy)
 	handlers.RegisterRoutesTo(apiv1)
 	if p, ok := s.proxy.(*proxy.Proxy); ok {
@@ -322,6 +327,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	}
 
 	milvuspb.RegisterMilvusServiceServer(s.grpcExternalServer, s)
+	milvuspb.RegisterClientTelemetryServiceServer(s.grpcExternalServer, s)
 	grpc_health_v1.RegisterHealthServer(s.grpcExternalServer, s)
 	errChan <- nil
 
@@ -1217,4 +1223,40 @@ func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *milvuspb.GetR
 
 func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *milvuspb.ListRestoreSnapshotJobsRequest) (*milvuspb.ListRestoreSnapshotJobsResponse, error) {
 	return s.proxy.ListRestoreSnapshotJobs(ctx, req)
+}
+
+// ClientHeartbeat handles client telemetry heartbeat requests
+func (s *Server) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
+	return s.proxy.ClientHeartbeat(ctx, req)
+}
+
+// GetClientTelemetry retrieves client telemetry data
+func (s *Server) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
+	return s.proxy.GetClientTelemetry(ctx, req)
+}
+
+// PushClientCommand pushes a command to clients
+func (s *Server) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
+	return s.proxy.PushClientCommand(ctx, req)
+}
+
+// DeleteClientCommand deletes a client command
+func (s *Server) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
+	return s.proxy.DeleteClientCommand(ctx, req)
+}
+
+func (s *Server) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
+	return s.proxy.BatchUpdateManifest(ctx, req)
+}
+
+func (s *Server) RefreshExternalCollection(ctx context.Context, req *milvuspb.RefreshExternalCollectionRequest) (*milvuspb.RefreshExternalCollectionResponse, error) {
+	return s.proxy.RefreshExternalCollection(ctx, req)
+}
+
+func (s *Server) GetRefreshExternalCollectionProgress(ctx context.Context, req *milvuspb.GetRefreshExternalCollectionProgressRequest) (*milvuspb.GetRefreshExternalCollectionProgressResponse, error) {
+	return s.proxy.GetRefreshExternalCollectionProgress(ctx, req)
+}
+
+func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *milvuspb.ListRefreshExternalCollectionJobsRequest) (*milvuspb.ListRefreshExternalCollectionJobsResponse, error) {
+	return s.proxy.ListRefreshExternalCollectionJobs(ctx, req)
 }

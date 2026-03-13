@@ -13,28 +13,34 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#include <cstddef>
+#include <cxxabi.h>
 #include <algorithm>
-#include "milvus-storage/common/metadata.h"
-#include "segcore/memory_planner.h"
-#include <memory>
-#include <vector>
-#include <arrow/record_batch.h>
-
+#include <atomic>
+#include <cstddef>
+#include <exception>
 #include <future>
 #include <memory>
+#include <numeric>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "arrow/type.h"
-#include "common/EasyAssert.h"
-#include "common/FieldData.h"
-#include "milvus-storage/format/parquet/file_reader.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "log/Log.h"
-#include "storage/ThreadPools.h"
+#include "arrow/api.h"
+#include "common/Channel.h"
 #include "common/Common.h"
+#include "common/EasyAssert.h"
+#include "common/protobuf_utils.h"
+#include "folly/ScopeGuard.h"
+#include "glog/logging.h"
+#include "log/Log.h"
+#include "milvus-storage/common/metadata.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "segcore/Utils.h"
+#include "segcore/memory_planner.h"
 #include "storage/KeyRetriever.h"
+#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore {
 
@@ -198,6 +204,10 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                             "[StorageV2] Failed to create row group reader: " +
                                 result.status().ToString());
                         auto row_group_reader = result.ValueOrDie();
+                        auto close_guard =
+                            folly::makeGuard([&row_group_reader]() {
+                                (void)row_group_reader->Close();
+                            });
                         auto status =
                             row_group_reader->SetRowGroupOffsetAndCount(
                                 block.offset, block.count);
@@ -222,13 +232,6 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                                  static_cast<size_t>(block.offset + i),
                                  table});
                         }
-                        auto close_status = row_group_reader->Close();
-                        AssertInfo(
-                            close_status.ok(),
-                            "[StorageV2] Failed to close row group reader "
-                            "for file " +
-                                file + " with error " +
-                                close_status.ToString());
                         return ret;
                     }));
             }
@@ -245,6 +248,189 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
         channel->close();
         throw e;
     }
+}
+
+std::vector<std::future<void>>
+LoadCellBatchAsync(milvus::OpContext* op_ctx,
+                   std::vector<CellSpec> cell_specs,
+                   BatchReaderFactory reader_factory,
+                   std::shared_ptr<CellReaderChannel>& channel,
+                   int64_t memory_limit,
+                   milvus::proto::common::LoadPriority priority) {
+    if (cell_specs.empty()) {
+        channel->close();
+        return {};
+    }
+
+    // Sort by (file_idx, local_rg_offset) for IO merging
+    std::sort(cell_specs.begin(),
+              cell_specs.end(),
+              [](const CellSpec& a, const CellSpec& b) {
+                  if (a.file_idx != b.file_idx) {
+                      return a.file_idx < b.file_idx;
+                  }
+                  return a.local_rg_offset < b.local_rg_offset;
+              });
+
+    // Determine batch size based on parallel degree
+    auto parallel_degree =
+        static_cast<size_t>(memory_limit / FILE_SLICE_SIZE.load());
+    size_t cells_per_batch = std::max<size_t>(
+        1, (cell_specs.size() + parallel_degree - 1) / parallel_degree);
+
+    // Group consecutive, same-key cells into batches for IO merging
+    struct CellBatch {
+        size_t file_idx;
+        int64_t rg_offset;
+        int64_t rg_count;
+        std::vector<CellSpec> cells;
+    };
+
+    std::vector<CellBatch> batches;
+    CellBatch current{};
+
+    for (const auto& spec : cell_specs) {
+        bool should_split = false;
+        if (!current.cells.empty()) {
+            if (spec.file_idx != current.file_idx ||
+                spec.local_rg_offset != current.rg_offset + current.rg_count ||
+                current.cells.size() >= cells_per_batch) {
+                should_split = true;
+            }
+        }
+        if (should_split) {
+            batches.push_back(std::move(current));
+            current = {};
+        }
+        if (current.cells.empty()) {
+            current.file_idx = spec.file_idx;
+            current.rg_offset = spec.local_rg_offset;
+            current.rg_count = 0;
+        }
+        current.rg_count += spec.rg_count;
+        current.cells.push_back(spec);
+    }
+    if (!current.cells.empty()) {
+        batches.push_back(std::move(current));
+    }
+
+    if (batches.empty()) {
+        channel->close();
+        return {};
+    }
+
+    auto& pool = ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
+    auto remaining = std::make_shared<std::atomic<size_t>>(batches.size());
+    auto reader_memory_limit =
+        std::max<int64_t>(memory_limit / static_cast<int64_t>(batches.size()),
+                          FILE_SLICE_SIZE.load());
+    auto shared_factory =
+        std::make_shared<BatchReaderFactory>(std::move(reader_factory));
+
+    std::vector<std::future<void>> futures;
+    futures.reserve(batches.size());
+
+    for (auto& batch : batches) {
+        futures.emplace_back(pool.Submit([batch = std::move(batch),
+                                          shared_factory,
+                                          reader_memory_limit,
+                                          channel,
+                                          remaining,
+                                          op_ctx]() {
+            auto task_guard = folly::makeGuard([&channel, &remaining]() {
+                if (remaining->fetch_sub(1) == 1) {
+                    channel->close();
+                }
+            });
+            CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
+
+            auto tables_result = (*shared_factory)(batch.file_idx,
+                                                   batch.rg_offset,
+                                                   batch.rg_count,
+                                                   reader_memory_limit);
+            AssertInfo(tables_result.ok(),
+                       "[StorageV2] Failed to read batch: " +
+                           tables_result.status().ToString());
+            auto all_tables = std::move(tables_result).ValueOrDie();
+            AssertInfo(all_tables.size() == static_cast<size_t>(batch.rg_count),
+                       "reader returns less tables than expected, batch rg "
+                       "count: {}, result size: {}",
+                       batch.rg_count,
+                       all_tables.size());
+
+            int64_t table_offset = 0;
+            for (const auto& cell : batch.cells) {
+                auto cell_result = std::make_shared<CellLoadResult>();
+                cell_result->cid = cell.cid;
+                cell_result->tables.reserve(cell.rg_count);
+                for (int64_t i = 0; i < cell.rg_count; ++i) {
+                    cell_result->tables.push_back(
+                        std::move(all_tables[table_offset + i]));
+                }
+                table_offset += cell.rg_count;
+                channel->push(std::move(cell_result));
+            }
+        }));
+    }
+
+    return futures;
+}
+
+BatchReaderFactory
+MakeFileReaderFactory(std::vector<std::string> remote_files,
+                      milvus_storage::ArrowFileSystemPtr fs) {
+    auto files =
+        std::make_shared<std::vector<std::string>>(std::move(remote_files));
+    return [files, fs](size_t batch_key,
+                       int64_t rg_offset,
+                       int64_t total_rg_count,
+                       int64_t reader_memory_limit)
+               -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+        ARROW_ASSIGN_OR_RAISE(auto reader,
+                              milvus_storage::FileRowGroupReader::Make(
+                                  fs,
+                                  (*files)[batch_key],
+                                  nullptr,
+                                  reader_memory_limit,
+                                  milvus::storage::GetReaderProperties()));
+        auto close_guard =
+            folly::makeGuard([&reader]() { (void)reader->Close(); });
+        ARROW_RETURN_NOT_OK(
+            reader->SetRowGroupOffsetAndCount(rg_offset, total_rg_count));
+        std::vector<std::shared_ptr<arrow::Table>> tables;
+        tables.reserve(total_rg_count);
+        for (int64_t i = 0; i < total_rg_count; ++i) {
+            std::shared_ptr<arrow::Table> table;
+            ARROW_RETURN_NOT_OK(reader->ReadNextRowGroup(&table));
+            tables.push_back(std::move(table));
+        }
+        return tables;
+    };
+}
+
+BatchReaderFactory
+MakeChunkReaderFactory(
+    std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader) {
+    return [chunk_reader](size_t /*batch_key*/,
+                          int64_t rg_offset,
+                          int64_t total_rg_count,
+                          int64_t /*reader_memory_limit*/)
+               -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+        std::vector<int64_t> rg_indices(total_rg_count);
+        std::iota(rg_indices.begin(), rg_indices.end(), rg_offset);
+        ARROW_ASSIGN_OR_RAISE(
+            auto batches,
+            chunk_reader->get_chunks(rg_indices, /*parallelism=*/1));
+        std::vector<std::shared_ptr<arrow::Table>> tables;
+        tables.reserve(batches.size());
+        for (auto& batch : batches) {
+            ARROW_ASSIGN_OR_RAISE(
+                auto table,
+                arrow::Table::FromRecordBatches({std::move(batch)}));
+            tables.push_back(std::move(table));
+        }
+        return tables;
+    };
 }
 
 }  // namespace milvus::segcore

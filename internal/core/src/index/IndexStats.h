@@ -11,10 +11,13 @@
 
 #pragma once
 
+#include <stdint.h>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
+
 #include "common/protobuf_utils.h"
-#include "pb/cgo_msg.pb.h"
 
 namespace milvus::index {
 

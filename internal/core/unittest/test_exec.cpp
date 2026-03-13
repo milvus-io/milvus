@@ -9,23 +9,49 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
-#include <cstdint>
-#include <memory>
-#include <vector>
+#include <stddef.h>
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
-#include "segcore/SegmentSealed.h"
-#include "test_utils/storage_test_utils.h"
-#include "test_utils/DataGen.h"
-#include "plan/PlanNode.h"
-#include "exec/Task.h"
+#include "NamedType/named_type_impl.hpp"
+#include "bitset/common.h"
+#include "common/Common.h"
+#include "common/Consts.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
-#include "expr/ITypeExpr.h"
-#include "exec/expression/Expr.h"
+#include "exec/Task.h"
 #include "exec/expression/ConjunctExpr.h"
-#include "exec/expression/LogicalUnaryExpr.h"
+#include "exec/expression/Expr.h"
 #include "exec/expression/function/FunctionFactory.h"
+#include "expr/ITypeExpr.h"
+#include "gtest/gtest.h"
+#include "index/NgramInvertedIndex.h"
+#include "index/SkipIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "pb/plan.pb.h"
+#include "plan/PlanNode.h"
+#include "query/PlanNode.h"
+#include "query/Utils.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentSealed.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::exec;
@@ -44,8 +70,7 @@ class TaskTest : public testing::TestWithParam<DataType> {
         factory.Initialize();
 
         auto schema = std::make_shared<Schema>();
-        auto vec_fid = schema->AddDebugField(
-            "fakevec", GetParam(), 16, knowhere::metric::L2);
+        schema->AddDebugField("fakevec", GetParam(), 16, knowhere::metric::L2);
         auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
         field_map_.insert({"bool", bool_fid});
         auto bool_1_fid = schema->AddDebugField("bool1", DataType::BOOL);
@@ -191,7 +216,6 @@ TEST_P(TaskTest, UnaryExpr) {
     auto start = std::chrono::steady_clock::now();
     auto task = Task::Create("task_unary_expr", plan, 0, query_context);
     int64_t num_rows = 0;
-    int i = 0;
     for (;;) {
         auto result = task->Next();
         if (!result) {

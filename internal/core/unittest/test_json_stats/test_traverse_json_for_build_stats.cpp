@@ -8,18 +8,21 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
 #include <cstring>
-#include <string>
-#include <vector>
 #include <map>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "index/json_stats/JsonKeyStats.h"
 #include "common/jsmn.h"
-#include "storage/ChunkManager.h"
-#include "storage/Types.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/json_stats/JsonKeyStats.h"
+#include "index/json_stats/utils.h"
 #include "storage/FileManager.h"
+#include "storage/Types.h"
 #include "storage/Util.h"
+#include "test_utils/Constants.h"
 
 using milvus::index::JsonKey;
 using milvus::index::JsonKeyStats;
@@ -74,11 +77,6 @@ Tokenize(const char* json) {
     return tokens;
 }
 
-static std::string
-Substr(const char* json, const jsmntok_t& tok) {
-    return std::string(json + tok.start, tok.end - tok.start);
-}
-
 }  // namespace
 
 TEST(TraverseJsonForBuildStatsTest,
@@ -98,7 +96,7 @@ TEST(TraverseJsonForBuildStatsTest,
     milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
     milvus::storage::StorageConfig storage_config;
     storage_config.storage_type = "local";
-    storage_config.root_path = "/tmp/test-traverse-json-build-stats";
+    storage_config.root_path = TestLocalPath;
     auto cm = milvus::storage::CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
@@ -139,7 +137,7 @@ TEST(CollectSingleJsonStatsInfoTest, EmptyJsonStringThrows) {
     milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
     milvus::storage::StorageConfig storage_config;
     storage_config.storage_type = "local";
-    storage_config.root_path = "/tmp/test-collect-single-json-stats-info";
+    storage_config.root_path = TestLocalPath;
     auto cm = milvus::storage::CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
     milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);

@@ -19,16 +19,25 @@
 #include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/builder/basic/kvp.hpp>
 #include <bsoncxx/document/view.hpp>
-#include <bsoncxx/types/bson_value/view.hpp>
 #include <bsoncxx/json.hpp>
 #include <bsoncxx/types.hpp>
-#include <string>
-#include <vector>
+#include <bsoncxx/types/bson_value/view.hpp>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <iomanip>
+#include <limits>
 #include <optional>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <vector>
 
+#include "common/EasyAssert.h"
 #include "fmt/format.h"
 #include "log/Log.h"
-#include "common/EasyAssert.h"
 
 template <>
 struct fmt::formatter<bsoncxx::type> : fmt::formatter<std::string> {
@@ -188,8 +197,9 @@ BsonHexDebugString(const uint8_t* data, size_t size) {
 // may lose precision for big int64_t more than 2^53
 inline bool
 CanConvertToInt64(double x) {
-    return std::trunc(x) == x && x >= std::numeric_limits<int64_t>::min() &&
-           x <= std::numeric_limits<int64_t>::max();
+    return std::trunc(x) == x &&
+           x >= static_cast<double>(std::numeric_limits<int64_t>::min()) &&
+           x <= static_cast<double>(std::numeric_limits<int64_t>::max());
 }
 
 class BsonView {
@@ -502,8 +512,7 @@ class BsonView {
         size_t key_len = strlen(key_cstr);
         ptr += key_len + 1;
 
-        return BsonRawField{
-            .type = type_tag, .key = key_cstr, .value_ptr = ptr};
+        return BsonRawField{type_tag, key_cstr, ptr};
     }
 
     template <typename T>

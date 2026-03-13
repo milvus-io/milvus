@@ -278,8 +278,8 @@ def analyze_documents_with_analyzer_params(texts, analyzer_params):
         uri = "http://" + param_info.param_host + ":" + str(param_info.param_port)
 
     client = MilvusClient(
-        uri = uri,
-        token = param_info.param_token
+        uri=uri,
+        token=param_info.param_token
     )
     freq = Counter()
     res = client.run_analyzer(texts, analyzer_params, with_detail=True, with_hash=True)
@@ -879,7 +879,7 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
     schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_max_length, nullable=nullable)
     schema.add_field("document", DataType.VARCHAR, max_length=2000, enable_analyzer=True, enable_match=True, nullable=nullable)
     schema.add_field("text", DataType.VARCHAR, max_length=2000, enable_analyzer=True, enable_match=True,
-                    analyzer_params=analyzer_params)
+                    analyzer_params=analyzer_params, nullable=True)
     schema.add_field(ct.default_json_field_name, DataType.JSON, nullable=nullable)
     schema.add_field(ct.default_geometry_field_name, DataType.GEOMETRY, nullable=nullable)
     schema.add_field(ct.default_timestamptz_field_name, DataType.TIMESTAMPTZ, nullable=nullable)
@@ -887,9 +887,9 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
     schema.add_field("array_float", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=ct.default_max_capacity)
     schema.add_field("array_varchar", DataType.ARRAY, element_type=DataType.VARCHAR, max_length=200, max_capacity=ct.default_max_capacity)
     schema.add_field("array_bool", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=ct.default_max_capacity)
-    schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim)
-    schema.add_field("image_emb", DataType.INT8_VECTOR, dim=dim)
-    schema.add_field("text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR)
+    schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+    schema.add_field("image_emb", DataType.INT8_VECTOR, dim=dim, nullable=True)
+    schema.add_field("text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR, nullable=False)  # function output field cannot be nullable
     # schema.add_field("voice_emb", DataType.FLOAT_VECTOR, dim=dim)
 
     # Add struct array field
@@ -1417,6 +1417,22 @@ def gen_default_data_for_upsert(nb=ct.default_nb, dim=ct.default_dim, start=0, s
         ct.default_float_vec_field_name: float_vec_values
     })
     return df, float_values
+
+
+def gen_default_rows_data_for_upsert(nb=ct.default_nb, dim=ct.default_dim, start=0, size=10000):
+    """Row-based version of gen_default_data_for_upsert (without json_field).
+    float and string fields are offset by `size` so upsert can be verified by checking updated values."""
+    float_vec_values = gen_vectors(nb, dim)
+    float_values = [float(np.float32(i + size)) for i in range(start, start + nb)]
+    rows = []
+    for i in range(nb):
+        rows.append({
+            ct.default_int64_field_name: start + i,
+            ct.default_float_field_name: float_values[i],
+            ct.default_string_field_name: str(start + i + size),
+            ct.default_float_vec_field_name: float_vec_values[i]
+        })
+    return rows, float_values
 
 
 def gen_array_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, auto_id=False,
@@ -2387,7 +2403,7 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
         else:
             dim = ct.default_dim if data_type == DataType.SPARSE_FLOAT_VECTOR else field.params['dim']
         if nb is None:
-            return gen_vectors(1, dim, vector_data_type=data_type)[0]
+            return gen_vectors(1, dim, vector_data_type=data_type)[0] if random.random() < 0.8 or nullable is False else None
         if nullable is False:
             return gen_vectors(nb, dim, vector_data_type=data_type)
         else:
@@ -3516,20 +3532,17 @@ def modify_file(file_path_list, is_modify=False, input_content=""):
     for file_path in file_path_list:
         folder_path, file_name = os.path.split(file_path)
         if not os.path.isdir(folder_path):
-            log.debug("[modify_file] folder(%s) is not exist." % folder_path)
             os.makedirs(folder_path)
 
         if not os.path.isfile(file_path):
             log.error("[modify_file] file(%s) is not exist." % file_path)
         else:
             if is_modify is True:
-                log.debug("[modify_file] start modifying file(%s)..." % file_path)
                 with open(file_path, "r+") as f:
                     f.seek(0)
                     f.truncate()
                     f.write(input_content)
                     f.close()
-                log.info("[modify_file] file(%s) modification is complete." % file_path_list)
 
 
 def index_to_dict(index):
@@ -4399,3 +4412,23 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
             row[timestamptz_field_name] = convert_one(row[timestamptz_field_name])
         new_rows.append(row)
     return new_rows
+
+
+def get_field_warmup(describe_res, field_name):
+    """Get warmup value from describe_collection result for a specific field"""
+    for field in describe_res["fields"]:
+        if field["name"] == field_name:
+            return field.get("params", {}).get("warmup", None)
+    return None
+
+
+def get_collection_warmup(describe_res, key):
+    """Get collection level warmup value from describe_collection result
+       key: "warmup.scalarField" / "warmup.scalarIndex" / "warmup.vectorField" / "warmup.vectorIndex"
+    """
+    return describe_res.get("properties", {}).get(key, None)
+
+
+def get_index_warmup(describe_index_res):
+    """Get index warmup value from describe_index result"""
+    return describe_index_res.get("warmup", None)

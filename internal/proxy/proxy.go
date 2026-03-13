@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -154,7 +153,7 @@ func (node *Proxy) GetStateCode() commonpb.StateCode {
 // Register registers proxy at etcd
 func (node *Proxy) Register() error {
 	node.session.Register()
-	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.ProxyRole).Inc()
+	metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.ProxyRole).Inc()
 	log.Info("Proxy Register Finished")
 	// TODO Reset the logger
 	// Params.initLogCfg()

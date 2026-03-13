@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
-	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
@@ -134,7 +133,6 @@ type shardDelegator struct {
 	idfOracle    IDFOracle
 
 	segmentManager segments.SegmentManager
-	pkOracle       pkoracle.PkOracle
 	// stream delete buffer
 	deleteMut    sync.RWMutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
@@ -149,7 +147,7 @@ type shardDelegator struct {
 	chunkManager   storage.ChunkManager
 
 	excludedSegments *ExcludedSegments
-	// cause growing segment meta has been stored in segmentManager/distribution/pkOracle/excludeSegments
+	// cause growing segment meta has been stored in segmentManager/distribution/excludeSegments
 	// in order to make add/remove growing be atomic, need lock before modify these meta info
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
@@ -429,7 +427,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	}
 
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
+		paramtable.GetStringNodeID(), metrics.SearchLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
 	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
@@ -548,7 +546,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		req.Req.MvccTimestamp = tSafe
 	}
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
+		paramtable.GetStringNodeID(), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
 	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(float64(1.0), req.GetReq().GetPartitionIDs()...)
@@ -634,7 +632,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
+		paramtable.GetStringNodeID(), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
 	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
@@ -1154,8 +1152,8 @@ func (sd *shardDelegator) Close() {
 	sd.tsCond.Broadcast()
 	sd.lifetime.Wait()
 
-	// Remove all candidates and refund bloom filter resources
-	sd.pkOracle.RemoveAndRefundAll()
+	// Refund all sealed segment candidates in distribution
+	sd.distribution.RefundAllCandidates()
 
 	// clean idf oracle
 	if sd.idfOracle != nil {
@@ -1173,8 +1171,8 @@ func (sd *shardDelegator) Close() {
 	sd.deleteBuffer.Clear()
 	log.Info("unregister all l0 segments", zap.Duration("cost", time.Since(start)))
 
-	metrics.QueryNodeDeleteBufferSize.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
-	metrics.QueryNodeDeleteBufferRowNum.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
+	metrics.QueryNodeDeleteBufferSize.DeleteLabelValues(paramtable.GetStringNodeID(), sd.vchannelName)
+	metrics.QueryNodeDeleteBufferRowNum.DeleteLabelValues(paramtable.GetStringNodeID(), sd.vchannelName)
 }
 
 // As partition stats is an optimization for search/query which is not mandatory for milvus instance,
@@ -1260,8 +1258,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
 		distribution:   NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
-			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
-		pkOracle:                   pkoracle.NewPkOracle(),
+			[]string{paramtable.GetStringNodeID(), channel}),
 		latestTsafe:                atomic.NewUint64(startTs),
 		loader:                     loader,
 		queryHook:                  queryHook,

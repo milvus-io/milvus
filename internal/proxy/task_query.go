@@ -221,7 +221,7 @@ func filterSystemFields(outputFieldIDs []UniqueID) []UniqueID {
 }
 
 // parseQueryParams get limit and offset from queryParamsPair, both are optional.
-func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, error) {
+func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, bigTopKEnabled bool) (*queryParams, error) {
 	var (
 		limit             int64
 		offset            int64
@@ -291,7 +291,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 			}
 		}
 		// validate max result window.
-		if err = validateMaxQueryResultWindow(offset, limit); err != nil {
+		if err = validateMaxQueryResultWindow(offset, limit, bigTopKEnabled); err != nil {
 			return nil, fmt.Errorf("invalid max query result window, %w", err)
 		}
 	}
@@ -523,7 +523,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.RetrieveRequest.IgnoreGrowing, err = isIgnoreGrowing(t.request.GetQueryParams()); err != nil {
 		return err
 	}
-	queryParams, err := parseQueryParams(t.request.GetQueryParams())
+	queryParams, err := parseQueryParams(t.request.GetQueryParams(), colInfo.bigTopKOptimization)
 	if err != nil {
 		return err
 	}
@@ -563,10 +563,13 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.plan.GetQuery().Limit = t.RetrieveRequest.Limit
 
-	// global agg only return one line as result which will not incur memory risks
-	globalAgg := len(t.userAggregates) > 0 && len(t.GetGroupByFieldIds()) == 0
+	// Aggregation queries have bounded result sizes:
+	// - global aggregation (no GROUP BY) returns exactly one row
+	// - GROUP BY aggregation returns at most one row per distinct group value
+	// Both are safe without a limit, so exempt them from the limit requirement.
+	hasAgg := len(t.userAggregates) > 0
 
-	if planparserv2.IsAlwaysTruePlan(t.plan) && t.RetrieveRequest.Limit == typeutil.Unlimited && !globalAgg {
+	if planparserv2.IsAlwaysTruePlan(t.plan) && t.RetrieveRequest.Limit == typeutil.Unlimited && !hasAgg {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("empty expression should be used with limit"))
 	}
 
@@ -592,8 +595,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	// count with pagination
-	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited {
+	// count(*) without GROUP BY is a single-value result, pagination is meaningless.
+	// But count(*) with GROUP BY + limit is valid (limits the number of groups returned).
+	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited && len(t.GetGroupByFieldIds()) == 0 {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed"))
 	}
 	t.plan.Namespace = t.request.Namespace
@@ -645,6 +649,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.GuaranteeTimestamp = guaranteeTs
+	// Extract physical time for entity-level TTL (issue #47413)
+	physicalTimeMs, _ := tsoutil.ParseHybridTs(guaranteeTs)
+	t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
 	// need modify mvccTs and guaranteeTs for iterator specially
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
 		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()

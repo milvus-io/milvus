@@ -15,14 +15,22 @@
 // limitations under the License.
 
 #include "storage/MmapChunkManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include <fstream>
+
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include "stdio.h"
-#include <fcntl.h>
+#include <exception>
+#include <utility>
+
+#include "common/EasyAssert.h"
+#include "glog/logging.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
+#include "prometheus/gauge.h"
+#include "prometheus/histogram.h"
+#include "stdio.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
 
 namespace milvus::storage {
 namespace {
@@ -119,7 +127,7 @@ MmapBlock::~MmapBlock() {
         try {
             Close();
         } catch (const std::exception& e) {
-            LOG_ERROR(e.what());
+            LOG_ERROR("{}", e.what());
         }
     }
 }
@@ -142,7 +150,7 @@ MmapBlocksHandler::AllocateFixSizeBlock() {
         // return a mmap_block in fix_size_blocks_cache_
         auto block = std::move(fix_size_blocks_cache_.front());
         fix_size_blocks_cache_.pop();
-        return std::move(block);
+        return block;
     } else {
         // if space not enough for create a new block, clear cache and check again
         if (GetFixFileSize() + Size() > max_disk_limit_) {
@@ -157,7 +165,7 @@ MmapBlocksHandler::AllocateFixSizeBlock() {
         auto new_block = std::make_unique<MmapBlock>(
             GetMmapFilePath(), GetFixFileSize(), MmapBlock::BlockType::Fixed);
         new_block->Init();
-        return std::move(new_block);
+        return new_block;
     }
 }
 
@@ -180,7 +188,7 @@ MmapBlocksHandler::AllocateLargeBlock(const uint64_t size) {
     auto new_block = std::make_unique<MmapBlock>(
         GetMmapFilePath(), size, MmapBlock::BlockType::Variable);
     new_block->Init();
-    return std::move(new_block);
+    return new_block;
 }
 
 void

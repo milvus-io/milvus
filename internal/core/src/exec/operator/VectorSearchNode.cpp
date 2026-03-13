@@ -15,12 +15,31 @@
 // limitations under the License.
 
 #include "VectorSearchNode.h"
-#include "common/Tracer.h"
-#include "fmt/format.h"
-#include "common/ArrayOffsets.h"
-#include "exec/operator/Utils.h"
 
+#include <algorithm>
+#include <chrono>
+#include <functional>
+#include <ratio>
+#include <utility>
+#include <vector>
+
+#include "bitset/bitset.h"
+#include "common/ArrayOffsets.h"
+#include "common/BitsetView.h"
+#include "common/EasyAssert.h"
+#include "common/QueryResult.h"
+#include "common/Tracer.h"
+#include "common/Utils.h"
+#include "exec/QueryContext.h"
+#include "exec/expression/Utils.h"
+#include "exec/operator/Utils.h"
 #include "monitor/Monitor.h"
+#include "opentelemetry/trace/span.h"
+#include "plan/PlanNode.h"
+#include "prometheus/histogram.h"
+#include "query/PlanImpl.h"
+#include "segcore/SegmentInterface.h"
+
 namespace milvus {
 namespace exec {
 
@@ -96,10 +115,10 @@ PhyVectorSearchNode::GetOutput() {
     //
     // When embedding search embedding on embedding list is used, which means element_level_ is true, we need to transform doc-level
     // bitset to element-level bitset. In pre-filter path, ElementFilterBitsNode already transforms the bitset. We need to transform it
-    // in iterative filter path.
-    // If element_level_query is true, the bitset is already element-level bitset.
-    if (milvus::exec::UseVectorIterator(search_info_) && ph.element_level_ &&
-        !query_context_->element_level_query()) {
+    // in iterative filter path or when ElementFilterBitsNode is not present (e.g., only doc-level filter without element-level filter).
+    //
+    // Check if bitset needs conversion: element_level search is requested but bitset hasn't been converted yet
+    if (ph.element_level_ && !query_context_->bitset_is_element_level()) {
         auto col_input = GetColumnVector(input_);
         TargetBitmapView view(col_input->GetRawData(), col_input->size());
         TargetBitmapView valid_view(col_input->GetValidRawData(),
@@ -122,8 +141,7 @@ PhyVectorSearchNode::GetOutput() {
     TargetBitmapView view(col_input->GetRawData(), col_input->size());
 
     if (view.all()) {
-        query_context_->set_search_result(
-            std::move(empty_search_result(num_queries)));
+        query_context_->set_search_result(empty_search_result(num_queries));
         return input_;
     }
 

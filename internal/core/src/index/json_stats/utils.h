@@ -424,13 +424,13 @@ CreateArrowField(const JsonKey& key, const JsonKeyLayoutType& key_type);
 
 std::pair<std::vector<std::shared_ptr<arrow::ArrayBuilder>>,
           std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>>
-CreateArrowBuilders(std::map<JsonKey, JsonKeyLayoutType> column_map);
+CreateArrowBuilders(const std::map<JsonKey, JsonKeyLayoutType>& column_map);
 
 std::shared_ptr<arrow::Schema>
-CreateArrowSchema(std::map<JsonKey, JsonKeyLayoutType> column_map);
+CreateArrowSchema(const std::map<JsonKey, JsonKeyLayoutType>& column_map);
 
 std::vector<std::pair<std::string, std::string>>
-CreateParquetKVMetadata(std::map<JsonKey, JsonKeyLayoutType> column_map);
+CreateParquetKVMetadata(const std::map<JsonKey, JsonKeyLayoutType>& column_map);
 
 inline size_t
 GetArrowArrayMemorySize(const std::shared_ptr<arrow::Array>& array) {
@@ -593,7 +593,7 @@ template <>
 struct fmt::formatter<milvus::index::JSONType> : fmt::formatter<std::string> {
     template <typename FormatContext>
     auto
-    format(const milvus::index::JSONType& jt, FormatContext& ctx) {
+    format(const milvus::index::JSONType& jt, FormatContext& ctx) const {
         switch (jt) {
             case milvus::index::JSONType::UNKNOWN:
                 return fmt::format_to(ctx.out(), "UNKNOWN");
@@ -631,7 +631,8 @@ template <>
 struct fmt::formatter<milvus::index::JsonKeyLayoutType>
     : fmt::formatter<std::string> {
     auto
-    format(milvus::index::JsonKeyLayoutType type, fmt::format_context& ctx) {
+    format(milvus::index::JsonKeyLayoutType type,
+           fmt::format_context& ctx) const {
         std::string name;
         switch (type) {
             case milvus::index::JsonKeyLayoutType::TYPED:

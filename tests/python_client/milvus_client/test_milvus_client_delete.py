@@ -221,6 +221,60 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_delete_with_filters_nullable_vector_field(self):
+        """
+        target: test delete with filters on nullable vector field
+        method: create collection with nullable vector field,
+        insert data with nullable vector field, delete with filters on nullable vector field
+        expected: delete successfully 
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        dim = 32
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim, nullable=True)
+        schema.add_field(default_float_field_name, DataType.FLOAT, nullable=True)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # 2. insert data
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: cf.gen_vectors(1, dim=dim)[0] if i % 2 == 0 else None,
+            default_float_field_name: i * 1.0,
+        } for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # 3. delete 500 random by ids
+        ids_to_delete = random.sample(range(default_nb), 500)
+        self.delete(client, collection_name, filter=f"{default_primary_key_field_name} in {ids_to_delete}")
+        self.flush(client, collection_name)
+        # create index and load
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params=index_params)
+        self.load_collection(client, collection_name)
+        # 4. query count(*)
+        self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": [{"count(*)": default_nb - len(ids_to_delete)}],
+                                "pk_name": default_primary_key_field_name})
+
+        # delete by float filter
+        filter = f"{default_float_field_name} < {default_nb / 2}"
+        self.delete(client, collection_name, filter=filter)
+        self.flush(client, collection_name)
+        # 5. query count(*)
+        expect_count = default_nb//2 - len([i for i in ids_to_delete if i >= default_nb / 2])
+        self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": [{"count(*)": expect_count}],
+                                "pk_name": default_primary_key_field_name})
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("add_field", [True, False])
     def test_milvus_client_delete_with_filters_partition(self, add_field):
         """

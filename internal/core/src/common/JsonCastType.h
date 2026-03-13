@@ -11,11 +11,13 @@
 
 #pragma once
 
+#include <algorithm>
 #include <string>
-#include "common/EasyAssert.h"
-#include "common/FieldDataInterface.h"
-#include "tantivy-binding.h"
+#include <unordered_map>
+
+#include "common/Types.h"
 #include "fmt/core.h"
+#include "tantivy-binding.h"
 
 namespace milvus {
 
@@ -74,6 +76,12 @@ struct fmt::formatter<milvus::JsonCastType::DataType> : formatter<string_view> {
                 break;
             case milvus::JsonCastType::DataType::ARRAY:
                 name = "ARRAY";
+                break;
+            case milvus::JsonCastType::DataType::UNKNOWN:
+                name = "UNKNOWN";
+                break;
+            case milvus::JsonCastType::DataType::JSON:
+                name = "JSON";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

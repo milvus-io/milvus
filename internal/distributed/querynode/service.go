@@ -408,6 +408,10 @@ func (s *Server) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) (
 	return s.querynode.DropIndex(ctx, req)
 }
 
+func (s *Server) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
+	return s.querynode.UpdateIndex(ctx, req)
+}
+
 func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	return s.querynode.ValidateAnalyzer(ctx, req)
 }

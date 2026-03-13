@@ -1,20 +1,44 @@
 #include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
+
+#include <algorithm>
+#include <exception>
+#include <map>
+#include <optional>
+#include <type_traits>
+
+#include "cachinglayer/CacheSlot.h"
+#include "common/Chunk.h"
+#include "common/OffsetMapping.h"
+#include "fmt/core.h"
+#include "folly/FBVector.h"
+#include "index/Index.h"
+#include "index/Utils.h"
+#include "index/VectorIndex.h"
 #include "index/VectorMemIndex.h"
+#include "knowhere/dataset.h"
+#include "knowhere/expected.h"
+#include "knowhere/object.h"
+#include "knowhere/operands.h"
+#include "knowhere/version.h"
+#include "mmap/ChunkedColumnInterface.h"
+#include "nlohmann/json.hpp"
 #include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
 
 InterimSealedIndexTranslator::InterimSealedIndexTranslator(
     std::shared_ptr<ChunkedColumnInterface> vec_data,
-    std::string segment_id,
-    std::string field_id,
+    int64_t segment_id,
+    int64_t field_id,
     knowhere::IndexType index_type,
     knowhere::MetricType metric_type,
     knowhere::Json build_config,
     int64_t dim,
     bool is_sparse,
-    DataType vec_data_type)
+    DataType vec_data_type,
+    const std::string& warmup_policy)
     : vec_data_(vec_data),
+      segment_id_(segment_id),
       index_type_(index_type),
       metric_type_(metric_type),
       build_config_(build_config),
@@ -27,9 +51,9 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
             milvus::segcore::getCellDataType(
                 /* is_vector */ true,
                 /* is_index */ true),
-            milvus::segcore::getCacheWarmupPolicy(
-                /* is_vector */ true,
-                /* is_index */ true),
+            milvus::segcore::getCacheWarmupPolicy(warmup_policy,
+                                                  /* is_vector */ true,
+                                                  /* is_index */ true),
             /* support_eviction */ false) {
 }
 
@@ -89,7 +113,12 @@ InterimSealedIndexTranslator::key() const {
 std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::IndexBase>>>
 InterimSealedIndexTranslator::get_cells(
+    milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    // Check for cancellation before building interim index
+    CheckCancellation(
+        ctx, segment_id_, "InterimSealedIndexTranslator::get_cells()");
+
     std::unique_ptr<index::VectorIndex> vec_index = nullptr;
     if (!is_sparse_) {
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
@@ -99,7 +128,7 @@ InterimSealedIndexTranslator::get_cells(
 
             field_raw_data_ptr->BulkValueAt(
                 nullptr,
-                [&data, &data_id](const char* value, size_t i) {
+                [&data](const char* value, size_t i) {
                     data = static_cast<const void*>(value);
                 },
                 &data_id,

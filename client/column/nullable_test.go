@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -283,6 +284,89 @@ func (s *NullableScalarSuite) TestBasic() {
 		}
 
 		_, err = NewNullableColumnDouble(name, compactData, []bool{false, false})
+		s.Error(err)
+	})
+
+	s.Run("nullable_timestamptz", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		now := time.Now().UTC()
+		compactData := []time.Time{now, now.Add(2 * time.Hour)}
+		validData := []bool{true, false, true}
+		// compact mode
+		column, err := NewNullableColumnTimestamptz(name, compactData, validData)
+		s.NoError(err)
+		s.Equal(entity.FieldTypeTimestamptz, column.Type())
+		s.Equal(name, column.Name())
+		// verify time values are converted to RFC3339Nano strings
+		expectedStrings := []string{
+			compactData[0].Format(time.RFC3339Nano),
+			compactData[1].Format(time.RFC3339Nano),
+		}
+		s.Equal(expectedStrings, column.Data())
+		for i := 0; i < len(validData); i++ {
+			r, err := column.IsNull(i)
+			s.NoError(err)
+			s.Equal(validData[i], !r)
+		}
+
+		// sparse mode
+		sparseData := []time.Time{now, {}, now.Add(2 * time.Hour)}
+		sparseExpected := []string{
+			sparseData[0].Format(time.RFC3339Nano),
+			sparseData[1].Format(time.RFC3339Nano),
+			sparseData[2].Format(time.RFC3339Nano),
+		}
+		column, err = NewNullableColumnTimestamptz(name, sparseData, validData, WithSparseNullableMode[string](true))
+		s.NoError(err)
+
+		fd := column.FieldData()
+		s.Equal(validData, fd.GetValidData())
+		result, err := FieldDataColumn(fd, 0, -1)
+		s.NoError(err)
+		parsed, ok := result.(*ColumnTimestampTzIsoString)
+		if s.True(ok) {
+			s.Equal(name, parsed.Name())
+			s.Equal(sparseExpected, parsed.Data())
+			s.Equal(entity.FieldTypeTimestamptz, parsed.Type())
+		}
+
+		_, err = NewNullableColumnTimestamptz(name, compactData, []bool{false, false})
+		s.Error(err)
+	})
+
+	s.Run("nullable_timestamptz_iso_string", func() {
+		name := fmt.Sprintf("field_%d", rand.Intn(1000))
+		compactData := []string{"2024-01-01T00:00:00Z", "2024-06-15T12:30:45Z"}
+		sparseData := []string{"2024-01-01T00:00:00Z", "", "2024-06-15T12:30:45Z"}
+		validData := []bool{true, false, true}
+		// compact mode
+		column, err := NewNullableColumnTimestamptzIsoString(name, compactData, validData)
+		s.NoError(err)
+		s.Equal(entity.FieldTypeTimestamptz, column.Type())
+		s.Equal(name, column.Name())
+		s.Equal(compactData, column.Data())
+		for i := 0; i < len(validData); i++ {
+			r, err := column.IsNull(i)
+			s.NoError(err)
+			s.Equal(validData[i], !r)
+		}
+
+		// sparse mode
+		column, err = NewNullableColumnTimestamptzIsoString(name, sparseData, validData, WithSparseNullableMode[string](true))
+		s.NoError(err)
+
+		fd := column.FieldData()
+		s.Equal(validData, fd.GetValidData())
+		result, err := FieldDataColumn(fd, 0, -1)
+		s.NoError(err)
+		parsed, ok := result.(*ColumnTimestampTzIsoString)
+		if s.True(ok) {
+			s.Equal(name, parsed.Name())
+			s.Equal(sparseData, parsed.Data())
+			s.Equal(entity.FieldTypeTimestamptz, parsed.Type())
+		}
+
+		_, err = NewNullableColumnTimestamptzIsoString(name, compactData, []bool{false, false})
 		s.Error(err)
 	})
 }

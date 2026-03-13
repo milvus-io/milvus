@@ -316,6 +316,90 @@ class ColumnVector final : public SimpleVector {
         return std::make_shared<ColumnVector>(type(), size, std::nullopt);
     }
 
+    // Check if all rows are definitely TRUE (valid=1, data=1)
+    // Uses early termination for efficiency
+    // Can only be called when ColumnVector is a bitmap
+    bool
+    AllTrue() const {
+        AssertInfo(is_bitmap_, "AllTrue can only be called on bitmap vectors");
+        const size_t len = length_;
+        if (len == 0) {
+            return true;
+        }
+
+        const uint64_t* data =
+            reinterpret_cast<const uint64_t*>(values_->Data());
+        const uint64_t* valid =
+            reinterpret_cast<const uint64_t*>(valid_values_.data());
+
+        const size_t num_full_words = len / 64;
+        const size_t tail_bits = len % 64;
+
+        // For AllTrue: every bit must have valid=1 AND data=1
+        // (data & valid) == all_ones implies both are all 1s
+        constexpr uint64_t all_ones = ~0ULL;
+
+        // Process full 64-bit words with early termination
+        for (size_t i = 0; i < num_full_words; ++i) {
+            if ((data[i] & valid[i]) != all_ones) {
+                return false;
+            }
+        }
+
+        // Process remaining bits (if any)
+        if (tail_bits > 0) {
+            const uint64_t mask = (1ULL << tail_bits) - 1;
+            if (((data[num_full_words] & valid[num_full_words]) & mask) !=
+                mask) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Check if all rows are definitely FALSE (valid=1, data=0)
+    // Uses early termination for efficiency
+    // Can only be called when ColumnVector is a bitmap
+    bool
+    AllFalse() const {
+        AssertInfo(is_bitmap_, "AllFalse can only be called on bitmap vectors");
+        const size_t len = length_;
+        if (len == 0) {
+            return true;
+        }
+
+        const uint64_t* data =
+            reinterpret_cast<const uint64_t*>(values_->Data());
+        const uint64_t* valid =
+            reinterpret_cast<const uint64_t*>(valid_values_.data());
+
+        const size_t num_full_words = len / 64;
+        const size_t tail_bits = len % 64;
+
+        // For AllFalse: every bit must have valid=1 AND data=0
+        // (valid & ~data) == all_ones means all bits are definitely FALSE
+        constexpr uint64_t all_ones = ~0ULL;
+
+        // Process full 64-bit words with early termination
+        for (size_t i = 0; i < num_full_words; ++i) {
+            if ((valid[i] & ~data[i]) != all_ones) {
+                return false;
+            }
+        }
+
+        // Process remaining bits (if any)
+        if (tail_bits > 0) {
+            const uint64_t mask = (1ULL << tail_bits) - 1;
+            if (((valid[num_full_words] & ~data[num_full_words]) & mask) !=
+                mask) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
  private:
     bool is_bitmap_;  // TODO: remove the field after implementing BitmapVector
     FieldDataPtr values_;

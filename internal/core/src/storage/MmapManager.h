@@ -16,6 +16,11 @@
 
 #pragma once
 
+#include <atomic>
+#include <cstddef>
+#include <mutex>
+
+#include "log/Log.h"
 #include "storage/MmapChunkManager.h"
 #include "storage/Types.h"
 

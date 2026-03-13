@@ -15,11 +15,35 @@
 // limitations under the License.
 
 #include "BinaryRangeExpr.h"
-#include <utility>
 
-#include "query/Utils.h"
+#include <cstdint>
+#include <limits>
+#include <utility>
+#include <variant>
+
+#include "common/EasyAssert.h"
+#include "common/Tracer.h"
+#include "common/bson_view.h"
+#include "common/type_c.h"
+#include "common/ScopedTimer.h"
+#include "exec/expression/Utils.h"
+#include "fmt/core.h"
+#include "folly/FBVector.h"
+#include "glog/logging.h"
+#include "index/SkipIndex.h"
+#include "monitor/Monitor.h"
 #include "index/json_stats/JsonKeyStats.h"
+#include "index/json_stats/utils.h"
+#include "log/Log.h"
+#include "opentelemetry/trace/span.h"
+#include "query/Utils.h"
+#include "segcore/SegmentInterface.h"
+#include "segcore/SegmentSealed.h"
+#include "storage/MmapManager.h"
+#include "storage/Types.h"
+
 namespace milvus {
+
 namespace exec {
 
 void
@@ -77,6 +101,8 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
+            span.GetSpan()->SetAttribute("json_filter_expr_type",
+                                         "binary_range");
             auto lower_type = expr_->lower_val_.val_case();
             auto upper_type = expr_->upper_val_.val_case();
             // For numeric types, if either bound is float, use double for both.
@@ -309,7 +335,6 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
-    using Index = index::ScalarIndex<IndexInnerType>;
     typedef std::conditional_t<std::is_integral_v<IndexInnerType> &&
                                    !std::is_same_v<bool, T>,
                                int64_t,
@@ -473,16 +498,21 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 template <typename ValueType>
 VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
-    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
-                                       std::string_view,
-                                       ValueType>;
     const auto& bitmap_input = context.get_bitmap_input();
     auto* input = context.get_offset_input();
     FieldId field_id = expr_->column_.field_id_;
     if (!has_offset_input_ &&
         CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+        milvus::ScopedTimer timer(
+            "binary_range_json_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecRangeVisitorImplForJsonStats<ValueType>();
     }
+
+    milvus::ScopedTimer timer(
+        "binary_range_json_bruteforce",
+        [this](double us) { json_filter_bruteforce_latency_us_ += us; });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -683,48 +713,54 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
             }
         };
 
-        if constexpr (std::is_same_v<GetType, int64_t>) {
-            // int64 compare
-            try_execute(milvus::index::JSONType::INT64,
-                        res_view,
-                        valid_res_view,
-                        int64_t{});
-            // and double compare
-            TargetBitmap res_double(active_count_, false);
-            TargetBitmapView res_double_view(res_double);
-            TargetBitmap res_double_valid(active_count_, true);
-            TargetBitmapView valid_res_double_view(res_double_valid);
-            try_execute(milvus::index::JSONType::DOUBLE,
-                        res_double_view,
-                        valid_res_double_view,
-                        double{});
-            res_view.inplace_or_with_count(res_double_view, active_count_);
-            valid_res_view.inplace_or_with_count(valid_res_double_view,
-                                                 active_count_);
+        {
+            milvus::ScopedTimer timer(
+                "binary_range_json_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
 
-        } else if constexpr (std::is_same_v<GetType, double>) {
-            try_execute(milvus::index::JSONType::DOUBLE,
-                        res_view,
-                        valid_res_view,
-                        double{});
-            // and int64 compare
-            TargetBitmap res_int64(active_count_, false);
-            TargetBitmapView res_int64_view(res_int64);
-            TargetBitmap res_int64_valid(active_count_, true);
-            TargetBitmapView valid_res_int64_view(res_int64_valid);
-            try_execute(milvus::index::JSONType::INT64,
-                        res_int64_view,
-                        valid_res_int64_view,
-                        int64_t{});
-            res_view.inplace_or_with_count(res_int64_view, active_count_);
-            valid_res_view.inplace_or_with_count(valid_res_int64_view,
-                                                 active_count_);
-        } else if constexpr (std::is_same_v<GetType, std::string_view> ||
-                             std::is_same_v<GetType, std::string>) {
-            try_execute(milvus::index::JSONType::STRING,
-                        res_view,
-                        valid_res_view,
-                        std::string_view{});
+            if constexpr (std::is_same_v<GetType, int64_t>) {
+                // int64 compare
+                try_execute(milvus::index::JSONType::INT64,
+                            res_view,
+                            valid_res_view,
+                            int64_t{});
+                // and double compare
+                TargetBitmap res_double(active_count_, false);
+                TargetBitmapView res_double_view(res_double);
+                TargetBitmap res_double_valid(active_count_, true);
+                TargetBitmapView valid_res_double_view(res_double_valid);
+                try_execute(milvus::index::JSONType::DOUBLE,
+                            res_double_view,
+                            valid_res_double_view,
+                            double{});
+                res_view.inplace_or_with_count(res_double_view, active_count_);
+                valid_res_view.inplace_or_with_count(valid_res_double_view,
+                                                     active_count_);
+
+            } else if constexpr (std::is_same_v<GetType, double>) {
+                try_execute(milvus::index::JSONType::DOUBLE,
+                            res_view,
+                            valid_res_view,
+                            double{});
+                // and int64 compare
+                TargetBitmap res_int64(active_count_, false);
+                TargetBitmapView res_int64_view(res_int64);
+                TargetBitmap res_int64_valid(active_count_, true);
+                TargetBitmapView valid_res_int64_view(res_int64_valid);
+                try_execute(milvus::index::JSONType::INT64,
+                            res_int64_view,
+                            valid_res_int64_view,
+                            int64_t{});
+                res_view.inplace_or_with_count(res_int64_view, active_count_);
+                valid_res_view.inplace_or_with_count(valid_res_int64_view,
+                                                     active_count_);
+            } else if constexpr (std::is_same_v<GetType, std::string_view> ||
+                                 std::is_same_v<GetType, std::string>) {
+                try_execute(milvus::index::JSONType::STRING,
+                            res_view,
+                            valid_res_view,
+                            std::string_view{});
+            }
         }
 
         // process shared data
@@ -772,8 +808,14 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                     }
                 }
             };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "binary_range_json_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
@@ -788,9 +830,6 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
 template <typename ValueType>
 VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
-    using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
-                                       std::string_view,
-                                       ValueType>;
     const auto& bitmap_input = context.get_bitmap_input();
     auto* input = context.get_offset_input();
     auto real_batch_size =

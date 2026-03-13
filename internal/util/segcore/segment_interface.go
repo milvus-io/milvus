@@ -35,9 +35,6 @@ type SealedSegment interface {
 	// LoadFieldData loads field data into the segment.
 	LoadFieldData(ctx context.Context, request *LoadFieldDataRequest) (*LoadFieldDataResult, error)
 
-	// AddFieldDataInfo adds field data info into the segment.
-	AddFieldDataInfo(ctx context.Context, request *AddFieldDataInfoRequest) (*AddFieldDataInfoResult, error)
-
 	// DropIndex drops the index of the segment.
 	DropIndex(ctx context.Context, fieldID int64) error
 
@@ -78,9 +75,6 @@ type basicSegmentMethodSet interface {
 
 	// Delete deletes data from the segment.
 	Delete(ctx context.Context, request *DeleteRequest) (*DeleteResult, error)
-
-	// FinishLoad wraps up the load process and let segcore do the leftover jobs.
-	FinishLoad() error
 
 	// Load invokes segment managed loading.
 	Load(ctx context.Context) error

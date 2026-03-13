@@ -84,6 +84,11 @@ type RootCoordCatalog interface {
 	// For example []string{"user1/role1"}
 	ListUserRole(ctx context.Context, tenant string) ([]string, error)
 
+	// DeleteGrantByCollectionName deletes all grants for a specific collection.
+	DeleteGrantByCollectionName(ctx context.Context, tenant string, dbName string, collectionName string) error
+	// MigrateGrantCollectionName migrates all grants from oldName to newName when a collection is renamed.
+	MigrateGrantCollectionName(ctx context.Context, tenant string, oldDBName string, oldName string, newDBName string, newName string) error
+
 	ListCredentialsWithPasswd(ctx context.Context) (map[string]string, error)
 	BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBACMeta, error)
 	RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error
@@ -245,6 +250,18 @@ type DataCoordCatalog interface {
 	SaveUpdateExternalCollectionTask(ctx context.Context, task *indexpb.UpdateExternalCollectionTask) error
 	DropUpdateExternalCollectionTask(ctx context.Context, taskID typeutil.UniqueID) error
 
+	// External Collection Refresh - Separated Job/Task storage
+	ListExternalCollectionRefreshJobs(ctx context.Context) ([]*datapb.ExternalCollectionRefreshJob, error)
+	SaveExternalCollectionRefreshJob(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error
+	DropExternalCollectionRefreshJob(ctx context.Context, jobID typeutil.UniqueID) error
+	ListExternalCollectionRefreshTasks(ctx context.Context) ([]*datapb.ExternalCollectionRefreshTask, error)
+	SaveExternalCollectionRefreshTask(ctx context.Context, task *datapb.ExternalCollectionRefreshTask) error
+	DropExternalCollectionRefreshTask(ctx context.Context, taskID typeutil.UniqueID) error
+
+	// Analyzer Resource
+	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error
+	RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error
+	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error)
 	// snapshot related
 	SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error
 	DropSnapshot(ctx context.Context, collectionID int64, snapshotID int64) error

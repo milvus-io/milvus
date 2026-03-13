@@ -538,7 +538,7 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 	for _, task := range scanTasks {
 		gc.recycleUnusedBinLogWithChecker(ctx, task.prefix, task.label, task.checker)
 	}
-	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
 
 // recycleUnusedBinLogWithChecker scans the prefix and checks the path with checker.
@@ -552,6 +552,45 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 	unexpectedFailure := atomic.NewInt32(0)
 	removed := atomic.NewInt32(0)
 	start := time.Now()
+
+	// isSnapshotProtected checks if a segment should be skipped from GC due to snapshot references.
+	// Returns true if the segment is protected (should NOT be deleted).
+	// Caches per-collection loaded state and per-segment query results to avoid repeated calls.
+	snapshotMeta := gc.meta.GetSnapshotMeta()
+	var snapshotAllLoaded bool
+	if snapshotMeta != nil {
+		snapshotAllLoaded = snapshotMeta.IsAllRefIndexLoaded()
+	}
+	collectionLoadedCache := make(map[int64]bool)
+	segmentProtectedCache := make(map[int64]bool)
+	isSnapshotProtected := func(segmentID, collectionID int64) bool {
+		if snapshotMeta == nil {
+			return false
+		}
+		// Check loaded state: per-collection when known, global otherwise.
+		if collectionID >= 0 {
+			if loaded, ok := collectionLoadedCache[collectionID]; ok {
+				if !loaded {
+					return true
+				}
+			} else {
+				loaded = snapshotMeta.IsRefIndexLoadedForCollection(collectionID)
+				collectionLoadedCache[collectionID] = loaded
+				if !loaded {
+					return true
+				}
+			}
+		} else if !snapshotAllLoaded {
+			return true
+		}
+		// Check segment cache, then query.
+		if protected, ok := segmentProtectedCache[segmentID]; ok {
+			return protected
+		}
+		protected := len(snapshotMeta.GetSnapshotBySegment(ctx, collectionID, segmentID)) > 0
+		segmentProtectedCache[segmentID] = protected
+		return protected
+	}
 
 	futures := make([]*conc.Future[struct{}], 0)
 	err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(chunkInfo *storage.ChunkObjectInfo) bool {
@@ -579,6 +618,18 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		if checker(chunkInfo, segment) {
 			valid++
 			logger.Info("garbageCollector recycleUnusedBinlogFiles skip file since it is valid", zap.String("filePath", chunkInfo.FilePath), zap.Int64("segmentID", segmentID))
+			return true
+		}
+
+		// Check if segment is referenced by any snapshot before deleting its binlog.
+		collectionID := int64(-1)
+		if segment != nil {
+			collectionID = segment.GetCollectionID()
+		}
+		if isSnapshotProtected(segmentID, collectionID) {
+			logger.Info("skip GC binlog files since segment is protected by snapshot",
+				zap.Int64("segmentID", segmentID))
+			valid++
 			return true
 		}
 
@@ -618,7 +669,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		zap.Error(err))
 
 	metrics.GarbageCollectorFileScanDuration.
-		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), label).
+		WithLabelValues(paramtable.GetStringNodeID(), label).
 		Observe(float64(cost.Milliseconds()))
 }
 
@@ -739,20 +790,22 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 
 		// Check if snapshot RefIndex is loaded before querying snapshot references
 		// If not loaded, skip this segment and try again in next GC cycle
-		if !gc.meta.GetSnapshotMeta().IsRefIndexLoadedForCollection(segment.GetCollectionID()) {
-			log.Info("skip GC segment since snapshot RefIndex is not loaded yet",
-				zap.Int64("collectionID", segment.GetCollectionID()))
-			continue
-		}
+		if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
+			if !snapshotMeta.IsRefIndexLoadedForCollection(segment.GetCollectionID()) {
+				log.Info("skip GC segment since snapshot RefIndex is not loaded yet",
+					zap.Int64("collectionID", segment.GetCollectionID()))
+				continue
+			}
 
-		if snapshotIDs := gc.meta.GetSnapshotMeta().GetSnapshotBySegment(ctx, segment.GetCollectionID(), segmentID); len(snapshotIDs) > 0 {
-			log.Info("skip GC segment since it is referenced by snapshot",
-				zap.Int64("collectionID", segment.GetCollectionID()),
-				zap.Int64("partitionID", segment.GetPartitionID()),
-				zap.String("channel", segInsertChannel),
-				zap.Int64("segmentID", segmentID),
-				zap.Int64s("snapshotIDs", snapshotIDs))
-			continue
+			if snapshotIDs := snapshotMeta.GetSnapshotBySegment(ctx, segment.GetCollectionID(), segmentID); len(snapshotIDs) > 0 {
+				log.Info("skip GC segment since it is referenced by snapshot",
+					zap.Int64("collectionID", segment.GetCollectionID()),
+					zap.Int64("partitionID", segment.GetPartitionID()),
+					zap.String("channel", segInsertChannel),
+					zap.Int64("segmentID", segmentID),
+					zap.Int64s("snapshotIDs", snapshotIDs))
+				continue
+			}
 		}
 
 		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel]) {
@@ -995,16 +1048,19 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 
 			// Check if snapshot RefIndex is loaded before querying snapshot references
 			// If not loaded, skip this index and try again in next GC cycle
-			if !gc.meta.GetSnapshotMeta().IsRefIndexLoadedForCollection(segIdx.CollectionID) {
-				log.Info("skip GC segment index since snapshot RefIndex is not loaded yet",
-					zap.Int64("collectionID", segIdx.CollectionID))
-				continue
-			}
+			if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
+				if !snapshotMeta.IsRefIndexLoadedForCollection(segIdx.CollectionID) {
+					log.Info("skip GC segment index since snapshot RefIndex is not loaded yet",
+						zap.Int64("collectionID", segIdx.CollectionID))
+					continue
+				}
 
-			if snapshotIDs := gc.meta.GetSnapshotMeta().GetSnapshotByIndex(ctx, segIdx.CollectionID, segIdx.IndexID); len(snapshotIDs) > 0 {
-				log.Info("skip GC segment index since it is referenced by snapshot",
-					zap.Int64s("snapshotIDs", snapshotIDs))
-				continue
+				if snapshotIDs := snapshotMeta.GetSnapshotByBuildID(segIdx.BuildID); len(snapshotIDs) > 0 {
+					log.Info("skip GC segment index since buildID is referenced by snapshot",
+						zap.Int64("buildID", segIdx.BuildID),
+						zap.Int64s("snapshotIDs", snapshotIDs))
+					continue
+				}
 			}
 
 			log.Info("GC Segment Index file start...")
@@ -1032,6 +1088,15 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 	log.Info("start recycleUnusedIndexFiles...")
 
 	prefix := path.Join(gc.option.cli.RootPath(), common.SegmentIndexPath) + "/"
+
+	// Pre-fetch snapshot meta once before the walk to avoid repeated calls per buildID.
+	// Use IsAllRefIndexLoaded because orphan buildIDs (segIdx==nil) have no collection context.
+	snapshotMeta := gc.meta.GetSnapshotMeta()
+	var snapshotAllLoaded bool
+	if snapshotMeta != nil {
+		snapshotAllLoaded = snapshotMeta.IsAllRefIndexLoaded()
+	}
+
 	// list dir first
 	keyCount := 0
 	err := gc.option.cli.WalkWithPrefix(ctx, prefix, false, func(indexPathInfo *storage.ChunkObjectInfo) bool {
@@ -1054,6 +1119,20 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 			return true
 		}
 		if segIdx == nil {
+			// buildID no longer exists in meta. Check if any snapshot references this buildID.
+			if snapshotMeta != nil {
+				if !snapshotAllLoaded {
+					logger.Info("skip GC index files since snapshot RefIndex not fully loaded")
+					return true
+				}
+				if snapshotIDs := snapshotMeta.GetSnapshotByBuildID(buildID); len(snapshotIDs) > 0 {
+					logger.Info("skip GC index files since buildID is referenced by snapshot",
+						zap.Int64("buildID", buildID),
+						zap.Int64s("snapshotIDs", snapshotIDs))
+					return true
+				}
+			}
+
 			// buildID no longer exists in meta, remove all index files
 			logger.Info("garbageCollector recycleUnusedIndexFiles find meta has not exist, remove index files")
 			err = gc.option.cli.RemoveWithPrefix(ctx, key)
@@ -1064,6 +1143,25 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 			logger.Info("garbageCollector recycleUnusedIndexFiles remove index files success")
 			return true
 		}
+
+		// Check if snapshot RefIndex is loaded before querying snapshot references
+		// If not loaded, skip this index and try again in next GC cycle
+		if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
+			if !snapshotMeta.IsRefIndexLoadedForCollection(segIdx.CollectionID) {
+				logger.Info("skip GC index files since snapshot RefIndex is not loaded yet",
+					zap.Int64("collectionID", segIdx.CollectionID))
+				return true
+			}
+
+			// Check if this index is referenced by any snapshot
+			// If snapshots reference this index, do not delete the index files
+			if snapshotIDs := snapshotMeta.GetSnapshotByIndex(ctx, segIdx.CollectionID, segIdx.IndexID); len(snapshotIDs) > 0 {
+				logger.Info("skip GC index files since index is referenced by snapshot",
+					zap.Int64s("snapshotIDs", snapshotIDs))
+				return true
+			}
+		}
+
 		filesMap := gc.getAllIndexFilesOfIndex(segIdx)
 
 		logger.Info("recycle index files", zap.Int("meta files num", len(filesMap)))
@@ -1211,6 +1309,8 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 	fileNum := 0
 	deletedFilesNum := atomic.NewInt32(0)
 
+	snapshotMeta := gc.meta.GetSnapshotMeta()
+
 	for _, seg := range hasTextIndexSegments {
 		if ctx.Err() != nil {
 			// process canceled, stop.
@@ -1220,6 +1320,23 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 			log.Info("skip GC segment since collection is paused", zap.Int64("segmentID", seg.GetID()), zap.Int64("collectionID", seg.GetCollectionID()))
 			continue
 		}
+
+		// Check if segment is referenced by any snapshot before deleting text index files
+		if snapshotMeta != nil {
+			if !snapshotMeta.IsRefIndexLoadedForCollection(seg.GetCollectionID()) {
+				log.Info("skip GC text index files since snapshot RefIndex is not loaded yet",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.Int64("collectionID", seg.GetCollectionID()))
+				continue
+			}
+			if snapshotIDs := snapshotMeta.GetSnapshotBySegment(ctx, seg.GetCollectionID(), seg.GetID()); len(snapshotIDs) > 0 {
+				log.Info("skip GC text index files since segment is referenced by snapshot",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.Int64s("snapshotIDs", snapshotIDs))
+				continue
+			}
+		}
+
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetTextStatsLogs() {
 			log := log.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
@@ -1264,7 +1381,7 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, sig
 	}
 	log.Info("text index files recycle done")
 
-	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
 
 // recycleUnusedJSONStatsFiles load meta file info and compares OSS keys
@@ -1281,6 +1398,8 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 	fileNum := 0
 	deletedFilesNum := atomic.NewInt32(0)
 
+	snapshotMeta := gc.meta.GetSnapshotMeta()
+
 	for _, seg := range hasJSONStatsSegments {
 		if ctx.Err() != nil {
 			// process canceled, stop.
@@ -1290,6 +1409,23 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 			log.Info("skip GC segment since collection is paused", zap.Int64("segmentID", seg.GetID()), zap.Int64("collectionID", seg.GetCollectionID()))
 			continue
 		}
+
+		// Check if segment is referenced by any snapshot before deleting JSON stats files
+		if snapshotMeta != nil {
+			if !snapshotMeta.IsRefIndexLoadedForCollection(seg.GetCollectionID()) {
+				log.Info("skip GC JSON stats files since snapshot RefIndex is not loaded yet",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.Int64("collectionID", seg.GetCollectionID()))
+				continue
+			}
+			if snapshotIDs := snapshotMeta.GetSnapshotBySegment(ctx, seg.GetCollectionID(), seg.GetID()); len(snapshotIDs) > 0 {
+				log.Info("skip GC JSON stats files since segment is referenced by snapshot",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.Int64s("snapshotIDs", snapshotIDs))
+				continue
+			}
+		}
+
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetJsonKeyStats() {
 			log := log.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
@@ -1372,7 +1508,7 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 		zap.Int("deleteJSONStatsNum", int(deletedFilesNum.Load())),
 		zap.Int("walkFileNum", fileNum))
 
-	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
 
 // recycleUnusedJSONIndexFiles load meta file info and compares OSS keys
@@ -1397,6 +1533,25 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 			log.Info("skip GC segment since collection is paused", zap.Int64("segmentID", seg.GetID()), zap.Int64("collectionID", seg.GetCollectionID()))
 			continue
 		}
+
+		// Check if segment is referenced by any snapshot before deleting JSON index files
+		snapshotMeta := gc.meta.GetSnapshotMeta()
+		if snapshotMeta != nil {
+			// If RefIndex is not loaded yet, skip to avoid incorrectly deleting snapshot-referenced files
+			if !snapshotMeta.IsRefIndexLoadedForCollection(seg.GetCollectionID()) {
+				log.Info("skip GC JSON index files since snapshot RefIndex is not loaded yet",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.Int64("collectionID", seg.GetCollectionID()))
+				continue
+			}
+			if snapshotIDs := snapshotMeta.GetSnapshotBySegment(ctx, seg.GetCollectionID(), seg.GetID()); len(snapshotIDs) > 0 {
+				log.Info("skip GC JSON index files since segment is referenced by snapshot",
+					zap.Int64("segmentID", seg.GetID()),
+					zap.Int64s("snapshotIDs", snapshotIDs))
+				continue
+			}
+		}
+
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetJsonKeyStats() {
 			log := log.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
@@ -1440,7 +1595,7 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 	}
 	log.Info("json index files recycle done", zap.Int("deleteJSONKeyIndexNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
 
-	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
 
 // recyclePendingSnapshots cleans up orphaned snapshot files from failed 2PC commits.
@@ -1598,5 +1753,5 @@ func (gc *garbageCollector) recyclePendingSnapshots(ctx context.Context, signal 
 			zap.Int("cleanedCount", deletingCleanedCount))
 	}
 
-	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }

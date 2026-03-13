@@ -19,7 +19,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     sed -i 's/http:/https:/g' /etc/apt/sources.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends curl libaio-dev libgomp1 libopenblas-dev && \
+    apt-get install -y --no-install-recommends gpgv curl libaio-dev libgomp1 libopenblas-dev && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
         echo "Etc/UTC" > /etc/timezone && \
@@ -43,11 +43,13 @@ ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:/milvus/lib/libjemalloc.so
 ENV MALLOC_CONF=background_thread:true
 
 # Change user to milvus
-ENV ASAN_OPTIONS=detect_leaks=0
+# protobuf 5.x RepeatedField adds container annotations that trigger ASAN
+# container-overflow false positives during static initialization, disable it.
+ENV ASAN_OPTIONS=detect_leaks=0:detect_container_overflow=0
 RUN groupadd -r milvus && useradd -r -g milvus milvus && \
     mkdir -p /var/lib/milvus && \
     chown -R milvus:milvus /milvus /var/lib/milvus
-ENV ASAN_OPTIONS=detect_leaks=1
+ENV ASAN_OPTIONS=detect_leaks=1:detect_container_overflow=0
 USER milvus:milvus
 
 ENTRYPOINT ["/tini", "--"]

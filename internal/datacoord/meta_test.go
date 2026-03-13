@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
@@ -98,6 +99,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.Error(err)
@@ -116,6 +119,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.Error(err)
@@ -156,6 +161,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 			},
 		}, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.NoError(err)
@@ -188,6 +195,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, collectionID int64) ([]*datapb.SegmentInfo, error) {
@@ -1349,6 +1358,137 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Equal(t, commonpb.SegmentState_Growing, segmentInfo.State)
 		assert.Nil(t, segmentInfo.Binlogs)
 		assert.Nil(t, segmentInfo.StartPosition)
+	})
+}
+
+func TestUpdateManifestVersion(t *testing.T) {
+	t.Run("segment not found", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		operator := UpdateManifestVersion(999, 10)
+		pack := &updateSegmentPack{
+			meta:     meta,
+			segments: make(map[int64]*SegmentInfo),
+		}
+		assert.False(t, operator(pack))
+	})
+
+	t.Run("empty manifest path", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		meta.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				State:        commonpb.SegmentState_Flushed,
+				ManifestPath: "",
+			},
+		})
+
+		operator := UpdateManifestVersion(1, 10)
+		pack := &updateSegmentPack{
+			meta:     meta,
+			segments: make(map[int64]*SegmentInfo),
+		}
+		assert.False(t, operator(pack))
+	})
+
+	t.Run("invalid manifest path - unmarshal error", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		meta.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				State:        commonpb.SegmentState_Flushed,
+				ManifestPath: "not-json",
+			},
+		})
+
+		operator := UpdateManifestVersion(1, 10)
+		pack := &updateSegmentPack{
+			meta:     meta,
+			segments: make(map[int64]*SegmentInfo),
+		}
+		assert.False(t, operator(pack))
+	})
+
+	t.Run("same version - no update", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		manifestPath := packed.MarshalManifestPath("/data/segments/1", 10)
+		meta.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				State:        commonpb.SegmentState_Flushed,
+				ManifestPath: manifestPath,
+			},
+		})
+
+		operator := UpdateManifestVersion(1, 10)
+		pack := &updateSegmentPack{
+			meta:     meta,
+			segments: make(map[int64]*SegmentInfo),
+		}
+		assert.False(t, operator(pack))
+	})
+
+	t.Run("success - version updated", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		manifestPath := packed.MarshalManifestPath("/data/segments/1", 5)
+		meta.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				State:        commonpb.SegmentState_Flushed,
+				ManifestPath: manifestPath,
+			},
+		})
+
+		operator := UpdateManifestVersion(1, 10)
+		pack := &updateSegmentPack{
+			meta:     meta,
+			segments: make(map[int64]*SegmentInfo),
+		}
+		assert.True(t, operator(pack))
+
+		// Verify the manifest path was updated
+		seg := pack.Get(1)
+		assert.NotNil(t, seg)
+		basePath, version, err := packed.UnmarshalManifestPath(seg.ManifestPath)
+		assert.NoError(t, err)
+		assert.Equal(t, "/data/segments/1", basePath)
+		assert.Equal(t, int64(10), version)
+	})
+
+	t.Run("success - via UpdateSegmentsInfo", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		manifestPath := packed.MarshalManifestPath("/data/segments/1", 1)
+		meta.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				State:        commonpb.SegmentState_Flushed,
+				ManifestPath: manifestPath,
+			},
+		})
+
+		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
+			UpdateManifestVersion(1, 5),
+		)
+		assert.NoError(t, err)
+
+		updated := meta.GetHealthySegment(context.TODO(), 1)
+		assert.NotNil(t, updated)
+		basePath, version, err := packed.UnmarshalManifestPath(updated.ManifestPath)
+		assert.NoError(t, err)
+		assert.Equal(t, "/data/segments/1", basePath)
+		assert.Equal(t, int64(5), version)
 	})
 }
 

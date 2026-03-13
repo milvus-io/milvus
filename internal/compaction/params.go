@@ -95,6 +95,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			CloudProvider:     paramtable.Get().MinioCfg.CloudProvider.GetValue(),
 			RequestTimeoutMs:  paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt64(),
 			GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
+			SslTlsMinVersion:  paramtable.Get().MinioCfg.SslTLSMinVersion.GetValue(),
 		}
 	}
 

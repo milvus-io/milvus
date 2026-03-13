@@ -72,6 +72,13 @@ type Balancer interface {
 	// Trigger is a hint to trigger a balance.
 	Trigger(ctx context.Context) error
 
+	// SetFileResourceChecker sets the file resource checker.
+	SetFileResourceChecker(checker FileResourceChecker)
+
 	// Close close the balancer.
 	Close()
+}
+
+type FileResourceChecker interface {
+	CheckNodeSynced(nodeID int64) bool
 }

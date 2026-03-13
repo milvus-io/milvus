@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -32,9 +33,13 @@ import (
 func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) error {
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 	if err != nil {
-		return err
+		if !shouldApplyLocallyOnNonPrimary(err, message.MessageTypeDropResourceGroup) {
+			return err
+		}
 	}
-	defer broadcaster.Close()
+	if broadcaster != nil {
+		defer broadcaster.Close()
+	}
 
 	replicas := s.meta.ReplicaManager.GetByResourceGroup(ctx, req.GetResourceGroup())
 	if len(replicas) > 0 {
@@ -53,6 +58,9 @@ func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.D
 		WithBody(&message.DropResourceGroupMessageBody{}).
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
+	if broadcaster == nil {
+		return registry.CallMessageAckCallback(ctx, msg, nil)
+	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
 }

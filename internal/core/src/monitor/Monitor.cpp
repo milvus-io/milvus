@@ -9,8 +9,14 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <chrono>
+#include <map>
+#include <string>
+
 #include "monitor/Monitor.h"
+#include "prometheus/counter.h"
+#include "prometheus/family.h"
+#include "prometheus/gauge.h"
+#include "prometheus/histogram.h"
 
 namespace milvus::monitor {
 
@@ -153,6 +159,20 @@ DEFINE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_shared,
 DEFINE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_load,
                             internal_json_stats_latency,
                             loadLatencyLabels)
+
+// json filter performance metrics
+std::map<std::string, std::string> jsonFilterBruteforceLatencyLabels{
+    {"type", "bruteforce_latency"}};
+std::map<std::string, std::string> jsonFilterJsonStatsLatencyLabels{
+    {"type", "json_stats_latency"}};
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_json_filter_latency,
+                                   "[cpp]latency(ms) of json field filter")
+DEFINE_PROMETHEUS_HISTOGRAM(internal_json_filter_latency_bruteforce,
+                            internal_json_filter_latency,
+                            jsonFilterBruteforceLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_json_filter_latency_json_stats,
+                            internal_json_filter_latency,
+                            jsonFilterJsonStatsLatencyLabels)
 
 // search latency metrics
 std::map<std::string, std::string> scalarLatencyLabels{

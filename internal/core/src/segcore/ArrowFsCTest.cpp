@@ -15,12 +15,21 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <memory>
+
+#include "common/common_type_c.h"
+#include "gtest/gtest.h"
 #include "segcore/arrow_fs_c.h"
+#include "test_utils/Constants.h"
 
 TEST(ArrowFileSystemSingleton, LocalArrowFileSystemSingleton) {
-    const char* path = "/tmp";
+    const char* path = TestLocalPath.c_str();
     CStatus status = InitLocalArrowFileSystemSingleton(path);
     EXPECT_EQ(status.error_code, 0);
 
     CleanArrowFileSystemSingleton();
+
+    // Reinitialize the singleton so subsequent tests can use it
+    status = InitLocalArrowFileSystemSingleton(path);
+    EXPECT_EQ(status.error_code, 0);
 }

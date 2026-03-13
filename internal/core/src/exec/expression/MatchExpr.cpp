@@ -15,9 +15,19 @@
 // limitations under the License.
 
 #include "MatchExpr.h"
-#include <utility>
+
+#include <algorithm>
+#include <cstddef>
+
+#include "bitset/bitset.h"
+#include "common/ArrayOffsets.h"
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/Schema.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
+#include "exec/expression/EvalCtx.h"
+#include "folly/FBVector.h"
 
 namespace milvus {
 namespace exec {

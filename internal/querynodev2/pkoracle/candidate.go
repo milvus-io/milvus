@@ -34,6 +34,12 @@ type Candidate interface {
 	Type() commonpb.SegmentState
 }
 
+// Refundable is an optional interface for candidates that need resource cleanup.
+// BloomFilterSet implements this interface to refund charged memory resources.
+type Refundable interface {
+	Refund()
+}
+
 type candidateWithWorker struct {
 	Candidate
 	workerID int64

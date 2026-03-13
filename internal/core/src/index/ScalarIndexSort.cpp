@@ -14,24 +14,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
 #include <algorithm>
+#include <cstdint>
+#include <exception>
+#include <filesystem>
+#include <map>
 #include <memory>
 #include <optional>
-#include <utility>
-#include <pb/schema.pb.h>
-#include <vector>
 #include <string>
-#include "common/CDataType.h"
-#include "index/ScalarIndex.h"
-#include "knowhere/log.h"
+#include <vector>
+
 #include "Meta.h"
-#include "common/Utils.h"
+#include "bitset/bitset.h"
+#include "common/Array.h"
+#include "common/EasyAssert.h"
+#include "common/FieldDataInterface.h"
+#include "common/File.h"
 #include "common/Slice.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
-#include "index/Utils.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
+#include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
+#include "index/Utils.h"
+#include "knowhere/binaryset.h"
+#include "log/Log.h"
+#include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/FileWriter.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
+#include "storage/Types.h"
 #include "storage/Util.h"
 
 namespace milvus::index {
@@ -46,8 +65,12 @@ const uint64_t MMAP_INDEX_PADDING = 1;
 
 template <typename T>
 ScalarIndexSort<T>::ScalarIndexSort(
-    const storage::FileManagerContext& file_manager_context)
-    : ScalarIndex<T>(ASCENDING_SORT), is_built_(false), data_() {
+    const storage::FileManagerContext& file_manager_context,
+    bool is_nested_index)
+    : ScalarIndex<T>(ASCENDING_SORT),
+      is_nested_index_(is_nested_index),
+      is_built_(false),
+      data_() {
     // not valid means we are in unit test
     if (file_manager_context.Valid()) {
         field_id_ = file_manager_context.fieldDataMeta.field_id;
@@ -109,6 +132,11 @@ ScalarIndexSort<T>::BuildWithFieldData(
     const std::vector<milvus::FieldDataPtr>& field_datas) {
     index_build_begin_ = std::chrono::system_clock::now();
 
+    if (is_nested_index_) {
+        BuildWithArrayDataNested(field_datas);
+        return;
+    }
+
     int64_t length = 0;
     for (const auto& data : field_datas) {
         total_num_rows_ += data->get_num_rows();
@@ -148,6 +176,54 @@ ScalarIndexSort<T>::BuildWithFieldData(
 }
 
 template <typename T>
+void
+ScalarIndexSort<T>::BuildWithArrayDataNested(
+    const std::vector<FieldDataPtr>& datas) {
+    // calculate total_num_rows_
+    for (const auto& data : datas) {
+        auto n = data->get_num_rows();
+        auto array_column = static_cast<const Array*>(data->Data());
+        for (int64_t i = 0; i < n; i++) {
+            if (data->is_valid(i)) {
+                total_num_rows_ += array_column[i].length();
+            }
+        }
+    }
+
+    if (total_num_rows_ == 0) {
+        ThrowInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
+    }
+
+    data_.reserve(total_num_rows_);
+    // all values are valid for nested index because any given slot in a valid_bitset_ denotes one element in a valid row
+    valid_bitset_ = TargetBitmap(total_num_rows_, true);
+    int64_t offset = 0;
+    for (const auto& data : datas) {
+        auto n = data->get_num_rows();
+        auto array_column = static_cast<const Array*>(data->Data());
+        for (int64_t i = 0; i < n; i++) {
+            if (!data->is_valid(i)) {
+                continue;
+            }
+            auto length = array_column[i].length();
+            for (int64_t j = 0; j < length; j++) {
+                data_.emplace_back(IndexStructure(
+                    array_column[i].template get_data<T>(j), offset));
+                offset++;
+            }
+        }
+    }
+    std::sort(data_.begin(), data_.end());
+    idx_to_offsets_.resize(total_num_rows_);
+    for (size_t i = 0; i < total_num_rows_; ++i) {
+        idx_to_offsets_[data_[i].idx_] = i;
+    }
+    is_built_ = true;
+
+    setup_data_pointers();
+}
+
+template <typename T>
 BinarySet
 ScalarIndexSort<T>::Serialize(const Config& config) {
     AssertInfo(is_built_, "index has not been built");
@@ -163,10 +239,14 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
     std::shared_ptr<uint8_t[]> index_num_rows(new uint8_t[sizeof(size_t)]);
     memcpy(index_num_rows.get(), &total_num_rows_, sizeof(size_t));
 
+    std::shared_ptr<uint8_t[]> is_nested_data(new uint8_t[sizeof(bool)]);
+    memcpy(is_nested_data.get(), &is_nested_index_, sizeof(bool));
+
     BinarySet res_set;
     res_set.Append("index_data", index_data, index_data_size);
     res_set.Append("index_length", index_length, sizeof(size_t));
     res_set.Append("index_num_rows", index_num_rows, sizeof(size_t));
+    res_set.Append("is_nested_index", is_nested_data, sizeof(bool));
 
     milvus::Disassemble(res_set);
 
@@ -181,8 +261,11 @@ ScalarIndexSort<T>::Upload(const Config& config) {
             std::chrono::system_clock::now() - index_build_begin_)
             .count();
     LOG_INFO(
-        "index build done for ScalarIndexSort, field_id: {}, duration: {}ms",
+        "index build done for ScalarIndexSort, field_id: {}, is_nested_index: "
+        "{}, duration: "
+        "{}ms",
         field_id_,
+        is_nested_index_,
         index_build_duration);
 
     auto binary_set = Serialize(config);
@@ -200,6 +283,13 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     size_t index_size;
     auto index_length = index_binary.GetByName("index_length");
     memcpy(&index_size, index_length->data.get(), (size_t)index_length->size);
+
+    auto is_nested_index = index_binary.GetByName("is_nested_index");
+    if (is_nested_index) {
+        memcpy(&is_nested_index_,
+               is_nested_index->data.get(),
+               (size_t)is_nested_index->size);
+    }
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 
@@ -330,9 +420,11 @@ ScalarIndexSort<T>::In(const size_t n, const T* values) {
             std::upper_bound(begin(), end(), IndexStructure<T>(*(values + i)));
         for (; lb < ub; ++lb) {
             if (lb->a_ != *(values + i)) {
-                std::cout << "error happens in ScalarIndexSort<T>::In, "
-                             "experted value is: "
-                          << *(values + i) << ", but real value is: " << lb->a_;
+                LOG_ERROR(
+                    "error happens in ScalarIndexSort<T>::In, "
+                    "expected value is: {}, but real value is: {}",
+                    *(values + i),
+                    lb->a_);
             }
             bitset[lb->idx_] = true;
         }
@@ -352,9 +444,11 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
             std::upper_bound(begin(), end(), IndexStructure<T>(*(values + i)));
         for (; lb < ub; ++lb) {
             if (lb->a_ != *(values + i)) {
-                std::cout << "error happens in ScalarIndexSort<T>::NotIn, "
-                             "experted value is: "
-                          << *(values + i) << ", but real value is: " << lb->a_;
+                LOG_ERROR(
+                    "error happens in ScalarIndexSort<T>::NotIn, "
+                    "expected value is: {}, but real value is: {}",
+                    *(values + i),
+                    lb->a_);
             }
             bitset[lb->idx_] = false;
         }
@@ -385,7 +479,7 @@ ScalarIndexSort<T>::IsNotNull() {
 
 template <typename T>
 const TargetBitmap
-ScalarIndexSort<T>::Range(const T value, const OpType op) {
+ScalarIndexSort<T>::Range(const T& value, const OpType op) {
     AssertInfo(is_built_, "index has not been built");
     auto lb = begin();
     auto ub = end();
@@ -438,9 +532,9 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
 
 template <typename T>
 const TargetBitmap
-ScalarIndexSort<T>::Range(T lower_bound_value,
+ScalarIndexSort<T>::Range(const T& lower_bound_value,
                           bool lb_inclusive,
-                          T upper_bound_value,
+                          const T& upper_bound_value,
                           bool ub_inclusive) {
     AssertInfo(is_built_, "index has not been built");
     if (lower_bound_value > upper_bound_value ||

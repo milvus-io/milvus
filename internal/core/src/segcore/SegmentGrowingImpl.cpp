@@ -9,49 +9,76 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/iterator/counting_iterator.hpp>
+#include <cxxabi.h>
 #include <algorithm>
 #include <cstring>
+#include <exception>
+#include <future>
+#include <iosfwd>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <numeric>
 #include <optional>
-#include <queue>
 #include <string>
-#include <thread>
-#include <boost/iterator/counting_iterator.hpp>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <variant>
 
+#include "NamedType/named_type_impl.hpp"
+#include "arrow/api.h"
+#include "bitset/bitset.h"
+#include "boost/iterator/iterator_facade.hpp"
 #include "cachinglayer/CacheSlot.h"
+#include "common/Array.h"
+#include "common/ArrayOffsets.h"
+#include "common/ArrowDataWrapper.h"
+#include "common/Channel.h"
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
-#include "common/Schema.h"
+#include "common/FieldDataInterface.h"
 #include "common/Json.h"
+#include "common/LoadInfo.h"
+#include "common/Schema.h"
+#include "common/Span.h"
 #include "common/Types.h"
-#include "common/Common.h"
-#include "fmt/format.h"
+#include "common/VectorArray.h"
+#include "glog/logging.h"
+#include "index/Index.h"
+#include "index/TextMatchIndex.h"
+#include "index/Utils.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
 #include "log/Log.h"
-#include "nlohmann/json.hpp"
-#include "query/PlanNode.h"
-#include "query/SearchOnSealed.h"
+#include "milvus-storage/common/config.h"
+#include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/metadata.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/manifest.h"
+#include "mmap/Types.h"
+#include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
+#include "query/SearchOnGrowing.h"
+#include "segcore/AckResponder.h"
+#include "segcore/ConcurrentVector.h"
+#include "segcore/DeletedRecord.h"
+#include "segcore/FieldIndexing.h"
+#include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "segcore/SegmentGrowing.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
-#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/KeyRetriever.h"
+#include "storage/ThreadPool.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
-#include "storage/Util.h"
-#include "storage/ThreadPools.h"
-#include "storage/KeyRetriever.h"
-#include "common/TypeTraits.h"
-#include "knowhere/comp/index_param.h"
-
-#include "milvus-storage/format/parquet/file_reader.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/common/constants.h"
 
 namespace milvus::segcore {
 
@@ -538,7 +565,8 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 num_rows,
                 field_id,
                 &insert_record_proto->fields_data(data_offset),
-                insert_record_);
+                insert_record_,
+                field_meta);
         }
 
         // update ArrayOffsetsGrowing for struct fields
@@ -628,7 +656,10 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 }
 
 void
-SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
+SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos,
+                                  milvus::OpContext* op_ctx) {
+    // Note: op_ctx is currently unused in growing segments but kept for interface consistency
+    (void)op_ctx;
     switch (infos.storage_version) {
         case 2:
             load_column_group_data_internal(infos);
@@ -728,6 +759,8 @@ SegmentGrowingImpl::load_field_data_common(
         return;
     }
 
+    auto field_meta = (*schema_)[field_id];
+
     if (!indexing_record_.HasRawData(field_id)) {
         if (insert_record_.is_valid_data_exist(field_id)) {
             insert_record_.get_valid_data(field_id)->set_data_raw(field_data);
@@ -740,7 +773,7 @@ SegmentGrowingImpl::load_field_data_common(
         for (auto& data : field_data) {
             auto row_count = data->get_num_rows();
             indexing_record_.AppendingIndex(
-                offset, row_count, field_id, data, insert_record_);
+                offset, row_count, field_id, data, insert_record_, field_meta);
             offset += row_count;
         }
     }
@@ -751,7 +784,6 @@ SegmentGrowingImpl::load_field_data_common(
     }
 
     // update average row data size
-    auto field_meta = (*schema_)[field_id];
     if (IsVariableDataType(field_meta.get_data_type())) {
         SegmentInternalInterface::set_field_avg_size(
             field_id, num_rows, storage::GetByteSizeOfFieldDatas(field_data));
@@ -1771,7 +1803,12 @@ SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
 }
 
 void
-SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
+SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
+                                    milvus::OpContext* op_ctx) {
+    // Check for cancellation before starting
+    CheckCancellation(
+        op_ctx, id_, field_id.get(), "SegmentGrowingImpl::CreateTextIndex()");
+
     std::unique_lock lock(mutex_);
     const auto& field_meta = schema_->operator[](field_id);
     AssertInfo(IsStringDataType(field_meta.get_data_type()),
@@ -1792,7 +1829,7 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
 
 void
 SegmentGrowingImpl::CreateTextIndexes() {
-    for (auto [field_id, field_meta] : schema_->get_fields()) {
+    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (IsStringDataType(field_meta.get_data_type()) &&
             field_meta.enable_match()) {
             CreateTextIndex(FieldId(field_id));
@@ -1829,7 +1866,7 @@ void
 SegmentGrowingImpl::BulkGetJsonData(
     milvus::OpContext* op_ctx,
     FieldId field_id,
-    std::function<void(milvus::Json, size_t, bool)> fn,
+    const std::function<void(milvus::Json, size_t, bool)>& fn,
     const int64_t* offsets,
     int64_t count) const {
     auto vec_ptr = dynamic_cast<const ConcurrentVector<Json>*>(
@@ -1891,7 +1928,8 @@ SegmentGrowingImpl::Reopen(
 }
 
 void
-SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
+SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
+                         milvus::OpContext* op_ctx) {
     // Convert load_info_ (SegmentLoadInfo) to LoadFieldDataInfo
     LoadFieldDataInfo field_data_info;
 
@@ -1941,10 +1979,7 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
     if (!field_data_info.field_infos.empty()) {
         LoadFieldData(field_data_info);
     }
-}
 
-void
-SegmentGrowingImpl::FinishLoad() {
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
@@ -1975,11 +2010,11 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
 
-    auto arrow_schema = schema_->ConvertToArrowSchema();
+    auto arrow_schema = schema_->ConvertToLoonArrowSchema();
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<
         std::future<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>>
         load_group_futures;
@@ -2271,7 +2306,7 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
     } else {
         auto vec_base = insert_record_.get_data_base(field_id);
         if (vec_base != nullptr) {
-            const auto& valid_data_vec = vec_base->get_valid_data();
+            auto valid_data_vec = vec_base->get_valid_data();
             bool is_mapping_storage = vec_base->is_mapping_storage();
             if (!valid_data_vec.empty()) {
                 result.valid_data = std::make_unique<bool[]>(count);

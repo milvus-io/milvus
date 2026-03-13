@@ -11,28 +11,38 @@
 
 #pragma once
 
-#include <cstddef>
-#include <cstdint>
-#include <optional>
-#include <map>
-#include <memory>
-
-#include <tbb/concurrent_vector.h>
+#include <assert.h>
 #include <index/Index.h>
 #include <index/ScalarIndex.h>
+#include <atomic>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
 
-#include "InsertRecord.h"
-#include "cachinglayer/CacheSlot.h"
-#include "common/FieldMeta.h"
-#include "common/Schema.h"
-#include "common/IndexMeta.h"
 #include "IndexConfigGenerator.h"
+#include "cachinglayer/CacheSlot.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldMeta.h"
+#include "common/IndexMeta.h"
+#include "common/QueryInfo.h"
+#include "common/Schema.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "glog/logging.h"
+#include "index/VectorIndex.h"
 #include "knowhere/config.h"
 #include "log/Log.h"
-#include "segcore/SegcoreConfig.h"
+#include "oneapi/tbb/concurrent_vector.h"
+#include "segcore/AckResponder.h"
+#include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
-#include "index/VectorIndex.h"
+#include "segcore/SegcoreConfig.h"
+#include "storage/MmapManager.h"
+#include "storage/Types.h"
 
 namespace milvus::segcore {
 
@@ -364,20 +374,16 @@ class IndexingRecord {
                             const IndexMetaPtr& indexMetaPtr,
                             const SegcoreConfig& segcore_config,
                             const InsertRecord<false>* insert_record)
-        : schema_(schema),
-          index_meta_(indexMetaPtr),
-          segcore_config_(segcore_config) {
-        Initialize(insert_record);
+        : index_meta_(indexMetaPtr), segcore_config_(segcore_config) {
+        Initialize(schema, insert_record);
     }
 
     void
-    Initialize(const InsertRecord<false>* insert_record) {
-        int offset_id = 0;
+    Initialize(const Schema& schema, const InsertRecord<false>* insert_record) {
         auto enable_growing_mmap = storage::MmapManager::GetInstance()
                                        .GetMmapConfig()
                                        .GetEnableGrowingMmap();
-        for (auto& [field_id, field_meta] : schema_.get_fields()) {
-            ++offset_id;
+        for (auto& [field_id, field_meta] : schema.get_fields()) {
             if (field_meta.is_vector() &&
                 segcore_config_.get_enable_interim_segment_index() &&
                 !enable_growing_mmap) {
@@ -431,7 +437,7 @@ class IndexingRecord {
                 }
             }
         }
-        assert(offset_id == schema_.size());
+        assert(offset_id == schema.size());
     }
 
     void
@@ -439,14 +445,16 @@ class IndexingRecord {
                    int64_t size,
                    FieldId fieldId,
                    const DataArray* stream_data,
-                   const InsertRecord<false>& record);
+                   const InsertRecord<false>& record,
+                   const FieldMeta& field_meta);
 
     void
     AppendingIndex(int64_t reserved_offset,
                    int64_t size,
                    FieldId fieldId,
                    const FieldDataPtr data,
-                   const InsertRecord<false>& record);
+                   const InsertRecord<false>& record,
+                   const FieldMeta& field_meta);
 
     // for sparse float vector:
     //   * element_size is not used
@@ -486,7 +494,6 @@ class IndexingRecord {
             const FieldIndexing& indexing = get_field_indexing(fieldId);
             return indexing.has_raw_data();
         }
-        // if this field id not in IndexingRecord or not build index, we should find raw data in InsertRecord instead of IndexingRecord.
         return false;
     }
 
@@ -531,7 +538,6 @@ class IndexingRecord {
     }
 
  private:
-    const Schema& schema_;
     IndexMetaPtr index_meta_;
     const SegcoreConfig& segcore_config_;
 
@@ -539,7 +545,6 @@ class IndexingRecord {
     std::atomic<int64_t> resource_ack_ = 0;
     //    std::atomic<int64_t> finished_ack_ = 0;
     AckResponder finished_ack_;
-    std::mutex mutex_;
 
     // field_offset => indexing
     std::map<FieldId, std::unique_ptr<FieldIndexing>> field_indexings_;

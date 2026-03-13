@@ -162,11 +162,11 @@ type Server struct {
 	// segReferManager  *SegmentReferenceManager
 	indexEngineVersionManager IndexEngineVersionManager
 
-	statsInspector              *statsInspector
-	indexInspector              *indexInspector
-	analyzeInspector            *analyzeInspector
-	externalCollectionInspector *externalCollectionInspector
-	globalScheduler             task.GlobalScheduler
+	statsInspector                   *statsInspector
+	indexInspector                   *indexInspector
+	analyzeInspector                 *analyzeInspector
+	externalCollectionRefreshManager ExternalCollectionRefreshManager
+	globalScheduler                  task.GlobalScheduler
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
@@ -174,7 +174,12 @@ type Server struct {
 	metricsRequest *metricsinfo.MetricsRequest
 
 	// file resource
-	fileManager *FileResourceManager
+	fileResourceObserver FileResourceObserver
+}
+
+type FileResourceObserver interface {
+	InitDataCoord(manager session.NodeManager)
+	Notify()
 }
 
 type CollectionNameInfo struct {
@@ -228,6 +233,10 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 
 func defaultDataNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 	return datanodeclient.NewClient(ctx, addr, nodeID, Params.DataCoordCfg.WithCredential.GetAsBool())
+}
+
+func (s *Server) SetFileResourceObserver(observer FileResourceObserver) {
+	s.fileResourceObserver = observer
 }
 
 // QuitSignal returns signal when server quits
@@ -331,9 +340,8 @@ func (s *Server) initDataCoord() error {
 	s.initStatsInspector()
 	log.Info("init statsJobManager done")
 
-	// TODO: enable external collection inspector
-	// s.initExternalCollectionInspector()
-	// log.Info("init external collection inspector done")
+	s.initExternalCollectionInspector()
+	log.Info("init external collection inspector done")
 
 	if err = s.initSegmentManager(); err != nil {
 		return err
@@ -344,9 +352,12 @@ func (s *Server) initDataCoord() error {
 
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
 
-	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.compactionTriggerManager)
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler)
 
-	s.fileManager = NewFileResourceManager(s.ctx, s.meta, s.nodeManager)
+	// init file resource observer
+	if s.fileResourceObserver != nil {
+		s.fileResourceObserver.InitDataCoord(s.nodeManager)
+	}
 
 	// Initialize copy segment meta and components
 	s.copySegmentMeta, err = NewCopySegmentMeta(s.ctx, s.meta.catalog, s.meta, s.meta.snapshotMeta)
@@ -457,6 +468,22 @@ func (s *Server) initMessageCallback() {
 		}
 		return nil
 	})
+
+	registry.RegisterBatchUpdateManifestV2AckCallback(func(ctx context.Context, result message.BroadcastResultBatchUpdateManifestMessageV2) error {
+		body := result.Message.MustBody()
+		var operators []UpdateOperator
+		for _, item := range body.GetItems() {
+			operators = append(operators, UpdateManifestVersion(item.GetSegmentId(), item.GetManifestVersion()))
+		}
+		if len(operators) > 0 {
+			if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+				log.Ctx(ctx).Warn("batch update manifest version failed", zap.Error(err))
+				return err
+			}
+		}
+		log.Ctx(ctx).Info("batch update manifest version handled", zap.Int("itemCount", len(body.GetItems())))
+		return nil
+	})
 }
 
 // Start initialize `Server` members and start loops, follow steps are taken:
@@ -477,8 +504,6 @@ func (s *Server) Start() error {
 func (s *Server) startDataCoord() {
 	s.startTaskScheduler()
 	s.startServerLoop()
-	s.fileManager.Start()
-	s.fileManager.Notify()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
@@ -727,8 +752,10 @@ func (s *Server) initStatsInspector() {
 }
 
 func (s *Server) initExternalCollectionInspector() {
-	if s.externalCollectionInspector == nil {
-		s.externalCollectionInspector = newExternalCollectionInspector(s.ctx, s.meta, s.globalScheduler, s.allocator)
+	// Initialize Manager (handles job submission, query, and internal inspector/checker)
+	if s.externalCollectionRefreshManager == nil {
+		s.externalCollectionRefreshManager = NewExternalCollectionRefreshManager(
+			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.handler.GetCollection)
 	}
 }
 
@@ -736,7 +763,7 @@ func (s *Server) initCompaction() {
 	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.indexEngineVersionManager)
 	cph.loadMeta()
 	s.compactionInspector = cph
-	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.importMeta)
+	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
 }
@@ -784,6 +811,9 @@ func (s *Server) startServerLoop() {
 	go s.copySegmentInspector.Start()
 	go s.copySegmentChecker.Start()
 
+	// Start external collection refresh manager (includes inspector and checker)
+	s.externalCollectionRefreshManager.Start()
+
 	s.garbageCollector.start()
 }
 
@@ -813,8 +843,7 @@ func (s *Server) startTaskScheduler() {
 	s.statsInspector.Start()
 	s.indexInspector.Start()
 	s.analyzeInspector.Start()
-	// TODO: enable external collection inspector
-	// s.externalCollectionInspector.Start()
+	// Note: externalCollectionInspector.Start() is called in startServerLoop as a goroutine
 	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
 
@@ -926,7 +955,9 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			}
 
 			// notify file manager sync file resource to new node
-			s.fileManager.Notify()
+			if s.fileResourceObserver != nil {
+				s.fileResourceObserver.Notify()
+			}
 			return nil
 		case sessionutil.SessionDelEvent:
 			log.Info("received datanode unregister",
@@ -1115,7 +1146,6 @@ func (s *Server) Stop() error {
 	s.stopServerLoop()
 	log.Info("datacoord stopServerLoop stopped")
 
-	s.fileManager.Close()
 	s.globalScheduler.Stop()
 	s.importInspector.Close()
 	s.importChecker.Close()
@@ -1144,9 +1174,8 @@ func (s *Server) Stop() error {
 	if s.qnSessionWatcher != nil {
 		s.qnSessionWatcher.Stop()
 	}
-	// TODO: enable external collection inspector
-	// s.externalCollectionInspector.Stop()
-	// log.Info("datacoord external collection inspector stopped")
+	s.externalCollectionRefreshManager.Stop()
+	log.Info("datacoord external collection refresh manager stopped")
 
 	if s.session != nil {
 		s.session.Stop()

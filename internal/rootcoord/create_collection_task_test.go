@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -1460,6 +1461,121 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		assert.Equal(t, int64(1000), fieldIDMap["field_1000"], "Non-contiguous ID 1000 should be preserved")
 	})
 
+	t.Run("normal with analyzer", func(t *testing.T) {
+		mixcoord := mocks.NewMixCoord(t)
+		mixcoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
+			Status:      merr.Status(nil),
+			ResourceIds: []int64{1, 2, 3},
+		}, nil)
+
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+		field2 := funcutil.GenRandomStr()
+
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         field1,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					Name:     field2,
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "100"},
+						{Key: "enable_analyzer", Value: "true"},
+						{Key: "enable_match", Value: "true"},
+						{Key: "analyzer_params", Value: `{"type": "standard"}`},
+					},
+				},
+			},
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := createCollectionTask{
+			Core: newTestCore(withMixCoord(mixcoord)),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+			preserveFieldID: false,
+		}
+
+		err = task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+	})
+
+	t.Run("normal with file resource observer", func(t *testing.T) {
+		mixcoord := mocks.NewMixCoord(t)
+		mixcoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
+			Status:      merr.Status(nil),
+			ResourceIds: []int64{1, 2, 3},
+		}, nil)
+
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+		field2 := funcutil.GenRandomStr()
+
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         field1,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					Name:     field2,
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxLengthKey, Value: "100"},
+						{Key: "enable_analyzer", Value: "true"},
+						{Key: "enable_match", Value: "true"},
+						{Key: "analyzer_params", Value: `{"type": "standard"}`},
+					},
+				},
+			},
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := createCollectionTask{
+			Core: newTestCore(withMixCoord(mixcoord)),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+			preserveFieldID: false,
+		}
+
+		// with file resource observer
+		fileResourceObserver := NewMockFileResourceObserver(t)
+		fileResourceObserver.EXPECT().CheckAllQnReady().Return(nil)
+
+		task.Core.fileResourceObserver = fileResourceObserver
+		err = task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+
+		assert.Equal(t, []int64{1, 2, 3}, task.body.CollectionSchema.FileResourceIds)
+	})
+
 	t.Run("normal case without preserve field IDs", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		field1 := funcutil.GenRandomStr()
@@ -1743,8 +1859,6 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 
 func TestNamespaceProperty(t *testing.T) {
 	paramtable.Init()
-	paramtable.Get().CommonCfg.EnableNamespace.SwapTempValue("true")
-	defer paramtable.Get().CommonCfg.EnableNamespace.SwapTempValue("false")
 	ctx := context.Background()
 	prefix := "TestNamespaceProperty"
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1771,6 +1885,7 @@ func TestNamespaceProperty(t *testing.T) {
 					},
 				},
 			},
+			EnableNamespace: true,
 		}
 	}
 	hasNamespaceField := func(schema *schemapb.CollectionSchema) bool {
@@ -1787,12 +1902,6 @@ func TestNamespaceProperty(t *testing.T) {
 		task := &createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				CollectionName: collectionName,
-				Properties: []*commonpb.KeyValuePair{
-					{
-						Key:   common.NamespaceEnabledKey,
-						Value: "true",
-					},
-				},
 			},
 			header: &message.CreateCollectionMessageHeader{},
 			body: &message.CreateCollectionRequest{
@@ -1807,6 +1916,7 @@ func TestNamespaceProperty(t *testing.T) {
 
 	t.Run("test namespace disabled with isolation and partition key", func(t *testing.T) {
 		schema := initSchema()
+		schema.EnableNamespace = false
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 			FieldID:        102,
 			Name:           "field2",
@@ -1843,10 +1953,6 @@ func TestNamespaceProperty(t *testing.T) {
 				CollectionName: collectionName,
 				Properties: []*commonpb.KeyValuePair{
 					{
-						Key:   common.NamespaceEnabledKey,
-						Value: "true",
-					},
-					{
 						Key:   common.PartitionKeyIsolationKey,
 						Value: "true",
 					},
@@ -1875,12 +1981,6 @@ func TestNamespaceProperty(t *testing.T) {
 		task := &createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				CollectionName: collectionName,
-				Properties: []*commonpb.KeyValuePair{
-					{
-						Key:   common.NamespaceEnabledKey,
-						Value: "true",
-					},
-				},
 			},
 			header: &message.CreateCollectionMessageHeader{},
 			body: &message.CreateCollectionRequest{
@@ -1895,8 +1995,9 @@ func TestNamespaceProperty(t *testing.T) {
 	t.Run("test namespace enabled with external collection", func(t *testing.T) {
 		// External collection is identified by having ExternalField set on fields
 		schema := &schemapb.CollectionSchema{
-			Name:           collectionName,
-			ExternalSource: "s3://bucket/path",
+			Name:            collectionName,
+			ExternalSource:  "s3://bucket/path",
+			EnableNamespace: true,
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:       100,
@@ -1922,12 +2023,6 @@ func TestNamespaceProperty(t *testing.T) {
 		task := &createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				CollectionName: collectionName,
-				Properties: []*commonpb.KeyValuePair{
-					{
-						Key:   common.NamespaceEnabledKey,
-						Value: "true",
-					},
-				},
 			},
 			header: &message.CreateCollectionMessageHeader{},
 			body: &message.CreateCollectionRequest{

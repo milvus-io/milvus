@@ -9,10 +9,31 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <assert.h>
 #include <gtest/gtest.h>
-#include <iostream>
+#include <stdint.h>
+#include <algorithm>
+#include <memory>
+#include <string>
+#include <vector>
 
+#include "NamedType/named_type_impl.hpp"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/Schema.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "expr/ITypeExpr.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/Collection.h"
+#include "segcore/SegmentInterface.h"
+#include "segcore/SegmentSealed.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/storage_test_utils.h"
@@ -63,12 +84,13 @@ TEST_P(RandomSampleTest, SampleOnly) {
     auto retrieve_results = RetrieveWithDefaultOutputSizeAndLargeTimestamp(
         segment.get(), plan.get());
 
-    Assert(retrieve_results->fields_data_size() == target_offsets.size());
+    ASSERT_TRUE(retrieve_results->fields_data_size() == target_offsets.size());
     auto field = retrieve_results->fields_data(0);
     int data_size = field.scalars().long_data().data_size();
     int expected_size = static_cast<int>(N * sample_factor);
     // We can accept size one difference due to the float point calculation in sampling.
-    assert(expected_size - 1 <= data_size && data_size <= expected_size + 1);
+    ASSERT_TRUE(expected_size - 1 <= data_size &&
+                data_size <= expected_size + 1);
 }
 
 TEST_P(RandomSampleTest, SampleWithUnaryFiler) {
@@ -128,7 +150,8 @@ TEST_P(RandomSampleTest, SampleWithUnaryFiler) {
 
     int expected_size = static_cast<int>(N * sample_factor) / 3;
     // We can accept size one difference due to the float point calculation in sampling.
-    assert(expected_size - 1 <= data_size && data_size <= expected_size + 1);
+    ASSERT_TRUE(expected_size - 1 <= data_size &&
+                data_size <= expected_size + 1);
 }
 
 TEST(RandomSampleTest, SampleWithEmptyInput) {
@@ -166,5 +189,5 @@ TEST(RandomSampleTest, SampleWithEmptyInput) {
     auto field_data = field.scalars().long_data();
     int data_size = field.scalars().long_data().data_size();
 
-    assert(data_size == 0);
+    ASSERT_EQ(data_size, 0);
 }

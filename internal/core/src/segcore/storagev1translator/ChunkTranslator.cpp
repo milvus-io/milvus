@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "cachinglayer/Utils.h"
+#include "segcore/Utils.h"
 #include "common/ChunkWriter.h"
 #include "common/EasyAssert.h"
 #include "common/Types.h"
@@ -74,7 +75,8 @@ ChunkTranslator::ChunkTranslator(
     std::vector<FileInfo>&& file_infos,
     bool use_mmap,
     bool mmap_populate,
-    milvus::proto::common::LoadPriority load_priority)
+    milvus::proto::common::LoadPriority load_priority,
+    const std::string& warmup_policy)
     : segment_id_(segment_id),
       field_id_(field_data_info.field_id),
       field_meta_(field_meta),
@@ -89,7 +91,9 @@ ChunkTranslator::ChunkTranslator(
             milvus::segcore::getCellDataType(
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false),
+            // Use getCacheWarmupPolicy to resolve: user setting > global config
             milvus::segcore::getCacheWarmupPolicy(
+                warmup_policy,
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false,
                 /* in_load_list*/ field_data_info.in_load_list),
@@ -151,6 +155,7 @@ ChunkTranslator::key() const {
 std::vector<
     std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
 ChunkTranslator::get_cells(
+    milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
     std::vector<
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
@@ -163,18 +168,18 @@ ChunkTranslator::get_cells(
         remote_files.push_back(file_infos_[cid].file_path);
     }
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     auto channel = std::make_shared<ArrowReaderChannel>();
     LOG_INFO("segment {} submits load field {} chunks {} task to thread pool",
              segment_id_,
              field_id_,
              fmt::format("{}", fmt::join(cids, " ")));
-    pool.Submit(
-        LoadArrowReaderFromRemote, remote_files, channel, load_priority_);
-
-    auto data_type = field_meta_.get_data_type();
+    LoadArrowReaderFromRemote(remote_files, channel, load_priority_);
 
     for (auto cid : cids) {
+        // Check for cancellation before processing each chunk
+        CheckCancellation(
+            ctx, segment_id_, field_id_, "ChunkTranslator::get_cells()");
+
         std::unique_ptr<milvus::Chunk> chunk = nullptr;
         if (!use_mmap_) {
             std::shared_ptr<milvus::ArrowDataWrapper> r;

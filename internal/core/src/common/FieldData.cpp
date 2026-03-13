@@ -15,18 +15,26 @@
 // limitations under the License.
 
 #include "common/FieldData.h"
-#include <cstdint>
 
+#include <simdjson.h>
+#include <string.h>
+#include <cstdint>
+#include <iosfwd>
+#include <optional>
+
+#include "arrow/api.h"
+#include "arrow/array/array_base.h"
 #include "arrow/array/array_binary.h"
-#include "arrow/chunked_array.h"
+#include "arrow/array/array_nested.h"
+#include "arrow/array/array_primitive.h"
 #include "bitset/detail/element_wise.h"
 #include "bitset/detail/popcount.h"
 #include "common/Array.h"
 #include "common/EasyAssert.h"
-#include "common/Exception.h"
 #include "common/FieldDataInterface.h"
+#include "common/Geometry.h"
 #include "common/Json.h"
-#include "index/Utils.h"
+#include "pb/schema.pb.h"
 #include "simdjson/padded_string.h"
 
 namespace milvus {
@@ -230,17 +238,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                        "inconsistent data type");
             auto string_array =
                 std::dynamic_pointer_cast<arrow::StringArray>(array);
-            std::vector<std::string> values(element_count);
-            for (size_t index = 0; index < element_count; ++index) {
-                values[index] = string_array->GetString(index);
-            }
-            if (nullable_) {
-                return FillFieldData(values.data(),
-                                     array->null_bitmap_data(),
-                                     element_count,
-                                     array->offset());
-            }
-            return FillFieldData(values.data(), element_count);
+            return FillFieldData(string_array);
         }
         case DataType::JSON: {
             // The code here is not referenced.
@@ -334,6 +332,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                        "inconsistent data type");
             auto arr = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
             std::vector<knowhere::sparse::SparseRow<SparseValueType>> values;
+            values.reserve(element_count);
 
             if (nullable_) {
                 for (int64_t i = 0; i < element_count; ++i) {

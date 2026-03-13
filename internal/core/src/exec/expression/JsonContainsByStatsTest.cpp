@@ -9,24 +9,47 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <fmt/core.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <simdjson.h>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "NamedType/named_type_impl.hpp"
+#include "bitset/bitset.h"
+#include "bitset/detail/element_vectorized.h"
+#include "common/Consts.h"
+#include "common/FieldData.h"
+#include "common/Json.h"
 #include "common/Schema.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
 #include "expr/ITypeExpr.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/IndexStats.h"
 #include "index/json_stats/JsonKeyStats.h"
+#include "pb/common.pb.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
-#include "segcore/Types.h"
+#include "segcore/SegmentSealed.h"
+#include "simdjson/padded_string.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/PayloadReader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
 #include "storage/Util.h"
+#include "test_utils/Constants.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -76,12 +99,6 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
     storage_config.root_path = root_path;
     auto chunk_manager = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
-
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(
-        milvus_storage::ArrowFileSystemConfig{
-            .root_path = root_path,
-            .storage_type = "local",
-        });
 
     auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
                                 root_path,
@@ -158,7 +175,7 @@ TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
     const int64_t field_id = json_fid.get();
     const int64_t build_id = 5001;
     const int64_t version_id = 1;
-    const std::string root_path = "/tmp/test-json-contains-by-stats";
+    const std::string root_path = TestLocalPath;
 
     auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
                                           json_fid,

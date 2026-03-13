@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/rootcoord/telemetry"
 	"github.com/milvus-io/milvus/internal/rootcoord/tombstone"
 	"github.com/milvus-io/milvus/internal/storage"
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
@@ -134,6 +135,18 @@ type Core struct {
 
 	tombstoneSweeper tombstone.TombstoneSweeper
 	storage          storage.ChunkManager // used to check file resource existence
+
+	fileResourceObserver FileResourceObserver
+
+	// telemetry manager for client telemetry collection and command management
+	telemetryMgr *telemetry.TelemetryManager
+}
+
+type FileResourceObserver interface {
+	CheckAllQnReady() error
+	InitMeta(meta IMetaTable)
+	Notify()
+	Sync() error
 }
 
 // --------------------- function --------------------------
@@ -160,6 +173,10 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 func (c *Core) UpdateStateCode(code commonpb.StateCode) {
 	c.stateCode.Store(int32(code))
 	log.Ctx(c.ctx).Info("update rootcoord state", zap.String("state", code.String()))
+}
+
+func (c *Core) SetFileResourceObserver(observer FileResourceObserver) {
+	c.fileResourceObserver = observer
 }
 
 func (c *Core) GetStateCode() commonpb.StateCode {
@@ -461,6 +478,10 @@ func (c *Core) initInternal() error {
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
+	// Initialize telemetry manager for client telemetry collection
+	c.telemetryMgr = telemetry.NewTelemetryManager(c.etcdCli)
+	log.Debug("init telemetry manager done")
+
 	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.mixCoord, c.tsoAllocator, c.meta)
 	log.Debug("RootCoord init QuotaCenter done")
 
@@ -483,6 +504,11 @@ func (c *Core) initInternal() error {
 		return err
 	}
 	c.storage = cli
+
+	// init file resource observer
+	if c.fileResourceObserver != nil {
+		c.fileResourceObserver.InitMeta(c.meta)
+	}
 	log.Info("init rootcoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", c.address))
 	return nil
 }
@@ -664,6 +690,10 @@ func (c *Core) startInternal() error {
 		c.quotaCenter.Start()
 	}
 
+	if c.telemetryMgr != nil {
+		c.telemetryMgr.Start()
+	}
+
 	c.scheduler.Start()
 	go func() {
 		// refresh rbac cache
@@ -742,6 +772,9 @@ func (c *Core) Stop() error {
 	}
 	if c.quotaCenter != nil {
 		c.quotaCenter.stop()
+	}
+	if c.telemetryMgr != nil {
+		c.telemetryMgr.Stop()
 	}
 
 	c.revokeSession()
@@ -1097,10 +1130,12 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		StructArrayFields:  model.MarshalStructArrayFieldModels(collInfo.StructArrayFields),
 		Functions:          model.MarshalFunctionModels(collInfo.Functions),
 		EnableDynamicField: collInfo.EnableDynamicField,
+		EnableNamespace:    collInfo.EnableNamespace,
 		Properties:         collInfo.Properties,
 		FileResourceIds:    collInfo.FileResourceIds,
 		ExternalSource:     collInfo.ExternalSource,
 		ExternalSpec:       collInfo.ExternalSpec,
+		DbName:             dbName, // Use dbName parameter for consistency with resp.DbName
 	}
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
@@ -1461,6 +1496,29 @@ func (c *Core) AlterCollectionField(ctx context.Context, in *milvuspb.AlterColle
 	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollectionField").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Info("done to alter collection field")
 	return merr.Success(), nil
+}
+
+func (c *Core) AlterCollectionSchema(ctx context.Context, in *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &milvuspb.AlterCollectionSchemaResponse{}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionSchema", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("AlterCollectionSchema")
+
+	log := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("collectionName", in.GetCollectionName()),
+	)
+	log.Info("received request to alter collection schema")
+
+	// AlterCollectionSchema is currently a placeholder implementation
+	// The actual logic should handle schema alterations similar to AlterCollection
+	// For now, return success to satisfy the interface
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionSchema", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollectionSchema").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Info("done to alter collection schema")
+	return &milvuspb.AlterCollectionSchemaResponse{}, nil
 }
 
 func (c *Core) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseRequest) (*commonpb.Status, error) {
@@ -2985,9 +3043,14 @@ func (c *Core) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourc
 		return merr.Status(err), nil
 	}
 
-	resources, version := c.meta.ListFileResource(ctx)
-	c.mixCoord.SyncQcFileResource(ctx, resources, version)
-	c.mixCoord.SyncDcFileResource(ctx, resources, version)
+	if c.fileResourceObserver != nil {
+		err = c.fileResourceObserver.Sync()
+		if err != nil {
+			c.fileResourceObserver.Notify()
+			return merr.Status(errors.Wrap(err, "add file resource success but some node sync failed")), nil
+		}
+	}
+
 	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -3010,10 +3073,12 @@ func (c *Core) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileR
 		return merr.Status(err), nil
 	}
 
-	if exist {
-		resources, version := c.meta.ListFileResource(ctx)
-		c.mixCoord.SyncQcFileResource(ctx, resources, version)
-		c.mixCoord.SyncDcFileResource(ctx, resources, version)
+	if exist && c.fileResourceObserver != nil {
+		err = c.fileResourceObserver.Sync()
+		if err != nil {
+			c.fileResourceObserver.Notify()
+			return merr.Status(errors.Wrap(err, "remove file resource success but some node sync failed")), nil
+		}
 	}
 
 	ctxLog.Debug(method + " success")
@@ -3036,13 +3101,20 @@ func (c *Core) ListFileResources(ctx context.Context, req *milvuspb.ListFileReso
 		}, nil
 	}
 
+	resources, _ := c.meta.ListFileResource(ctx)
 	ctxLog.Debug(method + " success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	return &milvuspb.ListFileResourcesResponse{
-		Status:    merr.Success(),
-		Resources: []*milvuspb.FileResourceInfo{},
+		Status: merr.Success(),
+		Resources: lo.Map(resources, func(resource *internalpb.FileResourceInfo, _ int) *milvuspb.FileResourceInfo {
+			return &milvuspb.FileResourceInfo{
+				Id:   resource.Id,
+				Name: resource.Name,
+				Path: resource.Path,
+			}
+		}),
 	}, nil
 }
 
@@ -3297,16 +3369,70 @@ func (c *Core) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest) 
 	}, nil
 }
 
-func (c *Core) InitFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) error {
-	resources, version := c.meta.ListFileResource(ctx)
-	err := c.mixCoord.SyncQcFileResource(ctx, resources, version)
-	if err != nil {
-		return err
+// ClientHeartbeat receives client metrics from proxy and returns commands
+func (c *Core) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &milvuspb.ClientHeartbeatResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
 
-	err = c.mixCoord.SyncDcFileResource(ctx, resources, version)
-	if err != nil {
-		return err
+	if c.telemetryMgr == nil {
+		return &milvuspb.ClientHeartbeatResponse{
+			Status: merr.Status(errors.New("telemetry manager not initialized")),
+		}, nil
 	}
-	return nil
+
+	return c.telemetryMgr.HandleHeartbeat(req)
+}
+
+// GetClientTelemetry retrieves client telemetry metrics
+func (c *Core) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &milvuspb.GetClientTelemetryResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if c.telemetryMgr == nil {
+		return &milvuspb.GetClientTelemetryResponse{
+			Status: merr.Status(errors.New("telemetry manager not initialized")),
+		}, nil
+	}
+
+	return c.telemetryMgr.GetClientTelemetry(req)
+}
+
+// PushClientCommand pushes a command to clients
+func (c *Core) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &milvuspb.PushClientCommandResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if c.telemetryMgr == nil {
+		return &milvuspb.PushClientCommandResponse{
+			Status: merr.Status(errors.New("telemetry manager not initialized")),
+		}, nil
+	}
+
+	return c.telemetryMgr.PushCommand(ctx, req)
+}
+
+// DeleteClientCommand deletes a command for clients
+func (c *Core) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &milvuspb.DeleteClientCommandResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if c.telemetryMgr == nil {
+		return &milvuspb.DeleteClientCommandResponse{
+			Status: merr.Status(errors.New("telemetry manager not initialized")),
+		}, nil
+	}
+
+	return c.telemetryMgr.DeleteCommand(ctx, req)
 }

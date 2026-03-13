@@ -20,8 +20,9 @@
 extern "C" {
 #endif
 
-#include <stdbool.h>
 #include <stdint.h>
+#include <stdbool.h>
+
 #include "common/type_c.h"
 
 void
@@ -56,6 +57,9 @@ SetDefaultConfigParamTypeCheck(bool val);
 
 void
 SetDefaultEnableParquetStatsSkipIndex(bool val);
+
+void
+SetEnableLatestDeleteSnapshotOptimization(bool val);
 
 // dynamic update segcore params
 void

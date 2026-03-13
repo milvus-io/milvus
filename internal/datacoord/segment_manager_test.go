@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
@@ -1092,4 +1093,54 @@ func TestDropSegmentOfPartition(t *testing.T) {
 	segmentManager.DropSegmentsOfPartition(context.Background(), "c1", []int64{100})
 	segment = meta.GetHealthySegment(context.TODO(), segID)
 	assert.NotNil(t, segment)
+}
+
+func TestAllocNewGrowingSegment_ManifestPath(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+	mockAllocator := newMockAllocator(t)
+	meta, err := newMemoryMeta(t)
+	assert.NoError(t, err)
+	segmentManager, _ := newSegmentManager(meta, mockAllocator)
+
+	schema := newTestSchema()
+	collID, err := mockAllocator.AllocID(ctx)
+	assert.NoError(t, err)
+	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
+
+	t.Run("StorageV3 segment has manifest path", func(t *testing.T) {
+		segID, err := mockAllocator.AllocID(ctx)
+		assert.NoError(t, err)
+		segment, err := segmentManager.AllocNewGrowingSegment(ctx, AllocNewGrowingSegmentRequest{
+			CollectionID:         collID,
+			PartitionID:          100,
+			SegmentID:            segID,
+			ChannelName:          "c1",
+			StorageVersion:       storage.StorageV3,
+			IsCreatedByStreaming: true,
+		})
+		assert.NoError(t, err)
+		assert.NotEmpty(t, segment.ManifestPath)
+
+		// Verify the manifest path can be unmarshalled
+		basePath, ver, unmarshalErr := packed.UnmarshalManifestPath(segment.ManifestPath)
+		assert.NoError(t, unmarshalErr)
+		assert.NotEmpty(t, basePath)
+		assert.Equal(t, int64(-1), ver)
+	})
+
+	t.Run("StorageV2 segment has no manifest path", func(t *testing.T) {
+		segID, err := mockAllocator.AllocID(ctx)
+		assert.NoError(t, err)
+		segment, err := segmentManager.AllocNewGrowingSegment(ctx, AllocNewGrowingSegmentRequest{
+			CollectionID:         collID,
+			PartitionID:          100,
+			SegmentID:            segID,
+			ChannelName:          "c2",
+			StorageVersion:       storage.StorageV2,
+			IsCreatedByStreaming: true,
+		})
+		assert.NoError(t, err)
+		assert.Empty(t, segment.ManifestPath)
+	})
 }

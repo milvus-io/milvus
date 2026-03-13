@@ -16,17 +16,19 @@
 
 #pragma once
 
+#include <stdint.h>
 #include <any>
-#include <string>
 #include <memory>
-#include <vector>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "common/FieldData.h"
 #include "common/Types.h"
+#include "pb/schema.pb.h"
+#include "storage/BinlogReader.h"
 #include "storage/PayloadReader.h"
 #include "storage/Types.h"
-#include "storage/BinlogReader.h"
 
 namespace milvus::storage {
 

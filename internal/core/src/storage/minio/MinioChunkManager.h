@@ -16,11 +16,6 @@
 
 #pragma once
 
-#include <map>
-#include <memory>
-#include <string>
-#include <vector>
-
 #include <aws/core/Aws.h>
 #include <aws/core/http/HttpClientFactory.h>
 #include <aws/core/http/HttpRequest.h>
@@ -33,18 +28,38 @@
 #include <fmt/core.h>
 #include <google/cloud/credentials.h>
 #include <google/cloud/internal/oauth2_credentials.h>
+#include <google/cloud/internal/oauth2_compute_engine_credentials.h>
 #include <google/cloud/internal/oauth2_google_credentials.h>
+#include <google/cloud/internal/oauth2_http_client_factory.h>
+#include <google/cloud/internal/rest_client.h>
 #include <google/cloud/storage/oauth2/compute_engine_credentials.h>
 #include <google/cloud/storage/oauth2/google_credentials.h>
 #include <google/cloud/status_or.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <atomic>
+#include <memory>
+#include <mutex>
+#include <ostream>
+#include <string>
+#include <utility>
+#include <vector>
 
+#include "aws/core/client/ClientConfiguration.h"
+#include "aws/core/http/HttpClient.h"
+#include "aws/core/utils/logging/LogLevel.h"
+#include "aws/core/utils/memory/stl/AWSAllocator.h"
+#include "aws/core/utils/memory/stl/AWSStreamFwd.h"
+#include "aws/core/utils/memory/stl/AWSString.h"
+#include "aws/s3/S3Errors.h"
 #include "common/EasyAssert.h"
-#include "common/Exception.h"
+#include "glog/logging.h"
+#include "google/cloud/status.h"
+#include "log/Log.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
-#include "log/Log.h"
-#include "storage/huawei/HuaweiCloudCredentialsProvider.h"
 #include "storage/aliyun/AliyunCredentialsProvider.h"
+#include "storage/huawei/HuaweiCloudCredentialsProvider.h"
 #include "storage/tencent/TencentCloudCredentialsProvider.h"
 
 namespace milvus::storage {
@@ -54,6 +69,9 @@ enum class RemoteStorageType {
     GOOGLE_CLOUD = 1,
     ALIYUN_CLOUD = 2,
 };
+
+void
+ConfigureGoogleCloudIAMHttpClientFactory(Aws::SDKOptions& sdk_options);
 
 template <typename... Args>
 static std::string
@@ -76,11 +94,11 @@ ThrowS3Error(const std::string& func,
              const std::string& fmt_string,
              Args&&... args) {
     std::string error_message = S3ErrorMessage(func, err, fmt_string, args...);
-    LOG_WARN(error_message);
+    LOG_WARN("{}", error_message);
     throw SegcoreError(S3Error, error_message);
 }
 
-static bool
+[[maybe_unused]] static bool
 IsNotFound(const Aws::S3::S3Errors& s3err) {
     return (s3err == Aws::S3::S3Errors::NO_SUCH_KEY ||
             s3err == Aws::S3::S3Errors::RESOURCE_NOT_FOUND);
@@ -349,12 +367,13 @@ class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
             Aws::MakeShared<Aws::Http::Standard::StandardHttpRequest>(
                 GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, uri, method);
         request->SetResponseStreamFactory(streamFactory);
-        auto auth_header = credentials_->AuthorizationHeader();
+        auto auth_header =
+            google::cloud::oauth2_internal::AuthorizationHeader(*credentials_);
         if (!auth_header.ok()) {
-            ThrowInfo(
-                S3Error,
-                fmt::format("get authorization failed, errcode: {}",
-                            StatusCodeToString(auth_header.status().code())));
+            ThrowInfo(S3Error,
+                      fmt::format("get authorization failed, errcode: {}",
+                                  google::cloud::StatusCodeToString(
+                                      auth_header.status().code())));
         }
         request->SetHeaderValue(auth_header->first.c_str(),
                                 auth_header->second.c_str());

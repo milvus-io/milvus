@@ -17,21 +17,15 @@
 #pragma once
 
 #include <aws/core/Core_EXPORTS.h>
-#include <aws/core/utils/memory/AWSMemory.h>
-#include <aws/core/utils/memory/stl/AWSString.h>
-#include <aws/core/client/ClientConfiguration.h>
-#include <aws/core/client/AWSErrorMarshaller.h>
 #include <aws/core/auth/AWSCredentials.h>
-#include <aws/core/AmazonWebServiceResult.h>
-#include <aws/core/utils/DateTime.h>
-#include <aws/core/internal/AWSHttpResourceClient.h>  // [aliyun] import original http client
-#include <memory>
-#include <mutex>
+#include <aws/core/client/ClientConfiguration.h>
+#include <aws/core/utils/memory/stl/AWSString.h>
+
+#include "aws/core/internal/AWSHttpResourceClient.h"
+#include "storage/aliyun/AliyunSTSClient.h"
 
 namespace Aws {
 namespace Http {
-class HttpClient;
-class HttpRequest;
 enum class HttpResponseCode;
 }  // namespace Http
 

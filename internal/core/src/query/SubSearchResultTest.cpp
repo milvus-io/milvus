@@ -10,10 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <cstdint>
+#include <functional>
+#include <memory>
 #include <queue>
 #include <random>
+#include <string>
+#include <utility>
 #include <vector>
 
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
 #include "query/SubSearchResult.h"
 

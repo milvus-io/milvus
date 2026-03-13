@@ -10,7 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 #pragma once
 
+#include <stdint.h>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "SimpleNumericAggregate.h"
+#include "common/EasyAssert.h"
+#include "common/Types.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
+#include "fmt/core.h"
+#include "folly/Range.h"
 
 namespace milvus {
 namespace exec {
@@ -49,9 +60,20 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
             input_column = std::dynamic_pointer_cast<ColumnVector>(input[0]);
             AssertInfo(input_column != nullptr,
                        "input[0] must be ColumnVector for count aggregation");
-            for (auto i = 0; i < input_column->size(); i++) {
-                if (input_column->ValidAt(i)) {
+            if (input_column->nullCount() == 0) {
+                for (auto i = 0; i < input_column->size(); i++) {
                     addToGroup(groups[i], 1);
+                }
+            } else {
+                // Safe: GetValidRawData() returns CustomBitset::data(), which
+                // exposes storage as uint64_t* per the project-wide bitset
+                // API contract (Bitset::data_impl, CustomBitset.h).
+                const uint64_t* validity = reinterpret_cast<const uint64_t*>(
+                    input_column->GetValidRawData());
+                for (auto i = 0; i < input_column->size(); i++) {
+                    if (validity[i >> 6] & (uint64_t(1) << (i & 63))) {
+                        addToGroup(groups[i], 1);
+                    }
                 }
             }
             return;
@@ -63,7 +85,13 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
 
     void
     addSingleGroupRawInput(char* group,
+                           int64_t numRows,
                            const std::vector<VectorPtr>& input) override {
+        if (input.empty()) {
+            // count(*): count all rows regardless of null values
+            addToGroup(group, numRows);
+            return;
+        }
         AssertInfo(input.size() == 1,
                    fmt::format("input column count for count aggregation "
                                "must be exactly one for now, but got:{}",
@@ -72,15 +100,12 @@ class CountAggregate : public SimpleNumericAggregate<bool, int64_t, int64_t> {
         AssertInfo(column != nullptr,
                    "input[0] must be ColumnVector for count aggregation");
         if (column->IsBitmap()) {
-            // Use validity bitmap to count non-null values
             BitsetTypeView view(column->GetRawData(), column->size());
             addToGroup(group, view.size() - view.count());
         } else {
-            for (auto i = 0; i < column->size(); i++) {
-                if (column->ValidAt(i)) {
-                    addToGroup(group, 1);
-                }
-            }
+            addToGroup(
+                group,
+                column->size() - static_cast<int64_t>(column->nullCount()));
         }
     }
 

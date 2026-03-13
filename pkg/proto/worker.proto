@@ -231,7 +231,7 @@ message IndexTaskInfo {
   uint64 serialized_size = 4;
   string fail_reason = 5;
   int32 current_index_version = 6;
-  int64 index_store_version = 7;
+  int64 index_store_version = 7 [deprecated = true];
   uint64 mem_size = 8;
   int32 current_scalar_index_version = 9;
 }

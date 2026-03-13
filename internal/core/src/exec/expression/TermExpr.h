@@ -74,8 +74,7 @@ class PhyTermFilterExpr : public SegmentExpr {
                       active_count,
                       batch_size,
                       consistency_level),
-          expr_(expr),
-          query_timestamp_(timestamp) {
+          expr_(expr) {
     }
 
     void
@@ -87,7 +86,7 @@ class PhyTermFilterExpr : public SegmentExpr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
@@ -149,14 +148,12 @@ class PhyTermFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::TermFilterExpr> expr_;
-    milvus::Timestamp query_timestamp_;
     bool cached_bits_inited_{false};
     TargetBitmap cached_bits_;
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
     std::shared_ptr<MultiElement> arg_set_double_;
     SingleElement arg_val_;
-    int32_t consistency_level_ = 0;
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
 };
 }  //namespace exec

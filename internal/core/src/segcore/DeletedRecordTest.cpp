@@ -9,20 +9,38 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
-
-#include <boost/format.hpp>
+#include <stddef.h>
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <functional>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
+#include "bitset/bitset.h"
+#include "common/Common.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "exec/expression/function/FunctionFactory.h"
+#include "gtest/gtest.h"
+#include "index/NgramInvertedIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "query/Utils.h"
+#include "segcore/AckResponder.h"
+#include "segcore/ConcurrentVector.h"
 #include "segcore/DeletedRecord.h"
+#include "segcore/InsertRecord.h"
 #include "segcore/Record.h"
+#include "segcore/SegmentSealed.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
-#include "exec/expression/function/FunctionFactory.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -44,7 +62,6 @@ TEST(DeleteMVCC, common_case) {
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     ASSERT_EQ(c, segment->get_real_count());
     auto& insert_record = segment->get_insert_record();
-    auto segment_ptr = segment.get();
     DeletedRecord<true> delete_record(
         &insert_record,
         [&insert_record](
@@ -164,12 +181,11 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto N = 10;
-    uint64_t seg_id = 101;
     InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
@@ -289,12 +305,11 @@ TEST(DeleteMVCC, snapshot) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto N = 50000;
-    uint64_t seg_id = 101;
     InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
@@ -336,7 +351,7 @@ TEST(DeleteMVCC, snapshot) {
     delete_record.StreamPush(delete_pk, delete_ts.data());
     ASSERT_EQ(DN, delete_record.size());
 
-    auto snapshots = std::move(delete_record.get_snapshots());
+    auto snapshots = delete_record.get_snapshots();
     ASSERT_EQ(3, snapshots.size());
     ASSERT_EQ(snapshots[2].second.count(), 30000);
 }
@@ -347,12 +362,11 @@ TEST(DeleteMVCC, insert_after_snapshot) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto N = 11000;
-    uint64_t seg_id = 101;
     InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
@@ -396,7 +410,7 @@ TEST(DeleteMVCC, insert_after_snapshot) {
     delete_record.StreamPush(delete_pk, delete_ts.data());
     ASSERT_EQ(DN, delete_record.size());
 
-    auto snapshots = std::move(delete_record.get_snapshots());
+    auto snapshots = delete_record.get_snapshots();
     ASSERT_EQ(1, snapshots.size());
     ASSERT_EQ(snapshots[0].second.count(), 10000);
 
@@ -452,12 +466,11 @@ TEST(DeleteMVCC, perform) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto N = 1000000;
-    uint64_t seg_id = 101;
     InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
@@ -526,7 +539,7 @@ TEST(DeleteMVCC, QueryTimestampLowerThanFirstSnapshot) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
@@ -590,13 +603,184 @@ TEST(DeleteMVCC, QueryTimestampLowerThanFirstSnapshot) {
     }
 }
 
+TEST(DeleteMVCC, LatestSnapshotOptimizationBenchmark) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    const int N = 100000;  // total rows
+    const int DN = 9000;   // delete count (< 10000 to avoid snapshot dump)
+    const int QUERY_COUNT = 10000;  // number of queries
+
+    // Helper lambda to create search_pk function
+    auto make_search_pk_func = [](InsertRecord<false>& insert_record) {
+        return [&insert_record](const std::vector<PkType>& pks,
+                                const Timestamp* timestamps,
+                                std::function<void(const SegOffset offset,
+                                                   const Timestamp ts)> cb) {
+            for (size_t i = 0; i < pks.size(); ++i) {
+                auto timestamp = timestamps[i];
+                auto offsets = insert_record.search_pk(pks[i], timestamp);
+                for (auto offset : offsets) {
+                    cb(offset, timestamp);
+                }
+            }
+        };
+    };
+
+    // Helper lambda to setup insert record
+    auto setup_insert_record = [&](InsertRecord<false>& insert_record,
+                                   std::vector<int64_t>& age_data,
+                                   std::vector<Timestamp>& tss) {
+        for (int i = 0; i < N; ++i) {
+            age_data[i] = i;
+            tss[i] = i;
+            insert_record.insert_pk(age_data[i], i);
+        }
+        auto insert_offset = insert_record.reserved.fetch_add(N);
+        insert_record.timestamps_.set_data_raw(insert_offset, tss.data(), N);
+        auto field_data = insert_record.get_data_base(i64_fid);
+        field_data->set_data_raw(insert_offset, age_data.data(), N);
+        insert_record.ack_responder_.AddSegment(insert_offset,
+                                                insert_offset + N);
+    };
+
+    // Prepare delete data
+    std::vector<Timestamp> delete_ts(DN);
+    std::vector<PkType> delete_pk(DN);
+    for (int i = 0; i < DN; ++i) {
+        delete_pk[i] = i;      // delete first DN pks
+        delete_ts[i] = N + i;  // ts after all inserts
+    }
+
+    Timestamp query_timestamp = N + DN + 100;  // after all deletes
+    int64_t insert_barrier = N;
+
+    // ============ Setup for Optimization OFF (no latest_snapshot_) ============
+    InsertRecord<false> insert_record_off(*schema, N);
+    DeletedRecord<false> delete_record_off(
+        &insert_record_off, make_search_pk_func(insert_record_off), 0);
+
+    std::vector<int64_t> age_data_off(N);
+    std::vector<Timestamp> tss_off(N);
+    setup_insert_record(insert_record_off, age_data_off, tss_off);
+
+    // Push deletes with optimization OFF - no latest_snapshot_ created
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(false);
+    delete_record_off.StreamPush(delete_pk, delete_ts.data());
+    ASSERT_EQ(DN, delete_record_off.size());
+
+    // ============ Setup for Optimization ON (has latest_snapshot_) ============
+    InsertRecord<false> insert_record_on(*schema, N);
+    DeletedRecord<false> delete_record_on(
+        &insert_record_on, make_search_pk_func(insert_record_on), 0);
+
+    std::vector<int64_t> age_data_on(N);
+    std::vector<Timestamp> tss_on(N);
+    setup_insert_record(insert_record_on, age_data_on, tss_on);
+
+    // Push deletes with optimization ON - latest_snapshot_ created
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(true);
+    delete_record_on.StreamPush(delete_pk, delete_ts.data());
+    ASSERT_EQ(DN, delete_record_on.size());
+
+    // ============ Verify correctness ============
+    BitsetType ref_bitmap(insert_barrier);
+    BitsetTypeView ref_view(ref_bitmap);
+    delete_record_off.Query(ref_view, insert_barrier, query_timestamp);
+
+    BitsetType fast_bitmap(insert_barrier);
+    BitsetTypeView fast_view(fast_bitmap);
+    delete_record_on.Query(fast_view, insert_barrier, query_timestamp);
+
+    // Verify both produce same result
+    for (int i = 0; i < DN; ++i) {
+        ASSERT_TRUE(ref_view[i]) << "Row " << i << " should be deleted (OFF)";
+        ASSERT_TRUE(fast_view[i]) << "Row " << i << " should be deleted (ON)";
+    }
+    for (int i = DN; i < N; ++i) {
+        ASSERT_FALSE(ref_view[i])
+            << "Row " << i << " should NOT be deleted (OFF)";
+        ASSERT_FALSE(fast_view[i])
+            << "Row " << i << " should NOT be deleted (ON)";
+    }
+    std::cout << "Correctness verified: OFF and ON produce same results"
+              << std::endl;
+
+    // ============ Benchmark: Optimization OFF (slow path) ============
+    BitsetType res_bitmap(insert_barrier);
+    auto start_off = std::chrono::steady_clock::now();
+    for (int i = 0; i < QUERY_COUNT; ++i) {
+        res_bitmap.reset();
+        BitsetTypeView res_view(res_bitmap);
+        delete_record_off.Query(res_view, insert_barrier, query_timestamp);
+    }
+    auto end_off = std::chrono::steady_clock::now();
+    auto duration_off = std::chrono::duration_cast<std::chrono::microseconds>(
+                            end_off - start_off)
+                            .count();
+    std::cout << "[OFF] result bitmap count: " << res_bitmap.count()
+              << std::endl;
+
+    // ============ Benchmark: Optimization ON (fast path) ============
+    auto start_on = std::chrono::steady_clock::now();
+    for (int i = 0; i < QUERY_COUNT; ++i) {
+        res_bitmap.reset();
+        BitsetTypeView res_view(res_bitmap);
+        delete_record_on.Query(res_view, insert_barrier, query_timestamp);
+    }
+    auto end_on = std::chrono::steady_clock::now();
+    auto duration_on =
+        std::chrono::duration_cast<std::chrono::microseconds>(end_on - start_on)
+            .count();
+    std::cout << "[ON]  result bitmap count: " << res_bitmap.count()
+              << std::endl;
+
+    // ============ Print results ============
+    std::cout << "============================================" << std::endl;
+    std::cout << "Latest Delete Snapshot Optimization Benchmark" << std::endl;
+    std::cout << "============================================" << std::endl;
+    std::cout << "Config: N=" << N << ", Deleted=" << DN
+              << ", Queries=" << QUERY_COUNT << std::endl;
+    std::cout << "--------------------------------------------" << std::endl;
+    std::cout << "Optimization OFF (slow path): " << duration_off << " us ("
+              << duration_off / QUERY_COUNT << " us/query)" << std::endl;
+    std::cout << "Optimization ON  (fast path): " << duration_on << " us ("
+              << duration_on / QUERY_COUNT << " us/query)" << std::endl;
+    std::cout << "--------------------------------------------" << std::endl;
+
+    if (duration_on < duration_off) {
+        double speedup = static_cast<double>(duration_off) / duration_on;
+        std::cout << "Speedup: " << std::fixed << std::setprecision(2)
+                  << speedup << "x faster with optimization ON" << std::endl;
+    } else {
+        double slowdown = static_cast<double>(duration_on) / duration_off;
+        std::cout << "WARNING: " << std::fixed << std::setprecision(2)
+                  << slowdown << "x slower with optimization ON" << std::endl;
+    }
+    std::cout << "============================================" << std::endl;
+
+    // Verify optimization is faster
+    EXPECT_LT(duration_on, duration_off)
+        << "Optimization should be faster than slow path";
+
+    // Restore default
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(true);
+}
+
 TEST(DeleteMVCC, SnapshotDumpProgress) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);

@@ -9,26 +9,47 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "tantivy-binding.h"
-#include "common/Slice.h"
-#include "common/RegexQuery.h"
-#include "common/Tracer.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include "index/InvertedIndexTantivy.h"
-#include "index/InvertedIndexUtil.h"
-#include "log/Log.h"
-#include "index/Utils.h"
-#include "storage/Util.h"
-
-#include <algorithm>
-#include <boost/filesystem.hpp>
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <string.h>
+#include <algorithm>
 #include <cstddef>
-#include <shared_mutex>
+#include <cstdint>
+#include <exception>
+#include <list>
+#include <map>
 #include <type_traits>
+#include <utility>
 #include <vector>
+
 #include "InvertedIndexTantivy.h"
+#include "boost/container/vector.hpp"
+#include "boost/filesystem/directory.hpp"
+#include "boost/filesystem/operations.hpp"
+#include "boost/filesystem/path.hpp"
+#include "boost/iterator/iterator_facade.hpp"
+#include "common/Array.h"
+#include "common/FieldDataInterface.h"
+#include "common/Slice.h"
+#include "common/Tracer.h"
+#include "folly/SharedMutex.h"
+#include "glog/logging.h"
+#include "index/InvertedIndexTantivy.h"
+#include "index/InvertedIndexUtil.h"
+#include "index/Utils.h"
+#include "knowhere/dataset.h"
+#include "log/Log.h"
+#include "nlohmann/detail/iterators/iter_impl.hpp"
+#include "nlohmann/json.hpp"
+#include "pb/common.pb.h"
+#include "storage/DataCodec.h"
+#include "storage/FileManager.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "tantivy-binding.h"
 
 namespace milvus::index {
 inline TantivyDataType
@@ -318,6 +339,13 @@ InvertedIndexTantivy<T>::IsNull() {
     int64_t count = Count();
     TargetBitmap bitset(count);
 
+    // For nested index, null rows don't have elements in the index,
+    // so all elements in the index are valid (none are null).
+    // null_offset_ stores row offsets, not element offsets.
+    if (is_nested_index_) {
+        return bitset;  // All false - no element is null
+    }
+
     auto fill_bitset = [this, count, &bitset]() {
         auto end =
             std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
@@ -343,6 +371,13 @@ InvertedIndexTantivy<T>::IsNotNull() {
                           tracer::GetRootSpan());
     int64_t count = Count();
     TargetBitmap bitset(count, true);
+
+    // For nested index, null rows don't have elements in the index,
+    // so all elements in the index are valid.
+    // null_offset_ stores row offsets, not element offsets.
+    if (is_nested_index_) {
+        return bitset;  // All true - all elements are valid
+    }
 
     auto fill_bitset = [this, count, &bitset]() {
         auto end =
@@ -417,7 +452,7 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
 
 template <typename T>
 const TargetBitmap
-InvertedIndexTantivy<T>::Range(T value, OpType op) {
+InvertedIndexTantivy<T>::Range(const T& value, OpType op) {
     tracer::AutoSpan span("InvertedIndexTantivy::Range", tracer::GetRootSpan());
     TargetBitmap bitset(Count());
 
@@ -444,9 +479,9 @@ InvertedIndexTantivy<T>::Range(T value, OpType op) {
 
 template <typename T>
 const TargetBitmap
-InvertedIndexTantivy<T>::Range(T lower_bound_value,
+InvertedIndexTantivy<T>::Range(const T& lower_bound_value,
                                bool lb_inclusive,
-                               T upper_bound_value,
+                               const T& upper_bound_value,
                                bool ub_inclusive) {
     tracer::AutoSpan span("InvertedIndexTantivy::RangeWithBounds",
                           tracer::GetRootSpan());
@@ -639,17 +674,19 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                     }
                 }
             } else {
+                int64_t offset = 0;
                 for (const auto& data : field_datas) {
                     auto n = data->get_num_rows();
                     if (schema_.nullable()) {
                         for (int i = 0; i < n; i++) {
                             if (!data->is_valid(i)) {
-                                null_offset_.push_back(i);
+                                null_offset_.push_back(offset);
                             }
                             wrapper_
                                 ->add_array_data_by_single_segment_writer<T>(
                                     static_cast<const T*>(data->RawValue(i)),
                                     data->is_valid(i));
+                            offset++;
                         }
                         continue;
                     }

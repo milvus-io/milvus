@@ -15,7 +15,12 @@
 // limitations under the License.
 
 #include "logging_c.h"
+
 #include <glog/logging.h>
+#include <string.h>
+#include <string>
+
+#include "glog/log_severity.h"
 
 #ifdef WITHOUT_GO_LOGGING
 
@@ -120,6 +125,6 @@ InitGoogleLoggingWithoutZapSink() {
 
 void
 GoogleLoggingAtLevel(int severity, const char* msg) {
-    google::LogAtLevel(severity, msg);
+    google::LogAtLevel(static_cast<google::LogSeverity>(severity), msg);
 }
 }

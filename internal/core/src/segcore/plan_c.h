@@ -15,10 +15,10 @@
 extern "C" {
 #endif
 
-#include <stdbool.h>
 #include <stdint.h>
+#include <stdbool.h>
 
-#include "common/type_c.h"
+#include "common/common_type_c.h"
 #include "segcore/collection_c.h"
 
 typedef void* CSearchPlan;

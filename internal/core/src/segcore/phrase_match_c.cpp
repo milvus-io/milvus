@@ -1,7 +1,10 @@
 #include "segcore/phrase_match_c.h"
+
+#include <exception>
+#include <memory>
+
+#include "common/EasyAssert.h"
 #include "tantivy/phrase_match.h"
-#include "common/type_c.h"
-#include "common/Exception.h"
 
 CStatus
 compute_phrase_match_slop_c(const char* params,

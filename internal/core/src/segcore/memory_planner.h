@@ -15,14 +15,22 @@
 // limitations under the License.
 #pragma once
 
-#include <vector>
-#include <cstdint>
-#include <cstddef>
-#include "milvus-storage/common/metadata.h"
 #include <arrow/record_batch.h>
+#include <arrow/table.h>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <future>
+#include <memory>
+#include <string>
 #include <vector>
+
+#include "common/Channel.h"
 #include "common/FieldData.h"
+#include "common/OpContext.h"
+#include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/reader.h"
 
 namespace milvus::segcore {
 
@@ -69,7 +77,7 @@ class ParallelDegreeSplitStrategy : public RowGroupSplitStrategy {
     uint64_t parallel_degree_;
 };
 
-/*
+/**
  * Load storage v2 files with specified strategy. The number of row group readers is determined by the strategy.
  *
  * @param remote_files: list of remote files
@@ -89,5 +97,78 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                  const std::shared_ptr<arrow::Schema> schema = nullptr,
                  milvus::proto::common::LoadPriority priority =
                      milvus::proto::common::LoadPriority::HIGH);
+
+// ---- Cell-batch loading ----
+
+// A cell specification: identifies a cell's location within a specific file.
+struct CellSpec {
+    int64_t cid;              // cell id
+    size_t file_idx;          // index into the remote_files list
+    int64_t local_rg_offset;  // file-local row group start offset
+    int64_t rg_count;         // number of row groups in this cell
+};
+
+// Result of loading a single cell: cid + the arrow tables read.
+struct CellLoadResult {
+    int64_t cid;
+    std::vector<std::shared_ptr<arrow::Table>> tables;
+};
+
+using CellReaderChannel = milvus::Channel<std::shared_ptr<CellLoadResult>>;
+
+// Creates a batch reader for a range of contiguous row groups.
+// Returns all row groups as a vector of tables in one call.
+// batch_key: grouping key (file_idx for files, 0 for single reader)
+// rg_offset: start row group index for this batch
+// total_rg_count: total row groups across all cells in this batch
+// reader_memory_limit: memory budget for this batch's reader
+using BatchReaderFactory =
+    std::function<arrow::Result<std::vector<std::shared_ptr<arrow::Table>>>(
+        size_t batch_key,
+        int64_t rg_offset,
+        int64_t total_rg_count,
+        int64_t reader_memory_limit)>;
+
+/**
+ * Load cells in batches using a pluggable reader factory. Cells are sorted by
+ * (file_idx, local_rg_offset) and grouped into IO-merged batches.
+ * Each completed cell is pushed to the channel immediately, enabling
+ * streaming consumption without accumulating all ArrowTables.
+ *
+ * @param op_ctx operation context for cancellation
+ * @param cell_specs cell specifications (sorted internally)
+ * @param reader_factory factory that reads all row groups for a batch
+ * @param channel channel to receive loaded cell data; closed when all done
+ * @param memory_limit total memory limit for readers
+ * @param priority load priority
+ * @return vector of futures for the batch loading tasks
+ */
+std::vector<std::future<void>>
+LoadCellBatchAsync(milvus::OpContext* op_ctx,
+                   std::vector<CellSpec> cell_specs,
+                   BatchReaderFactory reader_factory,
+                   std::shared_ptr<CellReaderChannel>& channel,
+                   int64_t memory_limit,
+                   milvus::proto::common::LoadPriority priority =
+                       milvus::proto::common::LoadPriority::HIGH);
+
+/**
+ * Creates a BatchReaderFactory that reads from Parquet files via FileRowGroupReader.
+ * The returned factory owns a copy of remote_files, so the caller's vector
+ * need not outlive the factory.
+ */
+BatchReaderFactory
+MakeFileReaderFactory(std::vector<std::string> remote_files,
+                      milvus_storage::ArrowFileSystemPtr fs);
+
+/**
+ * Creates a BatchReaderFactory that reads from a ChunkReader via batch
+ * get_chunks(). Row groups are loaded in a single IO call for IO merging
+ * and returned as a vector of tables. The factory captures the shared_ptr
+ * by value, extending the ChunkReader's lifetime automatically.
+ */
+BatchReaderFactory
+MakeChunkReaderFactory(
+    std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader);
 
 }  // namespace milvus::segcore

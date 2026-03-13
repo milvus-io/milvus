@@ -9,26 +9,50 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <gtest/gtest.h>
+#include <simdjson.h>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <string>
+#include <tuple>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "NamedType/named_type_impl.hpp"
+#include "bitset/bitset.h"
 #include "common/Consts.h"
+#include "common/FieldData.h"
+#include "common/Json.h"
 #include "common/JsonCastType.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
 #include "expr/ITypeExpr.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
 #include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
 #include "index/JsonInvertedIndex.h"
-#include "mmap/Types.h"
+#include "index/Meta.h"
+#include "index/Utils.h"
 #include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
+#include "simdjson/error.h"
+#include "simdjson/padded_string.h"
+#include "storage/FileManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
-#include "storage/Util.h"
+#include "storage/Types.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
-#include <gtest/gtest.h>
-#include <cstdint>
 using namespace milvus;
 using namespace milvus::index;
 
@@ -56,13 +80,12 @@ TEST(JsonIndexTest, TestJSONErrRecorder) {
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
+    index::CreateIndexInfo cii_double;
+    cii_double.index_type = index::INVERTED_INDEX_TYPE;
+    cii_double.json_cast_type = JsonCastType::FromString("DOUBLE");
+    cii_double.json_path = json_path;
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::CreateIndexInfo{
-            .index_type = index::INVERTED_INDEX_TYPE,
-            .json_cast_type = JsonCastType::FromString("DOUBLE"),
-            .json_path = json_path,
-        },
-        file_manager_ctx);
+        cii_double, file_manager_ctx);
     auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
         static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
 
@@ -119,13 +142,12 @@ TEST(JsonIndexTest, TestJsonContains) {
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
+    index::CreateIndexInfo cii_array_double;
+    cii_array_double.index_type = index::INVERTED_INDEX_TYPE;
+    cii_array_double.json_cast_type = JsonCastType::FromString("ARRAY_DOUBLE");
+    cii_array_double.json_path = json_path;
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::CreateIndexInfo{
-            .index_type = index::INVERTED_INDEX_TYPE,
-            .json_cast_type = JsonCastType::FromString("ARRAY_DOUBLE"),
-            .json_path = json_path,
-        },
-        file_manager_ctx);
+        cii_array_double, file_manager_ctx);
     auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
         static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
 
@@ -215,14 +237,13 @@ TEST(JsonIndexTest, TestJsonCast) {
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
+    index::CreateIndexInfo cii_cast;
+    cii_cast.index_type = index::INVERTED_INDEX_TYPE;
+    cii_cast.json_cast_type = JsonCastType::FromString("DOUBLE");
+    cii_cast.json_path = json_path;
+    cii_cast.json_cast_function = "STRING_TO_DOUBLE";
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::CreateIndexInfo{
-            .index_type = index::INVERTED_INDEX_TYPE,
-            .json_cast_type = JsonCastType::FromString("DOUBLE"),
-            .json_path = json_path,
-            .json_cast_function = "STRING_TO_DOUBLE",
-        },
-        file_manager_ctx);
+        cii_cast, file_manager_ctx);
     auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
         static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
 

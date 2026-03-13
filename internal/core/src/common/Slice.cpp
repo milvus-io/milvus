@@ -15,8 +15,20 @@
 // limitations under the License.
 
 #include "common/Slice.h"
+
+#include <string.h>
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <initializer_list>
+#include <map>
+#include <memory>
+#include <utility>
+#include <vector>
+
 #include "common/Common.h"
-#include "log/Log.h"
+#include "knowhere/binaryset.h"
+#include "nlohmann/json.hpp"
 
 namespace milvus {
 
@@ -89,6 +101,7 @@ Disassemble(BinarySet& binarySet) {
     }
 
     std::vector<std::string> slice_key_list;
+    slice_key_list.reserve(binarySet.binary_map_.size());
     for (auto& kv : binarySet.binary_map_) {
         if (kv.second->size > FILE_SLICE_SIZE.load()) {
             slice_key_list.push_back(kv.first);

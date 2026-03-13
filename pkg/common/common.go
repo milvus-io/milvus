@@ -160,16 +160,20 @@ const (
 
 	DropRatioBuildKey = "drop_ratio_build"
 
-	IsSparseKey               = "is_sparse"
-	AutoIndexName             = "AUTOINDEX"
-	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
-	IgnoreGrowing             = "ignore_growing"
-	ConsistencyLevel          = "consistency_level"
-	HintsKey                  = "hints"
+	IsSparseKey                       = "is_sparse"
+	AutoIndexName                     = "AUTOINDEX"
+	BitmapCardinalityLimitKey         = "bitmap_cardinality_limit"
+	HybridLowCardinalityIndexTypeKey  = "hybrid_low_cardinality_index_type"
+	HybridHighCardinalityIndexTypeKey = "hybrid_high_cardinality_index_type"
+	IgnoreGrowing                     = "ignore_growing"
+	ConsistencyLevel                  = "consistency_level"
+	HintsKey                          = "hints"
 
 	JSONCastTypeKey     = "json_cast_type"
 	JSONPathKey         = "json_path"
 	JSONCastFunctionKey = "json_cast_function"
+
+	SchemaVersionConsistencyProportionKey = "schema_version_consistency_proportion"
 )
 
 // expr query params
@@ -249,19 +253,30 @@ const (
 // common properties
 const (
 	MmapEnabledKey             = "mmap.enabled"
-	LazyLoadEnableKey          = "lazyload.enabled"
 	LoadPriorityKey            = "load_priority"
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
 	IndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
 	IndexNonEncoding           = "index.nonEncoding"
 	EnableDynamicSchemaKey     = `dynamicfield.enabled`
-	NamespaceEnabledKey        = "namespace.enabled"
 
 	// timezone releated
 	TimezoneKey             = "timezone"
 	AllowInsertAutoIDKey    = "allow_insert_auto_id"
 	DisableFuncRuntimeCheck = "disable_func_runtime_check"
+
+	// BigTopK optimization
+	BigTopKOptimizationEnabledKey = "bigtopk_optimization.enabled"
+
+	// warmup related
+	WarmupKey            = "warmup"
+	WarmupScalarFieldKey = "warmup.scalarField"
+	WarmupScalarIndexKey = "warmup.scalarIndex"
+	WarmupVectorFieldKey = "warmup.vectorField"
+	WarmupVectorIndexKey = "warmup.vectorIndex"
+	WarmupDisable        = "disable"
+	WarmupSync           = "sync"
+	WarmupAsync          = "async"
 )
 
 const (
@@ -303,6 +318,89 @@ func IsMmapIndexEnabled(kvs ...*commonpb.KeyValuePair) (bool, bool) {
 		}
 	}
 	return false, false
+}
+
+// GetWarmupPolicy returns the warmup policy value and whether it exists from key-value pairs
+func GetWarmupPolicy(kvs ...*commonpb.KeyValuePair) (string, bool) {
+	for _, kv := range kvs {
+		if kv.Key == WarmupKey {
+			return kv.Value, true
+		}
+	}
+	return "", false
+}
+
+// GetWarmupPolicyByKey returns the warmup policy for a specific key from key-value pairs
+func GetWarmupPolicyByKey(key string, kvs ...*commonpb.KeyValuePair) (string, bool) {
+	for _, kv := range kvs {
+		if kv.Key == key {
+			return kv.Value, true
+		}
+	}
+	return "", false
+}
+
+// IsWarmupKey checks if a key is any of the warmup-related keys
+func IsWarmupKey(key string) bool {
+	return IsFieldWarmupKey(key) || IsCollectionWarmupKey(key)
+}
+
+// IsFieldWarmupKey checks if a key is the field-level warmup key
+func IsFieldWarmupKey(key string) bool {
+	return key == WarmupKey
+}
+
+// IsCollectionWarmupKey checks if a key is a collection/table-level warmup key
+func IsCollectionWarmupKey(key string) bool {
+	return key == WarmupScalarFieldKey ||
+		key == WarmupScalarIndexKey ||
+		key == WarmupVectorFieldKey ||
+		key == WarmupVectorIndexKey
+}
+
+// ValidateWarmupPolicy validates that the warmup policy value is valid
+func ValidateWarmupPolicy(value string) error {
+	if value != WarmupDisable && value != WarmupSync && value != WarmupAsync {
+		return fmt.Errorf("invalid warmup policy: %s, must be '%s', '%s' or '%s'", value, WarmupDisable, WarmupSync, WarmupAsync)
+	}
+	return nil
+}
+
+// FieldHasWarmupKey checks if a field has warmup key set in its TypeParams
+func FieldHasWarmupKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
+	for _, field := range schema.GetFields() {
+		if field.GetFieldID() == fieldID {
+			for _, kv := range field.GetTypeParams() {
+				if kv.Key == WarmupKey {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	// Check struct array fields
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetFieldID() == fieldID {
+			for _, kv := range structField.GetTypeParams() {
+				if kv.Key == WarmupKey {
+					return true
+				}
+			}
+			return false
+		}
+		// Check fields inside struct
+		for _, field := range structField.GetFields() {
+			if field.GetFieldID() == fieldID {
+				for _, kv := range field.GetTypeParams() {
+					if kv.Key == WarmupKey {
+						return true
+					}
+				}
+				return false
+			}
+		}
+	}
+	return false
 }
 
 func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
@@ -350,30 +448,25 @@ func FieldHasMmapKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
 	return false
 }
 
-func HasLazyload(props []*commonpb.KeyValuePair) bool {
-	for _, kv := range props {
-		if kv.Key == LazyLoadEnableKey {
-			return true
-		}
-	}
-	return false
-}
-
-func IsCollectionLazyLoadEnabled(kvs ...*commonpb.KeyValuePair) bool {
-	for _, kv := range kvs {
-		if kv.Key == LazyLoadEnableKey && strings.ToLower(kv.Value) == "true" {
-			return true
-		}
-	}
-	return false
-}
-
 func IsPartitionKeyIsolationKvEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
 	for _, kv := range kvs {
 		if kv.Key == PartitionKeyIsolationKey {
 			val, err := strconv.ParseBool(strings.ToLower(kv.Value))
 			if err != nil {
 				return false, errors.Wrap(err, "failed to parse partition key isolation")
+			}
+			return val, nil
+		}
+	}
+	return false, nil
+}
+
+func IsBigTopKOptimizationEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range kvs {
+		if kv.Key == BigTopKOptimizationEnabledKey {
+			val, err := strconv.ParseBool(strings.ToLower(kv.Value))
+			if err != nil {
+				return false, errors.Wrap(err, "failed to parse bigTopK Optimization")
 			}
 			return val, nil
 		}
@@ -547,19 +640,6 @@ func ValidateAutoIndexMmapConfig(autoIndexConfigEnable, isVectorField bool, inde
 	return nil
 }
 
-func ParseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, err error) {
-	for _, p := range props {
-		if p.GetKey() == NamespaceEnabledKey {
-			value, err := strconv.ParseBool(p.GetValue())
-			if err != nil {
-				return false, false, fmt.Errorf("invalid namespace prop value: %s", p.GetValue())
-			}
-			return value, true, nil
-		}
-	}
-	return false, false, nil
-}
-
 func AllocAutoID(allocFunc func(uint32) (int64, int64, error), rowNum uint32, clusterID uint64) (int64, int64, error) {
 	idStart, idEnd, err := allocFunc(rowNum)
 	if err != nil {
@@ -645,10 +725,7 @@ func GetCollectionTTLFromMap(kvs map[string]string) (time.Duration, error) {
 }
 
 func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error {
-	enabled, _, err := ParseNamespaceProp(schema.Properties...)
-	if err != nil {
-		return err
-	}
+	enabled := schema.GetEnableNamespace()
 	namespaceIsSet := namespace != nil
 	if enabled != namespaceIsSet {
 		if namespaceIsSet {

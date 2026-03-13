@@ -16,6 +16,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <cmath>
@@ -45,6 +46,9 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "storage/Util.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus_plan_parser.h"
+#include "pb/plan.pb.h"
+#include "query/Plan.h"
 
 using boost::algorithm::starts_with;
 
@@ -386,45 +390,36 @@ GenerateRandomSparseFloatVector(size_t rows,
 
 inline SchemaPtr CreateTestSchema() {
     auto schema = std::make_shared<milvus::Schema>();
-    auto bool_field =
-        schema->AddDebugField("bool", milvus::DataType::BOOL, true);
-    auto int8_field =
-        schema->AddDebugField("int8", milvus::DataType::INT8, true);
-    auto int16_field =
-        schema->AddDebugField("int16", milvus::DataType::INT16, true);
-    auto int32_field =
-        schema->AddDebugField("int32", milvus::DataType::INT32, true);
+    schema->AddDebugField("bool", milvus::DataType::BOOL, true);
+    schema->AddDebugField("int8", milvus::DataType::INT8, true);
+    schema->AddDebugField("int16", milvus::DataType::INT16, true);
+    schema->AddDebugField("int32", milvus::DataType::INT32, true);
     auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
-    auto timestamptz_field =
-        schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ, true);
-    auto float_field =
-        schema->AddDebugField("float", milvus::DataType::FLOAT, true);
-    auto double_field =
-        schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
-    auto varchar_field =
-        schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
-    auto json_field =
-        schema->AddDebugField("json", milvus::DataType::JSON, true);
-    auto int_array_field = schema->AddDebugField(
+    schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ, true);
+    schema->AddDebugField("float", milvus::DataType::FLOAT, true);
+    schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
+    schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
+    schema->AddDebugField("json", milvus::DataType::JSON, true);
+    schema->AddDebugField(
         "int_array", milvus::DataType::ARRAY, milvus::DataType::INT8, true);
-    auto long_array_field = schema->AddDebugField(
+    schema->AddDebugField(
         "long_array", milvus::DataType::ARRAY, milvus::DataType::INT64, true);
-    auto bool_array_field = schema->AddDebugField(
+    schema->AddDebugField(
         "bool_array", milvus::DataType::ARRAY, milvus::DataType::BOOL, true);
-    auto string_array_field = schema->AddDebugField("string_array",
-                                                    milvus::DataType::ARRAY,
-                                                    milvus::DataType::VARCHAR,
-                                                    true);
-    auto double_array_field = schema->AddDebugField("double_array",
-                                                    milvus::DataType::ARRAY,
-                                                    milvus::DataType::DOUBLE,
-                                                    true);
-    auto float_array_field = schema->AddDebugField(
+    schema->AddDebugField("string_array",
+                          milvus::DataType::ARRAY,
+                          milvus::DataType::VARCHAR,
+                          true);
+    schema->AddDebugField("double_array",
+                          milvus::DataType::ARRAY,
+                          milvus::DataType::DOUBLE,
+                          true);
+    schema->AddDebugField(
         "float_array", milvus::DataType::ARRAY, milvus::DataType::FLOAT, true);
-    auto vec = schema->AddDebugField("embeddings",
-                                     milvus::DataType::VECTOR_FLOAT,
-                                     128,
-                                     knowhere::metric::L2);
+    schema->AddDebugField("embeddings",
+                          milvus::DataType::VECTOR_FLOAT,
+                          128,
+                          knowhere::metric::L2);
     schema->set_primary_field_id(int64_field);
     return schema;
 }
@@ -573,8 +568,7 @@ DataGen(SchemaPtr schema,
             insert_data->mutable_fields_data()->AddAllocated(array.release());
         };
 
-    auto generate_float_vector = [&seed, &offset, &random, &distr](
-                                     auto& field_meta, int64_t N) {
+    auto generate_float_vector = [&seed, &offset](auto& field_meta, int64_t N) {
         auto dim = field_meta.get_dim();
         vector<float> final(dim * N);
         bool is_ip = starts_with(field_meta.get_name().get(), "normalized");
@@ -601,8 +595,7 @@ DataGen(SchemaPtr schema,
         return final;
     };
 
-    auto generate_binary_vector = [&seed, &offset, &random](auto& field_meta,
-                                                            int64_t N) {
+    auto generate_binary_vector = [&random](auto& field_meta, int64_t N) {
         auto dim = field_meta.get_dim();
         Assert(dim % 8 == 0);
         vector<uint8_t> data(dim / 8 * N);
@@ -612,8 +605,8 @@ DataGen(SchemaPtr schema,
         return data;
     };
 
-    auto generate_float16_vector = [&seed, &offset, &random, &distr](
-                                       auto& field_meta, int64_t N) {
+    auto generate_float16_vector = [&offset, &random, &distr](auto& field_meta,
+                                                              int64_t N) {
         auto dim = field_meta.get_dim();
         vector<float16> data(dim * N);
         for (auto& x : data) {
@@ -622,8 +615,8 @@ DataGen(SchemaPtr schema,
         return data;
     };
 
-    auto generate_bfloat16_vector = [&seed, &offset, &random, &distr](
-                                        auto& field_meta, int64_t N) {
+    auto generate_bfloat16_vector = [&offset, &random, &distr](auto& field_meta,
+                                                               int64_t N) {
         auto dim = field_meta.get_dim();
         vector<bfloat16> data(dim * N);
         for (auto& x : data) {
@@ -632,8 +625,7 @@ DataGen(SchemaPtr schema,
         return data;
     };
 
-    auto generate_int8_vector = [&seed, &offset, &random](auto& field_meta,
-                                                          int64_t N) {
+    auto generate_int8_vector = [&random](auto& field_meta, int64_t N) {
         auto dim = field_meta.get_dim();
         vector<int8_t> data(dim * N);
         for (auto& x : data) {
@@ -1640,7 +1632,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 std::vector<std::string> data_raw(src_data.size());
                 for (int i = 0; i < src_data.size(); i++) {
                     auto str = src_data.Get(i);
-                    data_raw[i] = std::move(std::string(str));
+                    data_raw[i] = std::string(str);
                 }
                 if (field_meta.is_nullable()) {
                     auto raw_valid_data = data->valid_data().data();
@@ -1911,6 +1903,265 @@ replace_metric_and_translate_text_plan_to_binary_plan(
     return translate_text_plan_to_binary_plan(plan.c_str());
 }
 
+// Parse a string expression using the plan parser shared library.
+// This function takes a schema and expression string and returns the binary plan.
+// The schema is serialized to protobuf and registered with the plan parser,
+// then the expression is parsed and the schema is unregistered.
+inline std::vector<char>
+parse_expr_to_binary_plan(const Schema& schema, const std::string& expr) {
+    // Serialize schema to protobuf
+    auto schema_proto = schema.ToProto();
+    std::string schema_bytes;
+    schema_proto.SerializeToString(&schema_bytes);
+
+    // Register schema with plan parser
+    std::vector<uint8_t> schema_vec(schema_bytes.begin(), schema_bytes.end());
+    auto handle = milvus::planparserv2::PlanParser::RegisterSchema(schema_vec);
+
+    // Parse expression
+    std::vector<uint8_t> plan_bytes;
+    try {
+        plan_bytes = milvus::planparserv2::PlanParser::Parse(handle, expr);
+    } catch (...) {
+        // Ensure schema is unregistered even on error
+        milvus::planparserv2::PlanParser::UnregisterSchema(handle);
+        throw;
+    }
+
+    // Unregister schema
+    milvus::planparserv2::PlanParser::UnregisterSchema(handle);
+
+    // Convert to vector<char>
+    std::vector<char> ret(plan_bytes.begin(), plan_bytes.end());
+    return ret;
+}
+
+// RAII wrapper for PlanParser schema registration to ensure proper cleanup.
+// This is useful when you need to parse multiple expressions with the same schema.
+class ScopedSchemaHandle {
+ public:
+    explicit ScopedSchemaHandle(const Schema& schema) {
+        auto schema_proto = schema.ToProto();
+        std::string schema_bytes;
+        schema_proto.SerializeToString(&schema_bytes);
+        std::vector<uint8_t> schema_vec(schema_bytes.begin(),
+                                        schema_bytes.end());
+        handle_ = milvus::planparserv2::PlanParser::RegisterSchema(schema_vec);
+    }
+
+    ~ScopedSchemaHandle() {
+        if (handle_ != milvus::planparserv2::kInvalidSchemaHandle) {
+            milvus::planparserv2::PlanParser::UnregisterSchema(handle_);
+        }
+    }
+
+    ScopedSchemaHandle(const ScopedSchemaHandle&) = delete;
+    ScopedSchemaHandle&
+    operator=(const ScopedSchemaHandle&) = delete;
+
+    ScopedSchemaHandle(ScopedSchemaHandle&& other) noexcept
+        : handle_(other.handle_) {
+        other.handle_ = milvus::planparserv2::kInvalidSchemaHandle;
+    }
+
+    ScopedSchemaHandle&
+    operator=(ScopedSchemaHandle&& other) noexcept {
+        if (this != &other) {
+            if (handle_ != milvus::planparserv2::kInvalidSchemaHandle) {
+                milvus::planparserv2::PlanParser::UnregisterSchema(handle_);
+            }
+            handle_ = other.handle_;
+            other.handle_ = milvus::planparserv2::kInvalidSchemaHandle;
+        }
+        return *this;
+    }
+
+    milvus::planparserv2::SchemaHandle
+    get() const {
+        return handle_;
+    }
+
+    std::vector<char>
+    Parse(const std::string& expr) const {
+        auto plan_bytes =
+            milvus::planparserv2::PlanParser::Parse(handle_, expr);
+        return std::vector<char>(plan_bytes.begin(), plan_bytes.end());
+    }
+
+    // Parse a search expression with vector search parameters.
+    // This creates a VectorANNS plan node for search operations.
+    std::vector<char>
+    ParseSearch(const std::string& expr,
+                const std::string& vector_field_name,
+                int64_t topk,
+                const std::string& metric_type,
+                const std::string& search_params = "{}",
+                int64_t round_decimal = -1,
+                const std::string& hints = "",
+                bool materialized_view_involved = false) const {
+        // Build QueryInfo protobuf
+        milvus::proto::plan::QueryInfo query_info;
+        query_info.set_topk(topk);
+        query_info.set_metric_type(metric_type);
+        query_info.set_search_params(search_params);
+        query_info.set_round_decimal(round_decimal);
+        if (!hints.empty()) {
+            query_info.set_hints(hints);
+        }
+        query_info.set_materialized_view_involved(materialized_view_involved);
+
+        // Serialize QueryInfo
+        std::string query_info_bytes;
+        query_info.SerializeToString(&query_info_bytes);
+        std::vector<uint8_t> query_info_vec(query_info_bytes.begin(),
+                                            query_info_bytes.end());
+
+        auto plan_bytes = milvus::planparserv2::PlanParser::ParseSearch(
+            handle_, expr, vector_field_name, query_info_vec);
+        return std::vector<char>(plan_bytes.begin(), plan_bytes.end());
+    }
+
+    // Parse a group-by search expression with vector search parameters.
+    // This creates a VectorANNS plan node with group-by settings for search operations.
+    // group_by_field_id: the field to group by
+    // group_size: number of results per group
+    // json_path: path within JSON field (e.g., "/int8")
+    // json_type: data type of the JSON value (e.g., milvus::proto::schema::DataType::Int8)
+    // strict_group_size: if true, return exactly group_size results per group
+    // strict_cast: if true, throw error for type mismatch
+    std::vector<char>
+    ParseGroupBySearch(const std::string& expr,
+                       const std::string& vector_field_name,
+                       int64_t topk,
+                       const std::string& metric_type,
+                       const std::string& search_params,
+                       int64_t group_by_field_id,
+                       int64_t group_size,
+                       const std::string& json_path = "",
+                       milvus::proto::schema::DataType json_type =
+                           milvus::proto::schema::DataType::None,
+                       bool strict_group_size = false,
+                       bool strict_cast = false,
+                       int64_t round_decimal = -1) const {
+        // Build QueryInfo protobuf
+        milvus::proto::plan::QueryInfo query_info;
+        query_info.set_topk(topk);
+        query_info.set_metric_type(metric_type);
+        query_info.set_search_params(search_params);
+        query_info.set_round_decimal(round_decimal);
+        query_info.set_group_by_field_id(group_by_field_id);
+        query_info.set_group_size(group_size);
+        query_info.set_strict_group_size(strict_group_size);
+        if (!json_path.empty()) {
+            query_info.set_json_path(json_path);
+        }
+        if (json_type != milvus::proto::schema::DataType::None) {
+            query_info.set_json_type(json_type);
+        }
+        query_info.set_strict_cast(strict_cast);
+
+        // Serialize QueryInfo
+        std::string query_info_bytes;
+        query_info.SerializeToString(&query_info_bytes);
+        std::vector<uint8_t> query_info_vec(query_info_bytes.begin(),
+                                            query_info_bytes.end());
+
+        auto plan_bytes = milvus::planparserv2::PlanParser::ParseSearch(
+            handle_, expr, vector_field_name, query_info_vec);
+        return std::vector<char>(plan_bytes.begin(), plan_bytes.end());
+    }
+
+    // Parse a search iterator expression with vector search parameters.
+    // This creates a VectorANNS plan node with iterator settings for search operations.
+    // batch_size: number of results per batch in iterator
+    // token: iterator token (optional, for continuation)
+    // last_bound: last bound value (optional, for continuation)
+    std::vector<char>
+    ParseSearchIterator(const std::string& expr,
+                        const std::string& vector_field_name,
+                        int64_t topk,
+                        const std::string& metric_type,
+                        const std::string& search_params,
+                        uint32_t batch_size,
+                        const std::string& token = "",
+                        std::optional<float> last_bound = std::nullopt,
+                        int64_t round_decimal = -1) const {
+        // Build QueryInfo protobuf
+        milvus::proto::plan::QueryInfo query_info;
+        query_info.set_topk(topk);
+        query_info.set_metric_type(metric_type);
+        query_info.set_search_params(search_params);
+        query_info.set_round_decimal(round_decimal);
+
+        // Set iterator info
+        auto* iterator_info = query_info.mutable_search_iterator_v2_info();
+        iterator_info->set_batch_size(batch_size);
+        if (!token.empty()) {
+            iterator_info->set_token(token);
+        }
+        if (last_bound.has_value()) {
+            iterator_info->set_last_bound(last_bound.value());
+        }
+
+        // Serialize QueryInfo
+        std::string query_info_bytes;
+        query_info.SerializeToString(&query_info_bytes);
+        std::vector<uint8_t> query_info_vec(query_info_bytes.begin(),
+                                            query_info_bytes.end());
+
+        auto plan_bytes = milvus::planparserv2::PlanParser::ParseSearch(
+            handle_, expr, vector_field_name, query_info_vec);
+        return std::vector<char>(plan_bytes.begin(), plan_bytes.end());
+    }
+
+    // Helper struct for scorer configuration
+    struct ScorerParams {
+        milvus::proto::plan::FunctionType type =
+            milvus::proto::plan::FunctionTypeWeight;
+        float weight = 1.0f;
+        std::map<std::string, std::string> params;
+    };
+
+    // Parse a search expression with scorers for rescoring functionality.
+    // Returns the plan directly (not serialized bytes) since scorers need to be
+    // attached at the PlanNode level.
+    std::unique_ptr<milvus::query::Plan>
+    ParseSearchWithScorers(const milvus::SchemaPtr& schema,
+                           const std::string& expr,
+                           const std::string& vector_field_name,
+                           int64_t topk,
+                           const std::string& metric_type,
+                           const std::string& search_params,
+                           const std::vector<ScorerParams>& scorers) const {
+        // First parse the base search plan
+        auto plan_bytes = ParseSearch(
+            expr, vector_field_name, topk, metric_type, search_params);
+
+        // Deserialize to PlanNode proto
+        milvus::proto::plan::PlanNode plan_node;
+        milvus::query::ParsePlanNodeProto(
+            plan_node, plan_bytes.data(), plan_bytes.size());
+
+        // Add scorers to the plan node
+        for (const auto& scorer : scorers) {
+            auto* score_func = plan_node.add_scorers();
+            score_func->set_type(scorer.type);
+            score_func->set_weight(scorer.weight);
+            for (const auto& [key, value] : scorer.params) {
+                auto* param = score_func->add_params();
+                param->set_key(key);
+                param->set_value(value);
+            }
+        }
+
+        // Create and return the plan
+        return milvus::query::CreateSearchPlanFromPlanNode(schema, plan_node);
+    }
+
+ private:
+    milvus::planparserv2::SchemaHandle handle_;
+};
+
 inline auto
 GenTss(int64_t num, int64_t begin_ts) {
     std::vector<Timestamp> tss(num, 0);
@@ -2048,10 +2299,10 @@ gen_field_meta(int64_t collection_id = 1,
                bool nullable = false,
                int64_t max_length = 64) {
     auto meta = storage::FieldDataMeta{
-        .collection_id = collection_id,
-        .partition_id = partition_id,
-        .segment_id = segment_id,
-        .field_id = field_id,
+        collection_id,
+        partition_id,
+        segment_id,
+        field_id,
     };
     meta.field_schema.set_data_type(
         static_cast<proto::schema::DataType>(data_type));
@@ -2070,45 +2321,36 @@ gen_field_meta(int64_t collection_id = 1,
 inline std::shared_ptr<Schema>
 gen_all_data_types_schema() {
     auto schema = std::make_shared<milvus::Schema>();
-    auto bool_field =
-        schema->AddDebugField("bool", milvus::DataType::BOOL, true);
-    auto int8_field =
-        schema->AddDebugField("int8", milvus::DataType::INT8, true);
-    auto int16_field =
-        schema->AddDebugField("int16", milvus::DataType::INT16, true);
-    auto int32_field =
-        schema->AddDebugField("int32", milvus::DataType::INT32, true);
+    schema->AddDebugField("bool", milvus::DataType::BOOL, true);
+    schema->AddDebugField("int8", milvus::DataType::INT8, true);
+    schema->AddDebugField("int16", milvus::DataType::INT16, true);
+    schema->AddDebugField("int32", milvus::DataType::INT32, true);
     auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
-    auto float_field =
-        schema->AddDebugField("float", milvus::DataType::FLOAT, true);
-    auto double_field =
-        schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
-    auto timestamptz_field = schema->AddDebugField(
-        "timestamptz", milvus::DataType::TIMESTAMPTZ, true);
-    auto varchar_field =
-        schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
-    auto json_field =
-        schema->AddDebugField("json", milvus::DataType::JSON, true);
-    auto int_array_field = schema->AddDebugField(
+    schema->AddDebugField("float", milvus::DataType::FLOAT, true);
+    schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
+    schema->AddDebugField("timestamptz", milvus::DataType::TIMESTAMPTZ, true);
+    schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
+    schema->AddDebugField("json", milvus::DataType::JSON, true);
+    schema->AddDebugField(
         "int_array", milvus::DataType::ARRAY, milvus::DataType::INT8, true);
-    auto long_array_field = schema->AddDebugField(
+    schema->AddDebugField(
         "long_array", milvus::DataType::ARRAY, milvus::DataType::INT64, true);
-    auto bool_array_field = schema->AddDebugField(
+    schema->AddDebugField(
         "bool_array", milvus::DataType::ARRAY, milvus::DataType::BOOL, true);
-    auto string_array_field = schema->AddDebugField("string_array",
-                                                    milvus::DataType::ARRAY,
-                                                    milvus::DataType::VARCHAR,
-                                                    true);
-    auto double_array_field = schema->AddDebugField("double_array",
-                                                    milvus::DataType::ARRAY,
-                                                    milvus::DataType::DOUBLE,
-                                                    true);
-    auto float_array_field = schema->AddDebugField(
+    schema->AddDebugField("string_array",
+                          milvus::DataType::ARRAY,
+                          milvus::DataType::VARCHAR,
+                          true);
+    schema->AddDebugField("double_array",
+                          milvus::DataType::ARRAY,
+                          milvus::DataType::DOUBLE,
+                          true);
+    schema->AddDebugField(
         "float_array", milvus::DataType::ARRAY, milvus::DataType::FLOAT, true);
-    auto vec = schema->AddDebugField("embeddings",
-                                     milvus::DataType::VECTOR_FLOAT,
-                                     128,
-                                     knowhere::metric::L2);
+    schema->AddDebugField("embeddings",
+                          milvus::DataType::VECTOR_FLOAT,
+                          128,
+                          knowhere::metric::L2);
     schema->set_primary_field_id(int64_field);
     return schema;
 }
@@ -2116,11 +2358,11 @@ gen_all_data_types_schema() {
 inline SchemaPtr
 GenChunkedSegmentTestSchema(bool pk_is_string) {
     auto schema = std::make_shared<Schema>();
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64, true);
+    schema->AddDebugField("int64", DataType::INT64, true);
     auto pk_fid = schema->AddDebugField(
         "pk", pk_is_string ? DataType::VARCHAR : DataType::INT64, false);
-    auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR, true);
-    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR, true);
+    schema->AddDebugField("string1", DataType::VARCHAR, true);
+    schema->AddDebugField("string2", DataType::VARCHAR, true);
     schema->AddField(FieldName("ts"),
                      TimestampFieldID,
                      DataType::INT64,

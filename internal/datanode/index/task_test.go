@@ -43,6 +43,7 @@ type IndexBuildTaskSuite struct {
 	partitionID  int64
 	segmentID    int64
 	dataPath     string
+	rootPath     string
 
 	numRows int
 	dim     int
@@ -53,7 +54,8 @@ func (suite *IndexBuildTaskSuite) SetupSuite() {
 	suite.collectionID = 1000
 	suite.partitionID = 1001
 	suite.segmentID = 1002
-	suite.dataPath = "/tmp/milvus/data/1000/1001/1002/3/1"
+	suite.rootPath = suite.T().TempDir() + "/data"
+	suite.dataPath = suite.rootPath + "/1000/1001/1002/3/1"
 	suite.numRows = 100
 	suite.dim = 128
 }
@@ -101,7 +103,7 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 		TypeParams:   []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
 		NumRows:      int64(suite.numRows),
 		StorageConfig: &indexpb.StorageConfig{
-			RootPath:    "/tmp/milvus/data",
+			RootPath:    suite.rootPath,
 			StorageType: "local",
 		},
 		CollectionID: 1,
@@ -202,7 +204,7 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 		},
 		Version: 1,
 		StorageConfig: &indexpb.StorageConfig{
-			RootPath:    "/tmp/milvus/data",
+			RootPath:    suite.T().TempDir() + "/data",
 			StorageType: "local",
 		},
 		Dim: 1,

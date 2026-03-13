@@ -80,6 +80,10 @@ func newServerHandler(s *Server) *ServerHandler {
 }
 
 // GetDataVChanPositions gets vchannel latest positions with provided dml channel names for DataNode.
+// unflushend segmentIDs ---> L1, growing segments
+// flushend segmentIDs   ---> L1&L2, flushed segments
+// dropped segmentIDs    ---> dropped segments
+// level zero segmentIDs ---> L0 segments
 func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID UniqueID) *datapb.VchannelInfo {
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 	log.Info("GetDataVChanPositions",
@@ -88,6 +92,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 		zap.Int("numOfSegments", len(segments)),
 	)
 	var (
+		levelZeroIDs = make(typeutil.UniqueSet)
 		flushedIDs   = make(typeutil.UniqueSet)
 		unflushedIDs = make(typeutil.UniqueSet)
 		droppedIDs   = make(typeutil.UniqueSet)
@@ -104,12 +109,14 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 			continue
 		}
 
-		if s.GetState() == commonpb.SegmentState_Dropped {
+		switch {
+		case s.GetState() == commonpb.SegmentState_Dropped:
 			droppedIDs.Insert(s.GetID())
-			continue
-		} else if s.GetState() == commonpb.SegmentState_Flushing || s.GetState() == commonpb.SegmentState_Flushed {
+		case s.GetLevel() == datapb.SegmentLevel_L0:
+			levelZeroIDs.Insert(s.GetID())
+		case isFlushState(s.GetState()):
 			flushedIDs.Insert(s.GetID())
-		} else {
+		default:
 			unflushedIDs.Insert(s.GetID())
 		}
 	}
@@ -121,6 +128,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 		FlushedSegmentIds:   flushedIDs.Collect(),
 		UnflushedSegmentIds: unflushedIDs.Collect(),
 		DroppedSegmentIds:   droppedIDs.Collect(),
+		LevelZeroSegmentIds: levelZeroIDs.Collect(),
 	}
 }
 
@@ -214,20 +222,10 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	// ================================================
 
 	segmentIndexed := func(segID UniqueID) bool {
-		return indexed.Contain(segID) || (validSegmentInfos[segID].GetIsSorted() && validSegmentInfos[segID].GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64())
+		return indexed.Contain(segID) || ((validSegmentInfos[segID].GetIsSorted() || validSegmentInfos[segID].GetIsSortedByNamespace()) && validSegmentInfos[segID].GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64())
 	}
 
 	flushedIDs, droppedIDs = retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, segmentIndexed)
-
-	log.Info("GetQueryVChanPositions",
-		zap.Int64("collectionID", channel.GetCollectionID()),
-		zap.String("channel", channel.GetName()),
-		zap.Int("numOfSegments", len(segments)),
-		zap.Int("result flushed", len(flushedIDs)),
-		zap.Int("result growing", len(growingIDs)),
-		zap.Int("result L0", len(levelZeroIDs)),
-		zap.Any("partition stats", partStatsVersionsMap),
-	)
 
 	seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
 	// if no l0 segment exist, use checkpoint as delete checkpoint
@@ -477,10 +475,6 @@ func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs .
 	var seekPosition *msgpb.MsgPosition
 	seekPosition = h.s.meta.GetChannelCheckpoint(channel.GetName())
 	if seekPosition != nil {
-		log.Info("channel seek position set from channel checkpoint meta",
-			zap.Uint64("posTs", seekPosition.Timestamp),
-			zap.Stringer("posWALName", seekPosition.WALName),
-			zap.Time("posTime", tsoutil.PhysicalTime(seekPosition.GetTimestamp())))
 		return seekPosition
 	}
 
@@ -857,18 +851,19 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 			indexParams = append(indexParams, h.s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 
 			indexesFiles = append(indexesFiles, &indexpb.IndexFilePathInfo{
-				SegmentID:           segID,
-				FieldID:             fieldID,
-				IndexID:             segIdx.IndexID,
-				BuildID:             segIdx.BuildID,
-				IndexName:           indexName,
-				IndexParams:         indexParams,
-				IndexFilePaths:      indexFilePaths,
-				SerializedSize:      segIdx.IndexSerializedSize,
-				MemSize:             segIdx.IndexMemSize,
-				IndexVersion:        segIdx.IndexVersion,
-				NumRows:             segIdx.NumRows,
-				CurrentIndexVersion: segIdx.CurrentIndexVersion,
+				SegmentID:                 segID,
+				FieldID:                   fieldID,
+				IndexID:                   segIdx.IndexID,
+				BuildID:                   segIdx.BuildID,
+				IndexName:                 indexName,
+				IndexParams:               indexParams,
+				IndexFilePaths:            indexFilePaths,
+				SerializedSize:            segIdx.IndexSerializedSize,
+				MemSize:                   segIdx.IndexMemSize,
+				IndexVersion:              segIdx.IndexVersion,
+				NumRows:                   segIdx.NumRows,
+				CurrentIndexVersion:       segIdx.CurrentIndexVersion,
+				CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
 			})
 		}
 	}

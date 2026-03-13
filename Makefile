@@ -26,10 +26,8 @@ mode = Release
 # macOS (Darwin) does not support aio, so disable disk_index
 ifeq ($(OS),Darwin)
     use_disk_index = OFF
-    planparser_rpath_flag = -Wl,-rpath,@loader_path
 else
     use_disk_index = ON
-    planparser_rpath_flag = -Wl,-rpath,'$$ORIGIN'
 endif
 
 # Allow manual override via disk_index variable
@@ -40,8 +38,8 @@ endif
 use_asan = OFF
 ifeq ($(USE_ASAN), ON)
 	use_asan = ${USE_ASAN}
-	CGO_LDFLAGS := $(shell go env CGO_LDFLAGS) -fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address
-	CGO_CFLAGS := $(shell go env CGO_CFLAGS) -fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address
+	CGO_LDFLAGS += -fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address
+	CGO_CFLAGS += -fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address
 	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),use_asan
 endif
 
@@ -90,7 +88,13 @@ INSTALL_PROTOC_GEN_GO_GRPC := $(findstring $(PROTOC_GEN_GO_GRPC_VERSION),$(PROTO
 
 index_engine = knowhere
 
-export GIT_BRANCH=master
+# Ensure git works inside containers where .git is owned by a different user.
+# Must use git config --global because git's ownership check runs before
+# both -c options and GIT_CONFIG_COUNT env vars are processed.
+$(shell git config --global --add safe.directory '*' 2>/dev/null)
+
+export GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -v '^HEAD$$' || echo "$${GITHUB_REF_NAME:-$${BRANCH_NAME:-unknown}}")
+GIT_BRANCH_SAFE=$(shell echo "$(GIT_BRANCH)" | tr '/' '-')
 
 ifeq (${ENABLE_AZURE}, false)
 	AZURE_OPTION := -Z
@@ -102,14 +106,14 @@ build-go:
 	@echo "Building Milvus ..."
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-		CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
+		CGO_LDFLAGS="$${CGO_LDFLAGS} $(CGO_LDFLAGS)" CGO_CFLAGS="$${CGO_CFLAGS} $(CGO_CFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
 		-tags $(MILVUS_GO_BUILD_TAGS) -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 milvus-gpu: build-cpp-gpu print-gpu-build-info
 	@echo "Building Milvus-gpu ..."
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-		CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS_GPU)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
+		CGO_LDFLAGS="$${CGO_LDFLAGS} $(CGO_LDFLAGS)" CGO_CFLAGS="$${CGO_CFLAGS} $(CGO_CFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS_GPU)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
 		-tags "$(MILVUS_GO_BUILD_TAGS),cuda" -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 get-build-deps:
@@ -202,7 +206,7 @@ lint-fix: getdeps
 	@$(INSTALL_PATH)/gci write client/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@$(INSTALL_PATH)/gci write tests/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@echo "Running golangci-lint auto-fix"
-	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --fix --timeout=30m --config $(PWD)/.golangci.yml; 
+	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --fix --timeout=30m --config $(PWD)/.golangci.yml;
 	@source $(PWD)/scripts/setenv.sh && cd pkg && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --fix --timeout=30m --config $(PWD)/.golangci.yml
 	@source $(PWD)/scripts/setenv.sh && cd client && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --fix --timeout=30m --config $(PWD)/client/.golangci.yml
 
@@ -232,7 +236,7 @@ meta-migration:
 	@echo "Building migration tool ..."
 	@source $(PWD)/scripts/setenv.sh && \
     		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-    		GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
+    		GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
     		-tags dynamic -o $(INSTALL_PATH)/meta-migration $(MIGRATION_PATH)/main.go 1>/dev/null
 
 INTERATION_PATH = $(PWD)/tests/integration
@@ -245,16 +249,16 @@ BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu
 BUILD_TIME = $(shell date -u)
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
 GO_VERSION = $(shell go version)
+BUILD_DATE = $(shell date -u +%Y%m%d)
+MILVUS_VERSION := $(shell tag=$$(git describe --exact-match --tags 2>/dev/null) && echo "$$tag" | sed 's/^v//' || echo "$(GIT_BRANCH_SAFE)-$(BUILD_DATE)-$(GIT_COMMIT)")
 
 print-build-info:
-	$(shell git config --global --add safe.directory '*')
 	@echo "Build Tag: $(BUILD_TAGS)"
 	@echo "Build Time: $(BUILD_TIME)"
 	@echo "Git Commit: $(GIT_COMMIT)"
 	@echo "Go Version: $(GO_VERSION)"
 
 print-gpu-build-info:
-	$(shell git config --global --add safe.directory '*')
 	@echo "Build Tag: $(BUILD_TAGS_GPU)"
 	@echo "Build Time: $(BUILD_TIME)"
 	@echo "Git Commit: $(GIT_COMMIT)"
@@ -280,19 +284,19 @@ generated-proto: download-milvus-proto build-3rdparty get-proto-deps
 	@echo "Generate proto ..."
 	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
 
-build-cpp: generated-proto plan-parser-so
+build-cpp: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 
-build-cpp-gpu: generated-proto plan-parser-so
+build-cpp-gpu: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp gpu library ... "
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 
-build-cpp-with-unittest: generated-proto plan-parser-so
+build-cpp-with-unittest: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with unittest ... "
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 
-build-cpp-with-coverage: generated-proto plan-parser-so
+build-cpp-with-coverage: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with coverage and unittest ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 
@@ -400,18 +404,8 @@ run-test-cpp:
 	@echo $(PWD)/scripts/run_cpp_unittest.sh arg=${filter}
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh arg=${filter})
 
-plan-parser-so:
-	@echo "Building plan parser shared library ..."
-	@source $(PWD)/scripts/setenv.sh && \
-		mkdir -p $(PWD)/internal/core/output/lib $(PWD)/internal/core/output/include && \
-		go env -w CGO_ENABLED="1" && \
-		GO111MODULE=on $(GO) build -buildmode=c-shared -o $(PWD)/internal/core/output/lib/libmilvus-planparser.so $(PWD)/internal/parser/planparserv2/cwrapper/wrapper.go && \
-		mv $(PWD)/internal/core/output/lib/libmilvus-planparser.h $(PWD)/internal/core/output/include/libmilvus-planparser.h && \
-		cp $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.h $(PWD)/internal/core/output/include/ && \
-		g++ -std=c++17 -shared -fPIC -o $(PWD)/internal/core/output/lib/libmilvus-planparser-cpp.so $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.cpp \
-			-I$(PWD)/internal/core/output/include \
-			-L$(PWD)/internal/core/output/lib -lmilvus-planparser \
-			$(planparser_rpath_flag)
+plan-parser-lib:
+	@(env bash $(PWD)/scripts/build_plan_parser.sh)
 
 # Run code coverage.
 codecov: codecov-go codecov-cpp
@@ -502,6 +496,8 @@ generate-mockery-types: getdeps
 
 generate-mockery-rootcoord: getdeps
 	$(INSTALL_PATH)/mockery --name=IMetaTable --dir=$(PWD)/internal/rootcoord --output=$(PWD)/internal/rootcoord/mocks --filename=meta_table.go --with-expecter --outpkg=mockrootcoord
+	$(INSTALL_PATH)/mockery --name=FileResourceObserver --dir=$(PWD)/internal/rootcoord --output=$(PWD)/internal/rootcoord --filename=mock_file_resource_observer.go --with-expecter --structname=MockFileResourceObserver  --inpackage
+
 
 generate-mockery-proxy: getdeps
 	$(INSTALL_PATH)/mockery --config $(PWD)/internal/proxy/.mockery.yaml
@@ -587,7 +583,7 @@ mmap-migration:
 	@echo "Building migration tool ..."
 	@source $(PWD)/scripts/setenv.sh && \
     		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-    		GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
+    		GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
     		-tags dynamic -o $(INSTALL_PATH)/mmap-migration $(MMAP_MIGRATION_PATH)/main.go 1>/dev/null
 
 generate-parser:

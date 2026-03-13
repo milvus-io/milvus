@@ -15,11 +15,14 @@
 // limitations under the License.
 
 #include "segcore/arrow_fs_c.h"
-#include "milvus-storage/filesystem/fs.h"
+
+#include <exception>
+#include <string>
+
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "storage/loon_ffi/property_singleton.h"
-#include "storage/loon_ffi/util.h"
 
 CStatus
 InitLocalArrowFileSystemSingleton(const char* c_path) {
@@ -66,6 +69,10 @@ InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config) {
             std::string(c_storage_config.gcp_credential_json);
         conf.use_custom_part_upload = c_storage_config.use_custom_part_upload;
         conf.max_connections = c_storage_config.max_connections;
+        if (c_storage_config.tls_min_version != nullptr) {
+            conf.tls_min_version =
+                std::string(c_storage_config.tls_min_version);
+        }
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
 
         milvus::storage::LoonFFIPropertiesSingleton::GetInstance().Init(

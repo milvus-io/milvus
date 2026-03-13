@@ -72,9 +72,9 @@ cd ${ROOT}/tests/restful_client
 
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-  timeout "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m L0 -n 6 --timeout 180 --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
+  timeout "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m L0 -n 6 --timeout 180
 else
-  pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m L0 -n 6 --timeout 180 --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
+  pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m L0 -n 6 --timeout 180
 fi
 
 # Run restful test v2
@@ -82,17 +82,17 @@ cd ${ROOT}/tests/restful_client_v2
 
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-  timeout "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m L0 -n 6 --timeout 360 --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
+  timeout "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m L0 -n 6 --timeout 360
 else
-  pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m L0 -n 6 --timeout 360 --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
+  pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m L0 -n 6 --timeout 360
 fi
 
 if [[ "${MILVUS_HELM_RELEASE_NAME}" != *"msop"* ]]; then
   if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-    timeout "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m BulkInsert -n 6 --timeout 360 --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
+    timeout "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m BulkInsert -n 6 --timeout 360
   else
-    pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m BulkInsert -n 6 --timeout 360 --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
+    pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m BulkInsert -n 6 --timeout 360
   fi
 fi
 
@@ -101,10 +101,8 @@ cd ${ROOT}/tests/python_client
 # Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-  timeout "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME}\
-    --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup ${@:-}
+  timeout "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} --dist loadgroup ${@:-}
 else
-  pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME}\
-    --html=${CI_LOG_PATH}/report.html --self-contained-html --dist loadgroup ${@:-}
+  pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} --dist loadgroup ${@:-}
 fi
 

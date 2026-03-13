@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "common/common_type_c.h"
 #include "common/type_c.h"
 
 #ifdef __cplusplus

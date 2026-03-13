@@ -25,6 +25,7 @@
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "cachinglayer/lrucache/DList.h"
 #include "index/Index.h"
+#include "index/VectorIndex.h"
 namespace milvus {
 
 using namespace cachinglayer;
@@ -93,7 +94,7 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
     }
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::Chunk>>>
-    get_cells(const std::vector<cid_t>& cids) override {
+    get_cells(milvus::OpContext* ctx, const std::vector<cid_t>& cids) override {
         std::vector<std::pair<cid_t, std::unique_ptr<milvus::Chunk>>> res;
         res.reserve(cids.size());
         for (auto cid : cids) {
@@ -169,7 +170,7 @@ class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
     }
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::GroupChunk>>>
-    get_cells(const std::vector<cid_t>& cids) override {
+    get_cells(milvus::OpContext* ctx, const std::vector<cid_t>& cids) override {
         std::vector<std::pair<cid_t, std::unique_ptr<milvus::GroupChunk>>> res;
         res.reserve(cids.size());
         for (auto cid : cids) {
@@ -234,7 +235,7 @@ class TestIndexTranslator : public Translator<milvus::index::IndexBase> {
     }
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
-    get_cells(const std::vector<cid_t>& cids) override {
+    get_cells(milvus::OpContext* ctx, const std::vector<cid_t>& cids) override {
         std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
             res;
         res.reserve(cids.size());
@@ -265,6 +266,10 @@ inline std::map<std::string, std::string>
 GenIndexParams(const milvus::index::IndexBase* index) {
     std::map<std::string, std::string> index_params;
     index_params["index_type"] = index->Type();
+    if (auto vec_index =
+            dynamic_cast<const milvus::index::VectorIndex*>(index)) {
+        index_params["metric_type"] = vec_index->GetMetricType();
+    }
     return index_params;
 }
 

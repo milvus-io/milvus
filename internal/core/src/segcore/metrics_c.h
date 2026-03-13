@@ -13,8 +13,6 @@
 extern "C" {
 #endif
 
-#include <stdint.h>
-
 char*
 GetKnowhereMetrics();
 

@@ -15,7 +15,16 @@
 // limitations under the License.
 
 #include "ProjectNode.h"
+
+#include <algorithm>
+#include <utility>
+
+#include "common/EasyAssert.h"
+#include "exec/QueryContext.h"
 #include "exec/expression/Utils.h"
+#include "exec/operator/Operator.h"
+#include "plan/PlanNode.h"
+#include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
 
 namespace milvus {
@@ -50,9 +59,32 @@ PhyProjectNode::GetOutput() {
     auto col_input = GetColumnVector(input_);
     // raw data view
     TargetBitmapView raw_data_view(col_input->GetRawData(), col_input->size());
+
+    // When no fields need to be projected (e.g., count(*) only), skip
+    // find_first and count valid rows directly from the bitmap.
+    // find_first deduplicates by PK in growing segments (OffsetOrderedMap),
+    // which would undercount rows with duplicate PKs.
+    if (fields_to_project_.empty()) {
+        auto valid_count =
+            static_cast<int64_t>(col_input->size()) - raw_data_view.count();
+        is_finished_ = true;
+        if (valid_count == 0) {
+            return nullptr;
+        }
+        auto row_vector = std::make_shared<RowVector>(std::vector<VectorPtr>{});
+        row_vector->resize(valid_count);
+        return row_vector;
+    }
+
     auto result_pair = segment_->find_first(-1, raw_data_view);
     auto& selected_offsets = result_pair.first;
     auto selected_count = selected_offsets.size();
+    // When all rows are filtered out, return nullptr.
+    // Driver requires GetOutput to return nullptr or a non-empty vector.
+    if (selected_count == 0) {
+        is_finished_ = true;
+        return nullptr;
+    }
     auto row_type = OutputType();
     std::vector<VectorPtr> column_vectors;
     column_vectors.reserve(fields_to_project_.size());

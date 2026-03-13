@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -558,7 +559,7 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 				segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
 				segment.GetLevel() != datapb.SegmentLevel_L2 && // ignore l2 segment
 				!segment.GetIsInvisible() &&
-				segment.GetIsSorted()
+				(segment.GetIsSorted() || segment.GetIsSortedByNamespace())
 		}),
 	}
 
@@ -794,29 +795,58 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 		// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
 		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, index := range indexIDToSegIdxes {
-			if index.CurrentIndexVersion < t.indexEngineVersionManager.GetCurrentIndexEngineVersion() &&
-				len(index.IndexFileKeys) > 0 {
+			if len(index.IndexFileKeys) == 0 {
+				continue
+			}
+
+			indexParams := t.meta.indexMeta.GetIndexParams(segment.CollectionID, index.IndexID)
+			indexType := GetIndexType(indexParams)
+			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
+
+			var currentEngineVersion int32
+			if isVectorIndex {
+				currentEngineVersion = t.indexEngineVersionManager.GetCurrentIndexEngineVersion()
+			} else {
+				currentEngineVersion = t.indexEngineVersionManager.GetCurrentScalarIndexEngineVersion()
+			}
+
+			if index.CurrentIndexVersion < currentEngineVersion {
 				log.Info("index version is too old, trigger compaction",
 					zap.Int64("segmentID", segment.ID),
 					zap.Int64("indexID", index.IndexID),
+					zap.String("indexType", indexType),
+					zap.Bool("isVectorIndex", isVectorIndex),
 					zap.Strings("indexFileKeys", index.IndexFileKeys),
 					zap.Int32("currentIndexVersion", index.CurrentIndexVersion),
-					zap.Int32("currentEngineVersion", t.indexEngineVersionManager.GetCurrentIndexEngineVersion()))
+					zap.Int32("currentEngineVersion", currentEngineVersion))
 				return true
 			}
 		}
 	}
 
-	// enable force rebuild index with target index version
+	// enable force rebuild index with target index version (only for vector index)
 	if Params.DataCoordCfg.ForceRebuildSegmentIndex.GetAsBool() && Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt64() != -1 {
 		// index version of segment lower than current version and IndexFileKeys should have value, trigger compaction
 		indexIDToSegIdxes := t.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, index := range indexIDToSegIdxes {
-			if index.CurrentIndexVersion != Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32() &&
-				len(index.IndexFileKeys) > 0 {
+			if len(index.IndexFileKeys) == 0 {
+				continue
+			}
+
+			indexParams := t.meta.indexMeta.GetIndexParams(segment.CollectionID, index.IndexID)
+			indexType := GetIndexType(indexParams)
+			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
+
+			// ForceRebuildSegmentIndex with TargetVecIndexVersion only applies to vector indexes
+			if !isVectorIndex {
+				continue
+			}
+
+			if index.CurrentIndexVersion != Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32() {
 				log.Info("index version is not equal to target vec index version, trigger compaction",
 					zap.Int64("segmentID", segment.ID),
 					zap.Int64("indexID", index.IndexID),
+					zap.String("indexType", indexType),
 					zap.Strings("indexFileKeys", index.IndexFileKeys),
 					zap.Int32("currentIndexVersion", index.CurrentIndexVersion),
 					zap.Int32("targetIndexVersion", Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32()))
@@ -859,10 +889,10 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, 
 	return small
 }
 
-func canTriggerSortCompaction(segment *SegmentInfo, isPartitionIsolationEnabled bool) bool {
+func canTriggerSortCompaction(segment *SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Flushed &&
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		(!segment.GetIsSorted() || (isPartitionIsolationEnabled && !segment.GetIsPartitionKeySorted())) &&
+		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) &&
 		!segment.GetIsImporting() &&
 		!segment.isCompacting
 }

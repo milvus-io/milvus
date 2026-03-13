@@ -10,9 +10,24 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SearchOnIndex.h"
-#include "Utils.h"
-#include "exec/operator/Utils.h"
+
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <vector>
+
 #include "CachedSearchIterator.h"
+#include "Utils.h"
+#include "common/Consts.h"
+#include "common/OffsetMapping.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Types.h"
+#include "exec/operator/Utils.h"
+#include "index/VectorIndex.h"
+#include "knowhere/dataset.h"
+#include "query/helper.h"
 
 namespace milvus::query {
 void
@@ -36,6 +51,15 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     if (offset_mapping.IsEnabled()) {
         transformed_bitset = TransformBitset(bitset, offset_mapping);
         search_bitset = BitsetView(transformed_bitset);
+        if (offset_mapping.GetValidCount() == 0) {
+            // All vectors are null, return empty result
+            auto total_num = num_queries * search_conf.topk_;
+            search_result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
+            search_result.distances_.resize(total_num, 0.0f);
+            search_result.total_nq_ = num_queries;
+            search_result.unity_topK_ = search_conf.topk_;
+            return;
+        }
     }
 
     if (milvus::exec::PrepareVectorIteratorsFromIndex(search_conf,

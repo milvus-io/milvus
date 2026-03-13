@@ -63,7 +63,7 @@ func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.Delet
 }
 
 func (dNode *deleteNode) Operate(in Msg) Msg {
-	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Dec()
+	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.DeleteLabel).Dec()
 	nodeMsg := in.(*deleteNodeMsg)
 
 	if len(nodeMsg.deleteMsgs) > 0 {

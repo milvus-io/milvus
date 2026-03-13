@@ -22,7 +22,6 @@
 
 using namespace milvus::segcore;
 using namespace milvus;
-namespace pb = milvus::proto;
 class ChunkVectorTest : public ::testing::TestWithParam<bool> {
  public:
     void
@@ -250,13 +249,11 @@ TEST_P(ChunkVectorTest, SearchWithMmap) {
         is_sparse ? DataType::VECTOR_SPARSE_U32_F32 : DataType::VECTOR_FLOAT;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto random = schema->AddDebugField("random", DataType::DOUBLE);
-    auto vec = schema->AddDebugField("embeddings", data_type, 128, metric_type);
+    schema->AddDebugField("random", DataType::DOUBLE);
+    schema->AddDebugField("embeddings", data_type, 128, metric_type);
     schema->set_primary_field_id(pk);
 
     auto segment = CreateGrowingSegment(schema, empty_index_meta, 11, config);
-    auto segmentImplPtr = dynamic_cast<SegmentGrowingImpl*>(segment.get());
-
     milvus::proto::plan::PlanNode plan_node;
     auto vector_anns = plan_node.mutable_vector_anns();
     if (is_sparse) {
@@ -287,16 +284,6 @@ TEST_P(ChunkVectorTest, SearchWithMmap) {
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
                         dataset.raw_);
-        const VectorBase* field_data = nullptr;
-        if (is_sparse) {
-            field_data = segmentImplPtr->get_insert_record()
-                             .get_data<milvus::SparseFloatVector>(vec);
-        } else {
-            field_data = segmentImplPtr->get_insert_record()
-                             .get_data<milvus::FloatVector>(vec);
-        }
-        auto inserted = (i + 1) * per_batch;
-
         auto num_queries = 5;
         auto ph_group_raw =
             is_sparse ? CreateSparseFloatPlaceholderGroup(num_queries)
@@ -327,30 +314,15 @@ TEST_F(ChunkVectorTest, QueryWithMmap) {
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      term_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Int64
-                                        >
-                                        values: <
-                                          int64_val: 1
-                                        >
-                                        values: <
-                                          int64_val: 2
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.ParseSearch(
+        "counter in [1, 2]",  // term expression: field_id 102 is "counter"
+        "fakevec",            // vector field name (field_id 100)
+        5,                    // topK
+        "L2",                 // metric_type
+        R"({"nprobe": 10})",  // search_params
+        3);                   // round_decimal
+
     int64_t N = 4000;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta, 11, config);
@@ -360,8 +332,6 @@ TEST_F(ChunkVectorTest, QueryWithMmap) {
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
                     dataset.raw_);
-
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan = milvus::query::CreateSearchPlanByExpr(
         schema, plan_str.data(), plan_str.size());
     auto num_queries = 3;

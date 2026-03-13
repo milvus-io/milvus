@@ -13,19 +13,26 @@
 // limitations under the License.
 
 #include "segcore/packed_reader_c.h"
-#include "milvus-storage/packed/reader.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "storage/PluginLoader.h"
-#include "storage/KeyRetriever.h"
-#include "storage/StorageV2FSCache.h"
 
 #include <arrow/c/bridge.h>
-#include <arrow/filesystem/filesystem.h>
 #include <arrow/status.h>
+#include <exception>
 #include <memory>
+#include <string>
+#include <vector>
+
+#include "arrow/c/abi.h"
+#include "arrow/record_batch.h"
+#include "arrow/result.h"
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/packed/reader.h"
 #include "monitor/scope_metric.h"
+#include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
+#include "storage/StorageV2FSCache.h"
+#include "storage/plugin/PluginInterface.h"
 
 CStatus
 NewPackedReaderWithStorageConfig(char** paths,
@@ -60,6 +67,9 @@ NewPackedReaderWithStorageConfig(char** paths,
             std::string(c_storage_config.gcp_credential_json),
             c_storage_config.use_custom_part_upload,
             c_storage_config.max_connections,
+            c_storage_config.tls_min_version != nullptr
+                ? std::string(c_storage_config.tls_min_version)
+                : "",
         });
         if (!trueFs) {
             return milvus::FailureCStatus(

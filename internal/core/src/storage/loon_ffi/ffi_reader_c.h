@@ -18,9 +18,10 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+
 #include "common/common_type_c.h"
 #include "common/type_c.h"
-#include <arrow/c/abi.h>
 #include "milvus-storage/ffi_c.h"
 
 /**

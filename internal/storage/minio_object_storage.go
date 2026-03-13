@@ -119,5 +119,5 @@ func (minioObjectStorage *MinioObjectStorage) CopyObject(ctx context.Context, bu
 		Object: dstObjectName,
 	}
 	_, err := minioObjectStorage.Client.CopyObject(ctx, dstOpts, srcOpts)
-	return checkObjectStorageError(dstObjectName, err)
+	return checkObjectStorageError(srcObjectName, err)
 }

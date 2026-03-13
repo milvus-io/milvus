@@ -504,6 +504,9 @@ CreateArrowBuilder(DataType data_type,
             return std::make_shared<arrow::FixedSizeBinaryBuilder>(
                 arrow::fixed_size_binary(dim * sizeof(int8)));
         }
+        case DataType::VECTOR_SPARSE_U32_F32: {
+            return std::make_shared<arrow::BinaryBuilder>();
+        }
         case DataType::VECTOR_ARRAY: {
             AssertInfo(dim > 0, "invalid dim value");
             AssertInfo(element_type != DataType::NONE,
@@ -1176,6 +1179,7 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
             std::string(storage_config.gcp_credential_json);
         conf.use_custom_part_upload = true;
         conf.max_connections = storage_config.max_connections;
+        conf.tls_min_version = storage_config.tls_min_version;
     }
     return StorageV2FSCache::Instance().Get(conf);
 }
@@ -1316,11 +1320,9 @@ FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
     std::vector<std::string> batch_files;
     auto FetchRawData = [&]() {
         auto fds = GetObjectData(cm, batch_files);
-        // Wait for all futures and collect exceptions to ensure all threads complete
-        auto codecs = storage::WaitAllFutures(std::move(fds));
-        for (auto& codec : codecs) {
+        ProcessFuturesInOrder(fds, [&](std::unique_ptr<DataCodec> codec) {
             field_datas.emplace_back(codec->GetFieldData());
-        }
+        });
     };
 
     auto parallel_degree =
@@ -1586,8 +1588,8 @@ GetFieldDatasFromManifest(
             continue;
         }
 
-        auto chunked_array =
-            std::make_shared<arrow::ChunkedArray>(batch->column(0));
+        auto chunked_array = std::make_shared<arrow::ChunkedArray>(
+            batch->GetColumnByName(field_id_str));
         auto field_data = CreateFieldData(data_type.value(),
                                           element_type.value(),
                                           batch->schema()->field(0)->nullable(),

@@ -14,44 +14,56 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <folly/Conv.h>
+#include <arrow/api.h>
+#include <arrow/array/array_base.h>
+#include <arrow/array/builder_binary.h>
+#include <arrow/array/builder_primitive.h>
 #include <arrow/record_batch.h>
 #include <arrow/util/key_value_metadata.h>
-#include <gtest/gtest.h>
+#include <parquet/properties.h>
+#include <stdlib.h>
 #include <algorithm>
 #include <cstdint>
-#include "arrow/table_builder.h"
+#include <iostream>
+#include <map>
+#include <memory>
+#include <numeric>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "arrow/type_fwd.h"
-#include "common/FieldDataInterface.h"
+#include "common/ArrowDataWrapper.h"
+#include "common/Channel.h"
+#include "common/EasyAssert.h"
+#include "common/IndexMeta.h"
+#include "common/LoadInfo.h"
 #include "common/Schema.h"
+#include "common/TracerBase.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
+#include "milvus-storage/common/config.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/packed/writer.h"
 #include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/packed/writer.h"
+#include "pb/common.pb.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
-#include "pb/schema.pb.h"
-#include <iostream>
-#include <memory>
-#include <string>
-#include <vector>
 
 using namespace milvus;
 using namespace milvus::segcore;
-namespace pb = milvus::proto;
 
 class TestGrowingStorageV2 : public ::testing::Test {
     void
     SetUp() override {
-        auto conf = milvus_storage::ArrowFileSystemConfig();
-        conf.storage_type = "local";
-        conf.root_path = path_;
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
         fs_ = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
         SetUpCommonData();
@@ -128,7 +140,7 @@ class TestGrowingStorageV2 : public ::testing::Test {
     std::shared_ptr<arrow::Schema> schema_;
     std::shared_ptr<arrow::RecordBatch> record_batch_;
     std::shared_ptr<arrow::Table> table_;
-    std::string path_ = "/tmp";
+    std::string path_ = TestLocalPath;
 
     std::vector<int64_t> ts_values;
     std::vector<int64_t> pk_values;
@@ -159,10 +171,9 @@ TEST_F(TestGrowingStorageV2, LoadFieldData) {
     EXPECT_TRUE(writer->Close().ok());
 
     auto schema = std::make_shared<milvus::Schema>();
-    auto ts_fid = schema->AddDebugField("ts", milvus::DataType::INT64, true);
+    schema->AddDebugField("ts", milvus::DataType::INT64, true);
     auto pk_fid = schema->AddDebugField("pk", milvus::DataType::INT64, false);
-    auto str_fid =
-        schema->AddDebugField("str", milvus::DataType::VARCHAR, true);
+    schema->AddDebugField("str", milvus::DataType::VARCHAR, true);
     schema->set_primary_field_id(pk_fid);
     auto segment =
         milvus::segcore::CreateGrowingSegment(schema, milvus::empty_index_meta);
@@ -174,6 +185,7 @@ TEST_F(TestGrowingStorageV2, LoadFieldData) {
                          std::vector<int64_t>{3000},
                          std::vector<int64_t>{3000},
                          false,
+                         "",
                          std::vector<std::string>{paths[0]}}},
         {1,
          FieldBinlogInfo{1,
@@ -181,6 +193,7 @@ TEST_F(TestGrowingStorageV2, LoadFieldData) {
                          std::vector<int64_t>{3000},
                          std::vector<int64_t>{3000},
                          false,
+                         "",
                          std::vector<std::string>{paths[1]}}},
     };
     load_info.storage_version = 2;
@@ -399,6 +412,7 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
                          std::vector<int64_t>{total_rows},
                          std::vector<int64_t>{total_rows * 4},
                          false,
+                         "",
                          std::vector<std::string>{paths[0]}}},
         {1,
          FieldBinlogInfo{1,
@@ -406,6 +420,7 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
                          std::vector<int64_t>{total_rows},
                          std::vector<int64_t>{total_rows * 4},
                          false,
+                         "",
                          std::vector<std::string>{paths[1]}}},
     };
     load_info.storage_version = 2;

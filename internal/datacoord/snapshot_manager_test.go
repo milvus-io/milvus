@@ -24,11 +24,20 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -954,8 +963,206 @@ func TestSnapshotManager_BuildChannelMapping_GetChannelsError(t *testing.T) {
 }
 
 // --- Test RestoreSnapshot ---
-// TODO: Add tests for new DataCoord-driven RestoreSnapshot flow
-// The new flow requires mocking: CreateCollection, CreatePartition, ShowCollections, etc.
+
+func TestRestoreSnapshot_ValidationFailsCloseBroadcasterBeforeRollback(t *testing.T) {
+	ctx := context.Background()
+
+	// Track call order
+	var callOrder []string
+
+	// Mock ReadSnapshotData
+	m1 := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(&SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1"},
+		Segments:     []*datapb.SegmentDescription{},
+		Indexes:      nil,
+	}, nil).Build()
+	defer m1.UnPatch()
+
+	// Mock validateCMEKCompatibility
+	m2 := mockey.Mock((*snapshotManager).validateCMEKCompatibility).Return(nil).Build()
+	defer m2.UnPatch()
+
+	// Mock RestoreCollection
+	m3 := mockey.Mock((*snapshotManager).RestoreCollection).Return(int64(200), nil).Build()
+	defer m3.UnPatch()
+
+	// Mock RestoreIndexes
+	m4 := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
+	defer m4.UnPatch()
+
+	mockAlloc := allocator.NewMockAllocator(t)
+	mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(999), nil)
+
+	sm := &snapshotManager{
+		allocator: mockAlloc,
+	}
+
+	// Mock broadcaster that tracks Close calls
+	closeCalled := 0
+	mockBroadcaster := &mockBroadcastAPI{
+		closeFn: func() {
+			closeCalled++
+			callOrder = append(callOrder, "close")
+		},
+	}
+
+	startBroadcaster := func(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
+		callOrder = append(callOrder, "start_broadcaster")
+		return mockBroadcaster, nil
+	}
+
+	rollbackCalled := false
+	rollback := func(ctx context.Context, dbName, collName string) error {
+		rollbackCalled = true
+		callOrder = append(callOrder, "rollback")
+		return nil
+	}
+
+	validateResources := func(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error {
+		callOrder = append(callOrder, "validate")
+		return errors.New("partition missing")
+	}
+
+	// Execute
+	jobID, err := sm.RestoreSnapshot(ctx, "snap1", "target_coll", "default",
+		startBroadcaster, rollback, validateResources)
+
+	// Verify
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), jobID)
+	assert.Contains(t, err.Error(), "resource validation failed")
+	assert.True(t, rollbackCalled)
+
+	// Key assertion: Close must happen BEFORE rollback
+	assert.Equal(t, []string{"start_broadcaster", "validate", "close", "rollback"}, callOrder)
+
+	// Close called exactly once (not double-closed by defer)
+	assert.Equal(t, 1, closeCalled)
+}
+
+func TestRestoreSnapshot_ValidationFailsRollbackAlsoFails(t *testing.T) {
+	ctx := context.Background()
+
+	m1 := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(&SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1"},
+		Segments:     []*datapb.SegmentDescription{},
+	}, nil).Build()
+	defer m1.UnPatch()
+
+	m2 := mockey.Mock((*snapshotManager).validateCMEKCompatibility).Return(nil).Build()
+	defer m2.UnPatch()
+
+	m3 := mockey.Mock((*snapshotManager).RestoreCollection).Return(int64(200), nil).Build()
+	defer m3.UnPatch()
+
+	m4 := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
+	defer m4.UnPatch()
+
+	mockAlloc := allocator.NewMockAllocator(t)
+	mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(999), nil)
+
+	sm := &snapshotManager{allocator: mockAlloc}
+
+	closeCalled := 0
+	mockBcast := &mockBroadcastAPI{closeFn: func() { closeCalled++ }}
+
+	startBroadcaster := func(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
+		return mockBcast, nil
+	}
+	rollback := func(ctx context.Context, dbName, collName string) error {
+		return errors.New("rollback failed too")
+	}
+	validateResources := func(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error {
+		return errors.New("validation error")
+	}
+
+	jobID, err := sm.RestoreSnapshot(ctx, "snap1", "target", "default",
+		startBroadcaster, rollback, validateResources)
+
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), jobID)
+	assert.Contains(t, err.Error(), "resource validation failed")
+	// Broadcaster closed once despite rollback also failing
+	assert.Equal(t, 1, closeCalled)
+}
+
+func TestRestoreSnapshot_ValidationPassesThenBroadcastSucceeds(t *testing.T) {
+	ctx := context.Background()
+
+	m1 := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(&SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1"},
+		Segments:     []*datapb.SegmentDescription{},
+	}, nil).Build()
+	defer m1.UnPatch()
+
+	m2 := mockey.Mock((*snapshotManager).validateCMEKCompatibility).Return(nil).Build()
+	defer m2.UnPatch()
+
+	m3 := mockey.Mock((*snapshotManager).RestoreCollection).Return(int64(200), nil).Build()
+	defer m3.UnPatch()
+
+	m4 := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
+	defer m4.UnPatch()
+
+	mockAlloc := allocator.NewMockAllocator(t)
+	mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(999), nil)
+
+	sm := &snapshotManager{allocator: mockAlloc}
+
+	closeCalled := 0
+	broadcastCalled := false
+	mockBcast := &mockBroadcastAPI{
+		closeFn:     func() { closeCalled++ },
+		broadcastFn: func() { broadcastCalled = true },
+	}
+
+	startBroadcaster := func(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
+		return mockBcast, nil
+	}
+	rollback := func(ctx context.Context, dbName, collName string) error {
+		t.Fatal("rollback should not be called on success")
+		return nil
+	}
+	validateResources := func(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error {
+		return nil // validation passes
+	}
+
+	// Mock streaming.WAL().ControlChannel() since Broadcast builds a message using it
+	mockWAL := mock_streaming.NewMockWALAccesser(t)
+	mockWAL.EXPECT().ControlChannel().Return("control_channel")
+	streaming.SetWALForTest(mockWAL)
+
+	jobID, err := sm.RestoreSnapshot(ctx, "snap1", "target", "default",
+		startBroadcaster, rollback, validateResources)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(999), jobID)
+	assert.True(t, broadcastCalled)
+	// Close called once by defer (normal cleanup)
+	assert.Equal(t, 1, closeCalled)
+}
+
+// mockBroadcastAPI implements broadcaster.BroadcastAPI for testing.
+type mockBroadcastAPI struct {
+	closeFn     func()
+	broadcastFn func()
+}
+
+func (m *mockBroadcastAPI) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	if m.broadcastFn != nil {
+		m.broadcastFn()
+	}
+	return &types.BroadcastAppendResult{}, nil
+}
+
+func (m *mockBroadcastAPI) Close() {
+	if m.closeFn != nil {
+		m.closeFn()
+	}
+}
+
+// Ensure mockBroadcastAPI satisfies the broadcaster.BroadcastAPI interface.
+var _ broadcaster.BroadcastAPI = (*mockBroadcastAPI)(nil)
 
 // --- Test NewSnapshotManager ---
 
@@ -1472,4 +1679,320 @@ func TestSnapshotManager_BuildPartitionMapping_ShowPartitionsError(t *testing.T)
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Equal(t, expectedErr, err)
+}
+
+// --- Test validateCMEKCompatibility ---
+
+func TestSnapshotManager_ValidateCMEKCompatibility_NonEncryptedSnapshot(t *testing.T) {
+	ctx := context.Background()
+
+	// Non-encrypted snapshot (no cipher.ezID in properties)
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Properties: []*commonpb.KeyValuePair{
+					{Key: "other_key", Value: "other_value"},
+				},
+			},
+		},
+	}
+
+	// Mock DescribeDatabase to return non-encrypted database
+	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		dbName string,
+	) (*rootcoordpb.DescribeDatabaseResponse, error) {
+		return &rootcoordpb.DescribeDatabaseResponse{
+			DbName:     dbName,
+			Properties: []*commonpb.KeyValuePair{},
+		}, nil
+	}).Build()
+	defer mockDescribeDB.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	// Should pass - non-encrypted snapshot to non-encrypted database
+	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
+
+	assert.NoError(t, err)
+}
+
+func TestSnapshotManager_ValidateCMEKCompatibility_SameEZDatabase(t *testing.T) {
+	ctx := context.Background()
+
+	// Encrypted snapshot with ezID = 12345
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Properties: []*commonpb.KeyValuePair{
+					{Key: "cipher.ezID", Value: "12345"},
+				},
+			},
+		},
+	}
+
+	// Mock DescribeDatabase to return same ezID
+	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		dbName string,
+	) (*rootcoordpb.DescribeDatabaseResponse, error) {
+		return &rootcoordpb.DescribeDatabaseResponse{
+			DbName: dbName,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: "cipher.ezID", Value: "12345"},
+				{Key: "cipher.key", Value: "encrypted_root_key"},
+			},
+		}, nil
+	}).Build()
+	defer mockDescribeDB.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	// Should pass - same encryption zone
+	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
+
+	assert.NoError(t, err)
+}
+
+func TestSnapshotManager_ValidateCMEKCompatibility_NonEncryptedDatabase(t *testing.T) {
+	ctx := context.Background()
+
+	// Encrypted snapshot with ezID = 12345
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Properties: []*commonpb.KeyValuePair{
+					{Key: "cipher.ezID", Value: "12345"},
+				},
+			},
+		},
+	}
+
+	// Mock DescribeDatabase to return non-encrypted database
+	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		dbName string,
+	) (*rootcoordpb.DescribeDatabaseResponse, error) {
+		return &rootcoordpb.DescribeDatabaseResponse{
+			DbName:     dbName,
+			Properties: []*commonpb.KeyValuePair{
+				// No cipher.enabled property or set to false
+			},
+		}, nil
+	}).Build()
+	defer mockDescribeDB.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	// Should fail - cannot restore encrypted snapshot to non-encrypted database
+	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
+	assert.Contains(t, err.Error(), "non-encrypted database")
+}
+
+func TestSnapshotManager_ValidateCMEKCompatibility_DifferentEZDatabase(t *testing.T) {
+	ctx := context.Background()
+
+	// Encrypted snapshot with ezID = 12345
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Properties: []*commonpb.KeyValuePair{
+					{Key: "cipher.ezID", Value: "12345"},
+				},
+			},
+		},
+	}
+
+	// Mock DescribeDatabase to return different ezID (67890)
+	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		dbName string,
+	) (*rootcoordpb.DescribeDatabaseResponse, error) {
+		return &rootcoordpb.DescribeDatabaseResponse{
+			DbName: dbName,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: "cipher.enabled", Value: "true"},
+				{Key: "cipher.ezID", Value: "67890"},
+				{Key: "cipher.key", Value: "test-root-key"},
+			},
+		}, nil
+	}).Build()
+	defer mockDescribeDB.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	// Should fail - different encryption zone
+	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
+	assert.Contains(t, err.Error(), "different encryption zone")
+	assert.Contains(t, err.Error(), "12345")
+	assert.Contains(t, err.Error(), "67890")
+}
+
+func TestSnapshotManager_ValidateCMEKCompatibility_DescribeDatabaseError(t *testing.T) {
+	ctx := context.Background()
+
+	// Encrypted snapshot with ezID = 12345
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Properties: []*commonpb.KeyValuePair{
+					{Key: "cipher.ezID", Value: "12345"},
+				},
+			},
+		},
+	}
+
+	expectedErr := errors.New("describe database error")
+
+	// Mock DescribeDatabase to return error
+	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		dbName string,
+	) (*rootcoordpb.DescribeDatabaseResponse, error) {
+		return nil, expectedErr
+	}).Build()
+	defer mockDescribeDB.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	// Should return error from DescribeDatabase
+	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to describe target database")
+}
+
+func TestSnapshotManager_ValidateCMEKCompatibility_NonEncryptedToEncrypted(t *testing.T) {
+	ctx := context.Background()
+
+	// Non-encrypted snapshot (no cipher.ezID in properties)
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Properties: []*commonpb.KeyValuePair{
+					{Key: "other_key", Value: "other_value"},
+				},
+			},
+		},
+	}
+
+	// Mock DescribeDatabase to return encrypted database
+	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		dbName string,
+	) (*rootcoordpb.DescribeDatabaseResponse, error) {
+		return &rootcoordpb.DescribeDatabaseResponse{
+			DbName: dbName,
+			Properties: []*commonpb.KeyValuePair{
+				{Key: "cipher.enabled", Value: "true"},
+				{Key: "cipher.ezID", Value: "12345"},
+				{Key: "cipher.key", Value: "test-root-key"},
+			},
+		}, nil
+	}).Build()
+	defer mockDescribeDB.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	// Should fail - cannot restore non-encrypted collection to CMEK-encrypted database
+	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
+	assert.Contains(t, err.Error(), "cannot restore non-encrypted collection to CMEK-encrypted database")
+}
+
+// --- Test RestoreCollection ---
+
+func TestSnapshotManager_RestoreCollection_SchemaNameAndDbName(t *testing.T) {
+	ctx := context.Background()
+
+	// Snapshot data with original collection name and db name
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Name:   "original_collection",
+				DbName: "original_db",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				},
+			},
+			NumShards:        2,
+			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+			Partitions:       map[string]int64{"_default": 1},
+		},
+	}
+
+	targetCollectionName := "target_collection"
+	targetDbName := "target_db"
+
+	// Capture the CreateCollectionRequest to verify schema modifications
+	var capturedReq *milvuspb.CreateCollectionRequest
+
+	mockBroker := broker.NewMockBroker(t)
+	mockBroker.EXPECT().CreateCollection(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *milvuspb.CreateCollectionRequest) {
+		capturedReq = req
+	}).Return(nil)
+
+	mockBroker.EXPECT().DescribeCollectionByName(mock.Anything, targetDbName, targetCollectionName).Return(&milvuspb.DescribeCollectionResponse{
+		Status:       merr.Success(),
+		CollectionID: 12345,
+	}, nil)
+
+	sm := &snapshotManager{
+		broker: mockBroker,
+	}
+
+	collectionID, err := sm.RestoreCollection(ctx, snapshotData, targetCollectionName, targetDbName)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(12345), collectionID)
+
+	// Verify the schema in the request has updated Name and DbName
+	assert.NotNil(t, capturedReq)
+	assert.Equal(t, targetDbName, capturedReq.DbName)
+	assert.Equal(t, targetCollectionName, capturedReq.CollectionName)
+
+	// Unmarshal and verify the schema bytes
+	var schema schemapb.CollectionSchema
+	err = proto.Unmarshal(capturedReq.Schema, &schema)
+	assert.NoError(t, err)
+	assert.Equal(t, targetCollectionName, schema.Name, "schema.Name should be updated to target collection name")
+	assert.Equal(t, targetDbName, schema.DbName, "schema.DbName should be updated to target database name")
+}
+
+func TestSnapshotManager_GetSnapshotRestoreRefCount(t *testing.T) {
+	mockGetRef := mockey.Mock((*copySegmentMeta).GetRestoreRefCount).Return(int32(5)).Build()
+	defer mockGetRef.UnPatch()
+
+	sm := &snapshotManager{
+		copySegmentMeta: &copySegmentMeta{},
+	}
+
+	count := sm.GetSnapshotRestoreRefCount("test_snapshot")
+	assert.Equal(t, int32(5), count)
 }

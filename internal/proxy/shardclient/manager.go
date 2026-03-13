@@ -151,9 +151,9 @@ func (m *shardClientMgrImpl) getCachedShardLeaders(database, collectionName, cal
 	m.leaderMut.RUnlock()
 
 	if cacheShardLeaders != nil {
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), caller, metrics.CacheHitLabel).Inc()
+		metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), caller, metrics.CacheHitLabel).Inc()
 	} else {
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), caller, metrics.CacheMissLabel).Inc()
+		metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), caller, metrics.CacheMissLabel).Inc()
 	}
 
 	return cacheShardLeaders
@@ -167,7 +167,7 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 
 	method := "updateShardLocationCache"
 	tr := timerecord.NewTimeRecorder(method)
-	defer metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).
+	defer metrics.ProxyUpdateCacheLatency.WithLabelValues(paramtable.GetStringNodeID(), method).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	req := &querypb.GetShardLeadersRequest{

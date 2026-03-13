@@ -9,23 +9,79 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <boost/format.hpp>
-#include <optional>
-#include <gtest/gtest.h>
+#include <fmt/core.h>
+#include <folly/CancellationToken.h>
+#include <folly/FBVector.h>
+#include <nlohmann/json.hpp>
+#include <stdlib.h>
+#include <time.h>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstdint>
+#include <exception>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <vector>
 
-#include "cachinglayer/Utils.h"
+#include "NamedType/named_type_impl.hpp"
+#include "cachinglayer/CacheSlot.h"
+#include "common/Common.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
+#include "common/IndexMeta.h"
+#include "common/LoadInfo.h"
+#include "common/PrometheusClient.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/Span.h"
 #include "common/Types.h"
-#include "index/IndexFactory.h"
-#include "knowhere/version.h"
-#include "knowhere/comp/index_param.h"
-#include "storage/RemoteChunkManagerSingleton.h"
-#include "storage/Util.h"
 #include "common/VectorArray.h"
-
-#include "test_utils/cachinglayer_test_utils.h"
-#include "test_utils/DataGen.h"
-#include "test_utils/storage_test_utils.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
 #include "exec/expression/function/FunctionFactory.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/Meta.h"
+#include "index/SkipIndex.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/dataset.h"
+#include "knowhere/version.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "query/Plan.h"
+#include "query/PlanImpl.h"
+#include "query/Utils.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/InsertRecord.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/Types.h"
+#include "storage/FileManager.h"
+#include "storage/InsertData.h"
+#include "storage/PayloadReader.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -51,20 +107,9 @@ TEST(Sealed, without_predicate) {
     auto metric_type = knowhere::metric::L2;
     auto fake_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
-    auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
+    schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-        >)";
 
     auto N = ROW_COUNT;
 
@@ -82,7 +127,9 @@ TEST(Sealed, without_predicate) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str =
+        handle.ParseSearch("", "fakevec", 5, "L2", "{\"nprobe\": 10}", 3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -164,24 +211,12 @@ TEST(Sealed, without_predicate) {
 TEST(Sealed, without_search_ef_less_than_limit) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
-    auto topK = 5;
     auto metric_type = knowhere::metric::L2;
     auto fake_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
-    auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
+    schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    query_info: <
-                                      topk: 100
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"ef\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-        >)";
 
     auto N = ROW_COUNT;
 
@@ -189,7 +224,9 @@ TEST(Sealed, without_search_ef_less_than_limit) {
     auto vec_col = dataset.get_col<float>(fake_id);
     auto query_ptr = vec_col.data() + BIAS * dim;
 
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str =
+        handle.ParseSearch("", "fakevec", 100, "L2", "{\"ef\": 10}", 3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -253,32 +290,6 @@ TEST(Sealed, with_predicate) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    const char* raw_plan = R"(vector_anns: <
-                                field_id: 100
-                                predicates: <
-                                  binary_range_expr: <
-                                    column_info: <
-                                      field_id: 101
-                                      data_type: Int64
-                                    >
-                                    lower_inclusive: true,
-                                    upper_inclusive: false,
-                                    lower_value: <
-                                      int64_val: 1000
-                                    >
-                                    upper_value: <
-                                      int64_val: 1005
-                                    >
-                                  >
-                                >
-                                query_info: <
-                                  topk: 5
-                                  round_decimal: 6
-                                  metric_type: "L2"
-                                  search_params: "{\"nprobe\": 10}"
-                                >
-                                placeholder_tag: "$0"
-     >)";
 
     auto N = ROW_COUNT;
 
@@ -293,7 +304,14 @@ TEST(Sealed, with_predicate) {
                     dataset.timestamps_.data(),
                     dataset.raw_);
 
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // counter >= 1000 AND counter < 1005
+    auto plan_str = handle.ParseSearch("counter >= 1000 && counter < 1005",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       6);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -362,46 +380,26 @@ TEST(Sealed, with_predicate) {
 TEST(Sealed, with_predicate_filter_all) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
-    auto topK = 5;
     // auto metric_type = MetricType::METRIC_L2;
     auto metric_type = knowhere::metric::L2;
     auto fake_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
-    const char* raw_plan = R"(vector_anns: <
-                                field_id: 100
-                                predicates: <
-                                  binary_range_expr: <
-                                    column_info: <
-                                      field_id: 101
-                                      data_type: Int64
-                                    >
-                                    lower_inclusive: true,
-                                    upper_inclusive: false,
-                                    lower_value: <
-                                      int64_val: 4200
-                                    >
-                                    upper_value: <
-                                      int64_val: 4199
-                                    >
-                                  >
-                                >
-                                query_info: <
-                                  topk: 5
-                                  round_decimal: 6
-                                  metric_type: "L2"
-                                  search_params: "{\"nprobe\": 10}"
-                                >
-                                placeholder_tag: "$0"
-     >)";
 
     auto N = ROW_COUNT;
 
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fake_id);
     auto query_ptr = vec_col.data() + BIAS * dim;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // counter >= 4200 AND counter < 4199 (impossible range, filters all)
+    auto plan_str = handle.ParseSearch("counter >= 4200 && counter < 4199",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       6);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -491,7 +489,6 @@ TEST(Sealed, with_predicate_filter_all) {
 
 TEST(Sealed, LoadFieldData) {
     auto dim = 4;
-    auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -499,7 +496,7 @@ TEST(Sealed, LoadFieldData) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("nothing", DataType::INT32);
     auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("int8", DataType::INT8);
     schema->AddDebugField("int16", DataType::INT16);
@@ -520,8 +517,7 @@ TEST(Sealed, LoadFieldData) {
         schema->AddDebugField("double_null", DataType::DOUBLE, true);
     auto str_nullable_id =
         schema->AddDebugField("str_null", DataType::VARCHAR, true);
-    auto float_nullable_id =
-        schema->AddDebugField("float_null", DataType::FLOAT, true);
+    schema->AddDebugField("float_null", DataType::FLOAT, true);
 
     auto dataset = DataGen(schema, N);
 
@@ -531,34 +527,15 @@ TEST(Sealed, LoadFieldData) {
         N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
     //
     auto segment = CreateSealedSegment(schema);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Double
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     Timestamp timestamp = 1000000;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // double >= -1 AND double < 1
+    auto plan_str = handle.ParseSearch("double >= -1 && double < 1",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -675,7 +652,6 @@ TEST(Sealed, ClearData) {
         milvus::exec::expression::FunctionFactory::Instance();
     factory.Initialize();
     auto dim = 4;
-    auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -683,7 +659,7 @@ TEST(Sealed, ClearData) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("nothing", DataType::INT32);
     auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("int8", DataType::INT8);
     schema->AddDebugField("int16", DataType::INT16);
@@ -701,34 +677,15 @@ TEST(Sealed, ClearData) {
         N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 
     auto segment = CreateSealedSegment(schema);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Double
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     Timestamp timestamp = 1000000;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // double >= -1 AND double < 1
+    auto plan_str = handle.ParseSearch("double >= -1 && double < 1",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -781,7 +738,6 @@ TEST(Sealed, ClearData) {
 
 TEST(Sealed, LoadFieldDataMmap) {
     auto dim = 4;
-    auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -789,7 +745,7 @@ TEST(Sealed, LoadFieldDataMmap) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("nothing", DataType::INT32);
     auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("int8", DataType::INT8);
     schema->AddDebugField("int16", DataType::INT16);
@@ -807,34 +763,15 @@ TEST(Sealed, LoadFieldDataMmap) {
         N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 
     auto segment = CreateSealedSegment(schema);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Double
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     Timestamp timestamp = 1000000;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // double >= -1 AND double < 1
+    auto plan_str = handle.ParseSearch("double >= -1 && double < 1",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -883,7 +820,7 @@ TEST(Sealed, LoadPkScalarIndex) {
     size_t N = ROW_COUNT;
     auto schema = std::make_shared<Schema>();
     auto pk_id = schema->AddDebugField("counter", DataType::INT64);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("nothing", DataType::INT32);
     schema->set_primary_field_id(pk_id);
 
     auto dataset = DataGen(schema, N);
@@ -919,34 +856,15 @@ TEST(Sealed, LoadScalarIndex) {
     auto indexing = GenVecIndexing(
         N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Double
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     Timestamp timestamp = 1000000;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // double >= -1 AND double < 1
+    auto plan_str = handle.ParseSearch("double >= -1 && double < 1",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -1010,15 +928,14 @@ TEST(Sealed, LoadScalarIndex) {
 
 TEST(Sealed, Delete) {
     auto dim = 4;
-    auto topK = 5;
     auto N = 10;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
-    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("double", DataType::DOUBLE);
+    schema->AddDebugField("nothing", DataType::INT32);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -1026,34 +943,15 @@ TEST(Sealed, Delete) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
     auto segment = CreateSealedSegment(schema);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Double
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     Timestamp timestamp = 1000000;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // double >= -1 AND double < 1
+    auto plan_str = handle.ParseSearch("double >= -1 && double < 1",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -1069,9 +967,9 @@ TEST(Sealed, Delete) {
     std::vector<idx_t> pks{1, 2, 3, 4, 5};
     auto ids = std::make_unique<IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
-    std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
+    std::vector<Timestamp> timestamps_del{10, 10, 10, 10, 10};
 
-    LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
+    LoadDeletedRecordInfo info = {timestamps_del.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
 
     BitsetType bitset(N, false);
@@ -1092,15 +990,14 @@ TEST(Sealed, Delete) {
 
 TEST(Sealed, OverlapDelete) {
     auto dim = 4;
-    auto topK = 5;
     auto N = 10;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
-    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("double", DataType::DOUBLE);
+    schema->AddDebugField("nothing", DataType::INT32);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -1108,34 +1005,15 @@ TEST(Sealed, OverlapDelete) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
     auto segment = CreateSealedSegment(schema);
-    const char* raw_plan = R"(vector_anns: <
-                                    field_id: 100
-                                    predicates: <
-                                      binary_range_expr: <
-                                        column_info: <
-                                          field_id: 102
-                                          data_type: Double
-                                        >
-                                        lower_inclusive: true,
-                                        upper_inclusive: false,
-                                        lower_value: <
-                                          float_val: -1
-                                        >
-                                        upper_value: <
-                                          float_val: 1
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0"
-     >)";
     Timestamp timestamp = 1000000;
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // double >= -1 AND double < 1
+    auto plan_str = handle.ParseSearch("double >= -1 && double < 1",
+                                       "fakevec",
+                                       5,
+                                       "L2",
+                                       "{\"nprobe\": 10}",
+                                       3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -1151,9 +1029,9 @@ TEST(Sealed, OverlapDelete) {
     std::vector<idx_t> pks{1, 2, 3, 4, 5};
     auto ids = std::make_unique<IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
-    std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
+    std::vector<Timestamp> timestamps_del{10, 10, 10, 10, 10};
 
-    LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
+    LoadDeletedRecordInfo info = {timestamps_del.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
     ASSERT_EQ(segment->get_deleted_count(), pks.size())
         << "deleted_count=" << segment->get_deleted_count()
@@ -1164,9 +1042,9 @@ TEST(Sealed, OverlapDelete) {
     pks.insert(pks.end(), {6, 7, 8});
     auto new_ids = std::make_unique<IdArray>();
     new_ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
-    timestamps.insert(timestamps.end(), {11, 11, 11});
+    timestamps_del.insert(timestamps_del.end(), {11, 11, 11});
     LoadDeletedRecordInfo overlap_info = {
-        timestamps.data(), new_ids.get(), row_count};
+        timestamps_del.data(), new_ids.get(), row_count};
     segment->LoadDeletedRecord(overlap_info);
     // NOTE: need to change delete timestamp, so not to hit the cache
     ASSERT_EQ(segment->get_deleted_count(), pks.size())
@@ -1247,21 +1125,11 @@ TEST(Sealed, BF) {
     segment->LoadFieldData(load_info);
 
     auto topK = 1;
-    auto fmt = boost::format(R"(vector_anns: <
-                                            field_id: 100
-                                            query_info: <
-                                                topk: %1%
-                                                metric_type: "L2"
-                                                search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0">
-                                            output_field_ids: 101)") %
-               topK;
-    auto serialized_expr_plan = fmt.str();
-    auto binary_plan =
-        translate_text_plan_to_binary_plan(serialized_expr_plan.data());
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str =
+        handle.ParseSearch("", "fakevec", topK, "L2", "{\"nprobe\": 10}");
     auto plan =
-        CreateSearchPlanByExpr(schema, binary_plan.data(), binary_plan.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
 
     auto num_queries = 10;
     auto query = GenQueryVecs(num_queries, dim);
@@ -1310,21 +1178,11 @@ TEST(Sealed, BF_Overflow) {
     segment->LoadFieldData(vec_load_info);
 
     auto topK = 1;
-    auto fmt = boost::format(R"(vector_anns: <
-                                            field_id: 100
-                                            query_info: <
-                                                topk: %1%
-                                                metric_type: "L2"
-                                                search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0">
-                                            output_field_ids: 101)") %
-               topK;
-    auto serialized_expr_plan = fmt.str();
-    auto binary_plan =
-        translate_text_plan_to_binary_plan(serialized_expr_plan.data());
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str =
+        handle.ParseSearch("", "fakevec", topK, "L2", "{\"nprobe\": 10}");
     auto plan =
-        CreateSearchPlanByExpr(schema, binary_plan.data(), binary_plan.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
 
     auto num_queries = 10;
     auto query = GenQueryVecs(num_queries, dim);
@@ -1426,6 +1284,143 @@ TEST(Sealed, RealCount) {
     ASSERT_EQ(0, segment->get_real_count());
 }
 
+// Test for DeletedRecord atomic snapshot optimization fast path
+// When query_timestamp >= max_delete_timestamp, we can directly use the snapshot bitset
+TEST(Sealed, DeleteSnapshotOptimizationFastPath) {
+    // Save original value and ensure optimization is enabled
+    bool original_value = ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.load();
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(true);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    int64_t N = 100;
+    auto dataset = DataGen(schema, N);
+    auto pks = dataset.get_col<int64_t>(pk);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Delete some records with timestamps
+    int64_t delete_count = 10;
+    auto del_ids = GenPKs(pks.begin(), pks.begin() + delete_count);
+    Timestamp delete_ts = 1000;
+    auto del_tss = GenTss(delete_count, delete_ts);
+    auto status = segment->Delete(delete_count, del_ids.get(), del_tss.data());
+    ASSERT_TRUE(status.ok());
+
+    // Query with timestamp >= max_delete_ts should use fast path
+    BitsetType bitset1(N, false);
+    auto bitset_view1 = BitsetTypeView(bitset1);
+    Timestamp query_ts_fast =
+        delete_ts + delete_count + 100;  // >= max_delete_ts
+    segment->mask_with_delete(bitset_view1, N, query_ts_fast);
+    ASSERT_EQ(bitset1.count(), delete_count);
+
+    // Query with timestamp < max_delete_ts should use slow path
+    BitsetType bitset2(N, false);
+    auto bitset_view2 = BitsetTypeView(bitset2);
+    Timestamp query_ts_slow =
+        delete_ts + 5;  // < max_delete_ts, covers some but not all
+    segment->mask_with_delete(bitset_view2, N, query_ts_slow);
+    // Should have fewer deletions visible since query_ts is in the middle
+    ASSERT_LT(bitset2.count(), delete_count);
+    ASSERT_GT(bitset2.count(), 0);
+
+    // Restore original value
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(original_value);
+}
+
+// Test for DeletedRecord atomic snapshot optimization disabled
+TEST(Sealed, DeleteSnapshotOptimizationDisabled) {
+    // Save original value and disable optimization
+    bool original_value = ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.load();
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(false);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    int64_t N = 100;
+    auto dataset = DataGen(schema, N);
+    auto pks = dataset.get_col<int64_t>(pk);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Delete some records
+    int64_t delete_count = 10;
+    auto del_ids = GenPKs(pks.begin(), pks.begin() + delete_count);
+    Timestamp delete_ts = 1000;
+    auto del_tss = GenTss(delete_count, delete_ts);
+    auto status = segment->Delete(delete_count, del_ids.get(), del_tss.data());
+    ASSERT_TRUE(status.ok());
+
+    // Query should still work correctly via slow path
+    BitsetType bitset(N, false);
+    auto bitset_view = BitsetTypeView(bitset);
+    Timestamp query_ts = delete_ts + delete_count + 100;
+    segment->mask_with_delete(bitset_view, N, query_ts);
+    ASSERT_EQ(bitset.count(), delete_count);
+
+    // Restore original value
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(original_value);
+}
+
+// Test for multiple sequential deletes updating snapshot correctly
+TEST(Sealed, DeleteSnapshotMultipleDeletes) {
+    bool original_value = ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.load();
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(true);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    int64_t N = 100;
+    auto dataset = DataGen(schema, N);
+    auto pks = dataset.get_col<int64_t>(pk);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // First batch of deletes
+    int64_t delete_count1 = 5;
+    auto del_ids1 = GenPKs(pks.begin(), pks.begin() + delete_count1);
+    Timestamp delete_ts1 = 1000;
+    auto del_tss1 = GenTss(delete_count1, delete_ts1);
+    auto status =
+        segment->Delete(delete_count1, del_ids1.get(), del_tss1.data());
+    ASSERT_TRUE(status.ok());
+
+    // Query after first delete batch
+    BitsetType bitset1(N, false);
+    auto bitset_view1 = BitsetTypeView(bitset1);
+    Timestamp query_ts1 = delete_ts1 + delete_count1 + 100;
+    segment->mask_with_delete(bitset_view1, N, query_ts1);
+    ASSERT_EQ(bitset1.count(), delete_count1);
+
+    // Second batch of deletes
+    int64_t delete_count2 = 5;
+    auto del_ids2 = GenPKs(pks.begin() + delete_count1,
+                           pks.begin() + delete_count1 + delete_count2);
+    Timestamp delete_ts2 = 2000;
+    auto del_tss2 = GenTss(delete_count2, delete_ts2);
+    status = segment->Delete(delete_count2, del_ids2.get(), del_tss2.data());
+    ASSERT_TRUE(status.ok());
+
+    // Query after second delete batch - should see all deletes
+    BitsetType bitset2(N, false);
+    auto bitset_view2 = BitsetTypeView(bitset2);
+    Timestamp query_ts2 = delete_ts2 + delete_count2 + 100;
+    segment->mask_with_delete(bitset_view2, N, query_ts2);
+    ASSERT_EQ(bitset2.count(), delete_count1 + delete_count2);
+
+    // Query with timestamp between batches - should only see first batch
+    BitsetType bitset3(N, false);
+    auto bitset_view3 = BitsetTypeView(bitset3);
+    Timestamp query_ts_between =
+        delete_ts1 + delete_count1 + 50;  // Between batch1 and batch2
+    segment->mask_with_delete(bitset_view3, N, query_ts_between);
+    ASSERT_EQ(bitset3.count(), delete_count1);
+
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(original_value);
+}
+
 TEST(Sealed, GetVector) {
     auto dim = 4;
     auto N = ROW_COUNT;
@@ -1476,7 +1471,6 @@ TEST(Sealed, GetVector) {
 
 TEST(Sealed, LoadArrayFieldData) {
     auto dim = 4;
-    auto topK = 5;
     auto N = 10;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -1491,29 +1485,10 @@ TEST(Sealed, LoadArrayFieldData) {
     auto fakevec = dataset.get_col<float>(fakevec_id);
     auto segment = CreateSealedSegment(schema);
 
-    const char* raw_plan = R"(vector_anns:<
-            field_id:100
-            predicates:<
-                json_contains_expr:<
-                    column_info:<
-                        field_id:102
-                        data_type:Array
-                        element_type:Int64
-                    >
-                    elements:<int64_val:1 >
-                    op:Contains
-                    elements_same_type:true
-                >
-            >
-            query_info:<
-                topk: 5
-                round_decimal: 3
-                metric_type: "L2"
-                search_params: "{\"nprobe\": 10}"
-            > placeholder_tag:"$0"
-        >)";
-
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // array contains 1
+    auto plan_str = handle.ParseSearch(
+        "array_contains(array, 1)", "fakevec", 5, "L2", "{\"nprobe\": 10}", 3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -1534,44 +1509,23 @@ TEST(Sealed, LoadArrayFieldData) {
 
 TEST(Sealed, LoadArrayFieldDataWithMMap) {
     auto dim = 4;
-    auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
-    auto array_id =
-        schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
+    schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
     auto fakevec = dataset.get_col<float>(fakevec_id);
     auto segment = CreateSealedSegment(schema);
 
-    const char* raw_plan = R"(vector_anns:<
-            field_id:100
-            predicates:<
-                json_contains_expr:<
-                    column_info:<
-                        field_id:102
-                        data_type:Array
-                        element_type:Int64
-                    >
-                    elements:<int64_val:1 >
-                    op:Contains
-                    elements_same_type:true
-                >
-            >
-            query_info:<
-                topk: 5
-                round_decimal: 3
-                metric_type: "L2"
-                search_params: "{\"nprobe\": 10}"
-            > placeholder_tag:"$0"
-        >)";
-
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle handle(*schema);
+    // array contains 1
+    auto plan_str = handle.ParseSearch(
+        "array_contains(array, 1)", "fakevec", 5, "L2", "{\"nprobe\": 10}", 3);
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
@@ -1587,8 +1541,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     auto i32_fid = schema->AddDebugField("int32_field", DataType::INT32);
     auto i16_fid = schema->AddDebugField("int16_field", DataType::INT16);
@@ -1736,8 +1689,7 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     size_t N = 10;
     auto dataset = DataGen(schema, N);
@@ -1779,8 +1731,7 @@ TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
 
     auto dataset = DataGen(schema, 5);
@@ -1851,8 +1802,7 @@ TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
     auto dataset = DataGen(schema, 5);
     auto segment = CreateSealedSegment(schema);
@@ -1894,10 +1844,9 @@ TEST(Sealed, SkipIndexSkipStringRange) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->AddDebugField("pk", DataType::INT64);
     auto string_fid = schema->AddDebugField("string_field", DataType::VARCHAR);
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     size_t N = 5;
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
@@ -2413,7 +2362,6 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     int64_t segment_id = 3;
     int64_t index_build_id = 4000;
     int64_t index_version = 4000;
-    int64_t index_id = 5000;
 
     auto schema = std::make_shared<Schema>();
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
@@ -2440,7 +2388,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     auto dataset = DataGen(schema, dataset_size, 42, 0, 1, emb_list_len);
 
     // create field data
-    std::string root_path = "/tmp/test-vector-array/";
+    std::string root_path = TestLocalPath;
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
@@ -2473,7 +2421,8 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
     auto get_binlog_path = [=](int64_t log_id) {
-        return fmt::format("{}/{}/{}/{}/{}",
+        return fmt::format("{}{}/{}/{}/{}/{}",
+                           TestLocalPath,
                            collection_id,
                            partition_id,
                            segment_id,
@@ -2561,20 +2510,12 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     // create sealed segment
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
+    ScopedSchemaHandle handle(*schema);
+
     // brute force search
     {
-        std::string raw_plan = fmt::format(R"(vector_anns: <
-                                    field_id: 101
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "{}"
-                                      search_params: "{{\"nprobe\": 10}}"
-                                    >
-                                    placeholder_tag: "$0"
-        >)",
-                                           metric_type);
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+        auto plan_str = handle.ParseSearch(
+            "", "array_vec", 5, metric_type, "{\"nprobe\": 10}", 3);
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
 
@@ -2643,18 +2584,8 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
         sealed_segment->DropFieldData(array_vec);
         sealed_segment->LoadIndex(load_info);
 
-        std::string raw_plan = fmt::format(R"(vector_anns: <
-                                    field_id: 101
-                                    query_info: <
-                                      topk: 5
-                                      round_decimal: 3
-                                      metric_type: "{}"
-                                      search_params: "{{\"nprobe\": 10}}"
-                                    >
-                                    placeholder_tag: "$0"
-        >)",
-                                           metric_type);
-        auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+        auto plan_str = handle.ParseSearch(
+            "", "array_vec", 5, metric_type, "{\"nprobe\": 10}", 3);
         auto plan =
             CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
 

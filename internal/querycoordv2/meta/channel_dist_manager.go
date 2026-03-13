@@ -234,6 +234,7 @@ type ChannelDistManagerInterface interface {
 	GetShardLeader(channelName string, replica *Replica) *DmChannel
 	GetChannelDist(collectionID int64) []*metricsinfo.DmChannel
 	GetLeaderView(collectionID int64) []*metricsinfo.LeaderView
+	GetVersion() int64
 }
 
 type ChannelDistManager struct {
@@ -246,6 +247,13 @@ type ChannelDistManager struct {
 	collectionIndex map[int64][]*DmChannel
 
 	nodeManager *session.NodeManager
+	version     int64
+}
+
+func (m *ChannelDistManager) GetVersion() int64 {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+	return m.version
 }
 
 func NewChannelDistManager(nodeManager *session.NodeManager) *ChannelDistManager {
@@ -311,6 +319,14 @@ func (m *ChannelDistManager) Update(nodeID typeutil.UniqueID, channels ...*DmCha
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
+	if len(channels) == 0 {
+		// Node offline, remove entry to avoid memory leak
+		delete(m.channels, nodeID)
+		m.updateCollectionIndex()
+		m.version++
+		return nil
+	}
+
 	newServiceableChannels := make([]*DmChannel, 0)
 	for _, channel := range channels {
 		channel.Node = nodeID
@@ -323,6 +339,7 @@ func (m *ChannelDistManager) Update(nodeID typeutil.UniqueID, channels ...*DmCha
 
 	m.channels[nodeID] = composeNodeChannels(channels...)
 	m.updateCollectionIndex()
+	m.version++
 	return newServiceableChannels
 }
 

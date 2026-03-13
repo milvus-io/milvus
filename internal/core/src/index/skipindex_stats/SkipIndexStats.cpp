@@ -15,7 +15,11 @@
 // limitations under the License.
 
 #include "index/skipindex_stats/SkipIndexStats.h"
-#include <cstring>
+
+#include <cstdint>
+
+#include "arrow/array/array_primitive.h"
+#include "common/Span.h"
 #include "parquet/types.h"
 
 namespace milvus::index {
@@ -138,6 +142,8 @@ SkipIndexStatsBuilder::Build(
                 ProcessStringFieldMetrics(batches, col_idx);
             return LoadMetrics<std::string>(info);
         }
+        default:
+            break;
     }
     return none_ptr;
 }
@@ -201,6 +207,8 @@ SkipIndexStatsBuilder::Build(DataType data_type, const Chunk* chunk) const {
                 ProcessFieldMetrics<double>(typedData, valid_data, count);
             return LoadMetrics<double>(info);
         }
+        default:
+            break;
     }
     return none_ptr;
 }

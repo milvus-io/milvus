@@ -15,8 +15,18 @@
 // limitations under the License.
 
 #include "GroupingSet.h"
+
+#include <cstddef>
+
+#include "common/BitUtil.h"
+#include "common/EasyAssert.h"
 #include "common/Utils.h"
-#include "SumAggregateBase.h"
+#include "exec/HashTable.h"
+#include "exec/VectorHasher.h"
+#include "exec/operator/query-agg/Aggregate.h"
+#include "exec/operator/query-agg/AggregateInfo.h"
+#include "exec/operator/query-agg/RowContainer.h"
+#include "folly/Range.h"
 
 namespace milvus {
 namespace exec {
@@ -99,10 +109,11 @@ void
 GroupingSet::addGlobalAggregationInput(const milvus::RowVectorPtr& input) {
     initializeGlobalAggregation();
     auto* group = lookup_->hits_[0];
+    auto numRows = input->size();
     for (auto i = 0; i < aggregates_.size(); i++) {
         auto& function = aggregates_[i].function_;
         populateTempVectors(i, input);
-        function->addSingleGroupRawInput(group, tempVectors_);
+        function->addSingleGroupRawInput(group, numRows, tempVectors_);
     }
     tempVectors_.clear();
 }
@@ -126,8 +137,11 @@ GroupingSet::getOutput(milvus::RowVectorPtr& result) {
     if (isGlobal_) {
         return getGlobalAggregationOutput(result);
     }
-    AssertInfo(hash_table_ != nullptr,
-               "hash_table_ should not be nullptr for non-global aggregation");
+    // For non-global aggregation, if hash_table_ is null, it means no input data
+    // Return false directly without creating empty hash table
+    if (!hash_table_) {
+        return false;
+    }
     const auto& all_rows = hash_table_->rows()->allRows();
     if (!all_rows.empty()) {
         extractGroups(result);
@@ -202,19 +216,17 @@ void
 GroupingSet::populateTempVectors(int32_t aggregateIndex,
                                  const milvus::RowVectorPtr& input) {
     const auto& channel_idxes = aggregates_[aggregateIndex].input_column_idxes_;
-    if (channel_idxes.empty() && input->childrens().size() == 1) {
-        tempVectors_.resize(1);
-        tempVectors_[0] = input->child(0);
-    } else {
-        tempVectors_.resize(channel_idxes.size());
-        for (auto i = 0; i < channel_idxes.size(); i++) {
-            tempVectors_[i] = input->child(channel_idxes[i]);
-        }
+    tempVectors_.resize(channel_idxes.size());
+    for (auto i = 0; i < channel_idxes.size(); i++) {
+        tempVectors_[i] = input->child(channel_idxes[i]);
     }
 }
 
 int32_t
 GroupingSet::outputRowCount() const {
+    if (!lookup_) {
+        return 0;
+    }
     return lookup_->newGroups_.size();
 }
 

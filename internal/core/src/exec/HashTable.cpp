@@ -15,10 +15,13 @@
 // limitations under the License.
 
 #include "HashTable.h"
+
 #include <cstring>
 #include <memory>
 #include <new>
+
 #include "common/SimdUtil.h"
+#include "exec/VectorHasher.h"
 
 namespace milvus {
 namespace exec {

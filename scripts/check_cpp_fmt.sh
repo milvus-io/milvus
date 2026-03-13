@@ -30,7 +30,7 @@ pushd $CPP_SRC_DIR
 ./run_clang_format.sh .
 popd
 
-check_result=$(git status | grep -E "\.h|\.hpp|\.cc|\.cpp")
+check_result=$(git status | grep -E "\.h|\.hpp|\.cc|\.cpp|\.c")
 echo "check_result: $check_result"
 if test -z "$check_result"; then
   exit 0

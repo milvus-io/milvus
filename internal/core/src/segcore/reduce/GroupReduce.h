@@ -9,9 +9,19 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 #pragma once
+#include <stdint.h>
+#include <memory>
+#include <optional>
+#include <unordered_set>
+#include <vector>
+
 #include "Reduce.h"
 #include "common/QueryResult.h"
+#include "common/Tracer.h"
+#include "common/Types.h"
+#include "pb/schema.pb.h"
 #include "query/PlanImpl.h"
+#include "segcore/ReduceStructure.h"
 
 namespace milvus::segcore {
 class GroupReduceHelper : public ReduceHelper {

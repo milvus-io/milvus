@@ -10,13 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 #pragma once
 
+#include <stdint.h>
 #include <memory>
 #include <vector>
 
-#include "common/Types.h"
 #include "Aggregate.h"
-#include "plan/PlanNode.h"
+#include "common/Types.h"
 #include "exec/operator/Operator.h"
+#include "plan/PlanNode.h"
 
 namespace milvus {
 namespace exec {

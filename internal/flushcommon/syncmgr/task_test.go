@@ -38,9 +38,11 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
@@ -159,7 +161,12 @@ func (s *SyncTaskSuite) getSuiteSyncTask(pack *SyncPack) *SyncTask {
 		WithAllocator(s.allocator).
 		WithChunkManager(s.chunkManager).
 		WithMetaCache(s.metacache).
-		WithSchema(s.schema)
+		WithSchema(s.schema).
+		WithStorageConfig(&indexpb.StorageConfig{
+			BucketName:  paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue(),
+			StorageType: "local",
+			RootPath:    "/tmp",
+		})
 	return task
 }
 
@@ -180,7 +187,17 @@ func (s *SyncTaskSuite) createSegment(storageVersion int64) *metacache.SegmentIn
 	}
 
 	bfs.UpdatePKRange(fd)
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{StorageVersion: storageVersion}, bfs, nil)
+	segInfo := &datapb.SegmentInfo{StorageVersion: storageVersion}
+
+	// For StorageV3, set up a manifest path
+	if storageVersion == storage.StorageV3 {
+		k := fmt.Sprintf("%d/%d/%d", s.collectionID, s.partitionID, s.segmentID)
+		basePath := fmt.Sprintf("insert_log/%s", k)
+		// Use JSON format for manifest path: {"ver": -1, "base_path": "..."}
+		segInfo.ManifestPath = packed.MarshalManifestPath(basePath, -1)
+	}
+
+	seg := metacache.NewSegmentInfo(segInfo, bfs, nil)
 	metacache.UpdateNumOfRows(1000)(seg)
 	seg.GetBloomFilterSet().Roll()
 
@@ -193,6 +210,10 @@ func (s *SyncTaskSuite) TestRunNormal() {
 
 func (s *SyncTaskSuite) TestRunNormalWithStorageV2() {
 	s.runTestRunNormal(storage.StorageV2)
+}
+
+func (s *SyncTaskSuite) TestRunNormalWithStorageV3() {
+	s.runTestRunNormal(storage.StorageV3)
 }
 
 func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
@@ -275,6 +296,80 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 		s.NoError(err)
 		s.True(isDataReleased(task)) // data should be released after task finished
 	})
+}
+
+func (s *SyncTaskSuite) TestRunStorageV3WithFlush() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
+
+	seg := s.createSegment(storage.StorageV3)
+
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return()
+
+	task := s.getSuiteSyncTask(
+		new(SyncPack).
+			WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).
+			WithFlush().
+			WithCheckpoint(&msgpb.MsgPosition{
+				ChannelName: s.channelName,
+				MsgID:       []byte{1, 2, 3, 4},
+				Timestamp:   100,
+			}))
+	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
+
+	err := task.Run(ctx)
+	s.NoError(err)
+
+	// Verify that the binlogs were properly captured
+	// Note: For StorageV3, insertBinlogs is the only guaranteed non-nil field
+	insertBinlogs, _, _, _ := task.Binlogs()
+	s.NotNil(insertBinlogs)
+}
+
+func (s *SyncTaskSuite) TestRunStorageV3ManifestPathUpdated() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
+
+	seg := s.createSegment(storage.StorageV3)
+	originalManifestPath := seg.ManifestPath()
+
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+
+	var capturedManifestPath string
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+		capturedManifestPath = seg.ManifestPath()
+	}).Return()
+
+	task := s.getSuiteSyncTask(
+		new(SyncPack).
+			WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).
+			WithCheckpoint(&msgpb.MsgPosition{
+				ChannelName: s.channelName,
+				MsgID:       []byte{1, 2, 3, 4},
+				Timestamp:   100,
+			}))
+	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
+
+	err := task.Run(ctx)
+	s.NoError(err)
+
+	// Verify manifest path was updated after write (version should be incremented)
+	s.NotEmpty(capturedManifestPath)
+	// The manifest path should be different from original since version is incremented
+	// Note: original has ver:-1, after write it should have a positive version
+	if len(task.insertBinlogs) > 0 {
+		s.NotEqual(originalManifestPath, capturedManifestPath)
+	}
 }
 
 func (s *SyncTaskSuite) TestRunL0Segment() {

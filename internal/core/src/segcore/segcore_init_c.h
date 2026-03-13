@@ -11,11 +11,10 @@
 
 #pragma once
 
-#include <stdbool.h>
 #include <stdint.h>
-#include "common/type_c.h"
+#include <stdbool.h>
 
-#include "common/type_c.h"
+#include "common/common_type_c.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -124,7 +123,10 @@ ConfigureTieredStorage(
     const float overloaded_memory_threshold_percentage,
     const float loading_resource_factor,
     const float max_disk_usage_percentage,
-    const char* disk_path);
+    const char* disk_path,
+    const int64_t loading_timeout_ms,
+    // async warmup prefetch pool threads
+    const uint32_t prefetch_pool_threads);
 
 #ifdef __cplusplus
 }

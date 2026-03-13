@@ -9,25 +9,47 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/container/vector.hpp>
+#include <boost/filesystem/operations.hpp>
+#include <fmt/core.h>
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <stdint.h>
+#include <stdlib.h>
 #include <cstddef>
 #include <functional>
-#include <boost/filesystem.hpp>
-#include <optional>
-#include <unordered_set>
 #include <memory>
+#include <string>
+#include <unordered_set>
+#include <variant>
+#include <vector>
 
 #include "common/Consts.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "storage/Util.h"
-#include "storage/InsertData.h"
-#include "indexbuilder/IndexFactory.h"
+#include "index/Index.h"
 #include "index/IndexFactory.h"
-#include "test_utils/indexbuilder_test_utils.h"
+#include "index/IndexInfo.h"
+#include "index/IndexStats.h"
 #include "index/Meta.h"
+#include "indexbuilder/IndexCreatorBase.h"
+#include "indexbuilder/IndexFactory.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
+#include "storage/InsertData.h"
+#include "storage/PayloadReader.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
@@ -40,16 +62,6 @@ GenerateData(const size_t size, const size_t cardinality) {
     std::vector<T> result;
     for (size_t i = 0; i < size; ++i) {
         result.push_back(rand() % cardinality);
-    }
-    return result;
-}
-
-template <>
-std::vector<bool>
-GenerateData<bool>(const size_t size, const size_t cardinality) {
-    std::vector<bool> result;
-    for (size_t i = 0; i < size; ++i) {
-        result.push_back(rand() % 2 == 0);
     }
     return result;
 }
@@ -148,7 +160,7 @@ class BitmapIndexTest : public testing::Test {
         auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
         auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
-                                    "/tmp/test-bitmap-index/",
+                                    TestLocalPath,
                                     collection_id,
                                     partition_id,
                                     segment_id,
@@ -189,7 +201,7 @@ class BitmapIndexTest : public testing::Test {
         if (is_mmap_) {
             config["enable_mmap"] = "true";
             config["mmap_filepath"] = fmt::format("/{}/{}/{}/{}/{}",
-                                                  "/tmp/test-bitmap-index/",
+                                                  TestLocalPath,
                                                   collection_id,
                                                   1,
                                                   segment_id,
@@ -230,7 +242,7 @@ class BitmapIndexTest : public testing::Test {
         int64_t partition_id = 2;
         int64_t segment_id = 3;
         int64_t field_id = 101;
-        std::string root_path = "/tmp/test-bitmap-index/";
+        std::string root_path = TestLocalPath;
 
         storage::StorageConfig storage_config;
         storage_config.storage_type = "local";

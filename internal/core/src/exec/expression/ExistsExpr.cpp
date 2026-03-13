@@ -15,12 +15,30 @@
 // limitations under the License.
 
 #include "ExistsExpr.h"
+
+#include <set>
+
+#include "bitset/bitset.h"
+#include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
+#include "common/Tracer.h"
+#include "common/ScopedTimer.h"
 #include "common/Types.h"
 #include "common/Vector.h"
+#include "common/bson_view.h"
+#include "common/type_c.h"
+#include "exec/expression/EvalCtx.h"
+#include "folly/FBVector.h"
+#include "monitor/Monitor.h"
+#include "index/Index.h"
+#include "index/JsonFlatIndex.h"
 #include "index/JsonInvertedIndex.h"
 #include "index/json_stats/JsonKeyStats.h"
+#include "index/json_stats/utils.h"
+#include "opentelemetry/trace/span.h"
+#include "segcore/SegmentInterface.h"
+#include "segcore/SegmentSealed.h"
 
 namespace milvus {
 namespace exec {
@@ -32,7 +50,6 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     span.GetSpan()->SetAttribute("data_type",
                                  static_cast<int>(expr_->column_.data_type_));
 
-    context.set_apply_valid_data_after_flip(false);
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     auto data_type = expr_->column_.data_type_;
@@ -41,6 +58,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
     switch (data_type) {
         case DataType::JSON: {
+            span.GetSpan()->SetAttribute("json_filter_expr_type", "exists");
             if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
                 result = EvalJsonExistsForIndex();
             } else {
@@ -72,8 +90,8 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                     const_cast<index::JsonInvertedIndex<double>*>(
                         dynamic_cast<const index::JsonInvertedIndex<double>*>(
                             index));
-                cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-                    std::move(json_index->Exists()));
+                cached_index_chunk_res_ =
+                    std::make_shared<TargetBitmap>(json_index->Exists());
                 break;
             }
 
@@ -82,16 +100,16 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                     index::JsonInvertedIndex<std::string>*>(
                     dynamic_cast<const index::JsonInvertedIndex<std::string>*>(
                         index));
-                cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-                    std::move(json_index->Exists()));
+                cached_index_chunk_res_ =
+                    std::make_shared<TargetBitmap>(json_index->Exists());
                 break;
             }
 
             case JsonCastType::DataType::BOOL: {
                 auto* json_index = const_cast<index::JsonInvertedIndex<bool>*>(
                     dynamic_cast<const index::JsonInvertedIndex<bool>*>(index));
-                cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-                    std::move(json_index->Exists()));
+                cached_index_chunk_res_ =
+                    std::make_shared<TargetBitmap>(json_index->Exists());
                 break;
             }
 
@@ -100,8 +118,8 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                     dynamic_cast<const index::JsonFlatIndex*>(index));
                 auto executor =
                     json_flat_index->create_executor<double>(pointer);
-                cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-                    std::move(executor->Exists()));
+                cached_index_chunk_res_ =
+                    std::make_shared<TargetBitmap>(executor->Exists());
                 break;
             }
 
@@ -126,8 +144,16 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
     FieldId field_id = expr_->column_.field_id_;
     if (CanUseJsonStats(context, field_id, expr_->column_.nested_path_) &&
         !has_offset_input_) {
+        milvus::ScopedTimer timer("exists_json_by_stats", [this](double us) {
+            json_filter_stats_latency_us_ += us;
+        });
         return EvalJsonExistsForDataSegmentByStats();
     }
+
+    milvus::ScopedTimer timer("exists_json_bruteforce", [this](double us) {
+        json_filter_bruteforce_latency_us_ += us;
+    });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -164,7 +190,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
                 offset = (offsets) ? offsets[i] : i;
             }
             if (valid_data != nullptr && !valid_data[offset]) {
-                res[i] = valid_res[i] = false;
+                res[i] = false;
                 continue;
             }
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
@@ -216,23 +242,36 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
 
         // process shredding data, for exists, we only need to check the fields
         // that start with the given prefix which contains the given pointer
-        auto shredding_fields = index->GetShreddingFieldsWithPrefix(pointer);
-        for (const auto& field : shredding_fields) {
-            TargetBitmap temp_valid(active_count_, true);
-            TargetBitmapView temp_valid_view(temp_valid);
-            index->ExecutorForGettingValid(op_ctx_, field, temp_valid_view);
-            res_view |= temp_valid_view;
+        {
+            milvus::ScopedTimer timer(
+                "exists_json_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
+
+            auto shredding_fields =
+                index->GetShreddingFieldsWithPrefix(pointer);
+            for (const auto& field : shredding_fields) {
+                TargetBitmap temp_valid(active_count_, true);
+                TargetBitmapView temp_valid_view(temp_valid);
+                index->ExecutorForGettingValid(op_ctx_, field, temp_valid_view);
+                res_view |= temp_valid_view;
+            }
         }
 
         // process shared data, need to check if the value is empty
         // which match the semantics of exists in Json.h
-        index->ExecuteForSharedData(
-            op_ctx_,
-            bson_index_,
-            pointer,
-            [&](BsonView bson, uint32_t row_id, uint32_t offset) {
-                res_view[row_id] = !bson.IsBsonValueEmpty(offset);
-            });
+        {
+            milvus::ScopedTimer timer(
+                "exists_json_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+
+            index->ExecuteForSharedData(
+                op_ctx_,
+                bson_index_,
+                pointer,
+                [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+                    res_view[row_id] = !bson.IsBsonValueEmpty(offset);
+                });
+        }
     }
 
     TargetBitmap result;

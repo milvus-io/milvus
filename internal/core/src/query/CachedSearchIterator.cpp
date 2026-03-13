@@ -9,10 +9,26 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <math.h>
 #include <algorithm>
+#include <exception>
+#include <iterator>
+#include <memory>
 
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Utils.h"
+#include "index/Utils.h"
+#include "index/VectorIndex.h"
+#include "knowhere/expected.h"
+#include "mmap/ChunkedColumnInterface.h"
+#include "nlohmann/json.hpp"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
+#include "query/helper.h"
+#include "segcore/ConcurrentVector.h"
 
 namespace milvus::query {
 
@@ -145,6 +161,11 @@ CachedSearchIterator::CachedSearchIterator(
                               return static_cast<const void*>(x);
                           });
             int64_t chunk_size = column->chunk_row_nums(chunk_id);
+            const auto& offset_mapping = column->GetOffsetMapping();
+            const auto& valid_count_per_chunk = column->GetValidCountPerChunk();
+            if (offset_mapping.IsEnabled() && !valid_count_per_chunk.empty()) {
+                chunk_size = valid_count_per_chunk[chunk_id];
+            }
             // pw guarantees chunk_data is kept alive.
             auto chunk_data = pw.get();
             pin_wrappers_.emplace_back(std::move(pw));

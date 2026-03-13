@@ -15,9 +15,13 @@
 // limitations under the License.
 
 #include "VectorHasher.h"
-#include "common/float_util_c.h"
-#include <folly/Hash.h>
+
+#include <cstddef>
+
 #include "common/BitUtil.h"
+#include "common/EasyAssert.h"
+#include "common/float_util_c.h"
+#include "folly/hash/Hash.h"
 
 namespace milvus {
 namespace exec {

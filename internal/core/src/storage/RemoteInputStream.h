@@ -11,8 +11,12 @@
 
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+#include <memory>
+
+#include "arrow/io/interfaces.h"
 #include "filemanager/InputStream.h"
-#include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::storage {
 

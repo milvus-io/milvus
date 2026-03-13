@@ -30,6 +30,8 @@ struct BsonInvertedIndexLoadInfo {
     int64_t index_size;
     std::vector<std::string> index_files;
     uint32_t load_priority;
+    std::string
+        warmup_policy;  // "disable", "sync", or "async"; empty means use global config
 };
 
 // Translator for BsonInvertedIndex in json stats. It loads a single-cell
@@ -64,7 +66,8 @@ class BsonInvertedIndexTranslator : public milvus::cachinglayer::Translator<
 
     std::vector<std::pair<milvus::cachinglayer::cid_t,
                           std::unique_ptr<milvus::index::BsonInvertedIndex>>>
-    get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override;
+    get_cells(milvus::OpContext* ctx,
+              const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
     milvus::cachinglayer::Meta*
     meta() override;

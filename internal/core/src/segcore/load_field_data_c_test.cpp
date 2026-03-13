@@ -10,14 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <map>
+#include <memory>
+#include <string>
 
-#include "segcore/collection_c.h"
-#include "segcore/segment_c.h"
-#include "segcore/reduce_c.h"
-
-#include "test_utils/c_api_test_utils.h"
-#include "test_utils/storage_test_utils.h"
-#include "test_utils/GenExprProto.h"
+#include "common/LoadInfo.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "segcore/load_field_data_c.h"
 
 TEST(CApiTest, LoadInfoTest) {
     auto load_info = std::make_shared<LoadFieldDataInfo>();

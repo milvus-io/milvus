@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -207,6 +209,19 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	// validate analyzer params at any streaming node
 	// and set file resource ids to schema
 	if len(analyzerInfos) > 0 {
+		err := retry.Do(ctx, func() error {
+			if t.fileResourceObserver == nil {
+				return nil
+			}
+			if err := t.fileResourceObserver.CheckAllQnReady(); err != nil {
+				return err
+			}
+			return nil
+		}, retry.Attempts(10), retry.Sleep(3*time.Second))
+		if err != nil {
+			return err
+		}
+
 		resp, err := t.mixCoord.ValidateAnalyzer(t.ctx, &querypb.ValidateAnalyzerRequest{
 			AnalyzerInfos: analyzerInfos,
 		})
@@ -306,18 +321,10 @@ func (t *createCollectionTask) appendConsistecyLevel() {
 }
 
 func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema *schemapb.CollectionSchema) error {
-	if !Params.CommonCfg.EnableNamespace.GetAsBool() {
-		return nil
-	}
-
 	hasIsolation := hasIsolationProperty(t.Req.Properties...)
 	_, err := typeutil.GetPartitionKeyFieldSchema(schema)
 	hasPartitionKey := err == nil
-	enabled, has, err := common.ParseNamespaceProp(t.Req.Properties...)
-	if err != nil {
-		return err
-	}
-	if !has || !enabled {
+	if !schema.GetEnableNamespace() {
 		return nil
 	}
 

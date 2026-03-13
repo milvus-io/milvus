@@ -19,12 +19,15 @@ package importv2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
@@ -119,9 +122,9 @@ func TestGenerateTargetIndexPath(t *testing.T) {
 	}{
 		{
 			name:       "vector scalar index path",
-			sourcePath: "files/index_files/111/222/333/100/1001/1002/scalar_index",
+			sourcePath: "files/index_files/1001/1/222/333/scalar_index",
 			indexType:  IndexTypeVectorScalar,
-			wantPath:   "files/index_files/444/555/666/100/1001/1002/scalar_index",
+			wantPath:   "files/index_files/1001/1/555/666/scalar_index",
 			wantErr:    false,
 		},
 		{
@@ -266,120 +269,24 @@ func TestTransformFieldBinlogs(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(result))
 	})
-}
 
-func TestCreateFileMappings(t *testing.T) {
-	source := &datapb.CopySegmentSource{
-		CollectionId: 111,
-		PartitionId:  222,
-		SegmentId:    333,
-		InsertBinlogs: []*datapb.FieldBinlog{
+	t.Run("error on missing mapping", func(t *testing.T) {
+		srcWithUnmapped := []*datapb.FieldBinlog{
 			{
 				FieldID: 100,
 				Binlogs: []*datapb.Binlog{
-					{LogPath: "files/insert_log/111/222/333/100/log1.log"},
+					{
+						EntriesNum: 1000,
+						LogPath:    "files/insert_log/999/888/777/100/unmapped.log",
+					},
 				},
 			},
-		},
-		DeltaBinlogs: []*datapb.FieldBinlog{
-			{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{
-					{LogPath: "files/delta_log/111/222/333/100/delta1.log"},
-				},
-			},
-		},
-		StatsBinlogs: []*datapb.FieldBinlog{
-			{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{
-					{LogPath: "files/stats_log/111/222/333/100/stats1.log"},
-				},
-			},
-		},
-		Bm25Binlogs: []*datapb.FieldBinlog{
-			{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{
-					{LogPath: "files/bm25_stats/111/222/333/100/bm25_1.log"},
-				},
-			},
-		},
-		IndexFiles: []*indexpb.IndexFilePathInfo{
-			{
-				FieldID:        100,
-				IndexFilePaths: []string{"files/index_files/111/222/333/100/1001/1002/index1"},
-			},
-		},
-		TextIndexFiles: map[int64]*datapb.TextIndexStats{
-			100: {
-				FieldID: 100,
-				Files:   []string{"files/text_log/123/1/111/222/333/100/text1"},
-			},
-		},
-		JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
-			101: {
-				FieldID:                101,
-				JsonKeyStatsDataFormat: 1, // Legacy format
-				Files:                  []string{"files/json_key_index_log/123/1/111/222/333/101/json1"},
-			},
-			102: {
-				FieldID:                102,
-				BuildID:                3002,
-				Version:                1,
-				JsonKeyStatsDataFormat: 2, // New format
-				Files: []string{
-					"files/json_stats/2/3002/1/111/222/333/102/shared_key_index/index1",
-					"files/json_stats/2/3002/1/111/222/333/102/shredding_data/data1",
-				},
-			},
-		},
-	}
-
-	target := &datapb.CopySegmentTarget{
-		CollectionId: 444,
-		PartitionId:  555,
-		SegmentId:    666,
-	}
-
-	t.Run("create all file mappings", func(t *testing.T) {
-		mappings, err := createFileMappings(source, target)
-		assert.NoError(t, err)
-		assert.Equal(t, 9, len(mappings)) // Updated: 7 + 2 JSON Stats files
-
-		// Verify insert binlog mapping
-		assert.Equal(t, "files/insert_log/444/555/666/100/log1.log",
-			mappings["files/insert_log/111/222/333/100/log1.log"])
-
-		// Verify delta binlog mapping
-		assert.Equal(t, "files/delta_log/444/555/666/100/delta1.log",
-			mappings["files/delta_log/111/222/333/100/delta1.log"])
-
-		// Verify stats binlog mapping
-		assert.Equal(t, "files/stats_log/444/555/666/100/stats1.log",
-			mappings["files/stats_log/111/222/333/100/stats1.log"])
-
-		// Verify BM25 binlog mapping
-		assert.Equal(t, "files/bm25_stats/444/555/666/100/bm25_1.log",
-			mappings["files/bm25_stats/111/222/333/100/bm25_1.log"])
-
-		// Verify vector/scalar index mapping
-		assert.Equal(t, "files/index_files/444/555/666/100/1001/1002/index1",
-			mappings["files/index_files/111/222/333/100/1001/1002/index1"])
-
-		// Verify text index mapping
-		assert.Equal(t, "files/text_log/123/1/444/555/666/100/text1",
-			mappings["files/text_log/123/1/111/222/333/100/text1"])
-
-		// Verify JSON key index mapping (legacy format)
-		assert.Equal(t, "files/json_key_index_log/123/1/444/555/666/101/json1",
-			mappings["files/json_key_index_log/123/1/111/222/333/101/json1"])
-
-		// Verify JSON Stats mapping (new format)
-		assert.Equal(t, "files/json_stats/2/3002/1/444/555/666/102/shared_key_index/index1",
-			mappings["files/json_stats/2/3002/1/111/222/333/102/shared_key_index/index1"])
-		assert.Equal(t, "files/json_stats/2/3002/1/444/555/666/102/shredding_data/data1",
-			mappings["files/json_stats/2/3002/1/111/222/333/102/shredding_data/data1"])
+		}
+		result, totalRows, err := transformFieldBinlogs(srcWithUnmapped, mappings, true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no mapping found")
+		assert.Nil(t, result)
+		assert.Equal(t, int64(0), totalRows)
 	})
 }
 
@@ -405,7 +312,7 @@ func TestCopySegmentAndIndexFiles(t *testing.T) {
 				FieldID:        100,
 				IndexID:        1001,
 				BuildID:        1002,
-				IndexFilePaths: []string{"files/index_files/111/222/333/100/1001/1002/index1"},
+				IndexFilePaths: []string{"files/index_files/1002/1/222/333/index1"},
 			},
 		},
 	}
@@ -417,10 +324,11 @@ func TestCopySegmentAndIndexFiles(t *testing.T) {
 	}
 
 	t.Run("successful copy", func(t *testing.T) {
-		mockCM := mocks.NewChunkManager(t)
-		mockCM.EXPECT().Copy(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(2)
+		mCopy := mockey.Mock(copyFile).Return(nil).Build()
+		defer mCopy.UnPatch()
 
-		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), mockCM, source, target, nil)
+		cm := &struct{ storage.ChunkManager }{}
+		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -432,11 +340,11 @@ func TestCopySegmentAndIndexFiles(t *testing.T) {
 	})
 
 	t.Run("copy failure", func(t *testing.T) {
-		mockCM := mocks.NewChunkManager(t)
-		mockCM.EXPECT().Copy(mock.Anything, mock.Anything, mock.Anything).
-			Return(errors.New("copy failed")).Once()
+		mCopy := mockey.Mock(copyFile).Return(errors.New("copy failed")).Build()
+		defer mCopy.UnPatch()
 
-		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), mockCM, source, target, nil)
+		cm := &struct{ storage.ChunkManager }{}
+		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
@@ -510,7 +418,7 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 				FieldID:        100,
 				IndexID:        1001,
 				BuildID:        1002,
-				IndexFilePaths: []string{"files/index_files/111/222/333/100/1001/1002/index1"},
+				IndexFilePaths: []string{"files/index_files/1002/1/222/333/index1"},
 				SerializedSize: 5000,
 			},
 		},
@@ -554,15 +462,42 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 	}
 
 	mappings := map[string]string{
-		"files/index_files/111/222/333/100/1001/1002/index1":                "files/index_files/444/555/666/100/1001/1002/index1",
+		"files/index_files/1002/1/222/333/index1":                           "files/index_files/1002/1/555/666/index1",
 		"files/text_log/123/1/111/222/333/100/text1":                        "files/text_log/123/1/444/555/666/100/text1",
 		"files/json_key_index_log/123/1/111/222/333/101/json1":              "files/json_key_index_log/123/1/444/555/666/101/json1",
 		"files/json_stats/2/3002/1/111/222/333/102/shared_key_index/index1": "files/json_stats/2/3002/1/444/555/666/102/shared_key_index/index1",
 		"files/json_stats/2/3002/1/111/222/333/102/shredding_data/data1":    "files/json_stats/2/3002/1/444/555/666/102/shredding_data/data1",
 	}
 
+	t.Run("error on missing vector index mapping", func(t *testing.T) {
+		emptyMappings := map[string]string{}
+		_, _, _, err := buildIndexInfoFromSource(source, target, emptyMappings)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no mapping found for index file")
+	})
+
+	t.Run("error on missing text index mapping", func(t *testing.T) {
+		partialMappings := map[string]string{
+			"files/index_files/1002/1/222/333/index1": "files/index_files/1002/1/555/666/index1",
+		}
+		_, _, _, err := buildIndexInfoFromSource(source, target, partialMappings)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no mapping found for text index file")
+	})
+
+	t.Run("error on missing json index mapping", func(t *testing.T) {
+		partialMappings := map[string]string{
+			"files/index_files/1002/1/222/333/index1":    "files/index_files/1002/1/555/666/index1",
+			"files/text_log/123/1/111/222/333/100/text1": "files/text_log/123/1/444/555/666/100/text1",
+		}
+		_, _, _, err := buildIndexInfoFromSource(source, target, partialMappings)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no mapping found for JSON index file")
+	})
+
 	t.Run("build all index info", func(t *testing.T) {
-		indexInfos, textIndexInfos, jsonKeyIndexInfos := buildIndexInfoFromSource(source, target, mappings)
+		indexInfos, textIndexInfos, jsonKeyIndexInfos, err := buildIndexInfoFromSource(source, target, mappings)
+		assert.NoError(t, err)
 
 		// Verify vector/scalar index info
 		assert.Equal(t, 1, len(indexInfos))
@@ -571,7 +506,7 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 		assert.Equal(t, int64(1001), indexInfos[100].IndexId)
 		assert.Equal(t, int64(1002), indexInfos[100].BuildId)
 		assert.Equal(t, int64(5000), indexInfos[100].IndexSize)
-		assert.Equal(t, "files/index_files/444/555/666/100/1001/1002/index1", indexInfos[100].IndexFilePaths[0])
+		assert.Equal(t, "files/index_files/1002/1/555/666/index1", indexInfos[100].IndexFilePaths[0])
 
 		// Verify text index info
 		assert.Equal(t, 1, len(textIndexInfos))
@@ -603,7 +538,10 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 
 func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 	t.Run("success returns all copied files", func(t *testing.T) {
-		cm := mocks.NewChunkManager(t)
+		mCopy := mockey.Mock(copyFile).Return(nil).Build()
+		defer mCopy.UnPatch()
+		cm := &struct{ storage.ChunkManager }{}
+
 		source := &datapb.CopySegmentSource{
 			CollectionId: 111,
 			PartitionId:  222,
@@ -623,9 +561,6 @@ func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 			PartitionId:  555,
 			SegmentId:    666,
 		}
-
-		// Mock successful copies
-		cm.EXPECT().Copy(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(2)
 
 		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
 
@@ -637,7 +572,18 @@ func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 	})
 
 	t.Run("failure returns partial file list", func(t *testing.T) {
-		cm := mocks.NewChunkManager(t)
+		callCount := 0
+		mCopy := mockey.Mock(copyFile).
+			To(func(_ context.Context, _ storage.ChunkManager, src, dst string) error {
+				callCount++
+				if callCount > 1 {
+					return errors.New("copy failed")
+				}
+				return nil
+			}).Build()
+		defer mCopy.UnPatch()
+		cm := &struct{ storage.ChunkManager }{}
+
 		source := &datapb.CopySegmentSource{
 			CollectionId: 111,
 			PartitionId:  222,
@@ -658,16 +604,352 @@ func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 			SegmentId:    666,
 		}
 
-		// First copy succeeds, second fails
-		cm.EXPECT().Copy(mock.Anything, "files/insert_log/111/222/333/1/10001", "files/insert_log/444/555/666/1/10001").Return(nil).Maybe()
-		cm.EXPECT().Copy(mock.Anything, "files/insert_log/111/222/333/1/10002", "files/insert_log/444/555/666/1/10002").Return(errors.New("copy failed")).Maybe()
-
 		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.True(t, len(copiedFiles) <= 1, "should return files copied before failure")
 	})
+}
+
+func TestGenerateTargetIndexPath_PathTooShort(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	tests := []struct {
+		name      string
+		path      string
+		indexType string
+	}{
+		{
+			name:      "text index path too short",
+			path:      "files/text_log/123/1/111",
+			indexType: IndexTypeText,
+		},
+		{
+			name:      "json key index path too short",
+			path:      "files/json_key_index_log/123",
+			indexType: IndexTypeJSONKey,
+		},
+		{
+			name:      "json stats path too short",
+			path:      "files/json_stats/2/123/1/111",
+			indexType: IndexTypeJSONStats,
+		},
+		{
+			name:      "vector scalar path exactly at keyword",
+			path:      "files/index_files",
+			indexType: IndexTypeVectorScalar,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := generateTargetIndexPath(tt.path, source, target, tt.indexType)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid")
+		})
+	}
+}
+
+func TestGenerateTargetIndexPath_VectorScalarPreservesIDs(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	// Verify buildID (1001) and indexVersion (1) are preserved, NOT replaced
+	// partitionID (222->555) and segmentID (333->666) ARE replaced
+	// collectionID is NOT in path at all
+	result, err := generateTargetIndexPath("files/index_files/1001/1/222/333/HNSW_SQ_3", source, target, IndexTypeVectorScalar)
+	assert.NoError(t, err)
+	assert.Equal(t, "files/index_files/1001/1/555/666/HNSW_SQ_3", result)
+
+	// Verify collectionID (111) does NOT appear in target path
+	assert.NotContains(t, result, "111")
+	assert.NotContains(t, result, "444") // collectionID should NOT be injected
+}
+
+func TestGenerateTargetPath_AllConstants(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	// Verify all constants match the correct storage path names
+	tests := []struct {
+		name     string
+		logType  string
+		expected string
+	}{
+		{"insert uses insert_log", BinlogTypeInsert, "insert_log"},
+		{"delta uses delta_log", BinlogTypeDelta, "delta_log"},
+		{"stats uses stats_log", BinlogTypeStats, "stats_log"},
+		{"bm25 uses bm25_stats", BinlogTypeBM25, "bm25_stats"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := fmt.Sprintf("files/%s/111/222/333/100/log1", tt.expected)
+			result, err := generateTargetPath(path, source, target)
+			assert.NoError(t, err)
+			assert.Contains(t, result, tt.expected)
+			assert.Contains(t, result, "444")
+			assert.Contains(t, result, "555")
+			assert.Contains(t, result, "666")
+		})
+	}
+}
+
+func TestGenerateSegmentInfoFromSource_AllBinlogTypes(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+		InsertBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{EntriesNum: 500, LogPath: "files/insert_log/111/222/333/100/log1"},
+				},
+			},
+		},
+		StatsBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "files/stats_log/111/222/333/100/stats1"},
+				},
+			},
+		},
+		DeltaBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{EntriesNum: 10, LogPath: "files/delta_log/111/222/333/100/delta1"},
+				},
+			},
+		},
+		Bm25Binlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "files/bm25_stats/111/222/333/100/bm25_1"},
+				},
+			},
+		},
+	}
+
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	mappings := map[string]string{
+		"files/insert_log/111/222/333/100/log1":   "files/insert_log/444/555/666/100/log1",
+		"files/stats_log/111/222/333/100/stats1":  "files/stats_log/444/555/666/100/stats1",
+		"files/delta_log/111/222/333/100/delta1":  "files/delta_log/444/555/666/100/delta1",
+		"files/bm25_stats/111/222/333/100/bm25_1": "files/bm25_stats/444/555/666/100/bm25_1",
+	}
+
+	segmentInfo, err := generateSegmentInfoFromSource(source, target, mappings)
+	assert.NoError(t, err)
+	assert.NotNil(t, segmentInfo)
+	assert.Equal(t, int64(666), segmentInfo.SegmentID)
+	assert.Equal(t, int64(500), segmentInfo.ImportedRows) // Only insert rows counted
+	assert.Equal(t, 1, len(segmentInfo.Binlogs))
+	assert.Equal(t, 1, len(segmentInfo.Statslogs))
+	assert.Equal(t, 1, len(segmentInfo.Deltalogs))
+	assert.Equal(t, 1, len(segmentInfo.Bm25Logs))
+	assert.Equal(t, "files/delta_log/444/555/666/100/delta1", segmentInfo.Deltalogs[0].Binlogs[0].LogPath)
+	assert.Equal(t, "files/bm25_stats/444/555/666/100/bm25_1", segmentInfo.Bm25Logs[0].Binlogs[0].LogPath)
+}
+
+func TestGenerateSegmentInfoFromSource_EmptySource(t *testing.T) {
+	source := &datapb.CopySegmentSource{}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	segmentInfo, err := generateSegmentInfoFromSource(source, target, map[string]string{})
+	assert.NoError(t, err)
+	assert.NotNil(t, segmentInfo)
+	assert.Equal(t, int64(666), segmentInfo.SegmentID)
+	assert.Equal(t, int64(0), segmentInfo.ImportedRows)
+	assert.Equal(t, 0, len(segmentInfo.Binlogs))
+	assert.Equal(t, 0, len(segmentInfo.Statslogs))
+	assert.Equal(t, 0, len(segmentInfo.Deltalogs))
+	assert.Equal(t, 0, len(segmentInfo.Bm25Logs))
+}
+
+func TestBuildIndexInfoFromSource_EmptySource(t *testing.T) {
+	source := &datapb.CopySegmentSource{}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	indexInfos, textIndexInfos, jsonKeyIndexInfos, err := buildIndexInfoFromSource(source, target, map[string]string{})
+	assert.NoError(t, err)
+	assert.Equal(t, 0, len(indexInfos))
+	assert.Equal(t, 0, len(textIndexInfos))
+	assert.Equal(t, 0, len(jsonKeyIndexInfos))
+}
+
+func TestBuildIndexInfoFromSource_UnmappedPaths(t *testing.T) {
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	t.Run("unmapped vector index path returns error", func(t *testing.T) {
+		source := &datapb.CopySegmentSource{
+			IndexFiles: []*indexpb.IndexFilePathInfo{
+				{
+					FieldID:        100,
+					IndexID:        1001,
+					BuildID:        1002,
+					IndexFilePaths: []string{"unmapped/path"},
+					SerializedSize: 5000,
+				},
+			},
+		}
+		_, _, _, err := buildIndexInfoFromSource(source, target, map[string]string{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no mapping found for index file")
+	})
+
+	t.Run("unmapped text index path returns error", func(t *testing.T) {
+		source := &datapb.CopySegmentSource{
+			TextIndexFiles: map[int64]*datapb.TextIndexStats{
+				200: {
+					FieldID: 200,
+					Files:   []string{"unmapped/text/path"},
+				},
+			},
+		}
+		_, _, _, err := buildIndexInfoFromSource(source, target, map[string]string{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no mapping found for text index file")
+	})
+
+	t.Run("unmapped json index path returns error", func(t *testing.T) {
+		source := &datapb.CopySegmentSource{
+			JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
+				300: {
+					FieldID: 300,
+					Files:   []string{"unmapped/json/path"},
+				},
+			},
+		}
+		_, _, _, err := buildIndexInfoFromSource(source, target, map[string]string{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no mapping found for JSON index file")
+	})
+}
+
+func TestTransformFieldBinlogs_NilInput(t *testing.T) {
+	result, totalRows, err := transformFieldBinlogs(nil, map[string]string{}, true)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), totalRows)
+	assert.Equal(t, 0, len(result))
+}
+
+func TestTransformFieldBinlogs_MultipleBinlogsPerField(t *testing.T) {
+	mappings := map[string]string{
+		"files/insert_log/111/222/333/100/log1": "files/insert_log/444/555/666/100/log1",
+		"files/insert_log/111/222/333/100/log2": "files/insert_log/444/555/666/100/log2",
+		"files/insert_log/111/222/333/100/log3": "files/insert_log/444/555/666/100/log3",
+	}
+
+	srcFieldBinlogs := []*datapb.FieldBinlog{
+		{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{
+				{EntriesNum: 100, LogPath: "files/insert_log/111/222/333/100/log1", LogSize: 512},
+				{EntriesNum: 200, LogPath: "files/insert_log/111/222/333/100/log2", LogSize: 1024},
+				{EntriesNum: 300, LogPath: "files/insert_log/111/222/333/100/log3", LogSize: 2048},
+			},
+		},
+	}
+
+	result, totalRows, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(600), totalRows)
+	assert.Equal(t, 1, len(result))
+	assert.Equal(t, 3, len(result[0].Binlogs))
+	assert.Equal(t, "files/insert_log/444/555/666/100/log1", result[0].Binlogs[0].LogPath)
+	assert.Equal(t, "files/insert_log/444/555/666/100/log2", result[0].Binlogs[1].LogPath)
+	assert.Equal(t, "files/insert_log/444/555/666/100/log3", result[0].Binlogs[2].LogPath)
+}
+
+func TestTransformFieldBinlogs_UnmappedPath(t *testing.T) {
+	// Path not in mappings -> returns error (fail-fast)
+	mappings := map[string]string{}
+
+	srcFieldBinlogs := []*datapb.FieldBinlog{
+		{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{
+				{EntriesNum: 100, LogPath: "files/insert_log/111/222/333/100/log1"},
+			},
+		},
+	}
+
+	_, _, err := transformFieldBinlogs(srcFieldBinlogs, mappings, true)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no mapping found for source path")
+}
+
+func TestCopySegmentAndIndexFiles_CreateFileMappingsError(t *testing.T) {
+	mockCM := mocks.NewChunkManager(t)
+	// Source with invalid path that will cause generateMappingsFromFiles to fail
+	source := &datapb.CopySegmentSource{
+		InsertBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "invalid/path/without/log/type"},
+				},
+			},
+		},
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), mockCM, source, target, nil)
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Nil(t, copiedFiles)
+	assert.Contains(t, err.Error(), "failed to generate file mappings")
 }
 
 func TestShortenIndexFilePaths(t *testing.T) {
@@ -679,8 +961,8 @@ func TestShortenIndexFilePaths(t *testing.T) {
 		{
 			name: "vector/scalar index paths",
 			fullPaths: []string{
-				"files/index_files/444/555/666/100/1001/1002/scalar_index",
-				"files/index_files/444/555/666/100/1001/1002/vector_index",
+				"files/index_files/1001/1/555/666/scalar_index",
+				"files/index_files/1001/1/555/666/vector_index",
 			},
 			expected: []string{"scalar_index", "vector_index"},
 		},
@@ -801,7 +1083,6 @@ func TestShortenJsonStatsPath(t *testing.T) {
 }
 
 func TestShortenJsonStatsPath_MetaJson(t *testing.T) {
-	// Test shortening meta.json path (file directly under fieldID directory)
 	jsonStats := map[int64]*datapb.JsonKeyStats{
 		102: {
 			FieldID: 102,
@@ -825,29 +1106,604 @@ func TestShortenJsonStatsPath_MetaJson(t *testing.T) {
 }
 
 func TestShortenSingleJsonStatsPath_EdgeCases(t *testing.T) {
-	// Test already shortened path
 	t.Run("already_shortened_meta", func(t *testing.T) {
 		result := shortenSingleJsonStatsPath("meta.json")
 		assert.Equal(t, "meta.json", result)
 	})
 
-	// Test already shortened shared_key_index path
 	t.Run("already_shortened_shared_key", func(t *testing.T) {
 		result := shortenSingleJsonStatsPath("shared_key_index/inverted_index_0")
 		assert.Equal(t, "shared_key_index/inverted_index_0", result)
 	})
 
-	// Test full path with meta.json
 	t.Run("full_path_meta_json", func(t *testing.T) {
 		fullPath := "files/json_stats/2/123/1/444/555/666/100/meta.json"
 		result := shortenSingleJsonStatsPath(fullPath)
 		assert.Equal(t, "meta.json", result)
 	})
 
-	// Test full path with nested file under fieldID
 	t.Run("full_path_nested_file", func(t *testing.T) {
 		fullPath := "files/json_stats/2/123/1/444/555/666/100/subdir/file.dat"
 		result := shortenSingleJsonStatsPath(fullPath)
 		assert.Equal(t, "subdir/file.dat", result)
+	})
+}
+
+func TestTransformManifestPath(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		SegmentId:    449104621518610065,
+		CollectionId: 449104612037410004,
+		PartitionId:  449104621518610066,
+	}
+
+	target := &datapb.CopySegmentTarget{
+		SegmentId:    2001,
+		CollectionId: 111,
+		PartitionId:  222,
+	}
+
+	sourceManifest := packed.MarshalManifestPath(
+		"files/insert_log/449104612037410004/449104621518610066/449104621518610065",
+		2,
+	)
+
+	targetManifest, err := transformManifestPath(sourceManifest, source, target)
+	assert.NoError(t, err)
+
+	basePath, version, err := packed.UnmarshalManifestPath(targetManifest)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), version)
+	assert.Contains(t, basePath, "111")
+	assert.Contains(t, basePath, "222")
+	assert.Contains(t, basePath, "2001")
+}
+
+func TestCollectSegmentFiles_WithManifest(t *testing.T) {
+	ctx := context.Background()
+
+	manifestPath := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
+
+	mList := mockey.Mock(listAllFiles).Return([]string{
+		"files/insert_log/111/222/333/_data/100/file1.log",
+		"files/insert_log/111/222/333/_data/101/file2.log",
+		"files/insert_log/111/222/333/_metadata/manifest.json",
+	}, nil).Build()
+	defer mList.UnPatch()
+
+	cm := &struct{ storage.ChunkManager }{}
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifestPath,
+		InsertBinlogs:  []*datapb.FieldBinlog{},
+	}
+
+	files, err := collectSegmentFiles(ctx, cm, source)
+
+	assert.NoError(t, err)
+	assert.Len(t, files.InsertBinlogs, 3)
+	assert.Contains(t, files.InsertBinlogs, "files/insert_log/111/222/333/_data/100/file1.log")
+	assert.Contains(t, files.InsertBinlogs, "files/insert_log/111/222/333/_data/101/file2.log")
+	assert.Contains(t, files.InsertBinlogs, "files/insert_log/111/222/333/_metadata/manifest.json")
+}
+
+func TestCollectSegmentFiles_V3MissingManifestPath(t *testing.T) {
+	ctx := context.Background()
+
+	cm := &struct{ storage.ChunkManager }{}
+
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   "", // V3 but no manifest
+	}
+
+	files, err := collectSegmentFiles(ctx, cm, source)
+
+	assert.Error(t, err)
+	assert.Nil(t, files)
+	assert.Contains(t, err.Error(), "requires manifest_path but it is empty")
+}
+
+func TestCollectSegmentFiles_ManifestUnmarshalFailure(t *testing.T) {
+	ctx := context.Background()
+
+	cm := &struct{ storage.ChunkManager }{}
+
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   "invalid-json-not-a-manifest",
+	}
+
+	files, err := collectSegmentFiles(ctx, cm, source)
+
+	assert.Error(t, err)
+	assert.Nil(t, files)
+	assert.Contains(t, err.Error(), "failed to unmarshal manifest path")
+}
+
+func TestCollectSegmentFiles_ManifestListFailure(t *testing.T) {
+	ctx := context.Background()
+
+	manifestPath := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
+
+	mList := mockey.Mock(listAllFiles).Return(nil, errors.New("storage unavailable")).Build()
+	defer mList.UnPatch()
+
+	cm := &struct{ storage.ChunkManager }{}
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifestPath,
+	}
+
+	files, err := collectSegmentFiles(ctx, cm, source)
+
+	assert.Error(t, err)
+	assert.Nil(t, files)
+	assert.Contains(t, err.Error(), "failed to list files from manifest base path")
+}
+
+func TestCollectSegmentFiles_ManifestEmptyFiles(t *testing.T) {
+	ctx := context.Background()
+
+	manifestPath := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
+
+	mList := mockey.Mock(listAllFiles).Return([]string{}, nil).Build()
+	defer mList.UnPatch()
+
+	cm := &struct{ storage.ChunkManager }{}
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifestPath,
+		InsertBinlogs:  []*datapb.FieldBinlog{}, // empty pb — should NOT be used
+	}
+
+	// Empty file list is OK for V3 — segment may have only deltas
+	files, err := collectSegmentFiles(ctx, cm, source)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, files)
+	assert.Empty(t, files.InsertBinlogs)
+}
+
+func TestCollectSegmentFiles_NoManifest(t *testing.T) {
+	ctx := context.Background()
+
+	cm := &struct{ storage.ChunkManager }{}
+
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		StorageVersion: storage.StorageV1, // V1: use pb paths
+		InsertBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "files/insert_log/111/222/333/100/file1.log"},
+					{LogPath: "files/insert_log/111/222/333/100/file2.log"},
+				},
+			},
+		},
+	}
+
+	files, err := collectSegmentFiles(ctx, cm, source)
+
+	assert.NoError(t, err)
+	assert.Len(t, files.InsertBinlogs, 2)
+	assert.Contains(t, files.InsertBinlogs, "files/insert_log/111/222/333/100/file1.log")
+	assert.Contains(t, files.InsertBinlogs, "files/insert_log/111/222/333/100/file2.log")
+}
+
+func TestExtractFromPb(t *testing.T) {
+	t.Run("extract paths from field binlogs", func(t *testing.T) {
+		fieldBinlogs := []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "path/a"},
+					{LogPath: "path/b"},
+				},
+			},
+			{
+				FieldID: 101,
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "path/c"},
+				},
+			},
+		}
+		paths := extractFromPb(fieldBinlogs)
+		assert.Equal(t, []string{"path/a", "path/b", "path/c"}, paths)
+	})
+
+	t.Run("skip empty paths", func(t *testing.T) {
+		fieldBinlogs := []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "path/a"},
+					{LogPath: ""},
+				},
+			},
+		}
+		paths := extractFromPb(fieldBinlogs)
+		assert.Equal(t, []string{"path/a"}, paths)
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		paths := extractFromPb(nil)
+		assert.Empty(t, paths)
+	})
+}
+
+func TestExtractIndexFiles(t *testing.T) {
+	t.Run("extract index file paths", func(t *testing.T) {
+		indexInfos := []*indexpb.IndexFilePathInfo{
+			{IndexFilePaths: []string{"idx/a", "idx/b"}},
+			{IndexFilePaths: []string{"idx/c"}},
+		}
+		paths := extractIndexFiles(indexInfos)
+		assert.Equal(t, []string{"idx/a", "idx/b", "idx/c"}, paths)
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		paths := extractIndexFiles(nil)
+		assert.Empty(t, paths)
+	})
+}
+
+func TestExtractTextIndexFiles(t *testing.T) {
+	t.Run("extract text index file paths", func(t *testing.T) {
+		textInfos := map[int64]*datapb.TextIndexStats{
+			100: {Files: []string{"text/a", "text/b"}},
+		}
+		paths := extractTextIndexFiles(textInfos)
+		assert.Equal(t, []string{"text/a", "text/b"}, paths)
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		paths := extractTextIndexFiles(nil)
+		assert.Empty(t, paths)
+	})
+}
+
+func TestExtractJsonFiles(t *testing.T) {
+	t.Run("separate by data format", func(t *testing.T) {
+		jsonInfos := map[int64]*datapb.JsonKeyStats{
+			100: {
+				JsonKeyStatsDataFormat: 1,
+				Files:                  []string{"legacy/a"},
+			},
+			101: {
+				JsonKeyStatsDataFormat: 2,
+				Files:                  []string{"new/b", "new/c"},
+			},
+		}
+		jsonKeyFiles, jsonStatsFiles := extractJsonFiles(jsonInfos)
+		assert.Equal(t, []string{"legacy/a"}, jsonKeyFiles)
+		assert.ElementsMatch(t, []string{"new/b", "new/c"}, jsonStatsFiles)
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		jsonKeyFiles, jsonStatsFiles := extractJsonFiles(nil)
+		assert.Empty(t, jsonKeyFiles)
+		assert.Empty(t, jsonStatsFiles)
+	})
+}
+
+func TestGenerateMappingsFromFiles(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+	}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	t.Run("generate mappings for all file types", func(t *testing.T) {
+		files := &SegmentFiles{
+			InsertBinlogs:     []string{"files/insert_log/111/222/333/100/log1"},
+			DeltaBinlogs:      []string{"files/delta_log/111/222/333/100/delta1"},
+			StatsBinlogs:      []string{"files/stats_log/111/222/333/100/stats1"},
+			Bm25Binlogs:       []string{"files/bm25_stats/111/222/333/100/bm25_1"},
+			VectorScalarIndex: []string{"files/index_files/1002/1/222/333/idx1"},
+			TextIndex:         []string{"files/text_log/123/1/111/222/333/100/text1"},
+			JsonKeyIndex:      []string{"files/json_key_index_log/123/1/111/222/333/101/json1"},
+			JsonStats:         []string{"files/json_stats/2/3002/1/111/222/333/102/shared_key_index/idx1"},
+		}
+
+		mappings, err := generateMappingsFromFiles(files, source, target)
+		assert.NoError(t, err)
+		assert.Len(t, mappings, 8)
+
+		assert.Equal(t, "files/insert_log/444/555/666/100/log1",
+			mappings["files/insert_log/111/222/333/100/log1"])
+		assert.Equal(t, "files/delta_log/444/555/666/100/delta1",
+			mappings["files/delta_log/111/222/333/100/delta1"])
+		assert.Equal(t, "files/bm25_stats/444/555/666/100/bm25_1",
+			mappings["files/bm25_stats/111/222/333/100/bm25_1"])
+		assert.Equal(t, "files/index_files/1002/1/555/666/idx1",
+			mappings["files/index_files/1002/1/222/333/idx1"])
+	})
+
+	t.Run("empty files", func(t *testing.T) {
+		files := &SegmentFiles{}
+		mappings, err := generateMappingsFromFiles(files, source, target)
+		assert.NoError(t, err)
+		assert.Empty(t, mappings)
+	})
+
+	t.Run("invalid path returns error", func(t *testing.T) {
+		files := &SegmentFiles{
+			InsertBinlogs: []string{"invalid/path/no/log_type"},
+		}
+		_, err := generateMappingsFromFiles(files, source, target)
+		assert.Error(t, err)
+	})
+}
+
+// TestCopySegmentAndIndexFiles_WithManifest tests the complete copy flow for StorageV3 segments.
+// When storage_version >= StorageV3, insert binlogs are stored in packed format.
+// Physical files (under _data/_metadata) differ from logical paths in protobuf.
+// Step 3.5 must add logical pb path mappings AFTER file copying for metadata generation.
+func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
+
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifestPath,
+		InsertBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{EntriesNum: 500, LogPath: "files/insert_log/111/222/333/100/10001", LogSize: 1024},
+				},
+			},
+			{
+				FieldID: 101,
+				Binlogs: []*datapb.Binlog{
+					{EntriesNum: 500, LogPath: "files/insert_log/111/222/333/101/10002", LogSize: 2048},
+				},
+			},
+		},
+		StatsBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "files/stats_log/111/222/333/100/20001"},
+				},
+			},
+		},
+		DeltaBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 0,
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "files/delta_log/111/222/333/0/30001"},
+				},
+			},
+		},
+	}
+
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	t.Run("successful copy with manifest", func(t *testing.T) {
+		mList := mockey.Mock(listAllFiles).To(func(_ context.Context, _ storage.ChunkManager, basePath string) ([]string, error) {
+			return []string{
+				"files/insert_log/111/222/333/_data/0",
+				"files/insert_log/111/222/333/_metadata/manifest.json",
+			}, nil
+		}).Build()
+		defer mList.UnPatch()
+
+		copiedSrcPaths := make([]string, 0)
+		mCopy := mockey.Mock(copyFile).
+			To(func(_ context.Context, _ storage.ChunkManager, src, dst string) error {
+				copiedSrcPaths = append(copiedSrcPaths, src)
+				return nil
+			}).Build()
+		defer mCopy.UnPatch()
+
+		cm := &struct{ storage.ChunkManager }{}
+
+		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+
+		assert.Equal(t, int64(666), result.SegmentId)
+		assert.Equal(t, int64(1000), result.ImportedRows)
+
+		assert.Equal(t, 2, len(result.Binlogs))
+		assert.Equal(t, 1, len(result.Statslogs))
+		assert.Equal(t, 1, len(result.Deltalogs))
+
+		expectedManifestPath := packed.MarshalManifestPath("files/insert_log/444/555/666", 2)
+		assert.Equal(t, expectedManifestPath, result.ManifestPath)
+
+		assert.Len(t, copiedFiles, 4)
+
+		for _, src := range copiedSrcPaths {
+			assert.NotEqual(t, "files/insert_log/111/222/333/100/10001", src)
+			assert.NotEqual(t, "files/insert_log/111/222/333/101/10002", src)
+		}
+
+		assert.Contains(t, copiedSrcPaths, "files/insert_log/111/222/333/_data/0")
+		assert.Contains(t, copiedSrcPaths, "files/insert_log/111/222/333/_metadata/manifest.json")
+		assert.Contains(t, copiedSrcPaths, "files/stats_log/111/222/333/100/20001")
+		assert.Contains(t, copiedSrcPaths, "files/delta_log/111/222/333/0/30001")
+	})
+
+	t.Run("copy failure on physical file", func(t *testing.T) {
+		mList := mockey.Mock(listAllFiles).To(func(_ context.Context, _ storage.ChunkManager, basePath string) ([]string, error) {
+			return []string{"files/insert_log/111/222/333/_data/0"}, nil
+		}).Build()
+		defer mList.UnPatch()
+
+		mCopy := mockey.Mock(copyFile).Return(errors.New("storage unavailable")).Build()
+		defer mCopy.UnPatch()
+
+		cm := &struct{ storage.ChunkManager }{}
+		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "failed to copy file")
+		assert.Empty(t, copiedFiles)
+	})
+
+	t.Run("step 3.5 fails on invalid pb path format", func(t *testing.T) {
+		badPbSource := &datapb.CopySegmentSource{
+			CollectionId:   111,
+			PartitionId:    222,
+			SegmentId:      333,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   manifestPath,
+			InsertBinlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 500, LogPath: "invalid/path/no/log_type/10001", LogSize: 1024},
+					},
+				},
+			},
+		}
+
+		mList := mockey.Mock(listAllFiles).Return([]string{"files/insert_log/111/222/333/_data/0"}, nil).Build()
+		defer mList.UnPatch()
+
+		mCopy := mockey.Mock(copyFile).Return(nil).Build()
+		defer mCopy.UnPatch()
+
+		cm := &struct{ storage.ChunkManager }{}
+		result, _, err := CopySegmentAndIndexFiles(context.Background(), cm, badPbSource, target, nil)
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "failed to generate target path for pb insert binlog")
+	})
+}
+
+// TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs tests StorageV3 segment with no pb insert binlogs.
+// When InsertBinlogs in pb is empty but manifest has files, Step 3.5 has nothing to add (no logical paths).
+func TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
+
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifestPath,
+		InsertBinlogs:  []*datapb.FieldBinlog{},
+	}
+
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	mList := mockey.Mock(listAllFiles).Return([]string{"files/insert_log/111/222/333/_data/0"}, nil).Build()
+	defer mList.UnPatch()
+
+	mCopy := mockey.Mock(copyFile).Return(nil).Build()
+	defer mCopy.UnPatch()
+
+	cm := &struct{ storage.ChunkManager }{}
+	result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, int64(0), result.ImportedRows)
+	assert.Len(t, copiedFiles, 1)
+	assert.NotEmpty(t, result.ManifestPath)
+}
+
+// TestCopySegmentAndIndexFiles_WithoutManifest_Unchanged verifies that StorageV1 segments
+// use pb paths and do NOT trigger manifest-related logic (Step 3.5, Step 8).
+func TestCopySegmentAndIndexFiles_WithoutManifest_Unchanged(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		StorageVersion: storage.StorageV1,
+		InsertBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{EntriesNum: 1000, LogPath: "files/insert_log/111/222/333/100/10001", LogSize: 1024},
+				},
+			},
+		},
+	}
+
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+	}
+
+	mCopy := mockey.Mock(copyFile).Return(nil).Build()
+	defer mCopy.UnPatch()
+
+	cm := &struct{ storage.ChunkManager }{}
+	result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, int64(1000), result.ImportedRows)
+	assert.Equal(t, int64(666), result.SegmentId)
+	assert.Len(t, copiedFiles, 1)
+	assert.Empty(t, result.ManifestPath)
+}
+
+func TestListAllFiles(t *testing.T) {
+	t.Run("list files successfully", func(t *testing.T) {
+		mWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).
+			To(func(_ *storage.LocalChunkManager, _ context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
+				walkFunc(&storage.ChunkObjectInfo{FilePath: "base/path/file1"})
+				walkFunc(&storage.ChunkObjectInfo{FilePath: "base/path/file2"})
+				return nil
+			}).Build()
+		defer mWalk.UnPatch()
+
+		cm := &storage.LocalChunkManager{}
+		files, err := listAllFiles(context.Background(), cm, "base/path")
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"base/path/file1", "base/path/file2"}, files)
+	})
+
+	t.Run("walk error returns error", func(t *testing.T) {
+		mWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).
+			Return(errors.New("walk failed")).Build()
+		defer mWalk.UnPatch()
+
+		cm := &storage.LocalChunkManager{}
+		files, err := listAllFiles(context.Background(), cm, "bad/path")
+		assert.Error(t, err)
+		assert.Nil(t, files)
 	})
 }

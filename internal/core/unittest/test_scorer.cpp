@@ -9,13 +9,20 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include <stdint.h>
+#include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "common/Types.h"
-#include "rescores/Scorer.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 #include "pb/plan.pb.h"
+#include "rescores/Scorer.h"
 
 using namespace milvus;
 using namespace milvus::rescores;

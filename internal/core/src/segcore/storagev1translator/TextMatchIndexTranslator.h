@@ -29,6 +29,8 @@ struct TextMatchIndexLoadInfo {
     int64_t field_id;
     std::string analyzer_params;
     int64_t index_size;
+    std::string
+        warmup_policy;  // "disable", "sync", or "async"; empty means use global config
 };
 
 // Translator for TextMatchIndex (non-knowhere index). It loads a single-cell
@@ -63,7 +65,8 @@ class TextMatchIndexTranslator
 
     std::vector<std::pair<milvus::cachinglayer::cid_t,
                           std::unique_ptr<milvus::index::TextMatchIndex>>>
-    get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override;
+    get_cells(milvus::OpContext* ctx,
+              const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
     milvus::cachinglayer::Meta*
     meta() override;

@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -78,6 +79,140 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 			err := s.cm.UpdateSchema(1, nil, 100)
 			s.Error(err)
 		})
+	})
+}
+
+func (s *CollectionManagerSuite) TestPutOrRefUpdateIndexMeta() {
+	// Verify initial collection has IndexMeta set from SetupTest.
+	coll := s.cm.Get(1)
+	s.Require().NotNil(coll)
+	s.Require().NotNil(coll.GetCCollection().IndexMeta())
+
+	// Add a new vector field to simulate schema evolution.
+	schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
+	newVecFieldID := int64(200)
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:  newVecFieldID,
+		Name:     "new_float_vector",
+		DataType: schemapb.DataType_FloatVector,
+		Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "128"},
+		},
+	})
+
+	// Build IndexMeta from the updated schema (should include the new field).
+	newIndexMeta := mock_segcore.GenTestIndexMeta(1, schema)
+	hasNewField := false
+	for _, meta := range newIndexMeta.GetIndexMetas() {
+		if meta.GetFieldID() == newVecFieldID {
+			hasNewField = true
+			break
+		}
+	}
+	s.Require().True(hasNewField, "precondition: new IndexMeta should contain field %d", newVecFieldID)
+
+	// PutOrRef on an existing collection should update its IndexMeta.
+	err := s.cm.PutOrRef(1, schema, newIndexMeta, &querypb.LoadMetaInfo{
+		LoadType:      querypb.LoadType_LoadCollection,
+		SchemaVersion: 100,
+	})
+	s.Require().NoError(err)
+	defer s.cm.Unref(1, 1)
+
+	// Verify IndexMeta now contains the new field.
+	updatedIndexMeta := s.cm.Get(1).GetCCollection().IndexMeta()
+	found := false
+	for _, meta := range updatedIndexMeta.GetIndexMetas() {
+		if meta.GetFieldID() == newVecFieldID {
+			found = true
+			break
+		}
+	}
+	s.True(found,
+		"PutOrRef should update IndexMeta for existing collections; field %d is missing",
+		newVecFieldID)
+}
+
+func (s *CollectionManagerSuite) TestRef() {
+	s.Run("ref_existing_collection", func() {
+		ok := s.cm.Ref(1, 1)
+		s.True(ok)
+	})
+
+	s.Run("ref_non_existing_collection", func() {
+		ok := s.cm.Ref(9999, 1)
+		s.False(ok)
+	})
+}
+
+func (s *CollectionManagerSuite) TestUnref() {
+	s.Run("unref_non_existing_collection", func() {
+		// Unref on non-existing collection should return true
+		ok := s.cm.Unref(9999, 1)
+		s.True(ok)
+	})
+
+	s.Run("unref_without_release", func() {
+		// Add more refs first
+		s.cm.Ref(1, 2)
+		// Unref once, should not release (refCount > 0)
+		ok := s.cm.Unref(1, 1)
+		s.False(ok)
+		// Collection should still exist
+		coll := s.cm.Get(1)
+		s.NotNil(coll)
+	})
+
+	s.Run("unref_with_release", func() {
+		// Create a new collection manager for this test
+		cm := NewCollectionManager()
+		schema := mock_segcore.GenTestCollectionSchema("collection_2", schemapb.DataType_Int64, false)
+		err := cm.PutOrRef(2, schema, mock_segcore.GenTestIndexMeta(2, schema), &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.Require().NoError(err)
+
+		// Unref to release the collection (refCount goes to 0)
+		ok := cm.Unref(2, 1)
+		s.True(ok)
+
+		// Collection should be removed
+		coll := cm.Get(2)
+		s.Nil(coll)
+	})
+}
+
+func (s *CollectionManagerSuite) TestList() {
+	ids := s.cm.List()
+	s.Contains(ids, int64(1))
+}
+
+func (s *CollectionManagerSuite) TestListWithName() {
+	names := s.cm.ListWithName()
+	s.Contains(names, int64(1))
+	s.Equal("collection_1", names[1])
+}
+
+func (s *CollectionManagerSuite) TestPutOrRef() {
+	s.Run("put_new_collection", func() {
+		cm := NewCollectionManager()
+		schema := mock_segcore.GenTestCollectionSchema("collection_new", schemapb.DataType_Int64, false)
+		err := cm.PutOrRef(100, schema, mock_segcore.GenTestIndexMeta(100, schema), &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.NoError(err)
+		coll := cm.Get(100)
+		s.NotNil(coll)
+	})
+
+	s.Run("ref_existing_collection", func() {
+		// Ref existing collection (id=1)
+		schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
+		err := s.cm.PutOrRef(1, schema, mock_segcore.GenTestIndexMeta(1, schema), &querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
+		s.NoError(err)
 	})
 }
 

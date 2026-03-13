@@ -10,12 +10,16 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-
+#include <stdint.h>
+#include <stdlib.h>
+#include <time.h>
 #include <iostream>
-#include <random>
+#include <memory>
 #include <string>
-#include <vector>
 
+#include "gtest/gtest.h"
+#include "storage/ChunkManager.h"
+#include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 
 using namespace std;

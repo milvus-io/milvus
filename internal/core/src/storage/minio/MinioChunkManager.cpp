@@ -16,11 +16,8 @@
 
 #include "storage/minio/MinioChunkManager.h"
 
-#include <fstream>
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
-#include <aws/core/auth/STSCredentialsProvider.h>
-#include <aws/core/utils/logging/ConsoleLogSystem.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -29,21 +26,60 @@
 #include <aws/s3/model/HeadObjectRequest.h>
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
+#include <string.h>
+#include <unistd.h>
+#include <algorithm>
+#include <chrono>
+#include <exception>
+#include <functional>
+#include <sstream>
 
-#include "storage/aliyun/AliyunSTSClient.h"
-#include "storage/aliyun/AliyunCredentialsProvider.h"
-#include "storage/tencent/TencentCloudSTSClient.h"
-#include "storage/tencent/TencentCloudCredentialsProvider.h"
-#include "monitor/Monitor.h"
-#include "common/EasyAssert.h"
-#include "log/Log.h"
-#include "signal.h"
+#include "aws/core/Aws.h"
+#include "aws/core/auth/signer/AWSAuthV4Signer.h"
+#include "aws/core/http/Scheme.h"
+#include "aws/core/utils/Outcome.h"
+#include "aws/core/utils/memory/AWSMemory.h"
+#include "aws/core/utils/memory/stl/AWSStringStream.h"
+#include "aws/s3/S3Client.h"
+#include "aws/s3/model/Bucket.h"
+#include "aws/s3/model/HeadObjectResult.h"
+#include "aws/s3/model/ListBucketsResult.h"
+#include "aws/s3/model/ListObjectsResult.h"
+#include "aws/s3/model/Object.h"
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "fmt/core.h"
+#include "google/cloud/internal/rest_client.h"
+#include "google/cloud/storage/oauth2/compute_engine_credentials.h"
+#include "google/cloud/version.h"
+#include "log/Log.h"
+#include "monitor/Monitor.h"
+#include "prometheus/counter.h"
+#include "prometheus/histogram.h"
+#include "signal.h"
+#include "storage/Types.h"
+#include "storage/aliyun/AliyunCredentialsProvider.h"
 
 namespace milvus::storage {
 
 std::atomic<size_t> MinioChunkManager::init_count_(0);
 std::mutex MinioChunkManager::client_mutex_;
+
+void
+ConfigureGoogleCloudIAMHttpClientFactory(Aws::SDKOptions& sdk_options) {
+    sdk_options.httpOptions.httpClientFactory_create_fn = []() {
+        auto credentials =
+            std::make_shared<google::cloud::oauth2_internal::
+                                 GOOGLE_CLOUD_CPP_NS::ComputeEngineCredentials>(
+                google::cloud::Options{},
+                [](google::cloud::Options const& opts) {
+                    return google::cloud::rest_internal::MakeDefaultRestClient(
+                        "", opts);
+                });
+        return Aws::MakeShared<GoogleHttpClientFactory>(
+            GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
+    };
+}
 
 static void
 SwallowHandler(int signal) {
@@ -107,13 +143,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type,
         sigaddset(&psa.sa_mask, SIGPIPE);
         sigaction(SIGPIPE, &psa, 0);
         if (type == RemoteStorageType::GOOGLE_CLOUD && useIAM) {
-            sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
-                auto credentials = std::make_shared<
-                    google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::
-                        ComputeEngineCredentials>();
-                return Aws::MakeShared<GoogleHttpClientFactory>(
-                    GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
-            };
+            ConfigureGoogleCloudIAMHttpClientFactory(sdk_options_);
         }
         LOG_INFO("init aws with log level:{}", log_level_str);
         auto get_aws_log_level = [](const std::string& level_str) {
@@ -226,7 +256,11 @@ MinioChunkManager::PreCheck(const StorageConfig& config) {
              config.ToString());
     try {
         // Just test connection not check real list, avoid cost resource.
-        ListWithPrefix("justforconnectioncheck");
+        std::string check_prefix = "justforconnectioncheck";
+        if (!remote_root_path_.empty()) {
+            check_prefix = remote_root_path_ + "/" + check_prefix;
+        }
+        ListWithPrefix(check_prefix);
     } catch (SegcoreError& e) {
         auto err_message = fmt::format(
             "precheck chunk manager client failed, "
@@ -234,7 +268,7 @@ MinioChunkManager::PreCheck(const StorageConfig& config) {
             "configuration:{}",
             e.what(),
             config.ToString());
-        LOG_ERROR(err_message);
+        LOG_ERROR("{}", err_message);
         throw SegcoreError(S3Error, err_message);
     } catch (std::exception& e) {
         throw e;

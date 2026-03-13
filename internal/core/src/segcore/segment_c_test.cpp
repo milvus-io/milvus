@@ -9,15 +9,71 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
+#include <folly/FBVector.h>
+#include <stdlib.h>
+#include <time.h>
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <initializer_list>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
+#include "NamedType/named_type_impl.hpp"
+#include "bitset/bitset.h"
+#include "bitset/common.h"
+#include "common/EasyAssert.h"
+#include "common/IndexMeta.h"
+#include "common/LoadInfo.h"
+#include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
 #include "exec/expression/Element.h"
+#include "expr/ITypeExpr.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/Meta.h"
+#include "index/ScalarIndexSort.h"
+#include "index/VectorIndex.h"
+#include "knowhere/binaryset.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/dataset.h"
+#include "pb/common.pb.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/Collection.h"
+#include "segcore/ReduceStructure.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentGrowing.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentInterface.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/Types.h"
+#include "segcore/Utils.h"
 #include "segcore/segment_c.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
+#include "test_utils/PbHelper.h"
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
-#include "test_utils/GenExprProto.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -510,7 +566,6 @@ TEST(CApiTest, SearchTestWhenNullable) {
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
-    int64_t ts_offset = 1000;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -871,21 +926,14 @@ TEST(CApiTest, SearchTestWithExpr) {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                            field_id: 100
-                                            query_info: <
-                                                topk: 10
-                                                metric_type: "L2"
-                                                search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0"
-                                         >)";
-
     int num_queries = 10;
     auto blob = generate_query_data<milvus::FloatVector>(num_queries);
 
+    ScopedSchemaHandle schema_handle(*col->get_schema());
+    auto binary_plan =
+        schema_handle.ParseSearch("", "fakevec", 10, "L2", R"({"nprobe": 10})");
+
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
     status = CreateSearchPlanByExpr(
         c_collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1122,52 +1170,19 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto vec_col = dataset.get_col<float>(FieldId(100));
     auto query_ptr = vec_col.data() + BIAS * DIM;
 
-    const char* raw_plan = R"(vector_anns: <
-                                field_id: 100
-                                predicates: <
-                                  binary_expr: <
-                                    op: LogicalAnd
-                                    left: <
-                                      unary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Int64
-                                        >
-                                        op: GreaterEqual
-                                        value: <
-                                          int64_val: 4200
-                                        >
-                                      >
-                                    >
-                                    right: <
-                                      unary_range_expr: <
-                                        column_info: <
-                                          field_id: 101
-                                          data_type: Int64
-                                        >
-                                        op: LessThan
-                                        value: <
-                                          int64_val: 4210
-                                        >
-                                      >
-                                    >
-                                  >
-                                >
-                                query_info: <
-                                  topk: 5
-                                  round_decimal: -1
-                                  metric_type: "L2"
-                                  search_params: "{\"nprobe\": 10}"
-                                >
-                                placeholder_tag: "$0"
-        >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-
     // create place_holder_group
     int num_queries = 10;
     auto raw_group =
         CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
+
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("counter >= 4200 and counter < 4210",
+                                  "fakevec",
+                                  TOPK,
+                                  "L2",
+                                  R"({"nprobe": 10})");
 
     // search on segment's small index
     void* plan = nullptr;
@@ -1191,25 +1206,6 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
                                    IndexEnum::INDEX_FAISS_IVFSQ8,
                                    DIM,
                                    N);
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::L2;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
@@ -1237,9 +1233,11 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
 
     // load index for vec field, load raw data for scalar field
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
-    sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
+    sealed_segment->LoadIndex(load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(sealed_segment.get(),
@@ -1255,7 +1253,6 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
     }
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_bigIndex);
@@ -1275,17 +1272,9 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     uint64_t ts_offset = 1000;
     auto dataset = DataGen(schema, ROW_COUNT, ts_offset);
 
-    const char* raw_plan = R"(vector_anns: <
-                                field_id: 100
-                                query_info: <
-                                  topk: 5
-                                  round_decimal: -1
-                                  metric_type: "L2"
-                                  search_params: "{\"nprobe\": 10}"
-                                >
-                                placeholder_tag: "$0"
-        >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str =
+        schema_handle.ParseSearch("", "fakevec", 5, "L2", R"({"nprobe": 10})");
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
@@ -1319,7 +1308,6 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     CSearchResult search_result;
     auto res = CSearch(
         segment, plan, placeholderGroup, ROW_COUNT + ts_offset, &search_result);
-    std::cout << res.error_msg << std::endl;
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
@@ -1353,55 +1341,22 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                            field_id: 100
-                                            predicates: <
-                                              binary_expr: <
-                                                op: LogicalAnd
-                                                left: <
-                                                  unary_range_expr: <
-                                                    column_info: <
-                                                      field_id: 101
-                                                      data_type: Int64
-                                                    >
-                                                    op: GreaterEqual
-                                                    value: <
-                                                      int64_val: 4200
-                                                    >
-                                                  >
-                                                >
-                                                right: <
-                                                  unary_range_expr: <
-                                                    column_info: <
-                                                      field_id: 101
-                                                      data_type: Int64
-                                                    >
-                                                    op: LessThan
-                                                    value: <
-                                                      int64_val: 4210
-                                                    >
-                                                  >
-                                                >
-                                              >
-                                            >
-                                            query_info: <
-                                              topk: 5
-                                              round_decimal: -1
-                                              metric_type: "L2"
-                                              search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0"
-                                        >)";
-
     // create place_holder_group
     int num_queries = 10;
     auto raw_group =
         CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
+    ScopedSchemaHandle schema_handle(*schema);
+    auto binary_plan =
+        schema_handle.ParseSearch("counter >= 4200 and counter < 4210",
+                                  "fakevec",
+                                  TOPK,
+                                  "L2",
+                                  R"({"nprobe": 10})");
+
     // search on segment's small index
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
     auto status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
@@ -1423,33 +1378,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
                                    DIM,
                                    N);
 
-    auto binary_set = indexing->Serialize(milvus::Config{});
-    void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-    std::string index_type_key = "index_type";
-    std::string index_type_value = IndexEnum::INDEX_FAISS_IVFSQ8;
-    std::string metric_type_key = "metric_type";
-    std::string metric_type_value = knowhere::metric::L2;
-
-    AppendIndexParam(
-        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(
-        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfoForTest(
-        c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
-    AppendIndexEngineVersionToLoadInfo(
-        c_load_index_info,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
-    AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
-
-    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
-
-    // load vec index
-    status = UpdateSealedSegmentIndex(segment.get(), c_load_index_info);
-    ASSERT_EQ(status.error_code, Success);
-
-    // gen query dataset
+    // gen query dataset and query on index before moving it
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
@@ -1465,6 +1394,14 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
+    auto load_index_info = CreateTestLoadIndexInfo(
+        std::move(indexing), DataType::VECTOR_FLOAT, 100);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // load vec index
+    status = UpdateSealedSegmentIndex(segment.get(), &load_index_info);
+    ASSERT_EQ(status.error_code, Success);
+
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = CSearch(segment.get(),
                                         plan,
@@ -1479,7 +1416,6 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], BIAS + i);
     }
 
-    DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(c_search_result_on_bigIndex);
@@ -1496,8 +1432,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data) {
                      false,
                      std::nullopt);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
-    auto vec_fid = schema->AddDebugField(
-        "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
+    schema->AddDebugField("vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
     schema->set_primary_field_id(str_fid);
 
     auto segment = CreateGrowingSegment(schema, empty_index_meta).release();
@@ -1528,8 +1463,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
                      false,
                      std::nullopt);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
-    auto vec_fid = schema->AddDebugField(
-        "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
+    schema->AddDebugField("vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
     schema->set_primary_field_id(str_fid);
 
     int N = ROW_COUNT;
@@ -1570,6 +1504,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
                         std::vector<int64_t>{int64_t(0)},
                         std::vector<int64_t>{0},
                         false,
+                        "",
                         std::vector<std::string>{}});
 
     load_info.field_infos.emplace(
@@ -1579,6 +1514,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
                         std::vector<int64_t>{int64_t(0)},
                         std::vector<int64_t>{0},
                         false,
+                        "",
                         std::vector<std::string>{}});
 
     auto status = LoadFieldData(segment, &load_info);
@@ -1600,8 +1536,7 @@ TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
                      false,
                      std::nullopt);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
-    auto vec_fid = schema->AddDebugField(
-        "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
+    schema->AddDebugField("vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
     schema->set_primary_field_id(str_fid);
 
     int N = ROW_COUNT;
@@ -1642,6 +1577,7 @@ TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
                         std::vector<int64_t>{int64_t(0)},
                         std::vector<int64_t>{0},
                         false,
+                        "",
                         std::vector<std::string>{}});
 
     load_info.field_infos.emplace(
@@ -1651,6 +1587,7 @@ TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
                         std::vector<int64_t>{int64_t(0)},
                         std::vector<int64_t>{0},
                         false,
+                        "",
                         std::vector<std::string>{}});
 
     auto status = LoadFieldData(segment, &load_info);
@@ -1859,20 +1796,17 @@ Test_Range_Search_With_Radius_And_Range_Filter() {
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    const char* raw_plan = R"(vector_anns: <
-                                             field_id: 100
-                                             query_info: <
-                                               topk: 10
-                                               round_decimal: 3
-                                               metric_type: "L2"
-                                               search_params: "{\"nprobe\": 10,\"radius\": 20, \"range_filter\": 10}"
-                                             >
-                                             placeholder_tag: "$0"
-     >)";
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-
     int num_queries = 10;
     auto blob = generate_query_data<TraitType>(num_queries);
+
+    ScopedSchemaHandle schema_handle(*col->get_schema());
+    auto plan_str = schema_handle.ParseSearch(
+        "",
+        "fakevec",
+        10,
+        "L2",
+        R"({"nprobe": 10,"radius": 20, "range_filter": 10})",
+        3);
 
     void* plan = nullptr;
     status = CreateSearchPlanByExpr(

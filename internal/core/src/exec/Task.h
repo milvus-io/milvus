@@ -16,11 +16,18 @@
 
 #pragma once
 
+#include <stdint.h>
+#include <exception>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "common/Types.h"
+#include "common/Promise.h"
+#include "common/Vector.h"
+#include "common/protobuf_utils.h"
 #include "exec/Driver.h"
 #include "exec/QueryContext.h"
 #include "plan/PlanNode.h"
@@ -110,6 +117,7 @@ class Task : public std::enable_shared_from_this<Task> {
         if (consumer_supplier_) {
             return false;
         }
+        return true;
     }
 
     RowVectorPtr

@@ -15,20 +15,28 @@
 // limitations under the License.
 #pragma once
 
-#include <string>
-#include <vector>
+#include <assert.h>
+#include <stdint.h>
+#include <algorithm>
+#include <cstddef>
 #include <memory>
+#include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
+#include "NamedType/underlying_functionalities.hpp"
+#include "arrow/record_batch.h"
+#include "arrow/table.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
-#include "milvus-storage/common/metadata.h"
-#include "mmap/Types.h"
-#include "common/Types.h"
+#include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
-#include "parquet/metadata.h"
-#include "segcore/ChunkedSegmentSealedImpl.h"
-#include "segcore/InsertRecord.h"
+#include "common/OpContext.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "milvus-storage/reader.h"
+#include "pb/common.pb.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 
 namespace milvus::segcore::storagev2translator {
@@ -61,14 +69,15 @@ class ManifestGroupTranslator
         int64_t segment_id,
         GroupChunkType group_chunk_type,
         int64_t column_group_index,
-        std::unique_ptr<milvus_storage::api::ChunkReader> chunk_reader,
+        std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
         bool use_mmap,
         bool mmap_populate,
         const std::string& mmap_dir_path,
         int64_t num_fields,
         milvus::proto::common::LoadPriority load_priority,
-        bool eager_load);
+        bool eager_load,
+        const std::string& warmup_policy);
     ~ManifestGroupTranslator() = default;
 
     /**
@@ -122,7 +131,8 @@ class ManifestGroupTranslator
      */
     std::vector<std::pair<milvus::cachinglayer::cid_t,
                           std::unique_ptr<milvus::GroupChunk>>>
-    get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override;
+    get_cells(milvus::OpContext* ctx,
+              const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
     /**
      * @brief Get the metadata object for this translator
@@ -159,26 +169,25 @@ class ManifestGroupTranslator
 
  private:
     /**
-     * @brief Load a cell from multiple Arrow RecordBatches
+     * @brief Load a cell from multiple Arrow Tables
      *
-     * Converts multiple Arrow RecordBatches (from row groups) into a single
+     * Converts multiple Arrow Tables (from row groups) into a single
      * GroupChunk containing merged field data for all columns.
      *
-     * @param record_batches Arrow RecordBatches from row groups
+     * @param tables Arrow Tables from row groups
      * @param cid Cell ID of the chunk being loaded
      * @return GroupChunk containing the loaded field data
      */
     std::unique_ptr<milvus::GroupChunk>
-    load_group_chunk(
-        const std::vector<std::shared_ptr<arrow::RecordBatch>>& record_batches,
-        milvus::cachinglayer::cid_t cid);
+    load_group_chunk(const std::vector<std::shared_ptr<arrow::Table>>& tables,
+                     milvus::cachinglayer::cid_t cid);
 
     int64_t segment_id_;
     GroupChunkType group_chunk_type_;
     int64_t column_group_index_;
     std::string key_;
     std::unordered_map<FieldId, FieldMeta> field_metas_;
-    std::unique_ptr<milvus_storage::api::ChunkReader> chunk_reader_;
+    std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader_;
 
     GroupCTMeta meta_;
     bool use_mmap_;

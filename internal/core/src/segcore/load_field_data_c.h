@@ -15,13 +15,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <stdint.h>
+#include <stdbool.h>
+
+#include "common/common_type_c.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <stdlib.h>
-
-#include "common/type_c.h"
 
 typedef void* CLoadFieldDataInfo;
 
@@ -51,10 +51,6 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
                         const char* file_path);
 
 void
-AppendWarmupPolicy(CLoadFieldDataInfo c_load_field_data_info,
-                   CacheWarmupPolicy warmup_policy);
-
-void
 SetStorageVersion(CLoadFieldDataInfo c_load_field_data_info,
                   int64_t storage_version);
 
@@ -62,6 +58,11 @@ void
 EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
            int64_t field_id,
            bool enabled);
+
+void
+SetFieldWarmupPolicy(CLoadFieldDataInfo c_load_field_data_info,
+                     int64_t field_id,
+                     CacheWarmupPolicy warmup_policy);
 
 void
 SetLoadPriority(CLoadFieldDataInfo c_load_field_data_info, int32_t priority);

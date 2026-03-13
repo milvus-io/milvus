@@ -10,11 +10,16 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/tokenizer_c.h"
+
+#include <exception>
+#include <map>
 #include <memory>
+#include <string>
+
+#include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/protobuf_utils.h"
 #include "pb/schema.pb.h"
-#include "common/EasyAssert.h"
 #include "tokenizer.h"
 
 using Map = std::map<std::string, std::string>;

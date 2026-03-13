@@ -10,9 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <sys/types.h>
+#include <limits>
+#include <string>
+#include <string_view>
 #include <unordered_set>
 
+#include "common/EasyAssert.h"
 #include "common/RegexQuery.h"
+#include "gtest/gtest.h"
 
 TEST(IsSpecial, Demo) {
     std::string special_bytes(R"(\.+*?()|[]{}^$)");

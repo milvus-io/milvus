@@ -15,8 +15,14 @@
 // limitations under the License.
 
 #include "common/Common.h"
+
+#include <string.h>
+
+#include "common/Consts.h"
 #include "gflags/gflags.h"
+#include "glog/logging.h"
 #include "log/Log.h"
+#include "tantivy-binding.h"
 
 namespace milvus {
 
@@ -24,6 +30,8 @@ std::atomic<int64_t> FILE_SLICE_SIZE(DEFAULT_INDEX_FILE_SLICE_SIZE);
 std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE(
     DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
 std::atomic<int64_t> DELETE_DUMP_BATCH_SIZE(DEFAULT_DELETE_DUMP_BATCH_SIZE);
+std::atomic<bool> ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION(
+    DEFAULT_ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION);
 std::atomic<bool> OPTIMIZE_EXPR_ENABLED(DEFAULT_OPTIMIZE_EXPR_ENABLED);
 
 std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED(
@@ -82,6 +90,13 @@ SetDefaultEnableParquetStatsSkipIndex(bool val) {
 }
 
 void
+SetEnableLatestDeleteSnapshotOptimization(bool val) {
+    ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(val);
+    LOG_INFO("set default enable latest delete snapshot optimization: {}",
+             ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.load());
+}
+
+void
 SetLogLevel(const char* level) {
     LOG_INFO("set log level: {}", level);
     if (strcmp(level, "debug") == 0) {
@@ -100,6 +115,7 @@ SetLogLevel(const char* level) {
             gflags::SetCommandLineOption("minloglevel", "2");
         }
     }
+    tantivy_set_log_level(level);
 }
 
 }  // namespace milvus

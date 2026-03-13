@@ -204,12 +204,11 @@ func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, sho
 					elementType = f.GetElementType()
 				}
 
-				d, ok := serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy)
-				if ok {
-					m[j] = d // TODO: avoid memory copy here.
-				} else {
-					return merr.WrapErrServiceInternal(fmt.Sprintf("unexpected type %s", dt))
+				d, err := serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy)
+				if err != nil {
+					return merr.WrapErrServiceInternal(fmt.Sprintf("deserialize error on type %s: %v", dt, err))
 				}
+				m[j] = d // TODO: avoid memory copy here.
 			}
 		}
 
@@ -460,9 +459,8 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 				elementType = elementTypes[fid]
 			}
 
-			ok = typeEntry.serialize(builders[fid], e, elementType)
-			if !ok {
-				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", types[fid]))
+			if err := typeEntry.serialize(builders[fid], e, elementType); err != nil {
+				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s: %v", types[fid], err))
 			}
 		}
 	}

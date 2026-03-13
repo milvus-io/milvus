@@ -1169,6 +1169,10 @@ func (coord *MixCoordMock) AlterCollectionField(ctx context.Context, request *mi
 	return &commonpb.Status{}, nil
 }
 
+func (coord *MixCoordMock) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest, opts ...grpc.CallOption) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	return &milvuspb.AlterCollectionSchemaResponse{}, nil
+}
+
 func (coord *MixCoordMock) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, nil
 }
@@ -1722,6 +1726,37 @@ func (coord *MixCoordMock) CreateExternalCollection(ctx context.Context, req *ms
 	}, nil
 }
 
+func (coord *MixCoordMock) RefreshExternalCollection(ctx context.Context, req *datapb.RefreshExternalCollectionRequest, opts ...grpc.CallOption) (*datapb.RefreshExternalCollectionResponse, error) {
+	return &datapb.RefreshExternalCollectionResponse{
+		Status: merr.Success(),
+		JobId:  1,
+	}, nil
+}
+
+func (coord *MixCoordMock) GetRefreshExternalCollectionProgress(ctx context.Context, req *datapb.GetRefreshExternalCollectionProgressRequest, opts ...grpc.CallOption) (*datapb.GetRefreshExternalCollectionProgressResponse, error) {
+	return &datapb.GetRefreshExternalCollectionProgressResponse{
+		Status: merr.Success(),
+		JobInfo: &datapb.ExternalCollectionRefreshJob{
+			JobId:    req.GetJobId(),
+			State:    indexpb.JobState_JobStateFinished,
+			Progress: 100,
+		},
+	}, nil
+}
+
+func (coord *MixCoordMock) ListRefreshExternalCollectionJobs(ctx context.Context, req *datapb.ListRefreshExternalCollectionJobsRequest, opts ...grpc.CallOption) (*datapb.ListRefreshExternalCollectionJobsResponse, error) {
+	return &datapb.ListRefreshExternalCollectionJobsResponse{
+		Status: merr.Success(),
+		Jobs: []*datapb.ExternalCollectionRefreshJob{
+			{
+				JobId:    1,
+				State:    indexpb.JobState_JobStateFinished,
+				Progress: 100,
+			},
+		},
+	}, nil
+}
+
 func (coord *MixCoordMock) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
 	return &milvuspb.TruncateCollectionResponse{
 		Status: merr.Success(),
@@ -1732,6 +1767,26 @@ func (coord *MixCoordMock) BackupEzk(ctx context.Context, req *internalpb.Backup
 	return &internalpb.BackupEzkResponse{
 		Status: merr.Success(),
 	}, nil
+}
+
+func (coord *MixCoordMock) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest, opts ...grpc.CallOption) (*milvuspb.ClientHeartbeatResponse, error) {
+	return &milvuspb.ClientHeartbeatResponse{}, nil
+}
+
+func (coord *MixCoordMock) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
+	return &milvuspb.DeleteClientCommandResponse{}, nil
+}
+
+func (coord *MixCoordMock) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest, opts ...grpc.CallOption) (*milvuspb.GetClientTelemetryResponse, error) {
+	return &milvuspb.GetClientTelemetryResponse{}, nil
+}
+
+func (coord *MixCoordMock) PushClientCommand(ctx context.Context, req *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error) {
+	return &milvuspb.PushClientCommandResponse{}, nil
+}
+
+func (coord *MixCoordMock) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
 }
 
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)

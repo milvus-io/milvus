@@ -170,14 +170,14 @@ func PruneSegments(ctx context.Context,
 			bias = float64(maxSegmentCount) / float64(minSegmentCount)
 		}
 		metrics.QueryNodeSegmentPruneBias.
-			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			WithLabelValues(paramtable.GetStringNodeID(),
 				fmt.Sprint(collectionID),
 				pruneType,
 			).Set(bias)
 
 		filterRatio := float32(realFilteredSegments) / float32(totalSegNum)
 		metrics.QueryNodeSegmentPruneRatio.
-			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			WithLabelValues(paramtable.GetStringNodeID(),
 				fmt.Sprint(collectionID),
 				pruneType,
 			).Set(float64(filterRatio))
@@ -190,7 +190,7 @@ func PruneSegments(ctx context.Context,
 	}
 
 	metrics.QueryNodeSegmentPruneLatency.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
+		paramtable.GetStringNodeID(),
 		fmt.Sprint(collectionID),
 		pruneType).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))

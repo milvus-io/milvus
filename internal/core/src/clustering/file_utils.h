@@ -11,20 +11,11 @@
 
 #pragma once
 
-#include "common/type_c.h"
-#include <future>
-#include "storage/ThreadPools.h"
+#include <cstdint>
+#include <string>
+#include <unordered_map>
 
-#include "common/FieldData.h"
-#include "common/LoadInfo.h"
-#include "knowhere/comp/index_param.h"
-#include "parquet/schema.h"
-#include "storage/PayloadStream.h"
-#include "storage/FileManager.h"
-#include "storage/BinlogReader.h"
 #include "storage/ChunkManager.h"
-#include "storage/DataCodec.h"
-#include "storage/Types.h"
 
 namespace milvus::clustering {
 

@@ -1,7 +1,21 @@
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <cstddef>
 #include <cstdint>
-#include "index/ScalarIndexSort.h"
+#include <functional>
+#include <memory>
+#include <optional>
+#include <vector>
+
+#include "bitset/bitset.h"
+#include "common/TracerBase.h"
 #include "common/Types.h"
+#include "gtest/gtest.h"
+#include "index/Meta.h"
+#include "index/ScalarIndexSort.h"
+#include "pb/common.pb.h"
+#include "storage/ThreadPools.h"
+
 using namespace milvus;
 using namespace milvus::index;
 

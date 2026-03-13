@@ -64,6 +64,10 @@ func (n *noopReplicateService) UpdateReplicateConfiguration(ctx context.Context,
 	return nil
 }
 
+func (n *noopReplicateService) GetReplicateConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, error) {
+	return nil, nil
+}
+
 func (n *noopReplicateService) GetReplicateCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error) {
 	return nil, nil
 }

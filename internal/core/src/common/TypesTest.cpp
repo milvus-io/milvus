@@ -14,9 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <gtest/gtest.h>
 #include <arrow/api.h>
+#include <gtest/gtest.h>
+#include <memory>
+#include <stdexcept>
+#include <string>
+
 #include "common/Types.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
 
 using namespace milvus;
 

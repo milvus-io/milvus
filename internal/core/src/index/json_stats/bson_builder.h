@@ -15,21 +15,22 @@
 // limitations under the License.
 
 #pragma once
-#include <iostream>
-#include <string>
-#include <vector>
-#include <unordered_map>
-#include <tuple>
 #include <bsoncxx/builder/basic/document.hpp>
-#include <bsoncxx/builder/basic/array.hpp>
-#include <bsoncxx/builder/basic/kvp.hpp>
 #include <bsoncxx/types/bson_value/value.hpp>
-#include <bsoncxx/document/value.hpp>
-#include <bsoncxx/json.hpp>
-#include <simdjson.h>
-#include <bsoncxx/types.hpp>
+#include <stddef.h>
+#include <stdint.h>
+#include <iostream>
+#include <map>
+#include <optional>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include "bsoncxx/document/view.hpp"
+#include "common/protobuf_utils.h"
 #include "index/json_stats/utils.h"
-#include "common/EasyAssert.h"
+
 namespace milvus::index {
 
 class DomNode {
@@ -80,7 +81,6 @@ class BsonBuilder {
     ExtractBsonKeyOffsets(const bsoncxx::document::view& view) {
         std::vector<std::pair<std::string, size_t>> result;
         const uint8_t* raw_data = view.data();
-        size_t raw_len = view.length();
 
         ExtractOffsetsRecursive(raw_data, raw_data, "", result);
         return result;

@@ -15,9 +15,17 @@
 // limitations under the License.
 
 #include "MvccNode.h"
+
+#include <utility>
+#include <vector>
+
 #include "common/Tracer.h"
-#include "fmt/format.h"
-#include <iostream>
+#include "exec/QueryContext.h"
+#include "exec/expression/Utils.h"
+#include "fmt/core.h"
+#include "plan/PlanNode.h"
+#include "segcore/SegmentInterface.h"
+
 namespace milvus {
 namespace exec {
 
@@ -78,10 +86,6 @@ PhyMvccNode::GetOutput() {
         data, query_timestamp_, collection_ttl_timestamp_);
     segment_->mask_with_delete(data, active_count_, query_timestamp_);
     is_finished_ = true;
-
-    auto output_rows = active_count_ - data.count();
-    tracer::AddEvent(fmt::format(
-        "output_rows: {}, filtered: {}", output_rows, data.count()));
 
     // input_ have already been updated
     return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});

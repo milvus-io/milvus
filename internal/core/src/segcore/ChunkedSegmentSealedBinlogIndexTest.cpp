@@ -9,23 +9,67 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <assert.h>
 #include <gtest/gtest.h>
-#include <boost/format.hpp>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <map>
+#include <memory>
 #include <optional>
+#include <random>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
-#include "index/IndexFactory.h"
-#include "index/VectorIndex.h"
-#include "pb/plan.pb.h"
-#include "query/Plan.h"
-#include "segcore/segcore_init_c.h"
-#include "segcore/SegmentSealed.h"
+#include "NamedType/named_type_impl.hpp"
+#include "common/Consts.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
+#include "common/IndexMeta.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
 #include "expr/ITypeExpr.h"
-#include "plan/PlanNode.h"
-
-#include "test_utils/cachinglayer_test_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/dataset.h"
+#include "knowhere/operands.h"
+#include "knowhere/sparse_utils.h"
+#include "knowhere/version.h"
+#include "pb/common.pb.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
+#include "query/Plan.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/TimestampIndex.h"
+#include "segcore/Types.h"
+#include "segcore/segcore_init_c.h"
+#include "storage/FileManager.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
-#include "test_utils/storage_test_utils.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -362,7 +406,7 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
             {vec_field_id, fieldIndexMeta}};
         IndexMetaPtr metaPtr =
             std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
-        return std::move(metaPtr);
+        return metaPtr;
     }
 
     void
@@ -615,12 +659,12 @@ GenerateTestParams() {
     for (const auto& [data_type, metric, index_type, interim_index] :
          base_configs) {
         for (const auto& [nullable, null_percent] : null_configs) {
-            params.push_back(std::make_tuple(data_type,
-                                             metric,
-                                             index_type,
-                                             interim_index,
-                                             nullable,
-                                             null_percent));
+            params.emplace_back(data_type,
+                                metric,
+                                index_type,
+                                interim_index,
+                                nullable,
+                                null_percent);
         }
     }
     return params;
@@ -688,7 +732,6 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
 
     std::vector<const milvus::query::PlaceholderGroup*> ph_group_arr = {
         ph_group.get()};
-    auto nlist = segcore_config.get_nlist();
     auto binlog_index_sr =
         segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     ASSERT_EQ(binlog_index_sr->total_nq_, num_queries);
@@ -963,7 +1006,6 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
 
     std::vector<const milvus::query::PlaceholderGroup*> ph_group_arr = {
         ph_group.get()};
-    auto nlist = segcore_config.get_nlist();
     auto binlog_index_sr =
         segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     ASSERT_EQ(binlog_index_sr->total_nq_, num_queries);

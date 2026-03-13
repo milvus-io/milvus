@@ -6,7 +6,7 @@
 OS: Ubuntu 20.04
 go：1.21
 cmake: >=3.18
-gcc： 7.5
+gcc: >= 11
 ```
 
 ## Install dependencies

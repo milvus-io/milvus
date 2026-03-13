@@ -39,8 +39,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	grpcmixcoordclient "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -476,9 +478,7 @@ func TestProxy_FlushAll_Success(t *testing.T) {
 		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
-		}).Build()
+		mockey.Mock(globalMetaCache.RemoveDatabase).Return().Build()
 
 		// Mock paramtable initialization
 		mockey.Mock(paramtable.Init).Return().Build()
@@ -532,9 +532,7 @@ func TestProxy_FlushAll_ServerAbnormal(t *testing.T) {
 		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
-		}).Build()
+		mockey.Mock(globalMetaCache.RemoveDatabase).Return().Build()
 
 		// Mock paramtable initialization
 		mockey.Mock(paramtable.Init).Return().Build()
@@ -982,6 +980,13 @@ func TestProxyDropDatabase(t *testing.T) {
 		mix.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 		node.mixCoord = mix
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		cacheBak := globalMetaCache
+		defer func() { globalMetaCache = cacheBak }()
+		cache := NewMockCache(t)
+		cache.EXPECT().RemoveDatabase(mock.Anything, mock.AnythingOfType("string")).Return()
+		globalMetaCache = cache
+
 		ctx := context.Background()
 
 		resp, err := node.DropDatabase(ctx, &milvuspb.DropDatabaseRequest{DbName: "db"})
@@ -1429,6 +1434,20 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 
+		// schema has no fields
+		mc = NewMockCache(t)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		}, nil).Once()
+		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
+		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{},
+		}, nil).Once()
+		globalMetaCache = mc
+		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+
 		// get channel failed
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
@@ -1469,7 +1488,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{},
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, mockErr)
 		globalMetaCache = mc
@@ -1481,7 +1500,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc = NewMockCache(t)
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{},
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
 		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		globalMetaCache = mc
@@ -2394,4 +2413,189 @@ func TestProxy_AlterCollectionField_ExternalCollection(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Error(t, merr.Error(resp))
 	assert.Contains(t, resp.GetReason(), "alter field operation is not supported for external collection")
+}
+
+func TestProxy_GetReplicateConfiguration_Success(t *testing.T) {
+	expectedConfig := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{
+				ClusterId: "primary",
+				ConnectionParam: &commonpb.ConnectionParam{
+					Uri: "http://primary:19530",
+				},
+				Pchannels: []string{"channel1"},
+			},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{
+			{SourceClusterId: "primary", TargetClusterId: "secondary"},
+		},
+	}
+
+	replicateService := mock_streaming.NewMockReplicateService(t)
+	replicateService.EXPECT().GetReplicateConfiguration(mock.Anything).Return(expectedConfig, nil)
+	mockWAL := mock_streaming.NewMockWALAccesser(t)
+	mockWAL.EXPECT().Replicate().Return(replicateService)
+	streaming.SetWALForTest(mockWAL)
+	defer streaming.SetWALForTest(nil)
+
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	resp, err := node.GetReplicateConfiguration(context.Background(), &milvuspb.GetReplicateConfigurationRequest{})
+	assert.NoError(t, err)
+	assert.True(t, merr.Ok(resp.GetStatus()))
+	assert.NotNil(t, resp.GetConfiguration())
+	assert.Equal(t, "primary", resp.GetConfiguration().GetClusters()[0].GetClusterId())
+	assert.Len(t, resp.GetConfiguration().GetCrossClusterTopology(), 1)
+}
+
+func TestProxy_GetReplicateConfiguration_Unhealthy(t *testing.T) {
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+	resp, err := node.GetReplicateConfiguration(context.Background(), &milvuspb.GetReplicateConfigurationRequest{})
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+}
+
+func TestProxy_GetReplicateConfiguration_Error(t *testing.T) {
+	replicateService := mock_streaming.NewMockReplicateService(t)
+	replicateService.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, errors.New("streaming error"))
+	mockWAL := mock_streaming.NewMockWALAccesser(t)
+	mockWAL.EXPECT().Replicate().Return(replicateService)
+	streaming.SetWALForTest(mockWAL)
+	defer streaming.SetWALForTest(nil)
+
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	resp, err := node.GetReplicateConfiguration(context.Background(), &milvuspb.GetReplicateConfigurationRequest{})
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+	assert.Nil(t, resp.GetConfiguration())
+}
+
+func TestHybridSearchRequestExprLogger_String(t *testing.T) {
+	t.Run("empty requests", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{},
+			},
+		}
+		result := logger.String()
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("single request", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{
+					{Dsl: "id > 100"},
+				},
+			},
+		}
+		result := logger.String()
+		assert.Equal(t, "[No.0 req, expr: id > 100]", result)
+	})
+
+	t.Run("multiple requests", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{
+					{Dsl: "id > 100"},
+					{Dsl: "name == 'test'"},
+					{Dsl: "age < 30"},
+				},
+			},
+		}
+		result := logger.String()
+		expected := "[No.0 req, expr: id > 100][No.1 req, expr: name == 'test'][No.2 req, expr: age < 30]"
+		assert.Equal(t, expected, result)
+	})
+
+	t.Run("request with empty dsl", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{
+					{Dsl: ""},
+				},
+			},
+		}
+		result := logger.String()
+		assert.Equal(t, "[No.0 req, expr: ]", result)
+	})
+
+	t.Run("nil sub request in slice", func(t *testing.T) {
+		logger := &hybridSearchRequestExprLogger{
+			req: &milvuspb.HybridSearchRequest{
+				Requests: []*milvuspb.SearchRequest{
+					nil,
+				},
+			},
+		}
+		result := logger.String()
+		assert.Equal(t, "[No.0 req, expr: ]", result)
+	})
+}
+
+func TestProxy_BatchUpdateManifest(t *testing.T) {
+	t.Run("unhealthy", func(t *testing.T) {
+		mockey.PatchConvey("TestProxy_BatchUpdateManifest_unhealthy", t, func() {
+			globalMetaCache = &MetaCache{}
+			mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+				return UniqueID(0), nil
+			}).Build()
+			mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) {}).Build()
+
+			mockey.Mock(paramtable.Init).Return().Build()
+			mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
+
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			node.UpdateStateCode(commonpb.StateCode_Abnormal)
+			resp, err := node.BatchUpdateManifest(context.Background(), &milvuspb.BatchUpdateManifestRequest{
+				CollectionName: "test_collection",
+				Items: []*milvuspb.BatchUpdateManifestItem{
+					{SegmentId: 1, ManifestVersion: 10},
+				},
+			})
+
+			assert.NoError(t, err)
+			assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
+		})
+	})
+
+	t.Run("success", func(t *testing.T) {
+		mockey.PatchConvey("TestProxy_BatchUpdateManifest_success", t, func() {
+			globalMetaCache = &MetaCache{}
+			mockey.Mock((*MetaCache).GetCollectionID).To(func(m *MetaCache, ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+				return UniqueID(100), nil
+			}).Build()
+			mockey.Mock((*MetaCache).RemoveDatabase).To(func(m *MetaCache, ctx context.Context, dbName string) {}).Build()
+
+			mockey.Mock(paramtable.Init).Return().Build()
+			mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
+
+			node := createTestProxy()
+			defer node.sched.Close()
+
+			mixcoord := &grpcmixcoordclient.Client{}
+			node.mixCoord = mixcoord
+			mockey.Mock((*grpcmixcoordclient.Client).BatchUpdateManifest).To(func(c *grpcmixcoordclient.Client, ctx context.Context, req *datapb.BatchUpdateManifestRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+				return merr.Success(), nil
+			}).Build()
+
+			resp, err := node.BatchUpdateManifest(context.Background(), &milvuspb.BatchUpdateManifestRequest{
+				CollectionName: "test_collection",
+				Items: []*milvuspb.BatchUpdateManifestItem{
+					{SegmentId: 1, ManifestVersion: 10},
+					{SegmentId: 2, ManifestVersion: 20},
+				},
+			})
+
+			assert.NoError(t, err)
+			assert.True(t, merr.Ok(resp))
+		})
+	})
 }

@@ -11,31 +11,54 @@
 
 #include "segcore/load_index_c.h"
 
+#include <folly/ExceptionWrapper.h>
+#include <stdlib.h>
+#include <string.h>
+#include <chrono>
+#include <cstdint>
+#include <exception>
+#include <iosfwd>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_set>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
-#include "common/Consts.h"
-#include "common/FieldMeta.h"
+#include "cachinglayer/Utils.h"
 #include "common/EasyAssert.h"
-#include "common/JsonCastType.h"
+#include "common/FieldMeta.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
+#include "common/protobuf_utils.h"
 #include "common/type_c.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
+#include "knowhere/binaryset.h"
+#include "knowhere/utils.h"
 #include "log/Log.h"
-#include "storage/FileManager.h"
-#include "segcore/Types.h"
-#include "storage/Util.h"
-#include "storage/RemoteChunkManagerSingleton.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include "pb/cgo_msg.pb.h"
-#include "knowhere/index/index_static.h"
-#include "knowhere/comp/knowhere_check.h"
-#include "cachinglayer/Manager.h"
-#include "segcore/storagev1translator/SealedIndexTranslator.h"
-#include "segcore/storagev1translator/V1SealedIndexTranslator.h"
-#include "segcore/Utils.h"
 #include "monitor/scope_metric.h"
+#include "nlohmann/json.hpp"
+#include "opentelemetry/trace/span.h"
+#include "pb/cgo_msg.pb.h"
+#include "pb/schema.pb.h"
+#include "segcore/Types.h"
+#include "segcore/Utils.h"
+#include "segcore/storagev1translator/V1SealedIndexTranslator.h"
+#include "storage/FileManager.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
 
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {
@@ -72,31 +95,6 @@ DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info) {
 
     auto info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
     delete info;
-}
-
-CStatus
-AppendIndexParam(CLoadIndexInfo c_load_index_info,
-                 const char* c_index_key,
-                 const char* c_index_value) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        std::string index_key(c_index_key);
-        std::string index_value(c_index_value);
-        load_index_info->index_params[index_key] = index_value;
-
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
 }
 
 CStatus
@@ -288,76 +286,6 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
 }
 
 CStatus
-AppendIndexFilePath(CLoadIndexInfo c_load_index_info, const char* c_file_path) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        std::string index_file_path(c_file_path);
-        load_index_info->index_files.emplace_back(index_file_path);
-
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
-}
-
-CStatus
-AppendIndexInfo(CLoadIndexInfo c_load_index_info,
-                int64_t index_id,
-                int64_t build_id,
-                int64_t version) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        load_index_info->index_id = index_id;
-        load_index_info->index_build_id = build_id;
-        load_index_info->index_version = version;
-
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
-}
-
-CStatus
-AppendIndexEngineVersionToLoadInfo(CLoadIndexInfo c_load_index_info,
-                                   int32_t index_engine_version) {
-    SCOPE_CGO_CALL_METRIC();
-
-    try {
-        auto load_index_info =
-            (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-        load_index_info->index_engine_version = index_engine_version;
-
-        auto status = CStatus();
-        status.error_code = milvus::Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
-}
-
-CStatus
 CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
     SCOPE_CGO_CALL_METRIC();
 
@@ -385,17 +313,6 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
         status.error_msg = strdup(e.what());
         return status;
     }
-}
-
-void
-AppendStorageInfo(CLoadIndexInfo c_load_index_info,
-                  const char* uri,
-                  int64_t version) {
-    SCOPE_CGO_CALL_METRIC();
-
-    auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
-    load_index_info->uri = uri;
-    load_index_info->index_store_version = version;
 }
 
 CStatus
@@ -430,10 +347,15 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
                 info_proto->index_files().begin(),
                 info_proto->index_files().end());
             load_index_info->uri = info_proto->uri();
-            load_index_info->index_store_version =
-                info_proto->index_store_version();
             load_index_info->index_engine_version =
                 info_proto->index_engine_version();
+            // Inject scalar index version into index_params for scalar indexes
+            auto scalar_version = info_proto->current_scalar_index_version();
+            if (scalar_version > 0) {
+                load_index_info
+                    ->index_params[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
+                    std::to_string(scalar_version);
+            }
             load_index_info->schema = info_proto->field();
             load_index_info->index_size = info_proto->index_file_size();
             load_index_info->num_rows = info_proto->num_rows();
@@ -445,6 +367,17 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
                              ? field_schema.get_dim()
                              : 1;
             load_index_info->dim = dim;
+            // Extract warmup_policy from index_params (keep it for Knowhere)
+            auto warmup_it = load_index_info->index_params.find("warmup");
+            if (warmup_it != load_index_info->index_params.end()) {
+                load_index_info->warmup_policy = warmup_it->second;
+                LOG_INFO("Index warmup_policy extracted from index_params: {}",
+                         load_index_info->warmup_policy);
+            } else {
+                LOG_INFO(
+                    "No warmup key in index_params, warmup_policy will be "
+                    "empty");
+            }
 
             auto remote_chunk_manager =
                 milvus::storage::RemoteChunkManagerSingleton::GetInstance()

@@ -12,17 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <log/Log.h>
+#include <nlohmann/json.hpp>
+#include <stdint.h>
+#include <algorithm>
+#include <initializer_list>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
-#include <nlohmann/json.hpp>
-#include "common/common_type_c.h"
+
+#include "arrow/result.h"
+#include "arrow/status.h"
+#include "common/EasyAssert.h"
 #include "common/type_c.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/properties.h"
-#include "milvus-storage/manifest.h"
 #include "milvus-storage/transaction/transaction.h"
+#include "nlohmann/json_fwd.hpp"
+#include "storage/Types.h"
 #include "storage/loon_ffi/util.h"
 
 using json = nlohmann::json;
@@ -106,6 +115,13 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         std::to_string(c_storage_config.max_connections);
     keys.emplace_back(PROPERTY_FS_MAX_CONNECTIONS);
     values.emplace_back(max_connections_str.c_str());
+
+    if (c_storage_config.tls_min_version != nullptr &&
+        std::string(c_storage_config.tls_min_version).length() > 0 &&
+        std::string(c_storage_config.tls_min_version) != "default") {
+        keys.emplace_back(PROPERTY_FS_TLS_MIN_VERSION);
+        values.emplace_back(c_storage_config.tls_min_version);
+    }
 
     // Create Properties using FFI
     auto properties = std::make_shared<LoonProperties>();
@@ -212,6 +228,14 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         PROPERTY_FS_MAX_CONNECTIONS,
         std::to_string(c_storage_config.max_connections).c_str());
 
+    if (c_storage_config.tls_min_version != nullptr &&
+        std::string(c_storage_config.tls_min_version).length() > 0 &&
+        std::string(c_storage_config.tls_min_version) != "default") {
+        milvus_storage::api::SetValue(*properties_map,
+                                      PROPERTY_FS_TLS_MIN_VERSION,
+                                      c_storage_config.tls_min_version);
+    }
+
     return properties_map;
 }
 
@@ -247,7 +271,8 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config) {
                           config.requestTimeoutMs,
                           config.gcp_credential_json.c_str(),
                           false,  // this field does not exist in StorageConfig
-                          config.max_connections};
+                          config.max_connections,
+                          config.tls_min_version.c_str()};
 }
 
 std::shared_ptr<milvus_storage::api::Manifest>

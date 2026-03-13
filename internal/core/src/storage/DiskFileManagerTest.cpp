@@ -9,40 +9,77 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <arrow/result.h>
 #include <boost/filesystem/operations.hpp>
-#include <chrono>
-#include <arrow/array/builder_binary.h>
-#include <arrow/array/builder_primitive.h>
-#include <arrow/record_batch.h>
-#include <arrow/type.h>
-#include <arrow/type_fwd.h>
+#include <boost/filesystem/path.hpp>
+#include <cxxabi.h>
+#include <fcntl.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <exception>
+#include <future>
+#include <initializer_list>
+#include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
-#include <fstream>
+#include <thread>
+#include <unordered_map>
+#include <utility>
 #include <vector>
-#include <unistd.h>
 
-#include "common/EasyAssert.h"
-#include "common/FieldDataInterface.h"
-#include "common/Slice.h"
 #include "common/Common.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "filemanager/OutputStream.h"
+#include "gtest/gtest.h"
+#include "index/Meta.h"
+#include "knowhere/binaryset.h"
+#include "knowhere/object.h"
+#include "knowhere/operands.h"
+#include "knowhere/sparse_utils.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "pb/common.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/PayloadReader.h"
 #include "storage/ThreadPool.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
-#include "storage/DiskFileManagerImpl.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include "index/Meta.h"
-
+#include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
+
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectDOUBLE_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectFLOAT_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectINT16_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectINT32_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectINT64_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectINT8_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectSTRING_Test;
+class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectVARCHAR_Test;
 
 using namespace std;
 using namespace milvus;
@@ -70,7 +107,8 @@ class DiskAnnFileManagerTest : public testing::Test {
 
 TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    std::string indexFilePath = "/tmp/diskann/index_files/1000/index";
+    std::string indexFilePath =
+        TestLocalPath + "diskann/index_files/1000/index";
     auto exist = lcm->Exist(indexFilePath);
     EXPECT_EQ(exist, false);
     uint64_t index_size = 50 << 20;
@@ -126,7 +164,7 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
 TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     auto conf = milvus_storage::ArrowFileSystemConfig();
     conf.storage_type = "local";
-    conf.root_path = "/tmp/diskann";
+    conf.root_path = TestLocalPath + "diskann";
 
     auto result = milvus_storage::CreateArrowFileSystem(conf);
     EXPECT_TRUE(result.ok());
@@ -134,13 +172,13 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
 
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string small_index_file_path =
-        "/tmp/diskann/index_files/1000/1/2/3/small_index_file";
+        TestLocalPath + "diskann/index_files/1000/1/2/3/small_index_file";
     std::string large_index_file_path =
-        "/tmp/diskann/index_files/1000/1/2/3/large_index_file";
+        TestLocalPath + "diskann/index_files/1000/1/2/3/large_index_file";
     auto exist = lcm->Exist(large_index_file_path);
 
     std::string index_file_path =
-        "/tmp/diskann/index_files/1000/1/2/3/index_file";
+        TestLocalPath + "diskann/index_files/1000/1/2/3/index_file";
     boost::filesystem::path localPath(index_file_path);
     auto local_file_name = localPath.filename().string();
 
@@ -209,7 +247,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     EXPECT_EQ(read_small_index_size, small_index_size);
     EXPECT_EQ(is->Tell(), read_offset);
     std::string small_index_file_path_read =
-        "/tmp/diskann/index_files/1000/1/2/3/small_index_file_read";
+        TestLocalPath + "diskann/index_files/1000/1/2/3/small_index_file_read";
     lcm->CreateFile(small_index_file_path_read);
     int fd_read = open(small_index_file_path_read.c_str(), O_WRONLY);
     ASSERT_NE(fd_read, -1);
@@ -320,7 +358,7 @@ namespace {
 const int64_t kOptFieldId = 123456;
 const std::string kOptFieldName = "opt_field_name";
 const int64_t kOptFieldDataRange = 1000;
-const std::string kOptFieldPath = "/tmp/diskann/opt_field/";
+// kOptFieldPath computed inline to avoid static initialization order issue
 const size_t kEntityCnt = 1000 * 10;
 const FieldDataMeta kOptVecFieldDataMeta = {1, 2, 3, 100};
 using OffsetT = uint32_t;
@@ -333,7 +371,6 @@ CreateFileManager(const ChunkManagerPtr& cm,
     // field_id: 100, index_build_id: 1000, index_version: 1
     IndexMeta index_meta = {
         3, 100, 1000, 1, "opt_fields", "field_name", DataType::VECTOR_FLOAT, 1};
-    int64_t slice_size = milvus::FILE_SLICE_SIZE;
     return std::make_shared<DiskFileManagerImpl>(storage::FileManagerContext(
         kOptVecFieldDataMeta, index_meta, cm, std::move(fs)));
 }
@@ -394,7 +431,8 @@ PrepareInsertData(const int64_t opt_field_data_range) -> std::string {
     auto chunk_manager =
         storage::CreateChunkManager(get_default_local_storage_config());
 
-    std::string path = kOptFieldPath + std::to_string(kOptFieldId);
+    std::string path =
+        TestLocalPath + "diskann/opt_field/" + std::to_string(kOptFieldId);
     boost::filesystem::remove_all(path);
     chunk_manager->Write(path, serialized_data.data(), serialized_data.size());
     return path;
@@ -633,7 +671,7 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNullableVector) {
             auto serialized_data =
                 insert_data.Serialize(storage::StorageType::Remote);
 
-            std::string insert_file_path = "/tmp/diskann/nullable_" +
+            std::string insert_file_path = TestLocalPath + "diskann/nullable_" +
                                            vec_type.type_name + "_" +
                                            std::to_string(null_percent);
             boost::filesystem::remove_all(insert_file_path);
@@ -861,7 +899,7 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {
 
     auto serialized_data = insert_data.Serialize(storage::StorageType::Remote);
 
-    std::string insert_file_path = "/tmp/diskann/valid_data_test";
+    std::string insert_file_path = TestLocalPath + "diskann/valid_data_test";
     boost::filesystem::remove_all(insert_file_path);
     cm_->Write(
         insert_file_path, serialized_data.data(), serialized_data.size());
@@ -877,7 +915,8 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskValidDataFile) {
     auto file_manager = std::make_shared<DiskFileManagerImpl>(
         storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_));
 
-    std::string valid_data_path = "/tmp/diskann/valid_data_test_output";
+    std::string valid_data_path =
+        TestLocalPath + "diskann/valid_data_test_output";
     boost::filesystem::remove_all(valid_data_path);
 
     milvus::Config config;
@@ -947,7 +986,7 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNoValidDataForNonNullable) {
 
     auto serialized_data = insert_data.Serialize(storage::StorageType::Remote);
 
-    std::string insert_file_path = "/tmp/diskann/non_nullable_test";
+    std::string insert_file_path = TestLocalPath + "diskann/non_nullable_test";
     boost::filesystem::remove_all(insert_file_path);
     cm_->Write(
         insert_file_path, serialized_data.data(), serialized_data.size());
@@ -963,7 +1002,8 @@ TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNoValidDataForNonNullable) {
     auto file_manager = std::make_shared<DiskFileManagerImpl>(
         storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_));
 
-    std::string valid_data_path = "/tmp/diskann/non_nullable_valid_data";
+    std::string valid_data_path =
+        TestLocalPath + "diskann/non_nullable_valid_data";
     boost::filesystem::remove_all(valid_data_path);
 
     milvus::Config config;

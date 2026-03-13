@@ -18,7 +18,6 @@ package querynodev2
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -68,7 +67,7 @@ func (suite *HandlersSuite) SetupTest() {
 
 	// mock factory
 	suite.factory = dependency.NewMockFactory(suite.T())
-	suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", objectstorage.RootPath("/tmp/milvus_test"))
+	suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", objectstorage.RootPath(suite.T().TempDir()))
 
 	// new node
 	suite.node = NewQueryNode(context.Background(), suite.factory)
@@ -86,7 +85,6 @@ func (suite *HandlersSuite) SetupTest() {
 
 func (suite *HandlersSuite) TearDownTest() {
 	suite.etcd.Close()
-	os.RemoveAll("/tmp/milvus-test")
 }
 
 func (suite *HandlersSuite) TestLoadGrowingSegments() {

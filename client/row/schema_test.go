@@ -210,4 +210,61 @@ func TestParseSchema(t *testing.T) {
 		assert.True(t, i64f)
 		assert.True(t, vecf)
 	})
+
+	t.Run("nullable_pointer_fields", func(t *testing.T) {
+		type NullableStruct struct {
+			ID     int64   `milvus:"primary_key"`
+			Name   *string `milvus:"max_length:256"`
+			Age    *int32
+			Score  *float64
+			Active *bool
+			Vector []float32 `milvus:"dim:16"`
+		}
+
+		sch, err := ParseSchema(&NullableStruct{})
+		assert.NoError(t, err)
+		assert.NotNil(t, sch)
+
+		fieldMap := make(map[string]*entity.Field)
+		for _, f := range sch.Fields {
+			fieldMap[f.Name] = f
+		}
+
+		// PK field should NOT be nullable even if it were a pointer (it's not here)
+		assert.False(t, fieldMap["ID"].Nullable)
+
+		// Pointer fields should be nullable
+		assert.True(t, fieldMap["Name"].Nullable)
+		assert.Equal(t, entity.FieldTypeVarChar, fieldMap["Name"].DataType)
+
+		assert.True(t, fieldMap["Age"].Nullable)
+		assert.Equal(t, entity.FieldTypeInt32, fieldMap["Age"].DataType)
+
+		assert.True(t, fieldMap["Score"].Nullable)
+		assert.Equal(t, entity.FieldTypeDouble, fieldMap["Score"].DataType)
+
+		assert.True(t, fieldMap["Active"].Nullable)
+		assert.Equal(t, entity.FieldTypeBool, fieldMap["Active"].DataType)
+
+		// Non-pointer fields should NOT be nullable
+		assert.False(t, fieldMap["Vector"].Nullable)
+	})
+
+	t.Run("pointer_pk_not_nullable", func(t *testing.T) {
+		type PtrPKStruct struct {
+			ID     *int64    `milvus:"primary_key"`
+			Vector []float32 `milvus:"dim:16"`
+		}
+
+		sch, err := ParseSchema(&PtrPKStruct{})
+		assert.NoError(t, err)
+		assert.NotNil(t, sch)
+
+		for _, f := range sch.Fields {
+			if f.Name == "ID" {
+				assert.True(t, f.PrimaryKey)
+				assert.False(t, f.Nullable, "PK field should not be nullable")
+			}
+		}
+	})
 }

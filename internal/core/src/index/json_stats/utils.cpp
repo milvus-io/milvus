@@ -15,11 +15,20 @@
 // limitations under the License.
 
 #include "index/json_stats/utils.h"
-#include <boost/filesystem.hpp>
+
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <nlohmann/json.hpp>
+#include <stdint.h>
+#include <initializer_list>
+
+#include "arrow/array/builder_binary.h"
+#include "arrow/array/builder_primitive.h"
+#include "common/Consts.h"
 #include "milvus-storage/common/constants.h"
+#include "nlohmann/detail/iterators/iter_impl.hpp"
+#include "nlohmann/detail/iterators/iteration_proxy.hpp"
+#include "nlohmann/json_fwd.hpp"
 
 namespace milvus::index {
 
@@ -134,7 +143,7 @@ CreateArrowField(const JsonKey& key,
 
 std::pair<std::vector<std::shared_ptr<arrow::ArrayBuilder>>,
           std::map<std::string, std::shared_ptr<arrow::ArrayBuilder>>>
-CreateArrowBuilders(std::map<JsonKey, JsonKeyLayoutType> column_map) {
+CreateArrowBuilders(const std::map<JsonKey, JsonKeyLayoutType>& column_map) {
     std::shared_ptr<arrow::ArrayBuilder> shared_builder =
         CreateSharedArrowBuilder();
     std::vector<std::shared_ptr<arrow::ArrayBuilder>> builders;
@@ -164,7 +173,7 @@ CreateArrowBuilders(std::map<JsonKey, JsonKeyLayoutType> column_map) {
 }
 
 std::shared_ptr<arrow::Schema>
-CreateArrowSchema(std::map<JsonKey, JsonKeyLayoutType> column_map) {
+CreateArrowSchema(const std::map<JsonKey, JsonKeyLayoutType>& column_map) {
     std::vector<std::shared_ptr<arrow::Field>> fields;
     std::shared_ptr<arrow::Field> shared_field = nullptr;
     bool shared_field_name_conflict = false;
@@ -207,7 +216,8 @@ CreateArrowSchema(std::map<JsonKey, JsonKeyLayoutType> column_map) {
 }
 
 std::vector<std::pair<std::string, std::string>>
-CreateParquetKVMetadata(std::map<JsonKey, JsonKeyLayoutType> column_map) {
+CreateParquetKVMetadata(
+    const std::map<JsonKey, JsonKeyLayoutType>& column_map) {
     // layout type map is now stored in a separate meta file to reduce parquet file size.
     // return empty metadata vector.
     return {};

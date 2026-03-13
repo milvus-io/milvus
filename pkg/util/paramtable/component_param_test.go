@@ -412,7 +412,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1, Params.BalanceChannelBatchSize.GetAsInt())
 		assert.Equal(t, true, Params.EnableBalanceOnMultipleCollections.GetAsBool())
 
-		assert.Equal(t, 1, Params.QueryNodeTaskParallelismFactor.GetAsInt())
+		assert.Equal(t, 20, Params.QueryNodeTaskParallelismFactor.GetAsInt())
 		params.Save("queryCoord.queryNodeTaskParallelismFactor", "2")
 		assert.Equal(t, 2, Params.QueryNodeTaskParallelismFactor.GetAsInt())
 
@@ -500,22 +500,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(70), Params.DiskCacheCapacityLimit.GetAsSize())
 		params.Save("queryNode.diskCacheCapacityLimit", "70m")
 		assert.Equal(t, int64(70*1024*1024), Params.DiskCacheCapacityLimit.GetAsSize())
-
-		assert.False(t, Params.LazyLoadEnabled.GetAsBool())
-		params.Save("queryNode.lazyload.enabled", "true")
-		assert.True(t, Params.LazyLoadEnabled.GetAsBool())
-
-		assert.Equal(t, 30*time.Second, Params.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond))
-		params.Save("queryNode.lazyload.waitTimeout", "100")
-		assert.Equal(t, 100*time.Millisecond, Params.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond))
-
-		assert.Equal(t, 5*time.Second, Params.LazyLoadRequestResourceTimeout.GetAsDuration(time.Millisecond))
-		params.Save("queryNode.lazyload.requestResourceTimeout", "100")
-		assert.Equal(t, 100*time.Millisecond, Params.LazyLoadRequestResourceTimeout.GetAsDuration(time.Millisecond))
-
-		assert.Equal(t, 2*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
-		params.Save("queryNode.lazyload.requestResourceRetryInterval", "3000")
-		assert.Equal(t, 3*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
 
 		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
 		assert.Equal(t, true, Params.SkipGrowingSegmentBF.GetAsBool())
@@ -698,7 +682,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 0.01, params.StreamingCfg.WALBalancerPolicyVChannelFairAntiAffinityWeight.GetAsFloat())
 		assert.Equal(t, 0.01, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceTolerance.GetAsFloat())
 		assert.Equal(t, 3, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceMaxStep.GetAsInt())
-		assert.Equal(t, 30*time.Second, params.StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse())
+		assert.Equal(t, 30*time.Minute, params.StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse())
 		assert.Equal(t, 4.0, params.StreamingCfg.WALBroadcasterConcurrencyRatio.GetAsFloat())
 		assert.Equal(t, 5*time.Minute, params.StreamingCfg.WALBroadcasterTombstoneCheckInternal.GetAsDurationByParse())
 		assert.Equal(t, 8192, params.StreamingCfg.WALBroadcasterTombstoneMaxCount.GetAsInt())
@@ -718,7 +702,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10*time.Minute, params.StreamingCfg.FlushL0MaxLifetime.GetAsDurationByParse())
 		assert.Equal(t, 500000, params.StreamingCfg.FlushL0MaxRowNum.GetAsInt())
 		assert.Equal(t, int64(32*1024*1024), params.StreamingCfg.FlushL0MaxSize.GetAsSize())
-		assert.Equal(t, 1*time.Minute, params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.GetAsDurationByParse())
+		assert.Equal(t, 2*time.Second, params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.GetAsDurationByParse())
 		assert.Equal(t, 1*time.Second, params.StreamingCfg.FlushEmptyTimeTickMaxFilterInterval.GetAsDurationByParse())
 		assert.Equal(t, 0, params.StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.GetAsInt())
 
@@ -809,6 +793,7 @@ func TestCachedParam(t *testing.T) {
 
 	assert.Equal(t, int32(16), params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	assert.Equal(t, int32(16), params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
+	assert.Equal(t, int64(1000000), params.DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64())
 
 	assert.Equal(t, uint(100000), params.CommonCfg.BloomFilterSize.GetAsUint())
 	assert.Equal(t, uint(100000), params.CommonCfg.BloomFilterSize.GetAsUint())

@@ -10,17 +10,28 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <memory>
+#include <string>
+#include <utility>
 #include <vector>
+
 #include "RTreeIndexWrapper.h"
+#include "test_utils/Constants.h"
 #include "common/Geometry.h"
+#include "geos_c.h"
+#include "gtest/gtest.h"
+#include "pb/plan.pb.h"
 
 class RTreeIndexWrapperTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
         // Create test directory
-        test_dir_ = "/tmp/rtree_test";
+        test_dir_ = TestLocalPath + "rtree_test";
         std::filesystem::create_directories(test_dir_);
 
         // Initialize GEOS

@@ -81,6 +81,7 @@ const (
 	SearchIterLastBoundKey = "search_iter_last_bound"
 	SearchIterIdKey        = "search_iter_id"
 	QueryGroupByFieldsKey  = "group_by_fields"
+	OrderByFieldsKey       = "order_by_fields"
 
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"
@@ -486,6 +487,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// validate bigTopK optimization mode
+	if _, err := common.IsBigTopKOptimizationEnabled(t.GetProperties()...); err != nil {
+		return err
+	}
+
 	// Validate timezone
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.GetProperties())
 	if exist && !timestamptz.IsTimezoneValid(tz) {
@@ -496,6 +502,20 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	_, err = common.GetCollectionTTL(t.GetProperties())
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("collection ttl property value not valid, parse error: %s", err.Error())
+	}
+
+	// Validate warmup policy for all warmup keys
+	if hasWarmupProp(t.GetProperties()...) {
+		for _, prop := range t.GetProperties() {
+			if common.IsFieldWarmupKey(prop.GetKey()) {
+				return merr.WrapErrParameterInvalidMsg("warmup key '%s' is only allowed at field level, use warmup.scalarField/warmup.scalarIndex/warmup.vectorField/warmup.vectorIndex at collection level", prop.GetKey())
+			}
+			if common.IsCollectionWarmupKey(prop.GetKey()) {
+				if err := common.ValidateWarmupPolicy(prop.GetValue()); err != nil {
+					return merr.WrapErrParameterInvalidMsg("invalid warmup value for key %s: %s", prop.GetKey(), err.Error())
+				}
+			}
+		}
 	}
 
 	// validate clustering key
@@ -1017,6 +1037,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.Schema.EnableDynamicField = result.Schema.EnableDynamicField
 	t.result.Schema.ExternalSource = result.Schema.ExternalSource
 	t.result.Schema.ExternalSpec = result.Schema.ExternalSpec
+	t.result.Schema.EnableNamespace = result.Schema.EnableNamespace
 	t.result.CollectionID = result.CollectionID
 	t.result.VirtualChannelNames = result.VirtualChannelNames
 	t.result.PhysicalChannelNames = result.PhysicalChannelNames
@@ -1053,7 +1074,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	for _, field := range result.Schema.Fields {
-		if field.IsDynamic {
+		if field.IsDynamic || field.Name == common.NamespaceFieldName {
 			continue
 		}
 		if field.FieldID >= common.StartOfUserFieldID {
@@ -1319,9 +1340,9 @@ func hasTTLFieldProp(props ...*commonpb.KeyValuePair) bool {
 	return false
 }
 
-func hasLazyLoadProp(props ...*commonpb.KeyValuePair) bool {
+func hasWarmupProp(props ...*commonpb.KeyValuePair) bool {
 	for _, p := range props {
-		if p.GetKey() == common.LazyLoadEnableKey {
+		if common.IsWarmupKey(p.GetKey()) {
 			return true
 		}
 	}
@@ -1330,11 +1351,69 @@ func hasLazyLoadProp(props ...*commonpb.KeyValuePair) bool {
 
 func hasPropInDeletekeys(keys []string) string {
 	for _, key := range keys {
-		if key == common.MmapEnabledKey || key == common.LazyLoadEnableKey {
+		if key == common.MmapEnabledKey || common.IsWarmupKey(key) {
 			return key
 		}
 	}
 	return ""
+}
+
+// checkVectorIndexExist checks if the collection has any vector index.
+// Returns the vector field name that has an index, or empty string if none.
+func checkVectorIndexExist(ctx context.Context, dbName, collectionName string, collectionID int64, mixCoord types.MixCoordClient) (string, error) {
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, collectionName)
+	if err != nil {
+		return "", err
+	}
+
+	indexResponse, err := mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: collectionID,
+		IndexName:    "",
+	})
+	if err = merr.CheckRPCCall(indexResponse, err); err != nil && !errors.Is(err, merr.ErrIndexNotFound) {
+		return "", merr.WrapErrServiceInternal("describe index failed", err.Error())
+	}
+	for _, index := range indexResponse.IndexInfos {
+		for _, field := range collSchema.Fields {
+			if index.FieldID == field.FieldID && typeutil.IsVectorType(field.DataType) {
+				return field.GetName(), nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// detectBoolPropChange detects whether a boolean collection property is being
+// changed via Properties or DeleteKeys. parseFn validates and parses the new
+// value when the key is found in Properties.
+// only one of properties or deleteKeys should be provided
+func detectBoolPropChange(
+	oldValue bool,
+	propKey string,
+	properties []*commonpb.KeyValuePair,
+	deleteKeys []string,
+	parseFn func() (bool, error),
+) (newValue bool, changed bool, err error) {
+	// this is duplicated with the check in alterCollectionTask PreExecute
+	if len(properties) > 0 && len(deleteKeys) > 0 {
+		return false, false, merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
+	}
+	newValue = oldValue
+	if _, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(propKey, properties); ok {
+		newValue, err = parseFn()
+		if err != nil {
+			return false, false, err
+		}
+		changed = oldValue != newValue
+	}
+	for _, key := range deleteKeys {
+		if key == propKey {
+			newValue = false
+			changed = oldValue != newValue
+			break
+		}
+	}
+	return newValue, changed, nil
 }
 
 func validatePartitionKeyIsolation(ctx context.Context, colName string, isPartitionKeyEnabled bool, props ...*commonpb.KeyValuePair) (bool, error) {
@@ -1380,13 +1459,21 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	t.CollectionID = collectionID
 
 	if len(t.GetProperties()) > 0 {
-		if hasMmapProp(t.Properties...) || hasLazyLoadProp(t.Properties...) {
+		hasMmap := hasMmapProp(t.Properties...)
+		hasWarmup := hasWarmupProp(t.Properties...)
+		if hasMmap || hasWarmup {
 			loaded, err := isCollectionLoaded(ctx, t.mixCoord, t.CollectionID)
 			if err != nil {
 				return err
 			}
 			if loaded {
-				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+				// keeping the original error msg here for compatibility
+				if hasMmap {
+					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
+				}
+				if hasWarmup {
+					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter warmup properties if collection loaded")
+				}
 			}
 		}
 
@@ -1423,6 +1510,20 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		if hasTTLField && hasTTLProp(collSchema.GetProperties()...) {
 			return merr.WrapErrParameterInvalidMsg("collection TTL is already set, cannot be set ttl field")
 		}
+
+		// Validate warmup policy for all warmup keys
+		if hasWarmupProp(t.Properties...) {
+			for _, prop := range t.Properties {
+				if common.IsFieldWarmupKey(prop.GetKey()) {
+					return merr.WrapErrParameterInvalidMsg("warmup key '%s' is only allowed at field level, use warmup.scalarField/warmup.scalarIndex/warmup.vectorField/warmup.vectorIndex at collection level", prop.GetKey())
+				}
+				if common.IsCollectionWarmupKey(prop.GetKey()) {
+					if err := common.ValidateWarmupPolicy(prop.GetValue()); err != nil {
+						return merr.WrapErrParameterInvalidMsg("invalid warmup value for key %s: %s", prop.GetKey(), err.Error())
+					}
+				}
+			}
+		}
 	} else if len(t.GetDeleteKeys()) > 0 {
 		key := hasPropInDeletekeys(t.DeleteKeys)
 		if key != "" {
@@ -1431,7 +1532,10 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 			if loaded {
-				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not delete mmap properties if collection loaded")
+				if key == common.MmapEnabledKey {
+					return merr.WrapErrCollectionLoaded(t.CollectionName, "can not delete mmap properties if collection loaded")
+				}
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not delete %s properties if collection loaded", key)
 			}
 		}
 	}
@@ -1440,55 +1544,58 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// check if the new partition key isolation is valid to use
-	newIsoValue, err := validatePartitionKeyIsolation(ctx, t.CollectionName, isPartitionKeyMode, t.Properties...)
-	if err != nil {
-		return err
-	}
 	collBasicInfo, err := globalMetaCache.GetCollectionInfo(t.ctx, t.GetDbName(), t.CollectionName, t.CollectionID)
 	if err != nil {
 		return err
 	}
-	oldIsoValue := collBasicInfo.partitionKeyIsolation
+	newIsoValue, isoChanged, err := detectBoolPropChange(
+		collBasicInfo.partitionKeyIsolation, common.PartitionKeyIsolationKey,
+		t.Properties, t.GetDeleteKeys(),
+		func() (bool, error) {
+			return validatePartitionKeyIsolation(ctx, t.CollectionName, isPartitionKeyMode, t.Properties...)
+		},
+	)
+	if err != nil {
+		return err
+	}
 
-	log.Ctx(ctx).Info("alter collection pre check with partition key isolation",
+	newBigTopK, bigTopKChanged, err := detectBoolPropChange(
+		collBasicInfo.bigTopKOptimization, common.BigTopKOptimizationEnabledKey,
+		t.Properties, t.GetDeleteKeys(),
+		func() (bool, error) {
+			return common.IsBigTopKOptimizationEnabled(t.Properties...)
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	log.Ctx(ctx).Info("alter collection pre check with partition key isolation/big topk optimization",
 		zap.String("collectionName", t.CollectionName),
 		zap.Bool("isPartitionKeyMode", isPartitionKeyMode),
 		zap.Bool("newIsoValue", newIsoValue),
-		zap.Bool("oldIsoValue", oldIsoValue))
+		zap.Bool("oldIsoValue", collBasicInfo.partitionKeyIsolation),
+		zap.Bool("newBigTopKOptimizationValue", newBigTopK),
+		zap.Bool("oldBigTopKOptimizationValue", collBasicInfo.bigTopKOptimization))
 
-	// if the isolation flag in properties is not set, meta cache will assign partitionKeyIsolation in collection info to false
+	// if the isolation/bigTopKOptimization flag in properties is not set, meta cache will assign partitionKeyIsolation/bigTopKOptimization in collection info to false
 	//   - None|false -> false, skip
 	//   - None|false -> true, check if the collection has vector index
 	//   - true -> false, check if the collection has vector index
 	//   - false -> true, check if the collection has vector index
 	//   - true -> true, skip
-	if oldIsoValue != newIsoValue {
-		collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
-		if err != nil {
+	if isoChanged || bigTopKChanged {
+		if vecField, err := checkVectorIndexExist(ctx, t.GetDbName(), t.CollectionName, t.CollectionID, t.mixCoord); err != nil {
 			return err
-		}
-
-		hasVecIndex := false
-		indexName := ""
-		indexResponse, err := t.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
-			CollectionID: t.CollectionID,
-			IndexName:    "",
-		})
-		if err != nil {
-			return merr.WrapErrServiceInternal("describe index failed", err.Error())
-		}
-		for _, index := range indexResponse.IndexInfos {
-			for _, field := range collSchema.Fields {
-				if index.FieldID == field.FieldID && typeutil.IsVectorType(field.DataType) {
-					hasVecIndex = true
-					indexName = field.GetName()
-				}
+		} else if vecField != "" {
+			if isoChanged {
+				return merr.WrapErrIndexDuplicate(vecField,
+					"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
 			}
-		}
-		if hasVecIndex {
-			return merr.WrapErrIndexDuplicate(indexName,
-				"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
+			if bigTopKChanged {
+				return merr.WrapErrIndexDuplicate(vecField,
+					"can not alter "+common.BigTopKOptimizationEnabledKey+" if the collection already has a vector index. Please drop the index first")
+			}
 		}
 	}
 	return nil
@@ -1566,10 +1673,20 @@ var allowedAlterProps = []string{
 	common.MmapEnabledKey,
 	common.MaxCapacityKey,
 	common.FieldDescriptionKey,
+	common.WarmupKey,
+	common.WarmupScalarFieldKey,
+	common.WarmupScalarIndexKey,
+	common.WarmupVectorFieldKey,
+	common.WarmupVectorIndexKey,
 }
 
 var allowedDropProps = []string{
 	common.MmapEnabledKey,
+	common.WarmupKey,
+	common.WarmupScalarFieldKey,
+	common.WarmupScalarIndexKey,
+	common.WarmupVectorFieldKey,
+	common.WarmupVectorIndexKey,
 }
 
 func IsKeyAllowAlter(key string) bool {
@@ -1652,6 +1769,18 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter collection field properties if collection loaded")
 			}
 
+		case common.WarmupKey:
+			loaded, err := isCollectionLoadedFn()
+			if err != nil {
+				return err
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter warmup if collection loaded")
+			}
+			if err := common.ValidateWarmupPolicy(prop.Value); err != nil {
+				return merr.WrapErrParameterInvalidMsg(err.Error())
+			}
+
 		case common.MaxLengthKey:
 			IsStringType := false
 			fieldName := ""
@@ -1705,7 +1834,7 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			return merr.WrapErrParameterInvalidMsg("%s is not allowed to drop in collection field param", key)
 		}
 
-		if updatedKey == common.MmapEnabledKey {
+		if updatedKey == common.MmapEnabledKey || common.IsFieldWarmupKey(updatedKey) {
 			loaded, err := isCollectionLoadedFn()
 			if err != nil {
 				return err

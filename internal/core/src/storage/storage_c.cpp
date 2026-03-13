@@ -15,15 +15,22 @@
 // limitations under the License.
 
 #include "storage/storage_c.h"
+
+#include <exception>
+#include <memory>
+#include <string>
+
+#include "PluginInterface.h"
+#include "common/EasyAssert.h"
+#include "monitor/scope_metric.h"
 #include "storage/FileWriter.h"
-#include "monitor/Monitor.h"
-#include "storage/PluginLoader.h"
-#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
+#include "storage/PluginLoader.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
-#include "monitor/scope_metric.h"
-#include "common/EasyAssert.h"
+#include "storage/Types.h"
 
 CStatus
 GetLocalUsedSize(const char* c_dir, int64_t* size) {
@@ -86,6 +93,10 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
         storage_config.max_connections = c_storage_config.max_connections;
         storage_config.gcp_credential_json =
             std::string(c_storage_config.gcp_credential_json);
+        if (c_storage_config.tls_min_version != nullptr) {
+            storage_config.tls_min_version =
+                std::string(c_storage_config.tls_min_version);
+        }
         milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
             storage_config);
 

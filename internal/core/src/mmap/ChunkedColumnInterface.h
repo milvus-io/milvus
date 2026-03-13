@@ -32,6 +32,12 @@ class ChunkedColumnInterface {
     ManualEvictCache() const {
     }
 
+    // Cancel any pending async warmup for this column's cache slot.
+    // Default implementation does nothing.
+    virtual void
+    CancelWarmup() {
+    }
+
     // Get raw data pointer of a specific chunk
     virtual cachinglayer::PinWrapper<const char*>
     DataOfChunk(milvus::OpContext* op_ctx, int chunk_id) const = 0;
@@ -131,6 +137,12 @@ class ChunkedColumnInterface {
     // Get vector of row counts before each chunk
     virtual const std::vector<int64_t>&
     GetNumRowsUntilChunk() const = 0;
+
+    // Get vector of valid (non-null) row counts before each chunk
+    // For nullable columns, this tracks cumulative physical offsets
+    // For non-nullable columns, this equals GetNumRowsUntilChunk()
+    virtual const std::vector<int64_t>&
+    GetNumValidRowsUntilChunk() const = 0;
 
     const FixedVector<bool>&
     GetValidData() const {
@@ -270,6 +282,7 @@ class ChunkedColumnInterface {
  protected:
     FixedVector<bool> valid_data_;
     std::vector<int64_t> valid_count_per_chunk_;
+    std::vector<int64_t> num_valid_rows_until_chunk_;
     OffsetMapping offset_mapping_;
 
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
@@ -299,6 +312,35 @@ class ChunkedColumnInterface {
         for (int64_t i = 0; i < count; i++) {
             auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(offsets[i]);
             cids.push_back(chunk_id);
+            offsets_in_chunk.push_back(offset_in_chunk);
+        }
+        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+    }
+
+    std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
+    ToChunkIdAndOffsetByPhysical(const int64_t* physical_offsets,
+                                 int64_t count) const {
+        AssertInfo(physical_offsets != nullptr,
+                   "Physical offsets cannot be nullptr");
+        const auto& num_valid_rows_until_chunk = GetNumValidRowsUntilChunk();
+        std::vector<milvus::cachinglayer::cid_t> cids;
+        cids.reserve(count);
+        std::vector<int64_t> offsets_in_chunk;
+        offsets_in_chunk.reserve(count);
+
+        for (int64_t i = 0; i < count; i++) {
+            auto offset = physical_offsets[i];
+            auto iter = std::upper_bound(num_valid_rows_until_chunk.begin(),
+                                         num_valid_rows_until_chunk.end(),
+                                         offset);
+            AssertInfo(iter != num_valid_rows_until_chunk.begin(),
+                       "Physical offset {} is invalid",
+                       offset);
+            size_t chunk_idx =
+                std::distance(num_valid_rows_until_chunk.begin(), iter) - 1;
+            int64_t offset_in_chunk =
+                offset - num_valid_rows_until_chunk[chunk_idx];
+            cids.push_back(chunk_idx);
             offsets_in_chunk.push_back(offset_in_chunk);
         }
         return std::make_pair(std::move(cids), std::move(offsets_in_chunk));

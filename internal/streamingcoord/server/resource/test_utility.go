@@ -17,10 +17,11 @@ func OptStreamingManagerClient(c manager.ManagerClient) optResourceInit {
 
 // InitForTest initializes the singleton of resources for test.
 func InitForTest(opts ...optResourceInit) {
-	r = &resourceImpl{
+	newR := &resourceImpl{
 		logger: log.With(),
 	}
 	for _, opt := range opts {
-		opt(r)
+		opt(newR)
 	}
+	r.Store(newR)
 }

@@ -49,6 +49,17 @@ service RootCoord {
      */
     rpc AddCollectionField(milvus.AddCollectionFieldRequest) returns (common.Status) {}
 
+
+     /**
+     * @brief This method is used to add/drop collection field/function.
+     *
+     * @param AlterCollectionSchemaRequest, field schema is going to be added.
+     *
+     * @return AlterCollectionSchemaResponse
+     */
+    rpc AlterCollectionSchema(milvus.AlterCollectionSchemaRequest) returns (milvus.AlterCollectionSchemaResponse){}
+
+
     /**
      * @brief This method is used to test collection existence.
      *
@@ -174,6 +185,12 @@ service RootCoord {
     rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
     rpc RemoveFileResource(milvus.RemoveFileResourceRequest) returns (common.Status) {}
     rpc ListFileResources(milvus.ListFileResourcesRequest) returns (milvus.ListFileResourcesResponse) {}
+
+    // Client Telemetry RPCs (forwarded to rootcoord implementation)
+    rpc ClientHeartbeat(milvus.ClientHeartbeatRequest) returns (milvus.ClientHeartbeatResponse) {}
+    rpc GetClientTelemetry(milvus.GetClientTelemetryRequest) returns (milvus.GetClientTelemetryResponse) {}
+    rpc PushClientCommand(milvus.PushClientCommandRequest) returns (milvus.PushClientCommandResponse) {}
+    rpc DeleteClientCommand(milvus.DeleteClientCommandRequest) returns (milvus.DeleteClientCommandResponse) {}
 }
 
 message AllocTimestampRequest {

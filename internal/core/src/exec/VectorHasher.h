@@ -16,8 +16,12 @@
 
 #pragma once
 
-#include "common/Vector.h"
+#include <stdint.h>
+#include <memory>
+#include <vector>
+
 #include "common/Types.h"
+#include "common/Vector.h"
 #include "expr/ITypeExpr.h"
 
 namespace milvus {

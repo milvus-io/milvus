@@ -17,22 +17,21 @@
 #pragma once
 
 #include <cstddef>
-#include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
 
-#include <boost/variant.hpp>
+#include "boost/container_hash/hash.hpp"
+#include "common/Types.h"
 #include "common/Vector.h"
 
 namespace milvus {
 namespace exec {
 
-class EvalCtx;
 class Expr;
-class PhyCallExpr;
 
 namespace expression {
 
@@ -74,8 +73,8 @@ class FunctionFactory {
     Initialize();
 
     void
-    RegisterFilterFunction(std::string func_name,
-                           std::vector<DataType> func_param_type_list,
+    RegisterFilterFunction(const std::string& func_name,
+                           const std::vector<DataType>& func_param_type_list,
                            FilterFunctionPtr func);
 
     void

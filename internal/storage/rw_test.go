@@ -638,7 +638,7 @@ func TestRwOptionValidate(t *testing.T) {
 				storageConfig: &indexpb.StorageConfig{},
 				op:            OpWrite,
 			},
-			expectError: true,
+			expectError: false, // V2 uses storageConfig, uploader not required
 		},
 	}
 

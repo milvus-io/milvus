@@ -117,6 +117,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cDeleteDumpBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.DeleteDumpBatchSize.GetAsInt64())
 	C.SetDefaultDeleteDumpBatchSize(cDeleteDumpBatchSize)
 
+	cEnableLatestDeleteSnapshotOptimization := C.bool(paramtable.Get().QueryNodeCfg.EnableLatestDeleteSnapshotOptimization.GetAsBool())
+	C.SetEnableLatestDeleteSnapshotOptimization(cEnableLatestDeleteSnapshotOptimization)
+
 	cOptimizeExprEnabled := C.bool(paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool())
 	C.SetDefaultOptimizeExprEnable(cOptimizeExprEnabled)
 
@@ -138,8 +141,8 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cExprResCacheCapacityBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.GetAsInt64())
 	C.SetExprResCacheCapacityBytes(cExprResCacheCapacityBytes)
 
-	cEnableParquetStatsSkipIndex := C.bool(paramtable.Get().CommonCfg.EnableNamespace.GetAsBool())
-	C.SetDefaultEnableParquetStatsSkipIndex(cEnableParquetStatsSkipIndex)
+	enableParquetStatsSkipIndex := paramtable.Get().CommonCfg.ParquetStatsSkipIndex.GetAsBool()
+	C.SetDefaultEnableParquetStatsSkipIndex(C.bool(enableParquetStatsSkipIndex))
 
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
 

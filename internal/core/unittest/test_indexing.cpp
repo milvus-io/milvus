@@ -9,35 +9,66 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <arrow/record_batch.h>
-#include <arrow/type_fwd.h>
+#include <folly/FBVector.h>
 #include <gtest/gtest.h>
-
-#include <boost/filesystem/operations.hpp>
+#include <nlohmann/json_fwd.hpp>
+#include <string.h>
+#include <algorithm>
+#include <cstdint>
+#include <initializer_list>
 #include <iostream>
+#include <iterator>
+#include <map>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
-#include "arrow/type.h"
+#include "bitset/bitset.h"
+#include "common/BitsetView.h"
 #include "common/EasyAssert.h"
-#include "common/Tracer.h"
-#include "common/Types.h"
-#include "index/Index.h"
-#include "knowhere/comp/index_param.h"
-#include "nlohmann/json.hpp"
-#include "query/SearchBruteForce.h"
-#include "segcore/reduce/Reduce.h"
-#include "index/IndexFactory.h"
+#include "common/QueryInfo.h"
 #include "common/QueryResult.h"
-#include "segcore/Types.h"
+#include "common/Schema.h"
+#include "common/Tracer.h"
+#include "common/TypeTraits.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/Index.h"
+#include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/IndexStats.h"
+#include "index/Meta.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/config.h"
+#include "knowhere/dataset.h"
+#include "knowhere/expected.h"
+#include "knowhere/index/index_node.h"
+#include "knowhere/object.h"
+#include "knowhere/operands.h"
+#include "knowhere/sparse_utils.h"
+#include "knowhere/version.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "nlohmann/json.hpp"
+#include "pb/common.pb.h"
+#include "query/SearchBruteForce.h"
+#include "query/SubSearchResult.h"
+#include "query/helper.h"
+#include "segcore/ReduceStructure.h"
+#include "segcore/reduce/Reduce.h"
+#include "storage/FileManager.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
-#include "test_utils/DataGen.h"
-#include "test_utils/Timer.h"
-#include "storage/Util.h"
-#include <boost/filesystem.hpp>
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -155,11 +186,10 @@ TEST(Indexing, BinaryBruteForce) {
     int64_t dim = 8192;
     Config search_params_ = {};
     auto metric_type = knowhere::metric::JACCARD;
-    auto result_count = topk * num_queries;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "vecbin", DataType::VECTOR_BINARY, dim, metric_type);
-    auto i64_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->AddDebugField("age", DataType::INT64);
     auto dataset = DataGen(schema, N, 10);
     auto bin_vec = dataset.get_col<uint8_t>(vec_fid);
     auto query_data = 1024 * dim / 8 + bin_vec.data();
@@ -397,27 +427,24 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     milvus_storage::ArrowFileSystemPtr fs_;
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    IndexTypeParameters,
-    IndexTest,
-    ::testing::Values(
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_IDMAP, knowhere::metric::L2),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFPQ, knowhere::metric::L2),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                  knowhere::metric::L2),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
-                  knowhere::metric::L2),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-                  knowhere::metric::JACCARD),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
-                  knowhere::metric::JACCARD),
-        std::pair(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
-                  knowhere::metric::IP),
-        std::pair(knowhere::IndexEnum::INDEX_SPARSE_WAND, knowhere::metric::IP),
+static const auto kIndexTestValues = ::testing::Values(
+    std::pair(knowhere::IndexEnum::INDEX_FAISS_IDMAP, knowhere::metric::L2),
+    std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFPQ, knowhere::metric::L2),
+    std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, knowhere::metric::L2),
+    std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, knowhere::metric::L2),
+    std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+              knowhere::metric::JACCARD),
+    std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
+              knowhere::metric::JACCARD),
+    std::pair(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+              knowhere::metric::IP),
+    std::pair(knowhere::IndexEnum::INDEX_SPARSE_WAND, knowhere::metric::IP),
 #ifdef BUILD_DISK_ANN
-        std::pair(knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2),
+    std::pair(knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2),
 #endif
-        std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)));
+    std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2));
+
+INSTANTIATE_TEST_SUITE_P(IndexTypeParameters, IndexTest, kIndexTestValues);
 
 TEST(Indexing, Iterator) {
     constexpr int N = 10240;
@@ -581,7 +608,8 @@ TEST_P(IndexTest, Mmap) {
     ASSERT_GT(serializedSize, 0);
     load_conf = generate_load_conf(index_type, metric_type, 0);
     load_conf["index_files"] = index_files;
-    load_conf["mmap_filepath"] = "mmap/test_index_mmap_" + index_type;
+    load_conf["mmap_filepath"] =
+        TestLocalPath + "mmap/test_index_mmap_" + index_type;
     load_conf[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);

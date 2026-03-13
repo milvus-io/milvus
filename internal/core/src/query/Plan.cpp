@@ -15,8 +15,28 @@
 // limitations under the License.
 
 #include "Plan.h"
-#include "common/Utils.h"
+
+#include <cstddef>
+#include <limits>
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "PlanProto.h"
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/QueryInfo.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "common/protobuf_utils.h"
+#include "fmt/core.h"
+#include "google/protobuf/io/coded_stream.h"
+#include "google/protobuf/io/zero_copy_stream_impl_lite.h"
+#include "pb/common.pb.h"
+#include "pb/plan.pb.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
 
 namespace milvus::query {
 

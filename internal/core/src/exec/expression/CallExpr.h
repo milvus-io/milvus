@@ -18,17 +18,19 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
+
 #include "common/EasyAssert.h"
-#include "common/FieldDataInterface.h"
 #include "common/OpContext.h"
+#include "common/Types.h"
 #include "common/Utils.h"
 #include "common/Vector.h"
+#include "common/protobuf_utils.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
-#include "exec/expression/function/FunctionFactory.h"
 #include "expr/ITypeExpr.h"
 #include "fmt/core.h"
 #include "segcore/SegmentInterface.h"
@@ -71,7 +73,7 @@ class PhyCallExpr : public Expr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
@@ -90,8 +92,6 @@ class PhyCallExpr : public Expr {
 
     int64_t active_count_{0};
     int64_t num_chunk_{0};
-    int64_t current_chunk_id_{0};
-    int64_t current_chunk_pos_{0};
     int64_t size_per_chunk_{0};
 
     const segcore::SegmentInternalInterface* segment_;

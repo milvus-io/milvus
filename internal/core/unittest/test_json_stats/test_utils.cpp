@@ -1,9 +1,20 @@
-#include <gtest/gtest.h>
-#include "index/json_stats/utils.h"
-#include <arrow/array/builder_binary.h>
-#include <arrow/array/builder_primitive.h>
+#include <arrow/array/builder_base.h>
 #include <arrow/type.h>
-#include <nlohmann/json.hpp>
+#include <gtest/gtest.h>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "common/protobuf_utils.h"
+#include "gtest/gtest.h"
+#include "index/json_stats/utils.h"
 
 namespace milvus::index {
 

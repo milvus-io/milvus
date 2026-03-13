@@ -15,18 +15,16 @@
 // limitations under the License.
 
 #include <algorithm>
-#include <cstddef>
+#include <memory>
 #include <optional>
 #include <string>
-#include "arrow/type.h"
-#include <boost/lexical_cast.hpp>
-#include <google/protobuf/text_format.h>
-#include <memory>
+#include <tuple>
 
 #include "Schema.h"
-#include "SystemProperty.h"
+#include "arrow/type.h"
 #include "arrow/util/key_value_metadata.h"
 #include "common/Consts.h"
+#include "common/FieldMeta.h"
 #include "milvus-storage/common/constants.h"
 #include "pb/common.pb.h"
 #include "protobuf_utils.h"
@@ -69,6 +67,13 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         if (has_setting) {
             schema->mmap_fields_[field_id] = enabled;
         }
+
+        // Parse warmup policy for the field (key: "warmup")
+        auto warmup_policy =
+            GetStringFromRepeatedKVs(child.type_params(), WARMUP_KEY);
+        if (warmup_policy.has_value()) {
+            schema->warmup_fields_[field_id] = warmup_policy.value();
+        }
     };
 
     for (const milvus::proto::schema::FieldSchema& child :
@@ -105,6 +110,15 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         }
         AssertInfo(found, "ttl field name not found in schema fields");
     }
+    // Parse collection-level warmup policies
+    schema->warmup_vector_index_ = GetStringFromRepeatedKVs(
+        schema_proto.properties(), WARMUP_VECTOR_INDEX_KEY);
+    schema->warmup_scalar_index_ = GetStringFromRepeatedKVs(
+        schema_proto.properties(), WARMUP_SCALAR_INDEX_KEY);
+    schema->warmup_scalar_field_ = GetStringFromRepeatedKVs(
+        schema_proto.properties(), WARMUP_SCALAR_FIELD_KEY);
+    schema->warmup_vector_field_ = GetStringFromRepeatedKVs(
+        schema_proto.properties(), WARMUP_VECTOR_FIELD_KEY);
 
     AssertInfo(schema->get_primary_field_id().has_value(),
                "primary key should be specified");
@@ -118,8 +132,9 @@ const FieldMeta FieldMeta::RowIdMeta(
 const ArrowSchemaPtr
 Schema::ConvertToArrowSchema() const {
     arrow::FieldVector arrow_fields;
-    for (auto& field : fields_) {
-        auto meta = field.second;
+    arrow_fields.reserve(field_ids_.size());
+    for (const auto& field_id : field_ids_) {
+        const auto& meta = fields_.at(field_id);
         int dim = IsVectorDataType(meta.get_data_type()) &&
                           !IsSparseFloatVectorDataType(meta.get_data_type())
                       ? meta.get_dim()
@@ -140,6 +155,35 @@ Schema::ConvertToArrowSchema() const {
             meta.is_nullable(),
             arrow::key_value_metadata({milvus_storage::ARROW_FIELD_ID_KEY},
                                       {std::to_string(meta.get_id().get())}));
+        arrow_fields.push_back(arrow_field);
+    }
+    return arrow::schema(arrow_fields);
+}
+
+const ArrowSchemaPtr
+Schema::ConvertToLoonArrowSchema() const {
+    arrow::FieldVector arrow_fields;
+    arrow_fields.reserve(field_ids_.size());
+    for (const auto& field_id : field_ids_) {
+        const auto& meta = fields_.at(field_id);
+        int dim = IsVectorDataType(meta.get_data_type()) &&
+                          !IsSparseFloatVectorDataType(meta.get_data_type())
+                      ? meta.get_dim()
+                      : 1;
+
+        std::shared_ptr<arrow::DataType> arrow_data_type = nullptr;
+        auto data_type = meta.get_data_type();
+        if (data_type == DataType::VECTOR_ARRAY) {
+            arrow_data_type = GetArrowDataTypeForVectorArray(
+                meta.get_element_type(), meta.get_dim());
+        } else {
+            arrow_data_type = GetArrowDataType(data_type, dim);
+        }
+
+        auto arrow_field =
+            std::make_shared<arrow::Field>(std::to_string(field_id.get()),
+                                           arrow_data_type,
+                                           meta.is_nullable());
         arrow_fields.push_back(arrow_field);
     }
     return arrow::schema(arrow_fields);
@@ -171,6 +215,7 @@ Schema::ToProto() const {
 std::unique_ptr<std::vector<FieldMeta>>
 Schema::AbsentFields(Schema& old_schema) const {
     std::vector<FieldMeta> result;
+    result.reserve(fields_.size());
     for (const auto& [field_id, field_meta] : fields_) {
         auto it = old_schema.fields_.find(field_id);
         if (it == old_schema.fields_.end()) {
@@ -178,7 +223,7 @@ Schema::AbsentFields(Schema& old_schema) const {
         }
     }
 
-    return std::make_unique<std::vector<FieldMeta>>(result);
+    return std::make_unique<std::vector<FieldMeta>>(std::move(result));
 }
 
 std::pair<bool, bool>
@@ -202,4 +247,32 @@ Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) const {
               "No array field found in struct: {}",
               struct_name);
 }
+
+std::pair<bool, std::string>
+Schema::WarmupPolicy(const FieldId& field_id,
+                     bool is_vector,
+                     bool is_index) const {
+    // First check field-level warmup policy
+    auto it = warmup_fields_.find(field_id);
+    if (it != warmup_fields_.end()) {
+        return {true, it->second};
+    }
+
+    // Fallback to appropriate collection-level config based on field type
+    if (is_vector) {
+        if (is_index) {
+            return {warmup_vector_index_.has_value(),
+                    warmup_vector_index_.value_or("")};
+        }
+        return {warmup_vector_field_.has_value(),
+                warmup_vector_field_.value_or("")};
+    }
+    if (is_index) {
+        return {warmup_scalar_index_.has_value(),
+                warmup_scalar_index_.value_or("")};
+    }
+    return {warmup_scalar_field_.has_value(),
+            warmup_scalar_field_.value_or("")};
+}
+
 }  // namespace milvus

@@ -9,18 +9,39 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <assert.h>
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
+#include <stdlib.h>
+#include <algorithm>
+#include <cstdint>
+#include <iosfwd>
+#include <memory>
+#include <string>
 #include <tuple>
+#include <utility>
+#include <vector>
 
-#include "common/VectorTrait.h"
-#include "common/type_c.h"
-#include "indexbuilder/ScalarIndexCreator.h"
-#include "indexbuilder/index_c.h"
-#include "pb/index_cgo_msg.pb.h"
-#include "test_utils/indexbuilder_test_utils.h"
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/binary_set_c.h"
+#include "common/common_type_c.h"
+#include "common/protobuf_utils.h"
+#include "common/type_c.h"
+#include "gtest/gtest.h"
+#include "indexbuilder/index_c.h"
+#include "indexbuilder/type_c.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/dataset.h"
+#include "knowhere/sparse_utils.h"
+#include "pb/common.pb.h"
+#include "pb/index_cgo_msg.pb.h"
+#include "pb/schema.pb.h"
+#include "test_utils/Constants.h"
+#include "test_utils/indexbuilder_test_utils.h"
 
 constexpr int NB = 10;
 
@@ -47,10 +68,10 @@ TestVecIndex() {
     std::string type_params_str, index_params_str;
     bool ok = google::protobuf::TextFormat::PrintToString(type_params,
                                                           &type_params_str);
-    assert(ok);
+    ASSERT_TRUE(ok);
     ok = google::protobuf::TextFormat::PrintToString(index_params,
                                                      &index_params_str);
-    assert(ok);
+    ASSERT_TRUE(ok);
     auto dataset =
         std::is_same_v<TraitType, milvus::BinaryVector>
             ? GenFieldData(NB, metric_type, TraitType::data_type, BINARY_DIM)
@@ -345,7 +366,7 @@ TEST(CreateIndexTest, StorageV2) {
 
     auto* storage_config = build_index_info->mutable_storage_config();
     storage_config->set_storage_type("remote");
-    storage_config->set_root_path("/tmp/test_storage");
+    storage_config->set_root_path(TestLocalPath);
     storage_config->set_address("localhost:9000");
     storage_config->set_bucket_name("test_bucket");
     storage_config->set_access_keyid("test_access_key");
@@ -411,7 +432,7 @@ TEST(VectorMemIndexTest, StorageV2) {
 
     auto* storage_config = build_index_info->mutable_storage_config();
     storage_config->set_storage_type("local");
-    storage_config->set_root_path("/tmp");
+    storage_config->set_root_path(TestLocalPath);
 
     std::string serialized_info;
     build_index_info->SerializeToString(&serialized_info);

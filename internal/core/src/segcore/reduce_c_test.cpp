@@ -10,14 +10,33 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <stddef.h>
+#include <cstdint>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <vector>
 
+#include "common/EasyAssert.h"
+#include "common/QueryResult.h"
+#include "common/Types.h"
+#include "common/VectorTrait.h"
+#include "common/protobuf_utils.h"
+#include "filemanager/InputStream.h"
+#include "gtest/gtest.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "segcore/Collection.h"
+#include "segcore/ReduceStructure.h"
 #include "segcore/collection_c.h"
-#include "segcore/segment_c.h"
+#include "segcore/reduce/Reduce.h"
 #include "segcore/reduce_c.h"
-
+#include "segcore/segment_c.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
+#include "test_utils/PbHelper.h"
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/storage_test_utils.h"
-#include "test_utils/GenExprProto.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -270,48 +289,24 @@ testReduceSearchWithExpr(int N,
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
-    auto fmt = boost::format(R"(vector_anns: <
-                                            field_id: 100
-                                            query_info: <
-                                                topk: %1%
-                                                metric_type: "L2"
-                                                search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0">
-                                            output_field_ids: 100)") %
-               topK;
+    // Create schema handle for parsing search expressions
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
 
-    // construct the predicate that filter out all data
+    // Build expression: empty for no filter, or "age > N" to filter all data
+    std::string expr = "";
     if (filter_all) {
-        fmt = boost::format(R"(vector_anns: <
-                                            field_id: 100
-                                            predicates: <
-                                                unary_range_expr: <
-                                                    column_info: <
-                                                    field_id: 101
-                                                    data_type: Int64
-                                                    >
-                                                    op: GreaterThan
-                                                    value: <
-                                                    int64_val: %2%
-                                                    >
-                                                >
-                                            >
-                                            query_info: <
-                                                topk: %1%
-                                                metric_type: "L2"
-                                                search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0">
-                                            output_field_ids: 100)") %
-              topK % N;
+        expr = "age > " + std::to_string(N);
     }
-    auto serialized_expr_plan = fmt.str();
+
     auto blob = generate_query_data<TraitType>(num_queries);
 
     void* plan = nullptr;
     auto binary_plan =
-        translate_text_plan_to_binary_plan(serialized_expr_plan.data());
+        schema_handle.ParseSearch(expr,                  // expression
+                                  "fakevec",             // vector field name
+                                  topK,                  // topK
+                                  "L2",                  // metric_type
+                                  R"({"nprobe": 10})");  // search_params
     status = CreateSearchPlanByExpr(
         collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);

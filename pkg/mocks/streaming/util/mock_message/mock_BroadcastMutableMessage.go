@@ -208,6 +208,51 @@ func (_c *MockBroadcastMutableMessage_IntoMessageProto_Call) RunAndReturn(run fu
 	return _c
 }
 
+// IsPChannelLevel provides a mock function with no fields
+func (_m *MockBroadcastMutableMessage) IsPChannelLevel() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsPChannelLevel")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockBroadcastMutableMessage_IsPChannelLevel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsPChannelLevel'
+type MockBroadcastMutableMessage_IsPChannelLevel_Call struct {
+	*mock.Call
+}
+
+// IsPChannelLevel is a helper method to define mock.On call
+func (_e *MockBroadcastMutableMessage_Expecter) IsPChannelLevel() *MockBroadcastMutableMessage_IsPChannelLevel_Call {
+	return &MockBroadcastMutableMessage_IsPChannelLevel_Call{Call: _e.mock.On("IsPChannelLevel")}
+}
+
+func (_c *MockBroadcastMutableMessage_IsPChannelLevel_Call) Run(run func()) *MockBroadcastMutableMessage_IsPChannelLevel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBroadcastMutableMessage_IsPChannelLevel_Call) Return(_a0 bool) *MockBroadcastMutableMessage_IsPChannelLevel_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroadcastMutableMessage_IsPChannelLevel_Call) RunAndReturn(run func() bool) *MockBroadcastMutableMessage_IsPChannelLevel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsPersisted provides a mock function with no fields
 func (_m *MockBroadcastMutableMessage) IsPersisted() bool {
 	ret := _m.Called()

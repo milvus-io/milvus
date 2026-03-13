@@ -60,7 +60,7 @@ func statisticOnSegments(ctx context.Context, segments []Segment, segType Segmen
 // if segIDs is specified, it will only search on the segments specified by the segIDs.
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
 func StatisticsHistorical(ctx context.Context, manager *Manager, collID int64, partIDs []int64, segIDs []int64) ([]SegmentStats, []Segment, error) {
-	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
+	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -71,7 +71,7 @@ func StatisticsHistorical(ctx context.Context, manager *Manager, collID int64, p
 // StatisticStreaming will do statistics all the target segments in streaming
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
 func StatisticStreaming(ctx context.Context, manager *Manager, collID int64, partIDs []int64, segIDs []int64) ([]SegmentStats, []Segment, error) {
-	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
+	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs, nil)
 	if err != nil {
 		return nil, nil, err
 	}

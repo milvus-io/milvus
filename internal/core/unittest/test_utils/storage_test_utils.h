@@ -16,20 +16,30 @@
 
 #pragma once
 
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <unordered_set>
+#include <vector>
+
+#include <boost/filesystem.hpp>
+#include <gtest/gtest.h>
+
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/LoadInfo.h"
+#include "common/QueryResult.h"
+#include "common/Types.h"
 #include "Constants.h"
 #include "DataGen.h"
-#include "common/Consts.h"
-#include "common/IndexMeta.h"
-#include "common/Types.h"
-#include "common/LoadInfo.h"
-#include "common/Schema.h"
 #include "segcore/segment_c.h"
-#include "storage/Types.h"
-#include "storage/InsertData.h"
-#include "storage/RemoteChunkManagerSingleton.h"
+#include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentSealed.h"
-#include <boost/filesystem.hpp>
-#include "common/QueryResult.h"
+#include "storage/ChunkManager.h"
+#include "storage/InsertData.h"
+#include "storage/PayloadStream.h"
+#include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Types.h"
 
 using milvus::DataType;
 using milvus::FieldDataPtr;
@@ -55,12 +65,11 @@ get_default_local_storage_config() {
 inline MmapConfig
 get_default_mmap_config() {
     MmapConfig mmap_config = {
-        .cache_read_ahead_policy = "willneed",
-        .mmap_path = "/tmp/test_mmap_manager/",
-        .disk_limit =
-            uint64_t(2) * uint64_t(1024) * uint64_t(1024) * uint64_t(1024),
-        .fix_file_size = uint64_t(4) * uint64_t(1024) * uint64_t(1024),
-        .growing_enable_mmap = false,
+        "willneed",
+        TestMmapPath,
+        uint64_t(2) * uint64_t(1024) * uint64_t(1024) * uint64_t(1024),
+        uint64_t(4) * uint64_t(1024) * uint64_t(1024),
+        false,
     };
     return mmap_config;
 }
@@ -98,8 +107,10 @@ PrepareInsertBinlog(int64_t collection_id,
             FieldBinlogInfo{field_id,
                             static_cast<int64_t>(row_count),
                             std::vector<int64_t>{int64_t(row_count)},
-                            std::vector<int64_t>{serialized_insert_size},
+                            std::vector<int64_t>{
+                                static_cast<int64_t>(serialized_insert_size)},
                             enable_mmap,
+                            "",
                             std::vector<std::string>{file}});
     };
 
@@ -158,7 +169,8 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
     for (auto i = 0; i < field_datas.size(); ++i) {
         auto& field_data = field_datas[i];
         row_count += field_data->get_num_rows();
-        auto file = "./data/test/" + std::to_string(collection_id) + "/" +
+        auto file = TestRemotePath + "data/test/" +
+                    std::to_string(collection_id) + "/" +
                     std::to_string(partition_id) + "/" +
                     std::to_string(segment_id) + "/" +
                     std::to_string(field_id) + "/" + std::to_string(i);
@@ -184,6 +196,7 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
                         row_counts,
                         serialized_insert_sizes,
                         enable_mmap,
+                        "",
                         files});
 
     return load_info;
@@ -249,33 +262,33 @@ GetExcludedFieldIds(milvus::SchemaPtr schema,
     }
     return result;
 }
-auto
+[[maybe_unused]] auto
 gen_field_data_meta(int64_t collection_id = 1,
                     int64_t partition_id = 2,
                     int64_t segment_id = 3,
                     int64_t field_id = 101) -> milvus::storage::FieldDataMeta {
     return milvus::storage::FieldDataMeta{
-        .collection_id = collection_id,
-        .partition_id = partition_id,
-        .segment_id = segment_id,
-        .field_id = field_id,
+        collection_id,
+        partition_id,
+        segment_id,
+        field_id,
     };
 }
 
-auto
+[[maybe_unused]] auto
 gen_index_meta(int64_t segment_id = 3,
                int64_t field_id = 101,
                int64_t index_build_id = 1000,
                int64_t index_version = 10000) -> milvus::storage::IndexMeta {
     return milvus::storage::IndexMeta{
-        .segment_id = segment_id,
-        .field_id = field_id,
-        .build_id = index_build_id,
-        .index_version = index_version,
+        segment_id,
+        field_id,
+        index_build_id,
+        index_version,
     };
 }
 
-auto
+[[maybe_unused]] auto
 gen_local_storage_config(const std::string& root_path)
     -> milvus::storage::StorageConfig {
     auto ret = milvus::storage::StorageConfig{};
@@ -306,7 +319,7 @@ struct ChunkManagerWrapper {
     std::unordered_set<std::string> written_;
 };
 
-void
+[[maybe_unused]] void
 CheckGroupBySearchResult(const milvus::SearchResult& search_result,
                          int topK,
                          int nq,

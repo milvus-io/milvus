@@ -11,16 +11,39 @@
 
 #include "SegmentInterface.h"
 
+#include <folly/ExceptionWrapper.h>
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <map>
+#include <ratio>
+#include <type_traits>
+#include <unordered_set>
 
+#include "NamedType/named_type_impl.hpp"
 #include "Utils.h"
+#include "bitset/bitset.h"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/OpContext.h"
+#include "common/QueryResult.h"
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
-#include "monitor/Monitor.h"
-#include "query/ExecPlanNodeVisitor.h"
+#include "common/Utils.h"
+#include "expr/ITypeExpr.h"
+#include "fmt/core.h"
 #include "futures/Future.h"
+#include "monitor/Monitor.h"
+#include "pb/schema.pb.h"
+#include "plan/PlanNode.h"
+#include "plan/PlanNodeIdGenerator.h"
+#include "prometheus/histogram.h"
+#include "query/ExecPlanNodeVisitor.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "segcore/ConcurrentVector.h"
 
 namespace milvus::segcore {
 
@@ -98,7 +121,8 @@ SegmentInternalInterface::Search(
     Timestamp timestamp,
     const folly::CancellationToken& cancel_token,
     int32_t consistency_level,
-    Timestamp collection_ttl) const {
+    Timestamp collection_ttl,
+    int64_t entity_ttl_physical_time_us) const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
     check_search(plan);
@@ -107,7 +131,8 @@ SegmentInternalInterface::Search(
                                        placeholder_group,
                                        cancel_token,
                                        consistency_level,
-                                       collection_ttl);
+                                       collection_ttl,
+                                       entity_ttl_physical_time_us);
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;
@@ -122,12 +147,17 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    bool ignore_non_pk,
                                    const folly::CancellationToken& cancel_token,
                                    int32_t consistency_level,
-                                   Timestamp collection_ttl) const {
+                                   Timestamp collection_ttl,
+                                   int64_t entity_ttl_physical_time_us) const {
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("Retrieve", tracer::GetRootSpan(), true);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
-    query::ExecPlanNodeVisitor visitor(
-        *this, timestamp, cancel_token, consistency_level, collection_ttl);
+    query::ExecPlanNodeVisitor visitor(*this,
+                                       timestamp,
+                                       cancel_token,
+                                       consistency_level,
+                                       collection_ttl,
+                                       entity_ttl_physical_time_us);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
     results->set_has_more_result(retrieve_results.has_more_result);
@@ -247,7 +277,7 @@ SegmentInternalInterface::FillTargetEntry(
         std::unique_ptr<DataArray> col;
         auto& field_meta = plan->schema_->operator[](field_id);
         if (!is_field_exist(field_id)) {
-            col = std::move(bulk_subscript_not_exist_field(field_meta, size));
+            col = bulk_subscript_not_exist_field(field_meta, size);
         } else {
             col = bulk_subscript(&op_ctx, field_id, offsets, size);
         }
@@ -341,6 +371,17 @@ SegmentInternalInterface::get_real_count() const {
         milvus::plan::GetNextPlanNodeId());
     sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
 
+    // ProjectNode consumes the MVCC bitmap and materializes valid rows.
+    // Without it, AggregationNode would see input->size() == total rows
+    // instead of the actual valid row count after MVCC filtering.
+    plannode = std::make_shared<milvus::plan::ProjectNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<FieldId>{},
+        std::vector<std::string>{},
+        std::vector<DataType>{},
+        sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
     std::string agg_name = "count";
     std::vector<plan::AggregationNode::Aggregate> aggregates;
     {
@@ -429,49 +470,6 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
         auto size = field_info.first * field_info.second + field_size;
         field_info.first = field_info.first + num_rows;
         field_info.second = size / field_info.first;
-    }
-}
-
-void
-SegmentInternalInterface::timestamp_filter(BitsetType& bitset,
-                                           Timestamp timestamp) const {
-    auto& timestamps = get_timestamps();
-    auto cnt = bitset.size();
-    if (timestamps[cnt - 1] <= timestamp) {
-        // no need to filter out anything.
-        return;
-    }
-
-    auto pilot = upper_bound(timestamps, 0, cnt, timestamp);
-    // offset bigger than pilot should be filtered out.
-    auto offset = pilot;
-    while (offset < cnt) {
-        bitset[offset] = false;
-
-        const auto next_offset = bitset.find_next(offset);
-        if (!next_offset.has_value()) {
-            return;
-        }
-        offset = next_offset.value();
-    }
-}
-
-void
-SegmentInternalInterface::timestamp_filter(BitsetType& bitset,
-                                           const std::vector<int64_t>& offsets,
-                                           Timestamp timestamp) const {
-    auto& timestamps = get_timestamps();
-    auto cnt = bitset.size();
-    if (timestamps[cnt - 1] <= timestamp) {
-        // no need to filter out anything.
-        return;
-    }
-
-    // point query, faster than binary search.
-    for (auto& offset : offsets) {
-        if (timestamps[offset] > timestamp) {
-            bitset.set(offset, true);
-        }
     }
 }
 

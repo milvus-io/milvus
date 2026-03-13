@@ -47,7 +47,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         # Primary key and vector field
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("vector", vector_type, dim=dim)
+        schema.add_field("vector", vector_type, dim=dim, nullable=True)
         # Boolean type
         schema.add_field("bool_field", DataType.BOOL, nullable=True)
         # Integer types

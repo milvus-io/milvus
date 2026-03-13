@@ -39,6 +39,27 @@ func TestSelectMQType(t *testing.T) {
 	assert.Equal(t, mustSelectMQType(false, mqTypeWoodpecker, mqEnable{true, true, true, true}), mqTypeWoodpecker)
 }
 
+func TestTestRocksmqPath(t *testing.T) {
+	p1 := testRocksmqPath()
+	p2 := testRocksmqPath()
+	assert.NotEqual(t, p1, p2, "each call should return a unique path")
+	assert.Contains(t, p1, "rdb_data")
+}
+
+func TestNewDefaultFactory(t *testing.T) {
+	paramtable.Init()
+	f := NewDefaultFactory(true)
+	assert.NotNil(t, f)
+	assert.True(t, f.standAlone)
+}
+
+func TestMockDefaultFactory(t *testing.T) {
+	paramtable.Init()
+	f := MockDefaultFactory(false, paramtable.Get())
+	assert.NotNil(t, f)
+	assert.False(t, f.standAlone)
+}
+
 func TestHealthCheck(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().PulsarCfg.WebAddress.Key, "")

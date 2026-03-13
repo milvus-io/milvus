@@ -10,36 +10,48 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <glog/logging.h>
+#include <string.h>
+#include <exception>
+#include <map>
 #include <memory>
 #include <string>
+#include <tuple>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #include "common/Consts.h"
-#include "fmt/core.h"
-#include "indexbuilder/type_c.h"
-#include "log/Log.h"
-#include "storage/PluginLoader.h"
-#include "storage/loon_ffi/util.h"
-
-#ifdef __linux__
-#include <malloc.h>
-#endif
-
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/Types.h"
+#include "common/protobuf_utils.h"
+#include "common/type_c.h"
+#include "filemanager/InputStream.h"
+#include "index/IndexStats.h"
+#include "index/Meta.h"
+#include "index/TextMatchIndex.h"
+#include "index/Utils.h"
+#include "index/json_stats/JsonKeyStats.h"
+#include "indexbuilder/IndexCreatorBase.h"
+#include "indexbuilder/IndexFactory.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
-
-#include "index/TextMatchIndex.h"
-
-#include "indexbuilder/IndexFactory.h"
-#include "common/type_c.h"
-#include "storage/Types.h"
-#include "indexbuilder/types.h"
-#include "index/Utils.h"
-#include "pb/index_cgo_msg.pb.h"
-#include "storage/Util.h"
-#include "index/Meta.h"
-#include "index/json_stats/JsonKeyStats.h"
-#include "milvus-storage/filesystem/fs.h"
+#include "indexbuilder/type_c.h"
+#include "knowhere/binaryset.h"
+#include "knowhere/dataset.h"
+#include "knowhere/version.h"
+#include "log/Log.h"
 #include "monitor/scope_metric.h"
+#include "nlohmann/json.hpp"
+#include "pb/common.pb.h"
+#include "pb/index_cgo_msg.pb.h"
+#include "pb/schema.pb.h"
+#include "storage/FileManager.h"
+#include "storage/PluginLoader.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
+#include "storage/loon_ffi/util.h"
+#include "storage/plugin/PluginInterface.h"
 
 using namespace milvus;
 CStatus
@@ -113,6 +125,8 @@ get_storage_config(const milvus::proto::indexcgo::StorageConfig& config) {
     storage_config.requestTimeoutMs = config.request_timeout_ms();
     storage_config.gcp_credential_json =
         std::string(config.gcpcredentialjson());
+    storage_config.max_connections = config.max_connections();
+    storage_config.tls_min_version = std::string(config.ssl_tls_min_version());
     return storage_config;
 }
 

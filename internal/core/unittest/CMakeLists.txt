@@ -21,6 +21,12 @@ include_directories(
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
+# Plan parser shared library
+set(PLANPARSER_INCLUDE_DIR ${CMAKE_HOME_DIRECTORY}/output/include)
+set(PLANPARSER_LIB_DIR ${CMAKE_HOME_DIRECTORY}/output/lib)
+include_directories(${PLANPARSER_INCLUDE_DIR})
+link_directories(${PLANPARSER_LIB_DIR})
+
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/test_utils/test_segcore.yaml")
 
 # Collect test files from source directories using glob pattern
@@ -53,6 +59,7 @@ set(MILVUS_TEST_FILES
         test_element_filter.cpp
         test_query_group_by.cpp
         test_minhash.cpp
+        test_async_warmup.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
@@ -103,6 +110,9 @@ if (LINUX)
     endif()
 endif()
 
+add_compile_definitions(
+        MILVUS_CPPUT_OUTPUT_DIR="${CMAKE_INSTALL_PREFIX}/cpput_output")
+
 add_executable(all_tests
         ${MILVUS_TEST_FILES}
         )
@@ -116,9 +126,16 @@ target_link_libraries(all_tests
         milvus-common
         )
 
+# Link plan parser library using full path and set RPATH
+target_link_options(all_tests PRIVATE "-L${PLANPARSER_LIB_DIR}")
+target_link_libraries(all_tests milvus-planparser-cpp)
+set_target_properties(all_tests PROPERTIES
+        BUILD_RPATH "${PLANPARSER_LIB_DIR}"
+        INSTALL_RPATH "${PLANPARSER_LIB_DIR}"
+        )
+
 install(TARGETS all_tests DESTINATION unittest)
 
-add_subdirectory(bench)
 add_subdirectory(test_json_stats)
 
 # bitset unit test
@@ -146,4 +163,10 @@ target_link_libraries(bitset_test
         gtest
         ${CONAN_LIBS}
 )
+if (LINUX)
+    # folly shared library requires libaio; use --no-as-needed to ensure
+    # the linker pulls it in even when bitset_test doesn't reference aio directly
+    target_link_options(bitset_test PRIVATE "LINKER:--no-as-needed")
+    target_link_libraries(bitset_test aio)
+endif()
 install(TARGETS bitset_test DESTINATION unittest)

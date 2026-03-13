@@ -9,23 +9,43 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/ExceptionWrapper.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <memory>
+#include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
-#include "bitset/detail/element_wise.h"
+#include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
+#include "common/ArrayOffsets.h"
 #include "common/BitsetView.h"
+#include "common/Chunk.h"
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/OffsetMapping.h"
 #include "common/QueryInfo.h"
+#include "common/QueryResult.h"
+#include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "exec/operator/Utils.h"
+#include "index/Index.h"
+#include "index/VectorIndex.h"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/dataset.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
+#include "query/SubSearchResult.h"
 #include "query/Utils.h"
 #include "query/helper.h"
-#include "exec/operator/Utils.h"
+#include "segcore/SealedIndexingRecord.h"
 
 namespace milvus::query {
 
@@ -177,14 +197,39 @@ SearchOnSealedColumn(const Schema& schema,
 
     CheckBruteForceSearchParam(field, search_info);
 
+    // Check for nullable vector field with all null values - must be done before creating iterators
+    const auto& offset_mapping = column->GetOffsetMapping();
+    TargetBitmap transformed_bitset;
+    BitsetView search_bitview = bitview;
+    if (offset_mapping.IsEnabled()) {
+        transformed_bitset = TransformBitset(bitview, offset_mapping);
+        search_bitview = BitsetView(transformed_bitset);
+        if (offset_mapping.GetValidCount() == 0) {
+            // All vectors are null, return empty result
+            auto total_num = num_queries * search_info.topk_;
+            result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
+            result.distances_.resize(total_num, 0.0f);
+            result.total_nq_ = num_queries;
+            result.unity_topK_ = search_info.topk_;
+            return;
+        }
+    }
+
     if (search_info.iterator_v2_info_.has_value()) {
         AssertInfo(data_type != DataType::VECTOR_ARRAY,
                    "vector array(embedding list) is not supported for "
                    "vector iterator");
 
-        CachedSearchIterator cached_iter(
-            column, query_dataset, search_info, index_info, bitview, data_type);
+        CachedSearchIterator cached_iter(column,
+                                         query_dataset,
+                                         search_info,
+                                         index_info,
+                                         search_bitview,
+                                         data_type);
         cached_iter.NextBatch(search_info, result);
+        if (offset_mapping.IsEnabled()) {
+            TransformOffset(result.seg_offsets_, offset_mapping);
+        }
         return;
     }
 
@@ -207,25 +252,10 @@ SearchOnSealedColumn(const Schema& schema,
     }
 
     auto offset = 0;
-    const auto& offset_mapping = column->GetOffsetMapping();
-    TargetBitmap transformed_bitset;
-    BitsetView search_bitview = bitview;
-    if (offset_mapping.IsEnabled()) {
-        transformed_bitset = TransformBitset(bitview, offset_mapping);
-        search_bitview = BitsetView(transformed_bitset);
-        if (offset_mapping.GetValidCount() == 0) {
-            auto total_num = num_queries * search_info.topk_;
-            result.seg_offsets_.resize(total_num, INVALID_SEG_OFFSET);
-            result.distances_.resize(total_num, 0.0f);
-            result.total_nq_ = num_queries;
-            result.unity_topK_ = search_info.topk_;
-            return;
-        }
-    }
     auto vector_chunks = column->GetAllChunks(op_context);
     const auto& valid_count_per_chunk = column->GetValidCountPerChunk();
     for (int i = 0; i < num_chunk; ++i) {
-        auto pw = vector_chunks[i];
+        const auto& pw = vector_chunks[i];
         auto vec_data = pw.get()->Data();
         auto chunk_size = column->chunk_row_nums(i);
         if (offset_mapping.IsEnabled() && !valid_count_per_chunk.empty()) {

@@ -14,9 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "arrow/api.h"
+#include "arrow/array/array_base.h"
+#include "arrow/array/builder_base.h"
+#include "arrow/util/type_fwd.h"
 #include "common/EasyAssert.h"
-#include "common/FieldMeta.h"
 #include "common/Types.h"
+#include "parquet/arrow/writer.h"
+#include "parquet/properties.h"
+#include "storage/PayloadStream.h"
 #include "storage/PayloadWriter.h"
 #include "storage/Util.h"
 

@@ -9,13 +9,22 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <azure/core/diagnostics/logger.hpp>
 #include <gtest/gtest.h>
+#include <stdint.h>
+#include <time.h>
+#include <algorithm>
+#include <cstdlib>
+#include <iosfwd>
+#include <memory>
 #include <string>
 #include <vector>
-#include <cstdlib>
 
-#include "common/EasyAssert.h"
 #include "AzureChunkManager.h"
+#include "common/EasyAssert.h"
+#include "gtest/gtest.h"
+#include "storage/ChunkManager.h"
+#include "storage/Types.h"
 #include "storage/Util.h"
 
 using namespace std;
@@ -158,7 +167,7 @@ TEST_F(AzureChunkManagerTest, WritePositive) {
     if (!chunk_manager_->BucketExists(testBucketName)) {
         chunk_manager_->CreateBucket(testBucketName);
     }
-    auto has_bucket = chunk_manager_->BucketExists(testBucketName);
+    ASSERT_TRUE(chunk_manager_->BucketExists(testBucketName));
     uint8_t data[5] = {0x17, 0x32, 0x45, 0x34, 0x23};
     string path = "1";
     chunk_manager_->Write(path, data, sizeof(data));

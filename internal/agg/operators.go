@@ -72,7 +72,19 @@ func (min *MinAggregate) Update(target *FieldValue, new *FieldValue) error {
 		return fmt.Errorf("target or new field value is nil")
 	}
 
-	// Handle nil `val` for initialization
+	// Skip null values during aggregation
+	if new.IsNull() {
+		return nil
+	}
+
+	// If target is null and new is not null, initialize target with new value
+	if target.IsNull() {
+		target.val = new.val
+		target.isNull = false
+		return nil
+	}
+
+	// Handle nil `val` for initialization (backward compatibility)
 	if target.val == nil {
 		target.val = new.val
 		return nil
@@ -160,7 +172,19 @@ func (max *MaxAggregate) Update(target *FieldValue, new *FieldValue) error {
 		return fmt.Errorf("target or new field value is nil")
 	}
 
-	// Handle nil `val` for initialization
+	// Skip null values during aggregation
+	if new.IsNull() {
+		return nil
+	}
+
+	// If target is null and new is not null, initialize target with new value
+	if target.IsNull() {
+		target.val = new.val
+		target.isNull = false
+		return nil
+	}
+
+	// Handle nil `val` for initialization (backward compatibility)
 	if target.val == nil {
 		target.val = new.val
 		return nil

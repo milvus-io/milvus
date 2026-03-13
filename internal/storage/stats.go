@@ -463,24 +463,21 @@ func (m *BM25Stats) Deserialize(bs []byte) error {
 		return err
 	}
 
-	var keys []uint32 = make([]uint32, dim)
-	var values []int32 = make([]int32, dim)
+	var key uint32
+	var value int32
 	for i := 0; i < dim; i++ {
-		if err := binary.Read(buffer, common.Endian, &keys[i]); err != nil {
+		if err := binary.Read(buffer, common.Endian, &key); err != nil {
 			return err
 		}
 
-		if err := binary.Read(buffer, common.Endian, &values[i]); err != nil {
+		if err := binary.Read(buffer, common.Endian, &value); err != nil {
 			return err
 		}
+		m.rowsWithToken[key] += value
 	}
 
 	m.numRow += numRow
 	m.numToken += tokenNum
-	for i := 0; i < dim; i++ {
-		m.rowsWithToken[keys[i]] += values[i]
-	}
-
 	return nil
 }
 

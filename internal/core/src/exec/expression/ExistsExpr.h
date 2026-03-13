@@ -17,14 +17,24 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <stdint.h>
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "common/EasyAssert.h"
+#include "cachinglayer/CacheSlot.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
 #include "common/Vector.h"
+#include "common/protobuf_utils.h"
+#include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
-#include "segcore/SegmentInterface.h"
+#include "expr/ITypeExpr.h"
 #include "index/json_stats/bson_inverted.h"
-#include "cachinglayer/CacheSlot.h"
+#include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {
@@ -65,7 +75,7 @@ class PhyExistsFilterExpr : public SegmentExpr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 

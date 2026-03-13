@@ -10,10 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-
 #include <string>
 
 #include "common/Utils.h"
+#include "gtest/gtest.h"
+#include "knowhere/comp/index_param.h"
 
 TEST(Util_Common, GetCommonPrefix) {
     std::string str1 = "";

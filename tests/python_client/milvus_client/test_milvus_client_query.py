@@ -11,7 +11,6 @@ import random
 from pymilvus import Function, FunctionType
 import threading
 
-
 prefix = "milvus_client_api_query"
 epsilon = ct.epsilon
 default_nb = ct.default_nb
@@ -153,8 +152,8 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.query(client, collection_name, filter=filter,
                    check_task=CheckTasks.err_res, check_items=error)
         # 4. query with offset but no limit
-        self.query(client, collection_name, filter=filter, offset=1, 
-                   check_task=CheckTasks.err_res, check_items=error)          
+        self.query(client, collection_name, filter=filter, offset=1,
+                   check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -172,18 +171,19 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", enable_dynamic_field=enable_dynamic_field)
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong",
+                               enable_dynamic_field=enable_dynamic_field)
         # 2. insert data
         schema_info = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
         self.insert(client, collection_name, rows)
         # 3. query with non-existent field
         term_expr = 'invalid_field in [1, 2]'
-        if enable_dynamic_field :
-            self.query(client, collection_name, filter=term_expr, 
-                  check_task=CheckTasks.check_query_results,
-                  check_items={exp_res: [], "pk_name": ct.default_int64_field_name})
-        else :
+        if enable_dynamic_field:
+            self.query(client, collection_name, filter=term_expr,
+                       check_task=CheckTasks.check_query_results,
+                       check_items={exp_res: [], "pk_name": ct.default_int64_field_name})
+        else:
             error = {ct.err_code: 65535,
                      ct.err_msg: f"cannot parse expression: {term_expr}, error: field invalid_field not exist"}
             self.query(client, collection_name, filter=term_expr,
@@ -202,7 +202,8 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", enable_dynamic_field=enable_dynamic_field)
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong",
+                               enable_dynamic_field=enable_dynamic_field)
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, default_vector_field_name)
         # 2. insert data
@@ -215,15 +216,15 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. test query with non-existent fields
-        if enable_dynamic_field :
+        if enable_dynamic_field:
             exp_res = [{default_primary_key_field_name: i} for i in range(default_nb)]
             self.query(client, collection_name, filter=default_search_exp, output_fields=output_fields,
-              check_task=CheckTasks.check_query_results,
-              check_items={"exp_res": exp_res, "pk_name": ct.default_int64_field_name})
-        else :
+                       check_task=CheckTasks.check_query_results,
+                       check_items={"exp_res": exp_res, "pk_name": ct.default_int64_field_name})
+        else:
             error = {ct.err_code: 65535, ct.err_msg: 'field int not exist'}
             self.query(client, collection_name, filter=default_search_exp, output_fields=output_fields,
-                   check_task=CheckTasks.err_res, check_items=error)
+                       check_task=CheckTasks.err_res, check_items=error)
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -275,7 +276,7 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
             error = {ct.err_code: 1100, ct.err_msg: f"cannot parse expression: {expr}, "
                                                     "error: the right-hand side of 'in' must be a list"}
             self.query(client, collection_name, filter=expr, check_task=CheckTasks.err_res, check_items=error)
-        
+
         expr = f'{ct.default_int64_field_name} in (mn)'
         error = {ct.err_code: 1100, ct.err_msg: f"cannot parse expression: {expr}, "
                                                 "error: value '(mn)' in list cannot be a non-const expression"}
@@ -293,7 +294,8 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", enable_dynamic_field=False)
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong",
+                               enable_dynamic_field=False)
         # 2. insert data
         schema_info = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
@@ -317,7 +319,8 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", enable_dynamic_field=False, auto_id=False)
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong",
+                               enable_dynamic_field=False, auto_id=False)
         # 2. insert data
         schema_info = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
@@ -404,12 +407,15 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
                  ct.err_msg: "invalid max query result window, (offset+limit) should be in range [1, 16384]"}
         self.query(client, collection_name, filter="", limit=16385, check_task=CheckTasks.err_res, check_items=error)
         # 5. query with offset + limit > 16384
-        self.query(client, collection_name, filter="", limit=1, offset=16384, check_task=CheckTasks.err_res, check_items=error)
-        self.query(client, collection_name, filter="", limit=16384, offset=1, check_task=CheckTasks.err_res, check_items=error)
+        self.query(client, collection_name, filter="", limit=1, offset=16384, check_task=CheckTasks.err_res,
+                   check_items=error)
+        self.query(client, collection_name, filter="", limit=16384, offset=1, check_task=CheckTasks.err_res,
+                   check_items=error)
         # 6. query with offset < 0
         error = {ct.err_code: 1,
                  ct.err_msg: "invalid max query result window, offset [-1] is invalid, should be gte than 0"}
-        self.query(client, collection_name, filter="", limit=2, offset=-1, check_task=CheckTasks.err_res, check_items=error)
+        self.query(client, collection_name, filter="", limit=2, offset=-1, check_task=CheckTasks.err_res,
+                   check_items=error)
         # 7. clean up
         self.drop_collection(client, collection_name)
 
@@ -457,7 +463,8 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         # 4. verify partition has data
         self.flush(client, collection_name)
         partition_info = self.get_partition_stats(client, collection_name, partition_name)[0]
-        assert partition_info['row_count'] == default_nb, f"Expected {default_nb} entities in partition, got {partition_info['row_count']}"
+        assert partition_info[
+                   'row_count'] == default_nb, f"Expected {default_nb} entities in partition, got {partition_info['row_count']}"
         # 5. query on partition without loading collection
         error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
         self.query(client, collection_name, filter=default_term_expr, partition_names=[partition_name],
@@ -527,10 +534,10 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_partitions(client, collection_name, [partition_name, ct.default_partition_name])
         # 4. query from empty partition_names (should query all partitions)
-        term_expr = f'{default_primary_key_field_name} in [0, {half}, {default_nb-1}]'
+        term_expr = f'{default_primary_key_field_name} in [0, {half}, {default_nb - 1}]'
         # Prepare expected results by combining data from both partitions
         all_rows = rows_partition + rows_default
-        exp_res = [all_rows[0], all_rows[half], all_rows[default_nb-1]]
+        exp_res = [all_rows[0], all_rows[half], all_rows[default_nb - 1]]
         self.query(client, collection_name, filter=term_expr, partition_names=[],
                    check_task=CheckTasks.check_query_results,
                    check_items={"exp_res": exp_res, "with_vec": True, "pk_name": default_primary_key_field_name})
@@ -575,7 +582,8 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         # 4. query on partition
         self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name1],
                    check_task=CheckTasks.check_query_results,
-                   check_items={"exp_res": rows_partition1, "with_vec": True, "pk_name": default_primary_key_field_name})
+                   check_items={"exp_res": rows_partition1, "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -613,10 +621,11 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         # 4. query on two partitions to get multi results
         term_expr = f'{default_primary_key_field_name} in [{half - 1}, {half}]'
         rows = rows_partition1 + rows_partition2
-        self.query(client, collection_name, filter=term_expr, 
-                        partition_names=[partition_name1, partition_name2],
-                        check_task=CheckTasks.check_query_results,
-                        check_items={"exp_res": rows[half - 1:half + 1], "with_vec": True, "pk_name": default_primary_key_field_name})[0]
+        self.query(client, collection_name, filter=term_expr,
+                   partition_names=[partition_name1, partition_name2],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": rows[half - 1:half + 1], "with_vec": True,
+                                "pk_name": default_primary_key_field_name})[0]
         # 6. clean up
         self.drop_collection(client, collection_name)
 
@@ -654,10 +663,11 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         # 4. query on two partitions to get multi results
         term_expr = f'{default_primary_key_field_name} in [{half}]'
         rows = rows_partition1 + rows_partition2
-        self.query(client, collection_name, filter=term_expr, 
-                        partition_names=[partition_name1, partition_name2],
-                        check_task=CheckTasks.check_query_results,
-                        check_items={"exp_res": rows[half:half + 1], "with_vec": True, "pk_name": default_primary_key_field_name})[0]
+        self.query(client, collection_name, filter=term_expr,
+                   partition_names=[partition_name1, partition_name2],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": rows[half:half + 1], "with_vec": True,
+                                "pk_name": default_primary_key_field_name})[0]
         # 6. clean up
         self.drop_collection(client, collection_name)
 
@@ -779,9 +789,9 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 4. query with invalid limit type
         error = {ct.err_code: 1, ct.err_msg: f"limit [{limit}] is invalid"}
-        self.query(client, collection_name, filter=default_search_exp, 
-                  offset=10, limit=limit,
-                  check_task=CheckTasks.err_res, check_items=error)
+        self.query(client, collection_name, filter=default_search_exp,
+                   offset=10, limit=limit,
+                   check_task=CheckTasks.err_res, check_items=error)
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -815,9 +825,9 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         if limit == -1:
             error = {ct.err_code: 65535,
                      ct.err_msg: f"invalid max query result window, limit [{limit}] is invalid, should be greater than 0"}
-        self.query(client, collection_name, filter=default_search_exp, 
-                  offset=10, limit=limit,
-                  check_task=CheckTasks.err_res, check_items=error)
+        self.query(client, collection_name, filter=default_search_exp,
+                   offset=10, limit=limit,
+                   check_task=CheckTasks.err_res, check_items=error)
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -847,9 +857,9 @@ class TestMilvusClientQueryInvalid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 4. query with invalid offset type
         error = {ct.err_code: 1, ct.err_msg: f"offset [{offset}] is invalid"}
-        self.query(client, collection_name, filter=default_search_exp, 
-                  offset=offset, limit=10,
-                  check_task=CheckTasks.err_res, check_items=error)
+        self.query(client, collection_name, filter=default_search_exp,
+                   offset=offset, limit=10,
+                   check_task=CheckTasks.err_res, check_items=error)
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -987,11 +997,44 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_output_fields_nullable_vector_fields(self):
+        """
+        target: test query with nullable vector fields
+        method: create collection with nullable vector fields, insert data with nullable vector fields, query with nullable vector fields
+        expected: query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim, nullable=True)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        # 2. insert data
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        # 3. query with nullable vector fields
+        res = self.query(client, collection_name, filter=default_search_exp,
+                         output_fields=[default_primary_key_field_name, default_vector_field_name],
+                         check_task=CheckTasks.check_query_results,
+                         check_items={exp_res: rows,
+                                      "with_vec": True,
+                                      "pk_name": default_primary_key_field_name})[0]
+        assert set(res[0].keys()) == {default_primary_key_field_name, default_vector_field_name}
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("vector_field, vector_type", [
-    (ct.default_float_vec_field_name, DataType.FLOAT_VECTOR),
-    (ct.default_float16_vec_field_name, DataType.FLOAT16_VECTOR),
-    (ct.default_bfloat16_vec_field_name, DataType.BFLOAT16_VECTOR)])
+        (ct.default_float_vec_field_name, DataType.FLOAT_VECTOR),
+        (ct.default_float16_vec_field_name, DataType.FLOAT16_VECTOR),
+        (ct.default_bfloat16_vec_field_name, DataType.BFLOAT16_VECTOR)])
     def test_milvus_client_query_output_fields_all(self, enable_dynamic_field, vector_field, vector_type):
         """
         target: test query (high level api) normal case
@@ -1059,7 +1102,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong", enable_dynamic_field=enable_dynamic_field)
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong",
+                               enable_dynamic_field=enable_dynamic_field)
         # 2. insert data
         schema_info = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
@@ -1091,7 +1135,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
         schema.add_field(ct.default_float_field_name, DataType.FLOAT)
         schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        self.create_collection(client, collection_name, schema = schema, consistency_level="Strong", enable_dynamic_field=enable_dynamic_field)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong",
+                               enable_dynamic_field=enable_dynamic_field)
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, rows)
         # 3. create index and load
@@ -1100,7 +1145,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with one output field
-        res = self.query(client, collection_name, filter=default_search_exp, output_fields=[default_float_field_name])[0]
+        res = self.query(client, collection_name, filter=default_search_exp, output_fields=[default_float_field_name])[
+            0]
         # verify primary field and specified field are returned
         assert set(res[0].keys()) == {default_primary_key_field_name, default_float_field_name}
         # 5. clean up
@@ -1204,7 +1250,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                  ct.err_msg: "the sample factor should be between 0 and 1 and not too close to 0 or 1"}
         self.query(client, collection_name, filter=expr,
                    check_task=CheckTasks.err_res, check_items=error)
-    
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_query_json_modulo_operator(self):
         """
@@ -1221,17 +1267,18 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         schema.add_field("json_field", DataType.JSON, nullable=True)
         index_params, _ = self.prepare_index_params(client)
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong")
-        
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
+                               consistency_level="Strong")
+
         # 2. insert 3000 rows with various numeric values
         nb = 3000
         rng = np.random.default_rng(seed=19530)
-        
+
         # Store original data for verification
         rows = []
         all_numbers = []
         all_nested_numbers = []
-        
+
         for i in range(nb):
             # Generate diverse numeric values
             if i % 5 == 0:
@@ -1243,12 +1290,12 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             else:
                 # Regular sequential numbers
                 numeric_value = i
-            
+
             nested_value = i * 7 + (i % 13)  # Different pattern for nested
-            
+
             all_numbers.append(numeric_value)
             all_nested_numbers.append(nested_value)
-            
+
             rows.append({
                 default_primary_key_field_name: i,
                 default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -1258,9 +1305,9 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                     "data": {"nested_number": nested_value}
                 }
             })
-        
+
         self.insert(client, collection_name, rows)
-        
+
         # 3. Test modulo operations with different modulo values and remainders
         test_cases = [
             (10, list(range(10))),  # mod 10 - all remainders 0-9
@@ -1269,67 +1316,66 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             (7, list(range(7))),  # mod 7 - all remainders 0-6
             (13, [0, 5, 12]),  # mod 13 - selected remainders
         ]
-        
+
         for modulo, remainders in test_cases:
             log.info(f"\nTesting modulo {modulo}")
-            
+
             for remainder in remainders:
                 # Calculate expected results from original data
                 expected_ids = [i for i, num in enumerate(all_numbers) if num % modulo == remainder]
                 expected_count = len(expected_ids)
-                
+
                 # Query and get results
                 filter_expr = f'json_field["number"] % {modulo} == {remainder}'
-                res, _ = self.query(client, collection_name, filter=filter_expr, 
+                res, _ = self.query(client, collection_name, filter=filter_expr,
                                     output_fields=["json_field", default_primary_key_field_name])
-                
+
                 # Extract actual IDs from results
                 actual_ids = sorted([item[default_primary_key_field_name] for item in res])
                 expected_ids_sorted = sorted(expected_ids)
-                
+
                 log.info(f"Modulo {modulo} remainder {remainder}: expected {expected_count}, got {len(res)} results")
-                
+
                 # Verify we got exactly the expected results
                 assert len(res) == expected_count, \
                     f"Expected {expected_count} results for % {modulo} == {remainder}, got {len(res)}"
                 assert actual_ids == expected_ids_sorted, \
                     f"Result IDs don't match expected IDs for % {modulo} == {remainder}"
-                
+
                 # Also verify each result is correct
                 for item in res:
                     actual_remainder = item["json_field"]["number"] % modulo
                     assert actual_remainder == remainder, \
                         f"Number {item['json_field']['number']} % {modulo} = {actual_remainder}, expected {remainder}"
-                
+
                 # Test nested field
                 expected_nested_ids = [i for i, num in enumerate(all_nested_numbers) if num % modulo == remainder]
                 nested_filter = f'json_field["data"]["nested_number"] % {modulo} == {remainder}'
                 nested_res, _ = self.query(client, collection_name, filter=nested_filter,
-                                          output_fields=["json_field", default_primary_key_field_name])
-                
+                                           output_fields=["json_field", default_primary_key_field_name])
+
                 actual_nested_ids = sorted([item[default_primary_key_field_name] for item in nested_res])
                 expected_nested_ids_sorted = sorted(expected_nested_ids)
-                
+
                 assert len(nested_res) == len(expected_nested_ids), \
                     f"Expected {len(expected_nested_ids)} nested results for % {modulo} == {remainder}, got {len(nested_res)}"
                 assert actual_nested_ids == expected_nested_ids_sorted, \
                     f"Nested result IDs don't match expected IDs for % {modulo} == {remainder}"
-        
-        
+
         # Test combining modulo with other conditions
         combined_expr = 'json_field["number"] % 2 == 0 && json_field["index"] < 100'
         expected_combined = [i for i in range(min(100, nb)) if all_numbers[i] % 2 == 0]
         res_combined, _ = self.query(client, collection_name, filter=combined_expr,
-                                    output_fields=["json_field", default_primary_key_field_name])
+                                     output_fields=["json_field", default_primary_key_field_name])
         actual_combined_ids = sorted([item[default_primary_key_field_name] for item in res_combined])
-        
+
         assert len(res_combined) == len(expected_combined), \
             f"Expected {len(expected_combined)} results for combined filter, got {len(res_combined)}"
         assert actual_combined_ids == sorted(expected_combined), \
             "Results for combined filter don't match expected"
-        
+
         log.info(f"All modulo tests passed! Combined filter returned {len(res_combined)} results")
-        
+
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1350,7 +1396,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         res = self.query(client, collection_name, filter=default_search_exp)[0]
         assert len(res) == 0
-        
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_query_expr_empty_term_array(self):
         """
@@ -1456,7 +1502,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 4. query by non-primary non-vector scalar fields
         non_primary_fields = [ct.default_int32_field_name, ct.default_int16_field_name,
-                             ct.default_float_field_name, ct.default_double_field_name, ct.default_string_field_name]
+                              ct.default_float_field_name, ct.default_double_field_name, ct.default_string_field_name]
         # exp res: first two rows and all fields except vector field
         exp_res = rows[:2]
         for field in non_primary_fields:
@@ -1501,24 +1547,24 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. output bool field
-        res = self.query(client, collection_name, filter=default_term_expr, 
-                        output_fields=[ct.default_bool_field_name])[0]
+        res = self.query(client, collection_name, filter=default_term_expr,
+                         output_fields=[ct.default_bool_field_name])[0]
         assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_bool_field_name}
         # 5. not support filter bool field with expr 'bool in [0/ 1]'
         not_support_expr = f'{ct.default_bool_field_name} in [0]'
         error = {ct.err_code: 65535,
                  ct.err_msg: "cannot parse expression: bool in [0], error: "
                              "value 'int64_val:0' in list cannot be casted to Bool"}
-        self.query(client, collection_name, filter=not_support_expr, 
-                  output_fields=[ct.default_bool_field_name],
-                  check_task=CheckTasks.err_res, check_items=error)
+        self.query(client, collection_name, filter=not_support_expr,
+                   output_fields=[ct.default_bool_field_name],
+                   check_task=CheckTasks.err_res, check_items=error)
         # 6. filter bool field by bool term expr
         for bool_value in [True, False]:
             exprs = [f'{ct.default_bool_field_name} in [{bool_value}]',
                      f'{ct.default_bool_field_name} == {bool_value}']
             for expr in exprs:
-                res = self.query(client, collection_name, filter=expr, 
-                               output_fields=[ct.default_bool_field_name])[0]
+                res = self.query(client, collection_name, filter=expr,
+                                 output_fields=[ct.default_bool_field_name])[0]
                 assert len(res) == default_nb // 2
                 for _r in res:
                     assert _r[ct.default_bool_field_name] == bool_value
@@ -1597,8 +1643,9 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         for i in range(0, default_nb, 256):
             expected_rows.append(rows[i])
 
-        res = self.query(client, collection_name, filter=term_expr, output_fields=["float", "int64", "int8", "varchar"])[0]
-    
+        res = \
+        self.query(client, collection_name, filter=term_expr, output_fields=["float", "int64", "int8", "varchar"])[0]
+
         assert len(res) == len(expected_rows)
         returned_ids = {r[ct.default_int64_field_name] for r in res}
         expected_ids = {r[ct.default_int64_field_name] for r in expected_rows}
@@ -1635,10 +1682,11 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         term_expr = f'{field} not in {values[pos:]}'
         df = pd.DataFrame(rows)
         res = df.iloc[:pos, :3].to_dict('records')
-        self.query(client, collection_name, filter=term_expr, 
-                  output_fields=[ct.default_float_field_name, ct.default_int64_field_name, ct.default_string_field_name],
-                  check_task=CheckTasks.check_query_results,
-                  check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
+        self.query(client, collection_name, filter=term_expr,
+                   output_fields=[ct.default_float_field_name, ct.default_int64_field_name,
+                                  ct.default_string_field_name],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1673,9 +1721,9 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         df = pd.DataFrame(rows)
         res = df.iloc[:pos, :1].to_dict('records')
         self.query(client, collection_name, filter=term_expr,
-                  output_fields=[ct.default_int64_field_name],
-                  check_task=CheckTasks.check_query_results,
-                  check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
+                   output_fields=[ct.default_int64_field_name],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -1711,9 +1759,9 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         df = pd.DataFrame(rows)
         res = df.iloc[random_values, :1].to_dict('records')
         self.query(client, collection_name, filter=term_expr,
-                  output_fields=[ct.default_int64_field_name],
-                  check_task=CheckTasks.check_query_results,
-                  check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
+                   output_fields=[ct.default_int64_field_name],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1750,9 +1798,9 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         df = pd.DataFrame(rows)
         res = df.iloc[:10, :1].to_dict('records')
         self.query(client, collection_name, filter=term_expr,
-                  output_fields=[ct.default_int64_field_name],
-                  check_task=CheckTasks.check_query_results,
-                  check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
+                   output_fields=[ct.default_int64_field_name],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: res, "pk_name": ct.default_int64_field_name})
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -2236,7 +2284,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         exp_ids, res = sorted(unordered_ids)[:limit + offset][offset:], []
         for ids in exp_ids:
             res.append({ct.default_int64_field_name: ids, ct.default_string_field_name: str(ids)})
-        res = self.query(client, collection_name, filter="", limit=limit, offset=offset, output_fields=[ct.default_string_field_name],
+        res = self.query(client, collection_name, filter="", limit=limit, offset=offset,
+                         output_fields=[ct.default_string_field_name],
                          check_task=CheckTasks.check_query_results,
                          check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
         # 6. clean up
@@ -2464,11 +2513,13 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field, auto_id=False)[0]
         schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(ct.default_float_array_field_name, DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=1024)
+        schema.add_field(ct.default_float_array_field_name, DataType.ARRAY, element_type=DataType.FLOAT,
+                         max_capacity=1024)
         schema.add_field(ct.default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, default_dim, schema=schema, consistency_level="Strong")
         # 2. insert data
-        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[ct.default_float_array_field_name] )
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema,
+                                         skip_field_names=[ct.default_float_array_field_name])
         length = []
         for i in range(default_nb):
             ran_int = random.randint(50, 53)
@@ -2531,16 +2582,22 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with wildcard output fields
-        actual_res = self.query(client, collection_name, filter=default_search_exp, output_fields=wildcard_output_fields)[0]
+        actual_res = \
+        self.query(client, collection_name, filter=default_search_exp, output_fields=wildcard_output_fields)[0]
         # 5. test mmap
         self.release_collection(client, collection_name)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
-        self.alter_index_properties(client, collection_name, ct.default_vector_field_name, properties={"mmap.enabled": True})
-        self.alter_index_properties(client, collection_name, ct.default_int64_field_name, properties={"mmap.enabled": True})
-        self.alter_index_properties(client, collection_name, ct.default_float_field_name, properties={"mmap.enabled": True})
-        self.alter_index_properties(client, collection_name, ct.default_string_field_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_vector_field_name,
+                                    properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_int64_field_name,
+                                    properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_float_field_name,
+                                    properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_string_field_name,
+                                    properties={"mmap.enabled": True})
         self.load_collection(client, collection_name)
-        mmap_res = self.query(client, collection_name, filter=default_search_exp, output_fields=wildcard_output_fields)[0]
+        mmap_res = self.query(client, collection_name, filter=default_search_exp, output_fields=wildcard_output_fields)[
+            0]
         assert actual_res == mmap_res
         # 6. clean up
         self.drop_collection(client, collection_name)
@@ -2564,7 +2621,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # 3. create index and load
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=ct.default_binary_vec_field_name, index_type="BIN_FLAT", metric_type="JACCARD")
+        index_params.add_index(field_name=ct.default_binary_vec_field_name, index_type="BIN_FLAT",
+                               metric_type="JACCARD")
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. test different output field combinations
@@ -2599,7 +2657,9 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query with only primary field as output
-        res = self.query(client, collection_name, filter=default_search_exp, output_fields=[default_primary_key_field_name])[0]
+        res = \
+        self.query(client, collection_name, filter=default_search_exp, output_fields=[default_primary_key_field_name])[
+            0]
         # 5. verify only primary field is returned
         assert set(res[0].keys()) == {default_primary_key_field_name}
         # 6. clean up
@@ -2727,7 +2787,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         output_fields = [ct.default_int64_field_name, ct.default_float_vec_field_name]
         for vec_field_name in vec_fields:
             output_fields.append(vec_field_name)
-        
+
         res = self.query(client, collection_name, filter=default_term_expr, output_fields=output_fields)[0]
         assert len(res) == 2
         for result_item in res:
@@ -2769,7 +2829,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         else:
             error = {ct.err_code: 1, ct.err_msg: "Invalid query format. 'output_fields' must be a list"}
         self.query(client, collection_name, filter=default_term_expr, output_fields=invalid_fields,
-                  check_task=CheckTasks.err_res, check_items=error)
+                   check_task=CheckTasks.err_res, check_items=error)
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -2799,7 +2859,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_partitions(client, collection_name, [partition_name])
         # 5. query on partition and verify results
-        self.query(client, collection_name, filter=default_search_exp, 
+        self.query(client, collection_name, filter=default_search_exp,
                    partition_names=[partition_name],
                    check_task=CheckTasks.check_query_results,
                    check_items={"exp_res": rows, "with_vec": True, "pk_name": default_primary_key_field_name})
@@ -2829,7 +2889,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 4. query on default partition and verify results
-        self.query(client, collection_name, filter=default_search_exp, 
+        self.query(client, collection_name, filter=default_search_exp,
                    partition_names=[ct.default_partition_name],
                    check_task=CheckTasks.check_query_results,
                    check_items={"exp_res": rows, "pk_name": default_primary_key_field_name})
@@ -2952,11 +3012,11 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         for i in range(offset, min(pos + offset, len(rows))):
             res.append({default_primary_key_field_name: rows[i][default_primary_key_field_name]})
         # 4. query with pagination params
-        query_res = self.query(client, collection_name, filter=term_expr, 
-                              output_fields=[default_primary_key_field_name],
-                              limit=10,
-                              check_task=CheckTasks.check_query_results,
-                              check_items={exp_res: res, "pk_name": default_primary_key_field_name})[0]
+        query_res = self.query(client, collection_name, filter=term_expr,
+                               output_fields=[default_primary_key_field_name],
+                               limit=10,
+                               check_task=CheckTasks.check_query_results,
+                               check_items={exp_res: res, "pk_name": default_primary_key_field_name})[0]
         # 5. verify primary key order 
         key_res = [item[key] for item in query_res for key in item]
         assert key_res == int_values[offset: pos + offset]
@@ -2981,7 +3041,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, rows)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=ct.default_binary_vec_field_name, index_type="BIN_FLAT", metric_type="JACCARD")
+        index_params.add_index(field_name=ct.default_binary_vec_field_name, index_type="BIN_FLAT",
+                               metric_type="JACCARD")
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
         # 3. prepare pagination query
@@ -2993,11 +3054,11 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         for i in range(offset, min(pos + offset, len(rows))):
             res.append({default_primary_key_field_name: rows[i][default_primary_key_field_name]})
         # 4. query with pagination params
-        query_res = self.query(client, collection_name, filter=term_expr, 
-                              output_fields=[default_primary_key_field_name],
-                              limit=10,
-                              check_task=CheckTasks.check_query_results,
-                              check_items={exp_res: res, "pk_name": default_primary_key_field_name})[0]
+        query_res = self.query(client, collection_name, filter=term_expr,
+                               output_fields=[default_primary_key_field_name],
+                               limit=10,
+                               check_task=CheckTasks.check_query_results,
+                               check_items={exp_res: res, "pk_name": default_primary_key_field_name})[0]
         # 5. verify primary key order
         key_res = [item[key] for item in query_res for key in item]
         assert key_res == int_values[offset: pos + offset]
@@ -3037,12 +3098,12 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         for i in range(offset, min(10 + offset, len(rows))):
             res.append({default_primary_key_field_name: rows[i][default_primary_key_field_name]})
         # 6. query with pagination params on partition
-        self.query(client, collection_name, filter=default_search_exp, 
-                  output_fields=[default_primary_key_field_name],
-                  partition_names=[partition_name],
-                  offset=offset, limit=10,
-                  check_task=CheckTasks.check_query_results,
-                  check_items={exp_res: res, "pk_name": default_primary_key_field_name})
+        self.query(client, collection_name, filter=default_search_exp,
+                   output_fields=[default_primary_key_field_name],
+                   partition_names=[partition_name],
+                   offset=offset, limit=10,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: res, "pk_name": default_primary_key_field_name})
         # 7. clean up
         self.drop_collection(client, collection_name)
 
@@ -3079,11 +3140,11 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         for i in range(offset, min(pos + offset, len(rows))):
             res.append({ct.default_int64_field_name: rows[i][ct.default_int64_field_name]})
         # 5. query with pagination params
-        query_res = self.query(client, collection_name, filter=term_expr, 
-                  output_fields=[ct.default_int64_field_name],
-                  limit=10,
-                  check_task=CheckTasks.check_query_results,
-                  check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
+        query_res = self.query(client, collection_name, filter=term_expr,
+                               output_fields=[ct.default_int64_field_name],
+                               limit=10,
+                               check_task=CheckTasks.check_query_results,
+                               check_items={exp_res: res, "pk_name": ct.default_int64_field_name})[0]
         key_res = [item[ct.default_int64_field_name] for item in query_res]
         assert key_res == int_values[offset: pos + offset]
         self.drop_collection(client, collection_name)
@@ -3114,13 +3175,15 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 4. query with only offset parameter (no limit)
         query_res_with_offset = self.query(client, collection_name, filter="id in [0, 1]",
-                                          offset=offset,
-                                          check_task=CheckTasks.check_query_results,
-                                          check_items={exp_res: rows[:2], "with_vec": True, "pk_name": default_primary_key_field_name})[0]
+                                           offset=offset,
+                                           check_task=CheckTasks.check_query_results,
+                                           check_items={exp_res: rows[:2], "with_vec": True,
+                                                        "pk_name": default_primary_key_field_name})[0]
         # 5. query without pagination params
         query_res_without_pagination = self.query(client, collection_name, filter="id in [0, 1]",
-                                                 check_task=CheckTasks.check_query_results,
-                                                 check_items={exp_res: rows[:2], "with_vec": True, "pk_name": default_primary_key_field_name})[0]
+                                                  check_task=CheckTasks.check_query_results,
+                                                  check_items={exp_res: rows[:2], "with_vec": True,
+                                                               "pk_name": default_primary_key_field_name})[0]
         assert query_res_with_offset == query_res_without_pagination
         self.drop_collection(client, collection_name)
 
@@ -3150,8 +3213,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 4. query with offset over num_entities
         # Use a broader query that could return results, but offset is too large
-        res = self.query(client, collection_name, filter=default_search_exp, 
-                        offset=offset, limit=10)[0]
+        res = self.query(client, collection_name, filter=default_search_exp,
+                         offset=offset, limit=10)[0]
         # 5. verify empty result
         assert len(res) == 0
         # 6. clean up
@@ -3173,19 +3236,19 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         schema.add_field(ct.default_float_field_name, DataType.FLOAT)
         schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong",
-                              enable_dynamic_field=enable_dynamic_field)
+                               enable_dynamic_field=enable_dynamic_field)
         # 2. insert data
         nb = 2000
         rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
         self.insert(client, collection_name, rows)
-        #assert self.num_entities(client, collection_name)[0] == nb
+        # assert self.num_entities(client, collection_name)[0] == nb
         self.flush(client, collection_name)
         # 3. create index and load collection
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
-        
+
         # 4. filter result with expression in collection
         for expressions in cf.gen_normal_expressions_and_templates():
             log.debug(f"test_milvus_client_query_with_expression: {expressions}")
@@ -3227,7 +3290,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         schema.add_field(ct.default_float_field_name, DataType.FLOAT)
         schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong",
-                              enable_dynamic_field=False)
+                               enable_dynamic_field=False)
         # 2. insert data
         nb = 1000
         rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
@@ -3248,12 +3311,12 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 float = row[ct.default_float_field_name]
                 if not expr or eval(expr):
                     filter_ids.append(row[ct.default_int64_field_name])
-                    
+
             # query and verify result
             query_params = {"offset": offset, "limit": 10}
             res = self.query(client, collection_name, filter=expr, **query_params)[0]
             query_ids = [item[ct.default_int64_field_name] for item in res]
-            expected_ids = filter_ids[offset:offset+10]
+            expected_ids = filter_ids[offset:offset + 10]
             assert query_ids == expected_ids
 
             # query again with expression template
@@ -3280,11 +3343,11 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         schema.add_field(ct.default_float_field_name, DataType.FLOAT)
         schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong",
-                              enable_dynamic_field=False)
+                               enable_dynamic_field=False)
         # 2. insert data
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, rows)
-        self.flush(client, collection_name)        
+        self.flush(client, collection_name)
         # 3. create index and load collection
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
@@ -3306,8 +3369,10 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         describe_res = self.describe_collection(client, collection_name)[0]
         properties = describe_res.get("properties")
         assert properties["mmap.enabled"] == 'True'
-        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name, properties={"mmap.enabled": True})
-        self.alter_index_properties(client, collection_name, ct.default_string_field_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name,
+                                    properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_string_field_name,
+                                    properties={"mmap.enabled": True})
         self.load_collection(client, collection_name)
         # 5. query with empty expression and limit
         res = self.query(client, collection_name, filter="", limit=ct.default_limit)[0]
@@ -3337,7 +3402,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         schema.add_field(ct.default_float_field_name, DataType.FLOAT)
         schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong",
-                              enable_dynamic_field=enable_dynamic_field)
+                               enable_dynamic_field=enable_dynamic_field)
         # 2. insert data
         nb = 1000
         rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
@@ -3348,7 +3413,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
-        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name,
+                                    properties={"mmap.enabled": True})
         self.load_collection(client, collection_name)
         # 4. filter result with expression in collection
         for expressions in cf.gen_normal_expressions_and_templates()[1:]:
@@ -3376,7 +3442,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             res = self.query(client, collection_name, filter=expr, filter_params=expr_params, limit=nb)[0]
             query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
             assert query_ids == set(filter_ids)
-        
+
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -3415,9 +3481,12 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         index_params.add_index(field_name=ct.default_float_field_name, index_type="AUTOINDEX")
         self.create_index(client, collection_name, index_params)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
-        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name, properties={"mmap.enabled": True})
-        self.alter_index_properties(client, collection_name, ct.default_string_field_name, properties={"mmap.enabled": True})
-        self.alter_index_properties(client, collection_name, ct.default_float_field_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name,
+                                    properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_string_field_name,
+                                    properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_float_field_name,
+                                    properties={"mmap.enabled": True})
         self.load_collection(client, collection_name)
         # 4. query with empty string expression
         output_fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name]
@@ -3449,14 +3518,17 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
-        actual_res = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        actual_res = \
+        self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
         # 3. enable mmap and create index
         self.release_collection(client, collection_name)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
-        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name,
+                                    properties={"mmap.enabled": True})
         self.load_collection(client, collection_name)
         # 4. query with string expression and only string field as output
-        mmap_res = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        mmap_res = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[
+            0]
         assert set(mmap_res[0].keys()) == {ct.default_string_field_name}
         assert actual_res == mmap_res
         self.drop_collection(client, collection_name)
@@ -3492,30 +3564,34 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             for row in rows:
                 varchar_value = row[ct.default_string_field_name]
                 if varchar_value.startswith("0"):
-                    exp_res.append({ct.default_string_field_name: varchar_value, ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
+                    exp_res.append({ct.default_string_field_name: varchar_value,
+                                    ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
                     break  # Only take the first match like original test
         elif vachar_expression == suffix_expr:  # varchar like "%0"
             for row in rows:
                 varchar_value = row[ct.default_string_field_name]
                 if varchar_value.endswith("0"):
-                    exp_res.append({ct.default_string_field_name: varchar_value, ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
+                    exp_res.append({ct.default_string_field_name: varchar_value,
+                                    ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
         elif vachar_expression == inner_match_expr:  # varchar like "%0%"
             for row in rows:
                 varchar_value = row[ct.default_string_field_name]
                 if "0" in varchar_value:
-                    exp_res.append({ct.default_string_field_name: varchar_value, ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
+                    exp_res.append({ct.default_string_field_name: varchar_value,
+                                    ct.default_float_vec_field_name: row[ct.default_float_vec_field_name]})
         normal_res = self.query(client, collection_name, filter=vachar_expression,
                                 check_task=CheckTasks.check_query_results,
                                 check_items={"exp_res": exp_res, "pk_name": ct.default_string_field_name})[0]
         # 5. enable mmap and reload
         self.release_collection(client, collection_name)
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
-        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name, properties={"mmap.enabled": True})
+        self.alter_index_properties(client, collection_name, ct.default_float_vec_field_name,
+                                    properties={"mmap.enabled": True})
         self.load_collection(client, collection_name)
         # 6. query after enabling mmap
         mmap_res = self.query(client, collection_name, filter=vachar_expression,
-                                check_task=CheckTasks.check_query_results,
-                                check_items={"exp_res": exp_res, "pk_name": ct.default_string_field_name})[0]
+                              check_task=CheckTasks.check_query_results,
+                              check_items={"exp_res": exp_res, "pk_name": ct.default_string_field_name})[0]
         assert normal_res == mmap_res
         self.drop_collection(client, collection_name)
 
@@ -3566,15 +3642,15 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 5. verify the result returns the latest entity if there are duplicate primary keys
         expr = f'{ct.default_int64_field_name} == 0'
-        res = self.query(client, collection_name, filter=expr, 
-                        output_fields=[ct.default_int64_field_name, ct.default_float_field_name])[0]
+        res = self.query(client, collection_name, filter=expr,
+                         output_fields=[ct.default_int64_field_name, ct.default_float_field_name])[0]
         assert len(res) == 1, f"Expected 1 result for duplicate primary key 0, got {len(res)}"
         assert res[0][ct.default_float_field_name] == float(nb - 1), \
             f"Expected latest float value {float(nb - 1)}, got {res[0][ct.default_float_field_name]}"
         # 6. verify the result is same as dedup entities (should return one entity per round)
         expr = f'{ct.default_int64_field_name} >= 0'
-        res = self.query(client, collection_name, filter=expr, 
-                        output_fields=[ct.default_int64_field_name, ct.default_float_field_name])[0]
+        res = self.query(client, collection_name, filter=expr,
+                         output_fields=[ct.default_int64_field_name, ct.default_float_field_name])[0]
         assert len(res) == rounds
         # 7. clean up
         self.drop_collection(client, collection_name)
@@ -3605,8 +3681,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 4. query with vector field as output
         expected_fields = [ct.default_int64_field_name, ct.default_float_vec_field_name]
-        res = self.query(client, collection_name, filter=default_term_expr, 
-                        output_fields=[ct.default_float_vec_field_name])[0]
+        res = self.query(client, collection_name, filter=default_term_expr,
+                         output_fields=[ct.default_float_vec_field_name])[0]
         # 5. verify that query returns both primary key and vector field
         assert set(res[0].keys()) == set(expected_fields)
         # 6. clean up
@@ -3626,7 +3702,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong", auto_id=False)
-        self.load_collection(client, collection_name)        
+        self.load_collection(client, collection_name)
         # 2. insert data without flush (data will be in growing segment)
         schema_info = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema(nb=100, schema=schema_info)
@@ -3639,8 +3715,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 break
         # 4. query for entity with primary key = 1
         self.query(client, collection_name, filter=f'{default_primary_key_field_name} in [1]',
-                        check_task=CheckTasks.check_query_results,
-                        check_items={"exp_res": exp_res, "pk_name": default_primary_key_field_name})
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": exp_res, "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3670,7 +3746,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         schema_info = self.describe_collection(client, collection_name)[0]
         skip_fields = [
             ct.default_int8_field_name,
-            ct.default_int16_field_name, 
+            ct.default_int16_field_name,
             ct.default_int32_field_name,
             ct.default_int64_field_name,
             ct.default_float_field_name,
@@ -3690,14 +3766,22 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         res = self.query(client, collection_name, filter=default_search_exp, output_fields=["*"])[0]
         # Verify all default values are correctly applied
         first_result = res[0]
-        assert first_result[ct.default_int8_field_name] == 8, f"Expected int8 default value 8, got {first_result[ct.default_int8_field_name]}"
-        assert first_result[ct.default_int16_field_name] == 16, f"Expected int16 default value 16, got {first_result[ct.default_int16_field_name]}"
-        assert first_result[ct.default_int32_field_name] == 32, f"Expected int32 default value 32, got {first_result[ct.default_int32_field_name]}"
-        assert first_result[ct.default_int64_field_name] == 64, f"Expected int64 default value 64, got {first_result[ct.default_int64_field_name]}"
-        assert first_result[ct.default_float_field_name] == np.float32(3.14), f"Expected float default value 3.14, got {first_result[ct.default_float_field_name]}"
-        assert first_result[ct.default_double_field_name] == 3.1415, f"Expected double default value 3.1415, got {first_result[ct.default_double_field_name]}"
-        assert first_result[ct.default_bool_field_name] is False, f"Expected bool default value False, got {first_result[ct.default_bool_field_name]}"
-        assert first_result[ct.default_string_field_name] == "abc", f"Expected string default value 'abc', got {first_result[ct.default_string_field_name]}"
+        assert first_result[
+                   ct.default_int8_field_name] == 8, f"Expected int8 default value 8, got {first_result[ct.default_int8_field_name]}"
+        assert first_result[
+                   ct.default_int16_field_name] == 16, f"Expected int16 default value 16, got {first_result[ct.default_int16_field_name]}"
+        assert first_result[
+                   ct.default_int32_field_name] == 32, f"Expected int32 default value 32, got {first_result[ct.default_int32_field_name]}"
+        assert first_result[
+                   ct.default_int64_field_name] == 64, f"Expected int64 default value 64, got {first_result[ct.default_int64_field_name]}"
+        assert first_result[ct.default_float_field_name] == np.float32(
+            3.14), f"Expected float default value 3.14, got {first_result[ct.default_float_field_name]}"
+        assert first_result[
+                   ct.default_double_field_name] == 3.1415, f"Expected double default value 3.1415, got {first_result[ct.default_double_field_name]}"
+        assert first_result[
+                   ct.default_bool_field_name] is False, f"Expected bool default value False, got {first_result[ct.default_bool_field_name]}"
+        assert first_result[
+                   ct.default_string_field_name] == "abc", f"Expected string default value 'abc', got {first_result[ct.default_string_field_name]}"
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -3727,12 +3811,12 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 4. query with multi logical expressions
         # Create expression like: int64 == 0 || int64 == 1 || int64 == 2 ... || int64 == 59
         multi_exprs = " || ".join(f'{default_primary_key_field_name} == {i}' for i in range(60))
-        res = self.query(client, collection_name, filter=multi_exprs, 
-                        check_task=CheckTasks.check_query_results,
-                        check_items={"exp_res": rows[:60], "pk_name": default_primary_key_field_name})[0]
+        res = self.query(client, collection_name, filter=multi_exprs,
+                         check_task=CheckTasks.check_query_results,
+                         check_items={"exp_res": rows[:60], "pk_name": default_primary_key_field_name})[0]
         # 6. clean up
         self.drop_collection(client, collection_name)
-    
+
 
 class TestQueryOperation(TestMilvusClientV2Base):
     """
@@ -3740,6 +3824,7 @@ class TestQueryOperation(TestMilvusClientV2Base):
       The following cases are used to test query interface operations
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_query_without_connection(self):
         """
@@ -3753,7 +3838,7 @@ class TestQueryOperation(TestMilvusClientV2Base):
         self.close(client_temp)
         error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.query(client_temp, collection_name, filter=default_search_exp,
-                              check_task=CheckTasks.err_res, check_items=error)
+                   check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", [None, ["count(*)"]])
@@ -3811,16 +3896,16 @@ class TestQueryOperation(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         self.load_partitions(client, collection_name, [partition_name])
         # 5. query twice on the same partition
-        res_one = self.query(client, collection_name, filter=default_search_exp, 
-                           partition_names=[partition_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"exp_res": rows, "with_vec": True, "pk_name": default_primary_key_field_name}
-                           )[0]
-        res_two = self.query(client, collection_name, filter=default_search_exp, 
-                           partition_names=[partition_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"exp_res": rows, "with_vec": True, "pk_name": default_primary_key_field_name}
-                           )[0]
+        res_one = self.query(client, collection_name, filter=default_search_exp,
+                             partition_names=[partition_name],
+                             check_task=CheckTasks.check_query_results,
+                             check_items={"exp_res": rows, "with_vec": True, "pk_name": default_primary_key_field_name}
+                             )[0]
+        res_two = self.query(client, collection_name, filter=default_search_exp,
+                             partition_names=[partition_name],
+                             check_task=CheckTasks.check_query_results,
+                             check_items={"exp_res": rows, "with_vec": True, "pk_name": default_primary_key_field_name}
+                             )[0]
         assert res_one == res_two, "Query results should be identical when querying the same partition repeatedly"
         self.drop_collection(client, collection_name)
 
@@ -3860,16 +3945,16 @@ class TestQueryOperation(TestMilvusClientV2Base):
         # 4. query with bloom filter and without bloom filter
         start_time = time.perf_counter()
         res = self.query(client, collection_name=collection_name,
-            filter=f"{default_primary_key_field_name} != -1", output_fields=["count(*)"]
-        )[0]
+                         filter=f"{default_primary_key_field_name} != -1", output_fields=["count(*)"]
+                         )[0]
         end_time = time.perf_counter()
         run_time1 = end_time - start_time
 
         # with bloom filter
         start_time = time.perf_counter()
         res = self.query(client, collection_name=collection_name,
-            filter=f"{default_primary_key_field_name} == -1", output_fields=["count(*)"]
-        )[0]
+                         filter=f"{default_primary_key_field_name} == -1", output_fields=["count(*)"]
+                         )[0]
         end_time = time.perf_counter()
         run_time2 = end_time - start_time
 
@@ -3881,6 +3966,7 @@ class TestQueryOperation(TestMilvusClientV2Base):
 
         # 6. clean up
         self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientGetInvalid(TestMilvusClientV2Base):
     """ Test case of search interface """
@@ -4114,6 +4200,7 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
     #  The following are valid base cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("is_flush", [True, False])
@@ -4154,7 +4241,7 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         # 2. insert with different data distribution
-        vectors = cf.gen_vectors(default_nb+60, default_dim)
+        vectors = cf.gen_vectors(default_nb + 60, default_dim)
         inserted_data_distribution = ct.get_all_kind_data_distribution
         nb_single = single_data_num
         for i in range(len(inserted_data_distribution)):
@@ -4176,10 +4263,12 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
             json_list = []
             id_list = []
             log.info(f"query with filter {express_list[i]} before json path index is:")
-            res = self.query(client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"])[0]
+            res = \
+            self.query(client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"])[0]
             count = res[0]['count(*)']
             log.info(f"The count(*) after query with filter {express_list[i]} before json path index is: {count}")
-            res = self.query(client, collection_name=collection_name, filter=express_list[i], output_fields=[f"{json_field_name}"])[0]
+            res = self.query(client, collection_name=collection_name, filter=express_list[i],
+                             output_fields=[f"{json_field_name}"])[0]
             for single in res:
                 id_list.append(single[f"{default_primary_key_field_name}"])
                 json_list.append(single[f"{json_field_name}"])
@@ -4201,7 +4290,8 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
         else:
             json_path_list = [f"{json_field_name}", f"{json_field_name}[0]", f"{json_field_name}[1]",
                               f"{json_field_name}[6]", f"{json_field_name}['a']", f"{json_field_name}['a']['b']",
-                              f"{json_field_name}['a'][0]", f"{json_field_name}['a'][6]", f"{json_field_name}['a'][0]['b']",
+                              f"{json_field_name}['a'][0]", f"{json_field_name}['a'][6]",
+                              f"{json_field_name}['a'][0]['b']",
                               f"{json_field_name}['a']['b']['c']", f"{json_field_name}['a']['b'][0]['d']",
                               f"{json_field_name}[10000]", f"{json_field_name}['a']['c'][0]['d']"]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
@@ -4243,7 +4333,8 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
             if len(id_list) != len(compare_dict[f'{i}']["id_list"]):
                 log.debug(f"primary key field after json path index under expression {express_list[i]} is:")
                 log.debug(id_list)
-                log.debug(f"primary key field before json path index to be compared under expression {express_list[i]} is:")
+                log.debug(
+                    f"primary key field before json path index to be compared under expression {express_list[i]} is:")
                 log.debug(compare_dict[f'{i}']["id_list"])
             assert id_list == compare_dict[f'{i}']["id_list"]
             log.info(f"PASS with expression {express_list[i]}")
@@ -4402,7 +4493,8 @@ class TestQueryString(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, ct.default_string_field_name)
         self.load_collection(client, collection_name)
-        result_without_index = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        result_without_index = \
+        self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
         res_len_without_index = len(result_without_index)
         assert res_len_without_index == res_len
         # 6. clean up
@@ -4433,8 +4525,8 @@ class TestQueryString(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 4. query with invalid prefix expression
         expression = 'float like "0%"'
-        error = {ct.err_code: 65535, 
-                ct.err_msg: f"cannot parse expression: {expression}, error: like operation on non-string or no-json field is unsupported"}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"cannot parse expression: {expression}, error: like operation on non-string or no-json field is unsupported"}
         self.query(client, collection_name, filter=expression,
                    check_task=CheckTasks.err_res, check_items=error)
         # 5. clean up
@@ -4515,9 +4607,9 @@ class TestQueryString(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         # 4. query with invalid field comparison - should raise error
         expression = 'varchar == int64'
-        error = {ct.err_code: 1100, 
-                ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}, "
-                           f"error: comparisons between VarChar and Int64 are not supported: invalid parameter"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}, "
+                             f"error: comparisons between VarChar and Int64 are not supported: invalid parameter"}
         self.query(client, collection_name, filter=expression,
                    check_task=CheckTasks.err_res, check_items=error)
         # 5. clean up
@@ -4594,14 +4686,16 @@ class TestQueryString(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, ct.default_string_field_name)
         self.load_collection(client, collection_name)
-        result_without_index = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        result_without_index = \
+        self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
         res_len_without_index = len(result_without_index)
         assert res_len_without_index == res_len
         # 6. clean up
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression", ['TEXT_MATCH(varchar, "0")', 'TEXT_MATCH(varchar, "1")', 'TEXT_MATCH(varchar, "test")'])
+    @pytest.mark.parametrize("expression",
+                             ['TEXT_MATCH(varchar, "0")', 'TEXT_MATCH(varchar, "1")', 'TEXT_MATCH(varchar, "test")'])
     @pytest.mark.parametrize("index_type", ["AUTOINDEX", "BITMAP"])
     def test_milvus_client_query_string_expr_with_match_auto_index_and_bitmap(self, expression, index_type):
         """
@@ -4614,7 +4708,8 @@ class TestQueryString(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535, enable_match=True, enable_analyzer=True)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535, enable_match=True,
+                         enable_analyzer=True)
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
         # 2. insert data with completely manual generation for precise TEXT_MATCH testing
         rows = []
@@ -4633,7 +4728,7 @@ class TestQueryString(TestMilvusClientV2Base):
                 row[ct.default_string_field_name] = f"sample document number {i} without keywords"
             rows.append(row)
         self.insert(client, collection_name, rows)
-        
+
         # Calculate expected results based on the expression
         exp_len = 0
         if 'TEXT_MATCH(varchar, "0")' in expression:
@@ -4644,11 +4739,12 @@ class TestQueryString(TestMilvusClientV2Base):
             exp_len = default_nb // 10
         elif 'TEXT_MATCH(varchar, "test")' in expression:
             # Should match both "test data 0" and "this is test content" 
-            exp_len = (default_nb // 10) * 2       
-        # 3. create indexes
+            exp_len = (default_nb // 10) * 2
+            # 3. create indexes
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
-        index_params.add_index(field_name=ct.default_string_field_name, index_type=index_type, params={"tokenizer": "standard"})
+        index_params.add_index(field_name=ct.default_string_field_name, index_type=index_type,
+                               params={"tokenizer": "standard"})
         self.create_index(client, collection_name, index_params)
         # Wait for string field index to be ready before loading
         self.load_collection(client, collection_name)
@@ -4661,7 +4757,8 @@ class TestQueryString(TestMilvusClientV2Base):
         self.drop_index(client, collection_name, ct.default_string_field_name)
         self.load_collection(client, collection_name)
         time.sleep(ct.default_graceful_time)
-        result_without_index = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        result_without_index = \
+        self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
         assert len(result_without_index) == len(result) == exp_len
         # 6. clean up
         self.drop_collection(client, collection_name)
@@ -4695,16 +4792,20 @@ class TestQueryString(TestMilvusClientV2Base):
         res_len = len(result)
         # 5. enable offset cache and verify result count remains same
         self.release_collection(client, collection_name)
-        self.alter_index_properties(client, collection_name, ct.default_string_field_name, properties={'indexoffsetcache.enabled': True})
+        self.alter_index_properties(client, collection_name, ct.default_string_field_name,
+                                    properties={'indexoffsetcache.enabled': True})
         self.load_collection(client, collection_name)
-        result_with_cache = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        result_with_cache = \
+        self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
         res_len_with_cache = len(result_with_cache)
         assert res_len_with_cache == res_len
         # 6. disable offset cache and verify result count remains same
         self.release_collection(client, collection_name)
-        self.alter_index_properties(client, collection_name, ct.default_string_field_name, properties={'indexoffsetcache.enabled': False})
+        self.alter_index_properties(client, collection_name, ct.default_string_field_name,
+                                    properties={'indexoffsetcache.enabled': False})
         self.load_collection(client, collection_name)
-        result_without_cache = self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
+        result_without_cache = \
+        self.query(client, collection_name, filter=expression, output_fields=[ct.default_string_field_name])[0]
         res_len_without_cache = len(result_without_cache)
         assert res_len_without_cache == res_len
         # 7. clean up
@@ -4732,12 +4833,18 @@ class TestQueryArray(TestMilvusClientV2Base):
         additional_params = {"max_length": 1000} if array_element_data_type == DataType.VARCHAR else {}
         schema = self.create_schema(client, enable_dynamic_field=True, auto_id=False)[0]
         schema.add_field("id", DataType.INT64, is_primary=True)
-        schema.add_field("contains", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params)
-        schema.add_field("contains_any", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params)
-        schema.add_field("contains_all", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params)
-        schema.add_field("equals", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params)
-        schema.add_field("array_length_field", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params)
-        schema.add_field("array_access", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000, **additional_params)
+        schema.add_field("contains", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000,
+                         **additional_params)
+        schema.add_field("contains_any", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000,
+                         **additional_params)
+        schema.add_field("contains_all", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000,
+                         **additional_params)
+        schema.add_field("equals", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000,
+                         **additional_params)
+        schema.add_field("array_length_field", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000,
+                         **additional_params)
+        schema.add_field("array_access", DataType.ARRAY, element_type=array_element_data_type, max_capacity=2000,
+                         **additional_params)
         schema.add_field("emb", DataType.FLOAT_VECTOR, dim=128)
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
         # 2. insert data
@@ -4746,7 +4853,8 @@ class TestQueryArray(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # 3. create indexes
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="emb", index_type="HNSW", metric_type="L2", params={"M": 48, "efConstruction": 500})
+        index_params.add_index(field_name="emb", index_type="HNSW", metric_type="L2",
+                               params={"M": 48, "efConstruction": 500})
         # Add INVERTED index for array fields
         for field in ["contains", "contains_any", "contains_all", "equals", "array_length_field", "array_access"]:
             index_params.add_index(field_name=field, index_type="INVERTED")
@@ -4785,9 +4893,12 @@ class TestQueryArray(TestMilvusClientV2Base):
         schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
         schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(ct.default_json_field_name, DataType.JSON, nullable=True)
-        schema.add_field(ct.default_int32_array_field_name, DataType.ARRAY, element_type=DataType.INT32, max_capacity=ct.default_max_capacity)
-        schema.add_field(ct.default_float_array_field_name, DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=ct.default_max_capacity)
-        schema.add_field(ct.default_string_array_field_name, DataType.ARRAY, element_type=DataType.VARCHAR, max_capacity=ct.default_max_capacity, max_length=100, nullable=True)
+        schema.add_field(ct.default_int32_array_field_name, DataType.ARRAY, element_type=DataType.INT32,
+                         max_capacity=ct.default_max_capacity)
+        schema.add_field(ct.default_float_array_field_name, DataType.ARRAY, element_type=DataType.FLOAT,
+                         max_capacity=ct.default_max_capacity)
+        schema.add_field(ct.default_string_array_field_name, DataType.ARRAY, element_type=DataType.VARCHAR,
+                         max_capacity=ct.default_max_capacity, max_length=100, nullable=True)
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
         # 2. insert data
         # Generate string array data with specific pattern for testing
@@ -4827,9 +4938,9 @@ class TestQueryArray(TestMilvusClientV2Base):
             # Inner match: first element contains "0"
             filter_data = [row for row in string_field_value if '0' in row[0]]
             match_func = lambda x: '0' in x
-        
+
         assert len(res) == len(filter_data)
-        
+
         # Verify the returned records have correct first elements
         for record in res:
             first_element = record[ct.default_string_array_field_name][0]
@@ -5028,22 +5139,22 @@ class TestQueryCount(TestMilvusClientV2Base):
         self.load_partitions(client, collection_name, [partition_name, "_default"])
         # 4. query count for each partition
         for p_name in [partition_name, "_default"]:
-            self.query(client, collection_name, filter=default_search_exp, 
-                           output_fields=["count(*)"], partition_names=[p_name],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: [{"count(*)": half}],
-                                        "pk_name": default_primary_key_field_name})[0]
+            self.query(client, collection_name, filter=default_search_exp,
+                       output_fields=["count(*)"], partition_names=[p_name],
+                       check_task=CheckTasks.check_query_results,
+                       check_items={exp_res: [{"count(*)": half}],
+                                    "pk_name": default_primary_key_field_name})[0]
         # 5. delete entities from _default partition
         delete_expr = f"{default_primary_key_field_name} >= {half}"
         self.delete(client, collection_name, filter=delete_expr)
         # count _default partition after deletion
-        self.query(client, collection_name, filter=default_search_exp, 
+        self.query(client, collection_name, filter=default_search_exp,
                    output_fields=["count(*)"], partition_names=["_default"],
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: [{"count(*)": 0}],
                                 "pk_name": default_primary_key_field_name})[0]
         # count both partitions after deletion
-        self.query(client, collection_name, filter=default_search_exp, 
+        self.query(client, collection_name, filter=default_search_exp,
                    output_fields=["count(*)"], partition_names=[partition_name, "_default"],
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: [{"count(*)": half}],
@@ -5052,13 +5163,13 @@ class TestQueryCount(TestMilvusClientV2Base):
         self.release_partitions(client, collection_name, [partition_name])
         self.drop_partition(client, collection_name, partition_name)
         # query dropped partition should fail
-        self.query(client, collection_name, filter=default_search_exp, 
-                 output_fields=["count(*)"], partition_names=[partition_name],
-                 check_task=CheckTasks.err_res,
-                 check_items={"err_code": 65535,
-                              "err_msg": f'partition name {partition_name} not found'})
+        self.query(client, collection_name, filter=default_search_exp,
+                   output_fields=["count(*)"], partition_names=[partition_name],
+                   check_task=CheckTasks.err_res,
+                   check_items={"err_code": 65535,
+                                "err_msg": f'partition name {partition_name} not found'})
         # count remaining _default partition
-        self.query(client, collection_name, filter=default_search_exp, 
+        self.query(client, collection_name, filter=default_search_exp,
                    output_fields=["count(*)"], partition_names=["_default"],
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: [{"count(*)": 0}],
@@ -5101,7 +5212,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         # 5. delete some duplicate ids
         self.delete(client, collection_name, filter="id in [0, 1]")
         # 6. count remaining entities in partition p1
-        self.query(client, collection_name, filter=default_search_exp, 
+        self.query(client, collection_name, filter=default_search_exp,
                    output_fields=["count(*)"], partition_names=[partition_name],
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: [{"count(*)": default_nb - 2}],
@@ -5172,24 +5283,25 @@ class TestQueryCount(TestMilvusClientV2Base):
         schema_info = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
         self.insert(client, collection_name, rows)
-        # 3. flush while count (concurrent operations)        
+
+        # 3. flush while count (concurrent operations)
         def flush_collection():
             self.flush(client, collection_name)
-            
+
         def count_entities():
             self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
-                      check_task=CheckTasks.check_query_results,
-                      check_items={exp_res: [{"count(*)": default_nb}],
-                                   "pk_name": default_primary_key_field_name})
-        
+                       check_task=CheckTasks.check_query_results,
+                       check_items={exp_res: [{"count(*)": default_nb}],
+                                    "pk_name": default_primary_key_field_name})
+
         t_flush = threading.Thread(target=flush_collection)
         t_count = threading.Thread(target=count_entities)
-        
+
         t_flush.start()
         t_count.start()
         t_flush.join()
         t_count.join()
-        
+
         # 4. clean up
         self.drop_collection(client, collection_name)
 
@@ -5267,17 +5379,20 @@ class TestQueryCount(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
+
         # 4. compact while count using threading
         def compact_collection():
             self.compact(client, collection_name)
+
         def count_entities():
             self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
                        check_task=CheckTasks.check_query_results,
                        check_items={exp_res: [{"count(*)": tmp_nb * 10}],
                                     "pk_name": default_primary_key_field_name})
+
         t_compact = threading.Thread(target=compact_collection)
         t_count = threading.Thread(target=count_entities)
-        
+
         t_compact.start()
         t_count.start()
         t_count.join()
@@ -5338,7 +5453,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        
+
         # 1. create collection with multiple json fields
         json_int = "json_int"
         json_float = "json_float"
@@ -5348,7 +5463,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         json_embedded_object = "json_embedded_object"
         json_objects_array = "json_objects_array"
         dim = 16
-        
+
         schema = self.create_schema(client, enable_dynamic_field=False, auto_id=True)[0]
         schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
         schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim)
@@ -5359,24 +5474,26 @@ class TestQueryCount(TestMilvusClientV2Base):
         schema.add_field(json_array, DataType.JSON)
         schema.add_field(json_embedded_object, DataType.JSON)
         schema.add_field(json_objects_array, DataType.JSON)
-        
+
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
-        
+
         # 2. insert data with different json types
         nb = 1000
         for i in range(10):
             # Generate vectors
             vectors = cf.gen_vectors(nb, dim)
-            
+
             # Generate JSON data for each field using the same function as original test
             json_int_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_int)
             json_float_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_float)
             json_string_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_string)
             json_bool_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_bool)
             json_array_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_array)
-            json_embedded_object_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_embedded_object)
-            json_objects_array_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb, json_type=json_objects_array)
-            
+            json_embedded_object_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb,
+                                                                             json_type=json_embedded_object)
+            json_objects_array_data = cf.gen_json_data_for_diff_json_types(nb=nb, start=i * nb,
+                                                                           json_type=json_objects_array)
+
             # Convert to rows format for MilvusClient V2
             rows = []
             for j in range(nb):
@@ -5392,16 +5509,16 @@ class TestQueryCount(TestMilvusClientV2Base):
                 }
                 rows.append(row)
             self.insert(client, collection_name, rows)
-        
+
         time.sleep(0.4)
-        
+
         # 3. create index and load
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="IVF_SQ8", metric_type="L2",
-                              params={"nlist": 64})
+                               params={"nlist": 64})
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
-        
+
         # 4. query with different json expressions - each should return 10 results
         query_exprs = [
             f'json_contains_any({json_embedded_object}["{json_embedded_object}"]["level2"]["level2_array"], [1,3,5,7,9])',
@@ -5414,41 +5531,41 @@ class TestQueryCount(TestMilvusClientV2Base):
             f'{json_embedded_object}["{json_embedded_object}"]["number"] < 10',
             f'{json_objects_array}[0]["level2"]["level2_str"] like "199%" and {json_objects_array}[1]["float"] >= 1990'
         ]
-        
+
         search_vectors = cf.gen_vectors(2, dim)
-        
+
         for expr in query_exprs:
             log.debug(f"query_expr: {expr}")
             # Query test
             res = self.query(client, collection_name, filter=expr, output_fields=["count(*)"])
             assert res[0][0]["count(*)"] == 10, f"Query failed for expr: {expr}, got {res[0][0]['count(*)']}"
-            
+
             # Search test
-            search_res = self.search(client, collection_name, search_vectors, limit=10, filter=expr, 
-                                   output_fields=None, search_params={})
+            search_res = self.search(client, collection_name, search_vectors, limit=10, filter=expr,
+                                     output_fields=None, search_params={})
             assert len(search_res[0]) == 2, f"Search nq failed for expr: {expr}"
             for hits in search_res[0]:
                 assert len(hits) == 10, f"Search limit failed for expr: {expr}"
-        
+
         # 5. verify edge cases for issue #36718
         edge_case_exprs = [
             f'{json_embedded_object}["{json_embedded_object}"]["number"] in []',
             f'{json_embedded_object}["{json_embedded_object}"] in []'
         ]
-        
+
         for expr in edge_case_exprs:
             log.debug(f"edge_case_expr: {expr}")
             # Query test - should return 0 results
             res = self.query(client, collection_name, filter=expr, output_fields=["count(*)"])
             assert res[0][0]["count(*)"] == 0, f"Edge case query failed for expr: {expr}"
-            
+
             # Search test - should return 0 results
             search_res = self.search(client, collection_name, search_vectors, limit=10, filter=expr,
-                                   output_fields=None, search_params={})
+                                     output_fields=None, search_params={})
             assert len(search_res[0]) == 2, f"Edge case search nq failed for expr: {expr}"
             for hits in search_res[0]:
                 assert len(hits) == 0, f"Edge case search should return 0 results for expr: {expr}"
-        
+
         # 6. clean up
         self.drop_collection(client, collection_name)
 
@@ -5479,12 +5596,12 @@ class TestQueryCount(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == default_nb
         # 3. count with limit should raise exception
         self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"], limit=10,
-                  check_task=CheckTasks.err_res,
-                  check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"})
+                   check_task=CheckTasks.err_res,
+                   check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"})
         # 4. count with pagination params should raise exception
         self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"], offset=10, limit=10,
-                  check_task=CheckTasks.err_res,
-                  check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"})
+                   check_task=CheckTasks.err_res,
+                   check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"})
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -5508,7 +5625,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
-        
+
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
@@ -5528,7 +5645,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         assert res[0]["count(*)"] == default_nb
         # 6. try to drop collection via alias (should fail)
         self.drop_collection(client, alias, check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: "cannot drop the collection via alias"})
+                             check_items={ct.err_code: 1, ct.err_msg: "cannot drop the collection via alias"})
         # 7. clean up - drop alias and collection
         self.drop_alias(client, alias)
         self.drop_collection(client, collection_name)
@@ -5546,14 +5663,14 @@ class TestQueryCount(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        
+
         # create collection and prepare data
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, default_vector_field_name)
         schema_info = self.describe_collection(client, collection_name)[0]
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema_info)
-        
+
         if is_growing:
             # create -> index -> load -> insert -> delete (growing segments)
             index_params = self.prepare_index_params(client)[0]
@@ -5570,7 +5687,7 @@ class TestQueryCount(TestMilvusClientV2Base):
             index_params.add_index(field_name=default_vector_field_name, index_type="FLAT", metric_type="L2")
             self.create_index(client, collection_name, index_params)
             self.load_collection(client, collection_name)
-        
+
         # delete one entity (works for both growing and sealed)
         single_expr = f'{default_primary_key_field_name} in [0]'
         self.delete(client, collection_name, filter=single_expr)
@@ -5633,23 +5750,23 @@ class TestQueryCount(TestMilvusClientV2Base):
         upsert_rows = cf.gen_row_data_by_schema(nb=tmp_nb, schema=schema_info, start=0)
         self.upsert(client, collection_name, upsert_rows)
         self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
-              check_task=CheckTasks.check_query_results,
-              check_items={exp_res: [{"count(*)": tmp_nb}],
-                           "pk_name": default_primary_key_field_name})
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": tmp_nb}],
+                                "pk_name": default_primary_key_field_name})
         # 3. delete id and count
         self.delete(client, collection_name, filter="id in [0, 1]")
         delete_count = len([0, 1])  # delete_res.delete_count equivalent
         self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
-              check_task=CheckTasks.check_query_results,
-              check_items={exp_res: [{"count(*)": tmp_nb - delete_count}],
-                           "pk_name": default_primary_key_field_name})
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": tmp_nb - delete_count}],
+                                "pk_name": default_primary_key_field_name})
         # 4. upsert deleted id and count
         deleted_upsert_rows = cf.gen_row_data_by_schema(nb=delete_count, schema=schema_info, start=0)
         self.upsert(client, collection_name, deleted_upsert_rows)
         self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: [{"count(*)": tmp_nb}],
-                            "pk_name": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name})
         # 5. clean up
         self.drop_collection(client, collection_name)
 
@@ -5682,9 +5799,9 @@ class TestQueryCount(TestMilvusClientV2Base):
         self.rename_collection(client, collection_name, new_name)
         # 3. count with new collection name
         self.query(client, new_name, filter=default_search_exp, output_fields=["count(*)"],
-                  check_task=CheckTasks.check_query_results,
-                  check_items={exp_res: [{"count(*)": default_nb}],
-                               "pk_name": default_primary_key_field_name})
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": default_nb}],
+                                "pk_name": default_primary_key_field_name})
         # clean up
         self.drop_collection(client, new_name)
 
@@ -5711,11 +5828,11 @@ class TestQueryCount(TestMilvusClientV2Base):
         rows = cf.gen_row_data_by_schema(nb=100, schema=schema_info)
         self.insert(client, collection_name, rows)
         # 3. query count with ignore_growing=True (should return 0)
-        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"], 
-                  ignore_growing=True,
-                  check_task=CheckTasks.check_query_results,
-                  check_items={exp_res: [{"count(*)": 0}],
-                               "pk_name": default_primary_key_field_name})
+        self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"],
+                   ignore_growing=True,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: [{"count(*)": 0}],
+                                "pk_name": default_primary_key_field_name})
         # clean up
         self.drop_collection(client, collection_name)
 
@@ -5760,9 +5877,9 @@ class TestQueryCount(TestMilvusClientV2Base):
             expected_count = len(filter_ids)
             # count with expr
             self.query(client, collection_name, filter=expr, output_fields=["count(*)"],
-                      check_task=CheckTasks.check_query_results,
-                      check_items={exp_res: [{"count(*)": expected_count}],
-                                   "pk_name": ct.default_int64_field_name})
+                       check_task=CheckTasks.check_query_results,
+                       check_items={exp_res: [{"count(*)": expected_count}],
+                                    "pk_name": ct.default_int64_field_name})
         # clean up
         self.drop_collection(client, collection_name)
 
@@ -5800,7 +5917,7 @@ class TestQueryCount(TestMilvusClientV2Base):
             bool_type_cmp = True
         if bool_type == "false":
             bool_type_cmp = False
-            
+
         # Count matching rows manually
         for i, row in enumerate(rows):
             if row[ct.default_bool_field_name] == bool_type_cmp:
@@ -5850,14 +5967,14 @@ class TestQueryCount(TestMilvusClientV2Base):
                 if not expr or eval(expr):
                     filter_ids.append(row[ct.default_int64_field_name])
             expected_count = len(filter_ids)
-            
+
             # count with expr
             expr = cf.get_expr_from_template(expressions[1]).replace("&&", "and").replace("||", "or")
             expr_params = cf.get_expr_params_from_template(expressions[1])
             self.query(client, collection_name, filter=expr, filter_params=expr_params, output_fields=["count(*)"],
-                      check_task=CheckTasks.check_query_results,
-                      check_items={exp_res: [{"count(*)": expected_count}],
-                                   "pk_name": ct.default_int64_field_name})
+                       check_task=CheckTasks.check_query_results,
+                       check_items={exp_res: [{"count(*)": expected_count}],
+                                    "pk_name": ct.default_int64_field_name})
         # clean up
         self.drop_collection(client, collection_name)
 
@@ -5894,7 +6011,7 @@ class TestQueryCount(TestMilvusClientV2Base):
                 ct.default_float_vec_field_name: vectors[i]
             }
             rows.append(row)
-        
+
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. create index and load
@@ -5907,7 +6024,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         self.query(client, collection_name, filter=expr, output_fields=["count(*)"],
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: [{"count(*)": 1}],
-                            "pk_name": ct.default_int64_field_name})
+                                "pk_name": ct.default_int64_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -5919,7 +6036,7 @@ class TestQueryCount(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        
+
         # 1. create collection with two int64 fields for comparison
         schema = self.create_schema(client, enable_dynamic_field=False, auto_id=False)[0]
         schema.add_field("int64_1", DataType.INT64, is_primary=True)
@@ -5958,5 +6075,3 @@ class TestQueryCount(TestMilvusClientV2Base):
                                 "pk_name": "int64_1"})
         # clean up
         self.drop_collection(client, collection_name)
-
-

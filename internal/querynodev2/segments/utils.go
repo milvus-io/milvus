@@ -13,12 +13,10 @@ import "C"
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"strconv"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -35,9 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -210,13 +206,6 @@ func FilterZeroValuesFromSlice(intVals []int64) []int64 {
 	return result
 }
 
-// withLazyLoadTimeoutContext returns a new context with lazy load timeout.
-func withLazyLoadTimeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	lazyLoadTimeout := paramtable.Get().QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
-	// TODO: use context.WithTimeoutCause instead of contextutil.WithTimeoutCause in go1.21
-	return contextutil.WithTimeoutCause(ctx, lazyLoadTimeout, errLazyLoadTimeout)
-}
-
 func GetSegmentRelatedDataSize(segment Segment) int64 {
 	if segment.Type() == SegmentTypeSealed {
 		return calculateSegmentLogSize(segment.LoadInfo())
@@ -321,4 +310,47 @@ func isDataMmapEnable(fieldSchema *schemapb.FieldSchema) bool {
 
 func isGrowingMmapEnable() bool {
 	return params.Params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
+}
+
+// getFieldWarmupPolicy returns the warmup policy for field data loading.
+// Priority: field TypeParams (propagated from collection-level by QueryCoord, including autoWarmupForNonPKIsolationCollection) > global config
+func getFieldWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
+	// Check field TypeParams (collection-level warmup.scalarField/warmup.vectorField
+	// and autoWarmupForNonPKIsolationCollection are propagated to field TypeParams by QueryCoord)
+	policy, exist := common.GetWarmupPolicy(fieldSchema.GetTypeParams()...)
+	if exist {
+		return policy
+	}
+	// Fall back to global config
+	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+		return params.Params.QueryNodeCfg.TieredWarmupVectorField.GetValue()
+	}
+	return params.Params.QueryNodeCfg.TieredWarmupScalarField.GetValue()
+}
+
+// getIndexWarmupPolicy returns the warmup policy for index loading.
+// Priority: index params (propagated from collection-level by QueryCoord, including autoWarmupForNonPKIsolationCollection) > global config
+func getIndexWarmupPolicy(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) string {
+	// Check index params (collection-level warmup.scalarIndex/warmup.vectorIndex
+	// and autoWarmupForNonPKIsolationCollection are propagated to index params by QueryCoord)
+	policy, exist := common.GetWarmupPolicy(indexInfo.IndexParams...)
+	if exist {
+		return policy
+	}
+	// Fall back to global config
+	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+		return params.Params.QueryNodeCfg.TieredWarmupVectorIndex.GetValue()
+	}
+	return params.Params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue()
+}
+
+// getScalarDataWarmupPolicy returns the warmup policy for scalar data, but also include json key stats and text match.
+// Priority: field TypeParams (propagated from collection-level by QueryCoord, including autoWarmupForNonPKIsolationCollection) > global config
+func getScalarDataWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
+	// Check field TypeParams (collection-level warmup.scalarField and autoWarmupForNonPKIsolationCollection are propagated by QueryCoord)
+	policy, exist := common.GetWarmupPolicy(fieldSchema.GetTypeParams()...)
+	if exist {
+		return policy
+	}
+	return params.Params.QueryNodeCfg.TieredWarmupScalarField.GetValue()
 }

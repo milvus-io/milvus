@@ -81,9 +81,6 @@ func NewSyncTask(ctx context.Context,
 		if useLoonFFI {
 			k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 			basePath := path.Join(storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
-			if storageConfig.GetStorageType() != "local" {
-				basePath = path.Join(storageConfig.GetBucketName(), basePath)
-			}
 			// -1 for first write
 			segment.ManifestPath = packed.MarshalManifestPath(basePath, -1)
 		}
@@ -105,7 +102,6 @@ func NewSyncTask(ctx context.Context,
 		WithPartitionID(partitionID).
 		WithChannelName(vchannel).
 		WithSegmentID(segmentID).
-		WithTimeRange(ts, ts).
 		WithLevel(segmentLevel).
 		WithDataSource(metrics.BulkinsertDataSourceLabel).
 		WithBatchRows(int64(insertData.GetRowNum()))

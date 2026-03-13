@@ -42,7 +42,8 @@ type AssignmentService interface {
 	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
 
 	// GetReplicateConfiguration returns the replicate configuration of the milvus cluster.
-	GetReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error)
+	// Pass assignment.WithFreshRead() to force reading the latest state from the coord.
+	GetReplicateConfiguration(ctx context.Context, opts ...assignment.GetReplicateConfigurationOpt) (*replicateutil.ConfigHelper, error)
 
 	// GetLatestAssignments returns the latest assignment discovery result.
 	GetLatestAssignments(ctx context.Context) (*types.VersionedStreamingNodeAssignments, error)

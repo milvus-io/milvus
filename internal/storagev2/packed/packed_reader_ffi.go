@@ -44,6 +44,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get manifest")
 	}
+	defer C.loon_manifest_destroy(cLoonManifest)
 
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
@@ -74,7 +75,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 			storage_type:           C.CString(storageConfig.GetStorageType()),
 			cloud_provider:         C.CString(storageConfig.GetCloudProvider()),
 			iam_endpoint:           C.CString(storageConfig.GetIAMEndpoint()),
-			log_level:              C.CString("Warn"), // TODO use config after storage support lower case configuration
+			log_level:              C.CString("warn"),
 			useSSL:                 C.bool(storageConfig.GetUseSSL()),
 			sslCACert:              C.CString(storageConfig.GetSslCACert()),
 			useIAM:                 C.bool(storageConfig.GetUseIAM()),
@@ -84,6 +85,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 			gcp_credential_json:    C.CString(storageConfig.GetGcpCredentialJSON()),
 			use_custom_part_upload: true,
 			max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
+			tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
 		}
 		defer C.free(unsafe.Pointer(cStorageConfig.address))
 		defer C.free(unsafe.Pointer(cStorageConfig.bucket_name))
@@ -97,6 +99,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
 		defer C.free(unsafe.Pointer(cStorageConfig.region))
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
+		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
 
 		cNeededColumn := make([]*C.char, len(neededColumns))
 		for i, columnName := range neededColumns {
@@ -186,7 +189,7 @@ func (r *FFIPackedReader) Release() {
 
 func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig) (loonManifestHandle *C.LoonManifest, err error) {
 	var cManifestHandle *C.LoonManifest
-	basePath, version, err := UnmarshalManfestPath(manifestPath)
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return cManifestHandle, err
 	}
@@ -196,6 +199,7 @@ func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig
 	if err != nil {
 		return cManifestHandle, err
 	}
+	defer C.loon_properties_free(cProperties)
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 

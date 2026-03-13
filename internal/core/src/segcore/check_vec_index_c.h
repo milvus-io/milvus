@@ -14,6 +14,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#include <stdbool.h>
 #include "common/type_c.h"
 bool
 CheckVecIndexWithDataType(const char* index_type,

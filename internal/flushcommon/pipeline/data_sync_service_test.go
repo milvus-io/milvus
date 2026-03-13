@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
 	"testing"
 
 	"github.com/samber/lo"
@@ -51,7 +52,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var dataSyncServiceTestDir = "/tmp/milvus_test/data_sync_service"
+var dataSyncServiceTestDir string
+
+func init() {
+	dir, _ := os.MkdirTemp("", "milvus_test_data_sync_*")
+	dataSyncServiceTestDir = dir
+}
 
 func getWatchInfo(info *testInfo) *datapb.ChannelWatchInfo {
 	return &datapb.ChannelWatchInfo{

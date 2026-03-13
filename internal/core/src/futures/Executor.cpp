@@ -9,10 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <chrono>
+#include <memory>
+#include <thread>
+
 #include "Executor.h"
-#include "common/Common.h"
-#include "monitor/Monitor.h"
+#include "folly/executors/CPUThreadPoolExecutor.h"
+#include "folly/executors/thread_factory/NamedThreadFactory.h"
 
 namespace milvus::futures {
 

@@ -25,6 +25,8 @@ from chaos.checker import (CollectionCreateChecker,
                            AddFieldChecker,
                            CollectionRenameChecker,
                            TensorSearchChecker,
+                           SnapshotRestoreChecker,
+                           EntityTTLChecker,
                            Op,
                            EventRecords,
                            ResultAnalyzer
@@ -114,7 +116,9 @@ class TestOperations(TestBase):
             Op.drop: CollectionDropChecker(collection_name=c_name),
             Op.alter_collection: AlterCollectionChecker(collection_name=c_name),
             Op.add_field: AddFieldChecker(collection_name=c_name),
-            Op.rename_collection: CollectionRenameChecker(collection_name=c_name)
+            Op.rename_collection: CollectionRenameChecker(collection_name=c_name),
+            Op.restore_snapshot: SnapshotRestoreChecker(collection_name=c_name),
+            Op.entity_ttl: EntityTTLChecker(),
         }
         if bool(self.enable_import):
             checkers[Op.bulk_insert] = BulkInsertChecker(collection_name=c_name,

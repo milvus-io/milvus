@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install conan==1.64.1
+RUN pip3 install conan==1.66.0
 
 # Install openblas
 # RUN wget https://github.com/xianyi/OpenBLAS/archive/v0.3.21.tar.gz && \
@@ -44,7 +44,7 @@ ENV GOPATH /go
 ENV GOROOT /usr/local/go
 ENV GO111MODULE on
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.11.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.12.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
     mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
     curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ${GOROOT}/bin v1.46.2 && \
     # export GO111MODULE=on && go get github.com/quasilyte/go-ruleguard/cmd/ruleguard@v0.2.1 && \
