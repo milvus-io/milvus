@@ -138,15 +138,22 @@ if (LINUX OR MSYS)
                   "-Wno-error"
                   "-Wno-all"
                   )
-    if (USE_ASAN STREQUAL "ON") 
+    if (USE_ASAN STREQUAL "ON")
         message( STATUS "Building Milvus Core Using AddressSanitizer")
         add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
         add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
     endif()
     if (CMAKE_BUILD_TYPE STREQUAL "Release")
-        append_flags( CMAKE_CXX_FLAGS
-                "-O3"
-                )
+        if (ENABLE_O2)
+            message( STATUS "Building Milvus Core with -O2")
+            append_flags( CMAKE_CXX_FLAGS
+                    "-O2"
+                    )
+        else()
+            append_flags( CMAKE_CXX_FLAGS
+                    "-O3"
+                    )
+        endif()
     endif()
 endif ()
 
