@@ -20,6 +20,17 @@ using namespace std;
 using namespace milvus;
 using namespace milvus::storage;
 
+// Append GTEST_SHARD_INDEX to bucket name to avoid conflicts when
+// multiple shards run in parallel against the same MinIO instance.
+static std::string
+shardBucketName(const std::string& base) {
+    const char* shard = std::getenv("GTEST_SHARD_INDEX");
+    if (shard) {
+        return base + "-s" + std::string(shard);
+    }
+    return base;
+}
+
 class MinioChunkManagerTest : public testing::Test {
  public:
     MinioChunkManagerTest() {
@@ -30,6 +41,8 @@ class MinioChunkManagerTest : public testing::Test {
     virtual void
     SetUp() {
         configs_ = StorageConfig{};
+        // Append shard index to default bucket name for parallel safety
+        configs_.bucket_name = shardBucketName(configs_.bucket_name);
         chunk_manager_ = std::make_unique<MinioChunkManager>(configs_);
     }
 
@@ -93,7 +106,7 @@ TEST_F(MinioChunkManagerTest, InitFailed) {
 }
 
 TEST_F(MinioChunkManagerTest, BucketPositive) {
-    string testBucketName = "test-bucket";
+    string testBucketName = shardBucketName("test-bucket");
     chunk_manager_->SetBucketName(testBucketName);
     bool exist = chunk_manager_->BucketExists(testBucketName);
     EXPECT_EQ(exist, false);
@@ -104,7 +117,7 @@ TEST_F(MinioChunkManagerTest, BucketPositive) {
 }
 
 TEST_F(MinioChunkManagerTest, BucketNegtive) {
-    string testBucketName = "test-bucket-ng";
+    string testBucketName = shardBucketName("test-bucket-ng");
     chunk_manager_->SetBucketName(testBucketName);
     chunk_manager_->DeleteBucket(testBucketName);
 
@@ -236,7 +249,7 @@ TEST_F(MinioChunkManagerTest, ReadNotExist) {
 }
 
 TEST_F(MinioChunkManagerTest, RemovePositive) {
-    string testBucketName = "test-remove";
+    string testBucketName = shardBucketName("test-remove");
     chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(chunk_manager_->GetBucketName(), testBucketName);
 
@@ -264,7 +277,7 @@ TEST_F(MinioChunkManagerTest, RemovePositive) {
 }
 
 TEST_F(MinioChunkManagerTest, ListWithPrefixPositive) {
-    string testBucketName = "test-listprefix";
+    string testBucketName = shardBucketName("test-listprefix");
     chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(chunk_manager_->GetBucketName(), testBucketName);
 

@@ -20,9 +20,16 @@ using namespace std;
 using namespace milvus;
 using namespace milvus::storage;
 
+// Append GTEST_SHARD_INDEX to bucket name to avoid conflicts when
+// multiple shards run in parallel against the same MinIO instance.
 const string
 get_default_bucket_name() {
-    return "a-bucket";
+    std::string base = "a-bucket";
+    const char* shard = std::getenv("GTEST_SHARD_INDEX");
+    if (shard) {
+        return base + "-s" + std::string(shard);
+    }
+    return base;
 }
 
 StorageConfig
