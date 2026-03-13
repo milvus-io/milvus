@@ -134,7 +134,7 @@ PhyElementFilterNode::GetOutput() {
     // Step 4: If no doc-level predicate, collect results directly
     // (otherwise, downstream FilterNode will do this)
     if (!has_doc_predicate_) {
-        CollectResults(search_result, array_offsets);
+        CollectResults(search_result, array_offsets.get());
     }
 
     query_context_->set_search_result(std::move(search_result));
@@ -159,9 +159,8 @@ PhyElementFilterNode::GetOutput() {
 }
 
 void
-PhyElementFilterNode::CollectResults(
-    SearchResult& search_result,
-    std::shared_ptr<const IArrayOffsets> array_offsets) {
+PhyElementFilterNode::CollectResults(SearchResult& search_result,
+                                     const IArrayOffsets* array_offsets) {
     // When there's no doc-level predicate, we need to consume the iterators
     // and collect the top-K results ourselves.
     //

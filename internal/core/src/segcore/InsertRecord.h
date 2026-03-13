@@ -82,10 +82,9 @@ class OffsetMap {
     //   - has_more flag indicating if there are more results
     virtual std::
         tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-        find_first_n_element(
-            int64_t limit,
-            const BitsetTypeView& element_bitset,
-            std::shared_ptr<const IArrayOffsets> array_offsets) const = 0;
+        find_first_n_element(int64_t limit,
+                             const BitsetTypeView& element_bitset,
+                             const IArrayOffsets* array_offsets) const = 0;
 
     virtual void
     clear() = 0;
@@ -213,10 +212,9 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-    find_first_n_element(
-        int64_t limit,
-        const BitsetTypeView& element_bitset,
-        std::shared_ptr<const IArrayOffsets> array_offsets) const override {
+    find_first_n_element(int64_t limit,
+                         const BitsetTypeView& element_bitset,
+                         const IArrayOffsets* array_offsets) const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -272,10 +270,9 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-    find_first_n_element_by_index(
-        int64_t limit,
-        const BitsetTypeView& element_bitset,
-        std::shared_ptr<const IArrayOffsets> array_offsets) const {
+    find_first_n_element_by_index(int64_t limit,
+                                  const BitsetTypeView& element_bitset,
+                                  const IArrayOffsets* array_offsets) const {
         std::vector<int64_t> doc_offsets;
         std::vector<std::vector<int32_t>> element_indices;
 
@@ -288,6 +285,7 @@ class OffsetOrderedMap : public OffsetMap {
         limit = std::min(limit, cnt);
 
         // Traverse map_ in PK order
+        std::vector<int32_t> matching_indices;
         auto it = map_.begin();
         for (; hit_num < limit && it != map_.end(); ++it) {
             // For each PK, traverse from back to front to obtain the latest offset.
@@ -302,7 +300,7 @@ class OffsetOrderedMap : public OffsetMap {
                     array_offsets->ElementIDRangeOfRow(doc_offset);
 
                 // Collect all matching element indices for this doc
-                std::vector<int32_t> matching_indices;
+                matching_indices.clear();
                 for (int64_t elem_id = first_elem;
                      elem_id < last_elem && hit_num < limit;
                      ++elem_id) {
@@ -468,10 +466,9 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-    find_first_n_element(
-        int64_t limit,
-        const BitsetTypeView& element_bitset,
-        std::shared_ptr<const IArrayOffsets> array_offsets) const override {
+    find_first_n_element(int64_t limit,
+                         const BitsetTypeView& element_bitset,
+                         const IArrayOffsets* array_offsets) const override {
         check_search();
 
         if (limit == Unlimited || limit == NoLimit) {
@@ -520,10 +517,9 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
     std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
-    find_first_n_element_by_index(
-        int64_t limit,
-        const BitsetTypeView& element_bitset,
-        std::shared_ptr<const IArrayOffsets> array_offsets) const {
+    find_first_n_element_by_index(int64_t limit,
+                                  const BitsetTypeView& element_bitset,
+                                  const IArrayOffsets* array_offsets) const {
         std::vector<int64_t> doc_offsets;
         std::vector<std::vector<int32_t>> element_indices;
 
@@ -536,6 +532,7 @@ class OffsetOrderedArray : public OffsetMap {
         limit = std::min(limit, cnt);
 
         // Traverse array_ in PK order (already sorted)
+        std::vector<int32_t> matching_indices;
         auto it = array_.begin();
         for (; hit_num < limit && it != array_.end(); ++it) {
             auto doc_offset = it->second;
@@ -545,7 +542,7 @@ class OffsetOrderedArray : public OffsetMap {
                 array_offsets->ElementIDRangeOfRow(doc_offset);
 
             // Collect all matching element indices for this doc
-            std::vector<int32_t> matching_indices;
+            matching_indices.clear();
             for (int64_t elem_id = first_elem;
                  elem_id < last_elem && hit_num < limit;
                  ++elem_id) {

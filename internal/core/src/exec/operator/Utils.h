@@ -38,23 +38,12 @@ find_binsert_position(const std::vector<float>& distances,
                       size_t lo,
                       size_t hi,
                       float dist) {
-    while (lo < hi) {
-        size_t mid = lo + ((hi - lo) >> 1);
-        if constexpr (large_is_better) {
-            if (distances[mid] < dist) {
-                hi = mid;
-            } else {
-                lo = mid + 1;
-            }
-        } else {
-            if (distances[mid] > dist) {
-                hi = mid;
-            } else {
-                lo = mid + 1;
-            }
-        }
-    }
-    return lo;
+    auto first = distances.begin() + lo;
+    auto last = distances.begin() + hi;
+    auto it = large_is_better
+                  ? std::upper_bound(first, last, dist, std::greater<float>{})
+                  : std::upper_bound(first, last, dist);
+    return static_cast<size_t>(it - distances.begin());
 }
 
 static bool
@@ -179,10 +168,10 @@ sort_search_result(milvus::SearchResult& result, bool large_is_better) {
         }
     }
 
-    result.distances_ = new_distances;
-    result.seg_offsets_ = new_seg_offsets;
+    result.distances_ = std::move(new_distances);
+    result.seg_offsets_ = std::move(new_seg_offsets);
     if (has_element_indices) {
-        result.element_indices_ = new_element_indices;
+        result.element_indices_ = std::move(new_element_indices);
     }
 }
 

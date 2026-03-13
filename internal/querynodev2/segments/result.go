@@ -354,7 +354,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		resultIndex    int64
 		elementIndices *internalpb.ElementIndices
 	}
-	var docSelections []docSelection
+	docSelections := make([]docSelection, 0, loopEnd)
 	idxInSelections := make(map[interface{}]int) // pk -> index in docSelections
 
 	var availableCount int // for doc-level: doc count; for element-level: element count

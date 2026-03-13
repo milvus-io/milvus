@@ -81,7 +81,7 @@ class PhyElementFilterNode : public Operator {
  private:
     void
     CollectResults(SearchResult& search_result,
-                   std::shared_ptr<const IArrayOffsets> array_offsets);
+                   const IArrayOffsets* array_offsets);
 
     std::unique_ptr<ExprSet> element_exprs_;
     QueryContext* query_context_;
