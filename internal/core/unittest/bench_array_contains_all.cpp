@@ -206,6 +206,123 @@ class ContainsAllMatcher<std::string_view> {
 };
 
 // ============================================================================
+// BranchState — exact maintainer sketch: if (use_small_) inside mark()
+// This is the simplest possible wrapper with no indirection tricks.
+// ============================================================================
+
+template <typename T>
+class ContainsAllBranchState {
+ public:
+    explicit ContainsAllBranchState(const ContainsAllMatcher<T>& matcher)
+        : matcher_(matcher), use_small_(matcher.use_small()) {
+        if (!use_small_) {
+            found_large_.resize(matcher.num_words());
+        }
+    }
+
+    void
+    reset() {
+        if (use_small_) {
+            found_small_ = 0;
+        } else {
+            std::fill(found_large_.begin(), found_large_.end(), 0);
+            remaining_ = matcher_.target_count();
+        }
+    }
+
+    bool
+    mark(const T& val) {
+        if (use_small_) {
+            return matcher_.set_if_found(val, found_small_);
+        } else {
+            return matcher_.set_if_found(val, found_large_, remaining_);
+        }
+    }
+
+    bool
+    all_found() const {
+        if (use_small_) {
+            return found_small_ == matcher_.full_mask();
+        } else {
+            return remaining_ == 0;
+        }
+    }
+
+ private:
+    const ContainsAllMatcher<T>& matcher_;
+    bool use_small_;
+    uint64_t found_small_{0};
+    std::vector<uint64_t> found_large_;
+    size_t remaining_{0};
+};
+
+// ============================================================================
+// RowState — lightweight per-row state with reset()/mark()/all_found() API
+// Keeps small/large branch out of inner loop via function pointer dispatch.
+// ============================================================================
+
+template <typename T>
+class ContainsAllRowState {
+ public:
+    explicit ContainsAllRowState(const ContainsAllMatcher<T>& matcher)
+        : matcher_(matcher) {
+        if (matcher.use_small()) {
+            mark_fn_ = &mark_small;
+            all_found_fn_ = &all_found_small;
+        } else {
+            found_large_.resize(matcher.num_words());
+            mark_fn_ = &mark_large;
+            all_found_fn_ = &all_found_large;
+        }
+    }
+
+    void
+    reset() {
+        if (found_large_.empty()) {
+            found_small_ = 0;
+        } else {
+            std::fill(found_large_.begin(), found_large_.end(), 0);
+            remaining_ = matcher_.target_count();
+        }
+    }
+
+    bool
+    mark(const T& val) {
+        return mark_fn_(*this, val);
+    }
+
+    bool
+    all_found() const {
+        return all_found_fn_(*this);
+    }
+
+ private:
+    static bool
+    mark_small(ContainsAllRowState& s, const T& val) {
+        return s.matcher_.set_if_found(val, s.found_small_);
+    }
+    static bool
+    mark_large(ContainsAllRowState& s, const T& val) {
+        return s.matcher_.set_if_found(val, s.found_large_, s.remaining_);
+    }
+    static bool
+    all_found_small(const ContainsAllRowState& s) {
+        return s.found_small_ == s.matcher_.full_mask();
+    }
+    static bool
+    all_found_large(const ContainsAllRowState& s) {
+        return s.remaining_ == 0;
+    }
+
+    const ContainsAllMatcher<T>& matcher_;
+    uint64_t found_small_{0};
+    std::vector<uint64_t> found_large_;
+    size_t remaining_{0};
+    bool (*mark_fn_)(ContainsAllRowState&, const T&);
+    bool (*all_found_fn_)(const ContainsAllRowState&);
+};
+
+// ============================================================================
 // Minimal ArrayView simulation (mirrors milvus::ArrayView layout)
 // ============================================================================
 
@@ -314,6 +431,9 @@ ContainsAll_Bitmask(const std::vector<ArrayT>& arrays,
     // Matcher built once per sub-batch, matching production placement inside
     // execute_sub_batch lambda in ExecArrayContainsAll.
     ContainsAllMatcher<T> matcher(targets);
+    // Hoist vector allocation outside per-row loop (reset with std::fill).
+    std::vector<uint64_t> found_large(
+        matcher.use_small() ? 0 : matcher.num_words());
     for (size_t i = 0; i < arrays.size(); ++i) {
         if (static_cast<size_t>(arrays[i].length) < matcher.target_count()) {
             results[i] = false;
@@ -330,11 +450,12 @@ ContainsAll_Bitmask(const std::vector<ArrayT>& arrays,
             }
             results[i] = matched || (found == matcher.full_mask());
         } else {
-            std::vector<uint64_t> found(matcher.num_words(), 0);
+            std::fill(found_large.begin(), found_large.end(), 0);
             size_t remaining = matcher.target_count();
             bool matched = false;
             for (int j = 0; j < arrays[i].length; ++j) {
-                if (matcher.set_if_found(arrays[i].get(j), found, remaining)) {
+                if (matcher.set_if_found(
+                        arrays[i].get(j), found_large, remaining)) {
                     matched = true;
                     break;
                 }
@@ -352,6 +473,9 @@ ContainsAll_Bitmask_Json(const std::vector<JsonArray>& arrays,
     results.resize(arrays.size());
     // Matcher built once per sub-batch, matching production placement.
     ContainsAllMatcher<int64_t> matcher(targets);
+    // Hoist vector allocation outside per-row loop.
+    std::vector<uint64_t> found_large(
+        matcher.use_small() ? 0 : matcher.num_words());
     for (size_t i = 0; i < arrays.size(); ++i) {
         if (matcher.use_small()) {
             uint64_t found = 0;
@@ -374,12 +498,13 @@ ContainsAll_Bitmask_Json(const std::vector<JsonArray>& arrays,
             }
             results[i] = matched || (found == matcher.full_mask());
         } else {
-            std::vector<uint64_t> found(matcher.num_words(), 0);
+            std::fill(found_large.begin(), found_large.end(), 0);
             size_t remaining = matcher.target_count();
             bool matched = false;
             for (const auto& elem : arrays[i].elements) {
                 if (elem.tag == JsonArrayElement::INT64) {
-                    if (matcher.set_if_found(elem.i64_val, found, remaining)) {
+                    if (matcher.set_if_found(
+                            elem.i64_val, found_large, remaining)) {
                         matched = true;
                         break;
                     }
@@ -387,7 +512,7 @@ ContainsAll_Bitmask_Json(const std::vector<JsonArray>& arrays,
                     if (elem.f64_val == std::floor(elem.f64_val)) {
                         if (matcher.set_if_found(
                                 static_cast<int64_t>(elem.f64_val),
-                                found,
+                                found_large,
                                 remaining)) {
                             matched = true;
                             break;
@@ -397,6 +522,126 @@ ContainsAll_Bitmask_Json(const std::vector<JsonArray>& arrays,
             }
             results[i] = matched || (remaining == 0);
         }
+    }
+}
+
+// ============================================================================
+// BranchState API: exact maintainer sketch — if(use_small_) inside mark()
+// ============================================================================
+
+// --- Array path ---
+template <typename ArrayT, typename T>
+void
+ContainsAll_BranchState(const std::vector<ArrayT>& arrays,
+                        const std::set<T>& targets,
+                        std::vector<bool>& results) {
+    results.resize(arrays.size());
+    ContainsAllMatcher<T> matcher(targets);
+    ContainsAllBranchState<T> state(matcher);
+    for (size_t i = 0; i < arrays.size(); ++i) {
+        if (static_cast<size_t>(arrays[i].length) < matcher.target_count()) {
+            results[i] = false;
+            continue;
+        }
+        state.reset();
+        bool matched = false;
+        for (int j = 0; j < arrays[i].length; ++j) {
+            if (state.mark(arrays[i].get(j))) {
+                matched = true;
+                break;
+            }
+        }
+        results[i] = matched || state.all_found();
+    }
+}
+
+// --- JSON path (int64 with double fallback) ---
+void
+ContainsAll_BranchState_Json(const std::vector<JsonArray>& arrays,
+                             const std::set<int64_t>& targets,
+                             std::vector<bool>& results) {
+    results.resize(arrays.size());
+    ContainsAllMatcher<int64_t> matcher(targets);
+    ContainsAllBranchState<int64_t> state(matcher);
+    for (size_t i = 0; i < arrays.size(); ++i) {
+        state.reset();
+        bool matched = false;
+        for (const auto& elem : arrays[i].elements) {
+            if (elem.tag == JsonArrayElement::INT64) {
+                if (state.mark(elem.i64_val)) {
+                    matched = true;
+                    break;
+                }
+            } else if (elem.tag == JsonArrayElement::DOUBLE) {
+                if (elem.f64_val == std::floor(elem.f64_val)) {
+                    if (state.mark(static_cast<int64_t>(elem.f64_val))) {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+        }
+        results[i] = matched || state.all_found();
+    }
+}
+
+// ============================================================================
+// FnPtrState API: function-pointer dispatch, no per-element branching
+// ============================================================================
+
+// --- Array path ---
+template <typename ArrayT, typename T>
+void
+ContainsAll_FnPtrState(const std::vector<ArrayT>& arrays,
+                       const std::set<T>& targets,
+                       std::vector<bool>& results) {
+    results.resize(arrays.size());
+    ContainsAllMatcher<T> matcher(targets);
+    ContainsAllRowState<T> state(matcher);
+    for (size_t i = 0; i < arrays.size(); ++i) {
+        if (static_cast<size_t>(arrays[i].length) < matcher.target_count()) {
+            results[i] = false;
+            continue;
+        }
+        state.reset();
+        bool matched = false;
+        for (int j = 0; j < arrays[i].length; ++j) {
+            if (state.mark(arrays[i].get(j))) {
+                matched = true;
+                break;
+            }
+        }
+        results[i] = matched || state.all_found();
+    }
+}
+
+// --- JSON path (int64 with double fallback) ---
+void
+ContainsAll_FnPtrState_Json(const std::vector<JsonArray>& arrays,
+                            const std::set<int64_t>& targets,
+                            std::vector<bool>& results) {
+    results.resize(arrays.size());
+    ContainsAllMatcher<int64_t> matcher(targets);
+    ContainsAllRowState<int64_t> state(matcher);
+    for (size_t i = 0; i < arrays.size(); ++i) {
+        state.reset();
+        bool matched = false;
+        for (const auto& elem : arrays[i].elements) {
+            if (elem.tag == JsonArrayElement::INT64) {
+                if (state.mark(elem.i64_val)) {
+                    matched = true;
+                    break;
+                }
+            } else if (elem.tag == JsonArrayElement::DOUBLE) {
+                if (elem.f64_val == std::floor(elem.f64_val)) {
+                    if (state.mark(static_cast<int64_t>(elem.f64_val))) {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+        }
+        results[i] = matched || state.all_found();
     }
 }
 
@@ -612,23 +857,18 @@ CountTrue(const std::vector<bool>& v) {
 void
 PrintResult(const std::string& label,
             const std::string& params,
-            double us_old,
-            double us_new,
-            int matches_old,
-            int matches_new,
+            double us_before,
+            double us_after,
+            int matches_before,
+            int matches_after,
             bool correct) {
-    double ms_old = us_old / 1000.0;
-    double ms_new = us_new / 1000.0;
-    std::cout << "=== " << label << " ===" << std::endl;
-    std::cout << "  " << params << std::endl;
-    std::cout << std::fixed << std::setprecision(2);
-    std::cout << "  SetCopy:  " << ms_old << " ms  (matches=" << matches_old
-              << ")" << std::endl;
-    std::cout << "  Bitmask:  " << ms_new << " ms  (matches=" << matches_new
-              << ")" << std::endl;
-    std::cout << "  Speedup:  " << std::setprecision(3) << us_old / us_new
-              << "x" << (correct ? "" : "  [INCORRECT]") << std::endl;
-    std::cout << std::endl;
+    double ms_before = us_before / 1000.0;
+    double ms_after = us_after / 1000.0;
+    std::cout << std::fixed << std::setprecision(1);
+    std::cout << "  " << std::setw(50) << std::left << label << std::setw(10)
+              << std::right << ms_before << std::setw(10) << ms_after
+              << std::setprecision(2) << std::setw(8) << us_before / us_after
+              << "x" << (correct ? "" : " [FAIL]") << std::endl;
 }
 
 // ============================================================================
@@ -656,24 +896,20 @@ RunInt64Benchmark(const std::string& label,
         targets.insert(val_dist(rng));
     }
 
-    std::vector<bool> res_old, res_new;
-    double us_old = TimeMicroseconds(
-        [&]() { ContainsAll_SetCopy(storage.views, targets, res_old); });
-    double us_new = TimeMicroseconds(
-        [&]() { ContainsAll_Bitmask(storage.views, targets, res_new); });
+    std::vector<bool> res_before, res_after;
+    double us_before = TimeMicroseconds(
+        [&]() { ContainsAll_SetCopy(storage.views, targets, res_before); });
+    double us_after = TimeMicroseconds(
+        [&]() { ContainsAll_BranchState(storage.views, targets, res_after); });
 
-    bool correct = VerifyRowLevel(res_old, res_new, label);
-    std::string params = "rows=" + std::to_string(num_arrays) + " array_len=[" +
-                         std::to_string(min_len) + "," +
-                         std::to_string(max_len) + "]" +
-                         " targets=" + std::to_string(num_targets) +
-                         " value_range=" + std::to_string(value_range);
+    bool correct = VerifyRowLevel(res_before, res_after, label);
+    std::string params = "";
     PrintResult(label,
                 params,
-                us_old,
-                us_new,
-                CountTrue(res_old),
-                CountTrue(res_new),
+                us_before,
+                us_after,
+                CountTrue(res_before),
+                CountTrue(res_after),
                 correct);
 }
 
@@ -702,25 +938,21 @@ RunStringBenchmark(const std::string& label,
         targets_sv.insert(std::string_view(s));
     }
 
-    std::vector<bool> res_old, res_new;
-    double us_old = TimeMicroseconds(
-        [&]() { ContainsAll_SetCopy(storage.views, targets_sv, res_old); });
-    double us_new = TimeMicroseconds(
-        [&]() { ContainsAll_Bitmask(storage.views, targets_sv, res_new); });
+    std::vector<bool> res_before, res_after;
+    double us_before = TimeMicroseconds(
+        [&]() { ContainsAll_SetCopy(storage.views, targets_sv, res_before); });
+    double us_after = TimeMicroseconds([&]() {
+        ContainsAll_BranchState(storage.views, targets_sv, res_after);
+    });
 
-    bool correct = VerifyRowLevel(res_old, res_new, label);
-    std::string params = "rows=" + std::to_string(num_arrays) + " array_len=[" +
-                         std::to_string(min_len) + "," +
-                         std::to_string(max_len) + "]" +
-                         " targets=" + std::to_string(num_targets) +
-                         " value_range=" + std::to_string(value_range) +
-                         " (pessimistic: string_view->string conversion)";
+    bool correct = VerifyRowLevel(res_before, res_after, label);
+    std::string params = "";
     PrintResult(label,
                 params,
-                us_old,
-                us_new,
-                CountTrue(res_old),
-                CountTrue(res_new),
+                us_before,
+                us_after,
+                CountTrue(res_before),
+                CountTrue(res_after),
                 correct);
 }
 
@@ -748,42 +980,39 @@ RunJsonBenchmark(const std::string& label,
         targets.insert(val_dist(rng));
     }
 
-    std::vector<bool> res_old, res_new;
-    double us_old = TimeMicroseconds(
-        [&]() { ContainsAll_SetCopy_Json(storage.arrays, targets, res_old); });
-    double us_new = TimeMicroseconds(
-        [&]() { ContainsAll_Bitmask_Json(storage.arrays, targets, res_new); });
+    std::vector<bool> res_before, res_after;
+    double us_before = TimeMicroseconds([&]() {
+        ContainsAll_SetCopy_Json(storage.arrays, targets, res_before);
+    });
+    double us_after = TimeMicroseconds([&]() {
+        ContainsAll_BranchState_Json(storage.arrays, targets, res_after);
+    });
 
-    bool correct = VerifyRowLevel(res_old, res_new, label);
-    std::string params = "rows=" + std::to_string(num_arrays) + " array_len=[" +
-                         std::to_string(min_len) + "," +
-                         std::to_string(max_len) + "]" +
-                         " targets=" + std::to_string(num_targets) +
-                         " value_range=" + std::to_string(value_range) +
-                         " error=" + std::to_string(error_rate) +
-                         " double=" + std::to_string(double_rate);
+    bool correct = VerifyRowLevel(res_before, res_after, label);
+    std::string params = "";
     PrintResult(label,
                 params,
-                us_old,
-                us_new,
-                CountTrue(res_old),
-                CountTrue(res_new),
+                us_before,
+                us_after,
+                CountTrue(res_before),
+                CountTrue(res_after),
                 correct);
 }
 
 int
 main() {
-    std::cout << "ContainsAll Brute-Force Benchmark" << std::endl;
-    std::cout << "Comparing std::set copy-per-row vs ContainsAllMatcher bitmask"
+    std::cout << "ContainsAll Brute-Force Benchmark: Before vs After"
               << std::endl;
-    std::cout
-        << "Matcher built once per sub-batch (matches production placement)"
-        << std::endl;
-    std::cout << "Correctness: per-row result verification" << std::endl;
-    std::cout << std::string(60, '=') << std::endl << std::endl;
-
-    // ---- ARRAY path (int64) ----
-    std::cout << "--- Array path (int64) ---" << std::endl << std::endl;
+    std::cout << "Before: std::set copy-per-row + erase (original master code)"
+              << std::endl;
+    std::cout << "After:  ContainsAllMatcher bitmask + "
+                 "reset()/mark()/all_found() state API"
+              << std::endl;
+    std::cout << std::string(80, '=') << std::endl;
+    std::cout << std::setw(50) << std::left << "  Test" << std::setw(10)
+              << std::right << "Before" << std::setw(10) << "After"
+              << std::setw(9) << "Speedup" << std::endl;
+    std::cout << std::string(80, '-') << std::endl;
 
     RunInt64Benchmark(
         "int64: 1M rows, len 5-20, 3 targets", 1000000, 5, 20, 3, 1000);
@@ -826,8 +1055,6 @@ main() {
                       /*use_zipf=*/true);
 
     // ---- ARRAY path (string) ----
-    std::cout << "--- Array path (string, pessimistic) ---" << std::endl
-              << std::endl;
 
     RunStringBenchmark(
         "string: 500K rows, len 5-20, 3 targets", 500000, 5, 20, 3, 1000);
@@ -836,8 +1063,6 @@ main() {
         "string: 500K rows, len 10-30, 10 targets", 500000, 10, 30, 10, 10000);
 
     // ---- JSON path (int64 with double/error elements) ----
-    std::cout << "--- JSON path (int64 w/ double fallback) ---" << std::endl
-              << std::endl;
 
     RunJsonBenchmark("json: 1M rows, len 5-20, 3 targets, no errors",
                      1000000,

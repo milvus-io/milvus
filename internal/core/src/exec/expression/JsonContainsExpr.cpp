@@ -908,9 +908,12 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
     auto elements =
         std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
     int processed_cursor = 0;
+    ContainsAllMatcher<GetType> matcher(*elements);
+    std::vector<uint64_t> found_large(
+        matcher.use_small() ? 0 : matcher.num_words());
     auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &bitmap_input, &matcher, &
+         found_large ]<FilterType filter_type = FilterType::sequential>(
             const milvus::ArrayView* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -924,7 +927,6 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
             processed_cursor += size;
             return;
         }
-        ContainsAllMatcher<GetType> matcher(elements);
         auto executor = [&](size_t i) {
             if (static_cast<size_t>(data[i].length()) <
                 matcher.target_count()) {
@@ -940,12 +942,12 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
                 }
                 return found == matcher.full_mask();
             } else {
-                std::vector<uint64_t> found(matcher.num_words(), 0);
+                std::fill(found_large.begin(), found_large.end(), 0);
                 size_t remaining = matcher.target_count();
                 for (int j = 0; j < data[i].length(); ++j) {
                     if (matcher.set_if_found(
                             data[i].template get_data<GetType>(j),
-                            found,
+                            found_large,
                             remaining)) {
                         return true;
                     }
@@ -1039,9 +1041,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     auto elements =
         std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
     int processed_cursor = 0;
+    ContainsAllMatcher<GetType> matcher(*elements);
+    std::vector<uint64_t> found_large(
+        matcher.use_small() ? 0 : matcher.num_words());
     auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &bitmap_input, &matcher, &
+         found_large ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -1056,7 +1061,6 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
             processed_cursor += size;
             return;
         }
-        ContainsAllMatcher<GetType> matcher(elements);
         auto executor = [&](const size_t i) -> bool {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
@@ -1089,7 +1093,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
                 }
                 return found == matcher.full_mask();
             } else {
-                std::vector<uint64_t> found(matcher.num_words(), 0);
+                std::fill(found_large.begin(), found_large.end(), 0);
                 size_t remaining = matcher.target_count();
                 for (auto&& it : array) {
                     auto val = it.template get<GetType>();
@@ -1102,7 +1106,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
                                 if (matcher.set_if_found(
                                         static_cast<int64_t>(
                                             double_val.value()),
-                                        found,
+                                        found_large,
                                         remaining)) {
                                     return true;
                                 }
@@ -1110,7 +1114,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
                         }
                         continue;
                     }
-                    if (matcher.set_if_found(val.value(), found, remaining)) {
+                    if (matcher.set_if_found(
+                            val.value(), found_large, remaining)) {
                         return true;
                     }
                 }
@@ -1224,10 +1229,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
         }
         // process shared data
         ContainsAllMatcher<GetType> shared_matcher(*elements);
-        auto shared_executor = [&shared_matcher, &res_view](
-                                   milvus::BsonView bson,
-                                   uint32_t row_offset,
-                                   uint32_t value_offset) {
+        std::vector<uint64_t> shared_found_large(
+            shared_matcher.use_small() ? 0 : shared_matcher.num_words());
+        auto shared_executor = [&shared_matcher,
+                                &res_view,
+                                &shared_found_large](milvus::BsonView bson,
+                                                     uint32_t row_offset,
+                                                     uint32_t value_offset) {
             auto val = bson.ParseAsArrayAtOffset(value_offset);
 
             if (!val.has_value()) {
@@ -1267,7 +1275,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                 }
                 res_view[row_offset] = (found == shared_matcher.full_mask());
             } else {
-                std::vector<uint64_t> found(shared_matcher.num_words(), 0);
+                std::fill(
+                    shared_found_large.begin(), shared_found_large.end(), 0);
                 size_t remaining = shared_matcher.target_count();
                 for (const auto& element : val.value()) {
                     auto value =
@@ -1284,7 +1293,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                                 if (shared_matcher.set_if_found(
                                         static_cast<int64_t>(
                                             double_value.value()),
-                                        found,
+                                        shared_found_large,
                                         remaining)) {
                                     res_view[row_offset] = true;
                                     return;
@@ -1294,7 +1303,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                         continue;
                     }
                     if (shared_matcher.set_if_found(
-                            value.value(), found, remaining)) {
+                            value.value(), shared_found_large, remaining)) {
                         res_view[row_offset] = true;
                         return;
                     }
