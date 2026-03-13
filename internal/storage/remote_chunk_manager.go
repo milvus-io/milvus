@@ -458,6 +458,21 @@ func mapObjectStorageError(fileName string, err error) error {
 		return nil
 	}
 
+	// If error is already a Milvus IO error, return it as-is
+	// This handles cases where test code or internal code passes merr.ErrIo* directly
+	if errors.Is(err, merr.ErrIoKeyNotFound) ||
+		errors.Is(err, merr.ErrIoPermissionDenied) ||
+		errors.Is(err, merr.ErrIoBucketNotFound) ||
+		errors.Is(err, merr.ErrIoInvalidCredentials) ||
+		errors.Is(err, merr.ErrIoInvalidArgument) ||
+		errors.Is(err, merr.ErrIoInvalidRange) ||
+		errors.Is(err, merr.ErrIoEntityTooLarge) ||
+		errors.Is(err, merr.ErrIoTooManyRequests) ||
+		errors.Is(err, merr.ErrIoUnexpectEOF) ||
+		errors.Is(err, merr.ErrIoFailed) {
+		return err
+	}
+
 	switch err := err.(type) {
 	case *azcore.ResponseError:
 		if err.ErrorCode == string(bloberror.BlobNotFound) {

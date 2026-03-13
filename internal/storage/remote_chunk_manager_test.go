@@ -19,6 +19,7 @@ package storage
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -1330,6 +1331,39 @@ func TestToMilvusIoError(t *testing.T) {
 		googleErr := &googleapi.Error{Code: http.StatusForbidden}
 		err := ToMilvusIoError(fileName, googleErr)
 		assert.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+	})
+
+	// Test cases for passing merr.ErrIo* errors directly
+	// These should be returned as-is without re-wrapping
+	t.Run("direct merr.ErrIoKeyNotFound", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, merr.ErrIoKeyNotFound)
+		assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+		assert.Same(t, merr.ErrIoKeyNotFound, err, "should return error as-is without wrapping")
+	})
+
+	t.Run("direct merr.ErrIoPermissionDenied", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, merr.ErrIoPermissionDenied)
+		assert.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+		assert.Same(t, merr.ErrIoPermissionDenied, err, "should return error as-is without wrapping")
+	})
+
+	t.Run("direct merr.ErrIoBucketNotFound", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, merr.ErrIoBucketNotFound)
+		assert.ErrorIs(t, err, merr.ErrIoBucketNotFound)
+		assert.Same(t, merr.ErrIoBucketNotFound, err, "should return error as-is without wrapping")
+	})
+
+	t.Run("direct merr.ErrIoInvalidArgument", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, merr.ErrIoInvalidArgument)
+		assert.ErrorIs(t, err, merr.ErrIoInvalidArgument)
+		assert.Same(t, merr.ErrIoInvalidArgument, err, "should return error as-is without wrapping")
+	})
+
+	t.Run("wrapped merr.ErrIoKeyNotFound", func(t *testing.T) {
+		wrappedErr := fmt.Errorf("failed to read: %w", merr.ErrIoKeyNotFound)
+		err := ToMilvusIoError(fileName, wrappedErr)
+		assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+		assert.Same(t, wrappedErr, err, "should return wrapped error as-is")
 	})
 }
 
