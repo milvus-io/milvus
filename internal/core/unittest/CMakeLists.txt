@@ -138,18 +138,6 @@ install(TARGETS all_tests DESTINATION unittest)
 
 add_subdirectory(test_json_stats)
 
-# ContainsAll brute-force benchmark
-add_executable(bench_array_contains_all
-        bench_array_contains_all.cpp
-        )
-target_link_libraries(bench_array_contains_all
-        milvus_core
-        knowhere
-        milvus-storage
-        milvus-common
-        )
-install(TARGETS bench_array_contains_all DESTINATION unittest)
-
 # bitset unit test
 include(CheckCXXCompilerFlag)
 include(CheckIncludeFileCXX)
