@@ -423,4 +423,13 @@ GetFieldIDList(FieldId column_group_id,
                const std::shared_ptr<arrow::Schema>& arrow_schema,
                milvus_storage::ArrowFileSystemPtr fs);
 
+// Convert LIST or FIXED_SIZE_LIST arrays to FixedSizeBinary.
+// External files store vectors in list format (e.g. List<Float32>);
+// Milvus expects FixedSizeBinary (raw bytes). Returns the input
+// unchanged if already FixedSizeBinary.
+arrow::ArrayVector
+NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
+                                       DataType data_type,
+                                       int dim);
+
 }  // namespace milvus::storage
