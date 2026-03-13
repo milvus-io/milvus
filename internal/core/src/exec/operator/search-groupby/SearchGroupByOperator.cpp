@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <tuple>
+#include <unordered_set>
 #include <variant>
 
 #include "common/QueryInfo.h"
@@ -318,6 +319,10 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
     //note it may enumerate all data inside a segment and can block following
     //query and search possibly
     std::vector<std::tuple<int64_t, float, std::optional<T>>> res;
+    // For element-level search, multiple elements from the same row may be
+    // returned by the iterator. We must deduplicate by row_offset so that
+    // the same document does not consume multiple slots in a group.
+    std::unordered_set<int64_t> seen_rows;
     while (iterator->HasNext() && !groupMap.IsGroupResEnough()) {
         auto offset_dis_pair = iterator->Next();
         AssertInfo(
@@ -331,7 +336,13 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
         // but DataGetter expects row_id. Convert element_id to row_id.
         int64_t row_offset = offset;
         if (is_element_id) {
-            row_offset = array_offsets->ElementIDToRowID(offset).first;
+            row_offset =
+                array_offsets->ElementIDToRowID(static_cast<int32_t>(offset))
+                    .first;
+            // Skip if we already saw this row (closest element wins)
+            if (!seen_rows.insert(row_offset).second) {
+                continue;
+            }
         }
 
         std::optional<T> row_data = data_getter->Get(row_offset);

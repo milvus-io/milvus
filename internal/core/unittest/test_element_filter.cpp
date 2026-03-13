@@ -13,7 +13,6 @@
 #include <gtest/gtest.h>
 #include <stddef.h>
 #include <cstdint>
-#include <iostream>
 #include <map>
 #include <memory>
 #include <optional>
@@ -306,10 +305,6 @@ TEST_P(ElementFilterSealed, RangeExpr) {
         for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
             int64_t doc_id = search_result->seg_offsets_[i];
             int32_t elem_idx = search_result->element_indices_[i];
-            float distance = search_result->distances_[i];
-
-            std::cout << "doc_id: " << doc_id << ", element_index: " << elem_idx
-                      << ", distance: " << distance << std::endl;
 
             // Verify the doc_id satisfies the predicate (id % 2 == 0)
             ASSERT_EQ(doc_id % 2, 0) << "Result doc_id " << doc_id
@@ -523,16 +518,6 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
 
         ASSERT_LE(search_result->element_indices_.size(),
                   static_cast<size_t>(topK * num_queries));
-
-        std::cout << "Element-level search returned ("
-                  << static_cast<int>(elem_type) << "):" << std::endl;
-        for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
-            std::cout << "doc_id: " << search_result->seg_offsets_[i]
-                      << ", element_index: "
-                      << search_result->element_indices_[i]
-                      << ", distance: " << search_result->distances_[i]
-                      << std::endl;
-        }
 
         // Verify distances are sorted
         for (size_t i = 1; i < search_result->distances_.size(); ++i) {
@@ -936,16 +921,9 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                   static_cast<size_t>(topK * num_queries))
             << "Should not exceed topK results";
 
-        std::cout << "Growing segment element-level search ("
-                  << static_cast<int>(elem_type) << "):" << std::endl;
         for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
             int64_t doc_id = search_result->seg_offsets_[i];
             int32_t elem_idx = search_result->element_indices_[i];
-            float distance = search_result->distances_[i];
-
-            std::cout << "  [" << i << "] doc_id=" << doc_id
-                      << ", element_index=" << elem_idx
-                      << ", distance=" << distance << std::endl;
 
             ASSERT_EQ(doc_id % 2, 0) << "Result doc_id " << doc_id
                                      << " should satisfy (id % 2 == 0)";
@@ -1414,11 +1392,6 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
             last_distance = search_result->distances_[i];
         }
     }
-
-    std::cout << "Test passed: index_type="
-              << NestedIndexTypeToString(index_type)
-              << ", offset_mode=" << (offset_mode ? "true" : "false")
-              << ", valid_results=" << valid_count << std::endl;
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1512,70 +1485,24 @@ TEST(ElementFilterGroupBy, SealedWithIndex) {
     int group_size = 4;
 
     // Execute element-level search with group by primary key
-    std::string raw_plan = boost::str(boost::format(R"(vector_anns: <
-                                    field_id: %1%
-                                    predicates: <
-                                      element_filter_expr: <
-                                        element_expr: <
-                                          binary_range_expr: <
-                                            column_info: <
-                                              field_id: %2%
-                                              data_type: Int32
-                                              element_type: Int32
-                                              is_element_level: true
-                                            >
-                                            lower_inclusive: false
-                                            upper_inclusive: false
-                                            lower_value: <
-                                              int64_val: 100
-                                            >
-                                            upper_value: <
-                                              int64_val: 400
-                                            >
-                                          >
-                                        >
-                                        predicate: <
-                                          binary_arith_op_eval_range_expr: <
-                                            column_info: <
-                                              field_id: %3%
-                                              data_type: Int64
-                                            >
-                                            arith_op: Mod
-                                            right_operand: <
-                                              int64_val: 2
-                                            >
-                                            op: Equal
-                                            value: <
-                                              int64_val: 0
-                                            >
-                                          >
-                                        >
-                                        struct_name: "structA"
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: %4%
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      group_by_field_id: %3%
-                                      group_size: %5%
-                                      search_params: "{\"ef\": 50}"
-                                    >
-                                    placeholder_tag: "$0">)") %
-                                      vec_fid.get() % int_array_fid.get() %
-                                      int64_fid.get() % topK % group_size);
+    ScopedSchemaHandle handle(*schema);
+    std::string expr =
+        "id % 2 == 0 && element_filter(structA, 400 > $[price_array] > 100)";
+    std::string search_params = R"({"ef": 50})";
 
-    proto::plan::PlanNode plan_node;
-    auto ok =
-        google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-    ASSERT_TRUE(ok) << "Failed to parse plan";
-
-    auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+    auto plan_bytes = handle.ParseGroupBySearch(expr,
+                                                "structA[array_vec]",
+                                                topK,
+                                                knowhere::metric::L2,
+                                                search_params,
+                                                int64_fid.get(),
+                                                group_size);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
     ASSERT_NE(plan, nullptr);
 
     auto num_queries = 1;
-    auto ph_group_raw = CreatePlaceholderGroup<milvus::FloatVector>(
-        num_queries, dim, 1024, true);
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024, true);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -1587,14 +1514,6 @@ TEST(ElementFilterGroupBy, SealedWithIndex) {
 
     auto& group_by_values = search_result->group_by_values_.value();
 
-    std::cout << "Element-level + GroupBy search results:" << std::endl;
-    std::cout << "  Results count: " << search_result->seg_offsets_.size()
-              << std::endl;
-    std::cout << "  element_level_: " << search_result->element_level_
-              << std::endl;
-    std::cout << "  element_indices_ size: "
-              << search_result->element_indices_.size() << std::endl;
-
     ASSERT_LE(search_result->seg_offsets_.size(),
               static_cast<size_t>(topK * group_size))
         << "Should not exceed topK * group_size results";
@@ -1602,16 +1521,11 @@ TEST(ElementFilterGroupBy, SealedWithIndex) {
     std::unordered_map<int64_t, int> group_counts;
     for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
         int64_t doc_id = search_result->seg_offsets_[i];
-        float distance = search_result->distances_[i];
-
-        std::cout << "  [" << i << "] doc_id=" << doc_id
-                  << ", distance=" << distance;
 
         if (i < group_by_values.size() && group_by_values[i].has_value()) {
             if (std::holds_alternative<int64_t>(group_by_values[i].value())) {
                 int64_t group_val =
                     std::get<int64_t>(group_by_values[i].value());
-                std::cout << ", group_value=" << group_val;
 
                 ASSERT_EQ(group_val, doc_id)
                     << "Group by primary key: group value should equal doc_id";
@@ -1621,8 +1535,6 @@ TEST(ElementFilterGroupBy, SealedWithIndex) {
                     << "Each group should have at most group_size results";
             }
         }
-
-        std::cout << std::endl;
 
         ASSERT_EQ(doc_id % 2, 0)
             << "Result doc_id " << doc_id << " should satisfy (id % 2 == 0)";
@@ -1691,70 +1603,24 @@ TEST(ElementFilterGroupBy, GrowingSegment) {
     int group_size = 4;
 
     // Execute element-level search with group by primary key
-    std::string raw_plan = boost::str(boost::format(R"(vector_anns: <
-                                    field_id: %1%
-                                    predicates: <
-                                      element_filter_expr: <
-                                        element_expr: <
-                                          binary_range_expr: <
-                                            column_info: <
-                                              field_id: %2%
-                                              data_type: Int32
-                                              element_type: Int32
-                                              is_element_level: true
-                                            >
-                                            lower_inclusive: false
-                                            upper_inclusive: false
-                                            lower_value: <
-                                              int64_val: 100
-                                            >
-                                            upper_value: <
-                                              int64_val: 400
-                                            >
-                                          >
-                                        >
-                                        predicate: <
-                                          binary_arith_op_eval_range_expr: <
-                                            column_info: <
-                                              field_id: %3%
-                                              data_type: Int64
-                                            >
-                                            arith_op: Mod
-                                            right_operand: <
-                                              int64_val: 2
-                                            >
-                                            op: Equal
-                                            value: <
-                                              int64_val: 0
-                                            >
-                                          >
-                                        >
-                                        struct_name: "structA"
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: %4%
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      group_by_field_id: %3%
-                                      group_size: %5%
-                                      search_params: "{\"nprobe\": 10}"
-                                    >
-                                    placeholder_tag: "$0">)") %
-                                      vec_fid.get() % int_array_fid.get() %
-                                      int64_fid.get() % topK % group_size);
+    ScopedSchemaHandle handle(*schema);
+    std::string expr =
+        "id % 2 == 0 && element_filter(structA, 400 > $[price_array] > 100)";
+    std::string search_params = R"({"nprobe": 10})";
 
-    proto::plan::PlanNode plan_node;
-    auto ok =
-        google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-    ASSERT_TRUE(ok) << "Failed to parse plan";
-
-    auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+    auto plan_bytes = handle.ParseGroupBySearch(expr,
+                                                "structA[array_vec]",
+                                                topK,
+                                                knowhere::metric::L2,
+                                                search_params,
+                                                int64_fid.get(),
+                                                group_size);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
     ASSERT_NE(plan, nullptr);
 
     auto num_queries = 1;
-    auto ph_group_raw = CreatePlaceholderGroup<milvus::FloatVector>(
-        num_queries, dim, 1024, true);
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024, true);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -1836,47 +1702,23 @@ TEST(ElementFilterGroupBy, NormalGroupBy) {
     int group_size = 2;
 
     // Normal search with group by (no element level)
-    std::string raw_plan = boost::str(boost::format(R"(vector_anns: <
-                                    field_id: %1%
-                                    predicates: <
-                                      binary_arith_op_eval_range_expr: <
-                                        column_info: <
-                                          field_id: %2%
-                                          data_type: Int64
-                                        >
-                                        arith_op: Mod
-                                        right_operand: <
-                                          int64_val: 2
-                                        >
-                                        op: Equal
-                                        value: <
-                                          int64_val: 0
-                                        >
-                                      >
-                                    >
-                                    query_info: <
-                                      topk: %3%
-                                      round_decimal: 3
-                                      metric_type: "L2"
-                                      group_by_field_id: %4%
-                                      group_size: %5%
-                                      search_params: "{\"ef\": 50}"
-                                    >
-                                    placeholder_tag: "$0">)") %
-                                      vec_fid.get() % int64_fid.get() % topK %
-                                      category_fid.get() % group_size);
+    ScopedSchemaHandle handle(*schema);
+    std::string expr = "id % 2 == 0";
+    std::string search_params = R"({"ef": 50})";
 
-    proto::plan::PlanNode plan_node;
-    auto ok =
-        google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-    ASSERT_TRUE(ok) << "Failed to parse plan";
-
-    auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+    auto plan_bytes = handle.ParseGroupBySearch(expr,
+                                                "vec",
+                                                topK,
+                                                knowhere::metric::L2,
+                                                search_params,
+                                                category_fid.get(),
+                                                group_size);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
     ASSERT_NE(plan, nullptr);
 
     auto num_queries = 1;
-    auto ph_group_raw =
-        CreatePlaceholderGroup<milvus::FloatVector>(num_queries, dim, 1024);
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
