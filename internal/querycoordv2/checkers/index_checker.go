@@ -128,8 +128,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 
 	idSegmentsStats := make(map[int64]*meta.Segment)
 	targetsStats := make(map[int64][]int64) // segmentID => FieldID
-	redundant := make(map[int64][]int64)    // segmentID => indexIDs
-	redundantSegments := make(map[int64]*meta.Segment)
+	segmentsToUpdate := typeutil.NewSet[int64]()
 	for _, segment := range segments {
 		// skip update index in read only node
 		if roNodeSet.Contain(segment.Node) {
@@ -147,12 +146,10 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 
 		redundantIndices := c.checkRedundantIndices(segment, indexInfos)
 		if len(redundantIndices) > 0 {
-			redundant[segment.GetID()] = redundantIndices
-			redundantSegments[segment.GetID()] = segment
+			segmentsToUpdate.Insert(segment.GetID())
 		}
 	}
 
-	segmentsToUpdate := typeutil.NewSet[int64]()
 	for _, segmentIDs := range lo.Chunk(lo.Keys(idSegments), MaxSegmentNumPerGetIndexInfoRPC) {
 		segmentIndexInfos, err := c.broker.GetIndexInfo(ctx, collection.GetCollectionID(), segmentIDs...)
 		if err != nil {
@@ -199,11 +196,6 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	})
 	tasks = append(tasks, tasksStats...)
 
-	dropTasks := lo.FilterMap(lo.Values(redundantSegments), func(segment *meta.Segment, _ int) (task.Task, bool) {
-		return c.createSegmentIndexDropTasks(ctx, replica, segment, redundant[segment.GetID()]), true
-	})
-	tasks = append(tasks, dropTasks...)
-
 	return tasks
 }
 
@@ -242,7 +234,7 @@ func (c *IndexChecker) checkRedundantIndices(segment *meta.Segment, indexInfos [
 }
 
 func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *meta.Segment, replica *meta.Replica) (task.Task, bool) {
-	action := task.NewSegmentActionWithScope(segment.Node, task.ActionTypeUpdate, segment.GetInsertChannel(), segment.GetID(), querypb.DataScope_Historical, int(segment.GetNumOfRows()))
+	action := task.NewSegmentActionWithScope(segment.Node, task.ActionTypeReopen, segment.GetInsertChannel(), segment.GetID(), querypb.DataScope_Historical, int(segment.GetNumOfRows()))
 	t, err := task.NewSegmentTask(
 		ctx,
 		params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
@@ -319,15 +311,4 @@ func (c *IndexChecker) createSegmentStatsUpdateTask(ctx context.Context, segment
 	t.SetPriority(task.TaskPriorityLow)
 	t.SetReason("missing json stats")
 	return t, true
-}
-
-func (c *IndexChecker) createSegmentIndexDropTasks(ctx context.Context, replica *meta.Replica, segment *meta.Segment, indexIDs []int64) task.Task {
-	if len(indexIDs) == 0 {
-		return nil
-	}
-	action := task.NewDropIndexAction(segment.Node, task.ActionTypeDropIndex, segment.GetInsertChannel(), indexIDs)
-	t := task.NewDropIndexTask(ctx, c.ID(), replica.GetCollectionID(), replica, segment.GetID(), action)
-	t.SetPriority(task.TaskPriorityLow)
-	t.SetReason("drop index")
-	return t
 }

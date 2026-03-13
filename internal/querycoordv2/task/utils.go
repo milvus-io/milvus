@@ -97,7 +97,7 @@ func GetTaskType(task Task) Type {
 		return TaskTypeGrow
 	case task.Actions()[0].Type() == ActionTypeReduce:
 		return TaskTypeReduce
-	case task.Actions()[0].Type() == ActionTypeUpdate:
+	case task.Actions()[0].Type() == ActionTypeUpdate || task.Actions()[0].Type() == ActionTypeReopen:
 		return TaskTypeUpdate
 	case task.Actions()[0].Type() == ActionTypeStatsUpdate:
 		return TaskTypeStatsUpdate
