@@ -151,7 +151,7 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 	action, ok := t.Actions()[0].(*task.SegmentAction)
 	suite.Require().True(ok)
 	suite.EqualValues(200, t.ReplicaID())
-	suite.Equal(task.ActionTypeUpdate, action.Type())
+	suite.Equal(task.ActionTypeReopen, action.Type())
 	suite.EqualValues(2, action.GetSegmentID())
 
 	// test skip load index for read only node
@@ -351,7 +351,7 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 	tasks := checker.Check(context.Background())
 	suite.Len(tasks, 1)
 	suite.Len(tasks[0].Actions(), 1)
-	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).Type(), task.ActionTypeUpdate)
+	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).Type(), task.ActionTypeReopen)
 }
 
 func (suite *IndexCheckerSuite) TestLoadJsonIndex() {
