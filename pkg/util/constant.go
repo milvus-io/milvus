@@ -380,6 +380,7 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeListResourceGroups.String(),
 		commonpb.ObjectPrivilege_PrivilegeListPrivilegeGroups.String(),
 		commonpb.ObjectPrivilege_PrivilegeGetReplicateConfiguration.String(),
+		commonpb.ObjectPrivilege_PrivilegeListFileResources.String(),
 	})
 
 	ClusterReadWritePrivileges = append(ClusterReadOnlyPrivileges,
@@ -388,6 +389,8 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeTransferNode.String(),
 			commonpb.ObjectPrivilege_PrivilegeTransferReplica.String(),
 			commonpb.ObjectPrivilege_PrivilegeUpdateResourceGroups.String(),
+			commonpb.ObjectPrivilege_PrivilegeAddFileResource.String(),
+			commonpb.ObjectPrivilege_PrivilegeRemoveFileResource.String(),
 		})...,
 	)
 
