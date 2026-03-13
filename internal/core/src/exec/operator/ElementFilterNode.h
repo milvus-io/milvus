@@ -79,9 +79,14 @@ class PhyElementFilterNode : public Operator {
     }
 
  private:
+    void
+    CollectResults(SearchResult& search_result,
+                   const IArrayOffsets* array_offsets);
+
     std::unique_ptr<ExprSet> element_exprs_;
     QueryContext* query_context_;
     std::string struct_name_;
+    bool has_doc_predicate_{true};
     bool is_finished_{false};
 };
 

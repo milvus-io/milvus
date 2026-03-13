@@ -191,11 +191,13 @@ class ElementFilterNode : public PlanNode {
     ElementFilterNode(const PlanNodeId& id,
                       expr::TypedExprPtr element_filter,
                       std::string struct_name,
-                      std::vector<PlanNodePtr> sources)
+                      std::vector<PlanNodePtr> sources,
+                      bool has_doc_predicate = true)
         : PlanNode(id),
           sources_{std::move(sources)},
           element_filter_(std::move(element_filter)),
-          struct_name_(std::move(struct_name)) {
+          struct_name_(std::move(struct_name)),
+          has_doc_predicate_(has_doc_predicate) {
         AssertInfo(
             element_filter_->type() == DataType::BOOL,
             fmt::format(
@@ -223,6 +225,11 @@ class ElementFilterNode : public PlanNode {
         return struct_name_;
     }
 
+    bool
+    has_doc_predicate() const {
+        return has_doc_predicate_;
+    }
+
     std::string_view
     name() const override {
         return "ElementFilter";
@@ -231,15 +238,18 @@ class ElementFilterNode : public PlanNode {
     std::string
     ToString() const override {
         return fmt::format(
-            "ElementFilterNode:[struct_name:{}, element_filter:{}]",
+            "ElementFilterNode:[struct_name:{}, element_filter:{}, "
+            "has_doc_predicate:{}]",
             struct_name_,
-            element_filter_->ToString());
+            element_filter_->ToString(),
+            has_doc_predicate_);
     }
 
  private:
     const std::vector<PlanNodePtr> sources_;
     const expr::TypedExprPtr element_filter_;
     const std::string struct_name_;
+    const bool has_doc_predicate_;
 };
 
 class ElementFilterBitsNode : public PlanNode {

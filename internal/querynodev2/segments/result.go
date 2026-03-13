@@ -276,7 +276,9 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		zap.Int64("limit", param.limit),
 		zap.Int("resultNum", len(retrieveResults)),
 	)
-	if len(retrieveResults) == 1 {
+	// For doc-level with single result, return directly (no merge/limit needed)
+	// For element-level, need to continue to apply element-count limit
+	if len(retrieveResults) == 1 && !retrieveResults[0].GetElementLevel() {
 		return retrieveResults[0], nil
 	}
 	var (
@@ -291,6 +293,10 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	_, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeInternalRetrieveResult")
 	defer sp.End()
 
+	// Detect if this is an element-level query
+	isElementLevel := len(retrieveResults) > 0 && retrieveResults[0].GetElementLevel()
+	ret.ElementLevel = isElementLevel
+
 	validRetrieveResults := []*TimestampedRetrieveResult[*internalpb.RetrieveResults]{}
 	relatedDataSize := int64(0)
 	hasMoreResult := false
@@ -302,6 +308,14 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		size := typeutil.GetSizeOfIDs(r.GetIds())
 		if r == nil || len(r.GetFieldsData()) == 0 || size == 0 {
 			continue
+		}
+		// Validate element-level consistency: if any result is element-level, all must be
+		if isElementLevel && !r.GetElementLevel() {
+			return nil, fmt.Errorf("inconsistent element-level flag: expected all results to be element-level")
+		}
+		// Validate element_indices length matches ids length for element-level
+		if isElementLevel && len(r.GetElementIndices()) != size {
+			return nil, fmt.Errorf("element_indices length (%d) does not match ids length (%d)", len(r.GetElementIndices()), size)
 		}
 		tr, err := NewTimestampedRetrieveResult(r)
 		if err != nil {
@@ -317,8 +331,12 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		return ret, nil
 	}
 
+	var limit int = -1
 	if param.limit != typeutil.Unlimited && reduce.ShouldUseInputLimit(param.reduceType) {
-		loopEnd = int(param.limit)
+		limit = int(param.limit)
+		if !isElementLevel {
+			loopEnd = int(param.limit)
+		}
 	}
 
 	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(loopEnd))
@@ -330,9 +348,19 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		idxComputers[i] = typeutil.NewFieldDataIdxComputer(vr.Result.GetFieldsData())
 	}
 
+	// Track element indices for element-level query
+	type docSelection struct {
+		batchIndex     int
+		resultIndex    int64
+		elementIndices *internalpb.ElementIndices
+	}
+	docSelections := make([]docSelection, 0, loopEnd)
+	idxInSelections := make(map[interface{}]int) // pk -> index in docSelections
+
+	var availableCount int // for doc-level: doc count; for element-level: element count
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for j := 0; j < loopEnd; {
+	for j := 0; j < loopEnd && (limit == -1 || availableCount < limit); {
 		sel, drainOneResult := typeutil.SelectMinPKWithTimestamp(validRetrieveResults, cursors)
 		if sel == -1 || (reduce.ShouldStopWhenDrained(param.reduceType) && drainOneResult) {
 			break
@@ -340,12 +368,33 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 
 		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
 		ts := validRetrieveResults[sel].Timestamps[cursors[sel]]
+
+		// Get element indices for element-level query
+		var elemIndices *internalpb.ElementIndices
+		var elemCount int = 1 // default for doc-level
+		if isElementLevel {
+			elemIndicesList := validRetrieveResults[sel].Result.GetElementIndices()
+			if int(cursors[sel]) < len(elemIndicesList) {
+				elemIndices = elemIndicesList[cursors[sel]]
+				elemCount = len(elemIndices.GetIndices())
+			}
+		}
+
 		fieldsData := validRetrieveResults[sel].Result.GetFieldsData()
 		fieldIdxs := idxComputers[sel].Compute(cursors[sel])
 		if _, ok := idTsMap[pk]; !ok {
 			typeutil.AppendPKs(ret.Ids, pk)
 			retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, cursors[sel], fieldIdxs...)
 			idTsMap[pk] = ts
+			if isElementLevel {
+				idxInSelections[pk] = len(docSelections)
+				docSelections = append(docSelections, docSelection{
+					batchIndex:     sel,
+					resultIndex:    cursors[sel],
+					elementIndices: elemIndices,
+				})
+			}
+			availableCount += elemCount
 			j++
 		} else {
 			// primary keys duplicate
@@ -354,6 +403,16 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 				idTsMap[pk] = ts
 				typeutil.DeleteFieldData(ret.FieldsData)
 				retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, cursors[sel], fieldIdxs...)
+				if isElementLevel {
+					idx := idxInSelections[pk]
+					oldElemCount := len(docSelections[idx].elementIndices.GetIndices())
+					availableCount = availableCount - oldElemCount + elemCount
+					docSelections[idx] = docSelection{
+						batchIndex:     sel,
+						resultIndex:    cursors[sel],
+						elementIndices: elemIndices,
+					}
+				}
 			}
 		}
 
@@ -367,6 +426,13 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 
 	if skipDupCnt > 0 {
 		log.Debug("skip duplicated query result while reducing internal.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
+	}
+
+	// Fill ElementIndices for element-level query
+	if isElementLevel {
+		for _, sel := range docSelections {
+			ret.ElementIndices = append(ret.ElementIndices, sel.elementIndices)
+		}
 	}
 
 	return ret, nil
@@ -404,6 +470,10 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		loopEnd    int
 	)
 
+	// Detect if this is an element-level query
+	isElementLevel := len(retrieveResults) > 0 && retrieveResults[0].GetElementLevel()
+	ret.ElementLevel = isElementLevel
+
 	validRetrieveResults := []*TimestampedRetrieveResult[*segcorepb.RetrieveResults]{}
 	validSegments := make([]Segment, 0, len(segments))
 	hasMoreResult := false
@@ -415,6 +485,14 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		if r == nil || len(r.GetOffset()) == 0 || size == 0 {
 			log.Debug("filter out invalid retrieve result")
 			continue
+		}
+		// Validate element-level consistency: if any result is element-level, all must be
+		if isElementLevel && !r.GetElementLevel() {
+			return nil, fmt.Errorf("inconsistent element-level flag: expected all results to be element-level")
+		}
+		// Validate element_indices length matches ids length for element-level
+		if isElementLevel && len(r.GetElementIndices()) != size {
+			return nil, fmt.Errorf("element_indices length (%d) does not match ids length (%d)", len(r.GetElementIndices()), size)
 		}
 		tr, err := NewTimestampedRetrieveResult(r)
 		if err != nil {
@@ -440,16 +518,21 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(loopEnd))
 	cursors := make([]int64, len(validRetrieveResults))
-	idTsMap := make(map[any]int64, limit*len(validRetrieveResults))
+	mapCap := 0
+	if limit > 0 {
+		mapCap = limit * len(validRetrieveResults)
+	}
+	idTsMap := make(map[any]int64, mapCap)
 
-	var availableCount int
+	var availableCount int // for doc-level: doc count; for element-level: element count
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 
 	type selection struct {
-		batchIndex  int   // index of validate retrieve results
-		resultIndex int64 // index of selection in selected result item
-		offset      int64 // offset of the result
+		batchIndex     int                       // index of validate retrieve results
+		resultIndex    int64                     // index of selection in selected result item
+		offset         int64                     // offset of the result
+		elementIndices *segcorepb.ElementIndices // element indices for element-level query
 	}
 
 	var selections []selection
@@ -462,15 +545,30 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
 		ts := validRetrieveResults[sel].Timestamps[cursors[sel]]
+
+		// Get element indices for element-level query
+		var elemIndices *segcorepb.ElementIndices
+		// For doc-level filter, we always count 1 for each document
+		// For element-level filter, we count the number of elements for each document
+		var elemCount int = 1
+		if isElementLevel {
+			elemIndicesList := validRetrieveResults[sel].Result.GetElementIndices()
+			if int(cursors[sel]) < len(elemIndicesList) {
+				elemIndices = elemIndicesList[cursors[sel]]
+				elemCount = len(elemIndices.GetIndices())
+			}
+		}
+
 		if _, ok := idTsMap[pk]; !ok {
 			typeutil.AppendPKs(ret.Ids, pk)
 			selections = append(selections, selection{
-				batchIndex:  sel,
-				resultIndex: cursors[sel],
-				offset:      validRetrieveResults[sel].Result.GetOffset()[cursors[sel]],
+				batchIndex:     sel,
+				resultIndex:    cursors[sel],
+				offset:         validRetrieveResults[sel].Result.GetOffset()[cursors[sel]],
+				elementIndices: elemIndices,
 			})
 			idTsMap[pk] = ts
-			availableCount++
+			availableCount += elemCount
 		} else {
 			// primary keys duplicate
 			skipDupCnt++
@@ -485,10 +583,16 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 					}
 				}
 				if idx >= 0 {
+					// For element-level: adjust availableCount
+					if isElementLevel {
+						oldElemCount := len(selections[idx].elementIndices.GetIndices())
+						availableCount = availableCount - oldElemCount + elemCount
+					}
 					selections[idx] = selection{
-						batchIndex:  sel,
-						resultIndex: cursors[sel],
-						offset:      validRetrieveResults[sel].Result.GetOffset()[cursors[sel]],
+						batchIndex:     sel,
+						resultIndex:    cursors[sel],
+						offset:         validRetrieveResults[sel].Result.GetOffset()[cursors[sel]],
+						elementIndices: elemIndices,
 					}
 				}
 			}
@@ -584,6 +688,13 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			if retSize > maxOutputSize {
 				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 			}
+		}
+	}
+
+	// Fill ElementIndices for element-level query
+	if isElementLevel {
+		for _, sel := range selections {
+			ret.ElementIndices = append(ret.ElementIndices, sel.elementIndices)
 		}
 	}
 

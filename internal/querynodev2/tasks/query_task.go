@@ -172,6 +172,8 @@ func (t *QueryTask) Execute() error {
 		HasMoreResult:      reducedResult.HasMoreResult,
 		ScannedRemoteBytes: reducedResult.GetScannedRemoteBytes(),
 		ScannedTotalBytes:  reducedResult.GetScannedTotalBytes(),
+		ElementLevel:       reducedResult.GetElementLevel(),
+		ElementIndices:     convertSegcoreElementIndicesToInternal(reducedResult.GetElementIndices()),
 	}
 	return nil
 }
@@ -194,4 +196,18 @@ func (t *QueryTask) Result() *internalpb.RetrieveResults {
 
 func (t *QueryTask) NQ() int64 {
 	return 1
+}
+
+// convertSegcoreElementIndicesToInternal converts segcorepb.ElementIndices to internalpb.ElementIndices
+func convertSegcoreElementIndicesToInternal(src []*segcorepb.ElementIndices) []*internalpb.ElementIndices {
+	if src == nil {
+		return nil
+	}
+	dst := make([]*internalpb.ElementIndices, len(src))
+	for i, s := range src {
+		if s != nil {
+			dst[i] = &internalpb.ElementIndices{Indices: s.GetIndices()}
+		}
+	}
+	return dst
 }

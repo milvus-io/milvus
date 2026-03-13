@@ -1054,6 +1054,94 @@ func TestResult_MergeRequestCost(t *testing.T) {
 	assert.Equal(t, int64(43), channelCost.TotalNQ)
 }
 
+func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults_ElementLevel() {
+	// Helper to create element-level retrieve result
+	makeResult := func(pks []int64, ts []int64, elemIndices [][]int32) *segcorepb.RetrieveResults {
+		offsets := make([]int64, len(pks))
+		for i := range pks {
+			offsets[i] = int64(i)
+		}
+		elemIdxList := make([]*segcorepb.ElementIndices, len(elemIndices))
+		for i, indices := range elemIndices {
+			elemIdxList[i] = &segcorepb.ElementIndices{Indices: indices}
+		}
+		return &segcorepb.RetrieveResults{
+			Ids:            &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: pks}}},
+			Offset:         offsets,
+			FieldsData:     []*schemapb.FieldData{mock_segcore.GenFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, ts, 1)},
+			ElementLevel:   true,
+			ElementIndices: elemIdxList,
+		}
+	}
+
+	suite.Run("merge different pks", func() {
+		r1 := makeResult([]int64{1, 3}, []int64{100, 100}, [][]int32{{0, 1}, {2}})
+		r2 := makeResult([]int64{2, 4}, []int64{100, 100}, [][]int32{{0}, {1, 2}})
+		result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r1, r2},
+			NewMergeParam(typeutil.Unlimited, nil, nil, reduce.IReduceNoOrder))
+		suite.NoError(err)
+		suite.True(result.GetElementLevel())
+		suite.Equal([]int64{1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
+		suite.Equal(4, len(result.GetElementIndices()))
+		suite.Equal([]int32{0, 1}, result.GetElementIndices()[0].GetIndices())
+	})
+
+	suite.Run("dedup by pk with newer ts", func() {
+		r1 := makeResult([]int64{1}, []int64{100}, [][]int32{{0, 1}})    // older
+		r2 := makeResult([]int64{1}, []int64{200}, [][]int32{{0, 1, 2}}) // newer, should win
+		result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r1, r2},
+			NewMergeParam(typeutil.Unlimited, nil, nil, reduce.IReduceNoOrder))
+		suite.NoError(err)
+		suite.Equal([]int64{1}, result.GetIds().GetIntId().GetData())
+		suite.Equal([]int32{0, 1, 2}, result.GetElementIndices()[0].GetIndices()) // newer wins
+	})
+
+	suite.Run("limit counts elements", func() {
+		// doc1 has 3 elements, doc2 has 2 elements
+		r1 := makeResult([]int64{1, 2}, []int64{100, 100}, [][]int32{{0, 1, 2}, {0, 1}})
+		result, err := MergeSegcoreRetrieveResultsV1(context.Background(), []*segcorepb.RetrieveResults{r1},
+			NewMergeParam(3, nil, nil, reduce.IReduceNoOrder)) // limit=3 elements
+		suite.NoError(err)
+		// Should get doc1 (3 elements) only, not doc2
+		suite.Equal([]int64{1}, result.GetIds().GetIntId().GetData())
+		suite.Equal(1, len(result.GetElementIndices()))
+	})
+}
+
+func (suite *ResultSuite) TestResult_MergeInternalRetrieveResult_ElementLevel() {
+	makeResult := func(pks []int64, ts []int64, elemIndices [][]int32) *internalpb.RetrieveResults {
+		elemIdxList := make([]*internalpb.ElementIndices, len(elemIndices))
+		for i, indices := range elemIndices {
+			elemIdxList[i] = &internalpb.ElementIndices{Indices: indices}
+		}
+		return &internalpb.RetrieveResults{
+			Ids:            &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: pks}}},
+			FieldsData:     []*schemapb.FieldData{mock_segcore.GenFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64, ts, 1)},
+			ElementLevel:   true,
+			ElementIndices: elemIdxList,
+		}
+	}
+
+	suite.Run("merge and dedup", func() {
+		r1 := makeResult([]int64{1, 2}, []int64{100, 100}, [][]int32{{0}, {1, 2}})
+		r2 := makeResult([]int64{1, 3}, []int64{200, 100}, [][]int32{{0, 1}, {0}}) // pk=1 newer
+		result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1, r2},
+			NewMergeParam(typeutil.Unlimited, nil, nil, reduce.IReduceNoOrder))
+		suite.NoError(err)
+		suite.True(result.GetElementLevel())
+		suite.Equal([]int64{1, 2, 3}, result.GetIds().GetIntId().GetData())
+		suite.Equal([]int32{0, 1}, result.GetElementIndices()[0].GetIndices()) // pk=1 uses newer
+	})
+
+	suite.Run("limit counts elements", func() {
+		r1 := makeResult([]int64{1, 2}, []int64{100, 100}, [][]int32{{0, 1}, {0, 1, 2}})
+		result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1},
+			NewMergeParam(2, nil, nil, reduce.IReduceNoOrder)) // limit=2 elements
+		suite.NoError(err)
+		suite.Equal([]int64{1}, result.GetIds().GetIntId().GetData())
+	})
+}
+
 func TestResult(t *testing.T) {
 	paramtable.Init()
 	suite.Run(t, new(ResultSuite))

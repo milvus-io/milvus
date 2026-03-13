@@ -1441,10 +1441,10 @@ ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
 }
 
 std::pair<std::vector<OffsetMap::OffsetType>, bool>
-ChunkedSegmentSealedImpl::find_first(int64_t limit,
-                                     const BitsetTypeView& bitset) const {
+ChunkedSegmentSealedImpl::find_first_n(int64_t limit,
+                                       const BitsetTypeView& bitset) const {
     if (!is_sorted_by_pk_) {
-        return insert_record_.pk2offset_->find_first(limit, bitset);
+        return insert_record_.pk2offset_->find_first_n(limit, bitset);
     }
     if (limit == Unlimited || limit == NoLimit) {
         limit = num_rows_.value();
@@ -1472,6 +1472,56 @@ ChunkedSegmentSealedImpl::find_first(int64_t limit,
     }
 
     return {seg_offsets, more_hit_than_limit && result.has_value()};
+}
+
+std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
+ChunkedSegmentSealedImpl::find_first_n_element(
+    int64_t limit,
+    const BitsetTypeView& element_bitset,
+    const IArrayOffsets* array_offsets) const {
+    if (!is_sorted_by_pk_) {
+        // Not sorted by PK, use pk2offset_ to iterate in PK order
+        return insert_record_.pk2offset_->find_first_n_element(
+            limit, element_bitset, array_offsets);
+    }
+
+    // Sorted by PK, element_id order = (PK, element_index) order
+    // Directly iterate element_bitset in order
+    if (limit == Unlimited || limit == NoLimit) {
+        limit = static_cast<int64_t>(element_bitset.size());
+    }
+
+    int64_t hit_num = 0;
+    auto element_size = static_cast<int64_t>(element_bitset.size());
+    int64_t cnt = element_size - element_bitset.count();
+    auto more_hit_than_limit = cnt > limit;
+    limit = std::min(limit, cnt);
+
+    std::vector<int64_t> doc_offsets;
+    std::vector<std::vector<int32_t>> element_indices;
+
+    int64_t current_doc_id = -1;
+    std::optional<size_t> elem_opt = element_bitset.find_first(false);
+    while (elem_opt.has_value() && hit_num < limit) {
+        int64_t elem_id = static_cast<int64_t>(elem_opt.value());
+        auto [doc_id, elem_idx] = array_offsets->ElementIDToRowID(elem_id);
+
+        if (doc_id != current_doc_id) {
+            // New document - start a new entry
+            doc_offsets.push_back(doc_id);
+            element_indices.push_back({static_cast<int32_t>(elem_idx)});
+            current_doc_id = doc_id;
+        } else {
+            // Same document - append to existing entry
+            element_indices.back().push_back(static_cast<int32_t>(elem_idx));
+        }
+        hit_num++;
+        elem_opt = element_bitset.find_next(elem_id, false);
+    }
+
+    return {std::move(doc_offsets),
+            std::move(element_indices),
+            more_hit_than_limit && elem_opt.has_value()};
 }
 
 ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(

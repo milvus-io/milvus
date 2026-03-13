@@ -368,6 +368,13 @@ struct RetrieveResult {
     bool has_more_result = true;
     // record the storage usage in retrieve
     StorageCost retrieve_storage_cost_;
+
+    // Element-level query support
+    // When element_level_ is true:
+    //   - result_offsets_ contains unique doc_ids (no duplicates)
+    //   - element_indices_[i] contains all matching element indices for result_offsets_[i]
+    bool element_level_{false};
+    std::vector<std::vector<int32_t>> element_indices_;
 };
 
 using RetrieveResultPtr = std::shared_ptr<RetrieveResult>;

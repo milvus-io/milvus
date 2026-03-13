@@ -181,6 +181,17 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     results->mutable_offset()->Add(retrieve_results.result_offsets_.begin(),
                                    retrieve_results.result_offsets_.end());
 
+    // Element-level query support: serialize element_level flag and element_indices
+    if (retrieve_results.element_level_) {
+        results->set_element_level(true);
+        // element_indices_ is vector<vector<int32_t>>, serialize each doc's indices
+        for (const auto& indices : retrieve_results.element_indices_) {
+            auto* elem_indices = results->add_element_indices();
+            elem_indices->mutable_indices()->Add(indices.begin(),
+                                                 indices.end());
+        }
+    }
+
     std::chrono::high_resolution_clock::time_point get_target_entry_start =
         std::chrono::high_resolution_clock::now();
     if (retrieve_results.field_data_.empty()) {

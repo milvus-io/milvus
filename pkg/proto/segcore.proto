@@ -41,6 +41,11 @@ message JsonKeyStats {
   int64 json_key_stats_data_format = 7;
 }
 
+// Element indices for a single document in element-level query
+message ElementIndices {
+  repeated int32 indices = 1;
+}
+
 message RetrieveResults {
   schema.IDs ids = 1;
   repeated int64 offset = 2;
@@ -49,6 +54,11 @@ message RetrieveResults {
   bool has_more_result = 5;
   int64 scanned_remote_bytes = 6;
   int64 scanned_total_bytes = 7;
+  // Element-level query support
+  bool element_level = 8;
+  // Element indices per document (aligned with offset array)
+  // element_indices[i] contains all matching element indices for offset[i]
+  repeated ElementIndices element_indices = 9;
 }
 
 message LoadFieldMeta {

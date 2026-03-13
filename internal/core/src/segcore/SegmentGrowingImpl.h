@@ -521,8 +521,16 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetTypeView& bitset) const override {
-        return insert_record_.pk2offset_->find_first(limit, bitset);
+    find_first_n(int64_t limit, const BitsetTypeView& bitset) const override {
+        return insert_record_.pk2offset_->find_first_n(limit, bitset);
+    }
+
+    std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
+    find_first_n_element(int64_t limit,
+                         const BitsetTypeView& element_bitset,
+                         const IArrayOffsets* array_offsets) const override {
+        return insert_record_.pk2offset_->find_first_n_element(
+            limit, element_bitset, array_offsets);
     }
 
     bool
