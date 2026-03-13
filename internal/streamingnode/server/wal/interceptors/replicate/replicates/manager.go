@@ -45,4 +45,8 @@ type ReplicateManager interface {
 	// GetReplicateCheckpoint gets current replicate checkpoint.
 	// return ReplicateViolationError if the replicate mode is not replicating.
 	GetReplicateCheckpoint() (*utility.ReplicateCheckpoint, error)
+
+	// GetSalvageCheckpoint returns the salvage checkpoint captured during force promote.
+	// Returns nil if no force promote has occurred or TTL expired.
+	GetSalvageCheckpoint() *utility.ReplicateCheckpoint
 }

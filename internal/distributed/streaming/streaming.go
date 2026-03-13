@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -100,7 +101,7 @@ type ReplicateService interface {
 	Append(ctx context.Context, msg message.ReplicateMutableMessage) (*types.AppendResult, error)
 
 	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
-	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
+	UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error
 
 	// GetReplicateConfiguration returns the current replication configuration
 	// with sensitive fields (tokens) sanitized.
@@ -109,6 +110,10 @@ type ReplicateService interface {
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.
 	GetReplicateCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error)
+
+	// GetSalvageCheckpoint returns the salvage checkpoint captured during force promote.
+	// Returns nil if no force promote has occurred or TTL expired.
+	GetSalvageCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error)
 }
 
 // Balancer is the interface for managing the balancer of the wal.
