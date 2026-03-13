@@ -306,6 +306,18 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		fieldData.FieldId = fieldSchema.GetFieldID()
 		fieldData.FieldName = fieldName
 
+		// Ensure dynamic field has ValidData before merge logic.
+		// SDK doesn't set ValidData on $meta; without it, AppendFieldDataByColumn
+		// won't propagate ValidData for insert rows, causing length mismatch.
+		if fieldData.GetIsDynamic() && len(fieldData.GetValidData()) == 0 {
+			nRows := int(it.upsertMsg.InsertMsg.NRows())
+			validData := make([]bool, nRows)
+			for i := range validData {
+				validData[i] = true
+			}
+			fieldData.ValidData = validData
+		}
+
 		// compatible with different nullable/default_value data format from sdk
 		if len(fieldData.GetValidData()) != 0 {
 			var err error
