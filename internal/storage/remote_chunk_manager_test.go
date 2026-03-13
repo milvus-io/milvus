@@ -1326,10 +1326,10 @@ func TestToMilvusIoError(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrIoTooManyRequests)
 	})
 
-	t.Run("googleapi other error", func(t *testing.T) {
+	t.Run("googleapi permission denied", func(t *testing.T) {
 		googleErr := &googleapi.Error{Code: http.StatusForbidden}
 		err := ToMilvusIoError(fileName, googleErr)
-		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.ErrorIs(t, err, merr.ErrIoPermissionDenied)
 	})
 }
 
