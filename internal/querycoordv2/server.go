@@ -19,9 +19,7 @@ package querycoordv2
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/blang/semver/v4"
@@ -656,11 +654,6 @@ func (s *Server) watchNodes(revision int64) {
 				// ErrCompacted is handled inside SessionWatcher
 				log.Warn("Session Watcher channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
 				go s.Stop()
-				if s.session.IsTriggerKill() {
-					if p, err := os.FindProcess(os.Getpid()); err == nil {
-						p.Signal(syscall.SIGINT)
-					}
-				}
 				return
 			}
 

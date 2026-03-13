@@ -20,10 +20,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"os"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/blang/semver/v4"
@@ -876,11 +874,6 @@ func (s *Server) stopServiceWatch() {
 	// ErrCompacted is handled inside SessionWatcher, which means there is some other error occurred, closing server.
 	log.Ctx(s.ctx).Error("watch service channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
 	go s.Stop()
-	if s.session.IsTriggerKill() {
-		if p, err := os.FindProcess(os.Getpid()); err == nil {
-			p.Signal(syscall.SIGINT)
-		}
-	}
 }
 
 // watchService watches services.
