@@ -11,3 +11,4 @@
 
 add_source_at_current_directory_recursively()
 add_library(milvus_exec OBJECT ${SOURCE_FILES})
+target_link_libraries(milvus_exec PUBLIC milvus_conan_deps)

@@ -57,7 +57,7 @@ print_error() {
 # Minimum version requirements
 MIN_CMAKE_VERSION="3.26"
 MIN_GO_VERSION="1.21"
-CONAN_VERSION="1.66.0"
+CONAN_VERSION="2.25.1"
 RUST_VERSION="1.89"
 
 #######################################
@@ -355,10 +355,7 @@ install_rocky_deps() {
     gcc_ver=$(gcc -dumpversion 2>/dev/null | cut -d. -f1)
     if [ -n "$gcc_ver" ]; then
         print_info "Configuring Conan profile for GCC ${gcc_ver}..."
-        conan profile new default --detect --force 2>/dev/null || true
-        conan profile update settings.compiler.version="$gcc_ver" default
-        conan profile update settings.compiler.libcxx=libstdc++11 default
-        conan profile update settings.compiler.cppstd=17 default
+        conan profile detect --force 2>/dev/null || true
     fi
 
     # Install Rust
