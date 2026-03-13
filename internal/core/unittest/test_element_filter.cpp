@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -1512,6 +1513,10 @@ TEST(ElementFilterGroupBy, SealedWithIndex) {
     ASSERT_TRUE(search_result->group_by_values_.has_value())
         << "Group by values should be present";
 
+    // Group by returns row-level results even for element-level search
+    ASSERT_FALSE(search_result->element_level_)
+        << "Group by should return row-level results";
+
     auto& group_by_values = search_result->group_by_values_.value();
 
     ASSERT_LE(search_result->seg_offsets_.size(),
@@ -1751,6 +1756,162 @@ TEST(ElementFilterGroupBy, NormalGroupBy) {
             if (std::holds_alternative<int32_t>(group_by_values[i].value())) {
                 int32_t group_val =
                     std::get<int32_t>(group_by_values[i].value());
+                group_counts[group_val]++;
+                ASSERT_LE(group_counts[group_val], group_size)
+                    << "Each group should have at most group_size results";
+            }
+        }
+    }
+
+    ASSERT_LE(group_counts.size(), static_cast<size_t>(topK))
+        << "Should have at most topK distinct groups";
+}
+
+// Test: element-level + group by non-unique field to verify row deduplication.
+// When multiple elements from the same document are close to the query vector,
+// each document should only appear once in the results (not consume multiple
+// group slots).
+TEST(ElementFilterGroupBy, DeduplicateRowsInGroup) {
+    int dim = 4;
+    size_t N = 500;
+    int array_len = 3;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    // category field: non-unique, used for group by
+    // Assign category = id % 10, so ~50 docs per category
+    auto category_fid = schema->AddDebugField("category", DataType::INT32);
+    schema->set_primary_field_id(int64_fid);
+
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Customize int_array data: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+
+            for (int row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+        }
+        // Set category = id % 10
+        if (field_data->field_id() == category_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_int_data()
+                ->mutable_data()
+                ->Clear();
+            for (int row = 0; row < N; row++) {
+                field_data->mutable_scalars()
+                    ->mutable_int_data()
+                    ->mutable_data()
+                    ->Add(row % 10);
+            }
+        }
+    }
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Build and load vector index
+    auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
+    std::vector<float> vector_data(dim * N * array_len);
+    for (int i = 0; i < N; i++) {
+        const auto& float_vec = array_vec_values[i].float_vector().data();
+        for (int j = 0; j < array_len * dim; j++) {
+            vector_data[i * array_len * dim + j] = float_vec[j];
+        }
+    }
+
+    auto indexing = GenVecIndexing(N * array_len,
+                                   dim,
+                                   vector_data.data(),
+                                   knowhere::IndexEnum::INDEX_HNSW);
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.field_type = DataType::VECTOR_ARRAY;
+    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(load_index_info);
+
+    int topK = 5;
+    int group_size = 3;
+
+    ScopedSchemaHandle handle(*schema);
+    std::string expr = "element_filter(structA, 2000 > $[price_array] > 100)";
+    std::string search_params = R"({"ef": 50})";
+
+    auto plan_bytes = handle.ParseGroupBySearch(expr,
+                                                "structA[array_vec]",
+                                                topK,
+                                                knowhere::metric::L2,
+                                                search_params,
+                                                category_fid.get(),
+                                                group_size);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto num_queries = 1;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024, true);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+    ASSERT_NE(search_result, nullptr);
+    ASSERT_TRUE(search_result->group_by_values_.has_value())
+        << "Group by values should be present";
+    ASSERT_FALSE(search_result->element_level_)
+        << "Group by should return row-level results";
+
+    auto& group_by_values = search_result->group_by_values_.value();
+
+    ASSERT_FALSE(search_result->seg_offsets_.empty())
+        << "Should have search results";
+    ASSERT_LE(search_result->seg_offsets_.size(),
+              static_cast<size_t>(topK * group_size))
+        << "Should not exceed topK * group_size results";
+
+    // Verify: no duplicate row_offsets in results.
+    // Without deduplication, the same document could appear multiple times
+    // because different elements from one document may all be close to the
+    // query vector.
+    std::unordered_set<int64_t> seen_docs;
+    std::unordered_map<int32_t, int> group_counts;
+    for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+        int64_t doc_id = search_result->seg_offsets_[i];
+
+        ASSERT_TRUE(seen_docs.insert(doc_id).second)
+            << "Duplicate doc_id " << doc_id
+            << " in results: same document should not appear more than once";
+
+        if (i < group_by_values.size() && group_by_values[i].has_value()) {
+            if (std::holds_alternative<int32_t>(group_by_values[i].value())) {
+                int32_t group_val =
+                    std::get<int32_t>(group_by_values[i].value());
+
+                ASSERT_EQ(group_val, doc_id % 10)
+                    << "Group value should equal category (doc_id % 10)";
+
                 group_counts[group_val]++;
                 ASSERT_LE(group_counts[group_val], group_size)
                     << "Each group should have at most group_size results";
