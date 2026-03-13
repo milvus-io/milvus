@@ -109,7 +109,7 @@ case "${unameOut}" in
 
       export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}:$ROOT_DIR/internal/core/output/lib/pkgconfig"
       export DYLD_LIBRARY_PATH=$ROOT_DIR/cmake_build/lib:$ROOT_DIR/internal/core/output/lib
-      export RPATH=$DYLD_LIBRARY_PATH;;
+      export RPATH=$(echo "$DYLD_LIBRARY_PATH" | sed 's/:/ -r /g');;
     MINGW*)
       extra_path=$(cygpath -w "$ROOT_DIR/internal/core/output/lib")
       export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:+$PKG_CONFIG_PATH;}${extra_path}\pkgconfig"
