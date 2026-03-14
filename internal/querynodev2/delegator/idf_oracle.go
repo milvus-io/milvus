@@ -51,6 +51,7 @@ type IDFOracle interface {
 
 	RegisterGrowing(segmentID int64, stats bm25Stats)
 	RegisterSealed(segmentID int64, stats bm25Stats) error
+	UnregisterSealed(segmentIDs ...int64)
 
 	BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error)
 
@@ -354,6 +355,14 @@ func (o *idfOracle) RegisterSealed(segmentID int64, stats bm25Stats) error {
 		return err
 	}
 	return nil
+}
+
+func (o *idfOracle) UnregisterSealed(segmentIDs ...int64) {
+	for _, segmentID := range segmentIDs {
+		if stats, ok := o.sealed.GetAndRemove(segmentID); ok {
+			stats.Remove()
+		}
+	}
 }
 
 func (o *idfOracle) UpdateGrowing(segmentID int64, stats bm25Stats) {
