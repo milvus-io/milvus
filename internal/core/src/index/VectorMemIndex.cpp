@@ -370,7 +370,7 @@ VectorMemIndex<T>::Build(const Config& config) {
             offsets.reserve(total_num_rows + 1);
             offsets.push_back(lim_offset);
             auto bytes_per_vec = vector_bytes_per_element(elem_type_, dim);
-            for (auto data : field_datas) {
+            for (auto& data : field_datas) {
                 auto vec_array_data =
                     dynamic_cast<FieldData<VectorArray>*>(data.get());
                 AssertInfo(vec_array_data != nullptr,

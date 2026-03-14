@@ -161,7 +161,7 @@ JsonStatsParquetWriter::AppendValue(const std::string& key,
             ErrorCode::UnexpectedError, "builder for key {} not found", key);
     }
 
-    auto builder = it->second;
+    auto& builder = it->second;
     auto ast = AppendDataToBuilder(value, builder);
     AssertInfo(ast.ok(), "failed to append data to builder");
 }
@@ -177,7 +177,7 @@ JsonStatsParquetWriter::AppendRow(
                       key);
         }
 
-        auto builder = it->second;
+        auto& builder = it->second;
         auto status = AppendDataToBuilder(value, builder);
         AssertInfo(status.ok(), "failed to append data to builder");
     }

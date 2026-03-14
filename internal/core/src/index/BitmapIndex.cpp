@@ -604,7 +604,7 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
 
     if (is_mmap_) {
         for (size_t i = 0; i < n; ++i) {
-            auto val = values[i];
+            const auto& val = values[i];
             auto it = bitmap_info_map_.find(val);
             if (it != bitmap_info_map_.end()) {
                 for (const auto& v : it->second) {
@@ -616,7 +616,7 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
     }
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         for (size_t i = 0; i < n; ++i) {
-            auto val = values[i];
+            const auto& val = values[i];
             auto it = data_.find(val);
             if (it != data_.end()) {
                 for (const auto& v : it->second) {
@@ -626,7 +626,7 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
         }
     } else {
         for (size_t i = 0; i < n; ++i) {
-            auto val = values[i];
+            const auto& val = values[i];
             if (bitsets_.find(val) != bitsets_.end()) {
                 res |= bitsets_.at(val);
             }
@@ -645,7 +645,7 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
     if (is_mmap_) {
         TargetBitmap res(total_num_rows_, true);
         for (int i = 0; i < n; ++i) {
-            auto val = values[i];
+            const auto& val = values[i];
             auto it = bitmap_info_map_.find(val);
             if (it != bitmap_info_map_.end()) {
                 for (const auto& v : it->second) {
@@ -660,7 +660,7 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
         TargetBitmap res(total_num_rows_, true);
         for (int i = 0; i < n; ++i) {
-            auto val = values[i];
+            const auto& val = values[i];
             auto it = data_.find(val);
             if (it != data_.end()) {
                 for (const auto& v : it->second) {
@@ -674,7 +674,7 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
     } else {
         TargetBitmap res(total_num_rows_, false);
         for (size_t i = 0; i < n; ++i) {
-            auto val = values[i];
+            const auto& val = values[i];
             if (bitsets_.find(val) != bitsets_.end()) {
                 res |= bitsets_.at(val);
             }
@@ -711,7 +711,7 @@ BitmapIndex<T>::IsNotNull() {
 
 template <typename T>
 TargetBitmap
-BitmapIndex<T>::RangeForBitset(const T value, const OpType op) {
+BitmapIndex<T>::RangeForBitset(const T& value, const OpType op) {
     tracer::AutoSpan span("BitmapIndex::RangeForBitset", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
@@ -773,7 +773,7 @@ BitmapIndex<T>::RangeForBitset(const T value, const OpType op) {
 
 template <typename T>
 const TargetBitmap
-BitmapIndex<T>::Range(const T value, OpType op) {
+BitmapIndex<T>::Range(const T& value, OpType op) {
     if (is_mmap_) {
         return std::move(RangeForMmap(value, op));
     }
@@ -785,7 +785,7 @@ BitmapIndex<T>::Range(const T value, OpType op) {
 }
 template <typename T>
 TargetBitmap
-BitmapIndex<T>::RangeForMmap(const T value, const OpType op) {
+BitmapIndex<T>::RangeForMmap(const T& value, const OpType op) {
     tracer::AutoSpan span("BitmapIndex::RangeForMmap", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
@@ -849,7 +849,7 @@ BitmapIndex<T>::RangeForMmap(const T value, const OpType op) {
 
 template <typename T>
 TargetBitmap
-BitmapIndex<T>::RangeForRoaring(const T value, const OpType op) {
+BitmapIndex<T>::RangeForRoaring(const T& value, const OpType op) {
     tracer::AutoSpan span("BitmapIndex::RangeForRoaring",
                           tracer::GetRootSpan());
 
@@ -913,9 +913,9 @@ BitmapIndex<T>::RangeForRoaring(const T value, const OpType op) {
 
 template <typename T>
 TargetBitmap
-BitmapIndex<T>::RangeForBitset(const T lower_value,
+BitmapIndex<T>::RangeForBitset(const T& lower_value,
                                bool lb_inclusive,
-                               const T upper_value,
+                               const T& upper_value,
                                bool ub_inclusive) {
     tracer::AutoSpan span("BitmapIndex::RangeForBitset", tracer::GetRootSpan());
 
@@ -972,9 +972,9 @@ BitmapIndex<T>::RangeForBitset(const T lower_value,
 
 template <typename T>
 const TargetBitmap
-BitmapIndex<T>::Range(const T lower_value,
+BitmapIndex<T>::Range(const T& lower_value,
                       bool lb_inclusive,
-                      const T upper_value,
+                      const T& upper_value,
                       bool ub_inclusive) {
     if (is_mmap_) {
         return RangeForMmap(
@@ -991,9 +991,9 @@ BitmapIndex<T>::Range(const T lower_value,
 
 template <typename T>
 TargetBitmap
-BitmapIndex<T>::RangeForMmap(const T lower_value,
+BitmapIndex<T>::RangeForMmap(const T& lower_value,
                              bool lb_inclusive,
-                             const T upper_value,
+                             const T& upper_value,
                              bool ub_inclusive) {
     tracer::AutoSpan span("BitmapIndex::RangeForMmap", tracer::GetRootSpan());
 
@@ -1052,9 +1052,9 @@ BitmapIndex<T>::RangeForMmap(const T lower_value,
 
 template <typename T>
 TargetBitmap
-BitmapIndex<T>::RangeForRoaring(const T lower_value,
+BitmapIndex<T>::RangeForRoaring(const T& lower_value,
                                 bool lb_inclusive,
-                                const T upper_value,
+                                const T& upper_value,
                                 bool ub_inclusive) {
     tracer::AutoSpan span("BitmapIndex::RangeForRoaring",
                           tracer::GetRootSpan());

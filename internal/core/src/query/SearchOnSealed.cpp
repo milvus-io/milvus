@@ -155,7 +155,7 @@ SearchOnSealedColumn(const Schema& schema,
 
     auto vector_chunks = column->GetAllChunks(op_context);
     for (int i = 0; i < num_chunk; ++i) {
-        auto pw = vector_chunks[i];
+        const auto& pw = vector_chunks[i];
         auto vec_data = pw.get()->Data();
         auto chunk_size = column->chunk_row_nums(i);
         auto raw_dataset =

@@ -366,15 +366,15 @@ StringIndexSort::IsNotNull() {
 }
 
 const TargetBitmap
-StringIndexSort::Range(std::string value, OpType op) {
+StringIndexSort::Range(const std::string& value, OpType op) {
     assert(impl_ != nullptr);
     return impl_->Range(value, op, total_num_rows_);
 }
 
 const TargetBitmap
-StringIndexSort::Range(std::string lower_bound_value,
+StringIndexSort::Range(const std::string& lower_bound_value,
                        bool lb_inclusive,
-                       std::string upper_bound_value,
+                       const std::string& upper_bound_value,
                        bool ub_inclusive) {
     assert(impl_ != nullptr);
     return impl_->Range(lower_bound_value,
@@ -756,7 +756,7 @@ StringIndexSortMemoryImpl::IsNotNull(const TargetBitmap& valid_bitset) {
 }
 
 const TargetBitmap
-StringIndexSortMemoryImpl::Range(std::string value,
+StringIndexSortMemoryImpl::Range(const std::string& value,
                                  OpType op,
                                  size_t total_num_rows) {
     TargetBitmap bitset(total_num_rows, false);
@@ -807,9 +807,9 @@ StringIndexSortMemoryImpl::Range(std::string value,
 }
 
 const TargetBitmap
-StringIndexSortMemoryImpl::Range(std::string lower_bound_value,
+StringIndexSortMemoryImpl::Range(const std::string& lower_bound_value,
                                  bool lb_inclusive,
-                                 std::string upper_bound_value,
+                                 const std::string& upper_bound_value,
                                  bool ub_inclusive,
                                  size_t total_num_rows) {
     TargetBitmap bitset(total_num_rows, false);
@@ -1210,7 +1210,7 @@ StringIndexSortMmapImpl::IsNotNull(const TargetBitmap& valid_bitset) {
 }
 
 const TargetBitmap
-StringIndexSortMmapImpl::Range(std::string value,
+StringIndexSortMmapImpl::Range(const std::string& value,
                                OpType op,
                                size_t total_num_rows) {
     TargetBitmap bitset(total_num_rows, false);
@@ -1248,9 +1248,9 @@ StringIndexSortMmapImpl::Range(std::string value,
 }
 
 const TargetBitmap
-StringIndexSortMmapImpl::Range(std::string lower_bound_value,
+StringIndexSortMmapImpl::Range(const std::string& lower_bound_value,
                                bool lb_inclusive,
-                               std::string upper_bound_value,
+                               const std::string& upper_bound_value,
                                bool ub_inclusive,
                                size_t total_num_rows) {
     TargetBitmap bitset(total_num_rows, false);
