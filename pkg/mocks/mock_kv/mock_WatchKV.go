@@ -871,6 +871,56 @@ func (_c *MockWatchKV_WalkWithPrefix_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// WalkWithPrefixFrom provides a mock function with given fields: ctx, prefix, startKey, paginationSize, fn
+func (_m *MockWatchKV) WalkWithPrefixFrom(ctx context.Context, prefix string, startKey string, paginationSize int, fn func([]byte, []byte) error) error {
+	ret := _m.Called(ctx, prefix, startKey, paginationSize, fn)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WalkWithPrefixFrom")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int, func([]byte, []byte) error) error); ok {
+		r0 = rf(ctx, prefix, startKey, paginationSize, fn)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockWatchKV_WalkWithPrefixFrom_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WalkWithPrefixFrom'
+type MockWatchKV_WalkWithPrefixFrom_Call struct {
+	*mock.Call
+}
+
+// WalkWithPrefixFrom is a helper method to define mock.On call
+//   - ctx context.Context
+//   - prefix string
+//   - startKey string
+//   - paginationSize int
+//   - fn func([]byte , []byte) error
+func (_e *MockWatchKV_Expecter) WalkWithPrefixFrom(ctx interface{}, prefix interface{}, startKey interface{}, paginationSize interface{}, fn interface{}) *MockWatchKV_WalkWithPrefixFrom_Call {
+	return &MockWatchKV_WalkWithPrefixFrom_Call{Call: _e.mock.On("WalkWithPrefixFrom", ctx, prefix, startKey, paginationSize, fn)}
+}
+
+func (_c *MockWatchKV_WalkWithPrefixFrom_Call) Run(run func(ctx context.Context, prefix string, startKey string, paginationSize int, fn func([]byte, []byte) error)) *MockWatchKV_WalkWithPrefixFrom_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(int), args[4].(func([]byte, []byte) error))
+	})
+	return _c
+}
+
+func (_c *MockWatchKV_WalkWithPrefixFrom_Call) Return(_a0 error) *MockWatchKV_WalkWithPrefixFrom_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWatchKV_WalkWithPrefixFrom_Call) RunAndReturn(run func(context.Context, string, string, int, func([]byte, []byte) error) error) *MockWatchKV_WalkWithPrefixFrom_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Watch provides a mock function with given fields: ctx, key
 func (_m *MockWatchKV) Watch(ctx context.Context, key string) clientv3.WatchChan {
 	ret := _m.Called(ctx, key)

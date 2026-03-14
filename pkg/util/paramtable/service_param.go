@@ -513,6 +513,8 @@ type MetaStoreConfig struct {
 	MetaStoreType              ParamItem `refreshable:"false"`
 	SnapshotTTLSeconds         ParamItem `refreshable:"true"`
 	SnapshotReserveTimeSeconds ParamItem `refreshable:"true"`
+	SnapshotGCBatchSize        ParamItem `refreshable:"true"`
+	SnapshotGCInterval         ParamItem `refreshable:"true"`
 	PaginationSize             ParamItem `refreshable:"true"`
 	ReadConcurrency            ParamItem `refreshable:"true"`
 	MaxEtcdTxnNum              ParamItem `refreshable:"true"`
@@ -545,6 +547,24 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.SnapshotReserveTimeSeconds.Init(base.mgr)
+
+	p.SnapshotGCBatchSize = ParamItem{
+		Key:          "metastore.snapshot.gcBatchSize",
+		Version:      "2.6.12",
+		DefaultValue: "10000",
+		Doc:          "number of snapshot keys to scan per GC batch",
+		Export:       true,
+	}
+	p.SnapshotGCBatchSize.Init(base.mgr)
+
+	p.SnapshotGCInterval = ParamItem{
+		Key:          "metastore.snapshot.gcInterval",
+		Version:      "2.6.12",
+		DefaultValue: "10",
+		Doc:          "base interval in seconds between snapshot GC batches",
+		Export:       true,
+	}
+	p.SnapshotGCInterval.Init(base.mgr)
 
 	p.PaginationSize = ParamItem{
 		Key:          "metastore.paginationSize",
