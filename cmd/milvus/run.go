@@ -60,6 +60,7 @@ func (c *run) printBanner(w io.Writer) {
 	fmt.Fprintln(w, "Built:     "+BuildTime)
 	fmt.Fprintln(w, "GitCommit: "+GitCommit)
 	fmt.Fprintln(w, "GoVersion: "+GoVersion)
+	fmt.Fprintf(w, "Milvus FIPS in Go: BoringCrypto %v\n", boringEnabled())
 	fmt.Fprintln(w)
 	metrics.BuildInfo.WithLabelValues(common.Version.String(), BuildTime, GitCommit).Set(1)
 }
