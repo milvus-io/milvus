@@ -95,6 +95,12 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "The name in the crendential configuration item"
 			case "vertexai.enable":
 				return "Whether to enable vertexai model service"
+			case "gemini.credential":
+				return "The name in the credential configuration item"
+			case "gemini.url":
+				return "Your Gemini embedding url, Default is the official embedding url"
+			case "gemini.enable":
+				return "Whether to enable Gemini model service"
 			default:
 				return ""
 			}

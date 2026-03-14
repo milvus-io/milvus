@@ -1444,6 +1444,10 @@ function:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable dashscope model service
         url:  # Your dashscope embedding url, Default is the official embedding url
+      gemini:
+        credential:  # The name in the credential configuration item
+        enable: true # Whether to enable Gemini model service
+        url:  # Your Gemini embedding url, Default is the official embedding url
       openai:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable openai model service
