@@ -968,6 +968,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		channelInfos = append(channelInfos, channelInfo)
 		log.Info("datacoord append channelInfo in GetRecoveryInfo",
 			zap.String("channel", channelInfo.GetChannelName()),
+			zap.Any("seekPos", channelInfo.GetSeekPosition()),
 			zap.Int("# of unflushed segments", len(channelInfo.GetUnflushedSegmentIds())),
 			zap.Int("# of flushed segments", len(channelInfo.GetFlushedSegmentIds())),
 			zap.Int("# of dropped segments", len(channelInfo.GetDroppedSegmentIds())),
@@ -1379,7 +1380,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		}
 
 		// try to init channel checkpoint, if failed, we will log it and continue
-		startPos := toMsgPosition(channelName, req.GetStartPositions())
+		startPos := toMsgPositionWithWALNames(channelName, req.GetStartPositions(), req.ChannelWalNames)
 		if startPos != nil {
 			startPos.Timestamp = req.GetCreateTimestamp()
 			if err := s.meta.UpdateChannelCheckpoint(ctx, channelName, startPos); err != nil {

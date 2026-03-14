@@ -9,11 +9,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/mock_walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
@@ -32,6 +36,14 @@ func TestOpenerAdaptorFailure(t *testing.T) {
 	basicOpener.EXPECT().Open(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, boo *walimpls.OpenOption) (walimpls.WALImpls, error) {
 		return nil, errExpected
 	})
+
+	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(
+		&streamingpb.WALCheckpoint{MessageId: &commonpb.MessageID{
+			Id:      "0",
+			WALName: commonpb.WALName_Test,
+		}}, nil)
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
 
 	opener := adaptImplsToOpener(basicOpener, nil)
 	l, err := opener.Open(context.Background(), &wal.OpenOption{})
