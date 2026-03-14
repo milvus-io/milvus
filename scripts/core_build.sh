@@ -98,6 +98,7 @@ CUDA_ARCH="DEFAULT"
 EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
+ENABLE_O2="OFF"
 USE_DYNAMIC_SIMD="ON"
 USE_OPENDAL="OFF"
 TANTIVY_FEATURES=""
@@ -105,7 +106,7 @@ INDEX_ENGINE="KNOWHERE"
 ENABLE_AZURE_FS="ON"
 : "${ENABLE_GCP_NATIVE:="OFF"}"
 
-while getopts "p:t:s:n:a:y:x:o:f:ulcgbZh" arg; do
+while getopts "p:t:s:n:a:y:x:o:f:ulcgbZrh" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
@@ -154,6 +155,10 @@ while getopts "p:t:s:n:a:y:x:o:f:ulcgbZh" arg; do
   f)
     TANTIVY_FEATURES=$OPTARG
     ;;
+  r)
+    echo "Set ENABLE_O2 to ON"
+    ENABLE_O2="ON"
+    ;;
   h) # help
     echo "
 
@@ -169,6 +174,7 @@ parameter:
 -s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61;-gencode=compute_75,code=sm_75'
 -b: build embedded milvus(default: OFF)
 -a: build milvus with AddressSanitizer(default: false)
+-r: use -O2 instead of -O3 for Release builds (default: false, reduces CI peak memory ~15%)
 -Z: build milvus without azure-sdk-for-cpp, so cannot use azure blob
 -o: build milvus with opendal(default: false)
 -f: build milvus with tantivy features(default: '')
@@ -229,6 +235,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
 -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
 -DUSE_ASAN=${USE_ASAN} \
+-DENABLE_O2=${ENABLE_O2} \
 -DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
 -DCPU_ARCH=${CPU_ARCH} \
 -DUSE_OPENDAL=${USE_OPENDAL} \
