@@ -8,19 +8,34 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+)
+
+const (
+	multiplierForCPUUsagePercent = 1000
 )
 
 // systemMetricsWatcher is a hardware monitor that can be used to monitor hardware information.
 var (
 	defaultMetricMonitorInterval = 1 * time.Second
+	defaultAverageHistoryCount   = 30
 	systemMericsWatcherOnce      sync.Once
 	systemMetricsWatcher         *SystemMericsWatcher
 )
 
 // SystemMetrics is the system metrics.
 type SystemMetrics struct {
-	UsedMemoryBytes  uint64
-	TotalMemoryBytes uint64
+	AverageCPUUsage  float64 // average CPU usage in the last 30 samples, about 30 seconds.
+	CPUUsage         float64 // the percentage of current CPU usage.
+	CPUNum           int     // number of CPU cores.
+	UsedMemoryBytes  int64
+	TotalMemoryBytes int64
+}
+
+// systemMetricsSampler is the sampler of system metrics.
+type systemMetricsSampler struct {
+	CPUUsagePercentCountWithMultiplier int64 // CPUUsagePercent = CPUUsagePercentCountWithMultiplier / multiplierForCPUUsagePercent
+	UsedMemoryBytes                    int64
 }
 
 // UsedRatio returns the used ratio of the memory.
@@ -60,7 +75,7 @@ func UnregisterSystemMetricsListener(listener *SystemMetricsListener) {
 // getSystemMetricsWatcher returns the systemMetricsWatcher instance.
 func getSystemMetricsWatcher() *SystemMericsWatcher {
 	systemMericsWatcherOnce.Do(func() {
-		systemMetricsWatcher = NewSystemMetricsWatcher(defaultMetricMonitorInterval)
+		systemMetricsWatcher = newSystemMetricsWatcher(defaultMetricMonitorInterval)
 		logger := log.With(log.FieldComponent("system-metrics"))
 		warningLoggerListener := &SystemMetricsListener{
 			Cooldown: 1 * time.Minute,
@@ -76,8 +91,8 @@ func getSystemMetricsWatcher() *SystemMericsWatcher {
 	return systemMetricsWatcher
 }
 
-// NewSystemMetricsWatcher creates a new SystemMericsWatcher.
-func NewSystemMetricsWatcher(interval time.Duration) *SystemMericsWatcher {
+// newSystemMetricsWatcher creates a new SystemMericsWatcher.
+func newSystemMetricsWatcher(interval time.Duration) *SystemMericsWatcher {
 	w := &SystemMericsWatcher{
 		listener: make(map[*SystemMetricsListener]struct{}),
 		closed:   make(chan struct{}),
@@ -93,6 +108,8 @@ type SystemMericsWatcher struct {
 	listener map[*SystemMetricsListener]struct{}
 	closed   chan struct{}
 	finished chan struct{}
+	total    systemMetricsSampler
+	history  []systemMetricsSampler
 }
 
 // RegisterListener registers a listener.
@@ -136,15 +153,36 @@ func (w *SystemMericsWatcher) loop(interval time.Duration) {
 	}
 }
 
+// updateMetrics updates the metrics.
 func (w *SystemMericsWatcher) updateMetrics() {
 	stats := SystemMetrics{
-		UsedMemoryBytes:  GetUsedMemoryCount(),
-		TotalMemoryBytes: GetMemoryCount(),
+		CPUUsage:         GetCPUUsage() / 100,
+		CPUNum:           GetCPUNum(),
+		UsedMemoryBytes:  int64(GetUsedMemoryCount()),
+		TotalMemoryBytes: int64(GetMemoryCount()),
 	}
+	newSampler := systemMetricsSampler{
+		CPUUsagePercentCountWithMultiplier: int64(stats.CPUUsage * multiplierForCPUUsagePercent),
+		UsedMemoryBytes:                    stats.UsedMemoryBytes,
+	}
+	w.history = append(w.history, newSampler)
+	w.total.CPUUsagePercentCountWithMultiplier += newSampler.CPUUsagePercentCountWithMultiplier
+	w.total.UsedMemoryBytes += newSampler.UsedMemoryBytes
+	if len(w.history) > defaultAverageHistoryCount {
+		w.total.CPUUsagePercentCountWithMultiplier -= w.history[0].CPUUsagePercentCountWithMultiplier
+		w.total.UsedMemoryBytes -= w.history[0].UsedMemoryBytes
+		w.history = w.history[1:]
+	}
+	stats.AverageCPUUsage = float64(w.total.CPUUsagePercentCountWithMultiplier) / multiplierForCPUUsagePercent / float64(len(w.history))
+
 	now := time.Now()
 	w.mu.Lock()
 	listener := w.listener
 	w.mu.Unlock()
+
+	metrics.CPUUsage.Set(stats.CPUUsage)
+	metrics.MemoryUsage.Set(float64(stats.UsedMemoryBytes))
+	metrics.AverageCPUUsage.Set(stats.AverageCPUUsage)
 
 	for l := range listener {
 		if now.Before(l.nextTriggerInstant) {

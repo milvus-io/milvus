@@ -375,6 +375,10 @@ func WrapErrTooManyRequests(limit int32, msg ...string) error {
 	return err
 }
 
+func WrapErrServiceInternalInvalidMsg(fmt string, args ...any) error {
+	return errors.Wrapf(ErrServiceInternal, fmt, args...)
+}
+
 func WrapErrServiceInternal(reason string, msg ...string) error {
 	err := wrapFieldsWithDesc(ErrServiceInternal, reason)
 	if len(msg) > 0 {

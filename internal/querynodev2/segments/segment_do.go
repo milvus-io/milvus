@@ -6,9 +6,9 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/limiter"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 )
 
 type doOnSegmentFunc func(ctx context.Context, segment Segment) error
@@ -40,6 +40,7 @@ func doOnSegment(ctx context.Context, mgr *Manager, seg Segment, do doOnSegmentF
 // doOnSegments Be careful to use this, since no any pool is used.
 func doOnSegments(ctx context.Context, mgr *Manager, segments []Segment, do doOnSegmentFunc) error {
 	errGroup, ctx := errgroup.WithContext(ctx)
+	errGroup.SetLimit(limiter.GetCurrentSegmentSQConcurrentLimit())
 	for _, segment := range segments {
 		seg := segment
 		errGroup.Go(func() error {
@@ -50,17 +51,4 @@ func doOnSegments(ctx context.Context, mgr *Manager, segments []Segment, do doOn
 		})
 	}
 	return errGroup.Wait()
-}
-
-func doOnSegmentsWithPool(ctx context.Context, mgr *Manager, segments []Segment, do doOnSegmentFunc, pool *conc.Pool[any]) error {
-	futures := make([]*conc.Future[any], 0, len(segments))
-	for _, segment := range segments {
-		seg := segment
-		future := pool.Submit(func() (any, error) {
-			err := doOnSegment(ctx, mgr, seg, do)
-			return nil, err
-		})
-		futures = append(futures, future)
-	}
-	return conc.BlockOnAll(futures...)
 }
