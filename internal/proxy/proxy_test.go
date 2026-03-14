@@ -252,7 +252,7 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, p *paramtable.GrpcServe
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	log.Debug("Proxy server listen on tcp", zap.Int("port", p.Port.GetAsInt()))
+	log.Debug("Proxy server about to listen on localhost:0")
 	lis, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
 		log.Warn("Proxy server failed to listen on", zap.Error(err))
@@ -990,6 +990,7 @@ func TestProxy(t *testing.T) {
 	go testServer.startGrpc(ctx, &p)
 	assert.NoError(t, testServer.waitForGrpcReady())
 	testServer.Proxy.SetAddress(testServer.lisAddr)
+	assert.Equal(t, testServer.lisAddr, testServer.Proxy.GetAddress())
 
 	rootCoordClient, err := mixc.NewClient(ctx)
 	assert.NoError(t, err)
