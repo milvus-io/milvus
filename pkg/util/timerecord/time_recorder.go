@@ -24,27 +24,33 @@ import (
 
 // TimeRecorder provides methods to record time duration
 type TimeRecorder struct {
-	header string
-	start  time.Time
-	last   time.Time
+	header   string
+	logLabel string
+	start    time.Time
+	last     time.Time
 }
 
 // NewTimeRecorder creates a new TimeRecorder
 func NewTimeRecorder(header string) *TimeRecorder {
+	now := time.Now()
 	return &TimeRecorder{
-		header: header,
-		start:  time.Now(),
-		last:   time.Now(),
+		header:   header,
+		logLabel: "tr/" + header,
+		start:    now,
+		last:     now,
 	}
 }
 
 // NewTimeRecorderWithCtx creates a new TimeRecorder with context's traceID,
 func NewTimeRecorderWithTrace(ctx context.Context, header string) *TimeRecorder {
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
+	h := fmt.Sprintf("%s(%s)", header, traceID)
+	now := time.Now()
 	return &TimeRecorder{
-		header: fmt.Sprintf("%s(%s)", header, traceID),
-		start:  time.Now(),
-		last:   time.Now(),
+		header:   h,
+		logLabel: "tr/" + h,
+		start:    now,
+		last:     now,
 	}
 }
 
@@ -92,9 +98,11 @@ func (tr *TimeRecorder) CtxElapse(ctx context.Context, msg string) time.Duration
 
 func (tr *TimeRecorder) printTimeRecord(ctx context.Context, msg string, span time.Duration) {
 	ts := trace.SpanFromContext(ctx)
-	ts.AddEvent(fmt.Sprintf("%s, cost %s", msg, span.String()))
+	if ts.IsRecording() {
+		ts.AddEvent(fmt.Sprintf("%s, cost %s", msg, span.String()))
+	}
 	log.Ctx(ctx).WithOptions(zap.AddCallerSkip(2)).
-		Debug(fmt.Sprintf("tr/%s", tr.header),
+		Debug(tr.logLabel,
 			zap.String("msg", msg),
 			zap.Duration("duration", span),
 		)

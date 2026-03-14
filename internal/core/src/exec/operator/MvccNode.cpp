@@ -63,22 +63,71 @@ PhyMvccNode::GetOutput() {
         return nullptr;
     }
 
+    // ── Sealed + no-filter fast paths ──────────────────────────────
+    // Split into two independent optimizations so each applies on its own:
+    //   Level 1: no deletes → skip everything (QueryContext flag + thread-local bitmap)
+    //   Level 2: has deletes → skip timestamp mask, only apply delete mask
+    // Both require: source node (no scalar filter), sealed segment, no TTL.
+    // mask_with_timestamps is redundant on sealed segments without TTL
+    // because all rows are committed before the query timestamp.
+    if (is_source_node_ &&
+        segment_->type() == SegmentType::Sealed &&
+        collection_ttl_timestamp_ == 0) {
+
+        // Level 1: no deletes — every row is visible.
+        // Return a thread-local full-size zero bitmap (satisfies Driver +
+        // ExecPlanNodeVisitor assertions) and set skip_filter flag so
+        // VectorSearchNode passes empty BitsetView to Knowhere.
+        if (segment_->get_deleted_count() == 0) {
+            is_finished_ = true;
+            auto* qctx =
+                operator_context_->get_exec_context()->get_query_context();
+            qctx->set_skip_filter(true);
+
+            thread_local int64_t cached_size = 0;
+            thread_local RowVectorPtr cached_output;
+            if (cached_size != active_count_) {
+                auto col = std::make_shared<ColumnVector>(
+                    TargetBitmap(active_count_),
+                    TargetBitmap(active_count_));
+                cached_output = std::make_shared<RowVector>(
+                    std::vector<VectorPtr>{col});
+                cached_size = active_count_;
+            }
+            return cached_output;
+        }
+
+        // Level 2: has deletes — allocate bitmap, apply delete mask only
+        auto col_input = std::make_shared<ColumnVector>(
+            TargetBitmap(active_count_), TargetBitmap(active_count_));
+        TargetBitmapView data(col_input->GetRawData(), col_input->size());
+        segment_->mask_with_delete(data, active_count_, query_timestamp_);
+        is_finished_ = true;
+
+        auto output_rows = active_count_ - data.count();
+        tracer::AddEvent(fmt::format(
+            "output_rows: {}, filtered: {}", output_rows, data.count()));
+        return std::make_shared<RowVector>(
+            std::vector<VectorPtr>{col_input});
+    }
+
+    // ── Level 3: default path (has filter / growing / TTL) ────────
     tracer::AddEvent(fmt::format("input_rows: {}", active_count_));
-    // the first vector is filtering result and second bitset is a valid bitset
-    // if valid_bitset[i]==false, means result[i] is null
     auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
                                            TargetBitmap(active_count_),
                                            TargetBitmap(active_count_))
                                      : GetColumnVector(input_);
 
     TargetBitmapView data(col_input->GetRawData(), col_input->size());
-    // need to expose null?
     segment_->mask_with_timestamps(
         data, query_timestamp_, collection_ttl_timestamp_);
     segment_->mask_with_delete(data, active_count_, query_timestamp_);
     is_finished_ = true;
 
-    // input_ have already been updated
+    auto output_rows = active_count_ - data.count();
+    tracer::AddEvent(fmt::format(
+        "output_rows: {}, filtered: {}", output_rows, data.count()));
+
     return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
 }
 

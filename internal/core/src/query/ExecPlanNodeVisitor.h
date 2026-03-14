@@ -97,7 +97,8 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
 
     static BitsetType
     ExecuteTask(plan::PlanFragment& plan,
-                std::shared_ptr<milvus::exec::QueryContext> query_context);
+                std::shared_ptr<milvus::exec::QueryContext> query_context,
+                bool collect_bitset = true);
 
  private:
     const segcore::SegmentInterface& segment_;
