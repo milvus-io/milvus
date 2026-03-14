@@ -17,10 +17,14 @@
 package delegator
 
 import (
+	"fmt"
+	"os"
+	"path"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -52,6 +56,7 @@ func (suite *IDFOracleSuite) SetupSuite() {
 
 func (suite *IDFOracleSuite) SetupTest() {
 	suite.idfOracle = NewIDFOracle(suite.channel, suite.collectionSchema.GetFunctions()).(*idfOracle)
+	suite.idfOracle.dirPath = suite.T().TempDir()
 	suite.idfOracle.Start()
 	suite.snapshot = &snapshot{
 		dist: []SnapshotItem{{1, make([]SegmentEntry, 0)}},
@@ -80,6 +85,38 @@ func (suite *IDFOracleSuite) genStats(start uint32, end uint32) map[int64]*stora
 		result[102].Append(row)
 	}
 	return result
+}
+
+// registerSealed writes stats to disk and registers directly into idfOracle.
+func (suite *IDFOracleSuite) registerSealed(segID int64, start uint32, end uint32) int64 {
+	stats := suite.genStats(start, end)
+	segDir := path.Join(suite.idfOracle.dirPath, fmt.Sprintf("%d", segID))
+	fieldDir := path.Join(segDir, "102")
+	err := os.MkdirAll(fieldDir, os.ModePerm)
+	suite.Require().NoError(err)
+
+	var diskSize int64
+	for fieldID, s := range stats {
+		data, err := s.Serialize()
+		suite.Require().NoError(err)
+		filePath := path.Join(segDir, fmt.Sprintf("%d", fieldID), "0.data")
+		err = os.WriteFile(filePath, data, os.ModePerm)
+		suite.Require().NoError(err)
+		diskSize += int64(len(data))
+	}
+
+	segStats := &sealedBm25Stats{
+		ts:        time.Now(),
+		activate:  atomic.NewBool(false),
+		segmentID: segID,
+		localDir:  segDir,
+		fieldList: []int64{102},
+		diskSize:  diskSize,
+	}
+
+	suite.idfOracle.preloadSealed(segID, segStats, bm25Stats(stats))
+	suite.idfOracle.sealedDiskSize.Add(diskSize)
+	return diskSize
 }
 
 // update test snapshot
@@ -127,18 +164,18 @@ func (suite *IDFOracleSuite) TestSealed() {
 	// register sealed
 	sealedSegs := []int64{1, 2, 3, 4}
 	for _, segID := range sealedSegs {
-		suite.idfOracle.RegisterSealed(segID, suite.genStats(uint32(segID), uint32(segID)+1))
+		suite.registerSealed(segID, uint32(segID), uint32(segID)+1)
 	}
 
 	// reduplicate register
 	for _, segID := range sealedSegs {
-		suite.idfOracle.RegisterSealed(segID, suite.genStats(uint32(segID), uint32(segID)+1))
+		suite.registerSealed(segID, uint32(segID), uint32(segID)+1)
 	}
 
 	// some sealed not in target
 	invalidSealedSegs := []int64{5, 6}
 	for _, segID := range invalidSealedSegs {
-		suite.idfOracle.RegisterSealed(segID, suite.genStats(uint32(segID), uint32(segID)+1))
+		suite.registerSealed(segID, uint32(segID), uint32(segID)+1)
 	}
 
 	// register sealed segment and all preload to current
@@ -213,20 +250,28 @@ func (suite *IDFOracleSuite) TestStats() {
 }
 
 func (suite *IDFOracleSuite) TestLocalCache() {
-	// register sealed
+	// register sealed (all stats are now always on disk)
 	sealedSegs := []int64{1, 2, 3, 4}
 	for _, segID := range sealedSegs {
-		suite.idfOracle.RegisterSealed(segID, suite.genStats(uint32(segID), uint32(segID)+1))
+		suite.registerSealed(segID, uint32(segID), uint32(segID)+1)
 	}
 
 	// some sealed not in target
 	invalidSealedSegs := []int64{5, 6}
 	for _, segID := range invalidSealedSegs {
-		suite.idfOracle.RegisterSealed(segID, suite.genStats(uint32(segID), uint32(segID)+1))
+		suite.registerSealed(segID, uint32(segID), uint32(segID)+1)
 	}
 
 	// register sealed segment and all preload to current
 	suite.Equal(int64(len(sealedSegs)+len(invalidSealedSegs)), suite.idfOracle.current.NumRow())
+
+	// verify all sealed stats have local dir set
+	suite.idfOracle.sealed.Range(func(id int64, stats *sealedBm25Stats) bool {
+		stats.RLock()
+		defer stats.RUnlock()
+		suite.NotEmpty(stats.localDir)
+		return true
+	})
 
 	// update and sync snapshot make all sealed in target activate
 	suite.updateSnapshot(sealedSegs, []int64{}, []int64{})
@@ -234,27 +279,82 @@ func (suite *IDFOracleSuite) TestLocalCache() {
 	suite.waitTargetVersion(suite.targetVersion)
 	suite.Equal(int64(len(sealedSegs)), suite.idfOracle.current.NumRow())
 
-	suite.Require().Eventually(func() bool {
-		allInLocal := true
-		suite.idfOracle.sealed.Range(func(id int64, stats *sealedBm25Stats) bool {
-			stats.RLock()
-			defer stats.RUnlock()
-			if stats.inmemory == true {
-				allInLocal = false
-				return false
-			}
-			return true
-		})
-
-		return allInLocal
-	}, time.Minute, time.Millisecond*100)
-
 	// release some segments
 	releasedSeg := []int64{1, 2, 3}
 	suite.updateSnapshot([]int64{}, []int64{}, releasedSeg)
 	suite.idfOracle.SetNext(suite.snapshot)
 	suite.waitTargetVersion(suite.targetVersion)
 	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
+}
+
+func (suite *IDFOracleSuite) TestFetchStatsRemoved() {
+	segID := int64(1)
+	suite.registerSealed(segID, 1, 5)
+
+	stats, ok := suite.idfOracle.sealed.Get(segID)
+	suite.True(ok)
+
+	// remove then fetch — should return error
+	stats.Remove()
+	_, err := stats.FetchStats()
+	suite.Error(err)
+	suite.Contains(err.Error(), "already removed")
+}
+
+func (suite *IDFOracleSuite) TestDiskSizeTracking() {
+	disk1 := suite.registerSealed(1, 1, 2)
+	disk2 := suite.registerSealed(2, 2, 3)
+	suite.Equal(disk1+disk2, suite.idfOracle.sealedDiskSize.Load())
+
+	// SyncDistribution with only seg 1 in target — seg 2 gets removed
+	suite.updateSnapshot([]int64{1}, []int64{}, []int64{})
+	suite.idfOracle.SetNext(suite.snapshot)
+	suite.waitTargetVersion(suite.targetVersion)
+	suite.Equal(disk1, suite.idfOracle.sealedDiskSize.Load())
+
+	// release seg 1
+	suite.updateSnapshot([]int64{}, []int64{}, []int64{1})
+	suite.idfOracle.SetNext(suite.snapshot)
+	suite.waitTargetVersion(suite.targetVersion)
+	suite.Equal(int64(0), suite.idfOracle.sealedDiskSize.Load())
+}
+
+func (suite *IDFOracleSuite) TestDiskSizeTrackingSyncDistribution() {
+	sealedSegs := []int64{1, 2, 3}
+	var totalDisk int64
+	for _, segID := range sealedSegs {
+		totalDisk += suite.registerSealed(segID, uint32(segID), uint32(segID)+1)
+	}
+	suite.Equal(totalDisk, suite.idfOracle.sealedDiskSize.Load())
+
+	// activate only seg 1,2 via SyncDistribution — seg 3 gets removed
+	suite.updateSnapshot([]int64{1, 2}, []int64{}, []int64{})
+	suite.idfOracle.SetNext(suite.snapshot)
+	suite.waitTargetVersion(suite.targetVersion)
+
+	suite.Equal(2, suite.idfOracle.sealed.Len())
+	suite.Less(suite.idfOracle.sealedDiskSize.Load(), totalDisk)
+}
+
+func (suite *IDFOracleSuite) TestMemorySize() {
+	// initial state — empty current stats
+	suite.Greater(suite.idfOracle.MemorySize(), int64(0)) // current has fixed overhead
+
+	// add growing segments — memory should increase
+	sizeBefore := suite.idfOracle.MemorySize()
+	suite.idfOracle.RegisterGrowing(1, suite.genStats(1, 100))
+	sizeAfter := suite.idfOracle.MemorySize()
+	suite.Greater(sizeAfter, sizeBefore)
+}
+
+func (suite *IDFOracleSuite) TestUpdateGrowingCheckMemory() {
+	suite.idfOracle.RegisterGrowing(1, suite.genStats(1, 2))
+
+	// repeated updates grow the stats
+	for i := uint32(2); i < 200; i++ {
+		suite.idfOracle.UpdateGrowing(1, suite.genStats(i, i+1))
+	}
+	suite.Equal(int64(199), suite.idfOracle.current.NumRow())
 }
 
 func TestIDFOracle(t *testing.T) {
