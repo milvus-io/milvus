@@ -252,12 +252,13 @@ func TestGetCollectionIDFromVChannel(t *testing.T) {
 func TestCheckCtxValid(t *testing.T) {
 	bgCtx := context.Background()
 	timeout := 20 * time.Millisecond
-	deltaTime := 5 * time.Millisecond
+
 	ctx1, cancel1 := context.WithTimeout(bgCtx, timeout)
 	defer cancel1()
 	assert.True(t, CheckCtxValid(ctx1))
-	time.Sleep(timeout + deltaTime)
-	assert.False(t, CheckCtxValid(ctx1))
+	assert.Eventually(t, func() bool {
+		return !CheckCtxValid(ctx1)
+	}, time.Second, time.Millisecond)
 
 	ctx2, cancel2 := context.WithTimeout(bgCtx, timeout)
 	assert.True(t, CheckCtxValid(ctx2))
@@ -268,8 +269,9 @@ func TestCheckCtxValid(t *testing.T) {
 	ctx3, cancel3 := context.WithDeadline(bgCtx, futureTime)
 	defer cancel3()
 	assert.True(t, CheckCtxValid(ctx3))
-	time.Sleep(timeout + deltaTime)
-	assert.False(t, CheckCtxValid(ctx3))
+	assert.Eventually(t, func() bool {
+		return !CheckCtxValid(ctx3)
+	}, time.Second, time.Millisecond)
 }
 
 func TestCheckPortAvailable(t *testing.T) {

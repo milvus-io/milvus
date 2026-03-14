@@ -212,6 +212,7 @@ type proxyTestServer struct {
 	*Proxy
 	grpcServer *grpc.Server
 	ch         chan error
+	lisAddr    string // actual listen address (set after startGrpc binds to :0)
 }
 
 func newProxyTestServer(node *Proxy) *proxyTestServer {
@@ -252,13 +253,14 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, p *paramtable.GrpcServe
 	}
 
 	log.Debug("Proxy server listen on tcp", zap.Int("port", p.Port.GetAsInt()))
-	lis, err := net.Listen("tcp", ":"+p.Port.GetValue())
+	lis, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
-		log.Warn("Proxy server failed to listen on", zap.Error(err), zap.Int("port", p.Port.GetAsInt()))
+		log.Warn("Proxy server failed to listen on", zap.Error(err))
 		s.ch <- err
 		return
 	}
-	log.Debug("Proxy server already listen on tcp", zap.Int("port", p.Port.GetAsInt()))
+	s.lisAddr = lis.Addr().String()
+	log.Debug("Proxy server listening on", zap.String("addr", s.lisAddr))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -984,11 +986,10 @@ func TestProxy(t *testing.T) {
 	base.Init(bt)
 	var p paramtable.GrpcServerConfig
 	p.Init(typeutil.ProxyRole, bt)
-	testServer.Proxy.SetAddress(p.GetAddress())
-	assert.Equal(t, p.GetAddress(), testServer.Proxy.GetAddress())
 
 	go testServer.startGrpc(ctx, &p)
 	assert.NoError(t, testServer.waitForGrpcReady())
+	testServer.Proxy.SetAddress(testServer.lisAddr)
 
 	rootCoordClient, err := mixc.NewClient(ctx)
 	assert.NoError(t, err)
