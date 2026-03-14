@@ -126,7 +126,14 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         num_rows_ = GetNumRowsUntilChunk().back();
     }
 
-    virtual ~ChunkedColumnBase() = default;
+    virtual ~ChunkedColumnBase() {
+        slot_->CancelWarmup();
+    }
+
+    void
+    CancelWarmup() override {
+        slot_->CancelWarmup();
+    }
 
     PinWrapper<const char*>
     DataOfChunk(milvus::OpContext* op_ctx, int chunk_id) const override {

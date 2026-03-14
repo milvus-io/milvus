@@ -456,7 +456,7 @@ class Schema {
     std::unordered_map<FieldId, bool> mmap_fields_;
 
     // warmup policy settings
-    // Valid values: "disable", "sync" (empty string means no setting)
+    // Valid values: "disable", "sync", "async" (empty string means no setting)
     // Collection-level warmup policies for different data types
     std::optional<std::string> warmup_vector_index_ = std::nullopt;
     std::optional<std::string> warmup_scalar_index_ = std::nullopt;

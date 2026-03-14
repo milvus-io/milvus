@@ -31,7 +31,7 @@ struct FieldBinlogInfo {
     // estimated memory size for each binlog file, in bytes, used by caching layer
     std::vector<int64_t> memory_sizes;
     bool enable_mmap{false};
-    // "disable" or "sync", empty means use global config
+    // "disable", "sync", or "async"; empty means use global config
     std::string warmup_policy;
     std::vector<std::string> insert_files;
     std::vector<int64_t> child_field_ids;

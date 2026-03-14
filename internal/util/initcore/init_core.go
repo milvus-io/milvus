@@ -294,6 +294,8 @@ func ConvertCacheWarmupPolicy(policy string) (C.CacheWarmupPolicy, error) {
 	switch policy {
 	case "sync":
 		return C.CacheWarmupPolicy_Sync, nil
+	case "async":
+		return C.CacheWarmupPolicy_Async, nil
 	case "disable":
 		return C.CacheWarmupPolicy_Disable, nil
 	default:
@@ -379,6 +381,8 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	diskPath := C.CString(params.LocalStorageCfg.Path.GetValue())
 	defer C.free(unsafe.Pointer(diskPath))
 
+	prefetchPoolThreads := C.uint32_t(hardware.GetCPUNum() * params.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt())
+
 	C.ConfigureTieredStorage(scalarFieldCacheWarmupPolicy,
 		vectorFieldCacheWarmupPolicy,
 		scalarIndexCacheWarmupPolicy,
@@ -388,7 +392,8 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		storageUsageTrackingEnabled,
 		evictionEnabled, cacheTouchWindowMs,
 		backgroundEvictionEnabled, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
-		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath, loadingTimeoutMs)
+		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath, loadingTimeoutMs,
+		prefetchPoolThreads)
 
 	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
 	tieredEvictableDiskCacheRatio := params.QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
