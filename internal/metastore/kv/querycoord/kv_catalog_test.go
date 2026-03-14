@@ -302,6 +302,39 @@ func (suite *CatalogTestSuite) TestCollectionTarget() {
 	suite.Error(err)
 }
 
+func (suite *CatalogTestSuite) TestRemoveCollectionTargets() {
+	ctx := context.Background()
+	// save 5 targets
+	suite.catalog.SaveCollectionTargets(ctx,
+		&querypb.CollectionTarget{CollectionID: 1, Version: 1},
+		&querypb.CollectionTarget{CollectionID: 2, Version: 2},
+		&querypb.CollectionTarget{CollectionID: 3, Version: 3},
+		&querypb.CollectionTarget{CollectionID: 4, Version: 4},
+		&querypb.CollectionTarget{CollectionID: 5, Version: 5},
+	)
+
+	// remove all targets via prefix delete
+	err := suite.catalog.RemoveCollectionTargets(ctx)
+	suite.NoError(err)
+
+	targets, err := suite.catalog.GetCollectionTargets(ctx)
+	suite.NoError(err)
+	suite.Len(targets, 0)
+
+	// remove when no targets exist should be no-op
+	err = suite.catalog.RemoveCollectionTargets(ctx)
+	suite.NoError(err)
+
+	// test error from meta store
+	mockStore := mocks.NewMetaKv(suite.T())
+	mockErr := errors.New("failed to access etcd")
+	mockStore.EXPECT().RemoveWithPrefix(mock.Anything, CollectionTargetPrefix).Return(mockErr)
+
+	suite.catalog.cli = mockStore
+	err = suite.catalog.RemoveCollectionTargets(ctx)
+	suite.ErrorIs(err, mockErr)
+}
+
 func (suite *CatalogTestSuite) TestLoadRelease() {
 	// TODO(sunby): add ut
 }

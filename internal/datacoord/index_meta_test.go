@@ -45,16 +45,17 @@ func TestReloadFromKV(t *testing.T) {
 	t.Run("ListIndexes_fail", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, errors.New("mock"))
-		_, err := newIndexMeta(context.TODO(), catalog)
+		catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		_, err := newIndexMeta(context.TODO(), catalog, []int64{0})
 		assert.Error(t, err)
 	})
 
 	t.Run("ListSegmentIndexes_fails", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
-		catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, errors.New("mock"))
+		catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 
-		_, err := newIndexMeta(context.TODO(), catalog)
+		_, err := newIndexMeta(context.TODO(), catalog, []int64{0})
 		assert.Error(t, err)
 	})
 
@@ -69,14 +70,14 @@ func TestReloadFromKV(t *testing.T) {
 			},
 		}, nil)
 
-		catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{
+		catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{
 			{
 				SegmentID: 1,
 				IndexID:   1,
 			},
 		}, nil)
 
-		meta, err := newIndexMeta(context.TODO(), catalog)
+		meta, err := newIndexMeta(context.TODO(), catalog, []int64{0})
 		assert.NoError(t, err)
 		assert.NotNil(t, meta)
 	})
@@ -1607,6 +1608,54 @@ func TestBuildIndexTaskStatsJSON(t *testing.T) {
 
 	im.segmentBuildInfo.Remove(si1.BuildID)
 	assert.Equal(t, 1, len(im.segmentBuildInfo.List()))
+}
+
+func TestSegmentBuildInfo_AddForRecovery(t *testing.T) {
+	t.Run("lru not full, all states inserted", func(t *testing.T) {
+		info := newSegmentIndexBuildInfo()
+		finished := &model.SegmentIndex{BuildID: 1, IndexState: commonpb.IndexState_Finished}
+		inProgress := &model.SegmentIndex{BuildID: 2, IndexState: commonpb.IndexState_InProgress}
+
+		info.AddForRecovery(finished)
+		info.AddForRecovery(inProgress)
+
+		assert.Equal(t, 2, len(info.List()))
+		assert.Equal(t, 2, len(info.GetTaskStats()))
+	})
+
+	t.Run("lru full, finished tasks skipped", func(t *testing.T) {
+		info := newSegmentIndexBuildInfo()
+		// Fill the LRU to capacity with in-progress tasks.
+		for i := int64(0); i < taskStatsLRUCapacity; i++ {
+			info.AddForRecovery(&model.SegmentIndex{BuildID: i, IndexState: commonpb.IndexState_InProgress})
+		}
+		assert.Equal(t, taskStatsLRUCapacity, info.taskStats.Len())
+
+		// A finished task should be skipped when LRU is full.
+		finished := &model.SegmentIndex{BuildID: taskStatsLRUCapacity + 1, IndexState: commonpb.IndexState_Finished}
+		info.AddForRecovery(finished)
+
+		_, ok := info.Get(finished.BuildID)
+		assert.True(t, ok, "buildID2SegmentIndex should still contain the entry")
+		assert.Equal(t, taskStatsLRUCapacity, info.taskStats.Len(), "LRU size should not grow")
+	})
+
+	t.Run("lru full, unfinished tasks still inserted", func(t *testing.T) {
+		info := newSegmentIndexBuildInfo()
+		for i := int64(0); i < taskStatsLRUCapacity; i++ {
+			info.AddForRecovery(&model.SegmentIndex{BuildID: i, IndexState: commonpb.IndexState_InProgress})
+		}
+		assert.Equal(t, taskStatsLRUCapacity, info.taskStats.Len())
+
+		// An unfinished task should still be inserted (evicting the oldest).
+		unissued := &model.SegmentIndex{BuildID: taskStatsLRUCapacity + 1, IndexState: commonpb.IndexState_Unissued}
+		info.AddForRecovery(unissued)
+
+		_, ok := info.Get(unissued.BuildID)
+		assert.True(t, ok)
+		// LRU size stays at capacity because the oldest entry was evicted.
+		assert.Equal(t, taskStatsLRUCapacity, info.taskStats.Len())
+	})
 }
 
 func TestMeta_GetIndexJSON(t *testing.T) {

@@ -411,6 +411,7 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 		}
 		return nil
 	})
+	b.Close()
 }
 
 func TestBalancer_DynamicChannelFromProvider(t *testing.T) {

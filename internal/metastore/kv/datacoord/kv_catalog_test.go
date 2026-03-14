@@ -1074,7 +1074,7 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 			MetaKv: metakv,
 		}
 
-		segIdxes, err := catalog.ListSegmentIndexes(context.Background())
+		segIdxes, err := catalog.ListSegmentIndexes(context.Background(), 0)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(segIdxes))
 	})
@@ -1086,7 +1086,7 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 			MetaKv: metakv,
 		}
 
-		_, err := catalog.ListSegmentIndexes(context.Background())
+		_, err := catalog.ListSegmentIndexes(context.Background(), 0)
 		assert.Error(t, err)
 	})
 
@@ -1099,7 +1099,7 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 			MetaKv: metakv,
 		}
 
-		_, err := catalog.ListSegmentIndexes(context.Background())
+		_, err := catalog.ListSegmentIndexes(context.Background(), 0)
 		assert.Error(t, err)
 	})
 }
