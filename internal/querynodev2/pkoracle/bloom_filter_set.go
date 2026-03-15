@@ -51,6 +51,11 @@ type BloomFilterSet struct {
 	// Resource tracking
 	trackedSize     int64 // memory size that was charged
 	resourceCharged bool  // tracks whether memory resources were charged for this bloom filter set
+
+	// Mmap tracking
+	mmapPath    string                          // remote path used as mmap key
+	mmapManager *bloomfilter.PkStatsMmapManager // shared mmap manager, nil if not using mmap
+	isMmapped   bool                            // whether this BFS uses mmap'd bloom filters
 }
 
 // MayPkExist returns whether any bloom filters returns positive.
@@ -193,24 +198,36 @@ func (s *BloomFilterSet) Charge() {
 	}
 }
 
-// Refund refunds any charged resources. Safe to call multiple times.
+// Refund refunds any charged resources and releases mmap references.
+// Safe to call multiple times.
 func (s *BloomFilterSet) Refund() {
 	s.statsMutex.Lock()
 	defer s.statsMutex.Unlock()
 
-	if !s.resourceCharged || s.trackedSize <= 0 {
-		return
+	if s.resourceCharged && s.trackedSize > 0 {
+		C.RefundLoadedResource(C.CResourceUsage{
+			memory_bytes: C.int64_t(s.trackedSize),
+			disk_bytes:   0,
+		})
+		log.Debug("refunded bloom filter resource",
+			zap.Int64("segmentID", s.segmentID),
+			zap.Int64("size", s.trackedSize))
 	}
-
-	C.RefundLoadedResource(C.CResourceUsage{
-		memory_bytes: C.int64_t(s.trackedSize),
-		disk_bytes:   0,
-	})
-	log.Debug("refunded bloom filter resource",
-		zap.Int64("segmentID", s.segmentID),
-		zap.Int64("size", s.trackedSize))
 	s.trackedSize = 0
 	s.resourceCharged = false
+
+	// Release mmap reference
+	if s.isMmapped && s.mmapManager != nil && s.mmapPath != "" {
+		s.mmapManager.Release(s.mmapPath)
+		s.isMmapped = false
+		s.mmapPath = ""
+	}
+
+	// Nil out stats to prevent use-after-unmap. If the mmap'd memory was freed,
+	// any MmapBloomFilter objects in these stats point at invalid memory.
+	// A nil dereference gives a clear stack trace rather than a SIGSEGV.
+	s.historyStats = nil
+	s.currentStat = nil
 }
 
 // IsResourceCharged returns whether memory resources have been charged for this bloom filter set.
@@ -246,6 +263,28 @@ func (s *BloomFilterSet) memSizeLocked() int64 {
 		}
 	}
 	return size
+}
+
+// SetMmapPaths sets the remote path used as a key for the mmap manager.
+func (s *BloomFilterSet) SetMmapPaths(remotePath string) {
+	s.statsMutex.Lock()
+	defer s.statsMutex.Unlock()
+	s.mmapPath = remotePath
+	s.isMmapped = true
+}
+
+// SetMmapManager sets the mmap manager reference for this bloom filter set.
+func (s *BloomFilterSet) SetMmapManager(mgr *bloomfilter.PkStatsMmapManager) {
+	s.statsMutex.Lock()
+	defer s.statsMutex.Unlock()
+	s.mmapManager = mgr
+}
+
+// IsMmapped returns whether this bloom filter set uses mmap'd data.
+func (s *BloomFilterSet) IsMmapped() bool {
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
+	return s.isMmapped
 }
 
 // NewBloomFilterSet returns a new BloomFilterSet.

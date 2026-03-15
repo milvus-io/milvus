@@ -109,6 +109,7 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 	suite.node.manager.Collection.PutOrRef(suite.collectionID, collection.Schema(), suite.indexMeta, loadMata)
 
 	suite.mockLoader = segments.NewMockLoader(suite.T())
+	suite.mockLoader.EXPECT().Close().Maybe()
 	suite.node.loader = suite.mockLoader
 
 	suite.worker = NewLocalWorker(suite.node)

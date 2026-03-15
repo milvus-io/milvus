@@ -7,6 +7,8 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
+	bloomfilter "github.com/milvus-io/milvus/internal/util/bloomfilter"
+
 	mock "github.com/stretchr/testify/mock"
 
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
@@ -29,6 +31,85 @@ type MockLoader_Expecter struct {
 
 func (_m *MockLoader) EXPECT() *MockLoader_Expecter {
 	return &MockLoader_Expecter{mock: &_m.Mock}
+}
+
+// Close provides a mock function with no fields
+func (_m *MockLoader) Close() {
+	_m.Called()
+}
+
+// MockLoader_Close_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Close'
+type MockLoader_Close_Call struct {
+	*mock.Call
+}
+
+// Close is a helper method to define mock.On call
+func (_e *MockLoader_Expecter) Close() *MockLoader_Close_Call {
+	return &MockLoader_Close_Call{Call: _e.mock.On("Close")}
+}
+
+func (_c *MockLoader_Close_Call) Run(run func()) *MockLoader_Close_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockLoader_Close_Call) Return() *MockLoader_Close_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockLoader_Close_Call) RunAndReturn(run func()) *MockLoader_Close_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetPkStatsMmapManager provides a mock function with no fields
+func (_m *MockLoader) GetPkStatsMmapManager() *bloomfilter.PkStatsMmapManager {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPkStatsMmapManager")
+	}
+
+	var r0 *bloomfilter.PkStatsMmapManager
+	if rf, ok := ret.Get(0).(func() *bloomfilter.PkStatsMmapManager); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*bloomfilter.PkStatsMmapManager)
+		}
+	}
+
+	return r0
+}
+
+// MockLoader_GetPkStatsMmapManager_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPkStatsMmapManager'
+type MockLoader_GetPkStatsMmapManager_Call struct {
+	*mock.Call
+}
+
+// GetPkStatsMmapManager is a helper method to define mock.On call
+func (_e *MockLoader_Expecter) GetPkStatsMmapManager() *MockLoader_GetPkStatsMmapManager_Call {
+	return &MockLoader_GetPkStatsMmapManager_Call{Call: _e.mock.On("GetPkStatsMmapManager")}
+}
+
+func (_c *MockLoader_GetPkStatsMmapManager_Call) Run(run func()) *MockLoader_GetPkStatsMmapManager_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockLoader_GetPkStatsMmapManager_Call) Return(_a0 *bloomfilter.PkStatsMmapManager) *MockLoader_GetPkStatsMmapManager_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockLoader_GetPkStatsMmapManager_Call) RunAndReturn(run func() *bloomfilter.PkStatsMmapManager) *MockLoader_GetPkStatsMmapManager_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // Load provides a mock function with given fields: ctx, collectionID, segmentType, version, _a4
