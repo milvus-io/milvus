@@ -7352,7 +7352,7 @@
                 "uid": "${datasource}"
               },
               "exemplar": true,
-              "expr": "avg(milvus_querynode_consume_tt_lag_ms{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", msg_type=\"insert\"}) by (pod, node_id)",
+              "expr": "avg(milvus_querynode_consume_tt_lag_ms{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", msg_type=\"timetick\"}) by (pod, node_id)",
               "hide": false,
               "interval": "",
               "intervalFactor": 2,
@@ -7366,7 +7366,7 @@
                 "uid": "${datasource}"
               },
               "exemplar": true,
-              "expr": "max(milvus_querynode_consume_tt_lag_ms{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", msg_type=\"insert\"}) by (pod, node_id)",
+              "expr": "max(milvus_querynode_consume_tt_lag_ms{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", msg_type=\"timetick\"}) by (pod, node_id)",
               "hide": false,
               "interval": "",
               "legendFormat": "{{pod}}-{{node_id}}-max",
@@ -7378,7 +7378,7 @@
                 "uid": "${datasource}"
               },
               "exemplar": true,
-              "expr": "min(milvus_querynode_consume_tt_lag_ms{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", msg_type=\"insert\"}) by (pod, node_id)",
+              "expr": "min(milvus_querynode_consume_tt_lag_ms{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", msg_type=\"timetick\"}) by (pod, node_id)",
               "hide": false,
               "interval": "",
               "legendFormat": "{{pod}}-{{node_id}}-min",
