@@ -2566,6 +2566,9 @@ type queryCoordConfig struct {
 	BalanceCheckCollectionMaxCount    ParamItem `refreshable:"true"`
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
+	ResourceLimitFastStopEnable       ParamItem `refreshable:"true"`
+	ResourceLimitFastStopWindow       ParamItem `refreshable:"true"`
+	ResourceLimitFastStopThreshold    ParamItem `refreshable:"true"`
 
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 
@@ -3239,6 +3242,33 @@ Set to 0 to disable the penalty period.`,
 		Export:       true,
 	}
 	p.ResourceExhaustionCleanupInterval.Init(base.mgr)
+
+	p.ResourceLimitFastStopEnable = ParamItem{
+		Key:          "queryCoord.fastStopEnable",
+		Version:      "2.6.11",
+		DefaultValue: "false",
+		Doc:          "Whether to enable fast-stop skip logic for collections with repeated resource-limit load failures.",
+		Export:       true,
+	}
+	p.ResourceLimitFastStopEnable.Init(base.mgr)
+
+	p.ResourceLimitFastStopWindow = ParamItem{
+		Key:          "queryCoord.resourceLimitFastStopWindow",
+		Version:      "2.6.11",
+		DefaultValue: "300",
+		Doc:          "Window (in seconds) for resource-limit load failure counting used by fast-stop collection skipping.",
+		Export:       true,
+	}
+	p.ResourceLimitFastStopWindow.Init(base.mgr)
+
+	p.ResourceLimitFastStopThreshold = ParamItem{
+		Key:          "queryCoord.resourceLimitFastStopThreshold",
+		Version:      "2.6.11",
+		DefaultValue: "100",
+		Doc:          "Threshold of resource-limit load failures for a collection to be skipped during QueryNode graceful stop.",
+		Export:       true,
+	}
+	p.ResourceLimitFastStopThreshold.Init(base.mgr)
 
 	p.UpdateTargetNeedSegmentDataReady = ParamItem{
 		Key:          "queryCoord.updateTargetNeedSegmentDataReady",
