@@ -213,6 +213,90 @@ func (suite *SegmentSuite) TestCASVersion() {
 func (suite *SegmentSuite) TestSegmentRemoveUnusedFieldFiles() {
 }
 
+// TestDeleteSameTimestampAcrossBatches reproduces the DumpSnapshot rebuild path
+// caused by proxy splitting a large DELETE operation into multiple messages that
+// share the same TSO timestamp. Consecutive StreamPush calls can insert entries
+// with the same timestamp but smaller row_ids — landing BEFORE the DumpSnapshot
+// cursor in the sorted skip list.
+//
+// DUMP_BATCH_SIZE in C++ (segcore/DeletedRecord.h) is 10000, so we create a
+// segment with enough rows to trigger the snapshot + rebuild naturally.
+//
+// Scenario (DUMP_BATCH_SIZE = 10000):
+//  1. Batch 1: Delete 10100 PKs with high row_ids at ts=T
+//     → DumpSnapshot dumps first 10000, cursor at (T, row_20100)
+//  2. Batch 2: Delete 10100 PKs with LOW row_ids at the SAME ts=T
+//     → all 10100 entries sort BEFORE cursor; total_undumped = 10200 > 10000
+//     → DumpSnapshot iterates from cursor, but only 100 entries remain
+//     → iterator exhausts → old code Assert, new code rebuilds from scratch.
+func (suite *SegmentSuite) TestDeleteSameTimestampAcrossBatches() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rowCount := 20200
+
+	growing, err := NewSegment(ctx,
+		suite.collection,
+		SegmentTypeGrowing,
+		0,
+		&querypb.SegmentLoadInfo{
+			SegmentID:     suite.segmentID + 10,
+			CollectionID:  suite.collectionID,
+			PartitionID:   suite.partitionID,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+			Level:         datapb.SegmentLevel_Legacy,
+		},
+		nil,
+	)
+	suite.Require().NoError(err)
+	defer growing.Release(context.Background())
+
+	insertMsg, err := mock_segcore.GenInsertMsg(suite.collection.GetCCollection(), suite.partitionID, growing.ID(), rowCount)
+	suite.Require().NoError(err)
+	insertRecord, err := storage.TransferInsertMsgToInsertRecord(suite.collection.Schema(), insertMsg)
+	suite.Require().NoError(err)
+	err = growing.Insert(ctx, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
+	suite.Require().NoError(err)
+	suite.Equal(int64(rowCount), growing.RowNum())
+
+	// Use a timestamp well above any insert timestamp to avoid the
+	// "delete_ts == insert_ts" skip in InternalPush.
+	deleteTS := uint64(rowCount + 1000)
+
+	// Batch 1: delete PKs [10100..20199] (10100 entries) at deleteTS.
+	// Skip list entries: (deleteTS,10100), ..., (deleteTS,20199).
+	// DumpSnapshot: 10100 > 10000 → dumps first 10000, cursor at (deleteTS,20100).
+	batch1Size := 10100
+	pks1 := storage.NewInt64PrimaryKeys(int64(batch1Size))
+	ts1 := make([]uint64, batch1Size)
+	for i := 0; i < batch1Size; i++ {
+		pks1.AppendRaw(int64(10100 + i))
+		ts1[i] = deleteTS
+	}
+	err = growing.Delete(ctx, pks1, ts1)
+	suite.NoError(err)
+
+	// Batch 2: delete PKs [0..10099] (10100 entries) at the SAME deleteTS.
+	// All entries (deleteTS,0)..(deleteTS,10099) sort BEFORE cursor (deleteTS,20100).
+	// Total=20200, dumped=10000 → undumped=10200 > 10000, DumpSnapshot triggers.
+	// From cursor only 100 entries remain → iterator exhausts → rebuild
+	// (or Assert in old code).
+	batch2Size := 10100
+	pks2 := storage.NewInt64PrimaryKeys(int64(batch2Size))
+	ts2 := make([]uint64, batch2Size)
+	for i := 0; i < batch2Size; i++ {
+		pks2.AppendRaw(int64(i))
+		ts2[i] = deleteTS
+	}
+	err = growing.Delete(ctx, pks2, ts2)
+	suite.NoError(err)
+
+	// If we reach here without crash/panic, the rebuild fix works correctly.
+	totalDeleted := batch1Size + batch2Size
+	suite.Equal(int64(rowCount-totalDeleted), growing.RowNum())
+	suite.Equal(int64(rowCount), growing.InsertCount())
+}
+
 func (suite *SegmentSuite) TestSegmentReleased() {
 	suite.sealed.Release(context.Background())
 
