@@ -189,6 +189,13 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                 }
                 break;
             }
+            case DataType::MOL: {
+                auto& mol_data = FIELD_DATA(data, mol);
+                for (auto& mol_bytes : mol_data) {
+                    result += mol_bytes.size();
+                }
+                break;
+            }
             case DataType::ARRAY: {
                 auto& array_data = FIELD_DATA(data, array);
                 switch (field_meta.get_element_type()) {
@@ -424,6 +431,14 @@ SetUpScalarFieldData(milvus::proto::schema::ScalarField*& scalar_array,
             }
             break;
         }
+        case DataType::MOL: {
+            auto obj = scalar_array->mutable_mol_data();
+            obj->mutable_data()->Reserve(count);
+            for (int i = 0; i < count; i++) {
+                *(obj->mutable_data()->Add()) = std::string();
+            }
+            break;
+        }
         case DataType::ARRAY: {
             auto obj = scalar_array->mutable_array_data();
             obj->mutable_data()->Reserve(count);
@@ -618,6 +633,15 @@ CreateScalarDataArrayFrom(const void* data_raw,
         case DataType::GEOMETRY: {
             auto data = reinterpret_cast<const std::string*>(data_raw);
             auto obj = scalar_array->mutable_geometry_data();
+            for (auto i = 0; i < count; i++) {
+                *(obj->mutable_data()->Add()) =
+                    std::string(data[i].data(), data[i].size());
+            }
+            break;
+        }
+        case DataType::MOL: {
+            auto data = reinterpret_cast<const std::string*>(data_raw);
+            auto obj = scalar_array->mutable_mol_data();
             for (auto i = 0; i < count; i++) {
                 *(obj->mutable_data()->Add()) =
                     std::string(data[i].data(), data[i].size());
@@ -941,6 +965,13 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             case DataType::GEOMETRY: {
                 auto& data = FIELD_DATA(src_field_data, geometry);
                 auto obj = scalar_array->mutable_geometry_data();
+                *(obj->mutable_data()->Add()) = std::string(
+                    data[src_offset].data(), data[src_offset].size());
+                break;
+            }
+            case DataType::MOL: {
+                auto& data = FIELD_DATA(src_field_data, mol);
+                auto obj = scalar_array->mutable_mol_data();
                 *(obj->mutable_data()->Add()) = std::string(
                     data[src_offset].data(), data[src_offset].size());
                 break;

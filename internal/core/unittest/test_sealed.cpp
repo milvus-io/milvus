@@ -503,6 +503,7 @@ TEST(Sealed, LoadFieldData) {
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
     schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->AddDebugField("mol", DataType::MOL);
     schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
     auto int8_nullable_id =
@@ -666,6 +667,7 @@ TEST(Sealed, ClearData) {
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
     schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->AddDebugField("mol", DataType::MOL);
     schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
 
@@ -752,6 +754,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     schema->AddDebugField("float", DataType::FLOAT);
     schema->AddDebugField("json", DataType::JSON);
     schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->AddDebugField("mol", DataType::MOL);
     schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
 
@@ -1915,6 +1918,7 @@ TEST(Sealed, QueryAllFields) {
     auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
     auto json_field = schema->AddDebugField("json", DataType::JSON);
     auto geometry_field = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    auto mol_field = schema->AddDebugField("mol", DataType::MOL);
     auto int_array_field =
         schema->AddDebugField("int_array", DataType::ARRAY, DataType::INT8);
     auto long_array_field =
@@ -2004,6 +2008,8 @@ TEST(Sealed, QueryAllFields) {
         nullptr, json_field, ids_ds->GetIds(), dataset_size);
     auto geometry_result = segment->bulk_subscript(
         nullptr, geometry_field, ids_ds->GetIds(), dataset_size);
+    auto mol_result = segment->bulk_subscript(
+        nullptr, mol_field, ids_ds->GetIds(), dataset_size);
     auto int_array_result = segment->bulk_subscript(
         nullptr, int_array_field, ids_ds->GetIds(), dataset_size);
     auto long_array_result = segment->bulk_subscript(
@@ -2037,6 +2043,7 @@ TEST(Sealed, QueryAllFields) {
     EXPECT_EQ(json_result->scalars().json_data().data_size(), dataset_size);
     EXPECT_EQ(geometry_result->scalars().geometry_data().data_size(),
               dataset_size);
+    EXPECT_EQ(mol_result->scalars().mol_data().data_size(), dataset_size);
     EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
               dataset_size * dim);
     EXPECT_EQ(float16_vec_result->vectors().float16_vector().size(),
@@ -2091,6 +2098,7 @@ TEST(Sealed, QueryAllNullableFields) {
     auto json_field = schema->AddDebugField("json", DataType::JSON, true);
     auto geometry_field =
         schema->AddDebugField("geometry", DataType::GEOMETRY, true);
+    auto mol_field = schema->AddDebugField("mol", DataType::MOL, true);
     auto int_array_field = schema->AddDebugField(
         "int_array", DataType::ARRAY, DataType::INT8, true);
     auto long_array_field = schema->AddDebugField(
@@ -2159,6 +2167,7 @@ TEST(Sealed, QueryAllNullableFields) {
     auto varchar_valid_values = dataset.get_col_valid(varchar_field);
     auto json_valid_values = dataset.get_col_valid(json_field);
     auto geometry_valid_values = dataset.get_col_valid(geometry_field);
+    auto mol_valid_values = dataset.get_col_valid(mol_field);
     auto int_array_valid_values = dataset.get_col_valid(int_array_field);
     auto long_array_valid_values = dataset.get_col_valid(long_array_field);
     auto bool_array_valid_values = dataset.get_col_valid(bool_array_field);
@@ -2187,6 +2196,8 @@ TEST(Sealed, QueryAllNullableFields) {
         nullptr, json_field, ids_ds->GetIds(), dataset_size);
     auto geometry_result = segment->bulk_subscript(
         nullptr, geometry_field, ids_ds->GetIds(), dataset_size);
+    auto mol_result = segment->bulk_subscript(
+        nullptr, mol_field, ids_ds->GetIds(), dataset_size);
     auto int_array_result = segment->bulk_subscript(
         nullptr, int_array_field, ids_ds->GetIds(), dataset_size);
     auto long_array_result = segment->bulk_subscript(
@@ -2214,6 +2225,7 @@ TEST(Sealed, QueryAllNullableFields) {
     EXPECT_EQ(json_result->scalars().json_data().data_size(), dataset_size);
     EXPECT_EQ(geometry_result->scalars().geometry_data().data_size(),
               dataset_size);
+    EXPECT_EQ(mol_result->scalars().mol_data().data_size(), dataset_size);
     EXPECT_EQ(vec_result->vectors().float_vector().data_size(),
               dataset_size * dim);
     EXPECT_EQ(int_array_result->scalars().array_data().data_size(),
@@ -2238,6 +2250,7 @@ TEST(Sealed, QueryAllNullableFields) {
     EXPECT_EQ(varchar_result->valid_data_size(), dataset_size);
     EXPECT_EQ(json_result->valid_data_size(), dataset_size);
     EXPECT_EQ(geometry_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(mol_result->valid_data_size(), dataset_size);
     EXPECT_EQ(int_array_result->valid_data_size(), dataset_size);
     EXPECT_EQ(long_array_result->valid_data_size(), dataset_size);
     EXPECT_EQ(bool_array_result->valid_data_size(), dataset_size);
