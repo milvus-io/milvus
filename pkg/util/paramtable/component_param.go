@@ -1141,7 +1141,7 @@ The default value is 1, which is enough for most cases.`,
 
 	p.BloomFilterMmapEnabled = ParamItem{
 		Key:          "common.bloomFilterMmapEnabled",
-		Version:      "2.5.6",
+		Version:      "2.6.14",
 		DefaultValue: "false",
 		Doc:          "if true, mmap bloom filter data to local file to reduce Go heap pressure",
 		Export:       true,

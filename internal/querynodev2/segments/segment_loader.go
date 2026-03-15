@@ -727,33 +727,48 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 	pkField := GetPkField(collection.Schema())
 	pkFieldID := pkField.GetFieldID()
 
-	// Calculate total memory size needed for bloom filters (PK stats)
-	var totalMemorySize int64
+	// Calculate total size needed for bloom filters (PK stats)
+	var totalBFSize int64
 	for _, info := range infos {
 		memSize, _ := packed.NewStatsResolverFromLoadInfo(info).BloomFilterMemorySize(pkFieldID)
-		totalMemorySize += memSize
+		totalBFSize += memSize
 	}
 
-	// Reserve memory resource if tiered eviction is enabled
-	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && totalMemorySize > 0 {
-		if ok := C.TryReserveLoadingResourceWithTimeout(C.CResourceUsage{
-			// double loading memory size for bloom filters to avoid OOM during loading
-			memory_bytes: C.int64_t(totalMemorySize * 2),
-			disk_bytes:   C.int64_t(0),
-		}, 1000); !ok {
-			return nil, fmt.Errorf("failed to reserve loading resource for bloom filters, totalMemorySize = %v MB",
-				logutil.ToMB(float64(totalMemorySize)))
+	// Reserve resource if tiered eviction is enabled.
+	// When bloom filter mmap is enabled (file-backed), the loaded data resides on disk,
+	// but loading still needs temporary memory for deserialization/conversion.
+	// When mmap is disabled (memory-backed), both loaded and loading are memory.
+	bfMmapEnabled := paramtable.Get().CommonCfg.BloomFilterMmapEnabled.GetAsBool()
+	var bfReserve C.CResourceUsage
+	if bfMmapEnabled {
+		// loaded: disk, loading overhead: memory (deserialization + conversion buffers)
+		bfReserve = C.CResourceUsage{
+			memory_bytes: C.int64_t(totalBFSize),
+			disk_bytes:   C.int64_t(totalBFSize),
 		}
-		log.Info("reserved loading resource for bloom filters", zap.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
+	} else {
+		// loaded: memory, loading overhead: memory (double for deserialization)
+		bfReserve = C.CResourceUsage{
+			memory_bytes: C.int64_t(totalBFSize * 2),
+			disk_bytes:   C.int64_t(0),
+		}
+	}
+	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && totalBFSize > 0 {
+		if ok := C.TryReserveLoadingResourceWithTimeout(bfReserve, 1000); !ok {
+			return nil, fmt.Errorf("failed to reserve loading resource for bloom filters, totalBFSize = %v MB, mmapEnabled = %v",
+				logutil.ToMB(float64(totalBFSize)), bfMmapEnabled)
+		}
+		log.Info("reserved loading resource for bloom filters",
+			zap.Float64("totalBFSizeMB", logutil.ToMB(float64(totalBFSize))),
+			zap.Bool("mmapEnabled", bfMmapEnabled))
 	}
 
 	defer func() {
-		if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && totalMemorySize > 0 {
-			C.ReleaseLoadingResource(C.CResourceUsage{
-				memory_bytes: C.int64_t(totalMemorySize * 2),
-				disk_bytes:   C.int64_t(0),
-			})
-			log.Info("released loading resource for bloom filters", zap.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
+		if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && totalBFSize > 0 {
+			C.ReleaseLoadingResource(bfReserve)
+			log.Info("released loading resource for bloom filters",
+				zap.Float64("totalBFSizeMB", logutil.ToMB(float64(totalBFSize))),
+				zap.Bool("mmapEnabled", bfMmapEnabled))
 		}
 	}()
 
