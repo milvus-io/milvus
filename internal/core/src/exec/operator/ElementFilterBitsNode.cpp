@@ -117,7 +117,6 @@ PhyElementFilterBitsNode::GetOutput() {
         doc_bitset, doc_bitset_valid, array_offsets.get());
 
     // Step 4: Set query context
-    query_context_->set_element_level_query(true);
     query_context_->set_struct_name(struct_name_);
     // Mark that bitset has been converted to element-level
     query_context_->set_bitset_is_element_level(true);
