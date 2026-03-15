@@ -175,8 +175,9 @@ class ProbeState;
 class HashTable : public BaseHashTable {
  public:
     HashTable(std::vector<std::unique_ptr<VectorHasher>>&& hashers,
-              const std::vector<Accumulator>& accumulators)
-        : BaseHashTable(std::move(hashers)) {
+              const std::vector<Accumulator>& accumulators,
+              int64_t maxNumGroups = 100000)
+        : BaseHashTable(std::move(hashers)), maxNumGroups_(maxNumGroups) {
         std::vector<DataType> keyTypes;
         for (auto& hasher : hashers_) {
             keyTypes.push_back(hasher->ChannelDataType());
@@ -305,6 +306,12 @@ class HashTable : public BaseHashTable {
     void
     checkSizeAndAllocateTable(int32_t numNew);
 
+    void
+    rehash();
+
+    void
+    insertForRehash(char* row, uint64_t hash);
+
     // Returns the number of entries after which the table gets rehashed.
     static uint64_t
     rehashSize(int64_t size) {
@@ -344,6 +351,8 @@ class HashTable : public BaseHashTable {
 
     [[maybe_unused]] int64_t numRehashes_{0};
     char* table_ = nullptr;
+    std::vector<uint64_t> rowHashes_;
+    int64_t maxNumGroups_;
 
     HashMode
     hashMode() const override {

@@ -485,6 +485,7 @@ queryNode:
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     enableGeometryCache: false # Enable geometry cache for geometry data
+    maxGroupByGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation per segment. Exceeding this limit fails the query.
     tieredStorage:
       warmup:
         # options: sync, async, disable.

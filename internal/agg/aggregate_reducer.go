@@ -9,6 +9,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -346,6 +348,7 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 
 	// 2. compute hash values for all rows in the result retrieved
 	var totalRowCount int64 = 0
+	maxGroupByGroups := paramtable.Get().QueryNodeCfg.MaxGroupByGroups.GetAsInt64()
 processResults:
 	for _, result := range results {
 		// Check limit before processing each shard to avoid unnecessary work
@@ -425,6 +428,11 @@ processResults:
 				} else {
 					bucket.Accumulate(newRow, rowIdx, numGroupingKeys, aggs)
 				}
+			}
+			if maxGroupByGroups > 0 && totalRowCount > maxGroupByGroups {
+				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("GROUP BY produced too many groups (%d). "+
+					"Add filters or increase queryNode.segcore.maxGroupByGroups (current: %d)",
+					totalRowCount, maxGroupByGroups))
 			}
 			// Don't guarantee specific groups to be returned before milvus support order by
 		}
