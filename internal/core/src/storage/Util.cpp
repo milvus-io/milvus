@@ -1509,13 +1509,22 @@ GetFieldDatasFromManifest(
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
 
+    // Determine the column name to use: external fields use their external name,
+    // internal fields use the numeric field ID string.
+    std::string column_name;
+    const auto& ext_field = field_meta.field_schema.external_field();
+    if (!ext_field.empty()) {
+        column_name = ext_field;
+    } else {
+        column_name = std::to_string(field_meta.field_id);
+    }
+
     // TODO remove manual check after loon support read null for non-exists field
     bool field_exists = false;
-    const auto field_id_to_find = std::to_string(field_meta.field_id);
     for (size_t i = 0; i < column_groups->size() && !field_exists; i++) {
         auto column_group = column_groups->at(i);
         for (const auto& column : column_group->columns) {
-            if (column == field_id_to_find) {
+            if (column == column_name) {
                 field_exists = true;
                 break;
             }
@@ -1525,8 +1534,7 @@ GetFieldDatasFromManifest(
         return {};
     }
 
-    std::string field_id_str = std::to_string(field_meta.field_id);
-    std::vector<std::string> needed_columns = {field_id_str};
+    std::vector<std::string> needed_columns = {column_name};
 
     // Create arrow schema from field meta
     std::shared_ptr<arrow::Schema> arrow_schema;
@@ -1543,17 +1551,13 @@ GetFieldDatasFromManifest(
                 data_type.value(), static_cast<int>(dim), nullable);
         }
     } else if (data_type.value() == DataType::ARRAY) {
-        // For ARRAY types, we use binary representation
-        // Element type information is encoded in the data itself
         arrow_schema = CreateArrowSchema(data_type.value(), nullable);
     } else {
-        // For scalar types
         arrow_schema = CreateArrowSchema(data_type.value(), nullable);
     }
 
     auto updated_schema = std::make_shared<arrow::Schema>(
-        arrow::Schema({arrow_schema->field(0)->WithName(
-            std::to_string((field_meta.field_id)))}));
+        arrow::Schema({arrow_schema->field(0)->WithName(column_name)}));
 
     auto reader = milvus_storage::api::Reader::create(
         column_groups,
@@ -1588,8 +1592,21 @@ GetFieldDatasFromManifest(
             continue;
         }
 
-        auto chunked_array = std::make_shared<arrow::ChunkedArray>(
-            batch->GetColumnByName(field_id_str));
+        auto raw_column = batch->GetColumnByName(column_name);
+        // External files may store vectors as List<Float32> or
+        // FixedSizeList<Float32, dim>. Normalize to FixedSizeBinary
+        // before FillFieldData which expects that format.
+        if (IsVectorDataType(data_type.value()) &&
+            !IsSparseFloatVectorDataType(data_type.value()) &&
+            !IsVectorArrayDataType(data_type.value()) &&
+            raw_column->type_id() != arrow::Type::FIXED_SIZE_BINARY) {
+            arrow::ArrayVector normalized =
+                NormalizeVectorArraysToFixedSizeBinary(
+                    {raw_column}, data_type.value(), dim);
+            raw_column = normalized[0];
+        }
+        auto chunked_array =
+            std::make_shared<arrow::ChunkedArray>(raw_column);
         auto field_data = CreateFieldData(data_type.value(),
                                           element_type.value(),
                                           batch->schema()->field(0)->nullable(),
@@ -1677,6 +1694,81 @@ GetFieldIDList(FieldId column_group_id,
                "failed to close file reader when get field id list from {}",
                filepath);
     return field_id_list;
+}
+
+arrow::ArrayVector
+NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
+                                       DataType data_type,
+                                       int dim) {
+    int byte_width = GetDataTypeSize(data_type, dim);
+    auto fsb_type = arrow::fixed_size_binary(byte_width);
+
+    arrow::ArrayVector result;
+    result.reserve(arrays.size());
+
+    for (const auto& array : arrays) {
+        auto type_id = array->type_id();
+        if (type_id == arrow::Type::FIXED_SIZE_BINARY) {
+            result.push_back(array);
+            continue;
+        }
+
+        int64_t num_rows = array->length();
+        AssertInfo(array->null_count() == 0,
+                   "Null values in vector columns are not supported for "
+                   "external collections");
+        auto buffer_result = arrow::AllocateBuffer(num_rows * byte_width);
+        AssertInfo(buffer_result.ok(),
+                   "Failed to allocate buffer for vector normalization");
+        auto buffer = std::move(*buffer_result);
+        auto dst = buffer->mutable_data();
+
+        if (type_id == arrow::Type::LIST) {
+            auto list_array = std::static_pointer_cast<arrow::ListArray>(array);
+            auto values = list_array->values();
+            int elem_bit_width = values->type()->bit_width();
+            AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
+                       "Vector list element must be fixed-width byte-aligned "
+                       "type, got bit_width={}",
+                       elem_bit_width);
+            int elem_byte_size = elem_bit_width / 8;
+            auto raw = reinterpret_cast<const uint8_t*>(
+                values->data()->buffers[1]->data());
+            for (int64_t i = 0; i < num_rows; i++) {
+                auto offset = list_array->value_offset(i);
+                memcpy(dst + i * byte_width,
+                       raw + offset * elem_byte_size,
+                       byte_width);
+            }
+        } else if (type_id == arrow::Type::FIXED_SIZE_LIST) {
+            auto fsl_array =
+                std::static_pointer_cast<arrow::FixedSizeListArray>(array);
+            auto values = fsl_array->values();
+            int elem_bit_width = values->type()->bit_width();
+            AssertInfo(elem_bit_width > 0 && elem_bit_width % 8 == 0,
+                       "Vector list element must be fixed-width byte-aligned "
+                       "type, got bit_width={}",
+                       elem_bit_width);
+            int elem_byte_size = elem_bit_width / 8;
+            auto raw = reinterpret_cast<const uint8_t*>(
+                values->data()->buffers[1]->data());
+            for (int64_t i = 0; i < num_rows; i++) {
+                auto offset = fsl_array->value_offset(i);
+                memcpy(dst + i * byte_width,
+                       raw + offset * elem_byte_size,
+                       byte_width);
+            }
+        } else {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "Unsupported arrow type for vector normalization: {}",
+                      array->type()->ToString());
+        }
+
+        auto fsb_array = std::make_shared<arrow::FixedSizeBinaryArray>(
+            fsb_type, num_rows, std::move(buffer));
+        result.push_back(std::move(fsb_array));
+    }
+    return result;
 }
 
 }  // namespace milvus::storage

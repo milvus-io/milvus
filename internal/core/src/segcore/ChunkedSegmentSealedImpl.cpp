@@ -40,7 +40,10 @@
 #include "NamedType/named_type_impl.hpp"
 #include "Types.h"
 #include "Utils.h"
+#include "arrow/array.h"
 #include "arrow/result.h"
+#include "arrow/table.h"
+#include "arrow/type.h"
 #include "bitset/bitset.h"
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Manager.h"
@@ -89,6 +92,7 @@
 #include "knowhere/sparse_utils.h"
 #include "knowhere/version.h"
 #include "log/Log.h"
+#include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/chunk_manager.h"
@@ -97,10 +101,11 @@
 #include "mmap/ChunkedColumn.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "mmap/ChunkedColumnInterface.h"
+#include "mmap/VirtualPKChunkedColumn.h"
 #include "mmap/Types.h"
+#include "common/VirtualPK.h"
 #include "monitor/Monitor.h"
 #include "monitor/scope_metric.h"
-#include "nlohmann/json.hpp"
 #include "parquet/metadata.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/schema.pb.h"
@@ -344,6 +349,113 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info,
             load_field_data_internal(load_info, op_ctx, is_replace);
             break;
     }
+}
+
+void
+ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
+    LOG_INFO(
+        "Loading segment {} field data with manifest {}", id_, manifest_path);
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
+    auto column_groups = segment_load_info_.GetColumnGroups();
+
+    auto arrow_schema = schema_->BuildReaderArrowSchema();
+    reader_ = milvus_storage::api::Reader::create(
+        column_groups, arrow_schema, nullptr, *properties);
+
+    // Pre-resolve field IDs for each column group, then reuse the
+    // standard LoadColumnGroup overload.
+    std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids;
+    cg_field_ids.reserve(column_groups->size());
+    for (size_t i = 0; i < column_groups->size(); ++i) {
+        auto cg = column_groups->at(i);
+        std::vector<FieldId> field_ids;
+        field_ids.reserve(cg->columns.size());
+        for (auto& column : cg->columns) {
+            field_ids.emplace_back(schema_->ResolveColumnFieldId(column));
+        }
+        cg_field_ids.emplace_back(static_cast<int>(i), std::move(field_ids));
+    }
+
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    std::vector<std::future<void>> load_group_futures;
+    for (const auto& pair : cg_field_ids) {
+        auto cg_index = pair.first;
+        const auto& field_ids = pair.second;
+        auto future =
+            pool.Submit([this, column_groups, properties, cg_index, field_ids] {
+                LoadColumnGroup(column_groups,
+                                properties,
+                                cg_index,
+                                field_ids,
+                                /*eager_load=*/false,
+                                /*op_ctx=*/nullptr);
+            });
+        load_group_futures.emplace_back(std::move(future));
+    }
+
+    std::vector<std::exception_ptr> load_exceptions;
+    for (auto& future : load_group_futures) {
+        try {
+            future.get();
+        } catch (...) {
+            load_exceptions.push_back(std::current_exception());
+        }
+    }
+
+    // If any exceptions occurred during index loading, handle them
+    if (!load_exceptions.empty()) {
+        LOG_ERROR("Failed to load {} out of {} indexes for segment {}",
+                  load_exceptions.size(),
+                  load_group_futures.size(),
+                  id_);
+
+        // Rethrow the first exception
+        std::rethrow_exception(load_exceptions[0]);
+    }
+
+    if (schema_->is_external_collection()) {
+        SynthesizeExternalSystemFields();
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields() {
+    int64_t num_rows = segment_load_info_.GetNumOfRows();
+    if (num_rows == 0) {
+        std::unique_lock lck(mutex_);
+        update_row_count(0);
+        system_ready_count_++;
+        return;
+    }
+
+    // 1. VirtualPKChunkedColumn for the synthetic primary key
+    auto pk_field_id = schema_->get_primary_field_id().value();
+    auto virtual_pk = std::make_shared<VirtualPKChunkedColumn>(id_, num_rows);
+    fields_.wlock()->emplace(pk_field_id, virtual_pk);
+    set_bit(field_data_ready_bitset_, pk_field_id, true);
+
+    // 2. PK→offset index for filter expressions
+    insert_record_.insert_pks(DataType::INT64, virtual_pk.get());
+    insert_record_.seal_pks();
+
+    // 3. Synthetic timestamps (all 0 — rows always visible)
+    std::vector<Timestamp> timestamps(num_rows, 0);
+    TimestampIndex index;
+    auto min_slice_length = num_rows < 4096 ? 1 : 4096;
+    auto meta =
+        GenerateFakeSlices(timestamps.data(), num_rows, min_slice_length);
+    index.set_length_meta(std::move(meta));
+    index.build_with(timestamps.data(), num_rows);
+    insert_record_.init_timestamps_from_owned(std::move(timestamps),
+                                              std::move(index));
+
+    // 4. Row count + readiness
+    {
+        std::unique_lock lck(mutex_);
+        update_row_count(num_rows);
+    }
+    system_ready_count_++;
 }
 
 std::optional<ChunkedSegmentSealedImpl::ParquetStatistics>
@@ -2625,9 +2737,12 @@ void
 ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
                                                Timestamp timestamp,
                                                Timestamp collection_ttl) const {
+    // External collections have no timestamps; all data is always visible
+    if (schema_->is_external_collection()) {
+        return;
+    }
     auto& ts = insert_record_.timestamps_;
     auto total_size = static_cast<int64_t>(ts.size());
-
     if (collection_ttl > 0) {
         auto range =
             insert_record_.timestamp_index_.get_active_range(collection_ttl);
@@ -3109,53 +3224,58 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
     }
 
     // load column groups
-    bool has_cg_changes = !diff.column_groups_to_load.empty() ||
-                          !diff.column_groups_to_replace.empty() ||
-                          !diff.column_groups_to_lazyload.empty() ||
-                          !diff.column_groups_to_lazyreplace.empty();
-    if (has_cg_changes) {
-        auto properties =
-            milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-                .GetProperties();
-        auto column_groups = segment_load_info.GetColumnGroups();
-        auto arrow_schema = schema_->ConvertToLoonArrowSchema();
-        auto needed_columns = std::make_shared<std::vector<std::string>>();
-        for (const auto& field_id : schema_->get_field_ids()) {
-            needed_columns->push_back(std::to_string(field_id.get()));
-        }
-        reader_ = milvus_storage::api::Reader::create(
-            column_groups, arrow_schema, needed_columns, *properties);
-        // New column group fields
-        if (!diff.column_groups_to_load.empty()) {
-            LoadColumnGroups(column_groups,
-                             properties,
-                             diff.column_groups_to_load,
-                             true,
-                             op_ctx);
-        }
-        if (!diff.column_groups_to_lazyload.empty()) {
-            LoadColumnGroups(column_groups,
-                             properties,
-                             diff.column_groups_to_lazyload,
-                             false,
-                             op_ctx);
-        }
-        // Replace column group fields
-        if (!diff.column_groups_to_replace.empty()) {
-            LoadColumnGroups(column_groups,
-                             properties,
-                             diff.column_groups_to_replace,
-                             true,
-                             op_ctx,
-                             true);
-        }
-        if (!diff.column_groups_to_lazyreplace.empty()) {
-            LoadColumnGroups(column_groups,
-                             properties,
-                             diff.column_groups_to_lazyreplace,
-                             false,
-                             op_ctx,
-                             true);
+    if (diff.load_external_manifest) {
+        // External collections: load via manifest path
+        LoadColumnGroups(segment_load_info.GetManifestPath());
+    } else {
+        bool has_cg_changes = !diff.column_groups_to_load.empty() ||
+                              !diff.column_groups_to_replace.empty() ||
+                              !diff.column_groups_to_lazyload.empty() ||
+                              !diff.column_groups_to_lazyreplace.empty();
+        if (has_cg_changes) {
+            auto properties =
+                milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                    .GetProperties();
+            auto column_groups = segment_load_info.GetColumnGroups();
+            auto arrow_schema = schema_->ConvertToLoonArrowSchema();
+            auto needed_columns = std::make_shared<std::vector<std::string>>();
+            for (const auto& field_id : schema_->get_field_ids()) {
+                needed_columns->push_back(std::to_string(field_id.get()));
+            }
+            reader_ = milvus_storage::api::Reader::create(
+                column_groups, arrow_schema, needed_columns, *properties);
+            // New column group fields
+            if (!diff.column_groups_to_load.empty()) {
+                LoadColumnGroups(column_groups,
+                                 properties,
+                                 diff.column_groups_to_load,
+                                 true,
+                                 op_ctx);
+            }
+            if (!diff.column_groups_to_lazyload.empty()) {
+                LoadColumnGroups(column_groups,
+                                 properties,
+                                 diff.column_groups_to_lazyload,
+                                 false,
+                                 op_ctx);
+            }
+            // Replace column group fields
+            if (!diff.column_groups_to_replace.empty()) {
+                LoadColumnGroups(column_groups,
+                                 properties,
+                                 diff.column_groups_to_replace,
+                                 true,
+                                 op_ctx,
+                                 true);
+            }
+            if (!diff.column_groups_to_lazyreplace.empty()) {
+                LoadColumnGroups(column_groups,
+                                 properties,
+                                 diff.column_groups_to_lazyreplace,
+                                 false,
+                                 op_ctx,
+                                 true);
+            }
         }
     }
 
@@ -3428,7 +3548,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     needed_columns->reserve(milvus_field_ids.size());
     for (const auto& fid : milvus_field_ids) {
-        needed_columns->push_back(std::to_string(fid.get()));
+        const auto& field_meta = (*schema_)[fid];
+        if (field_meta.is_external_field()) {
+            needed_columns->push_back(field_meta.get_external_field());
+        } else {
+            needed_columns->push_back(std::to_string(fid.get()));
+        }
     }
     auto chunk_reader_result = reader_->get_chunk_reader(index, needed_columns);
     AssertInfo(chunk_reader_result.ok(),
@@ -3742,6 +3867,494 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     ApplyLoadDiff(segment_load_info_, diff, op_ctx);
 
     LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
+}
+
+void
+ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
+                                          SearchResult& results) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(plan, "empty plan");
+    auto size = results.distances_.size();
+    AssertInfo(results.seg_offsets_.size() == size,
+               "Size of result distances is not equal to size of ids");
+
+    // Try take() for external fields; fills output_fields_data_ for
+    // external fields only. Non-external fields still go through
+    // bulk_subscript below.
+    bool used_take = TryTakeForSearch(
+        plan, results.seg_offsets_.data(), size, results);
+
+    std::unique_ptr<DataArray> field_data;
+    milvus::OpContext op_ctx;
+    for (auto field_id : plan->target_entries_) {
+        // Skip fields already filled by take
+        if (used_take &&
+            results.output_fields_data_.count(field_id) > 0) {
+            continue;
+        }
+        auto& field_meta = plan->schema_->operator[](field_id);
+        if (plan->schema_->get_dynamic_field_id().has_value() &&
+            plan->schema_->get_dynamic_field_id().value() == field_id &&
+            !plan->target_dynamic_fields_.empty()) {
+            auto& target_dynamic_fields = plan->target_dynamic_fields_;
+            field_data = bulk_subscript(&op_ctx,
+                                        field_id,
+                                        results.seg_offsets_.data(),
+                                        size,
+                                        target_dynamic_fields);
+        } else if (!is_field_exist(field_id)) {
+            field_data = bulk_subscript_not_exist_field(field_meta, size);
+        } else {
+            field_data = bulk_subscript(
+                &op_ctx, field_id, results.seg_offsets_.data(), size);
+        }
+        results.output_fields_data_[field_id] = std::move(field_data);
+    }
+    results.search_storage_cost_.scanned_remote_bytes +=
+        op_ctx.storage_usage.scanned_cold_bytes.load();
+    results.search_storage_cost_.scanned_total_bytes +=
+        op_ctx.storage_usage.scanned_total_bytes.load();
+}
+
+// ---- Shared helpers for TryTakeForRetrieve / TryTakeForSearch ----
+
+ChunkedSegmentSealedImpl::TakeContext
+ChunkedSegmentSealedImpl::BuildTakeContext(const int64_t* offsets,
+                                           int64_t size) {
+    struct OffsetEntry {
+        int64_t offset;
+        int64_t orig_pos;
+    };
+    std::vector<OffsetEntry> entries;
+    entries.reserve(size);
+    for (int64_t i = 0; i < size; i++) {
+        entries.push_back({offsets[i], i});
+    }
+    std::sort(entries.begin(), entries.end(),
+              [](const OffsetEntry& a, const OffsetEntry& b) {
+                  return a.offset < b.offset;
+              });
+
+    TakeContext ctx;
+    ctx.unique_offsets.reserve(size);
+    ctx.result_mapping.resize(size);
+    for (auto& e : entries) {
+        if (ctx.unique_offsets.empty() ||
+            ctx.unique_offsets.back() != e.offset) {
+            ctx.unique_offsets.push_back(e.offset);
+        }
+        ctx.result_mapping[e.orig_pos] =
+            static_cast<int64_t>(ctx.unique_offsets.size() - 1);
+    }
+    return ctx;
+}
+
+std::unique_ptr<DataArray>
+ChunkedSegmentSealedImpl::ArrowToDataArray(
+    const std::shared_ptr<arrow::Array>& arr,
+    const FieldMeta& field_meta,
+    const std::vector<int64_t>& result_mapping,
+    int64_t size) {
+    auto data_array = std::make_unique<DataArray>();
+    data_array->set_type(
+        static_cast<proto::schema::DataType>(field_meta.get_data_type()));
+
+    switch (field_meta.get_data_type()) {
+        case DataType::BOOL: {
+            auto typed =
+                std::static_pointer_cast<arrow::BooleanArray>(arr);
+            auto obj =
+                data_array->mutable_scalars()->mutable_bool_data();
+            for (int64_t i = 0; i < size; i++) {
+                obj->add_data(typed->Value(result_mapping[i]));
+            }
+            break;
+        }
+        case DataType::INT8: {
+            auto typed =
+                std::static_pointer_cast<arrow::Int8Array>(arr);
+            auto obj =
+                data_array->mutable_scalars()->mutable_int_data();
+            for (int64_t i = 0; i < size; i++) {
+                obj->add_data(
+                    static_cast<int32_t>(typed->Value(result_mapping[i])));
+            }
+            break;
+        }
+        case DataType::INT16: {
+            auto typed =
+                std::static_pointer_cast<arrow::Int16Array>(arr);
+            auto obj =
+                data_array->mutable_scalars()->mutable_int_data();
+            for (int64_t i = 0; i < size; i++) {
+                obj->add_data(
+                    static_cast<int32_t>(typed->Value(result_mapping[i])));
+            }
+            break;
+        }
+        case DataType::INT32: {
+            auto typed =
+                std::static_pointer_cast<arrow::Int32Array>(arr);
+            auto obj =
+                data_array->mutable_scalars()->mutable_int_data();
+            for (int64_t i = 0; i < size; i++) {
+                obj->add_data(typed->Value(result_mapping[i]));
+            }
+            break;
+        }
+        case DataType::INT64: {
+            auto typed =
+                std::static_pointer_cast<arrow::Int64Array>(arr);
+            auto obj =
+                data_array->mutable_scalars()->mutable_long_data();
+            for (int64_t i = 0; i < size; i++) {
+                obj->add_data(typed->Value(result_mapping[i]));
+            }
+            break;
+        }
+        case DataType::FLOAT: {
+            auto typed =
+                std::static_pointer_cast<arrow::FloatArray>(arr);
+            auto obj =
+                data_array->mutable_scalars()->mutable_float_data();
+            for (int64_t i = 0; i < size; i++) {
+                obj->add_data(typed->Value(result_mapping[i]));
+            }
+            break;
+        }
+        case DataType::DOUBLE: {
+            auto typed =
+                std::static_pointer_cast<arrow::DoubleArray>(arr);
+            auto obj =
+                data_array->mutable_scalars()->mutable_double_data();
+            for (int64_t i = 0; i < size; i++) {
+                obj->add_data(typed->Value(result_mapping[i]));
+            }
+            break;
+        }
+        case DataType::VARCHAR:
+        case DataType::STRING: {
+            auto typed =
+                std::static_pointer_cast<arrow::StringArray>(arr);
+            auto obj =
+                data_array->mutable_scalars()->mutable_string_data();
+            for (int64_t i = 0; i < size; i++) {
+                obj->add_data(typed->GetString(result_mapping[i]));
+            }
+            break;
+        }
+        case DataType::VECTOR_FLOAT: {
+            auto typed =
+                std::static_pointer_cast<arrow::FixedSizeBinaryArray>(arr);
+            int byte_width = typed->byte_width();
+            int dim = byte_width / sizeof(float);
+            auto vectors = data_array->mutable_vectors();
+            vectors->set_dim(dim);
+            auto float_data = vectors->mutable_float_vector();
+            for (int64_t i = 0; i < size; i++) {
+                auto val = typed->Value(result_mapping[i]);
+                auto floats = reinterpret_cast<const float*>(val);
+                for (int d = 0; d < dim; d++) {
+                    float_data->mutable_data()->Add(floats[d]);
+                }
+            }
+            break;
+        }
+        default:
+            return nullptr;  // unsupported type
+    }
+    return data_array;
+}
+
+std::shared_ptr<arrow::Table>
+ChunkedSegmentSealedImpl::ExecuteTake(
+    const std::vector<int64_t>& unique_offsets,
+    const std::shared_ptr<std::vector<std::string>>& needed_columns,
+    const char* caller_tag,
+    double& elapsed_ms) const {
+    if (!reader_) {
+        LOG_WARN("[TakeAPI] {} reader is null for segment {}",
+                 caller_tag, id_);
+        return nullptr;
+    }
+    auto take_start = std::chrono::high_resolution_clock::now();
+    auto result = reader_->take(unique_offsets, 1, needed_columns);
+    elapsed_ms =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::high_resolution_clock::now() - take_start)
+            .count();
+    if (!result.ok()) {
+        LOG_WARN("[TakeAPI] {} take() failed for segment {}: {}",
+                 caller_tag, id_, result.status().ToString());
+        return nullptr;
+    }
+    return *result;
+}
+
+// ---- End shared helpers ----
+
+bool
+ChunkedSegmentSealedImpl::TryTakeForRetrieve(
+    const query::RetrievePlan* plan,
+    const std::unique_ptr<proto::segcore::RetrieveResults>& results,
+    const int64_t* offsets,
+    int64_t size,
+    bool ignore_non_pk,
+    bool fill_ids) const {
+    if (!schema_->is_external_collection() || size == 0) {
+        return false;
+    }
+    constexpr int64_t kTakeThreshold = 10000;
+    if (size > kTakeThreshold) {
+        return false;
+    }
+
+    auto pk_field_id = plan->schema_->get_primary_field_id();
+    auto is_pk_field = [&](const FieldId& fid) {
+        return pk_field_id.has_value() && pk_field_id.value() == fid;
+    };
+
+    // Collect needed external columns and their field IDs
+    auto needed_columns = std::make_shared<std::vector<std::string>>();
+    std::vector<FieldId> take_field_ids;
+    std::vector<const FieldMeta*> take_field_metas;
+    for (auto field_id : plan->field_ids_) {
+        if (SystemProperty::Instance().IsSystem(field_id)) {
+            continue;
+        }
+        if (ignore_non_pk && !is_pk_field(field_id)) {
+            continue;
+        }
+        auto& field_meta = schema_->operator[](field_id);
+        if (!field_meta.is_external_field()) {
+            continue;
+        }
+        needed_columns->push_back(field_meta.get_external_field());
+        take_field_ids.push_back(field_id);
+        take_field_metas.push_back(&field_meta);
+    }
+    if (take_field_ids.empty()) {
+        return false;
+    }
+
+    auto ctx = BuildTakeContext(offsets, size);
+
+    double take_elapsed_ms = 0;
+    auto table = ExecuteTake(
+        ctx.unique_offsets, needed_columns, "retrieve", take_elapsed_ms);
+    if (!table) {
+        return false;
+    }
+
+    // Convert Arrow Table columns to DataArray results
+    auto fields_data = results->mutable_fields_data();
+    auto ids = results->mutable_ids();
+
+    // Build lookup from field_id to index in take_field_ids/take_field_metas
+    std::unordered_map<int64_t, size_t> ext_field_idx;
+    for (size_t fi = 0; fi < take_field_ids.size(); fi++) {
+        ext_field_idx[take_field_ids[fi].get()] = fi;
+    }
+
+    // Pre-combine Arrow chunks for each external column
+    std::vector<std::shared_ptr<arrow::Array>> combined_arrays(
+        take_field_ids.size());
+    for (size_t fi = 0; fi < take_field_ids.size(); fi++) {
+        auto ext_name = take_field_metas[fi]->get_external_field();
+        auto col = table->GetColumnByName(ext_name);
+        if (!col || col->num_chunks() == 0) {
+            LOG_WARN(
+                "[TakeAPI] column '{}' not found in take result for "
+                "segment {}",
+                ext_name, id_);
+            return false;
+        }
+        if (col->num_chunks() == 1) {
+            combined_arrays[fi] = col->chunk(0);
+        } else {
+            auto combined_result = arrow::Concatenate(col->chunks());
+            if (!combined_result.ok()) {
+                LOG_WARN("[TakeAPI] concatenate failed: {}",
+                         combined_result.status().ToString());
+                return false;
+            }
+            combined_arrays[fi] = *combined_result;
+        }
+    }
+
+    // Emit fields in plan->field_ids_ order so the positional index
+    // matches outputFieldsID in the Proxy's afterReduce.
+    for (auto field_id : plan->field_ids_) {
+        if (SystemProperty::Instance().IsSystem(field_id)) {
+            auto system_type =
+                SystemProperty::Instance().GetSystemFieldType(field_id);
+            FixedVector<int64_t> output(size);
+            milvus::OpContext op_ctx;
+            bulk_subscript(
+                &op_ctx, system_type, offsets, size, output.data());
+            auto data_array = std::make_unique<DataArray>();
+            data_array->set_field_id(field_id.get());
+            data_array->set_type(milvus::proto::schema::DataType::Int64);
+            auto obj =
+                data_array->mutable_scalars()->mutable_long_data();
+            auto data = reinterpret_cast<const int64_t*>(output.data());
+            obj->mutable_data()->Add(data, data + size);
+            fields_data->AddAllocated(data_array.release());
+            continue;
+        }
+
+        if (ignore_non_pk && !is_pk_field(field_id)) {
+            continue;
+        }
+
+        auto& field_meta = schema_->operator[](field_id);
+
+        // Virtual PK field (not external, computed on-the-fly)
+        if (!field_meta.is_external_field()) {
+            if (is_pk_field(field_id) &&
+                field_meta.get_data_type() == DataType::INT64) {
+                auto data_array = std::make_unique<DataArray>();
+                data_array->set_field_id(field_id.get());
+                data_array->set_type(
+                    milvus::proto::schema::DataType::Int64);
+                auto obj =
+                    data_array->mutable_scalars()->mutable_long_data();
+                for (int64_t i = 0; i < size; i++) {
+                    obj->add_data(GetVirtualPK(id_, offsets[i]));
+                }
+                if (!ignore_non_pk) {
+                    fields_data->AddAllocated(data_array.release());
+                }
+                if (fill_ids) {
+                    auto int_ids = ids->mutable_int_id();
+                    for (int64_t i = 0; i < size; i++) {
+                        int_ids->add_data(
+                            GetVirtualPK(id_, offsets[i]));
+                    }
+                }
+            }
+            continue;
+        }
+
+        // External field — convert from take() result
+        auto it = ext_field_idx.find(field_id.get());
+        if (it == ext_field_idx.end()) {
+            continue;
+        }
+        size_t fi = it->second;
+        auto& arr = combined_arrays[fi];
+
+        auto data_array = ArrowToDataArray(
+            arr, field_meta, ctx.result_mapping, size);
+        if (!data_array) {
+            LOG_WARN(
+                "[TakeAPI] unsupported data type {} for field '{}', "
+                "falling back",
+                static_cast<int>(field_meta.get_data_type()),
+                field_meta.get_external_field());
+            results->clear_fields_data();
+            results->clear_ids();
+            return false;
+        }
+        data_array->set_field_id(field_id.get());
+
+        if (!ignore_non_pk) {
+            fields_data->AddAllocated(data_array.release());
+        }
+    }
+
+    LOG_DEBUG(
+        "[TakeAPI] segment {} used take() for {} rows ({} unique), "
+        "{} fields, elapsed={:.2f}ms",
+        id_, size, ctx.unique_offsets.size(),
+        take_field_ids.size(), take_elapsed_ms);
+    return true;
+}
+
+bool
+ChunkedSegmentSealedImpl::TryTakeForSearch(
+    const query::Plan* plan,
+    const int64_t* seg_offsets,
+    int64_t size,
+    SearchResult& results) const {
+    if (!schema_->is_external_collection() || size == 0) {
+        return false;
+    }
+    constexpr int64_t kTakeThreshold = 10000;
+    if (size > kTakeThreshold) {
+        return false;
+    }
+
+    // Collect needed external columns
+    auto needed_columns = std::make_shared<std::vector<std::string>>();
+    std::vector<FieldId> take_field_ids;
+    std::vector<const FieldMeta*> take_field_metas;
+    for (auto field_id : plan->target_entries_) {
+        auto& field_meta = schema_->operator[](field_id);
+        if (!field_meta.is_external_field()) {
+            continue;
+        }
+        needed_columns->push_back(field_meta.get_external_field());
+        take_field_ids.push_back(field_id);
+        take_field_metas.push_back(&field_meta);
+    }
+    if (take_field_ids.empty()) {
+        return false;
+    }
+
+    auto ctx = BuildTakeContext(seg_offsets, size);
+
+    double take_elapsed_ms = 0;
+    auto table = ExecuteTake(
+        ctx.unique_offsets, needed_columns, "search", take_elapsed_ms);
+    if (!table) {
+        return false;
+    }
+
+    // Convert Arrow Table columns to DataArray and store in SearchResult
+    for (size_t fi = 0; fi < take_field_ids.size(); fi++) {
+        auto field_id = take_field_ids[fi];
+        auto& field_meta = *take_field_metas[fi];
+        auto ext_name = field_meta.get_external_field();
+        auto col = table->GetColumnByName(ext_name);
+        if (!col || col->num_chunks() == 0) {
+            LOG_WARN(
+                "[TakeAPI] search column '{}' not found for segment {}",
+                ext_name, id_);
+            return false;
+        }
+
+        std::shared_ptr<arrow::Array> arr;
+        if (col->num_chunks() == 1) {
+            arr = col->chunk(0);
+        } else {
+            auto combined_result = arrow::Concatenate(col->chunks());
+            if (!combined_result.ok()) {
+                return false;
+            }
+            arr = *combined_result;
+        }
+
+        auto data_array = ArrowToDataArray(
+            arr, field_meta, ctx.result_mapping, size);
+        if (!data_array) {
+            LOG_WARN(
+                "[TakeAPI] search: unsupported type {} for '{}', "
+                "falling back",
+                static_cast<int>(field_meta.get_data_type()), ext_name);
+            results.output_fields_data_.clear();
+            return false;
+        }
+        data_array->set_field_id(field_id.get());
+        results.output_fields_data_[field_id] = std::move(data_array);
+    }
+
+    LOG_DEBUG(
+        "[TakeAPI] search: segment {} used take() for {} rows ({} unique), "
+        "{} fields, elapsed={:.2f}ms",
+        id_, size, ctx.unique_offsets.size(),
+        take_field_ids.size(), take_elapsed_ms);
+    return true;
 }
 
 }  // namespace milvus::segcore

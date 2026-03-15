@@ -1693,6 +1693,12 @@ func (m *mockCandidate) Type() commonpb.SegmentState {
 	return commonpb.SegmentState_Sealed
 }
 
+func (m *mockCandidate) PkCandidateExist() bool                   { return true }
+func (m *mockCandidate) UpdatePkCandidate(_ []storage.PrimaryKey) {}
+func (m *mockCandidate) Stats() *storage.PkStatistics             { return nil }
+func (m *mockCandidate) Charge()                                  {}
+func (m *mockCandidate) Refund()                                  {}
+
 func TestBatchGetFromSegments(t *testing.T) {
 	t.Run("basic_sealed_segments", func(t *testing.T) {
 		candidate1 := &mockCandidate{id: 1, partition: 1, hits: []bool{true, false, true}}

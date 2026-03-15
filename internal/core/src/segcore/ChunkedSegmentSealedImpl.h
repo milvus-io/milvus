@@ -312,6 +312,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             callback) const;
 
  public:
+    // Non-virtual helper called via dynamic_cast from SegmentInterface.
+    // Must be public for cross-class access.
+    bool
+    TryTakeForRetrieve(
+        const query::RetrievePlan* plan,
+        const std::unique_ptr<proto::segcore::RetrieveResults>& results,
+        const int64_t* offsets,
+        int64_t size,
+        bool ignore_non_pk,
+        bool fill_ids) const;
+
     // count of chunk that has raw data
     int64_t
     num_chunk_data(FieldId field_id) const override;
@@ -438,6 +449,44 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    void* data,
                    TargetBitmap& valid_map,
                    bool small_int_raw_type = false) const override;
+
+    // Override to inject take() fast path for Search on external tables.
+    // Uses existing vtable slot — no layout change.
+    void
+    FillTargetEntry(const query::Plan* plan,
+                    SearchResult& results) const override;
+
+    bool
+    TryTakeForSearch(const query::Plan* plan,
+                     const int64_t* seg_offsets,
+                     int64_t size,
+                     SearchResult& results) const;
+
+    // Shared helpers for TryTakeForRetrieve / TryTakeForSearch
+    struct TakeContext {
+        std::vector<int64_t> unique_offsets;
+        std::vector<int64_t> result_mapping;  // orig_pos → unique index
+    };
+
+    static TakeContext
+    BuildTakeContext(const int64_t* offsets, int64_t size);
+
+    // Converts a combined Arrow array into a proto DataArray using
+    // result_mapping for reorder.  Returns nullptr on unsupported type.
+    static std::unique_ptr<DataArray>
+    ArrowToDataArray(const std::shared_ptr<arrow::Array>& arr,
+                     const FieldMeta& field_meta,
+                     const std::vector<int64_t>& result_mapping,
+                     int64_t size);
+
+    // Calls reader_->take() with timing. Returns the table on success,
+    // or nullptr on failure (logs a warning).
+    std::shared_ptr<arrow::Table>
+    ExecuteTake(
+        const std::vector<int64_t>& unique_offsets,
+        const std::shared_ptr<std::vector<std::string>>& needed_columns,
+        const char* caller_tag,
+        double& elapsed_ms) const;
 
     void
     check_search(const query::Plan* plan) const override;
@@ -1076,6 +1125,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false);
 
+    // Load column groups from a manifest file path (for external collections)
+    void
+    LoadColumnGroups(const std::string& manifest_path);
+
     /**
      * @brief Load a single column group at the specified index
      *
@@ -1098,6 +1151,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool eager_load,
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false);
+
+    // Synthesize system fields (virtual PK, timestamps, PK index, row count)
+    // for external collections. External collections don't have real PK or
+    // timestamp fields in their parquet data, so these must be generated.
+    void
+    SynthesizeExternalSystemFields();
 
     /**
      * @brief Reloads columns from the specified field IDs
@@ -1161,6 +1220,30 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         });
         return res;
     }
+
+#ifdef MILVUS_UNIT_TEST
+ public:
+    // Test-only: inject a mock Reader for unit testing take() paths.
+    void
+    SetReaderForTesting(std::unique_ptr<milvus_storage::api::Reader> r) {
+        reader_ = std::move(r);
+    }
+
+    // Wrappers for protected methods to enable direct unit testing.
+    void
+    TestFillTargetEntry(const query::Plan* plan,
+                        SearchResult& results) const {
+        FillTargetEntry(plan, results);
+    }
+
+    bool
+    TestTryTakeForSearch(const query::Plan* plan,
+                         const int64_t* seg_offsets,
+                         int64_t size,
+                         SearchResult& results) const {
+        return TryTakeForSearch(plan, seg_offsets, size, results);
+    }
+#endif
 
  private:
     // InsertRecord needs to pin pk column.

@@ -17,7 +17,9 @@ package packed
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -85,6 +87,11 @@ func SplitFileToFragments(
 
 // FetchFragmentsFromExternalSource scans the external source and returns fragments.
 // It explores files from the external source and splits large files into multiple fragments.
+//
+// IMPORTANT: The loon_exttable_explore FFI uses a Transaction that writes a manifest file
+// to baseDir. If baseDir == exploreDir, the manifest pollutes the data directory and
+// accumulates stale column groups across calls (Transaction append semantics).
+// To avoid this, we use a unique temporary baseDir for each explore call.
 func FetchFragmentsFromExternalSource(
 	ctx context.Context,
 	format string,
@@ -94,55 +101,83 @@ func FetchFragmentsFromExternalSource(
 ) ([]Fragment, error) {
 	log := log.Ctx(ctx)
 
-	// Call ExploreFiles to get file list
-	filePaths, err := ExploreFiles(
+	// Use a unique temp base dir for explore output to prevent:
+	// 1. Manifest files polluting the user's data directory
+	// 2. Transaction accumulating stale column groups across calls
+	exploreBaseDir := fmt.Sprintf("__explore_temp__/%s", uuid.New().String())
+
+	// For lance-table format, BuildLanceBaseUri constructs "scheme://bucket/path" without
+	// root_path (unlike Parquet which uses Arrow S3 FileSystemProxy that prepends root_path).
+	// Prepend root_path so Lance can locate the dataset in the correct bucket prefix.
+	exploreDir := externalSource
+	if format == "lance-table" && storageConfig.GetRootPath() != "" {
+		exploreDir = strings.TrimRight(storageConfig.GetRootPath(), "/") + "/" + externalSource
+	}
+
+	// Call ExploreFiles to get file list with row counts.
+	// ExploreFiles writes temp manifest files to exploreBaseDir as a side effect of the FFI.
+	// We clean them up immediately after consuming the results.
+	fileInfos, err := ExploreFiles(
 		columns,
 		format,
-		externalSource,
-		externalSource,
+		exploreBaseDir,
+		exploreDir,
 		storageConfig,
 	)
+	// Always clean up temp dir, regardless of whether ExploreFiles succeeded or failed.
+	defer CleanupExploreTempDir(exploreBaseDir, storageConfig)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to explore files: %w", err)
 	}
 
-	if len(filePaths) == 0 {
+	if len(fileInfos) == 0 {
 		return nil, fmt.Errorf("no files found in external source %q with format %q", externalSource, format)
 	}
 
 	log.Info("Explored external files",
-		zap.Int("fileCount", len(filePaths)),
-		zap.String("format", format))
+		zap.Int("fileCount", len(fileInfos)),
+		zap.String("format", format),
+		zap.String("externalSource", externalSource))
 
-	// Get row count for each file and split large files into fragments
+	// Get row count for each file and split large files into fragments.
 	var fragments []Fragment
 	fragmentIDGenerator := NewFragmentIDGenerator(0)
 
-	for _, filePath := range filePaths {
+	for _, fi := range fileInfos {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
 
-		fileInfo, err := GetFileInfo(format, filePath, storageConfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get file info for %s: %w", filePath, err)
+		numRows := fi.NumRows
+		if numRows <= 0 {
+			// Row count not available from explore (e.g., parquet format).
+			// Fetch it separately via GetFileInfo FFI call.
+			fetchedInfo, err := GetFileInfo(format, fi.FilePath, storageConfig)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get file info for %s: %w", fi.FilePath, err)
+			}
+			numRows = fetchedInfo.NumRows
 		}
 
-		// Split large files into multiple fragments
 		fileFragments := SplitFileToFragments(
-			filePath,
-			fileInfo.NumRows,
+			fi.FilePath,
+			numRows,
 			DefaultFragmentRowLimit,
 			fragmentIDGenerator,
 		)
 		fragments = append(fragments, fileFragments...)
 	}
 
+	if len(fragments) == 0 {
+		return nil, fmt.Errorf("no data files found in external source %q", externalSource)
+	}
+
 	log.Info("Created fragments from external files",
 		zap.Int("totalFragments", len(fragments)),
-		zap.Int("fileCount", len(filePaths)))
+		zap.Int("fileCount", len(fileInfos)))
 
 	return fragments, nil
 }
@@ -251,20 +286,26 @@ func CreateSegmentManifestWithBasePath(
 }
 
 // GetColumnNamesFromSchema extracts column names from schema.
-// If a field has ExternalField set, it uses that; otherwise uses the field name.
+// For external collections: only includes fields with ExternalField set
+// (system fields like __virtual_pk__ are skipped as they don't exist in parquet data).
+// For normal collections: uses field name for all fields.
 func GetColumnNamesFromSchema(schema *schemapb.CollectionSchema) []string {
 	if schema == nil {
 		return nil
 	}
 
+	isExternal := schema.GetExternalSource() != ""
 	var columns []string
 	for _, field := range schema.GetFields() {
 		extField := field.GetExternalField()
 		if extField != "" {
 			columns = append(columns, extField)
-		} else {
+		} else if !isExternal {
+			// Non-external collections: use field name
 			columns = append(columns, field.GetName())
 		}
+		// External collections: skip fields without ExternalField
+		// (e.g., __virtual_pk__, RowID, Timestamp)
 	}
 	return columns
 }

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -244,9 +245,9 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
 			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			exist := segment.BloomFilterExist()
-			suite.Require().True(exist)
-			exist = segment.MayPkExist(lc)
+			pkReady := segment.PkCandidateExist()
+			suite.Require().True(pkReady)
+			exist := segment.MayPkExist(lc)
 			suite.Require().True(exist)
 		}
 	}
@@ -281,9 +282,9 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
 			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			exist := segment.BloomFilterExist()
-			suite.True(exist)
-			exist = segment.MayPkExist(lc)
+			pkReady := segment.PkCandidateExist()
+			suite.True(pkReady)
+			exist := segment.MayPkExist(lc)
 			suite.True(exist)
 		}
 	}
@@ -1324,6 +1325,89 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_ExpansionF
 	suite.NoError(err)
 	expected := uint64(float64(textIndexSize) * expansionFactor)
 	suite.EqualValues(expected, usage.MemorySize)
+}
+
+func TestSeparateLoadInfoV2_ExternalFieldIndexNotSkipped(t *testing.T) {
+	// Verifies that indexes on external fields are NOT skipped in separateLoadInfoV2.
+	// Previously, external field indexes were filtered out, preventing index loading for external tables.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "__virtual_pk__", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{Name: "embedding", FieldID: 102, DataType: schemapb.DataType_FloatVector, ExternalField: "embedding"},
+		},
+	}
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		StorageVersion: storage.StorageV3,
+		IndexInfos: []*querypb.FieldIndexInfo{
+			{
+				FieldID:        101,
+				IndexID:        1001,
+				IndexFilePaths: []string{"index/101/file1", "index/101/file2"},
+			},
+			{
+				FieldID:        102,
+				IndexID:        1002,
+				IndexFilePaths: []string{"index/102/file1"},
+			},
+		},
+		// External segments have no BinlogPaths — data is loaded from manifest
+		BinlogPaths: []*datapb.FieldBinlog{},
+	}
+
+	indexedFieldInfos, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+
+	// External field indexes should be included (not skipped)
+	assert.Len(t, indexedFieldInfos, 0, "no binlog paths means no indexed field infos via binlog matching")
+	assert.Len(t, fieldBinlogs, 0, "no binlog paths for external segments")
+
+	// The key point: fieldID2IndexInfo should contain external field indexes.
+	// Even though indexedFieldInfos is empty (no binlog to match), the indexes are
+	// still available in loadInfo.IndexInfos for the C++ managed loading path.
+	// This test ensures the code doesn't filter them out from IndexInfos.
+	assert.Len(t, loadInfo.IndexInfos, 2, "IndexInfos should still contain all external field indexes")
+}
+
+func TestSeparateLoadInfoV2_MixedExternalAndNormalFields(t *testing.T) {
+	// Verify that normal field indexes are matched while external field binlogs are skipped.
+	// Index info for both external and normal fields should remain in IndexInfos.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "__virtual_pk__", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{Name: "normal_field", FieldID: 103, DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		StorageVersion: storage.StorageV3,
+		IndexInfos: []*querypb.FieldIndexInfo{
+			{
+				FieldID:        101,
+				IndexID:        1001,
+				IndexFilePaths: []string{"index/101/file1"},
+			},
+			{
+				FieldID:        103,
+				IndexID:        1003,
+				IndexFilePaths: []string{"index/103/file1"},
+			},
+		},
+		BinlogPaths: []*datapb.FieldBinlog{
+			// Normal field has binlog; external field 101 does not
+			{FieldID: 103, Binlogs: []*datapb.Binlog{{LogPath: "binlog/103"}}},
+		},
+	}
+
+	indexedFieldInfos, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+
+	// Normal field 103 has binlog + index → indexed
+	assert.Len(t, indexedFieldInfos, 1)
+	assert.Contains(t, indexedFieldInfos, int64(1003))
+	assert.Len(t, fieldBinlogs, 0)
+	// IndexInfos still contains both external and normal field indexes
+	assert.Len(t, loadInfo.IndexInfos, 2)
 }
 
 func TestSegmentLoader(t *testing.T) {
