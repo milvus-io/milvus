@@ -129,6 +129,32 @@ var (
 			segmentLevelLabelName,
 		})
 
+	QueryNodeLoadedSegmentCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "loaded_segment_count",
+			Help:      "number of segments loaded, categorized by collection, segment type, and vector index status",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			segmentStateLabelName,
+			segmentIndexStatusLabelName,
+		})
+
+	QueryNodeSegmentByStorageVersion = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_by_storage_version",
+			Help:      "number of segments loaded, categorized by storage version",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			segmentStateLabelName,
+			segmentStorageVersionLabelName,
+		})
+
 	QueryNodeNumDmlChannels = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -833,6 +859,8 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeNumCollections)
 	registry.MustRegister(QueryNodeNumPartitions)
 	registry.MustRegister(QueryNodeNumSegments)
+	registry.MustRegister(QueryNodeLoadedSegmentCount)
+	registry.MustRegister(QueryNodeSegmentByStorageVersion)
 	registry.MustRegister(QueryNodeNumDmlChannels)
 	registry.MustRegister(QueryNodeNumDeltaChannels)
 	registry.MustRegister(QueryNodeSQCount)

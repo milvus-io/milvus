@@ -73,6 +73,26 @@ const (
 	SegmentTypeSealed  = commonpb.SegmentState_Sealed
 )
 
+// IndexStatus represents the vector index status of a segment
+type IndexStatus int32
+
+const (
+	IndexStatusUnindexed IndexStatus = iota
+	IndexStatusIndexed
+)
+
+// String returns the string representation of IndexStatus
+func (s IndexStatus) String() string {
+	switch s {
+	case IndexStatusIndexed:
+		return "indexed"
+	case IndexStatusUnindexed:
+		return "unindexed"
+	default:
+		return "unknown"
+	}
+}
+
 var ErrSegmentUnhealthy = errors.New("segment unhealthy")
 
 // IndexedFieldInfo contains binlog info of vector field
@@ -97,6 +117,7 @@ type baseSegment struct {
 	resourceUsageCache *atomic.Pointer[ResourceUsage]
 
 	needUpdatedVersion *atomic.Int64 // only for lazy load mode update index
+	indexStatus        *atomic.Int32 // vector index status: indexed or unindexed
 }
 
 func newBaseSegment(collection *Collection, segmentType SegmentType, version int64, loadInfo *querypb.SegmentLoadInfo) (baseSegment, error) {
@@ -116,6 +137,7 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 		needUpdatedVersion: atomic.NewInt64(0),
+		indexStatus:        atomic.NewInt32(int32(IndexStatusUnindexed)),
 	}
 	return bs, nil
 }
@@ -155,6 +177,18 @@ func (s *baseSegment) Type() SegmentType {
 
 func (s *baseSegment) Level() datapb.SegmentLevel {
 	return s.loadInfo.Load().GetLevel()
+}
+
+func (s *baseSegment) GetIndexStatus() IndexStatus {
+	return IndexStatus(s.indexStatus.Load())
+}
+
+func (s *baseSegment) SetIndexStatus(status IndexStatus) {
+	s.indexStatus.Store(int32(status))
+}
+
+func (s *baseSegment) CompareAndSetIndexStatus(old, new IndexStatus) bool {
+	return s.indexStatus.CompareAndSwap(int32(old), int32(new))
 }
 
 func (s *baseSegment) IsSorted() bool {
@@ -549,26 +583,58 @@ func (s *LocalSegment) DropIndex(ctx context.Context, indexID int64) error {
 	}
 	defer s.ptrLock.Unpin()
 
-	if indexInfo, ok := s.fieldIndexes.Get(indexID); ok {
-		field := typeutil.GetField(s.collection.schema.Load(), indexInfo.IndexInfo.FieldID)
-		if typeutil.IsJSONType(field.GetDataType()) {
-			nestedPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, indexInfo.IndexInfo.GetIndexParams())
-			if err != nil {
-				return err
-			}
-			err = s.csegment.DropJSONIndex(ctx, indexInfo.IndexInfo.FieldID, nestedPath)
-			if err != nil {
-				return err
-			}
-		} else {
-			err := s.csegment.DropIndex(ctx, indexInfo.IndexInfo.FieldID)
-			if err != nil {
-				return err
+	indexInfo, ok := s.fieldIndexes.Get(indexID)
+	if !ok {
+		return nil
+	}
+
+	field := typeutil.GetField(s.collection.schema.Load(), indexInfo.IndexInfo.FieldID)
+
+	// Check if this is a vector field index being dropped
+	isVectorField := typeutil.IsVectorType(field.GetDataType())
+
+	// Get the current index status before dropping (only for vector fields)
+	var oldIndexStatus IndexStatus
+	if isVectorField {
+		oldIndexStatus = s.GetIndexStatus()
+	}
+
+	// Drop the index from core segment
+	if typeutil.IsJSONType(field.GetDataType()) {
+		nestedPath, err := funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, indexInfo.IndexInfo.GetIndexParams())
+		if err != nil {
+			return err
+		}
+		err = s.csegment.DropJSONIndex(ctx, indexInfo.IndexInfo.FieldID, nestedPath)
+		if err != nil {
+			return err
+		}
+	} else {
+		err := s.csegment.DropIndex(ctx, indexInfo.IndexInfo.FieldID)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Remove from field indexes
+	s.fieldIndexes.Remove(indexID)
+
+	// Update metrics if this was a vector field and the segment transitioned to unindexed
+	if isVectorField && oldIndexStatus == IndexStatusIndexed {
+		schema := s.collection.Schema()
+		allIndexed := checkAllVectorFieldsIndexed(s, schema)
+		if !allIndexed {
+			// Segment transitioned from indexed to unindexed
+			if updateSegmentIndexMetric(s, IndexStatusIndexed, IndexStatusUnindexed) {
+				log.Ctx(ctx).Info("segment index status updated after dropping index",
+					zap.Int64("segmentID", s.ID()),
+					zap.Int64("fieldID", field.GetFieldID()),
+					zap.String("oldStatus", IndexStatusIndexed.String()),
+					zap.String("newStatus", IndexStatusUnindexed.String()))
 			}
 		}
-
-		s.fieldIndexes.Remove(indexID)
 	}
+
 	return nil
 }
 
