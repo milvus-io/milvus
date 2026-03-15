@@ -371,7 +371,7 @@ type ReplicaManagerV2Suite struct {
 	suite.Suite
 
 	rgs             map[string]typeutil.UniqueSet
-	sqNodes         typeutil.UniqueSet
+	sqNodesByRG     map[string]typeutil.UniqueSet // streaming query nodes grouped by resource group
 	outboundSQNodes []int64
 	collections     map[int64]collectionLoadConfig
 	kv              kv.MetaKv
@@ -390,7 +390,11 @@ func (suite *ReplicaManagerV2Suite) SetupSuite() {
 		"RG4": typeutil.NewUniqueSet(7, 8, 9, 10),
 		"RG5": typeutil.NewUniqueSet(11, 12, 13, 14, 15),
 	}
-	suite.sqNodes = typeutil.NewUniqueSet(16, 17, 18, 19, 20)
+	// Streaming query nodes grouped by resource group for resource group isolation testing.
+	// Use a default empty resource group to test fallback mode initially.
+	suite.sqNodesByRG = map[string]typeutil.UniqueSet{
+		"": typeutil.NewUniqueSet(16, 17, 18, 19, 20),
+	}
 	suite.outboundSQNodes = []int64{}
 	suite.collections = map[int64]collectionLoadConfig{
 		1000: {
@@ -448,7 +452,7 @@ func (suite *ReplicaManagerV2Suite) TestSpawn() {
 			rgsOfCollection[rg] = suite.rgs[rg]
 		}
 		mgr.RecoverNodesInCollection(ctx, id, rgsOfCollection)
-		mgr.RecoverSQNodesInCollection(ctx, id, suite.sqNodes)
+		mgr.RecoverSQNodesInCollection(ctx, id, suite.sqNodesByRG)
 		for rg := range cfg.spawnConfig {
 			for _, node := range suite.rgs[rg].Collect() {
 				replica := mgr.GetByCollectionAndNode(ctx, id, node)
@@ -506,11 +510,22 @@ func (suite *ReplicaManagerV2Suite) testIfBalanced() {
 			suite.ElementsMatch(nodes, suite.rgs[replicas[0].GetResourceGroup()].Collect())
 			suite.True(maximumNodes-minimumNodes <= 1)
 		}
-		availableSQNodes := suite.sqNodes.Clone()
+		availableSQNodes := suite.getAllSQNodes()
 		availableSQNodes.Remove(suite.outboundSQNodes...)
 		suite.ElementsMatch(availableSQNodes.Collect(), sqNodes)
 		suite.True(maximumSQNodes-minimumSQNodes <= 1)
 	}
+}
+
+// getAllSQNodes returns all streaming query nodes from all resource groups.
+func (suite *ReplicaManagerV2Suite) getAllSQNodes() typeutil.UniqueSet {
+	allNodes := typeutil.NewUniqueSet()
+	for _, nodes := range suite.sqNodesByRG {
+		for node := range nodes {
+			allNodes.Insert(node)
+		}
+	}
+	return allNodes
 }
 
 func (suite *ReplicaManagerV2Suite) TestTransferReplica() {
@@ -534,7 +549,8 @@ func (suite *ReplicaManagerV2Suite) TestTransferReplicaAndAddNode() {
 	suite.mgr.TransferReplica(ctx, 1005, "RG4", "RG5", 1)
 	suite.recoverReplica(1, false)
 	suite.rgs["RG5"].Insert(16, 17, 18)
-	suite.sqNodes.Insert(20, 21, 22)
+	// Add new streaming query nodes to the default resource group.
+	suite.sqNodesByRG[""].Insert(20, 21, 22)
 	suite.recoverReplica(2, true)
 	suite.testIfBalanced()
 }
@@ -558,10 +574,14 @@ func (suite *ReplicaManagerV2Suite) recoverReplica(k int, clearOutbound bool) {
 			for rg := range cfg.spawnConfig {
 				rgsOfCollection[rg] = suite.rgs[rg]
 			}
-			sqNodes := suite.sqNodes.Clone()
-			sqNodes.Remove(suite.outboundSQNodes...)
+			// Build sqNodes map with outbound nodes removed.
+			sqNodesByRG := make(map[string]typeutil.UniqueSet)
+			for rg, nodes := range suite.sqNodesByRG {
+				sqNodesByRG[rg] = nodes.Clone()
+				sqNodesByRG[rg].Remove(suite.outboundSQNodes...)
+			}
 			suite.mgr.RecoverNodesInCollection(ctx, id, rgsOfCollection)
-			suite.mgr.RecoverSQNodesInCollection(ctx, id, sqNodes)
+			suite.mgr.RecoverSQNodesInCollection(ctx, id, sqNodesByRG)
 		}
 
 		// clear all outbound nodes
@@ -576,6 +596,229 @@ func (suite *ReplicaManagerV2Suite) recoverReplica(k int, clearOutbound bool) {
 			}
 		}
 	}
+}
+
+// TestSQNodeResourceGroupIsolation tests that streaming query nodes are assigned
+// by resource group isolation when the streaming node resource groups cover all
+// replica resource groups.
+func TestSQNodeResourceGroupIsolation(t *testing.T) {
+	paramtable.Init()
+
+	catalog := mocks.NewQueryCoordCatalog(t)
+	// Use On directly to handle variadic arguments.
+	catalog.On("SaveReplica", mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.On("SaveReplica", mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.On("SaveReplica", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.On("SaveReplica", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	idAllocator := RandomIncrementIDAllocator()
+	mgr := NewReplicaManager(idAllocator, catalog)
+	ctx := context.Background()
+
+	// Create replicas in different resource groups.
+	replica1 := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  100,
+		ResourceGroup: "RG1",
+		Nodes:         []int64{},
+	})
+	replica2 := newReplica(&querypb.Replica{
+		ID:            2,
+		CollectionID:  100,
+		ResourceGroup: "RG2",
+		Nodes:         []int64{},
+	})
+	replica3 := newReplica(&querypb.Replica{
+		ID:            3,
+		CollectionID:  100,
+		ResourceGroup: "RG3",
+		Nodes:         []int64{},
+	})
+
+	err := mgr.put(ctx, replica1, replica2, replica3)
+	assert.NoError(t, err)
+
+	// Test case 1: Resource group isolation mode.
+	// Streaming nodes by RG that covers all replica RGs.
+	sqNodesByRG := map[string]typeutil.UniqueSet{
+		"RG1": typeutil.NewUniqueSet(101, 102),
+		"RG2": typeutil.NewUniqueSet(201, 202, 203),
+		"RG3": typeutil.NewUniqueSet(301),
+	}
+
+	err = mgr.RecoverSQNodesInCollection(ctx, 100, sqNodesByRG)
+	assert.NoError(t, err)
+
+	// Verify that each replica only gets streaming nodes from its own resource group.
+	updatedReplica1 := mgr.Get(ctx, 1)
+	updatedReplica2 := mgr.Get(ctx, 2)
+	updatedReplica3 := mgr.Get(ctx, 3)
+
+	// RG1 has 2 nodes, replica1 should get both.
+	assert.ElementsMatch(t, []int64{101, 102}, updatedReplica1.GetRWSQNodes())
+	// RG2 has 3 nodes, replica2 should get all 3.
+	assert.ElementsMatch(t, []int64{201, 202, 203}, updatedReplica2.GetRWSQNodes())
+	// RG3 has 1 node, replica3 should get it.
+	assert.ElementsMatch(t, []int64{301}, updatedReplica3.GetRWSQNodes())
+
+	// Test case 2: Fallback mode.
+	// Create a new collection with a replica in a resource group not covered by streaming nodes.
+	replica4 := newReplica(&querypb.Replica{
+		ID:            4,
+		CollectionID:  200,
+		ResourceGroup: "RG_UNKNOWN", // This RG is not in sqNodesByRG.
+		Nodes:         []int64{},
+	})
+	replica5 := newReplica(&querypb.Replica{
+		ID:            5,
+		CollectionID:  200,
+		ResourceGroup: "RG1",
+		Nodes:         []int64{},
+	})
+
+	err = mgr.put(ctx, replica4, replica5)
+	assert.NoError(t, err)
+
+	err = mgr.RecoverSQNodesInCollection(ctx, 200, sqNodesByRG)
+	assert.NoError(t, err)
+
+	// In fallback mode, all streaming nodes are pooled together.
+	// Total 6 nodes (2 + 3 + 1), 2 replicas, each should get 3 nodes.
+	updatedReplica4 := mgr.Get(ctx, 4)
+	updatedReplica5 := mgr.Get(ctx, 5)
+
+	// Each replica should have 3 streaming query nodes (6 total / 2 replicas = 3 each).
+	assert.Equal(t, 3, len(updatedReplica4.GetRWSQNodes()))
+	assert.Equal(t, 3, len(updatedReplica5.GetRWSQNodes()))
+
+	// Verify that nodes are from all resource groups combined.
+	allNodes := append(updatedReplica4.GetRWSQNodes(), updatedReplica5.GetRWSQNodes()...)
+	allExpectedNodes := []int64{101, 102, 201, 202, 203, 301}
+	assert.ElementsMatch(t, allExpectedNodes, allNodes)
+
+	// Test case 3: Strict isolation mode (with config enabled).
+	// When streaming.queryNodeResourceGroupIsolation.enabled is true, uncovered replicas
+	// should not get any streaming query nodes.
+	paramtable.Get().Save(paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.Key)
+
+	replica6 := newReplica(&querypb.Replica{
+		ID:            6,
+		CollectionID:  300,
+		ResourceGroup: "RG_NO_STREAMING_NODES", // Not covered by sqNodesByRG.
+		Nodes:         []int64{},
+	})
+	replica7 := newReplica(&querypb.Replica{
+		ID:            7,
+		CollectionID:  300,
+		ResourceGroup: "RG1",
+		Nodes:         []int64{},
+	})
+
+	err = mgr.put(ctx, replica6, replica7)
+	assert.NoError(t, err)
+
+	err = mgr.RecoverSQNodesInCollection(ctx, 300, sqNodesByRG)
+	assert.NoError(t, err)
+
+	// In strict isolation mode:
+	// - Replica7 (RG1) should get nodes from RG1.
+	// - Replica6 (RG_NO_STREAMING_NODES) should NOT get any nodes.
+	updatedReplica6 := mgr.Get(ctx, 6)
+	updatedReplica7 := mgr.Get(ctx, 7)
+
+	// RG1 has 2 nodes, replica7 should get both.
+	assert.ElementsMatch(t, []int64{101, 102}, updatedReplica7.GetRWSQNodes())
+	// Uncovered replica should not get any streaming query nodes in strict isolation mode.
+	assert.Equal(t, 0, len(updatedReplica6.GetRWSQNodes()))
+}
+
+// TestSQNodeRecoveryWithRONodes tests streaming query node recovery with existing RO nodes
+// and RW nodes that are no longer available in the node set.
+func TestSQNodeRecoveryWithRONodes(t *testing.T) {
+	paramtable.Init()
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	idAllocator := RandomIncrementIDAllocator()
+	mgr := NewReplicaManager(idAllocator, catalog)
+	ctx := context.Background()
+
+	// Create a replica with existing SQ nodes
+	replica1 := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  100,
+		ResourceGroup: "RG1",
+		Nodes:         []int64{},
+		RwSqNodes:     []int64{101, 102, 103}, // RW SQ nodes
+		RoSqNodes:     []int64{104},           // RO SQ node (previously removed from available set)
+	})
+
+	err := mgr.put(ctx, replica1)
+	assert.NoError(t, err)
+
+	// Available SQ nodes: only 101, 102 remain. 103 is no longer available (will become RO).
+	// 104 was already RO but is now back in the available set (will recover to RW).
+	sqNodesByRG := map[string]typeutil.UniqueSet{
+		"RG1": typeutil.NewUniqueSet(101, 102, 104, 105),
+	}
+
+	err = mgr.RecoverSQNodesInCollection(ctx, 100, sqNodesByRG)
+	assert.NoError(t, err)
+
+	updatedReplica := mgr.Get(ctx, 1)
+	// Node 103 is no longer available, should become RO.
+	// Node 104 was RO but is now available, should recover to RW.
+	// Node 105 is a new incoming node.
+	assert.Contains(t, updatedReplica.GetROSQNodes(), int64(103))
+	assert.Contains(t, updatedReplica.GetRWSQNodes(), int64(101))
+	assert.Contains(t, updatedReplica.GetRWSQNodes(), int64(102))
+	assert.Contains(t, updatedReplica.GetRWSQNodes(), int64(104))
+	assert.Contains(t, updatedReplica.GetRWSQNodes(), int64(105))
+	assert.NotContains(t, updatedReplica.GetROSQNodes(), int64(104))
+}
+
+// TestSQNodeRecoveryWithUnrecoverableNodes tests that unrecoverable RO nodes
+// (nodes not in any available resource group) remain as RO.
+func TestSQNodeRecoveryWithUnrecoverableNodes(t *testing.T) {
+	paramtable.Init()
+	catalog := mocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	idAllocator := RandomIncrementIDAllocator()
+	mgr := NewReplicaManager(idAllocator, catalog)
+	ctx := context.Background()
+
+	// Create a replica with RO SQ nodes that are not recoverable
+	replica1 := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  100,
+		ResourceGroup: "RG1",
+		Nodes:         []int64{},
+		RwSqNodes:     []int64{101},
+		RoSqNodes:     []int64{999}, // Node 999 is not in any available set - unrecoverable
+	})
+
+	err := mgr.put(ctx, replica1)
+	assert.NoError(t, err)
+
+	// Available SQ nodes don't include 999
+	sqNodesByRG := map[string]typeutil.UniqueSet{
+		"RG1": typeutil.NewUniqueSet(101, 102),
+	}
+
+	err = mgr.RecoverSQNodesInCollection(ctx, 100, sqNodesByRG)
+	assert.NoError(t, err)
+
+	updatedReplica := mgr.Get(ctx, 1)
+	// Node 999 should remain in RO since it's unrecoverable (not in available set)
+	assert.Contains(t, updatedReplica.GetROSQNodes(), int64(999))
+	// Node 101 should remain RW
+	assert.Contains(t, updatedReplica.GetRWSQNodes(), int64(101))
+	// Node 102 should be added as new RW
+	assert.Contains(t, updatedReplica.GetRWSQNodes(), int64(102))
 }
 
 func TestReplicaManager(t *testing.T) {

@@ -32,8 +32,8 @@ type Balancer interface {
 	// GetLatestChannelAssignment returns the latest channel assignment.
 	GetLatestChannelAssignment() (*WatchChannelAssignmentsCallbackParam, error)
 
-	// GetAllStreamingNodes fetches all streaming node info.
-	GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error)
+	// GetAllStreamingNodes fetches all streaming node info with resource group.
+	GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error)
 
 	// AllocVirtualChannels allocates virtual channels for a collection.
 	AllocVirtualChannels(ctx context.Context, param AllocVChannelParam) ([]string, error)

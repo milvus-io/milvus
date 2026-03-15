@@ -876,3 +876,9 @@ func (s *Server) watchLoadConfigChanges() {
 	rgHandler := config.NewHandler("watchResourceGroupChanges", func(e *config.Event) { w.Trigger() })
 	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, rgHandler)
 }
+
+// GetInternalReplicasByCollection returns replicas for a collection from internal meta.
+// This method provides access to internal replica information including resource groups.
+func (s *Server) GetInternalReplicasByCollection(ctx context.Context, collectionID int64) []*meta.Replica {
+	return s.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+}
