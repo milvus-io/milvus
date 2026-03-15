@@ -26,7 +26,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Print("generate successed")
+	log.Print("generate succeeded")
 }
 
 func run() error {
@@ -71,7 +71,7 @@ func parseSections(root *yaml.Node) []Section {
 	return sections
 }
 
-// head commet + line comment, remove # prefix, then join with '\n'
+// head comment + line comment, remove # prefix, then join with '\n'
 func getDescriptionFromNode(node *yaml.Node) []string {
 	var retLines []string
 	if node.HeadComment != "" {
@@ -172,7 +172,7 @@ For the convenience of maintenance, Milvus classifies its configurations into %s
 	const fileName = "system_configuration.md"
 	fileContent := head
 	for _, sec := range secs {
-		fileContent += sec.systemConfiguratinContent()
+		fileContent += sec.systemConfigurationContent()
 		sectionFileContent := sec.sectionPageContent()
 		os.WriteFile(filepath.Join(outputPath, sec.fileName()), []byte(sectionFileContent), 0o644)
 	}
@@ -186,7 +186,7 @@ type Section struct {
 	Fields      []Field
 }
 
-func (s Section) systemConfiguratinContent() string {
+func (s Section) systemConfigurationContent() string {
 	return fmt.Sprintf("### `%s`"+mdNextLine+
 		"%s"+mdNextLine+
 		"See [%s-related Configurations](%s) for detailed description for each parameter under this section."+mdNextLine,
@@ -236,7 +236,7 @@ const fieldTableTemplate = `<table id="%s">
   <thead>
     <tr>
       <th class="width80">Description</th>
-      <th class="width20">Default Value</th> 
+      <th class="width20">Default Value</th>
     </tr>
   </thead>
   <tbody>

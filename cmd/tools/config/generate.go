@@ -79,7 +79,7 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 			log.Ctx(context.TODO()).Debug("got key", zap.String("key", item.KeyPrefix), zap.String("variable", val.Type().Field(j).Name))
 			refreshable := tag.Get("refreshable")
 
-			// Sort group items to stablize the output order
+			// Sort group items to stabilize the output order
 			m := item.GetValue()
 			keys := make([]string, 0, len(m))
 			for k := range m {
