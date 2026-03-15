@@ -9,7 +9,15 @@ import (
 
 func IsReplicationRemovedByAlterReplicateConfigMessage(msg message.ImmutableMessage, replicateInfo *streamingpb.ReplicatePChannelMeta) (replicationRemoved bool) {
 	prcMsg := message.MustAsImmutableAlterReplicateConfigMessageV2(msg)
-	replicateConfig := prcMsg.Header().ReplicateConfiguration
+	header := prcMsg.Header()
+
+	// Check ignore field - if true, this message should be ignored
+	// This is used for incomplete switchover messages that should be ignored after force promote
+	if header.Ignore {
+		return false
+	}
+
+	replicateConfig := header.ReplicateConfiguration
 	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	currentCluster := replicateutil.MustNewConfigHelper(currentClusterID, replicateConfig).GetCurrentCluster()
 	_, err := currentCluster.GetTargetChannel(replicateInfo.GetSourceChannelName(),
