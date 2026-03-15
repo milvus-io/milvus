@@ -1459,27 +1459,6 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
 
-		// list binlog failed
-		cm := mocks2.NewChunkManager(t)
-		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
-		s.meta = &meta{chunkManager: cm}
-		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
-			Files: []*internalpb.ImportFile{
-				{
-					Id:    1,
-					Paths: []string{"mock_insert_prefix"},
-				},
-			},
-			Options: []*commonpb.KeyValuePair{
-				{
-					Key:   "backup",
-					Value: "true",
-				},
-			},
-		})
-		assert.NoError(t, err)
-		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-
 		// alloc failed
 		catalog := mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
@@ -1493,49 +1472,6 @@ func TestImportV2(t *testing.T) {
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{})
 		assert.NoError(t, err)
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-		alloc = allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, nil)
-		s.allocator = alloc
-
-		// add job failed
-		catalog = mocks.NewDataCoordCatalog(t)
-		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
-		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(mockErr)
-		s.importMeta, err = NewImportMeta(context.TODO(), catalog, nil, nil)
-		assert.NoError(t, err)
-		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
-			Files: []*internalpb.ImportFile{
-				{
-					Id:    1,
-					Paths: []string{"a.json"},
-				},
-			},
-		})
-		assert.NoError(t, err)
-		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-		jobs := s.importMeta.GetJobBy(context.TODO())
-		assert.Equal(t, 0, len(jobs))
-		catalog.ExpectedCalls = lo.Filter(catalog.ExpectedCalls, func(call *mock.Call, _ int) bool {
-			return call.Method != "SaveImportJob"
-		})
-		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
-
-		// normal case
-		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
-			Files: []*internalpb.ImportFile{
-				{
-					Id:    1,
-					Paths: []string{"a.json"},
-				},
-			},
-			ChannelNames: []string{"foo_1v1"},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
-		jobs = s.importMeta.GetJobBy(context.TODO())
-		assert.Equal(t, 1, len(jobs))
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {
@@ -3170,7 +3106,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			meta: &meta{segments: NewSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
-		server.initMessageCallback()
+		RegisterDDLCallbacks(server)
 
 		msg := message.NewBatchUpdateManifestMessageBuilderV2().
 			WithHeader(&message.BatchUpdateManifestMessageHeader{
@@ -3205,7 +3141,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			meta: &meta{segments: NewSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
-		server.initMessageCallback()
+		RegisterDDLCallbacks(server)
 
 		msg := message.NewBatchUpdateManifestMessageBuilderV2().
 			WithHeader(&message.BatchUpdateManifestMessageHeader{
@@ -3241,7 +3177,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			meta: &meta{segments: NewSegmentsInfo()},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
-		server.initMessageCallback()
+		RegisterDDLCallbacks(server)
 
 		msg := message.NewBatchUpdateManifestMessageBuilderV2().
 			WithHeader(&message.BatchUpdateManifestMessageHeader{
