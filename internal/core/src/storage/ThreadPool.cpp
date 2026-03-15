@@ -16,10 +16,7 @@
 
 #include "ThreadPool.h"
 
-#include <chrono>
-
 #include "log/Log.h"
-#include "storage/SafeQueue.h"
 
 namespace milvus {
 
@@ -58,84 +55,62 @@ InitCpuNum(const int num) {
     CPU_NUM = num;
 }
 
+ThreadPool::ThreadPool(const float thread_core_coefficient, std::string name)
+    : name_(std::move(name)) {
+    int max_threads = std::max(
+        1, static_cast<int>(std::round(CPU_NUM * thread_core_coefficient)));
+
+    // only IO pool will set large limit, but the CPU helps nothing to IO operations,
+    // we need to limit the max thread num, each thread will download 16~64 MiB data,
+    // according to our benchmark, 16 threads is enough to saturate the network bandwidth.
+    if (max_threads > 16) {
+        max_threads = 16;
+    }
+    max_threads_size_.store(max_threads);
+
+    LOG_INFO("Init thread pool:{}", name_)
+        << " with min worker num:" << 1
+        << " and max worker num:" << max_threads;
+
+    executor_ = std::make_unique<folly::CPUThreadPoolExecutor>(
+        std::pair<size_t, size_t>{1, static_cast<size_t>(max_threads)},
+        std::make_shared<folly::NamedThreadFactory>(name_));
+}
+
+ThreadPool::~ThreadPool() {
+    ShutDown();
+}
+
+size_t
+ThreadPool::GetThreadNum() {
+    return executor_ ? executor_->numActiveThreads() : 0;
+}
+
+size_t
+ThreadPool::GetMaxThreadNum() {
+    return max_threads_size_.load();
+}
+
 void
-ThreadPool::Init() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (int i = 0; i < min_threads_size_; i++) {
-        std::thread t(&ThreadPool::Worker, this);
-        assert(threads_.find(t.get_id()) == threads_.end());
-        threads_[t.get_id()] = std::move(t);
-        current_threads_size_++;
+ThreadPool::Resize(int new_size) {
+    new_size = std::max(1, new_size);
+    if (new_size > 16) {
+        new_size = 16;
+    }
+    max_threads_size_.store(new_size);
+    if (executor_) {
+        executor_->setNumThreads(new_size);
     }
 }
 
 void
 ThreadPool::ShutDown() {
-    LOG_INFO("Start shutting down {}", name_);
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        shutdown_ = true;
-    }
-    condition_lock_.notify_all();
-    for (auto& thread : threads_) {
-        if (thread.second.joinable()) {
-            thread.second.join();
-        }
-    }
-    LOG_INFO("Finish shutting down {}", name_);
-}
-
-void
-ThreadPool::FinishThreads() {
-    while (!need_finish_threads_.empty()) {
-        std::thread::id id;
-        auto dequeue = need_finish_threads_.dequeue(id);
-        if (dequeue) {
-            auto iter = threads_.find(id);
-            assert(iter != threads_.end());
-            if (iter->second.joinable()) {
-                iter->second.join();
-            }
-            threads_.erase(iter);
-        }
+    if (executor_) {
+        LOG_INFO("Start shutting down {}", name_);
+        executor_->join();
+        executor_.reset();
+        LOG_INFO("Finish shutting down {}", name_);
     }
 }
 
-void
-ThreadPool::Worker() {
-    std::function<void()> func;
-    bool dequeue;
-    SetThreadName(name_);
-    while (!shutdown_) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        idle_threads_size_++;
-        auto is_timeout = !condition_lock_.wait_for(
-            lock, std::chrono::seconds(WAIT_SECONDS), [this]() {
-                return shutdown_ || !work_queue_.empty();
-            });
-        idle_threads_size_--;
-        if (work_queue_.empty()) {
-            // Dynamic reduce thread number
-            if (shutdown_) {
-                current_threads_size_--;
-                return;
-            }
-            if (is_timeout) {
-                FinishThreads();
-                if (current_threads_size_ > min_threads_size_) {
-                    need_finish_threads_.enqueue(std::this_thread::get_id());
-                    current_threads_size_--;
-                    return;
-                }
-                continue;
-            }
-        }
-        dequeue = work_queue_.dequeue(func);
-        lock.unlock();
-        if (dequeue) {
-            func();
-            func = nullptr;
-        }
-    }
-}
-};  // namespace milvus
+}  // namespace milvus
