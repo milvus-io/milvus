@@ -35,8 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
-	"github.com/milvus-io/milvus/internal/util/function/models"
-	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
@@ -84,6 +82,7 @@ func (s *SearchPipelineSuite) TestSearchReduceOp() {
 		1,
 		[]int64{1},
 		[]*planpb.QueryInfo{{}},
+		nil,
 	}
 	_, err := op.run(context.Background(), s.span, []*internalpb.SearchResults{data})
 	s.NoError(err)
@@ -124,6 +123,7 @@ func (s *SearchPipelineSuite) TestHybridSearchReduceOp() {
 		1,
 		[]int64{1},
 		[]*planpb.QueryInfo{{}, {}},
+		nil,
 	}
 	_, err := op.run(context.Background(), s.span, []*internalpb.SearchResults{data1, data2})
 	s.NoError(err)
@@ -141,7 +141,7 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 					{Key: "dim", Value: "4"},
 				},
 			},
-			{FieldID: 102, Name: "ts", DataType: schemapb.DataType_Int64},
+			{FieldID: 103, Name: "ts", DataType: schemapb.DataType_Int64},
 		},
 	}
 	functionSchema := &schemapb.FunctionSchema{
@@ -158,11 +158,6 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 			{Key: "function", Value: "gauss"},
 		},
 	}
-	funcScore, err := rerank.NewFunctionScore(schema, &schemapb.FunctionScore{
-		Functions: []*schemapb.FunctionSchema{functionSchema},
-	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-	s.NoError(err)
-
 	nq := int64(2)
 	topk := int64(10)
 	offset := int64(0)
@@ -176,18 +171,23 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 		1,
 		[]int64{1},
 		[]*planpb.QueryInfo{{}},
+		nil,
 	}
 
-	data := genTestSearchResultData(nq, topk, schemapb.DataType_Int64, "intField", 102, false)
+	data := genTestSearchResultData(nq, topk, schemapb.DataType_Int64, "ts", 103, false)
 	reduced, err := reduceOp.run(context.Background(), s.span, []*internalpb.SearchResults{data})
 	s.NoError(err)
 
+	funcScoreSchema := &schemapb.FunctionScore{
+		Functions: []*schemapb.FunctionSchema{functionSchema},
+	}
 	op := rerankOperator{
-		nq:            nq,
-		topK:          topk,
-		offset:        offset,
-		roundDecimal:  10,
-		functionScore: funcScore,
+		nq:           nq,
+		topK:         topk,
+		offset:       offset,
+		roundDecimal: -1,
+		collSchema:   schema,
+		rerankMeta:   newRerankMeta(schema, funcScoreSchema),
 	}
 
 	_, err = op.run(context.Background(), s.span, reduced[0], []string{"IP"})
@@ -1019,10 +1019,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
 			{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 		},
 	}
-	funcScore, err := rerank.NewFunctionScore(schema, &schemapb.FunctionScore{
-		Functions: []*schemapb.FunctionSchema{functionSchema},
-	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-	s.NoError(err)
+	funcScoreSchema := &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{functionSchema}}
 
 	task := &searchTask{
 		ctx:            context.Background(),
@@ -1042,7 +1039,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
 		node:                   nil,
-		functionScore:          funcScore,
+		rerankMeta:             newRerankMeta(schema, funcScoreSchema),
 	}
 
 	pipeline, err := newPipeline(searchWithRerankPipe, task)
@@ -1091,10 +1088,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 			{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 		},
 	}
-	funcScore, err := rerank.NewFunctionScore(schema, &schemapb.FunctionScore{
-		Functions: []*schemapb.FunctionSchema{functionSchema},
-	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-	s.NoError(err)
+	funcScoreSchema := &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{functionSchema}}
 
 	task := &searchTask{
 		ctx:            context.Background(),
@@ -1118,7 +1112,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
 		node:                   nil,
-		functionScore:          funcScore,
+		rerankMeta:             newRerankMeta(schema, funcScoreSchema),
 		request:                &milvuspb.SearchRequest{Namespace: nil},
 	}
 	f1 := testutils.GenerateScalarFieldData(schemapb.DataType_Int64, "intField", 20)
@@ -1374,9 +1368,7 @@ func getHybridSearchTask(collName string, data [][]string, outputFields []string
 			{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
 		},
 	}
-	funcScore, _ := rerank.NewFunctionScore(schema, &schemapb.FunctionScore{
-		Functions: []*schemapb.FunctionSchema{functionSchema},
-	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+	funcScoreSchema := &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{functionSchema}}
 	task := &searchTask{
 		ctx:            context.Background(),
 		collectionName: collName,
@@ -1405,10 +1397,8 @@ func getHybridSearchTask(collName string, data [][]string, outputFields []string
 			SearchParams: []*commonpb.KeyValuePair{
 				{Key: LimitKey, Value: "10"},
 			},
-			FunctionScore: &schemapb.FunctionScore{
-				Functions: []*schemapb.FunctionSchema{functionSchema},
-			},
-			OutputFields: outputFields,
+			FunctionScore: funcScoreSchema,
+			OutputFields:  outputFields,
 		},
 		schema: &schemaInfo{
 			CollectionSchema: schema,
@@ -1422,7 +1412,7 @@ func getHybridSearchTask(collName string, data [][]string, outputFields []string
 			roundDecimal: 0,
 		},
 		queryInfos:             []*planpb.QueryInfo{{}, {}},
-		functionScore:          funcScore,
+		rerankMeta:             newRerankMeta(schema, funcScoreSchema),
 		translatedOutputFields: outputFields,
 	}
 	return task
