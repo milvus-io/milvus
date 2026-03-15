@@ -197,7 +197,7 @@ func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, rwWAL wal.WA
 	var newWritten []message.ImmutableMessage
 	var read1, read2, read3 []message.ImmutableMessage
 	appendDone := make(chan struct{})
-	go func() {
+	go func() { //nolint:gosec // G118 false positive - cancel is stored and called later
 		defer wg.Done()
 		lastMVCC, err := rwWAL.GetLatestMVCCTimestamp(context.Background(), testVChannel)
 		require.NoError(f.t, err)

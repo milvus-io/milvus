@@ -51,7 +51,7 @@ func newTaskDispatcher[K comparable](runner task[K]) *taskDispatcher[K] {
 }
 
 func (d *taskDispatcher[K]) Start() {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is stored and called later
 	d.cancel = cancel
 
 	d.wg.Add(1)

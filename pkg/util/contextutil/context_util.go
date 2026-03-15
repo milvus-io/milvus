@@ -59,7 +59,7 @@ func AppendToIncomingContext(ctx context.Context, kv ...string) context.Context 
 	}
 	for i, s := range kv {
 		if i%2 == 0 {
-			md.Append(s, kv[i+1])
+			md.Append(s, kv[i+1]) //nolint:gosec // G602 index bounded by len check
 		}
 	}
 	return metadata.NewIncomingContext(ctx, md)
@@ -76,7 +76,7 @@ func SetToIncomingContext(ctx context.Context, kv ...string) context.Context {
 	}
 	for i, s := range kv {
 		if i%2 == 0 {
-			md.Set(s, kv[i+1])
+			md.Set(s, kv[i+1]) //nolint:gosec // G602 index bounded by len check
 		}
 	}
 	return metadata.NewIncomingContext(ctx, md)
@@ -128,7 +128,7 @@ func WithDeadlineCause(parent context.Context, deadline time.Time, err error) (c
 	}
 	if parentDeadline, ok := parent.Deadline(); ok && parentDeadline.Before(deadline) {
 		// The current deadline is already sooner than the new one.
-		return context.WithCancel(parent)
+		return context.WithCancel(parent) //nolint:gosec // G118 false positive - cancel is stored and called later
 	}
 	ctx, cancel := context.WithCancelCause(parent)
 	time.AfterFunc(time.Until(deadline), func() {

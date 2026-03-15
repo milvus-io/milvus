@@ -58,7 +58,7 @@ ifdef USE_OPENDAL
 	use_opendal = ${USE_OPENDAL}
 endif
 # golangci-lint
-GOLANGCI_LINT_VERSION := 1.64.7
+GOLANGCI_LINT_VERSION := 2.11.2
 GOLANGCI_LINT_OUTPUT := $(shell $(INSTALL_PATH)/golangci-lint --version 2>/dev/null)
 INSTALL_GOLANGCI_LINT := $(findstring $(GOLANGCI_LINT_VERSION), $(GOLANGCI_LINT_OUTPUT))
 # mockery
@@ -74,7 +74,7 @@ GOFUMPT_VERSION := 0.5.0
 GOFUMPT_OUTPUT := $(shell $(INSTALL_PATH)/gofumpt --version 2>/dev/null)
 INSTALL_GOFUMPT := $(findstring $(GOFUMPT_VERSION),$(GOFUMPT_OUTPUT))
 # gotestsum
-GOTESTSUM_VERSION := 1.11.0
+GOTESTSUM_VERSION := 1.13.0
 GOTESTSUM_OUTPUT := $(shell $(INSTALL_PATH)/gotestsum --version 2>/dev/null)
 INSTALL_GOTESTSUM := $(findstring $(GOTESTSUM_VERSION),$(GOTESTSUM_OUTPUT))
 # protoc-gen-go

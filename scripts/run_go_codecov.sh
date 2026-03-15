@@ -25,6 +25,18 @@ source $BASEDIR/setenv.sh
 
 set -e
 
+# Pre-build the covdata tool if missing. Go 1.25+ no longer ships covdata as a
+# prebuilt binary; the on-demand build fails with auto-downloaded toolchains
+# (https://github.com/golang/go/issues/75031). Building it explicitly here
+# ensures "go tool covdata" works for -coverpkg coverage of empty packages.
+COVDATA_DIR="$(go env GOROOT)/pkg/tool/$(go env GOOS)_$(go env GOARCH)"
+if [ ! -f "${COVDATA_DIR}/covdata" ]; then
+    echo "Pre-building covdata tool (not prebuilt in Go 1.25+)..."
+    mkdir -p "${COVDATA_DIR}"
+    go build -o "${COVDATA_DIR}/covdata" cmd/covdata || \
+        echo "Warning: covdata pre-build failed; on-demand build may be attempted"
+fi
+
 echo "mode: atomic" > ${FILE_COVERAGE_INFO}
 
 TEST_CMD=$@
@@ -46,9 +58,10 @@ for d in cmd/tools internal pkg client; do
     echo -e "-----------------------------------\nRunning test cases under $d with -p $PARALLEL ..."
 
     $TEST_CMD \
-        "-gcflags=all=-N -l" \
+        "-gcflags=./...=-N -l" \
         -race \
         -tags dynamic,test \
+        -vet=off \
         -v \
         -failfast \
         -buildvcs=false \

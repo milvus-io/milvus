@@ -57,5 +57,5 @@ func getContextWithTimeout(ctx context.Context, timeoutDuration time.Duration) (
 		mdCopy.Delete(util.HeaderToken)
 		newCtx = metadata.NewIncomingContext(ctx, mdCopy)
 	}
-	return context.WithTimeout(newCtx, timeoutDuration)
+	return context.WithTimeout(newCtx, timeoutDuration) //nolint:gosec // G118 false positive - cancel is stored and called later
 }

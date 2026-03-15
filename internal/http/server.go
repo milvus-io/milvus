@@ -127,7 +127,7 @@ func registerDefaults() {
 			output, err := expr.Exec(code, auth)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(fmt.Sprintf(`{"msg": "failed to execute expression, %s"}`, err.Error())))
+				w.Write([]byte(fmt.Sprintf(`{"msg": "failed to execute expression, %s"}`, err.Error()))) //nolint:gosec // G705 internal debug endpoint
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")

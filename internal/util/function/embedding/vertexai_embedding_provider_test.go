@@ -271,7 +271,7 @@ func (s *VertexAITextEmbeddingProviderSuite) TestParseCredentail() {
 		s.ErrorContains(err, "Parse gcp credential")
 	}
 	{
-		cred := credentials.NewCredentials(map[string]string{"mock.credential_json": "bW9jaw=="})
+		cred := credentials.NewCredentials(map[string]string{"mock.credential_json": "bW9jaw=="}) //nolint:gosec // G101 test mock credential, not real
 		_, err := parseGcpCredentialInfo(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "mock"})
 		s.NoError(err)
 	}

@@ -935,7 +935,7 @@ func TestProxy(t *testing.T) {
 	params.StreamingNodeGrpcServerCfg.IP = "localhost"
 	params.Save(params.MQCfg.Type.Key, "pulsar")
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is stored and called later
 	ctx = GetContext(ctx, "root:123456")
 	localMsg := true
 	factory := dependency.NewDefaultFactory(false)
