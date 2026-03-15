@@ -405,6 +405,91 @@ func Test_deduplicate_parseIndexParams(t *testing.T) {
 	})
 }
 
+// Test_parseIndexParams_MinHashFunction tests MinHash function output field: metric_type must be MHJACCARD (issue #47585).
+func Test_parseIndexParams_MinHashFunction(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.AutoIndexConfig.Enable.Key, "false")
+	defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+
+	minHashFieldSchema := &schemapb.FieldSchema{
+		FieldID:          101,
+		Name:             "minhash_sig",
+		DataType:         schemapb.DataType_BinaryVector,
+		IsFunctionOutput: true,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "512"},
+		},
+	}
+	minHashFunctionSchema := &schemapb.FunctionSchema{
+		Type: schemapb.FunctionType_MinHash,
+	}
+
+	t.Run("MinHash + HAMMING should reject", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "BIN_FLAT"},
+					{Key: common.MetricTypeKey, Value: "HAMMING"},
+				},
+			},
+			fieldSchema:    minHashFieldSchema,
+			functionSchema: minHashFunctionSchema,
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), metric.MHJACCARD)
+		assert.Contains(t, err.Error(), "HAMMING")
+	})
+
+	t.Run("MinHash + MHJACCARD should accept", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "BIN_FLAT"},
+					{Key: common.MetricTypeKey, Value: "MHJACCARD"},
+				},
+			},
+			fieldSchema:    minHashFieldSchema,
+			functionSchema: minHashFunctionSchema,
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.NotNil(t, cit.newIndexParams)
+		// metric_type should be MHJACCARD, mh_element_bit_width should be set
+		var metricVal string
+		for _, p := range cit.newIndexParams {
+			if p.Key == common.MetricTypeKey {
+				metricVal = p.Value
+				break
+			}
+		}
+		assert.Equal(t, metric.MHJACCARD, metricVal)
+	})
+
+	t.Run("MinHash + empty metric_type should default to MHJACCARD", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "MINHASH_LSH"},
+					{Key: "mh_lsh_band", Value: "8"},
+				},
+			},
+			fieldSchema:    minHashFieldSchema,
+			functionSchema: minHashFunctionSchema,
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		var metricVal string
+		for _, p := range cit.newIndexParams {
+			if p.Key == common.MetricTypeKey {
+				metricVal = p.Value
+				break
+			}
+		}
+		assert.Equal(t, metric.MHJACCARD, metricVal)
+	})
+}
+
 func Test_parseIndexParams(t *testing.T) {
 	cit := &createIndexTask{
 		Condition: nil,
