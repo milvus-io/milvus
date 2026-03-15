@@ -557,14 +557,15 @@ func TestIsEmptyString(t *testing.T) {
 	assert.Equal(t, IsEmptyString("hello"), false)
 }
 
-func TestHandleTenantForEtcdKey(t *testing.T) {
-	assert.Equal(t, "a/b/c", HandleTenantForEtcdKey("a", "b", "c"))
-
-	assert.Equal(t, "a/b", HandleTenantForEtcdKey("a", "", "b"))
-
-	assert.Equal(t, "a/b", HandleTenantForEtcdKey("a", "b", ""))
-
-	assert.Equal(t, "a", HandleTenantForEtcdKey("a", "", ""))
+func TestHandleTenantForEtcdPrefix(t *testing.T) {
+	// two layers: prefix/tenant/
+	assert.Equal(t, "a/b/", HandleTenantForEtcdPrefix("a", "b"))
+	// three layers: prefix/tenant/sub/
+	assert.Equal(t, "a/b/c/", HandleTenantForEtcdPrefix("a", "b", "c"))
+	// empty tenant: prefix/
+	assert.Equal(t, "a/", HandleTenantForEtcdPrefix("a", ""))
+	// empty tenant with sub: prefix/sub/
+	assert.Equal(t, "a/sub/", HandleTenantForEtcdPrefix("a", "", "sub"))
 }
 
 func TestIsRevoke(t *testing.T) {

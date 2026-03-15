@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -54,10 +55,13 @@ const (
 
 	// PrivilegeGroupPrefix prefix for privilege group
 	PrivilegeGroupPrefix = ComponentPrefix + "/privilege-group"
+
+	// FileResourceMetaPrefix prefix for file resource meta
+	FileResourceMetaPrefix = ComponentPrefix + "/file_resource_info"
 )
 
 func BuildDatabasePrefixWithDBID(dbID int64) string {
-	return fmt.Sprintf("%s/%d", CollectionInfoMetaPrefix, dbID)
+	return fmt.Sprintf("%s/%d/", CollectionInfoMetaPrefix, dbID)
 }
 
 func BuildCollectionKeyWithDBID(dbID int64, collectionID int64) string {
@@ -72,9 +76,13 @@ func getDatabasePrefix(dbID int64) string {
 	if dbID != util.NonDBID {
 		return BuildDatabasePrefixWithDBID(dbID)
 	}
-	return CollectionMetaPrefix
+	return CollectionMetaPrefix + "/"
 }
 
 func BuildPrivilegeGroupkey(groupName string) string {
 	return fmt.Sprintf("%s/%s", PrivilegeGroupPrefix, groupName)
+}
+
+func BuildFileResourceKey(resourceID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d", FileResourceMetaPrefix, resourceID)
 }
