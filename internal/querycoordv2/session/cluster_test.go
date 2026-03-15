@@ -374,6 +374,37 @@ func (suite *ClusterTestSuite) TestGetComponentStates() {
 	suite.Equal(status.State.GetStateCode(), commonpb.StateCode_Abnormal)
 }
 
+func (suite *ClusterTestSuite) TestContextCancellation() {
+	// Create a context that's already canceled
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	// Remove node 0 from manager to force client creation
+	suite.nodeManager.Remove(0)
+
+	// Add a new node that will require client creation
+	// Use a non-existent address to simulate connection attempt
+	node := NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   100,
+		Address:  "127.0.0.1:99999", // Invalid port, will fail to connect
+		Hostname: "localhost",
+	})
+	suite.nodeManager.Add(node)
+
+	// The request should fail fast due to canceled context, not hang
+	start := time.Now()
+	_, err := suite.cluster.LoadSegments(ctx, 100, &querypb.LoadSegmentsRequest{
+		Base:  &commonpb.MsgBase{},
+		Infos: []*querypb.SegmentLoadInfo{{}},
+	})
+	elapsed := time.Since(start)
+
+	// Should fail quickly (< 1 second) due to context cancellation
+	// rather than hanging for gRPC default timeout
+	suite.Error(err)
+	suite.Less(elapsed, 1*time.Second, "Request should fail fast on canceled context")
+}
+
 func TestClusterSuite(t *testing.T) {
 	suite.Run(t, new(ClusterTestSuite))
 }
