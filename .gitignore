@@ -94,6 +94,9 @@ cpp_coverage/
 venv/
 .venv/
 
+# Python egg-info
+*.egg-info/
+
 # gopls generated
 go.work
 go.work.sum
@@ -127,3 +130,5 @@ WARP.md
 **/.gocache/
 docs/plans/
 
+# agent context
+.context/
