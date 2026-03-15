@@ -10,6 +10,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -521,28 +522,47 @@ func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *p
 		return collection, nil
 	}
 
-	partitions, err := kc.listPartitionsAfter210(ctx, collection.CollectionID, ts)
-	if err != nil {
+	var (
+		partitions        []*model.Partition
+		fields            []*model.Field
+		structArrayFields []*model.StructArrayField
+		functions         []*model.Function
+	)
+
+	g, gCtx := errgroup.WithContext(ctx)
+	collectionID := collection.CollectionID
+
+	g.Go(func() error {
+		var err error
+		partitions, err = kc.listPartitionsAfter210(gCtx, collectionID, ts)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		fields, err = kc.listFieldsAfter210(gCtx, collectionID, ts)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		structArrayFields, err = kc.listStructArrayFieldsAfter210(gCtx, collectionID, ts)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		functions, err = kc.listFunctions(gCtx, collectionID, ts)
+		return err
+	})
+
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+
 	collection.Partitions = partitions
-
-	fields, err := kc.listFieldsAfter210(ctx, collection.CollectionID, ts)
-	if err != nil {
-		return nil, err
-	}
 	collection.Fields = fields
-
-	structArrayFields, err := kc.listStructArrayFieldsAfter210(ctx, collection.CollectionID, ts)
-	if err != nil {
-		return nil, err
-	}
 	collection.StructArrayFields = structArrayFields
-
-	functions, err := kc.listFunctions(ctx, collection.CollectionID, ts)
-	if err != nil {
-		return nil, err
-	}
 	collection.Functions = functions
 	return collection, nil
 }

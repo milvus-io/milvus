@@ -29,6 +29,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -43,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
@@ -97,17 +99,31 @@ type segmentBuildInfo struct {
 	taskStats *expirable.LRU[UniqueID, *metricsinfo.IndexTaskStats]
 }
 
+const taskStatsLRUCapacity = 1024
+
 func newSegmentIndexBuildInfo() *segmentBuildInfo {
 	return &segmentBuildInfo{
 		// build ID -> segment index
 		buildID2SegmentIndex: typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex](),
 		// build ID -> task stats
-		taskStats: expirable.NewLRU[UniqueID, *metricsinfo.IndexTaskStats](1024, nil, time.Minute*30),
+		taskStats: expirable.NewLRU[UniqueID, *metricsinfo.IndexTaskStats](taskStatsLRUCapacity, nil, time.Minute*30),
 	}
 }
 
 func (m *segmentBuildInfo) Add(segIdx *model.SegmentIndex) {
 	m.buildID2SegmentIndex.Insert(segIdx.BuildID, segIdx)
+	m.taskStats.Add(segIdx.BuildID, newIndexTaskStats(segIdx))
+}
+
+// AddForRecovery inserts segment index during recovery. It skips the LRU write
+// only when the LRU is already full and the index task is finished, since
+// finished tasks are unlikely to be queried and the LRU write is expensive
+// during bulk recovery.
+func (m *segmentBuildInfo) AddForRecovery(segIdx *model.SegmentIndex) {
+	m.buildID2SegmentIndex.Insert(segIdx.BuildID, segIdx)
+	if m.taskStats.Len() >= taskStatsLRUCapacity && segIdx.IndexState == commonpb.IndexState_Finished {
+		return
+	}
 	m.taskStats.Add(segIdx.BuildID, newIndexTaskStats(segIdx))
 }
 
@@ -129,7 +145,7 @@ func (m *segmentBuildInfo) GetTaskStats() []*metricsinfo.IndexTaskStats {
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
-func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*indexMeta, error) {
+func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog, collectionIDs []int64) (*indexMeta, error) {
 	mt := &indexMeta{
 		ctx:              ctx,
 		catalog:          catalog,
@@ -138,7 +154,7 @@ func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*ind
 		segmentBuildInfo: newSegmentIndexBuildInfo(),
 		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 	}
-	err := mt.reloadFromKV()
+	err := mt.reloadFromKV(collectionIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -146,30 +162,77 @@ func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*ind
 }
 
 // reloadFromKV loads meta from KV storage
-func (m *indexMeta) reloadFromKV() error {
+func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 	record := timerecord.NewTimeRecorder("indexMeta-reloadFromKV")
-	// load field indexes
-	fieldIndexes, err := m.catalog.ListIndexes(m.ctx)
-	if err != nil {
-		log.Error("indexMeta reloadFromKV load field indexes fail", zap.Error(err))
-		return err
-	}
-	for _, fieldIndex := range fieldIndexes {
-		m.updateCollectionIndex(fieldIndex)
-	}
-	segmentIndexes, err := m.catalog.ListSegmentIndexes(m.ctx)
-	if err != nil {
-		log.Error("indexMeta reloadFromKV load segment indexes fail", zap.Error(err))
-		return err
-	}
-	for _, segIdx := range segmentIndexes {
-		if segIdx.IndexMemSize == 0 {
-			segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
+
+	// Parallel load and process: ListIndexes and ListSegmentIndexes have no dependency,
+	// and they update completely separate data structures so memory updates can also run in parallel.
+	g, _ := errgroup.WithContext(m.ctx)
+	g.Go(func() error {
+		fieldIndexes, err := m.catalog.ListIndexes(m.ctx)
+		if err != nil {
+			log.Error("indexMeta reloadFromKV load field indexes fail", zap.Error(err))
+			return err
 		}
-		m.updateSegmentIndex(segIdx)
-		metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
-		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-			fmt.Sprintf("%d", segIdx.CollectionID)).Add(float64(segIdx.IndexSerializedSize))
+		for _, fieldIndex := range fieldIndexes {
+			m.updateCollectionIndex(fieldIndex)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
+		defer pool.Release()
+		futures := make([]*conc.Future[any], 0, len(collectionIDs))
+		collectionSegIdxes := make([][]*model.SegmentIndex, len(collectionIDs))
+		for i, collID := range collectionIDs {
+			i, collID := i, collID
+			futures = append(futures, pool.Submit(func() (any, error) {
+				segIdxes, err := m.catalog.ListSegmentIndexes(m.ctx, collID)
+				if err != nil {
+					return nil, err
+				}
+				collectionSegIdxes[i] = segIdxes
+				return nil, nil
+			}))
+		}
+		if err := conc.AwaitAll(futures...); err != nil {
+			return err
+		}
+		for _, segIdxes := range collectionSegIdxes {
+			for _, segIdx := range segIdxes {
+				if segIdx.IndexMemSize == 0 {
+					segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
+				}
+				indexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
+				if ok {
+					indexes.Insert(segIdx.IndexID, segIdx)
+				} else {
+					indexes = typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+					indexes.Insert(segIdx.IndexID, segIdx)
+					m.segmentIndexes.Insert(segIdx.SegmentID, indexes)
+				}
+				m.segmentBuildInfo.AddForRecovery(segIdx)
+			}
+		}
+
+		// Update Prometheus metrics asynchronously to avoid blocking recovery.
+		go func() {
+			storedSizeByCollection := make(map[int64]float64)
+			for _, segIdxes := range collectionSegIdxes {
+				for _, segIdx := range segIdxes {
+					metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
+					storedSizeByCollection[segIdx.CollectionID] += float64(segIdx.IndexSerializedSize)
+				}
+			}
+			for collID, size := range storedSizeByCollection {
+				metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+					fmt.Sprintf("%d", collID)).Add(size)
+			}
+		}()
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	log.Info("indexMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
@@ -186,7 +249,6 @@ func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	indexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
 		indexes.Insert(segIdx.IndexID, segIdx)
-		m.segmentIndexes.Insert(segIdx.SegmentID, indexes)
 	} else {
 		indexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 		indexes.Insert(segIdx.IndexID, segIdx)

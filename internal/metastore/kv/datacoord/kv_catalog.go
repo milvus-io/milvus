@@ -637,7 +637,7 @@ func (kc *Catalog) CreateSegmentIndex(ctx context.Context, segIdx *model.Segment
 	return nil
 }
 
-func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error) {
+func (kc *Catalog) ListSegmentIndexes(ctx context.Context, collectionID int64) ([]*model.SegmentIndex, error) {
 	segIndexes := make([]*model.SegmentIndex, 0)
 	applyFn := func(key []byte, value []byte) error {
 		segmentIndexInfo := &indexpb.SegmentIndex{}
@@ -651,7 +651,8 @@ func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentInde
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, util.SegmentIndexPrefix, kc.paginationSize, applyFn)
+	prefix := buildSegmentIndexCollectionPrefix(collectionID)
+	err := kc.MetaKv.WalkWithPrefix(ctx, prefix, kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
