@@ -586,6 +586,10 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 
 			mu.Lock()
 			totalSize := lo.SumBy(lo.Values(uploaded), func(fileSize int64) int64 { return fileSize })
+			scalarIndexVersion := t.plan.GetCurrentScalarIndexVersion()
+			if scalarIndexVersion > common.MaximumScalarIndexEngineVersion {
+				scalarIndexVersion = common.MaximumScalarIndexEngineVersion
+			}
 			textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
 				FieldID:                   field.GetFieldID(),
 				Version:                   0,
@@ -593,7 +597,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				Files:                     lo.Keys(uploaded),
 				LogSize:                   totalSize,
 				MemorySize:                totalSize,
-				CurrentScalarIndexVersion: common.CurrentScalarIndexEngineVersion,
+				CurrentScalarIndexVersion: scalarIndexVersion,
 			}
 			mu.Unlock()
 

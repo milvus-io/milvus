@@ -94,6 +94,7 @@ const (
 	// TODO: scalar index version 3 is still in development, so we use 2 as the current version.
 	// Do not use version 3 until this TODO is resolved.
 	CurrentScalarIndexEngineVersion = int32(2)
+	MaximumScalarIndexEngineVersion = int32(2)
 )
 
 const DefaultTimezone = "UTC"

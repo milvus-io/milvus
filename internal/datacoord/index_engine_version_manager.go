@@ -38,9 +38,17 @@ type IndexEngineVersionManager interface {
 	GetCurrentIndexEngineVersion() int32
 	GetMinimalIndexEngineVersion() int32
 
+	// Maximum version methods
+	GetMaximumIndexEngineVersion() int32
+	GetMaximumScalarIndexEngineVersion() int32
+
 	// Scalar index version methods (Milvus-defined)
 	GetCurrentScalarIndexEngineVersion() int32
 	GetMinimalScalarIndexEngineVersion() int32
+
+	// Resolve methods: compute final build version considering target override and max clamp
+	ResolveVecIndexVersion() int32
+	ResolveScalarIndexVersion() int32
 
 	GetIndexNonEncoding() bool
 
@@ -118,7 +126,9 @@ func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {
 		zap.String("sessionVersion", session.Version.String()),
 		zap.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion),
 		zap.Int32("current", session.IndexEngineVersion.CurrentIndexVersion),
-		zap.Int32("currentScalar", session.ScalarIndexEngineVersion.CurrentIndexVersion))
+		zap.Int32("maximum", session.IndexEngineVersion.MaximumIndexVersion),
+		zap.Int32("currentScalar", session.ScalarIndexEngineVersion.CurrentIndexVersion),
+		zap.Int32("maximumScalar", session.ScalarIndexEngineVersion.MaximumIndexVersion))
 	m.versions[session.ServerID] = session.IndexEngineVersion
 	m.scalarIndexVersions[session.ServerID] = session.ScalarIndexEngineVersion
 	m.indexNonEncoding[session.ServerID] = session.IndexNonEncoding
@@ -199,6 +209,78 @@ func (m *versionManagerImpl) GetMinimalScalarIndexEngineVersion() int32 {
 	}
 	log.Info("Merged minimal scalar index version", zap.Int32("minimal", minimal))
 	return minimal
+}
+
+func (m *versionManagerImpl) GetMaximumIndexEngineVersion() int32 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	maximum := int32(math.MaxInt32)
+	for _, version := range m.versions {
+		if version.MaximumIndexVersion == 0 {
+			continue
+		}
+		if version.MaximumIndexVersion < maximum {
+			maximum = version.MaximumIndexVersion
+		}
+	}
+	if maximum == math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return maximum
+}
+
+func (m *versionManagerImpl) GetMaximumScalarIndexEngineVersion() int32 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	maximum := int32(math.MaxInt32)
+	for _, version := range m.scalarIndexVersions {
+		if version.MaximumIndexVersion == 0 {
+			continue
+		}
+		if version.MaximumIndexVersion < maximum {
+			maximum = version.MaximumIndexVersion
+		}
+	}
+	if maximum == math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return maximum
+}
+
+func (m *versionManagerImpl) ResolveVecIndexVersion() int32 {
+	version := m.GetCurrentIndexEngineVersion()
+	if Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt64() != -1 {
+		if Params.DataCoordCfg.ForceRebuildSegmentIndex.GetAsBool() {
+			version = Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32()
+		} else {
+			version = max(version, Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32())
+		}
+	}
+	if maxVersion := m.GetMaximumIndexEngineVersion(); version > maxVersion {
+		log.Warn("targetVecIndexVersion exceeds cluster maximum, clamping",
+			zap.Int32("target", version), zap.Int32("maximum", maxVersion))
+		version = maxVersion
+	}
+	return version
+}
+
+func (m *versionManagerImpl) ResolveScalarIndexVersion() int32 {
+	version := m.GetCurrentScalarIndexEngineVersion()
+	if Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt64() != -1 {
+		if Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.GetAsBool() {
+			version = Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt32()
+		} else {
+			version = max(version, Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt32())
+		}
+	}
+	if maxVersion := m.GetMaximumScalarIndexEngineVersion(); version > maxVersion {
+		log.Warn("targetScalarIndexVersion exceeds cluster maximum, clamping",
+			zap.Int32("target", version), zap.Int32("maximum", maxVersion))
+		version = maxVersion
+	}
+	return version
 }
 
 func (m *versionManagerImpl) GetIndexNonEncoding() bool {

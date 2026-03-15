@@ -47,9 +47,9 @@ func getCurrentIndexVersion(v int32) int32 {
 }
 
 func getCurrentScalarIndexVersion(v int32) int32 {
-	cCurrent := common.CurrentScalarIndexEngineVersion
-	if cCurrent < v {
-		return cCurrent
+	cMaximum := common.MaximumScalarIndexEngineVersion
+	if cMaximum < v {
+		return cMaximum
 	}
 	return v
 }
