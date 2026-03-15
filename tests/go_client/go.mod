@@ -10,7 +10,7 @@ require (
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/peterstace/simplefeatures v0.54.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
-	github.com/samber/lo v1.27.0
+	github.com/samber/lo v1.52.0
 	github.com/stretchr/testify v1.11.1
 	github.com/twpayne/go-geom v1.6.1
 	github.com/x448/float16 v0.8.4
