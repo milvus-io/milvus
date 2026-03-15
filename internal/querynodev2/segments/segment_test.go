@@ -212,6 +212,54 @@ func (suite *SegmentSuite) TestCASVersion() {
 func (suite *SegmentSuite) TestSegmentRemoveUnusedFieldFiles() {
 }
 
+// TestDeleteSameTimestampAcrossBatches reproduces the DumpSnapshot Assert failure
+// caused by proxy splitting a large DELETE operation into multiple messages that
+// cross timetick boundaries. All split messages share the same TSO timestamp,
+// so consecutive StreamPush calls can insert entries with the same timestamp but
+// smaller row_ids — landing BEFORE the DumpSnapshot cursor in the sorted skip list.
+//
+// Scenario:
+//  1. Batch 1: Delete PKs [50,60,70,80,90] at ts=1000 → DumpSnapshot creates cursor
+//  2. Batch 2: Delete PKs [10,20,30] at ts=[1000,1000,1001] → entries (1000,10),(1000,20)
+//     are sorted BEFORE the cursor, but accessor.size() counts them.
+//     Iterator from cursor can't reach them → old code Assert, new code rebuilds.
+func (suite *SegmentSuite) TestDeleteSameTimestampAcrossBatches() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Set DELETE_DUMP_BATCH_SIZE to a small value so DumpSnapshot triggers easily
+	initcore.UpdateDefaultDeleteDumpBatchSize(3)
+	defer initcore.UpdateDefaultDeleteDumpBatchSize(10000)
+
+	// Batch 1: delete PKs with higher row_ids at timestamp 1000
+	// This triggers DumpSnapshot which sets cursor after processing 3 entries.
+	// Skip list: (1000,50),(1000,60),(1000,70),(1000,80),(1000,90)
+	// DumpSnapshot processes first 3 → cursor at (1000,80)
+	pks1 := storage.NewInt64PrimaryKeys(5)
+	pks1.AppendRaw(50, 60, 70, 80, 90)
+	err := suite.sealed.Delete(ctx, pks1, []uint64{1000, 1000, 1000, 1000, 1000})
+	suite.NoError(err)
+
+	// Batch 2: delete PKs with LOWER row_ids at the SAME timestamp 1000,
+	// plus one entry at ts=1001 to bypass lastDeltaTimestamp check (1000 >= 1001 is false).
+	//
+	// InternalPush inserts: (1000,10),(1000,20) → BEFORE cursor (1000,80)
+	//                       (1001,30)           → AFTER cursor
+	//
+	// DumpSnapshot sees: total=8, dumped=3, remaining=5 > BATCH_SIZE(3)
+	// But only 3 entries exist from cursor to end: (1000,80),(1000,90),(1001,30)
+	// For loop consumes all 3 → iterator reaches end() → triggers rebuild (or Assert in old code)
+	pks2 := storage.NewInt64PrimaryKeys(3)
+	pks2.AppendRaw(10, 20, 30)
+	err = suite.sealed.Delete(ctx, pks2, []uint64{1000, 1000, 1001})
+	suite.NoError(err)
+
+	// If we reach here without crash/panic, the rebuild fix works correctly.
+	// Verify all 8 deletes were applied.
+	suite.Equal(int64(100-8), suite.sealed.RowNum())
+	suite.Equal(int64(100), suite.sealed.InsertCount())
+}
+
 func (suite *SegmentSuite) TestSegmentReleased() {
 	suite.sealed.Release(context.Background())
 
