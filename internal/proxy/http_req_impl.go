@@ -74,9 +74,10 @@ func hideSensitive(configs map[string]string) {
 	}
 }
 
-func getConfigs(configs map[string]string) gin.HandlerFunc {
-	hideSensitive(configs)
+func getConfigs(configFunc func() map[string]string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		configs := configFunc()
+		hideSensitive(configs)
 		bs, err := json.Marshal(configs)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
