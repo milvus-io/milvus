@@ -102,6 +102,12 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "Your Yandex Cloud text embedding url, Default is the official text embedding url"
 			case "yc.enable":
 				return "Whether to enable Yandex Cloud model service"
+			case "gemini.credential":
+				return "The name in the credential configuration item"
+			case "gemini.url":
+				return "Your Gemini embedding url, Default is the official embedding url"
+			case "gemini.enable":
+				return "Whether to enable Gemini model service"
 			default:
 				return ""
 			}

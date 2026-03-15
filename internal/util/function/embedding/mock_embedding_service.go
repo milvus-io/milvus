@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/models/ali"
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
+	"github.com/milvus-io/milvus/internal/util/function/models/gemini"
 	"github.com/milvus-io/milvus/internal/util/function/models/openai"
 	"github.com/milvus-io/milvus/internal/util/function/models/siliconflow"
 	"github.com/milvus-io/milvus/internal/util/function/models/tei"
@@ -203,6 +204,34 @@ func CreateVertexAIEmbeddingServer() *httptest.Server {
 	return ts
 }
 
+func CreateVertexAIGeminiEmbeddingServer() *httptest.Server {
+	callCount := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req vertexai.GeminiEmbedContentRequest
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		json.Unmarshal(body, &req)
+		dim := int(req.OutputDimensionality)
+		if dim == 0 {
+			dim = 4
+		}
+		emb := make([]float32, dim)
+		for j := 0; j < dim; j++ {
+			emb[j] = float32(callCount + j)
+		}
+		callCount++
+		res := vertexai.GeminiEmbedContentResponse{
+			Embedding: vertexai.GeminiEmbeddingValues{
+				Values: emb,
+			},
+		}
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+	return ts
+}
+
 func CreateCohereEmbeddingServer[T int8 | float32]() *httptest.Server {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req cohere.EmbeddingRequest
@@ -279,6 +308,32 @@ func (c *MockBedrockClient) InvokeModel(ctx context.Context, params *bedrockrunt
 	resp.InputTextTokenCount = 2
 	body, _ := json.Marshal(resp)
 	return &bedrockruntime.InvokeModelOutput{Body: body}, nil
+}
+
+func CreateGeminiEmbeddingServer(dim int) *httptest.Server {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req gemini.BatchEmbeddingRequest
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		json.Unmarshal(body, &req)
+		var texts []string
+		for _, item := range req.Requests {
+			if len(item.Content.Parts) > 0 {
+				texts = append(texts, item.Content.Parts[0].Text)
+			}
+		}
+		embs := mockEmbedding[float32](texts, dim)
+		var res gemini.EmbeddingResponse
+		for i := 0; i < len(texts); i++ {
+			res.Embeddings = append(res.Embeddings, gemini.EmbeddingValues{
+				Values: embs[i],
+			})
+		}
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+	return ts
 }
 
 func GenSearchResultData(nq int64, topk int64, dType schemapb.DataType, fieldName string, fieldId int64) *schemapb.SearchResultData {
