@@ -96,6 +96,9 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.security.superUsers", "super1,super2,super3")
 		assert.Equal(t, []string{"super1", "super2", "super3"}, Params.SuperUsers.GetAsStrings())
 
+		params.Save("common.security.maintainerModeEnabled", "true")
+		assert.Equal(t, true, Params.MaintainerModeEnabled.GetAsBool())
+
 		assert.Equal(t, "Milvus", Params.DefaultRootPassword.GetValue())
 		params.Save("common.security.defaultRootPassword", "defaultMilvus")
 		assert.Equal(t, "defaultMilvus", Params.DefaultRootPassword.GetValue())
