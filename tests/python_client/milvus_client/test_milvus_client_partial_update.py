@@ -35,6 +35,8 @@ default_int32_array_field_name = ct.default_int32_array_field_name
 default_string_array_field_name = ct.default_string_array_field_name
 default_int32_field_name = ct.default_int32_field_name
 default_int32_value = ct.default_int32_value
+PU_DEFAULT_COLLECTION = "test_pu_not_nullable_default" + cf.gen_unique_str("_")
+PU_DEFAULT_DIM = 4
 
 
 class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
@@ -1454,6 +1456,664 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
+    """
+    ******************************************************************
+    #  The following are valid cases for dynamic field partial update
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partial_update_dynamic_full_fields_mixed_batch(self):
+        """
+        target: test partial update with dynamic schema, full fields, mixed existing + new rows
+        method:
+            1. Create collection with dynamic field enabled and a nullable static field
+            2. Insert initial rows with a dynamic field 'tag'
+            3. Upsert a mixed batch (existing + new rows) all with full fields including 'tag'
+            4. Verify both existing rows updated and new rows inserted
+        expected: upsert succeeds, all values correct
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = default_dim
+        nb_initial = 10
+
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("name", DataType.VARCHAR, max_length=256, nullable=True)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params, consistency_level="Strong")
+
+        # Insert initial data with dynamic field 'tag'
+        vectors = cf.gen_vectors(nb_initial, dim)
+        initial_rows = [{default_primary_key_field_name: i,
+                         default_vector_field_name: vectors[i],
+                         "name": f"item_{i}", "tag": f"tag_{i}"}
+                        for i in range(nb_initial)]
+        self.insert(client, collection_name, initial_rows)
+        self.flush(client, collection_name)
+
+        # Mixed batch: existing (full) + new (full), all same fields
+        new_vectors = cf.gen_vectors(4, dim)
+        mixed_rows = [
+            {default_primary_key_field_name: 0, default_vector_field_name: new_vectors[0],
+             "name": "upd_0", "tag": "upd_tag_0"},
+            {default_primary_key_field_name: 1, default_vector_field_name: new_vectors[1],
+             "name": "upd_1", "tag": "upd_tag_1"},
+            {default_primary_key_field_name: 700, default_vector_field_name: new_vectors[2],
+             "name": "new_700", "tag": "new_tag_700"},
+            {default_primary_key_field_name: 701, default_vector_field_name: new_vectors[3],
+             "name": "new_701", "tag": "new_tag_701"},
+        ]
+        self.upsert(client, collection_name, mixed_rows, partial_update=True)
+
+        # Verify all rows with check_query_results
+        result = self.query(client, collection_name,
+                            filter=f"{default_primary_key_field_name} in [0, 1, 700, 701]",
+                            output_fields=[default_vector_field_name, "name", "tag"],
+                            check_task=CheckTasks.check_query_results,
+                            check_items={exp_res: mixed_rows,
+                                         "with_vec": True,
+                                         "pk_name": default_primary_key_field_name})[0]
+        assert len(result) == 4
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partial_update_dynamic_static_only_data(self):
+        """
+        target: test partial update with dynamic schema but data contains only static fields
+        method:
+            1. Create collection with enable_dynamic_field=True and a nullable static field
+            2. Insert initial rows with only static fields (no dynamic data)
+            3. Upsert mixed batch (existing + new) with only static fields
+            4. Verify all rows correct
+        expected: upsert succeeds even with dynamic schema when no dynamic data present
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = default_dim
+        nb_initial = 10
+
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("name", DataType.VARCHAR, max_length=256, nullable=True)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params, consistency_level="Strong")
+
+        # Insert initial data — NO dynamic fields
+        vectors = cf.gen_vectors(nb_initial, dim)
+        initial_rows = [{default_primary_key_field_name: i,
+                         default_vector_field_name: vectors[i],
+                         "name": f"item_{i}"}
+                        for i in range(nb_initial)]
+        self.insert(client, collection_name, initial_rows)
+        self.flush(client, collection_name)
+
+        # Mixed upsert: existing + new, all static-only fields
+        new_vectors = cf.gen_vectors(4, dim)
+        mixed_rows = [
+            {default_primary_key_field_name: 0, default_vector_field_name: new_vectors[0],
+             "name": "static_upd_0"},
+            {default_primary_key_field_name: 1, default_vector_field_name: new_vectors[1],
+             "name": "static_upd_1"},
+            {default_primary_key_field_name: 800, default_vector_field_name: new_vectors[2],
+             "name": "static_new_800"},
+            {default_primary_key_field_name: 801, default_vector_field_name: new_vectors[3],
+             "name": "static_new_801"},
+        ]
+        self.upsert(client, collection_name, mixed_rows, partial_update=True)
+
+        # Verify
+        result = self.query(client, collection_name,
+                            filter=f"{default_primary_key_field_name} in [0, 1, 800, 801]",
+                            output_fields=[default_vector_field_name, "name"],
+                            check_task=CheckTasks.check_query_results,
+                            check_items={exp_res: mixed_rows,
+                                         "with_vec": True,
+                                         "pk_name": default_primary_key_field_name})[0]
+        assert len(result) == 4
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partial_update_dynamic_different_keys_per_row(self):
+        """
+        target: test partial update with different dynamic keys per row and
+                partial update of individual dynamic fields
+        method:
+            1. Create collection with enable_dynamic_field=True
+            2. Insert initial rows with dynamic field 'tag'
+            3. Upsert mixed batch: existing rows have 'tag', new rows have 'category'
+            4. Upsert with multiple dynamic fields per row (tag, category, score)
+            5. Partial update different dynamic fields per row (same field count per row)
+            6. Verify updated fields and preserved fields
+        expected: all upserts succeed, dynamic fields correctly updated/preserved
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = default_dim
+        nb_initial = 10
+
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("name", DataType.VARCHAR, max_length=256, nullable=True)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params, consistency_level="Strong")
+
+        # Insert initial data with dynamic field 'tag'
+        vectors = cf.gen_vectors(nb_initial, dim)
+        initial_rows = [{default_primary_key_field_name: i,
+                         default_vector_field_name: vectors[i],
+                         "name": f"item_{i}", "tag": f"tag_{i}"}
+                        for i in range(nb_initial)]
+        self.insert(client, collection_name, initial_rows)
+        self.flush(client, collection_name)
+
+        # Step 3: Different dynamic keys, same field count
+        new_vectors = cf.gen_vectors(4, dim)
+        mixed_diff_keys = [
+            {default_primary_key_field_name: 0, default_vector_field_name: new_vectors[0],
+             "name": "mixed_key_0", "tag": "upd_tag_0"},
+            {default_primary_key_field_name: 1, default_vector_field_name: new_vectors[1],
+             "name": "mixed_key_1", "tag": "upd_tag_1"},
+            {default_primary_key_field_name: 1000, default_vector_field_name: new_vectors[2],
+             "name": "mixed_key_1000", "category": "cat_A"},
+            {default_primary_key_field_name: 1001, default_vector_field_name: new_vectors[3],
+             "name": "mixed_key_1001", "category": "cat_B"},
+        ]
+        self.upsert(client, collection_name, mixed_diff_keys, partial_update=True)
+
+        expected_step3 = [
+            {default_primary_key_field_name: 0, "name": "mixed_key_0", "tag": "upd_tag_0"},
+            {default_primary_key_field_name: 1000, "name": "mixed_key_1000", "category": "cat_A"},
+            {default_primary_key_field_name: 1001, "name": "mixed_key_1001", "category": "cat_B"},
+        ]
+        self.query(client, collection_name,
+                   filter=f"{default_primary_key_field_name} in [0, 1000, 1001]",
+                   output_fields=["name", "tag", "category"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: expected_step3,
+                                "pk_name": default_primary_key_field_name})
+
+        # Step 4: Multiple dynamic fields per row (tag, category, score)
+        new_vectors = cf.gen_vectors(4, dim)
+        multi_dyn_rows = [
+            {default_primary_key_field_name: 2, default_vector_field_name: new_vectors[0],
+             "name": "multi_dyn_2", "tag": "t2", "category": "c2", "score": 0.95},
+            {default_primary_key_field_name: 3, default_vector_field_name: new_vectors[1],
+             "name": "multi_dyn_3", "tag": "t3", "category": "c3", "score": 0.85},
+            {default_primary_key_field_name: 1100, default_vector_field_name: new_vectors[2],
+             "name": "multi_dyn_1100", "tag": "t1100", "category": "c1100", "score": 0.75},
+            {default_primary_key_field_name: 1101, default_vector_field_name: new_vectors[3],
+             "name": "multi_dyn_1101", "tag": "t1101", "category": "c1101", "score": 0.65},
+        ]
+        self.upsert(client, collection_name, multi_dyn_rows, partial_update=True)
+
+        self.query(client, collection_name,
+                   filter=f"{default_primary_key_field_name} in [2, 3, 1100, 1101]",
+                   output_fields=[default_vector_field_name, "name", "tag", "category", "score"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: multi_dyn_rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+
+        # Step 5: Partial update different dynamic fields per row
+        # Each row: id + one different dynamic field (same field count)
+        partial_dyn = [
+            {default_primary_key_field_name: 2, "tag": "partial_tag_2"},
+            {default_primary_key_field_name: 3, "category": "partial_cat_3"},
+            {default_primary_key_field_name: 1101, "score": 0.99},
+        ]
+        self.upsert(client, collection_name, partial_dyn, partial_update=True)
+
+        # Verify: updated fields changed, non-updated dynamic fields preserved
+        expected_step5 = [
+            {default_primary_key_field_name: 2, "name": "multi_dyn_2",
+             "tag": "partial_tag_2", "category": "c2", "score": 0.95},
+            {default_primary_key_field_name: 3, "name": "multi_dyn_3",
+             "tag": "t3", "category": "partial_cat_3", "score": 0.85},
+            {default_primary_key_field_name: 1101, "name": "multi_dyn_1101",
+             "tag": "t1101", "category": "c1101", "score": 0.99},
+        ]
+        self.query(client, collection_name,
+                   filter=f"{default_primary_key_field_name} in [2, 3, 1101]",
+                   output_fields=["name", "tag", "category", "score"],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: expected_step5,
+                                "pk_name": default_primary_key_field_name})
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partial_update_dynamic_fields_static_fields(self):
+        """
+        target: test partial update of static fields when dynamic field enabled
+        method:
+            1. Create collection with enable_dynamic_field=True and nullable static fields
+            2. Insert initial rows without dynamic field
+            3. Partial update only static field 'name' for existing rows
+            4. Verify static fields updated
+            5. Partial update dynamic field 'tag' for existing rows
+            6. Verify dynamic fields updated
+        expected: static fields updated, dynamic fields updated
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = default_dim
+        nb_initial = 10
+
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("name", DataType.VARCHAR, max_length=256, nullable=True)
+        schema.add_field("price", DataType.FLOAT, nullable=True)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params, consistency_level="Strong")
+
+        # Insert initial data with known price values and dynamic field 'tag'
+        vectors = cf.gen_vectors(nb_initial, dim)
+        initial_rows = [{default_primary_key_field_name: i,
+                         default_vector_field_name: vectors[i],
+                         "name": f"item_{i}",
+                         "price": float(i * 10 + 1)}
+                        for i in range(nb_initial)]
+        self.insert(client, collection_name, initial_rows)
+        self.flush(client, collection_name)
+
+        # Partial update: only touch static field 'name'
+        partial_rows = [
+            {default_primary_key_field_name: 0, "name": "static_only_upd_0"},
+            {default_primary_key_field_name: 1, "name": "static_only_upd_1"},
+        ]
+        self.upsert(client, collection_name, partial_rows, partial_update=True)
+
+        # Verify: name updated, price and tag preserved
+        expected = [
+            {default_primary_key_field_name: 0, "name": "static_only_upd_0",
+             "price": 1.0},
+            {default_primary_key_field_name: 1, "name": "static_only_upd_1",
+             "price": 11.0}
+        ]
+        result = self.query(client, collection_name,
+                            filter=f"{default_primary_key_field_name} in [0, 1]",
+                            output_fields=["name", "price"],
+                            check_task=CheckTasks.check_query_results,
+                            check_items={exp_res: expected,
+                                         "pk_name": default_primary_key_field_name})[0]
+        assert len(result) == 2
+
+        partial_rows = [
+            {default_primary_key_field_name: 4, "tag": "partial_tag_4"},
+            {default_primary_key_field_name: 5, "tag": "partial_tag_5"},
+        ]
+        self.upsert(client, collection_name, partial_rows, partial_update=True)
+
+        result = self.query(client, collection_name,
+                            filter=f"{default_primary_key_field_name} in [4, 5]",
+                            output_fields=["tag"],
+                            check_task=CheckTasks.check_query_results,
+                            check_items={exp_res: partial_rows,
+                                         "pk_name": default_primary_key_field_name})[0]
+        assert len(result) == 2
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partial_update_dynamic_overwrite_and_null_like_value(self):
+        """
+        target: test overwrite semantics for a dynamic key and update with null-like value
+        method:
+            1. Create collection with enable_dynamic_field=True
+            2. Insert one row with dynamic fields
+            3. Partial update `tag` to a new value and verify overwrite
+            4. Partial update `tag` to None and verify null-like behavior
+        expected: dynamic key overwrite succeeds, and None update is reflected in query results
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = default_dim
+
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("name", DataType.VARCHAR, max_length=256, nullable=True)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params, consistency_level="Strong")
+
+        seed_vec = cf.gen_vectors(1, dim)[0]
+        self.insert(client, collection_name, [{
+            default_primary_key_field_name: 1,
+            default_vector_field_name: seed_vec,
+            "name": "seed_dynamic",
+            "tag": "seed_tag",
+            "category": "seed_category",
+        }])
+        self.flush(client, collection_name)
+
+        self.upsert(client, collection_name,
+                    [{default_primary_key_field_name: 1, "tag": "updated_tag"}],
+                    partial_update=True)
+        res = self.query(client, collection_name,
+                         filter=f"{default_primary_key_field_name} == 1",
+                         output_fields=["tag", "category"])[0]
+        assert res[0]["tag"] == "updated_tag"
+        assert res[0]["category"] == "seed_category"
+
+        self.upsert(client, collection_name,
+                    [{default_primary_key_field_name: 1, "tag": None}],
+                    partial_update=True)
+        res = self.query(client, collection_name,
+                         filter=f"{default_primary_key_field_name} == 1",
+                         output_fields=["tag", "category"])[0]
+        assert res[0]["tag"] is None
+        assert res[0]["category"] == "seed_category"
+
+        self.drop_collection(client, collection_name)
+
+
+@pytest.mark.xdist_group("TestPartialUpdateNotNullableDefault")
+class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
+    """
+    Test partial update on fields with nullable=False + default_value.
+    Uses a shared collection to save time on creation and data insertion.
+
+    Schema:
+        id      INT64   PK
+        text    VARCHAR nullable=False, default_value=""
+        score   INT32   nullable=False, default_value=0
+        weight  FLOAT   nullable=False, default_value=0
+        flag    BOOL    nullable=False, default_value=False
+        vector  FLOAT_VECTOR dim=4
+
+    Seed data (10 rows):
+        id=1:  text="seed_1",  score=100, weight=10.0, flag=True,  vec=[0.1,0.2,0.3,0.4]
+        id=2:  (omitted → defaults: text="", score=0, weight=0.0, flag=False), vec=[0.2,0.1,0.4,0.3]
+        id=3:  text="seed_3",  score=300, weight=30.0, flag=True,  vec=[0.3,0.4,0.1,0.2]
+        id=4:  (omitted → defaults), vec=[0.4,0.3,0.2,0.1]
+        id=5:  text="seed_5",  score=500, weight=50.0, flag=True,  vec=[0.5,0.6,0.7,0.8]
+        id=6:  (omitted → defaults), vec=[0.6,0.5,0.8,0.7]
+        id=7:  text="seed_7",  score=700, weight=70.0, flag=True,  vec=[0.7,0.8,0.5,0.6]
+        id=8:  (omitted → defaults), vec=[0.8,0.7,0.6,0.5]
+        id=9:  text="seed_9",  score=900, weight=90.0, flag=True,  vec=[0.9,0.1,0.2,0.3]
+        id=10: (omitted → defaults), vec=[0.1,0.9,0.3,0.2]
+
+    Each test uses a distinct PK range to avoid cross-test interference.
+    """
+
+    @pytest.fixture(scope="module", autouse=True)
+    def prepare_default_value_collection(self, request):
+        client = self._client()
+        collection_name = PU_DEFAULT_COLLECTION
+        if client.has_collection(collection_name):
+            client.drop_collection(collection_name)
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True)
+        schema.add_field("text", DataType.VARCHAR, max_length=512, nullable=False, default_value="")
+        schema.add_field("score", DataType.INT32, nullable=False, default_value=np.int32(0))
+        schema.add_field("weight", DataType.FLOAT, nullable=False, default_value=np.float32(0))
+        schema.add_field("flag", DataType.BOOL, nullable=False, default_value=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=PU_DEFAULT_DIM)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
+        index_params.add_index("text", index_type="AUTOINDEX")
+        index_params.add_index("score", index_type="AUTOINDEX")
+        index_params.add_index("weight", index_type="AUTOINDEX")
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="L2")
+
+        client.create_collection(collection_name=collection_name, schema=schema,
+                                 index_params=index_params, consistency_level="Strong")
+
+        # Seed data: odd ids have explicit values, even ids omit scalar fields (use defaults)
+        seed_rows = []
+        for i in range(1, 11):
+            vec = [round((i * 0.1 + j * 0.1) % 1.0, 1) for j in range(PU_DEFAULT_DIM)]
+            if i % 2 == 1:
+                seed_rows.append({
+                    default_primary_key_field_name: i,
+                    "text": f"seed_{i}", "score": i * 100,
+                    "weight": float(i * 10), "flag": True,
+                    default_vector_field_name: vec,
+                })
+            else:
+                # Omit scalar fields → defaults applied
+                seed_rows.append({
+                    default_primary_key_field_name: i,
+                    default_vector_field_name: vec,
+                })
+
+        client.insert(collection_name=collection_name, data=seed_rows)
+
+        def teardown():
+            try:
+                c = self._client()
+                if c.has_collection(PU_DEFAULT_COLLECTION):
+                    c.drop_collection(PU_DEFAULT_COLLECTION)
+            except Exception:
+                pass
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partial_update_default_varchar(self):
+        """
+        target: partial update VARCHAR field with nullable=False, default_value=""
+        method:
+            1. Verify id=2 has default text=""
+            2. Partial update id=1 text to "", verify vector preserved
+            3. Partial update id=2 text only, verify vector preserved
+        """
+        client = self._client()
+        cn = PU_DEFAULT_COLLECTION
+        pk = default_primary_key_field_name
+        vec = default_vector_field_name
+
+        # Verify default applied on id=2
+        res = self.query(client, cn, filter=f"{pk} == 2", output_fields=["text"])[0]
+        assert res[0]["text"] == ""
+
+        # Verify id=1 starts with non-empty text
+        res = self.query(client, cn, filter=f"{pk} == 1", output_fields=["text"])[0]
+        assert res[0]["text"] == "seed_1"
+
+        # Partial update id=1: set text from "seed_1" to "" (the default value)
+        self.upsert(client, cn,
+                    [{pk: 1, "text": ""}],
+                    partial_update=True)
+        res = self.query(client, cn, filter=f"{pk} == 1", output_fields=["text"])[0]
+        assert res[0]["text"] == ""
+
+        # Partial update id=2: update only text, vector preserved
+        self.upsert(client, cn,
+                    [{pk: 2, "text": "updated_only_text"}],
+                    partial_update=True)
+        res = self.query(client, cn, filter=f"{pk} == 2", output_fields=["text", vec])[0]
+        assert res[0]["text"] == "updated_only_text"
+        assert len(res[0][vec]) == PU_DEFAULT_DIM  # vector preserved
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partial_update_default_int(self):
+        """
+        target: partial update INT32 field with nullable=False, default_value=0
+        method:
+            1. Verify id=4 has default score=0
+            2. Partial update id=3 score only, verify vector preserved
+            3. Partial update id=4 vector only, verify score preserved as 0
+        """
+        client = self._client()
+        cn = PU_DEFAULT_COLLECTION
+        pk = default_primary_key_field_name
+        vec = default_vector_field_name
+
+        # Verify default
+        res = self.query(client, cn, filter=f"{pk} == 4", output_fields=["score"])[0]
+        assert res[0]["score"] == 0
+
+        # Partial update id=3: score only
+        self.upsert(client, cn, [{pk: 3, "score": 999}], partial_update=True)
+        res = self.query(client, cn, filter=f"{pk} == 3", output_fields=["score", vec])[0]
+        assert res[0]["score"] == 999
+        assert len(res[0][vec]) == PU_DEFAULT_DIM
+
+        # Partial update id=4: vector only, score stays default
+        new_vec = [0.9, 0.9, 0.9, 0.9]
+        self.upsert(client, cn, [{pk: 4, vec: new_vec}], partial_update=True)
+        res = self.query(client, cn, filter=f"{pk} == 4", output_fields=["score", vec])[0]
+        assert res[0]["score"] == 0
+        for i, v in enumerate(new_vec):
+            assert abs(res[0][vec][i] - v) < 1e-6
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partial_update_default_float(self):
+        """
+        target: partial update FLOAT field with nullable=False, default_value=0.0
+        method:
+            1. Verify id=6 has default weight=0.0
+            2. Partial update id=6 weight only, verify vector preserved
+        """
+        client = self._client()
+        cn = PU_DEFAULT_COLLECTION
+        pk = default_primary_key_field_name
+        vec = default_vector_field_name
+
+        # Verify default
+        res = self.query(client, cn, filter=f"{pk} == 6", output_fields=["weight"])[0]
+        assert res[0]["weight"] == 0.0
+
+        # Partial update weight
+        self.upsert(client, cn, [{pk: 6, "weight": 99.9}], partial_update=True)
+        res = self.query(client, cn, filter=f"{pk} == 6", output_fields=["weight", vec])[0]
+        assert abs(res[0]["weight"] - 99.9) < 0.1
+        assert len(res[0][vec]) == PU_DEFAULT_DIM
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partial_update_default_bool(self):
+        """
+        target: partial update BOOL field with nullable=False, default_value=False
+        method:
+            1. Verify id=8 has default flag=False
+            2. Partial update id=8 flag to True, verify vector preserved
+        """
+        client = self._client()
+        cn = PU_DEFAULT_COLLECTION
+        pk = default_primary_key_field_name
+        vec = default_vector_field_name
+
+        # Verify default
+        res = self.query(client, cn, filter=f"{pk} == 8", output_fields=["flag"])[0]
+        assert res[0]["flag"] is False
+
+        # Partial update flag
+        self.upsert(client, cn, [{pk: 8, "flag": True}], partial_update=True)
+        res = self.query(client, cn, filter=f"{pk} == 8", output_fields=["flag", vec])[0]
+        assert res[0]["flag"] is True
+        assert len(res[0][vec]) == PU_DEFAULT_DIM
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partial_update_default_multiple_fields_one_by_one(self):
+        """
+        target: partial update each defaulted field individually, verify others preserved
+        method:
+            1. Verify id=10 has all defaults (text="", score=0, weight=0.0, flag=False)
+            2. Partial update text only → check score, weight, flag preserved
+            3. Partial update score only → check text, weight, flag preserved
+            4. Partial update weight only → check text, score, flag preserved
+        """
+        client = self._client()
+        cn = PU_DEFAULT_COLLECTION
+        pk = default_primary_key_field_name
+        vec = default_vector_field_name
+
+        # Verify all defaults on id=10
+        res = self.query(client, cn, filter=f"{pk} == 10",
+                         output_fields=["text", "score", "weight", "flag"])[0]
+        assert res[0]["text"] == ""
+        assert res[0]["score"] == 0
+        assert res[0]["weight"] == 0.0
+        assert res[0]["flag"] is False
+
+        # Update text only
+        self.upsert(client, cn, [{pk: 10, "text": "updated"}], partial_update=True)
+        res = self.query(client, cn, filter=f"{pk} == 10",
+                         output_fields=["text", "score", "weight", "flag", vec])[0]
+        assert res[0]["text"] == "updated"
+        assert res[0]["score"] == 0
+        assert res[0]["weight"] == 0.0
+        assert res[0]["flag"] is False
+
+        # Update score only
+        self.upsert(client, cn, [{pk: 10, "score": 42}], partial_update=True)
+        res = self.query(client, cn, filter=f"{pk} == 10",
+                         output_fields=["text", "score", "weight", "flag"])[0]
+        assert res[0]["text"] == "updated"
+        assert res[0]["score"] == 42
+        assert res[0]["weight"] == 0.0
+        assert res[0]["flag"] is False
+
+        # Update weight only
+        self.upsert(client, cn, [{pk: 10, "weight": 3.14}], partial_update=True)
+        res = self.query(client, cn, filter=f"{pk} == 10",
+                         output_fields=["text", "score", "weight", "flag"])[0]
+        assert res[0]["text"] == "updated"
+        assert res[0]["score"] == 42
+        assert abs(res[0]["weight"] - 3.14) < 0.01
+        assert res[0]["flag"] is False
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partial_update_default_with_flush(self):
+        """
+        target: partial update on non-nullable default fields works across flush boundaries
+        method:
+            1. Partial update id=9 text, flush
+            2. Verify text updated, vector preserved
+            3. Partial update id=9 vector only
+            4. Verify text still preserved
+        """
+        client = self._client()
+        cn = PU_DEFAULT_COLLECTION
+        pk = default_primary_key_field_name
+        vec = default_vector_field_name
+
+        # Partial update text, flush
+        self.upsert(client, cn, [{pk: 9, "text": "after_flush"}], partial_update=True)
+        self.flush(client, cn)
+
+        res = self.query(client, cn, filter=f"{pk} == 9", output_fields=["text", vec])[0]
+        assert res[0]["text"] == "after_flush"
+        assert len(res[0][vec]) == PU_DEFAULT_DIM
+
+        # Partial update vector only
+        new_vec = [0.9, 0.8, 0.7, 0.6]
+        self.upsert(client, cn, [{pk: 9, vec: new_vec}], partial_update=True)
+        res = self.query(client, cn, filter=f"{pk} == 9", output_fields=["text", vec])[0]
+        assert res[0]["text"] == "after_flush"  # preserved
+        for i, v in enumerate(new_vec):
+            assert abs(res[0][vec][i] - v) < 1e-6
+
+
 
 class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
     """ Test case of partial update interface """
@@ -1770,6 +2430,108 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 1,
                  ct.err_msg: f"The data fields length is inconsistent. previous length is 2000, current length is 1000"}
         self.upsert(client, collection_name, new_rows, partial_update=True,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partial_update_dynamic_partial_fields_missing_vector(self):
+        """
+        target: test partial update fails when partial rows omit required vector field for new rows
+        method:
+            1. Create collection with enable_dynamic_field=True
+            2. Insert initial rows with dynamic field 'tag'
+            3. Upsert mixed batch where partial rows (existing + new) only have id + dynamic field,
+               missing the required vector field for new rows
+        expected: upsert fails with vector field missing error
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = default_dim
+        nb_initial = 10
+
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("name", DataType.VARCHAR, max_length=256, nullable=True)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params, consistency_level="Strong")
+
+        # Insert initial data with dynamic field 'tag'
+        vectors = cf.gen_vectors(nb_initial, dim)
+        initial_rows = [{default_primary_key_field_name: i,
+                         default_vector_field_name: vectors[i],
+                         "name": f"item_{i}", "tag": f"tag_{i}"}
+                        for i in range(nb_initial)]
+        self.insert(client, collection_name, initial_rows)
+        self.flush(client, collection_name)
+
+        # Mixed batch: all rows have same field count (id + tag), but missing vector for new rows
+        mixed_rows = [
+            {default_primary_key_field_name: 0, "tag": "updated_tag_0"},
+            {default_primary_key_field_name: 1, "tag": "updated_tag_1"},
+            {default_primary_key_field_name: 500, "tag": "new_tag_500"},
+            {default_primary_key_field_name: 501, "tag": "new_tag_501"},
+        ]
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"fieldSchema({default_vector_field_name}) has no corresponding fieldData pass in: invalid parameter"}
+        self.upsert(client, collection_name, mixed_rows, partial_update=True,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partial_update_dynamic_inconsistent_field_count(self):
+        """
+        target: test partial update fails when rows have different field counts
+        method:
+            1. Create collection with enable_dynamic_field=True
+            2. Insert initial rows with dynamic field 'tag'
+            3. Upsert mixed batch where rows have inconsistent field counts
+               (existing row: id + tag = 2 fields, new row: id + vector + name + tag = 4 fields)
+        expected: upsert fails with DataNotMatchException about inconsistent field lengths
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = default_dim
+        nb_initial = 10
+
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("name", DataType.VARCHAR, max_length=256, nullable=True)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+
+        self.create_collection(client, collection_name, schema=schema,
+                               index_params=index_params, consistency_level="Strong")
+
+        # Insert initial data with dynamic field 'tag'
+        vectors = cf.gen_vectors(nb_initial, dim)
+        initial_rows = [{default_primary_key_field_name: i,
+                         default_vector_field_name: vectors[i],
+                         "name": f"item_{i}", "tag": f"tag_{i}"}
+                        for i in range(nb_initial)]
+        self.insert(client, collection_name, initial_rows)
+        self.flush(client, collection_name)
+
+        # Mixed batch with inconsistent field counts per row
+        new_vectors = cf.gen_vectors(1, dim)
+        mixed_rows = [
+            # Existing row: 2 fields (id + tag)
+            {default_primary_key_field_name: 0, "tag": "updated_tag_0"},
+            # New row: 4 fields (id + vector + name + tag)
+            {default_primary_key_field_name: 600, default_vector_field_name: new_vectors[0],
+             "name": "new_600", "tag": "new_tag_600"},
+        ]
+        error = {ct.err_code: 1,
+                 ct.err_msg: "The data fields length is inconsistent"}
+        self.upsert(client, collection_name, mixed_rows, partial_update=True,
                     check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
