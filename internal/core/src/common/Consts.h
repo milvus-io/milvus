@@ -33,6 +33,10 @@ const char MAX_LENGTH[] = "max_length";
 const milvus::FieldId RowFieldID = milvus::FieldId(0);
 const milvus::FieldId TimestampFieldID = milvus::FieldId(1);
 
+// Virtual field ID for two-project mode: carries segment offsets through
+// the pipeline so that deferred fields can be fetched after TopK.
+const milvus::FieldId SegmentOffsetFieldID = milvus::FieldId(-100);
+
 // fill followed extra info to binlog file
 const char ORIGIN_SIZE_KEY[] = "original_size";
 const char INDEX_BUILD_ID_KEY[] = "indexBuildID";

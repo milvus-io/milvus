@@ -60,6 +60,8 @@ set(MILVUS_TEST_FILES
         test_query_group_by.cpp
         test_minhash.cpp
         test_async_warmup.cpp
+        test_sort_buffer.cpp
+        test_query_order_by.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
