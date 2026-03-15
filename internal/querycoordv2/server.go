@@ -19,9 +19,7 @@ package querycoordv2
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/blang/semver/v4"
@@ -256,7 +254,7 @@ func (s *Server) initSession() error {
 	// Init QueryCoord session
 	if s.session == nil {
 		s.session = sessionutil.NewSession(s.ctx)
-		s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
+		s.session.Init(typeutil.QueryCoordRole, s.address, true)
 		s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
 		s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	}
@@ -656,11 +654,6 @@ func (s *Server) watchNodes(revision int64) {
 				// ErrCompacted is handled inside SessionWatcher
 				log.Warn("Session Watcher channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
 				go s.Stop()
-				if s.session.IsTriggerKill() {
-					if p, err := os.FindProcess(os.Getpid()); err == nil {
-						p.Signal(syscall.SIGINT)
-					}
-				}
 				return
 			}
 

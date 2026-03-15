@@ -369,7 +369,7 @@ func (s *mixCoordImpl) initStreamingCoord() {
 
 func (s *mixCoordImpl) initSession() error {
 	s.session = sessionutil.NewSession(s.ctx)
-	s.session.Init(typeutil.MixCoordRole, s.address, true, true)
+	s.session.Init(typeutil.MixCoordRole, s.address, true)
 	s.session.SetEnableActiveStandBy(true)
 	s.rootcoordServer.SetSession(s.session)
 	s.datacoordServer.SetSession(s.session)

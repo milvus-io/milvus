@@ -379,9 +379,9 @@ func (_c *MockSession_GoingStop_Call) RunAndReturn(run func() error) *MockSessio
 	return _c
 }
 
-// Init provides a mock function with given fields: serverName, address, exclusive, triggerKill
-func (_m *MockSession) Init(serverName string, address string, exclusive bool, triggerKill bool) {
-	_m.Called(serverName, address, exclusive, triggerKill)
+// Init provides a mock function with given fields: serverName, address, exclusive
+func (_m *MockSession) Init(serverName string, address string, exclusive bool) {
+	_m.Called(serverName, address, exclusive)
 }
 
 // MockSession_Init_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Init'
@@ -393,14 +393,13 @@ type MockSession_Init_Call struct {
 //   - serverName string
 //   - address string
 //   - exclusive bool
-//   - triggerKill bool
-func (_e *MockSession_Expecter) Init(serverName interface{}, address interface{}, exclusive interface{}, triggerKill interface{}) *MockSession_Init_Call {
-	return &MockSession_Init_Call{Call: _e.mock.On("Init", serverName, address, exclusive, triggerKill)}
+func (_e *MockSession_Expecter) Init(serverName interface{}, address interface{}, exclusive interface{}) *MockSession_Init_Call {
+	return &MockSession_Init_Call{Call: _e.mock.On("Init", serverName, address, exclusive)}
 }
 
-func (_c *MockSession_Init_Call) Run(run func(serverName string, address string, exclusive bool, triggerKill bool)) *MockSession_Init_Call {
+func (_c *MockSession_Init_Call) Run(run func(serverName string, address string, exclusive bool)) *MockSession_Init_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string), args[2].(bool), args[3].(bool))
+		run(args[0].(string), args[1].(string), args[2].(bool))
 	})
 	return _c
 }
@@ -410,53 +409,8 @@ func (_c *MockSession_Init_Call) Return() *MockSession_Init_Call {
 	return _c
 }
 
-func (_c *MockSession_Init_Call) RunAndReturn(run func(string, string, bool, bool)) *MockSession_Init_Call {
+func (_c *MockSession_Init_Call) RunAndReturn(run func(string, string, bool)) *MockSession_Init_Call {
 	_c.Run(run)
-	return _c
-}
-
-// IsTriggerKill provides a mock function with no fields
-func (_m *MockSession) IsTriggerKill() bool {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for IsTriggerKill")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func() bool); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// MockSession_IsTriggerKill_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsTriggerKill'
-type MockSession_IsTriggerKill_Call struct {
-	*mock.Call
-}
-
-// IsTriggerKill is a helper method to define mock.On call
-func (_e *MockSession_Expecter) IsTriggerKill() *MockSession_IsTriggerKill_Call {
-	return &MockSession_IsTriggerKill_Call{Call: _e.mock.On("IsTriggerKill")}
-}
-
-func (_c *MockSession_IsTriggerKill_Call) Run(run func()) *MockSession_IsTriggerKill_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockSession_IsTriggerKill_Call) Return(_a0 bool) *MockSession_IsTriggerKill_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockSession_IsTriggerKill_Call) RunAndReturn(run func() bool) *MockSession_IsTriggerKill_Call {
-	_c.Call.Return(run)
 	return _c
 }
 

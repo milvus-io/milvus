@@ -168,7 +168,7 @@ func (node *DataNode) initSession() error {
 	if node.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	node.session.Init(typeutil.DataNodeRole, node.address, false, true)
+	node.session.Init(typeutil.DataNodeRole, node.address, false)
 	sessionutil.SaveServerInfo(typeutil.DataNodeRole, node.session.ServerID)
 	return nil
 }
