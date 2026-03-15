@@ -55,6 +55,16 @@ func SetJsonKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) Segmen
 	}
 }
 
+func SetSchemaVersion(schemaVersion int32) SegmentOperator {
+	return func(segment *SegmentInfo) bool {
+		if segment.GetSchemaVersion() == schemaVersion {
+			return false
+		}
+		segment.SchemaVersion = schemaVersion
+		return true
+	}
+}
+
 type segmentCriterion struct {
 	collectionID int64
 	channel      string

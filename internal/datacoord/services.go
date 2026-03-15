@@ -302,7 +302,6 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 	if req.GetCollectionId() == 0 || req.GetPartitionId() == 0 || req.GetVchannel() == "" || req.GetSegmentId() == 0 {
 		return &datapb.AllocSegmentResponse{Status: merr.Status(merr.ErrParameterInvalid)}, nil
 	}
-
 	// Alloc new growing segment and return the segment info.
 	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(
 		ctx,
@@ -313,6 +312,7 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 			ChannelName:          req.GetVchannel(),
 			StorageVersion:       req.GetStorageVersion(),
 			IsCreatedByStreaming: req.GetIsCreatedByStreaming(),
+			SchemaVersion:        req.GetSchemaVersion(),
 		},
 	)
 	if err != nil {
@@ -414,6 +414,40 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	}
 	nums := s.meta.GetNumRowsOfCollection(ctx, req.CollectionID)
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
+
+	// Calculate schema version consistency proportion
+	// Only report when schema version > 0 (i.e., AlterCollectionSchema has been called)
+	collection := s.meta.GetCollection(req.CollectionID)
+	if collection != nil && collection.Schema != nil && collection.Schema.GetVersion() > 0 {
+		collectionSchemaVersion := collection.Schema.GetVersion()
+		segments := s.meta.SelectSegments(ctx, WithCollection(req.CollectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
+			return isSegmentHealthy(si)
+		}))
+
+		var proportion float64
+		if len(segments) > 0 {
+			consistentCount := 0
+			for _, segment := range segments {
+				if segment.GetSchemaVersion() == collectionSchemaVersion {
+					consistentCount++
+				}
+			}
+			proportion = float64(consistentCount) / float64(len(segments)) * 100.0
+			log.Info("calculated schema version consistency proportion",
+				zap.Int32("collectionSchemaVersion", collectionSchemaVersion),
+				zap.Int("totalSegments", len(segments)),
+				zap.Int("consistentSegments", consistentCount),
+				zap.Float64("proportion", proportion))
+		} else {
+			// No segments, set proportion to 100% (all segments are consistent by default)
+			proportion = 100.0
+		}
+		resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{
+			Key:   common.SchemaVersionConsistencyProportionKey,
+			Value: fmt.Sprintf("%.2f", proportion),
+		})
+	}
+
 	log.Info("success to get collection statistics", zap.Any("response", resp))
 	return resp, nil
 }

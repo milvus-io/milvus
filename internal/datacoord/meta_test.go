@@ -1510,18 +1510,17 @@ func Test_meta_SetSegmentsCompacting(t *testing.T) {
 			"test set segment compacting",
 			fields{
 				NewMetaMemoryKV(),
-				&SegmentsInfo{
-					segments: map[int64]*SegmentInfo{
-						1: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:    1,
-								State: commonpb.SegmentState_Flushed,
-							},
-							isCompacting: false,
+				func() *SegmentsInfo {
+					s := NewSegmentsInfo()
+					s.SetSegment(1, &SegmentInfo{
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:    1,
+							State: commonpb.SegmentState_Flushed,
 						},
-					},
-					compactionTo: make(map[int64][]UniqueID),
-				},
+						isCompacting: false,
+					})
+					return s
+				}(),
 			},
 			args{
 				segmentID:  1,

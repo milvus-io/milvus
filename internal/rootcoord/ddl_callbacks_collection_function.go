@@ -46,7 +46,10 @@ func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.B
 		Functions:          model.MarshalFunctionModels(coll.Functions),
 		EnableDynamicField: coll.EnableDynamicField,
 		Properties:         coll.Properties,
+		DbName:             coll.DBName,
+		FileResourceIds:    coll.FileResourceIds,
 		Version:            coll.SchemaVersion + 1,
+		DoPhysicalBackfill: coll.DoPhysicalBackfill,
 	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, dbName, collectionName)

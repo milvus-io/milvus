@@ -586,6 +586,8 @@ func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (Compa
 		task = newL0CompactionTask(t, c.allocator, c.meta)
 	case datapb.CompactionType_ClusteringCompaction:
 		task = newClusteringCompactionTask(t, c.allocator, c.meta, c.handler, c.analyzeScheduler)
+	case datapb.CompactionType_BackfillCompaction:
+		task = newBackfillCompactionTask(t, c.allocator, c.meta, c.handler, c.ievm, t.GetDiffFunctions())
 	default:
 		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 	}
