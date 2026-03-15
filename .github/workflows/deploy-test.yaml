@@ -66,10 +66,10 @@ jobs:
           echo "NEW_IMAGE_REPO=${{ github.event.inputs.new_image_repo || env.DEFAULT_NEW_IMAGE_REPO }}" >> $GITHUB_ENV
           echo "NEW_IMAGE_TAG=${{ github.event.inputs.new_image_tag || env.DEFAULT_NEW_IMAGE_TAG }}" >> $GITHUB_ENV
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: 3.8
 
@@ -212,7 +212,7 @@ jobs:
       
       - name: 'Send mail'
         if: ${{ failure() }}
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v7
         with:
           server_address: ${{ secrets.EMAIL_SERVICE_NAME }}
           server_port: 465
@@ -225,7 +225,7 @@ jobs:
 
       - name: Upload logs
         if: ${{ ! success() }}
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v6
         with:
           name: docker-compose-logs-${{ matrix.mode }}-${{ matrix.task }}
           path: tests/python_client/deploy/${{ matrix.mode }}/logs
@@ -256,10 +256,10 @@ jobs:
           helm version
           kubectl version
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: 3.8
 
@@ -394,7 +394,7 @@ jobs:
 
       - name: Upload logs
         if: ${{ ! success() }}
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v6
         with:
           name: helm-log-${{ matrix.mq_type }}-${{ matrix.mode }}-${{ matrix.task }}
           path: tests/python_client/deploy/k8s_logs
