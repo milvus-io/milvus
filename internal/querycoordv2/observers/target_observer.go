@@ -59,6 +59,7 @@ const (
 	UpdateCollection targetOp = iota + 1
 	ReleaseCollection
 	ReleasePartition
+	UpdatePartition
 )
 
 type targetUpdateRequest struct {
@@ -241,6 +242,39 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				ob.targetMgr.RemovePartitionFromNextTarget(ctx, req.CollectionID, req.PartitionIDs...)
 				ob.keylocks.Unlock(req.CollectionID)
 				req.Notifier <- nil
+			case UpdatePartition:
+				// Fast path: check with read lock first
+				ob.keylocks.RLock(req.CollectionID)
+				exists := ob.targetMgr.IsCurrentTargetExist(ctx, req.CollectionID, req.PartitionIDs[0])
+				ob.keylocks.RUnlock(req.CollectionID)
+
+				if exists {
+					close(req.ReadyNotifier)
+					req.Notifier <- nil
+				} else {
+					// Slow path: need to update next target
+					ob.keylocks.Lock(req.CollectionID)
+					// Double check after acquiring write lock
+					if ob.targetMgr.IsCurrentTargetExist(ctx, req.CollectionID, req.PartitionIDs[0]) {
+						close(req.ReadyNotifier)
+						req.Notifier <- nil
+					} else {
+						err := ob.updateNextTarget(ctx, req.CollectionID)
+						if err != nil {
+							log.Warn("failed to manually update next target",
+								zap.Int64("collectionID", req.CollectionID),
+								zap.String("opType", req.opType.String()),
+								zap.Error(err))
+							close(req.ReadyNotifier)
+						} else {
+							ob.mut.Lock()
+							ob.readyNotifiers[req.CollectionID] = append(ob.readyNotifiers[req.CollectionID], req.ReadyNotifier)
+							ob.mut.Unlock()
+						}
+						req.Notifier <- err
+					}
+					ob.keylocks.Unlock(req.CollectionID)
+				}
 			}
 			log.Info("manually trigger update target done",
 				zap.Int64("collectionID", req.CollectionID),
@@ -313,6 +347,20 @@ func (ob *TargetObserver) UpdateNextTarget(collectionID int64) (chan struct{}, e
 	ob.updateChan <- targetUpdateRequest{
 		CollectionID:  collectionID,
 		opType:        UpdateCollection,
+		Notifier:      notifier,
+		ReadyNotifier: readyCh,
+	}
+	return readyCh, <-notifier
+}
+
+func (ob *TargetObserver) UpdatePartition(collectionID int64, partitionID int64) (chan struct{}, error) {
+	notifier := make(chan error)
+	readyCh := make(chan struct{})
+	defer close(notifier)
+	ob.updateChan <- targetUpdateRequest{
+		CollectionID:  collectionID,
+		PartitionIDs:  []int64{partitionID},
+		opType:        UpdatePartition,
 		Notifier:      notifier,
 		ReadyNotifier: readyCh,
 	}

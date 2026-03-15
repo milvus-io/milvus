@@ -60,7 +60,7 @@ func Test_showPartitionTask_Prepare(t *testing.T) {
 func Test_showPartitionTask_Execute(t *testing.T) {
 	t.Run("failed to list collections by name", func(t *testing.T) {
 		metaTable := mockrootcoord.NewIMetaTable(t)
-		metaTable.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, "test coll", mock.Anything).Return(nil, merr.WrapErrCollectionNotFound("test coll"))
+		metaTable.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, "test coll", mock.Anything, mock.Anything).Return(nil, merr.WrapErrCollectionNotFound("test coll"))
 		core := newTestCore(withMeta(metaTable))
 		task := &showPartitionTask{
 			baseTask: newBaseTask(context.Background(), core),

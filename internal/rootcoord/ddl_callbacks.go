@@ -175,7 +175,7 @@ func (*Core) startBroadcastWithCollectionLock(ctx context.Context, dbName string
 // Some API like AlterCollection can be called with alias or collection name,
 // so we need to get the real collection name to add resource key lock.
 func (c *Core) startBroadcastWithAliasOrCollectionLock(ctx context.Context, dbName string, collectionNameOrAlias string) (broadcaster.BroadcastAPI, error) {
-	coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionNameOrAlias, typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionNameOrAlias, typeutil.MaxTimestamp, true)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get collection by name")
 	}

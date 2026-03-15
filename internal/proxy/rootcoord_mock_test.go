@@ -682,6 +682,10 @@ func (coord *MixCoordMock) CreatePartition(ctx context.Context, req *milvuspb.Cr
 	return merr.Success(), nil
 }
 
+func (coord *MixCoordMock) CreatePartitionV2(ctx context.Context, req *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*rootcoordpb.CreatePartitionResponse, error) {
+	return &rootcoordpb.CreatePartitionResponse{}, nil
+}
+
 func (coord *MixCoordMock) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	code := coord.state.Load().(commonpb.StateCode)
 	if code != commonpb.StateCode_Healthy {

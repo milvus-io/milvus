@@ -142,7 +142,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Su
 	core.meta = mockMeta
 
 	// Mock meta calls for getCacheExpireForCollection
-	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp).Return(coll, nil)
+	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 	mockMeta.EXPECT().ListAliases(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp).Return([]string{}, nil)
 
 	// Mock broadcaster
@@ -167,7 +167,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Ge
 	core.meta = mockMeta
 
 	// Mock meta calls to return error
-	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp).Return(nil, errors.New("cache expire error"))
+	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp, mock.Anything).Return(nil, errors.New("cache expire error"))
 
 	err := callAlterCollection(ctx, core, suite.mockBroadcaster, coll, dbName, collectionName)
 	suite.Error(err)
@@ -186,7 +186,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Br
 	core.meta = mockMeta
 
 	// Mock meta calls for getCacheExpireForCollection
-	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp).Return(coll, nil)
+	mockMeta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 	mockMeta.EXPECT().ListAliases(mock.Anything, dbName, collectionName, typeutil.MaxTimestamp).Return([]string{}, nil)
 
 	// Mock broadcaster to return error
@@ -460,7 +460,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		coll := suite.createTestCollection()
 
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return(coll, nil)
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 		suite.core.meta = mockMeta
 
 		req := &milvuspb.AlterCollectionFunctionRequest{
@@ -486,7 +486,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		coll := suite.createTestCollection()
 
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return(coll, nil)
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 		suite.core.meta = mockMeta
 
 		req := &milvuspb.DropCollectionFunctionRequest{
@@ -522,7 +522,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		coll := suite.createTestCollection()
 
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return(coll, nil)
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 		suite.core.meta = mockMeta
 
 		req := &milvuspb.AddCollectionFunctionRequest{
@@ -546,7 +546,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 	suite.Run("function input field not exists", func() {
 		coll := suite.createTestCollection()
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return(coll, nil)
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 		suite.core.meta = mockMeta
 
 		req := &milvuspb.AddCollectionFunctionRequest{
@@ -572,7 +572,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 		coll := suite.createTestCollection()
 
 		mockMeta := mockrootcoord.NewIMetaTable(suite.T())
-		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp).Return(coll, nil)
+		mockMeta.EXPECT().GetCollectionByName(mock.Anything, "test_db", "test_collection", typeutil.MaxTimestamp, mock.Anything).Return(coll, nil)
 		suite.core.meta = mockMeta
 
 		req := &milvuspb.AddCollectionFunctionRequest{

@@ -57,7 +57,7 @@ func (c *Core) broadcastAlterCollectionForRenameCollection(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetOldName(), typeutil.MaxTimestamp)
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetOldName(), typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
