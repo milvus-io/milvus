@@ -261,7 +261,7 @@ func (s *Server) initSession() error {
 	if s.session == nil {
 		return errors.New("session is nil, the etcd client connection may have failed")
 	}
-	s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false, true)
+	s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false)
 	paramtable.SetNodeID(s.session.ServerID)
 	log.Ctx(s.ctx).Info("StreamingNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", s.listener.Address()))
 	return nil

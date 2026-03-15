@@ -350,6 +350,10 @@ func (s *mixCoordImpl) Stop() error {
 		log.Error("Failed to stop rootCoord", zap.Error(err))
 	}
 
+	// All coordinators have stopped. Now stop the session.
+	s.session.SetMixCoordMode(false)
+	s.session.Stop()
+
 	s.fileResourceObserver.Stop()
 	s.cancel()
 	return nil
@@ -369,8 +373,11 @@ func (s *mixCoordImpl) initStreamingCoord() {
 
 func (s *mixCoordImpl) initSession() error {
 	s.session = sessionutil.NewSession(s.ctx)
-	s.session.Init(typeutil.MixCoordRole, s.address, true, true)
+	s.session.Init(typeutil.MixCoordRole, s.address, true)
 	s.session.SetEnableActiveStandBy(true)
+	// Mark session as MixCoord mode so individual coordinator Stop() calls won't cancel it.
+	// MixCoord owns the session lifecycle and stops it after all coordinators have stopped.
+	s.session.SetMixCoordMode(true)
 	s.rootcoordServer.SetSession(s.session)
 	s.datacoordServer.SetSession(s.session)
 	s.queryCoordServer.SetSession(s.session)

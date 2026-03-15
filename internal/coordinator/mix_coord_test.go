@@ -80,7 +80,6 @@ func TestMixcoord_EnableActiveStandby(t *testing.T) {
 	err = core.Init()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_StandBy, core.GetStateCode())
-	core.session.TriggerKill = false
 	err = core.Register()
 	assert.NoError(t, err)
 	err = core.Start()

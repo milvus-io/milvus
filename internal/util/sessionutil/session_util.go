@@ -114,12 +114,11 @@ type IndexEngineVersion struct {
 
 // SessionRaw the persistent part of Session.
 type SessionRaw struct {
-	ServerID                 int64  `json:"ServerID,omitempty"`
-	ServerName               string `json:"ServerName,omitempty"`
-	Address                  string `json:"Address,omitempty"`
-	Exclusive                bool   `json:"Exclusive,omitempty"`
-	Stopping                 bool   `json:"Stopping,omitempty"`
-	TriggerKill              bool
+	ServerID                 int64              `json:"ServerID,omitempty"`
+	ServerName               string             `json:"ServerName,omitempty"`
+	Address                  string             `json:"Address,omitempty"`
+	Exclusive                bool               `json:"Exclusive,omitempty"`
+	Stopping                 bool               `json:"Stopping,omitempty"`
 	Version                  string             `json:"Version"`
 	IndexEngineVersion       IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
 	ScalarIndexEngineVersion IndexEngineVersion `json:"ScalarIndexEngineVersion,omitempty"`
@@ -140,10 +139,6 @@ func (s *SessionRaw) GetServerID() int64 {
 
 func (s *SessionRaw) GetServerLabel() map[string]string {
 	return s.ServerLabels
-}
-
-func (s *SessionRaw) IsTriggerKill() bool {
-	return s.TriggerKill
 }
 
 // Session is a struct to store service's session, including ServerID, ServerName,
@@ -168,6 +163,7 @@ type Session struct {
 	wg                sync.WaitGroup
 
 	metaRoot string
+	isMixCoordMode atomic.Bool
 
 	registered         atomic.Value
 	registeredRevision atomic.Int64
@@ -297,11 +293,10 @@ func NewSessionWithEtcd(ctx context.Context, metaRoot string, client *clientv3.C
 
 // Init will initialize base struct of the Session, including ServerName, ServerID,
 // Address, Exclusive. ServerID is obtained in getServerID.
-func (s *Session) Init(serverName, address string, exclusive bool, triggerKill bool) {
+func (s *Session) Init(serverName, address string, exclusive bool) {
 	s.ServerName = serverName
 	s.Address = address
 	s.Exclusive = exclusive
-	s.TriggerKill = triggerKill
 	s.checkIDExist()
 	serverID, err := s.getServerID()
 	if err != nil {
@@ -943,7 +938,18 @@ func (w *sessionWatcher) EventChannel() <-chan *SessionEvent {
 	return w.eventCh
 }
 
+// SetMixCoordMode marks this session as shared across multiple coordinators in MixCoord mode.
+// When in MixCoord mode, Stop() is a no-op — MixCoord is responsible for calling Stop() after
+// clearing the flag.
+func (s *Session) SetMixCoordMode(enable bool) {
+	s.isMixCoordMode.Store(enable)
+}
+
 func (s *Session) Stop() {
+	if s.isMixCoordMode.Load() {
+		log.Info("session stop skipped, session is in MixCoord mode", zap.String("serverName", s.ServerName))
+		return
+	}
 	log.Info("session stopping", zap.String("serverName", s.ServerName))
 	if s.cancel != nil {
 		s.cancel()
