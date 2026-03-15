@@ -249,6 +249,85 @@ func convertIDsToSchemapbIDs(ids []interface{}, pkField *schemapb.FieldSchema) (
 	}
 }
 
+// convertRawBodyIDsToSchemapbIDs extracts the "ids" field from the raw JSON body
+// and converts them to schemapb.IDs. This avoids the float64 precision loss that
+// occurs when Go's encoding/json decodes large int64 values (> 2^53) into interface{}.
+// By using gjson to read the raw JSON string representation, we preserve full int64 precision.
+func convertRawBodyIDsToSchemapbIDs(rawBody []byte, pkField *schemapb.FieldSchema) (*schemapb.IDs, error) {
+	idsResult := gjson.GetBytes(rawBody, "ids")
+	if !idsResult.Exists() || idsResult.Type != gjson.JSON {
+		return nil, errors.New("ids field not found or not an array in request body")
+	}
+
+	idsArray := idsResult.Array()
+	if len(idsArray) == 0 {
+		return nil, errors.New("ids array cannot be empty")
+	}
+
+	switch pkField.DataType {
+	case schemapb.DataType_Int64:
+		int64IDs := make([]int64, 0, len(idsArray))
+		for i, idResult := range idsArray {
+			var int64ID int64
+			switch idResult.Type {
+			case gjson.Number:
+				// gjson provides the raw string via idResult.Raw, parse it directly
+				// to avoid float64 precision loss for large int64 values
+				raw := idResult.Raw
+				parsed, err := strconv.ParseInt(raw, 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("invalid int64 id at index %d: %s, error: %v", i, raw, err)
+				}
+				int64ID = parsed
+			case gjson.String:
+				parsed, err := strconv.ParseInt(idResult.Str, 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("invalid int64 id at index %d: %s, error: %v", i, idResult.Str, err)
+				}
+				int64ID = parsed
+			default:
+				return nil, fmt.Errorf("invalid id type at index %d: expected number or string, got %v", i, idResult.Type)
+			}
+			int64IDs = append(int64IDs, int64ID)
+		}
+		return &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: int64IDs,
+				},
+			},
+		}, nil
+
+	case schemapb.DataType_VarChar:
+		stringIDs := make([]string, 0, len(idsArray))
+		for i, idResult := range idsArray {
+			var stringID string
+			switch idResult.Type {
+			case gjson.String:
+				stringID = idResult.Str
+			case gjson.Number:
+				stringID = idResult.Raw
+			default:
+				return nil, fmt.Errorf("invalid id type at index %d: expected string, got %v", i, idResult.Type)
+			}
+			if stringID == "" {
+				return nil, fmt.Errorf("empty string id at index %d", i)
+			}
+			stringIDs = append(stringIDs, stringID)
+		}
+		return &schemapb.IDs{
+			IdField: &schemapb.IDs_StrId{
+				StrId: &schemapb.StringArray{
+					Data: stringIDs,
+				},
+			},
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported primary key type: %s", pkField.DataType.String())
+	}
+}
+
 // --------------------- collection details --------------------- //
 
 func printFields(fields []*schemapb.FieldSchema) []gin.H {

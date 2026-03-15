@@ -2932,3 +2932,119 @@ func TestConvertIDsToSchemapbIDs(t *testing.T) {
 		assert.Contains(t, err.Error(), "unsupported primary key type")
 	})
 }
+
+func TestConvertRawBodyIDsToSchemapbIDs(t *testing.T) {
+	int64PkField := &schemapb.FieldSchema{
+		FieldID:      common.StartOfUserFieldID,
+		Name:         "id",
+		IsPrimaryKey: true,
+		DataType:     schemapb.DataType_Int64,
+	}
+	varcharPkField := &schemapb.FieldSchema{
+		FieldID:      common.StartOfUserFieldID,
+		Name:         "id",
+		IsPrimaryKey: true,
+		DataType:     schemapb.DataType_VarChar,
+	}
+
+	t.Run("large int64 ids preserve precision", func(t *testing.T) {
+		// These IDs are > 2^53, where float64 loses precision.
+		// 464004151041070705 and 464004151041070706 would both become
+		// 464004151041070720 when decoded as float64, causing false duplicates.
+		rawBody := []byte(`{"ids": [464004151041070705, 464004151041070706, 464004151041070707]}`)
+		result, err := convertRawBodyIDsToSchemapbIDs(rawBody, int64PkField)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		intIds := result.GetIntId()
+		assert.NotNil(t, intIds)
+		assert.Equal(t, []int64{464004151041070705, 464004151041070706, 464004151041070707}, intIds.Data)
+	})
+
+	t.Run("small int64 ids", func(t *testing.T) {
+		rawBody := []byte(`{"ids": [1, 2, 3]}`)
+		result, err := convertRawBodyIDsToSchemapbIDs(rawBody, int64PkField)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		intIds := result.GetIntId()
+		assert.NotNil(t, intIds)
+		assert.Equal(t, []int64{1, 2, 3}, intIds.Data)
+	})
+
+	t.Run("int64 ids as strings", func(t *testing.T) {
+		rawBody := []byte(`{"ids": ["464004151041070705", "464004151041070706"]}`)
+		result, err := convertRawBodyIDsToSchemapbIDs(rawBody, int64PkField)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		intIds := result.GetIntId()
+		assert.NotNil(t, intIds)
+		assert.Equal(t, []int64{464004151041070705, 464004151041070706}, intIds.Data)
+	})
+
+	t.Run("empty ids array", func(t *testing.T) {
+		rawBody := []byte(`{"ids": []}`)
+		_, err := convertRawBodyIDsToSchemapbIDs(rawBody, int64PkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ids array cannot be empty")
+	})
+
+	t.Run("missing ids field", func(t *testing.T) {
+		rawBody := []byte(`{"data": [1, 2, 3]}`)
+		_, err := convertRawBodyIDsToSchemapbIDs(rawBody, int64PkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ids field not found")
+	})
+
+	t.Run("int64 pk with invalid string value", func(t *testing.T) {
+		rawBody := []byte(`{"ids": ["not_a_number"]}`)
+		_, err := convertRawBodyIDsToSchemapbIDs(rawBody, int64PkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid int64 id")
+	})
+
+	t.Run("int64 pk with boolean value", func(t *testing.T) {
+		rawBody := []byte(`{"ids": [true]}`)
+		_, err := convertRawBodyIDsToSchemapbIDs(rawBody, int64PkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid id type")
+	})
+
+	t.Run("varchar pk with string values", func(t *testing.T) {
+		rawBody := []byte(`{"ids": ["abc", "def", "ghi"]}`)
+		result, err := convertRawBodyIDsToSchemapbIDs(rawBody, varcharPkField)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		strIds := result.GetStrId()
+		assert.NotNil(t, strIds)
+		assert.Equal(t, []string{"abc", "def", "ghi"}, strIds.Data)
+	})
+
+	t.Run("varchar pk with number values", func(t *testing.T) {
+		rawBody := []byte(`{"ids": [123, 456]}`)
+		result, err := convertRawBodyIDsToSchemapbIDs(rawBody, varcharPkField)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		strIds := result.GetStrId()
+		assert.NotNil(t, strIds)
+		assert.Equal(t, []string{"123", "456"}, strIds.Data)
+	})
+
+	t.Run("varchar pk with empty string", func(t *testing.T) {
+		rawBody := []byte(`{"ids": [""]}`)
+		_, err := convertRawBodyIDsToSchemapbIDs(rawBody, varcharPkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "empty string id")
+	})
+
+	t.Run("unsupported pk type", func(t *testing.T) {
+		boolPkField := &schemapb.FieldSchema{
+			FieldID:      common.StartOfUserFieldID,
+			Name:         "id",
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Bool,
+		}
+		rawBody := []byte(`{"ids": [1]}`)
+		_, err := convertRawBodyIDsToSchemapbIDs(rawBody, boolPkField)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported primary key type")
+	})
+}
