@@ -147,7 +147,7 @@ func (mcm *RemoteChunkManager) Size(ctx context.Context, filePath string) (int64
 			return false, nil
 		}
 		log.Warn("failed to get object size", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
-		err = checkObjectStorageError(filePath, err)
+		err = mapObjectStorageError(filePath, err)
 		if merr.IsRetryableErr(err) {
 			return true, err
 		}
@@ -208,7 +208,7 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 		// Prefetch object data
 		var empty []byte
 		_, err = object.Read(empty)
-		err = checkObjectStorageError(filePath, err)
+		err = mapObjectStorageError(filePath, err)
 		if err != nil {
 			log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
 			return err
@@ -219,7 +219,7 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 			return err
 		}
 		data, err = read(object, size)
-		err = checkObjectStorageError(filePath, err)
+		err = mapObjectStorageError(filePath, err)
 		if err != nil {
 			log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 			return err
@@ -266,7 +266,7 @@ func (mcm *RemoteChunkManager) ReadAt(ctx context.Context, filePath string, off 
 	defer object.Close()
 
 	data, err := read(object, length)
-	err = checkObjectStorageError(filePath, err)
+	err = mapObjectStorageError(filePath, err)
 	if err != nil {
 		log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
@@ -421,7 +421,7 @@ func (mcm *RemoteChunkManager) removeObject(ctx context.Context, bucketName, obj
 }
 
 func ToMilvusIoError(fileName string, err error) error {
-	return checkObjectStorageError(fileName, err)
+	return mapObjectStorageError(fileName, err)
 }
 
 func (mcm *RemoteChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
@@ -453,9 +453,24 @@ func (mcm *RemoteChunkManager) copyObject(ctx context.Context, bucketName, srcOb
 	return err
 }
 
-func checkObjectStorageError(fileName string, err error) error {
+func mapObjectStorageError(fileName string, err error) error {
 	if err == nil {
 		return nil
+	}
+
+	// If error is already a Milvus IO error, return it as-is
+	// This handles cases where test code or internal code passes merr.ErrIo* directly
+	if errors.Is(err, merr.ErrIoKeyNotFound) ||
+		errors.Is(err, merr.ErrIoPermissionDenied) ||
+		errors.Is(err, merr.ErrIoBucketNotFound) ||
+		errors.Is(err, merr.ErrIoInvalidCredentials) ||
+		errors.Is(err, merr.ErrIoInvalidArgument) ||
+		errors.Is(err, merr.ErrIoInvalidRange) ||
+		errors.Is(err, merr.ErrIoEntityTooLarge) ||
+		errors.Is(err, merr.ErrIoTooManyRequests) ||
+		errors.Is(err, merr.ErrIoUnexpectEOF) ||
+		errors.Is(err, merr.ErrIoFailed) {
+		return err
 	}
 
 	switch err := err.(type) {
@@ -466,6 +481,20 @@ func checkObjectStorageError(fileName string, err error) error {
 		if err.ErrorCode == string(bloberror.ServerBusy) {
 			return merr.WrapErrIoTooManyRequests(fileName, err)
 		}
+		// Permanent errors
+		if err.ErrorCode == "AuthenticationFailed" {
+			return merr.WrapErrIoPermissionDenied(fileName, err)
+		}
+		if err.ErrorCode == "ContainerNotFound" {
+			return merr.WrapErrIoBucketNotFound(fileName, err)
+		}
+		// Client validation errors
+		if err.ErrorCode == "InvalidParameterValue" {
+			return merr.WrapErrIoInvalidArgument(fileName, err)
+		}
+		if err.ErrorCode == "InvalidRange" {
+			return merr.WrapErrIoInvalidRange(fileName, err)
+		}
 		return merr.WrapErrIoFailed(fileName, err)
 	case minio.ErrorResponse:
 		if err.Code == "NoSuchKey" {
@@ -474,6 +503,26 @@ func checkObjectStorageError(fileName string, err error) error {
 		if err.Code == "SlowDown" || err.Code == "TooManyRequestsException" {
 			return merr.WrapErrIoTooManyRequests(fileName, err)
 		}
+		// Permanent errors - access denied
+		if err.Code == "AccessDenied" || err.Code == "InvalidAccessKeyId" || err.Code == "SignatureDoesNotMatch" {
+			return merr.WrapErrIoPermissionDenied(fileName, err)
+		}
+		if err.Code == "NoSuchBucket" {
+			return merr.WrapErrIoBucketNotFound(fileName, err)
+		}
+		if err.Code == "InvalidToken" || err.Code == "ExpiredToken" {
+			return merr.WrapErrIoInvalidCredentials(fileName, err)
+		}
+		// Client validation errors
+		if err.Code == "InvalidArgument" || err.Code == "InvalidRequest" {
+			return merr.WrapErrIoInvalidArgument(fileName, err)
+		}
+		if err.Code == "InvalidRange" {
+			return merr.WrapErrIoInvalidRange(fileName, err)
+		}
+		if err.Code == "EntityTooLarge" || err.Code == "MaxMessageLengthExceeded" {
+			return merr.WrapErrIoEntityTooLarge(fileName, err)
+		}
 		return merr.WrapErrIoFailed(fileName, err)
 	case *googleapi.Error:
 		if err.Code == http.StatusNotFound {
@@ -481,6 +530,17 @@ func checkObjectStorageError(fileName string, err error) error {
 		}
 		if err.Code == http.StatusTooManyRequests {
 			return merr.WrapErrIoTooManyRequests(fileName, err)
+		}
+		// Permanent errors
+		if err.Code == http.StatusForbidden {
+			return merr.WrapErrIoPermissionDenied(fileName, err)
+		}
+		// Client validation errors
+		if err.Code == http.StatusBadRequest {
+			return merr.WrapErrIoInvalidArgument(fileName, err)
+		}
+		if err.Code == http.StatusRequestEntityTooLarge {
+			return merr.WrapErrIoEntityTooLarge(fileName, err)
 		}
 		return merr.WrapErrIoFailed(fileName, err)
 	}

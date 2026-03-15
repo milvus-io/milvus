@@ -24,11 +24,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func TestMinioObjectStorage(t *testing.T) {
@@ -415,4 +417,78 @@ func listAllObjectsWithPrefixAtBucket(ctx context.Context, objectStorage ObjectS
 		return nil, nil, err
 	}
 	return dirs, mods, nil
+}
+
+func TestMapObjectStorageError_MinIO_NewErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		inputError    error
+		expectedError error
+	}{
+		// Permanent errors
+		{
+			name:          "AccessDenied",
+			inputError:    minio.ErrorResponse{Code: "AccessDenied"},
+			expectedError: merr.ErrIoPermissionDenied,
+		},
+		{
+			name:          "InvalidAccessKeyId",
+			inputError:    minio.ErrorResponse{Code: "InvalidAccessKeyId"},
+			expectedError: merr.ErrIoPermissionDenied,
+		},
+		{
+			name:          "SignatureDoesNotMatch",
+			inputError:    minio.ErrorResponse{Code: "SignatureDoesNotMatch"},
+			expectedError: merr.ErrIoPermissionDenied,
+		},
+		{
+			name:          "NoSuchBucket",
+			inputError:    minio.ErrorResponse{Code: "NoSuchBucket"},
+			expectedError: merr.ErrIoBucketNotFound,
+		},
+		{
+			name:          "InvalidToken",
+			inputError:    minio.ErrorResponse{Code: "InvalidToken"},
+			expectedError: merr.ErrIoInvalidCredentials,
+		},
+		{
+			name:          "ExpiredToken",
+			inputError:    minio.ErrorResponse{Code: "ExpiredToken"},
+			expectedError: merr.ErrIoInvalidCredentials,
+		},
+		// Client validation errors
+		{
+			name:          "InvalidArgument",
+			inputError:    minio.ErrorResponse{Code: "InvalidArgument"},
+			expectedError: merr.ErrIoInvalidArgument,
+		},
+		{
+			name:          "InvalidRequest",
+			inputError:    minio.ErrorResponse{Code: "InvalidRequest"},
+			expectedError: merr.ErrIoInvalidArgument,
+		},
+		{
+			name:          "InvalidRange",
+			inputError:    minio.ErrorResponse{Code: "InvalidRange"},
+			expectedError: merr.ErrIoInvalidRange,
+		},
+		{
+			name:          "EntityTooLarge",
+			inputError:    minio.ErrorResponse{Code: "EntityTooLarge"},
+			expectedError: merr.ErrIoEntityTooLarge,
+		},
+		{
+			name:          "MaxMessageLengthExceeded",
+			inputError:    minio.ErrorResponse{Code: "MaxMessageLengthExceeded"},
+			expectedError: merr.ErrIoEntityTooLarge,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mapObjectStorageError("test/path", tt.inputError)
+			assert.True(t, errors.Is(result, tt.expectedError),
+				"expected %v, got %v", tt.expectedError, result)
+		})
+	}
 }
