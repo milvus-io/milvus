@@ -33,6 +33,7 @@ import (
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -700,6 +701,61 @@ func (s *EtcdKVSuite) TestRevisionBytes() {
 	success, err = etcdKV.CompareVersionAndSwapBytes(context.TODO(), "a/b/c", 0, []byte("1"))
 	s.NoError(err)
 	s.False(success)
+}
+
+func (s *EtcdKVSuite) TestGetPathPreservesTrailingSlash() {
+	rootPath := s.rootPath
+
+	// GetPath should match path.Join for normal keys (no trailing /)
+	s.Equal(path.Join(rootPath, "key"), util.GetPath(rootPath, "key"))
+	s.Equal(path.Join(rootPath, "a/b/c"), util.GetPath(rootPath, "a/b/c"))
+
+	// GetPath should preserve trailing / (unlike path.Join)
+	s.Equal(rootPath+"/key/", util.GetPath(rootPath, "key/"))
+	s.NotEqual(rootPath+"/key/", path.Join(rootPath, "key/")) // path.Join strips it
+
+	// empty key should return rootPath
+	s.Equal(rootPath, util.GetPath(rootPath, ""))
+
+	// rootPath ending with "/" should not produce duplicate slashes.
+	s.Equal(rootPath+"/key", util.GetPath(rootPath+"/", "key"))
+	s.Equal(rootPath+"/key", util.GetPath(rootPath+"/", "/key"))
+
+	// empty root should not prepend "/".
+	s.Equal("key", util.GetPath("", "key"))
+}
+
+func (s *EtcdKVSuite) TestLoadWithPrefixIsolation() {
+	etcdKV := s.etcdKV
+
+	// Save keys that share a common prefix stem
+	err := etcdKV.MultiSave(context.TODO(), map[string]string{
+		"user_content/role1":           "v1",
+		"user_content/role2":           "v2",
+		"user_content_marketing/role3": "v3",
+		"user_content_marketing/role4": "v4",
+	})
+	s.Require().NoError(err)
+
+	// LoadWithPrefix with trailing "/" should only match the exact namespace
+	keys, values, err := etcdKV.LoadWithPrefix(context.TODO(), "user_content/")
+	s.NoError(err)
+	s.Len(keys, 2)
+	s.ElementsMatch(values, []string{"v1", "v2"})
+
+	// LoadWithPrefix without trailing "/" matches both namespaces (broader match)
+	keys, _, err = etcdKV.LoadWithPrefix(context.TODO(), "user_content")
+	s.NoError(err)
+	s.Len(keys, 4)
+
+	// WalkWithPrefix with trailing "/" should also be isolated
+	var walkedKeys []string
+	err = etcdKV.WalkWithPrefix(context.TODO(), "user_content/", 10, func(key []byte, value []byte) error {
+		walkedKeys = append(walkedKeys, string(key))
+		return nil
+	})
+	s.NoError(err)
+	s.Len(walkedKeys, 2)
 }
 
 func TestEtcdKV(t *testing.T) {
