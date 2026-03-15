@@ -55,7 +55,13 @@ get_default_storage_config(bool useIam) {
     auto useSSL = false;
     auto sslCACert = "";
     auto iamEndPoint = "";
-    auto bucketName = "a-bucket";
+    // Append GTEST_SHARD_INDEX to bucket name to avoid conflicts when
+    // multiple shards run in parallel against the same Azurite instance.
+    std::string bucketName = "a-bucket";
+    const char* shard = std::getenv("GTEST_SHARD_INDEX");
+    if (shard) {
+        bucketName += "-s" + std::string(shard);
+    }
 
     return StorageConfig{endpoint,
                          bucketName,
@@ -119,7 +125,7 @@ TEST_F(AzureChunkManagerTest, BasicFunctions) {
 }
 
 TEST_F(AzureChunkManagerTest, BucketPositive) {
-    string testBucketName = "test-bucket";
+    string testBucketName = configs_.bucket_name;
     bool exist = chunk_manager_->BucketExists(testBucketName);
     EXPECT_EQ(exist, false);
     chunk_manager_->CreateBucket(testBucketName);
@@ -131,7 +137,8 @@ TEST_F(AzureChunkManagerTest, BucketPositive) {
 }
 
 TEST_F(AzureChunkManagerTest, BucketNegtive) {
-    string testBucketName = "test-bucket-ng";
+    // Use config bucket name with shard suffix to avoid conflicts in parallel shards
+    string testBucketName = configs_.bucket_name + "-ng";
     try {
         chunk_manager_->DeleteBucket(testBucketName);
     } catch (SegcoreError& e) {

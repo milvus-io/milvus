@@ -21,6 +21,17 @@ using namespace std;
 using namespace milvus;
 using namespace milvus::storage;
 
+// Append GTEST_SHARD_INDEX to bucket name to avoid conflicts when
+// multiple shards run in parallel against the same fake-GCS instance.
+static std::string
+shardBucketName(const std::string& base) {
+    const char* shard = std::getenv("GTEST_SHARD_INDEX");
+    if (shard) {
+        return base + "-s" + std::string(shard);
+    }
+    return base;
+}
+
 StorageConfig
 get_default_storage_config() {
     auto endpoint = "storage.gcs.127.0.0.1.nip.io:4443";
@@ -30,7 +41,7 @@ get_default_storage_config() {
     auto use_ssl = false;
     auto ssl_ca_cert = "";
     auto iam_endpoint = "";
-    auto bucket_name = "sample-bucket";
+    auto bucket_name = shardBucketName("sample-bucket");
     bool use_iam = false;
     bool gcp_native_without_auth = true;
 
@@ -80,7 +91,7 @@ TEST_F(GcpNativeChunkManagerTest, BasicFunctions) {
 }
 
 TEST_F(GcpNativeChunkManagerTest, BucketPositive) {
-    string test_bucket_name = "bucket-not-exist";
+    string test_bucket_name = shardBucketName("bucket-not-exist");
     EXPECT_EQ(chunk_manager_->BucketExists(test_bucket_name), false);
     EXPECT_EQ(chunk_manager_->CreateBucket(test_bucket_name), true);
     EXPECT_EQ(chunk_manager_->BucketExists(test_bucket_name), true);
