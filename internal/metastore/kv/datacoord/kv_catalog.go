@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"path"
 	"strconv"
 	"strings"
 
@@ -200,7 +199,7 @@ func (kc *Catalog) listBinlogs(ctx context.Context, binlogType storage.BinlogTyp
 
 		segmentID, err := kc.parseBinlogKey(string(key))
 		if err != nil {
-			return fmt.Errorf("prefix:%s, %w", path.Join(kc.metaRootpath, logPathPrefix), err)
+			return fmt.Errorf("prefix:%s, %w", kc.metaRootpath+"/"+logPathPrefix, err)
 		}
 
 		// set log size to memory size if memory size is zero for old segment before v2.4.3
@@ -419,12 +418,12 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 
 func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error {
 	segKey := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	binlogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentBinlogPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	deltalogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentDeltalogPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	statelogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentStatslogPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	bm25logPrefix := fmt.Sprintf("%s/%d/%d/%d", SegmentBM25logPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+	binlogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentBinlogPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+	deltalogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentDeltalogPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+	statelogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentStatslogPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+	bm25logPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentBM25logPathPrefix, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 
-	keys := []string{segKey, binlogPreix, deltalogPreix, statelogPreix, bm25logPrefix}
+	keys := []string{segKey, binlogPrefix, deltalogPrefix, statelogPrefix, bm25logPrefix}
 	if err := kc.MetaKv.MultiSaveAndRemoveWithPrefix(ctx, nil, keys); err != nil {
 		return err
 	}
@@ -491,7 +490,7 @@ func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, ChannelCheckpointPrefix, kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, ChannelCheckpointPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -576,7 +575,7 @@ func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, util.FieldIndexPrefix, kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, util.FieldIndexPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -651,7 +650,7 @@ func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentInde
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, util.SegmentIndexPrefix, kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, util.SegmentIndexPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -705,7 +704,7 @@ func (kc *Catalog) ListImportJobs(ctx context.Context) ([]*datapb.ImportJob, err
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, ImportJobPrefix, kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, ImportJobPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -739,7 +738,7 @@ func (kc *Catalog) ListPreImportTasks(ctx context.Context) ([]*datapb.PreImportT
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, PreImportTaskPrefix, kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, PreImportTaskPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -773,7 +772,7 @@ func (kc *Catalog) ListImportTasks(ctx context.Context) ([]*datapb.ImportTaskV2,
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, ImportTaskPrefix, kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, ImportTaskPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -898,7 +897,7 @@ func (kc *Catalog) ListCompactionTask(ctx context.Context) ([]*datapb.Compaction
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, CompactionTaskPrefix, kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, CompactionTaskPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -937,7 +936,7 @@ func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, AnalyzeTaskPrefix, kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, AnalyzeTaskPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -977,7 +976,7 @@ func (kc *Catalog) ListPartitionStatsInfos(ctx context.Context) ([]*datapb.Parti
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, PartitionStatsInfoPrefix, kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, PartitionStatsInfoPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -1040,7 +1039,7 @@ func (kc *Catalog) ListStatsTasks(ctx context.Context) ([]*indexpb.StatsTask, er
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, StatsTaskPrefix, kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, StatsTaskPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -1204,7 +1203,7 @@ func (kc *Catalog) RemoveFileResource(ctx context.Context, resourceID int64, ver
 }
 
 func (kc *Catalog) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error) {
-	_, values, err := kc.MetaKv.LoadWithPrefix(ctx, FileResourceMetaPrefix)
+	_, values, err := kc.MetaKv.LoadWithPrefix(ctx, FileResourceMetaPrefix+"/")
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1271,7 +1270,7 @@ func (kc *Catalog) ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, e
 		return nil
 	}
 
-	err := kc.MetaKv.WalkWithPrefix(ctx, SnapshotPrefix, kc.paginationSize, applyFn)
+	err := kc.MetaKv.WalkWithPrefix(ctx, SnapshotPrefix+"/", kc.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
