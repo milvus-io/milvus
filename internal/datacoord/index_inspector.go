@@ -107,8 +107,9 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 			}
 		case collectionID := <-i.notifyIndexChan:
 			log.Info("receive create index notify", zap.Int64("collectionID", collectionID))
+			isExternal := i.isExternalCollection(collectionID)
 			segments := i.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-				return isFlush(info) && (!enableSortCompaction() || info.GetIsSorted() || info.GetIsSortedByNamespace())
+				return isFlush(info) && (!enableSortCompaction() || info.GetIsSorted() || info.GetIsSortedByNamespace() || isExternal)
 			}))
 			for _, segment := range segments {
 				if err := i.createIndexesForSegment(ctx, segment); err != nil {
@@ -146,7 +147,7 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 }
 
 func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
-	if enableSortCompaction() && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
+	if enableSortCompaction() && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && !i.isExternalCollection(segment.CollectionID) {
 		log.Ctx(ctx).Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
@@ -225,6 +226,11 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		zap.Int64("field size", fieldSize),
 		zap.Int64("task slot", taskSlot))
 	return nil
+}
+
+func (i *indexInspector) isExternalCollection(collectionID int64) bool {
+	coll := i.meta.GetCollection(collectionID)
+	return coll != nil && coll.IsExternal()
 }
 
 func (i *indexInspector) reloadFromMeta() {

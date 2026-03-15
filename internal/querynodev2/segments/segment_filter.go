@@ -282,9 +282,9 @@ func doSparseFilter(seg Segment, plan *planpb.PlanNode) bool {
 		switch op {
 		case planpb.OpType_Equal:
 
-			// bloom filter
-			existBF := seg.BloomFilterExist()
-			if existBF {
+			// bloom filter / PK candidate check
+			pkCheckReady := seg.PkCandidateExist()
+			if pkCheckReady {
 				lc := storage.NewLocationsCache(pk)
 				// BloomFilter contains this key, no filter here
 				noFilter = seg.MayPkExist(lc)
@@ -329,7 +329,7 @@ func WithSparseFilter(plan *planpb.PlanNode, filteredCount *int) SegmentFilter {
 		log.Debug("SparseFilter",
 			zap.Int64("Segment ID", segment.ID()),
 			zap.Bool("No Filter", rc),
-			zap.Bool("Exist BF", segment.BloomFilterExist()))
+			zap.Bool("pkCheckReady", segment.PkCandidateExist()))
 		return rc
 	})
 }

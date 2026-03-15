@@ -1076,6 +1076,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false);
 
+    // Load column groups from a manifest file path (for external collections)
+    void
+    LoadColumnGroups(const std::string& manifest_path);
+
     /**
      * @brief Load a single column group at the specified index
      *
@@ -1098,6 +1102,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool eager_load,
         milvus::OpContext* op_ctx = nullptr,
         bool is_replace = false);
+
+    // Synthesize system fields (virtual PK, timestamps, PK index, row count)
+    // for external collections. External collections don't have real PK or
+    // timestamp fields in their parquet data, so these must be generated.
+    void
+    SynthesizeExternalSystemFields();
 
     /**
      * @brief Reloads columns from the specified field IDs
