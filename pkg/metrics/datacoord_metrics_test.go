@@ -111,3 +111,61 @@ func TestDataCoordNumSegmentsLabelNames(t *testing.T) {
 	// Clean up
 	DataCoordNumSegments.Reset()
 }
+
+func TestSnapshotMetricsRegistration(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	// Should not panic when registering all snapshot metrics
+	assert.NotPanics(t, func() {
+		RegisterDataCoord(registry)
+	})
+}
+
+func TestSnapshotMetricsLabelCombinations(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	RegisterDataCoord(registry)
+
+	// Test DataCoordSnapshotTotal (gauge)
+	DataCoordSnapshotTotal.WithLabelValues("100", "default").Set(5)
+	value := testutil.ToFloat64(DataCoordSnapshotTotal.WithLabelValues("100", "default"))
+	assert.Equal(t, float64(5), value)
+
+	// Test DataCoordSnapshotOperationLatency (histogram with operation label)
+	assert.NotPanics(t, func() {
+		DataCoordSnapshotOperationLatency.WithLabelValues("100", "success", "create").Observe(1500)
+		DataCoordSnapshotOperationLatency.WithLabelValues("100", "fail", "create").Observe(200)
+		DataCoordSnapshotOperationLatency.WithLabelValues("200", "success", "restore").Observe(5000)
+	})
+
+	// Test DataCoordSnapshotRestoreProgressRatio (gauge)
+	DataCoordSnapshotRestoreProgressRatio.WithLabelValues("1001", "snap1").Set(0.75)
+	value = testutil.ToFloat64(DataCoordSnapshotRestoreProgressRatio.WithLabelValues("1001", "snap1"))
+	assert.Equal(t, 0.75, value)
+
+	// Test DataCoordSnapshotRestoreJobsTotal (gauge)
+	DataCoordSnapshotRestoreJobsTotal.WithLabelValues("CopySegmentJobPending").Set(2)
+	value = testutil.ToFloat64(DataCoordSnapshotRestoreJobsTotal.WithLabelValues("CopySegmentJobPending"))
+	assert.Equal(t, float64(2), value)
+
+	// Test DataCoordSnapshotSizeBytes (histogram)
+	assert.NotPanics(t, func() {
+		DataCoordSnapshotSizeBytes.WithLabelValues("100").Observe(1024 * 1024 * 50)  // 50MB
+		DataCoordSnapshotSizeBytes.WithLabelValues("200").Observe(1024 * 1024 * 500) // 500MB
+	})
+
+	// Test DataCoordSnapshotOperationErrorsTotal (counter)
+	DataCoordSnapshotOperationErrorsTotal.WithLabelValues("create", "name_conflict").Inc()
+	DataCoordSnapshotOperationErrorsTotal.WithLabelValues("create", "internal").Inc()
+	DataCoordSnapshotOperationErrorsTotal.WithLabelValues("restore", "read_snapshot").Inc()
+	value = testutil.ToFloat64(DataCoordSnapshotOperationErrorsTotal.WithLabelValues("create", "name_conflict"))
+	assert.Equal(t, float64(1), value)
+	value = testutil.ToFloat64(DataCoordSnapshotOperationErrorsTotal.WithLabelValues("restore", "read_snapshot"))
+	assert.Equal(t, float64(1), value)
+
+	// Clean up
+	DataCoordSnapshotTotal.Reset()
+	DataCoordSnapshotOperationLatency.Reset()
+	DataCoordSnapshotSizeBytes.Reset()
+	DataCoordSnapshotRestoreProgressRatio.Reset()
+	DataCoordSnapshotRestoreJobsTotal.Reset()
+	DataCoordSnapshotOperationErrorsTotal.Reset()
+}
