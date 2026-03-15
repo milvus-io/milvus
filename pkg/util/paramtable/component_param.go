@@ -6752,6 +6752,19 @@ type streamingConfig struct {
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
 
+	// wal rate limit
+	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
+	WALRateLimitNodeMemorySlowdownThreshold      ParamItem `refreshable:"true"`
+	WALRateLimitNodeMemoryRejectThreshold        ParamItem `refreshable:"true"`
+	WALRateLimitNodeMemoryRecoverThreshold       ParamItem `refreshable:"true"`
+	WALRateLimitNodeMemoryAdaptiveRateLimit      AdaptiveRateLimitConfig
+	WALRateLimitFlusherAdaptiveRateLimit         AdaptiveRateLimitConfig
+	WALRateLimitRecoveryStorageAdaptiveRateLimit AdaptiveRateLimitConfig
+	WALRateLimitAppendRateEnabled                ParamItem `refreshable:"true"`
+	WALRateLimitAppendRateSlowdownThreshold      ParamItem `refreshable:"true"`
+	WALRateLimitAppendRateRecoverThreshold       ParamItem `refreshable:"true"`
+	WALRateLimitAppendRateAdaptiveRateLimit      AdaptiveRateLimitConfig
+
 	// Empty TimeTick Filtering configration
 	DelegatorEmptyTimeTickMaxFilterInterval ParamItem `refreshable:"true"`
 	FlushEmptyTimeTickMaxFilterInterval     ParamItem `refreshable:"true"`
@@ -7168,6 +7181,264 @@ so we set 1 second here as a threshold.`,
 		Export:       false,
 	}
 	p.ReplicationSkipMessageTypes.Init(base.mgr)
+
+	p.WALRateLimitDefaultBurst = ParamItem{
+		Key:          "streaming.walRateLimit.defaultBurst",
+		Version:      "2.6.9",
+		Doc:          "The default burst size for the WAL rate limiter, 20MB by default. The burst size determines the maximum number of bytes that can be consumed at once.",
+		DefaultValue: "20m",
+		Export:       false,
+	}
+	p.WALRateLimitDefaultBurst.Init(base.mgr)
+
+	p.WALRateLimitNodeMemorySlowdownThreshold = ParamItem{
+		Key:          "streaming.walRateLimit.nodeMemory.slowdownThreshold",
+		Version:      "2.6.9",
+		Doc:          "When the memory usage is greater than this threshold, the node memory rate limiter will enter slowdown mode, 0.9 by default.",
+		DefaultValue: "0.9",
+		Export:       false,
+	}
+	p.WALRateLimitNodeMemorySlowdownThreshold.Init(base.mgr)
+
+	p.WALRateLimitNodeMemoryRejectThreshold = ParamItem{
+		Key:          "streaming.walRateLimit.nodeMemory.rejectThreshold",
+		Version:      "2.6.9",
+		Doc:          "When the memory usage is greater than this threshold, the node memory rate limiter will enter reject mode, 0.95 by default.",
+		DefaultValue: "0.95",
+		Export:       false,
+	}
+	p.WALRateLimitNodeMemoryRejectThreshold.Init(base.mgr)
+
+	p.WALRateLimitNodeMemoryRecoverThreshold = ParamItem{
+		Key:          "streaming.walRateLimit.nodeMemory.recoverThreshold",
+		Version:      "2.6.9",
+		Doc:          "When the memory usage is less than this threshold, the node memory rate limiter will enter recovery mode, 0.85 by default.",
+		DefaultValue: "0.85",
+		Export:       false,
+	}
+	p.WALRateLimitNodeMemoryRecoverThreshold.Init(base.mgr)
+
+	p.WALRateLimitNodeMemoryAdaptiveRateLimit.init(base, "streaming.walRateLimit.nodeMemory.adaptiveRateLimit", AdaptiveRateLimitConfigDefaultValue{
+		SlowdownStartupDelayInterval: "0",
+		SlowdownHWM:                  "8mb",
+		SlowdownLWM:                  "512kb",
+		SlowdownDecreaseInterval:     "30s",
+		SlowdownDecreaseRatio:        "0.8",
+		SlowdownRejectDelayInterval:  "0",
+		RecoveryHWM:                  "32mb",
+		RecoveryLWM:                  "2mb",
+		RecoveryNormalDelayInterval:  "10s",
+		RecoveryIncremental:          "512kb",
+		RecoveryIncreaseInterval:     "1s",
+		Export:                       false,
+	})
+
+	p.WALRateLimitRecoveryStorageAdaptiveRateLimit.init(base, "streaming.walRateLimit.recoveryStorage.adaptiveRateLimit", AdaptiveRateLimitConfigDefaultValue{
+		SlowdownStartupDelayInterval: "30s",
+		SlowdownHWM:                  "16mb",
+		SlowdownLWM:                  "1mb",
+		SlowdownDecreaseInterval:     "30s",
+		SlowdownDecreaseRatio:        "0.8",
+		SlowdownRejectDelayInterval:  "2m",
+		RecoveryHWM:                  "32mb",
+		RecoveryLWM:                  "2mb",
+		RecoveryNormalDelayInterval:  "1m",
+		RecoveryIncremental:          "512kb",
+		RecoveryIncreaseInterval:     "1s",
+		Export:                       false,
+	})
+
+	p.WALRateLimitFlusherAdaptiveRateLimit.init(base, "streaming.walRateLimit.flusher.adaptiveRateLimit", AdaptiveRateLimitConfigDefaultValue{
+		SlowdownStartupDelayInterval: "10s",
+		SlowdownHWM:                  "16mb",
+		SlowdownLWM:                  "2mb",
+		SlowdownDecreaseInterval:     "30s",
+		SlowdownDecreaseRatio:        "0.8",
+		SlowdownRejectDelayInterval:  "2m",
+		RecoveryHWM:                  "64mb",
+		RecoveryLWM:                  "16mb",
+		RecoveryNormalDelayInterval:  "5s",
+		RecoveryIncremental:          "5mb",
+		RecoveryIncreaseInterval:     "1s",
+		Export:                       false,
+	})
+
+	p.WALRateLimitAppendRateEnabled = ParamItem{
+		Key:          "streaming.walRateLimit.appendRate.enabled",
+		Version:      "2.6.10",
+		Doc:          "Whether to enable the append rate limiter, true by default. When enabled, the rate limiter will throttle writes based on append rate thresholds.",
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.WALRateLimitAppendRateEnabled.Init(base.mgr)
+
+	p.WALRateLimitAppendRateSlowdownThreshold = ParamItem{
+		Key:          "streaming.walRateLimit.appendRate.slowdownThreshold",
+		Version:      "2.6.10",
+		Doc:          "When the append rate (bytes/sec) is greater than this threshold, the append rate limiter will enter slowdown mode, 32MB/s by default. This protects each WAL from being overloaded.",
+		DefaultValue: "32m",
+		Export:       false,
+	}
+	p.WALRateLimitAppendRateSlowdownThreshold.Init(base.mgr)
+
+	p.WALRateLimitAppendRateRecoverThreshold = ParamItem{
+		Key:          "streaming.walRateLimit.appendRate.recoverThreshold",
+		Version:      "2.6.10",
+		Doc:          "When the append rate (bytes/sec) is less than this threshold, the append rate limiter will enter recovery mode, 28MB/s by default. The gap between slowdown and recover threshold prevents oscillation.",
+		DefaultValue: "28m",
+		Export:       false,
+	}
+	p.WALRateLimitAppendRateRecoverThreshold.Init(base.mgr)
+
+	p.WALRateLimitAppendRateAdaptiveRateLimit.init(base, "streaming.walRateLimit.appendRate.adaptiveRateLimit", AdaptiveRateLimitConfigDefaultValue{
+		SlowdownStartupDelayInterval: "0",
+		SlowdownHWM:                  "32mb",
+		SlowdownLWM:                  "2mb",
+		SlowdownDecreaseInterval:     "10s",
+		SlowdownDecreaseRatio:        "0.9",
+		SlowdownRejectDelayInterval:  "0",
+		RecoveryHWM:                  "32mb",
+		RecoveryLWM:                  "4mb",
+		RecoveryNormalDelayInterval:  "10s",
+		RecoveryIncremental:          "512kb",
+		RecoveryIncreaseInterval:     "1s",
+		Export:                       false,
+	})
+}
+
+type AdaptiveRateLimitConfigDefaultValue struct {
+	SlowdownStartupDelayInterval string
+	SlowdownHWM                  string
+	SlowdownLWM                  string
+	SlowdownDecreaseInterval     string
+	SlowdownDecreaseRatio        string
+	SlowdownRejectDelayInterval  string
+	RecoveryHWM                  string
+	RecoveryLWM                  string
+	RecoveryNormalDelayInterval  string
+	RecoveryIncremental          string
+	RecoveryIncreaseInterval     string
+
+	Export bool
+}
+
+type AdaptiveRateLimitConfig struct {
+	SlowdownStartupDelayInterval ParamItem `refreshable:"true"`
+	SlowdownHWM                  ParamItem `refreshable:"true"`
+	SlowdownLWM                  ParamItem `refreshable:"true"`
+	SlowdownDecreaseInterval     ParamItem `refreshable:"true"`
+	SlowdownDecreaseRatio        ParamItem `refreshable:"true"`
+	SlowdownRejectDelayInterval  ParamItem `refreshable:"true"`
+	RecoveryHWM                  ParamItem `refreshable:"true"`
+	RecoveryLWM                  ParamItem `refreshable:"true"`
+	RecoveryIncremental          ParamItem `refreshable:"true"`
+	RecoveryIncreaseInterval     ParamItem `refreshable:"true"`
+	RecoveryNormalDelayInterval  ParamItem `refreshable:"true"`
+}
+
+func (p *AdaptiveRateLimitConfig) init(
+	base *BaseTable,
+	prefix string,
+	defaults AdaptiveRateLimitConfigDefaultValue,
+) {
+	p.SlowdownStartupDelayInterval = ParamItem{
+		Key:          prefix + ".slowdown.startupDelayInterval",
+		Version:      "2.6.10",
+		Doc:          "The startup delay interval for adaptive rate limit slowdown, when the first time the rate limit enters slowdown mode, it will wait for this interval to take effect, " + defaults.SlowdownStartupDelayInterval + " by default.",
+		DefaultValue: defaults.SlowdownStartupDelayInterval,
+		Export:       defaults.Export,
+	}
+	p.SlowdownStartupDelayInterval.Init(base.mgr)
+
+	p.SlowdownHWM = ParamItem{
+		Key:          prefix + ".slowdown.hwm",
+		Version:      "2.6.10",
+		Doc:          "The high watermark of adaptive rate limit slowdown, the rate limit will be set to this value when slowdown mode is triggered, " + defaults.SlowdownHWM + "/s by default.",
+		DefaultValue: defaults.SlowdownHWM,
+		Export:       defaults.Export,
+	}
+	p.SlowdownHWM.Init(base.mgr)
+
+	p.SlowdownLWM = ParamItem{
+		Key:          prefix + ".slowdown.lwm",
+		Version:      "2.6.10",
+		Doc:          "The low watermark of adaptive rate limit slowdown, the rate limit will decrease until this value if slowdown mode is kept, " + defaults.SlowdownLWM + "/s by default.",
+		DefaultValue: defaults.SlowdownLWM,
+		Export:       defaults.Export,
+	}
+	p.SlowdownLWM.Init(base.mgr)
+
+	p.SlowdownDecreaseInterval = ParamItem{
+		Key:          prefix + ".slowdown.decreaseInterval",
+		Version:      "2.6.10",
+		Doc:          "The interval of adaptive rate limit slowdown decrease, the rate limit will decrease every this interval, " + defaults.SlowdownDecreaseInterval + " by default.",
+		DefaultValue: defaults.SlowdownDecreaseInterval,
+		Export:       defaults.Export,
+	}
+	p.SlowdownDecreaseInterval.Init(base.mgr)
+
+	p.SlowdownDecreaseRatio = ParamItem{
+		Key:          prefix + ".slowdown.decreaseRatio",
+		Version:      "2.6.10",
+		Doc:          "The ratio of adaptive rate limit slowdown decrease, the rate limit will decrease by this ratio every decrease interval, " + defaults.SlowdownDecreaseRatio + " by default.",
+		DefaultValue: defaults.SlowdownDecreaseRatio,
+		Export:       defaults.Export,
+	}
+	p.SlowdownDecreaseRatio.Init(base.mgr)
+
+	p.SlowdownRejectDelayInterval = ParamItem{
+		Key:          prefix + ".slowdown.rejectDelayInterval",
+		Version:      "2.6.10",
+		Doc:          "The delay interval of adaptive rate limit slowdown to reject mode after slowdown reaches low watermark; 0 means no reject operation will be triggered, " + defaults.SlowdownRejectDelayInterval + " by default.",
+		DefaultValue: defaults.SlowdownRejectDelayInterval,
+		Export:       defaults.Export,
+	}
+	p.SlowdownRejectDelayInterval.Init(base.mgr)
+
+	p.RecoveryHWM = ParamItem{
+		Key:          prefix + ".recovery.hwm",
+		Version:      "2.6.10",
+		Doc:          "The high watermark of adaptive rate limit recovery, the rate limit will increase until this value if recovery mode is kept, " + defaults.RecoveryHWM + "/s by default.",
+		DefaultValue: defaults.RecoveryHWM,
+		Export:       defaults.Export,
+	}
+	p.RecoveryHWM.Init(base.mgr)
+
+	p.RecoveryLWM = ParamItem{
+		Key:          prefix + ".recovery.lwm",
+		Version:      "2.6.10",
+		Doc:          "The low watermark of adaptive rate limit recovery, the rate limit will be set to this value when recovery mode is triggered, " + defaults.RecoveryLWM + "/s by default.",
+		DefaultValue: defaults.RecoveryLWM,
+		Export:       defaults.Export,
+	}
+	p.RecoveryLWM.Init(base.mgr)
+
+	p.RecoveryIncreaseInterval = ParamItem{
+		Key:          prefix + ".recovery.increaseInterval",
+		Version:      "2.6.10",
+		Doc:          "The delay interval of adaptive rate limit recovery increase, the rate limit will increase every this interval, " + defaults.RecoveryIncreaseInterval + " by default.",
+		DefaultValue: defaults.RecoveryIncreaseInterval,
+		Export:       defaults.Export,
+	}
+	p.RecoveryIncreaseInterval.Init(base.mgr)
+
+	p.RecoveryIncremental = ParamItem{
+		Key:          prefix + ".recovery.incremental",
+		Version:      "2.6.10",
+		Doc:          "The incremental of adaptive rate limit recovery, the rate limit will increase by this value every increase interval, " + defaults.RecoveryIncremental + "/s by default.",
+		DefaultValue: defaults.RecoveryIncremental,
+		Export:       defaults.Export,
+	}
+	p.RecoveryIncremental.Init(base.mgr)
+
+	p.RecoveryNormalDelayInterval = ParamItem{
+		Key:          prefix + ".recovery.normalDelayInterval",
+		Version:      "2.6.10",
+		Doc:          "The delay interval of adaptive rate limit recovery to normal mode after recovery reaches high watermark, " + defaults.RecoveryNormalDelayInterval + " by default.",
+		DefaultValue: defaults.RecoveryNormalDelayInterval,
+		Export:       defaults.Export,
+	}
+	p.RecoveryNormalDelayInterval.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.
