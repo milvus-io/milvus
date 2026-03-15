@@ -3421,6 +3421,10 @@ type queryNodeConfig struct {
 	IDFEnableDisk ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
+
+	// adaptive filter strategy
+	EnableAdaptiveFilterStrategy    ParamItem `refreshable:"true"`
+	AdaptiveFilterStrategyThreshold ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -4591,6 +4595,24 @@ user-task-polling:
 		Export:       true,
 	}
 	p.PartialResultRequiredDataRatio.Init(base.mgr)
+
+	p.EnableAdaptiveFilterStrategy = ParamItem{
+		Key:          "queryNode.adaptiveFilterStrategy.enabled",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "enable cost-based adaptive selection between pre-filter and iterative-filter per segment",
+		Export:       true,
+	}
+	p.EnableAdaptiveFilterStrategy.Init(base.mgr)
+
+	p.AdaptiveFilterStrategyThreshold = ParamItem{
+		Key:          "queryNode.adaptiveFilterStrategy.threshold",
+		Version:      "2.6.0",
+		DefaultValue: "0.5",
+		Doc:          "selectivity threshold above which iterative filter is preferred over pre-filter (0.0–1.0)",
+		Export:       true,
+	}
+	p.AdaptiveFilterStrategyThreshold.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

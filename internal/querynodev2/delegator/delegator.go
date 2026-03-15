@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
@@ -307,6 +308,50 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 	return nodeReq
 }
 
+// extractFilterExpr extracts the filter expression from a PlanNode.
+func extractFilterExpr(plan *planpb.PlanNode) *planpb.Expr {
+	if vn := plan.GetVectorAnns(); vn != nil {
+		return vn.GetPredicates()
+	}
+	return nil
+}
+
+// makeAdaptiveModifySearchRequest returns a modify function that injects per-segment
+// iterative-filter hints into the SerializedExprPlan when all segments in the batch
+// have been advised to use iterative filter.
+func (sd *shardDelegator) makeAdaptiveModifySearchRequest(
+	origReq *querypb.SearchRequest,
+	advisedHints AdvisedHints,
+) func(*querypb.SearchRequest, querypb.DataScope, []int64, int64) *querypb.SearchRequest {
+	// Pre-serialize the iterative-filter variant of the plan once.
+	var iterativePlan []byte
+	plan := &planpb.PlanNode{}
+	if proto.Unmarshal(origReq.GetReq().GetSerializedExprPlan(), plan) == nil {
+		if vn := plan.GetVectorAnns(); vn != nil && vn.GetQueryInfo() != nil {
+			vn.QueryInfo.Hints = HintIterativeFilter
+			if b, err := proto.Marshal(plan); err == nil {
+				iterativePlan = b
+			}
+		}
+	}
+
+	return func(req *querypb.SearchRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.SearchRequest {
+		nodeReq := sd.modifySearchRequest(req, scope, segmentIDs, targetID)
+		// Only override for sealed (historical) segments; growing segments fall back to default.
+		if scope != querypb.DataScope_Historical || iterativePlan == nil {
+			return nodeReq
+		}
+		// Use iterative filter only when ALL segments in this batch are advised to do so.
+		for _, segID := range segmentIDs {
+			if advisedHints[segID] != HintIterativeFilter {
+				return nodeReq
+			}
+		}
+		nodeReq.Req.SerializedExprPlan = iterativePlan
+		return nodeReq
+	}
+}
+
 // Search preforms search operation on shard.
 func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest, sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
@@ -320,6 +365,25 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 			defer sd.partitionStatsMut.RUnlock()
 			PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
 				PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		}()
+	}
+
+	// Compute per-segment filter strategy hints when the adaptive strategy is enabled
+	// and the user has not already supplied an explicit hints override.
+	var advisedHints AdvisedHints
+	if paramtable.Get().QueryNodeCfg.EnableAdaptiveFilterStrategy.GetAsBool() &&
+		req.GetReq().GetSerializedExprPlan() != nil {
+		func() {
+			sd.partitionStatsMut.RLock()
+			defer sd.partitionStatsMut.RUnlock()
+			plan := &planpb.PlanNode{}
+			if err := proto.Unmarshal(req.GetReq().GetSerializedExprPlan(), plan); err == nil {
+				exprPb := extractFilterExpr(plan)
+				if exprPb != nil {
+					threshold := paramtable.Get().QueryNodeCfg.AdaptiveFilterStrategyThreshold.GetAsFloat()
+					advisedHints = AdviseFilterStrategy(exprPb, sd.partitionStats, sealed, threshold)
+				}
+			}
 		}()
 	}
 
@@ -359,7 +423,15 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err
 	}
-	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifySearchRequest)
+
+	// Build the modify function: if we have per-segment hints, wrap modifySearchRequest
+	// so that requests targeting segments that need iterative filter get an updated plan.
+	modifyFn := sd.modifySearchRequest
+	if len(advisedHints) > 0 {
+		modifyFn = sd.makeAdaptiveModifySearchRequest(req, advisedHints)
+	}
+
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, modifyFn)
 	if err != nil {
 		log.Warn("Search organizeSubTask failed", zap.Error(err))
 		return nil, err
