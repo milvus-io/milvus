@@ -80,7 +80,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     switch (expr_->column_.data_type_) {
         case DataType::ARRAY: {
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 result = EvalArrayContainsForIndexSegment(
                     expr_->column_.element_type_);
             } else {
@@ -89,7 +89,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 result = EvalArrayContainsForIndexSegment(
                     value_type_ == DataType::INT64 ? DataType::DOUBLE
                                                    : value_type_);
@@ -333,8 +333,7 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
 
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer("json_contains_by_stats", [this](double us) {
             json_filter_stats_latency_us_ += us;
         });
@@ -566,12 +565,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -579,8 +576,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer(
             "json_contains_array_by_stats",
             [this](double us) { json_filter_stats_latency_us_ += us; });
@@ -788,12 +784,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 template <typename ExprValueType>
@@ -907,8 +901,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
 
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer(
             "json_contains_all_by_stats",
             [this](double us) { json_filter_stats_latency_us_ += us; });
@@ -1150,12 +1143,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -1163,8 +1154,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer(
             "json_contains_all_difftype_by_stats",
             [this](double us) { json_filter_stats_latency_us_ += us; });
@@ -1497,12 +1487,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -1510,8 +1498,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer(
             "json_contains_all_array_by_stats",
             [this](double us) { json_filter_stats_latency_us_ += us; });
@@ -1726,12 +1713,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -1739,8 +1724,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer(
             "json_contains_difftype_by_stats",
             [this](double us) { json_filter_stats_latency_us_ += us; });
@@ -2050,12 +2034,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -2174,5 +2156,6 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
                real_batch_size);
     return res;
 }
+
 }  //namespace exec
 }  // namespace milvus
