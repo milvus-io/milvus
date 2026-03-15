@@ -44,11 +44,12 @@ type msgHandlerImpl struct {
 func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error {
 	vchannel := createSegmentMsg.VChannel()
 	h := createSegmentMsg.Header()
+
 	if err := impl.createNewGrowingSegment(ctx, vchannel, h); err != nil {
 		return err
 	}
 	logger := log.With(log.FieldMessage(createSegmentMsg))
-	if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, h.PartitionId, h.SegmentId); err != nil {
+	if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, h.PartitionId, h.SegmentId, h.SchemaVersion); err != nil {
 		logger.Warn("fail to create new growing segment")
 		return err
 	}
@@ -79,12 +80,13 @@ func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchanne
 			Vchannel:             vchannel,
 			StorageVersion:       h.StorageVersion,
 			IsCreatedByStreaming: true,
+			SchemaVersion:        h.SchemaVersion,
 		})
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			logger.Warn("failed to alloc growing segment at datacoord")
 			return errors.Wrap(err, "failed to alloc growing segment at datacoord")
 		}
-		logger.Info("alloc growing segment at datacoord")
+		logger.Info("alloc growing segment at datacoord", zap.Int32("schemaVersion", h.SchemaVersion))
 		return nil
 	}, retry.AttemptAlways())
 }

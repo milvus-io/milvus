@@ -270,7 +270,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 
 	dmStreamNode := newDmInputNode(config, input)
 	nodeList = append(nodeList, dmStreamNode)
-
+	//1.ddNode
 	ddNode := newDDNode(
 		params.Ctx,
 		collectionID,
@@ -282,20 +282,21 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	)
 	nodeList = append(nodeList, ddNode)
 
-	if len(info.GetSchema().GetFunctions()) > 0 {
-		emNode, err := newEmbeddingNode(channelName, config.metacache)
-		if err != nil {
-			return nil, err
-		}
-		nodeList = append(nodeList, emNode)
+	//2.embeddingNode(maybe no function)
+	emNode, err := newEmbeddingNode(channelName, config.metacache)
+	if err != nil {
+		return nil, err
 	}
+	nodeList = append(nodeList, emNode)
 
+	//3.writeNode
 	writeNode, err := newWriteNode(params.Ctx, params.WriteBufferManager, ds.timetickSender, config)
 	if err != nil {
 		return nil, err
 	}
 	nodeList = append(nodeList, writeNode)
 
+	//4.ttNode
 	ttNode := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
 	nodeList = append(nodeList, ttNode)
 
