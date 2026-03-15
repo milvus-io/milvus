@@ -1,131 +1,32 @@
-
+import numpy as np
+import random
+import pytest
+import pandas as pd
+from pymilvus import DataType
 from utils.util_pymilvus import *
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
 from utils.util_log import test_log as log
-from base.client_base import TestcaseBase
-import random
-import pytest
-import pandas as pd
-from faker import Faker
-
-Faker.seed(19530)
-fake_en = Faker("en_US")
-fake_zh = Faker("zh_CN")
-
-# patch faker to generate text with specific distribution
-cf.patch_faker_text(fake_en, cf.en_vocabularies_distribution)
-cf.patch_faker_text(fake_zh, cf.zh_vocabularies_distribution)
-
-pd.set_option("expand_frame_repr", False)
+from base.client_v2_base import TestMilvusClientV2Base
 
 prefix = "search_collection"
-search_num = 10
-max_dim = ct.max_dim
-min_dim = ct.min_dim
-epsilon = ct.epsilon
-hybrid_search_epsilon = 0.01
-gracefulTime = ct.gracefulTime
 default_nb = ct.default_nb
 default_nb_medium = ct.default_nb_medium
 default_nq = ct.default_nq
 default_dim = ct.default_dim
 default_limit = ct.default_limit
-max_limit = ct.max_limit
 default_search_exp = "int64 >= 0"
-default_search_string_exp = "varchar >= \"0\""
-default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
-default_invaild_string_exp = "varchar >= 0"
-default_json_search_exp = "json_field[\"number\"] >= 0"
-perfix_expr = 'varchar like "0%"'
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
-default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
-default_json_field_name = ct.default_json_field_name
-default_index_params = ct.default_index
-vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-uid = "test_search"
-nq = 1
-epsilon = 0.001
-field_name = default_float_vec_field_name
-binary_field_name = default_binary_vec_field_name
-search_param = {"nprobe": 1}
-entity = gen_entities(1, is_normal=True)
-entities = gen_entities(default_nb, is_normal=True)
-raw_vectors, binary_entities = gen_binary_entities(default_nb)
-default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
-index_name1 = cf.gen_unique_str("float")
-index_name2 = cf.gen_unique_str("varhar")
-half_nb = ct.default_nb // 2
-max_hybrid_search_req_num = ct.max_hybrid_search_req_num
+field_name = ct.default_float_vec_field_name
 
 
-class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
+class TestSearchNoneDefaultIndependent(TestMilvusClientV2Base):
     """ Test case of search interface """
-
-    @pytest.fixture(scope="function", params=[default_nb_medium])
-    def nb(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[200])
-    def nq(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[32, 128])
-    def dim(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[False, True])
-    def auto_id(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[False, True])
-    def _async(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=["JACCARD", "HAMMING"])
-    def metrics(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[False, True])
-    def is_flush(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[True, False])
-    def enable_dynamic_field(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=["IP", "COSINE", "L2"])
-    def metric_type(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[True, False])
-    def random_primary_key(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=ct.all_dense_vector_types)
-    def vector_data_type(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=["STL_SORT", "INVERTED"])
-    def numeric_scalar_index(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=["TRIE", "INVERTED", "BITMAP"])
-    def varchar_scalar_index(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[200, 600])
-    def batch_size(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[0, 0.5, 1])
-    def null_data_percent(self, request):
-        yield request.param
 
     """
     ******************************************************************
@@ -134,39 +35,67 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_search_normal_none_data(self, nq, dim, auto_id, is_flush, enable_dynamic_field, vector_data_type,
+    @pytest.mark.parametrize("dim", [32, 128])
+    @pytest.mark.parametrize("auto_id", [False, True])
+    @pytest.mark.parametrize("is_flush", [False, True])
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("vector_data_type", ct.all_dense_vector_types)
+    @pytest.mark.parametrize("null_data_percent", [0, 0.5, 1])
+    def test_search_normal_none_data(self, dim, auto_id, is_flush, enable_dynamic_field, vector_data_type,
                                      null_data_percent):
         """
         target: test search normal case with none data inserted
         method: create connection, collection with nullable fields, insert data including none, and search
         expected: 1. search successfully with limit(topK)
         """
+        nq = 200
         # 1. initialize with data
-        collection_w, _, _, insert_ids, time_stamp = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_flush=is_flush,
-                                         enable_dynamic_field=enable_dynamic_field,
-                                         vector_data_type=vector_data_type,
-                                         nullable_fields={ct.default_float_field_name: null_data_percent})[0:5]
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=auto_id)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT, nullable=True)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, vector_data_type, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+        data = cf.gen_default_rows_data(nb=default_nb, dim=dim, auto_id=auto_id, with_json=True,
+                                        vector_data_type=vector_data_type,
+                                        nullable_fields={ct.default_float_field_name: null_data_percent})
+        insert_res, _ = self.insert(client, collection_name, data=data)
+        insert_ids = insert_res["ids"]
+        if is_flush:
+            self.flush(client, collection_name)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE")
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
         # 2. generate search data
         vectors = cf.gen_vectors(nq, dim, vector_data_type)
         # 3. search after insert
-        collection_w.search(vectors[:nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp,
-                            output_fields=[default_int64_field_name,
-                                           default_float_field_name],
-                            guarantee_timestamp=0,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": insert_ids,
-                                         "pk_name": ct.default_int64_field_name,
-                                         "limit": default_limit,
-                                         "output_fields": [default_int64_field_name,
-                                                           default_float_field_name]})
+        self.search(client, collection_name,
+                    data=vectors[:nq],
+                    anns_field=default_search_field,
+                    search_params=default_search_params,
+                    limit=default_limit,
+                    filter=default_search_exp,
+                    output_fields=[default_int64_field_name,
+                                   default_float_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": nq,
+                                 "ids": insert_ids,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "limit": default_limit,
+                                 "output_fields": [default_int64_field_name,
+                                                   default_float_field_name]})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("varchar_scalar_index", ["TRIE", "INVERTED", "BITMAP"])
+    @pytest.mark.parametrize("numeric_scalar_index", ["STL_SORT", "INVERTED"])
+    @pytest.mark.parametrize("null_data_percent", [0, 0.5, 1])
     def test_search_after_none_data_all_field_datatype(self, varchar_scalar_index, numeric_scalar_index,
-                                                       null_data_percent, _async):
+                                                       null_data_percent):
         """
         target: test search after different index
         method: test search after different index and corresponding search params
@@ -180,103 +109,157 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                            ct.default_float_field_name: null_data_percent,
                            ct.default_double_field_name: null_data_percent,
                            ct.default_string_field_name: null_data_percent}
-        collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, 5000, partition_num=1,
-                                         is_all_data_type=True, dim=default_dim,
-                                         is_index=False, nullable_fields=nullable_fields)[0:4]
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        default_schema = cf.gen_collection_schema_all_datatype(auto_id=False, dim=default_dim,
+                                                               enable_dynamic_field=False,
+                                                               nullable_fields=nullable_fields)
+        self.create_collection(client, collection_name, schema=default_schema)
+        # generate and insert data with nullable fields
+        data = cf.gen_default_rows_data_all_data_type(nb=5000, dim=default_dim)
+        # apply nullable fields
+        for field_key, percent in nullable_fields.items():
+            null_number = int(5000 * percent)
+            for row in data[-null_number:]:
+                if field_key in row:
+                    row[field_key] = None
+        insert_res, _ = self.insert(client, collection_name, data=data)
+        insert_ids = insert_res["ids"]
         # 2. create index on vector field and load
-        index = "HNSW"
-        params = cf.get_index_params_params(index)
-        default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
-        vector_name_list = cf.extract_vector_field_name_list(collection_w)
-        vector_name_list.append(ct.default_float_vec_field_name)
-        for vector_name in vector_name_list:
-            collection_w.create_index(vector_name, default_index)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW",
+                      metric_type="COSINE", params=cf.get_index_params_params("HNSW"))
+        self.create_index(client, collection_name, index_params=idx)
         # 3. create index on scalar field with None data
-        scalar_index_params = {"index_type": varchar_scalar_index, "params": {}}
-        collection_w.create_index(ct.default_string_field_name, scalar_index_params)
+        scalar_idx = self.prepare_index_params(client)[0]
+        scalar_idx.add_index(field_name=ct.default_string_field_name, index_type=varchar_scalar_index)
+        self.create_index(client, collection_name, index_params=scalar_idx)
         # 4. create index on scalar field with default data
-        scalar_index_params = {"index_type": numeric_scalar_index, "params": {}}
-        collection_w.create_index(ct.default_int64_field_name, scalar_index_params)
-        collection_w.create_index(ct.default_int32_field_name, scalar_index_params)
-        collection_w.create_index(ct.default_int16_field_name, scalar_index_params)
-        collection_w.create_index(ct.default_int8_field_name, scalar_index_params)
-        collection_w.create_index(ct.default_float_field_name, scalar_index_params)
-        scalar_index_params = {"index_type": "INVERTED", "params": {}}
-        collection_w.create_index(ct.default_bool_field_name, scalar_index_params)
-        collection_w.load()
+        for scalar_field in [ct.default_int64_field_name, ct.default_int32_field_name,
+                             ct.default_int16_field_name, ct.default_int8_field_name,
+                             ct.default_float_field_name]:
+            scalar_idx2 = self.prepare_index_params(client)[0]
+            scalar_idx2.add_index(field_name=scalar_field, index_type=numeric_scalar_index)
+            self.create_index(client, collection_name, index_params=scalar_idx2)
+        bool_idx = self.prepare_index_params(client)[0]
+        bool_idx.add_index(field_name=ct.default_bool_field_name, index_type="INVERTED")
+        self.create_index(client, collection_name, index_params=bool_idx)
+        self.load_collection(client, collection_name)
         # 5. search
         search_params = {}
         limit = ct.default_limit
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            search_params, limit, default_search_exp, _async=_async,
-                            output_fields=[ct.default_string_field_name, ct.default_float_field_name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "ids": insert_ids,
-                                         "limit": limit,
-                                         "pk_name": ct.default_int64_field_name,
-                                         "_async": _async,
-                                         "output_fields": [ct.default_string_field_name,
-                                                           ct.default_float_field_name]})
+        self.search(client, collection_name,
+                    data=vectors[:default_nq],
+                    anns_field=default_search_field,
+                    search_params=search_params,
+                    limit=limit,
+                    filter=default_search_exp,
+                    output_fields=[ct.default_string_field_name, ct.default_float_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": default_nq,
+                                 "ids": insert_ids,
+                                 "limit": limit,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "output_fields": [ct.default_string_field_name,
+                                                   ct.default_float_field_name]})
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_search_default_value_with_insert(self, nq, dim, auto_id, is_flush, enable_dynamic_field, vector_data_type):
+    @pytest.mark.parametrize("dim", [32, 128])
+    @pytest.mark.parametrize("auto_id", [False, True])
+    @pytest.mark.parametrize("is_flush", [False, True])
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("vector_data_type", ct.all_dense_vector_types)
+    def test_search_default_value_with_insert(self, dim, auto_id, is_flush, enable_dynamic_field, vector_data_type):
         """
         target: test search normal case with default value set
         method: create connection, collection with default value set, insert and search
         expected: 1. search successfully with limit(topK)
         """
+        nq = 200
         # 1. initialize with data
-        collection_w, _, _, insert_ids, time_stamp = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_flush=is_flush,
-                                         enable_dynamic_field=enable_dynamic_field,
-                                         vector_data_type=vector_data_type,
-                                         default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:5]
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=auto_id)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT, default_value=np.float32(10.0))
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, vector_data_type, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+        data = cf.gen_default_rows_data(nb=default_nb, dim=dim, auto_id=auto_id, with_json=True,
+                                        vector_data_type=vector_data_type)
+        insert_res, _ = self.insert(client, collection_name, data=data)
+        insert_ids = insert_res["ids"]
+        if is_flush:
+            self.flush(client, collection_name)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE")
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
         # 2. generate search data
         vectors = cf.gen_vectors(nq, dim, vector_data_type)
         # 3. search after insert
-        collection_w.search(vectors[:nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp,
-                            output_fields=[default_int64_field_name,
-                                           default_float_field_name],
-                            guarantee_timestamp=0,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": insert_ids,
-                                         "pk_name": ct.default_int64_field_name,
-                                         "limit": default_limit,
-                                         "output_fields": [default_int64_field_name,
-                                                           default_float_field_name]})
+        self.search(client, collection_name,
+                    data=vectors[:nq],
+                    anns_field=default_search_field,
+                    search_params=default_search_params,
+                    limit=default_limit,
+                    filter=default_search_exp,
+                    output_fields=[default_int64_field_name,
+                                   default_float_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": nq,
+                                 "ids": insert_ids,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "limit": default_limit,
+                                 "output_fields": [default_int64_field_name,
+                                                   default_float_field_name]})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     def test_search_default_value_without_insert(self, enable_dynamic_field):
         """
         target: test search normal case with default value set
         method: create connection, collection with default value set, no insert and search
         expected: 1. search successfully with limit(topK)
         """
-        # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, False, dim=default_dim,
-                                                    enable_dynamic_field=enable_dynamic_field,
-                                                    nullable_fields={ct.default_float_field_name: 0},
-                                                    default_value_fields={
-                                                        ct.default_float_field_name: np.float32(10.0)})[0]
+        # 1. initialize without data
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT, nullable=True,
+                         default_value=np.float32(10.0))
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE")
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
         # 2. generate search data
         vectors = cf.gen_vectors(default_nq, default_dim, vector_data_type=DataType.FLOAT_VECTOR)
         # 3. search after insert
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp,
-                            guarantee_timestamp=0,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": 0})
+        self.search(client, collection_name,
+                    data=vectors[:default_nq],
+                    anns_field=default_search_field,
+                    search_params=default_search_params,
+                    limit=default_limit,
+                    filter=default_search_exp,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": default_nq,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_after_default_data_all_field_datatype(self, varchar_scalar_index, numeric_scalar_index, _async):
+    @pytest.mark.parametrize("varchar_scalar_index", ["TRIE", "INVERTED", "BITMAP"])
+    @pytest.mark.parametrize("numeric_scalar_index", ["STL_SORT", "INVERTED"])
+    def test_search_after_default_data_all_field_datatype(self, varchar_scalar_index, numeric_scalar_index):
         """
         target: test search after different index
         method: test search after different index and corresponding search params
@@ -290,31 +273,37 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                                 ct.default_float_field_name: np.float32(10.0),
                                 ct.default_double_field_name: 10.0,
                                 ct.default_string_field_name: "1"}
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000, partition_num=1,
-                                                                      is_all_data_type=True, dim=default_dim,
-                                                                      is_index=False,
-                                                                      default_value_fields=default_value_fields)[0:4]
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        default_schema = cf.gen_collection_schema_all_datatype(auto_id=False, dim=default_dim,
+                                                               enable_dynamic_field=False,
+                                                               default_value_fields=default_value_fields)
+        self.create_collection(client, collection_name, schema=default_schema)
+        # generate and insert data
+        data = cf.gen_default_rows_data_all_data_type(nb=5000, dim=default_dim)
+        insert_res, _ = self.insert(client, collection_name, data=data)
+        insert_ids = insert_res["ids"]
         # 2. create index on vector field and load
-        index = "HNSW"
-        params = cf.get_index_params_params(index)
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
-        vector_name_list = cf.extract_vector_field_name_list(collection_w)
-        vector_name_list.append(ct.default_float_vec_field_name)
-        for vector_name in vector_name_list:
-            collection_w.create_index(vector_name, default_index)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW",
+                      metric_type="L2", params=cf.get_index_params_params("HNSW"))
+        self.create_index(client, collection_name, index_params=idx)
         # 3. create index on scalar field with None data
-        scalar_index_params = {"index_type": varchar_scalar_index, "params": {}}
-        collection_w.create_index(ct.default_string_field_name, scalar_index_params)
+        scalar_idx = self.prepare_index_params(client)[0]
+        scalar_idx.add_index(field_name=ct.default_string_field_name, index_type=varchar_scalar_index)
+        self.create_index(client, collection_name, index_params=scalar_idx)
         # 4. create index on scalar field with default data
-        scalar_index_params = {"index_type": numeric_scalar_index, "params": {}}
-        collection_w.create_index(ct.default_int64_field_name, scalar_index_params)
-        collection_w.create_index(ct.default_int32_field_name, scalar_index_params)
-        collection_w.create_index(ct.default_int16_field_name, scalar_index_params)
-        collection_w.create_index(ct.default_int8_field_name, scalar_index_params)
+        for scalar_field in [ct.default_int64_field_name, ct.default_int32_field_name,
+                             ct.default_int16_field_name, ct.default_int8_field_name,
+                             ct.default_float_field_name]:
+            scalar_idx2 = self.prepare_index_params(client)[0]
+            scalar_idx2.add_index(field_name=scalar_field, index_type=numeric_scalar_index)
+            self.create_index(client, collection_name, index_params=scalar_idx2)
         if numeric_scalar_index != "STL_SORT":
-            collection_w.create_index(ct.default_bool_field_name, scalar_index_params)
-        collection_w.create_index(ct.default_float_field_name, scalar_index_params)
-        collection_w.load()
+            bool_idx = self.prepare_index_params(client)[0]
+            bool_idx.add_index(field_name=ct.default_bool_field_name, index_type=numeric_scalar_index)
+            self.create_index(client, collection_name, index_params=bool_idx)
+        self.load_collection(client, collection_name)
         # 5. search
         search_params = {}
         limit = ct.default_limit
@@ -323,51 +312,81 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                          ct.default_int16_field_name, ct.default_int8_field_name,
                          ct.default_bool_field_name, ct.default_float_field_name,
                          ct.default_double_field_name, ct.default_string_field_name]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            search_params, limit, default_search_exp, _async=_async,
-                            output_fields=output_fields,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "ids": insert_ids,
-                                         "pk_name": ct.default_int64_field_name,
-                                         "limit": limit,
-                                         "_async": _async,
-                                         "output_fields": output_fields})
+        self.search(client, collection_name,
+                    data=vectors[:default_nq],
+                    anns_field=default_search_field,
+                    search_params=search_params,
+                    limit=limit,
+                    filter=default_search_exp,
+                    output_fields=output_fields,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": default_nq,
+                                 "ids": insert_ids,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "limit": limit,
+                                 "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_both_default_value_non_data(self, nq, dim, auto_id, is_flush, enable_dynamic_field,
+    @pytest.mark.parametrize("dim", [32, 128])
+    @pytest.mark.parametrize("auto_id", [False, True])
+    @pytest.mark.parametrize("is_flush", [False, True])
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("vector_data_type", ct.all_dense_vector_types)
+    def test_search_both_default_value_non_data(self, dim, auto_id, is_flush, enable_dynamic_field,
                                                 vector_data_type):
         """
         target: test search normal case with default value set
         method: create connection, collection with default value set, insert and search
         expected: 1. search successfully with limit(topK)
         """
+        nq = 200
         # 1. initialize with data
-        collection_w, _, _, insert_ids, time_stamp = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_flush=is_flush,
-                                         enable_dynamic_field=enable_dynamic_field,
-                                         vector_data_type=vector_data_type,
-                                         nullable_fields={ct.default_float_field_name: 1},
-                                         default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:5]
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=auto_id)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT, nullable=True,
+                         default_value=np.float32(10.0))
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, vector_data_type, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+        # null_data_percent=1 means all float field values are None
+        data = cf.gen_default_rows_data(nb=default_nb, dim=dim, auto_id=auto_id, with_json=True,
+                                        vector_data_type=vector_data_type,
+                                        nullable_fields={ct.default_float_field_name: 1})
+        insert_res, _ = self.insert(client, collection_name, data=data)
+        insert_ids = insert_res["ids"]
+        if is_flush:
+            self.flush(client, collection_name)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE")
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
         # 2. generate search data
         vectors = cf.gen_vectors(nq, dim, vector_data_type)
         # 3. search after insert
-        collection_w.search(vectors[:nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp,
-                            output_fields=[default_int64_field_name,
-                                           default_float_field_name],
-                            guarantee_timestamp=0,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": insert_ids,
-                                         "pk_name": ct.default_int64_field_name,
-                                         "limit": default_limit,
-                                         "output_fields": [default_int64_field_name,
-                                                           default_float_field_name]})
+        self.search(client, collection_name,
+                    data=vectors[:nq],
+                    anns_field=default_search_field,
+                    search_params=default_search_params,
+                    limit=default_limit,
+                    filter=default_search_exp,
+                    output_fields=[default_int64_field_name,
+                                   default_float_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": nq,
+                                 "ids": insert_ids,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "limit": default_limit,
+                                 "output_fields": [default_int64_field_name,
+                                                   default_float_field_name]})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_collection_with_non_default_data_after_release_load(self, nq, _async, null_data_percent):
+    @pytest.mark.parametrize("null_data_percent", [0, 0.5, 1])
+    def test_search_collection_with_non_default_data_after_release_load(self, null_data_percent):
         """
         target: search the pre-released collection after load
         method: 1. create collection
@@ -377,79 +396,120 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize without data
+        nq = 200
         nb = 2000
         dim = 64
         auto_id = True
-        collection_w, _, _, insert_ids, time_stamp = \
-            self.init_collection_general(prefix, True, nb, 1, auto_id=auto_id, dim=dim,
-                                         nullable_fields={ct.default_string_field_name: null_data_percent},
-                                         default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:5]
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=auto_id)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT, default_value=np.float32(10.0))
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535, nullable=True)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+        data = cf.gen_default_rows_data(nb=nb, dim=dim, auto_id=auto_id, with_json=True,
+                                        nullable_fields={ct.default_string_field_name: null_data_percent})
+        insert_res, _ = self.insert(client, collection_name, data=data)
+        insert_ids = insert_res["ids"]
+        self.flush(client, collection_name)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE")
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
         # 2. release collection
-        collection_w.release()
+        self.release_collection(client, collection_name)
         # 3. Search the pre-released collection after load
-        collection_w.load()
-        log.info("test_search_collection_awith_non_default_data_after_release_load: searching after load")
+        self.load_collection(client, collection_name)
+        log.info("test_search_collection_with_non_default_data_after_release_load: searching after load")
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        collection_w.search(vectors[:nq], default_search_field, default_search_params,
-                            default_limit, default_search_exp, _async=_async,
-                            output_fields=[ct.default_float_field_name, ct.default_string_field_name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": insert_ids,
-                                         "pk_name": ct.default_int64_field_name,
-                                         "limit": default_limit,
-                                         "_async": _async,
-                                         "output_fields": [ct.default_float_field_name,
-                                                           ct.default_string_field_name]})
+        self.search(client, collection_name,
+                    data=vectors[:nq],
+                    anns_field=default_search_field,
+                    search_params=default_search_params,
+                    limit=default_limit,
+                    filter=default_search_exp,
+                    output_fields=[ct.default_float_field_name, ct.default_string_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": nq,
+                                 "ids": insert_ids,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "limit": default_limit,
+                                 "output_fields": [ct.default_float_field_name,
+                                                   ct.default_string_field_name]})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.tags(CaseLabel.GPU)
+    @pytest.mark.parametrize("varchar_scalar_index", ["TRIE", "INVERTED", "BITMAP"])
+    @pytest.mark.parametrize("numeric_scalar_index", ["STL_SORT", "INVERTED"])
+    @pytest.mark.parametrize("null_data_percent", [0, 0.5, 1])
     def test_search_after_different_index_with_params_none_default_data(self, varchar_scalar_index,
                                                                         numeric_scalar_index,
-                                                                        null_data_percent, _async):
+                                                                        null_data_percent):
         """
         target: test search after different index
         method: test search after different index and corresponding search params
         expected: search successfully with limit(topK)
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, 5000, partition_num=1, is_all_data_type=True,
-                                         dim=default_dim, is_index=False,
-                                         nullable_fields={ct.default_string_field_name: null_data_percent},
-                                         default_value_fields={ct.default_float_field_name: np.float32(10.0)})[0:4]
+        nullable_fields = {ct.default_string_field_name: null_data_percent}
+        default_value_fields = {ct.default_float_field_name: np.float32(10.0)}
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        default_schema = cf.gen_collection_schema_all_datatype(auto_id=False, dim=default_dim,
+                                                               enable_dynamic_field=False,
+                                                               nullable_fields=nullable_fields,
+                                                               default_value_fields=default_value_fields)
+        self.create_collection(client, collection_name, schema=default_schema)
+        # generate and insert data with nullable fields
+        data = cf.gen_default_rows_data_all_data_type(nb=5000, dim=default_dim)
+        # apply nullable fields
+        for field_key, percent in nullable_fields.items():
+            null_number = int(5000 * percent)
+            for row in data[-null_number:]:
+                if field_key in row:
+                    row[field_key] = None
+        insert_res, _ = self.insert(client, collection_name, data=data)
+        insert_ids = insert_res["ids"]
         # 2. create index on vector field and load
-        index = "HNSW"
-        params = cf.get_index_params_params(index)
-        default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
-        vector_name_list = cf.extract_vector_field_name_list(collection_w)
-        vector_name_list.append(ct.default_float_vec_field_name)
-        for vector_name in vector_name_list:
-            collection_w.create_index(vector_name, default_index)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_float_vec_field_name, index_type="HNSW",
+                      metric_type="COSINE", params=cf.get_index_params_params("HNSW"))
+        self.create_index(client, collection_name, index_params=idx)
         # 3. create index on scalar field with None data
-        scalar_index_params = {"index_type": varchar_scalar_index, "params": {}}
-        collection_w.create_index(ct.default_string_field_name, scalar_index_params)
+        scalar_idx = self.prepare_index_params(client)[0]
+        scalar_idx.add_index(field_name=ct.default_string_field_name, index_type=varchar_scalar_index)
+        self.create_index(client, collection_name, index_params=scalar_idx)
         # 4. create index on scalar field with default data
-        scalar_index_params = {"index_type": numeric_scalar_index, "params": {}}
-        collection_w.create_index(ct.default_float_field_name, scalar_index_params)
-        collection_w.load()
+        scalar_idx2 = self.prepare_index_params(client)[0]
+        scalar_idx2.add_index(field_name=ct.default_float_field_name, index_type=numeric_scalar_index)
+        self.create_index(client, collection_name, index_params=scalar_idx2)
+        self.load_collection(client, collection_name)
         # 5. search
         limit = ct.default_limit
         search_params = {}
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            search_params, limit, default_search_exp, _async=_async,
-                            output_fields=[ct.default_string_field_name, ct.default_float_field_name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "ids": insert_ids,
-                                         "limit": limit,
-                                         "pk_name": ct.default_int64_field_name,
-                                         "_async": _async,
-                                         "output_fields": [ct.default_string_field_name,
-                                                           ct.default_float_field_name]})
+        self.search(client, collection_name,
+                    data=vectors[:default_nq],
+                    anns_field=default_search_field,
+                    search_params=search_params,
+                    limit=limit,
+                    filter=default_search_exp,
+                    output_fields=[ct.default_string_field_name, ct.default_float_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": default_nq,
+                                 "ids": insert_ids,
+                                 "limit": limit,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "output_fields": [ct.default_string_field_name,
+                                                   ct.default_float_field_name]})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("batch_size", [200, 600])
+    @pytest.mark.parametrize("null_data_percent", [0, 0.5, 1])
     def test_search_iterator_with_none_data(self, batch_size, null_data_percent):
         """
         target: test search iterator normal
@@ -459,19 +519,37 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         """
         # 1. initialize with data
         dim = 64
-        collection_w = \
-            self.init_collection_general(prefix, True, dim=dim, is_index=False,
-                                         nullable_fields={ct.default_string_field_name: null_data_percent})[0]
-        collection_w.create_index(field_name, {"metric_type": "L2"})
-        collection_w.load()
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535, nullable=True)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+        data = cf.gen_default_rows_data(nb=default_nb, dim=dim, with_json=True,
+                                        nullable_fields={ct.default_string_field_name: null_data_percent})
+        self.insert(client, collection_name, data=data)
+        self.flush(client, collection_name)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="L2")
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
         # 2. search iterator
         search_params = {"metric_type": "L2"}
         vectors = cf.gen_vectors(1, dim, vector_data_type=DataType.FLOAT_VECTOR)
-        collection_w.search_iterator(vectors[:1], field_name, search_params, batch_size,
-                                     check_task=CheckTasks.check_search_iterator,
-                                     check_items={"batch_size": batch_size})
+        self.search_iterator(client, collection_name, data=vectors[:1],
+                             batch_size=batch_size,
+                             anns_field=field_name,
+                             search_params=search_params,
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"batch_size": batch_size})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("is_flush", [False, True])
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    @pytest.mark.parametrize("null_data_percent", [0, 0.5, 1])
     def test_search_none_data_partial_load(self, is_flush, enable_dynamic_field, null_data_percent):
         """
         target: test search normal case with none data inserted
@@ -479,33 +557,53 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         expected: 1. search successfully with limit(topK)
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids, time_stamp = \
-            self.init_collection_general(prefix, True, is_flush=is_flush,
-                                         enable_dynamic_field=enable_dynamic_field,
-                                         nullable_fields={ct.default_float_field_name: null_data_percent})[0:5]
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT, nullable=True)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema)
+        data = cf.gen_default_rows_data(nb=default_nb, dim=default_dim, with_json=True,
+                                        nullable_fields={ct.default_float_field_name: null_data_percent})
+        insert_res, _ = self.insert(client, collection_name, data=data)
+        insert_ids = insert_res["ids"]
+        if is_flush:
+            self.flush(client, collection_name)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE")
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
         # 2. release and partial load again
-        collection_w.release()
+        self.release_collection(client, collection_name)
         loaded_fields = [default_int64_field_name, ct.default_float_vec_field_name]
         if not enable_dynamic_field:
             loaded_fields.append(default_float_field_name)
-        collection_w.load(load_fields=loaded_fields)
+        self.load_collection(client, collection_name, load_fields=loaded_fields)
         # 3. generate search data
         vectors = cf.gen_vectors(default_nq, default_dim)
         # 4. search after partial load field with None data
         output_fields = [default_int64_field_name, default_float_field_name]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp,
-                            output_fields=output_fields,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "ids": insert_ids,
-                                         "pk_name": ct.default_int64_field_name,
-                                         "limit": default_limit,
-                                         "output_fields": output_fields})
+        self.search(client, collection_name,
+                    data=vectors[:default_nq],
+                    anns_field=default_search_field,
+                    search_params=default_search_params,
+                    limit=default_limit,
+                    filter=default_search_exp,
+                    output_fields=output_fields,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": default_nq,
+                                 "ids": insert_ids,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "limit": default_limit,
+                                 "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="issue #37547")
+    @pytest.mark.parametrize("is_flush", [False, True])
     def test_search_none_data_expr_cache(self, is_flush):
         """
         target: test search case with none data to test expr cache
@@ -519,56 +617,81 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
                   2. report error for the second collection with the same name
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids, time_stamp = \
-            self.init_collection_general(prefix, True, is_flush=is_flush,
-                                         nullable_fields={ct.default_float_field_name: 0.5})[0:5]
-        collection_name = collection_w.name
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT, nullable=True)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema)
+        data = cf.gen_default_rows_data(nb=default_nb, dim=default_dim, with_json=True,
+                                        nullable_fields={ct.default_float_field_name: 0.5})
+        insert_res, _ = self.insert(client, collection_name, data=data)
+        insert_ids = insert_res["ids"]
+        if is_flush:
+            self.flush(client, collection_name)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE")
+        self.create_index(client, collection_name, index_params=idx)
+        self.load_collection(client, collection_name)
         # 2. generate search data
         vectors = cf.gen_vectors(default_nq, default_dim)
         # 3. search with expr "nullableFid == 0"
         search_exp = f"{ct.default_float_field_name} == 0"
         output_fields = [default_int64_field_name, default_float_field_name]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit,
-                            search_exp,
-                            output_fields=output_fields,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "ids": insert_ids,
-                                         "limit": 1,
-                                         "pk_name": ct.default_int64_field_name,
-                                         "output_fields": output_fields})
+        self.search(client, collection_name,
+                    data=vectors[:default_nq],
+                    anns_field=default_search_field,
+                    search_params=default_search_params,
+                    limit=default_limit,
+                    filter=search_exp,
+                    output_fields=output_fields,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": default_nq,
+                                 "ids": insert_ids,
+                                 "limit": 1,
+                                 "pk_name": ct.default_int64_field_name,
+                                 "output_fields": output_fields})
         # 4. drop collection
-        collection_w.drop()
+        self.drop_collection(client, collection_name)
         # 5. create the same collection name with same field name but varchar field type
-        int64_field = cf.gen_int64_field(is_primary=True)
-        string_field = cf.gen_string_field(ct.default_float_field_name, nullable=True)
-        json_field = cf.gen_json_field()
-        float_vector_field = cf.gen_float_vec_field()
-        fields = [int64_field, string_field, json_field, float_vector_field]
-        schema = cf.gen_collection_schema(fields)
-        collection_w = self.init_collection_wrap(name=collection_name, schema=schema)
-        int64_values = pd.Series(data=[i for i in range(default_nb)])
-        string_values = pd.Series(data=[str(i) for i in range(default_nb)], dtype="string")
+        schema2 = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema2.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema2.add_field(ct.default_float_field_name, DataType.VARCHAR, max_length=65535, nullable=True)
+        schema2.add_field(ct.default_json_field_name, DataType.JSON)
+        schema2.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema2)
+        # insert data
+        int64_values = [i for i in range(default_nb)]
         json_values = [{"number": i, "string": str(i), "bool": bool(i),
                         "list": [j for j in range(i, i + ct.default_json_list_length)]} for i in range(default_nb)]
         float_vec_values = cf.gen_vectors(default_nb, default_dim)
-        df = pd.DataFrame({
-            ct.default_int64_field_name: int64_values,
-            ct.default_float_field_name: None,
-            ct.default_json_field_name: json_values,
-            ct.default_float_vec_field_name: float_vec_values
-        })
-        collection_w.insert(df)
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
-        collection_w.load()
-        collection_w.flush()
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit,
-                            search_exp,
-                            output_fields=output_fields,
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1100,
-                                         "err_msg": "failed to create query plan: cannot parse expression: float == 0, "
-                                                    "error: comparisons between VarChar and Int64 are not supported: "
-                                                    "invalid parameter"})
+        rows = []
+        for i in range(default_nb):
+            rows.append({
+                ct.default_int64_field_name: int64_values[i],
+                ct.default_float_field_name: None,
+                ct.default_json_field_name: json_values[i],
+                ct.default_float_vec_field_name: float_vec_values[i]
+            })
+        self.insert(client, collection_name, data=rows)
+        idx2 = self.prepare_index_params(client)[0]
+        idx2.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE")
+        self.create_index(client, collection_name, index_params=idx2)
+        self.load_collection(client, collection_name)
+        self.flush(client, collection_name)
+        self.search(client, collection_name,
+                    data=vectors[:default_nq],
+                    anns_field=default_search_field,
+                    search_params=default_search_params,
+                    limit=default_limit,
+                    filter=search_exp,
+                    output_fields=output_fields,
+                    check_task=CheckTasks.err_res,
+                    check_items={"err_code": 1100,
+                                 "err_msg": "failed to create query plan: cannot parse expression: float == 0, "
+                                            "error: comparisons between VarChar and Int64 are not supported: "
+                                            "invalid parameter"})

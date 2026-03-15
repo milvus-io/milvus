@@ -1355,20 +1355,24 @@ def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
                                                                   vector_data_type=vector_data_type)[0]
     if ct.default_int64_field_name in nullable_fields:
         null_number = int(nb*nullable_fields[ct.default_int64_field_name])
-        for single_dict in array[-null_number:]:
-            single_dict[ct.default_int64_field_name] = None
+        if null_number > 0:
+            for single_dict in array[-null_number:]:
+                single_dict[ct.default_int64_field_name] = None
     if ct.default_float_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_float_field_name])
-        for single_dict in array[-null_number:]:
-            single_dict[ct.default_float_field_name] = None
+        if null_number > 0:
+            for single_dict in array[-null_number:]:
+                single_dict[ct.default_float_field_name] = None
     if ct.default_string_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_string_field_name])
-        for single_dict in array[-null_number:]:
-            single_dict[ct.default_string_field_name] = None
+        if null_number > 0:
+            for single_dict in array[-null_number:]:
+                single_dict[ct.default_string_field_name] = None
     if ct.default_json_field_name in nullable_fields:
         null_number = int(nb * nullable_fields[ct.default_json_field_name])
-        for single_dict in array[-null_number:]:
-            single_dict[ct.default_string_field_name] = {"number": None, "float": None}
+        if null_number > 0:
+            for single_dict in array[-null_number:]:
+                single_dict[ct.default_json_field_name] = {"number": None, "float": None}
 
     log.debug("generated default row data")
 
@@ -1647,9 +1651,9 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
     array = []
     for i in range(start, start + nb):
         dict = {ct.default_int64_field_name: i,
-                ct.default_int32_field_name: i,
-                ct.default_int16_field_name: i,
-                ct.default_int8_field_name: i,
+                ct.default_int32_field_name: i % (2**31),
+                ct.default_int16_field_name: i % (2**15),
+                ct.default_int8_field_name: i % (2**7),
                 ct.default_bool_field_name: bool(i),
                 ct.default_float_field_name: i*1.0,
                 ct.default_double_field_name: i * 1.0,

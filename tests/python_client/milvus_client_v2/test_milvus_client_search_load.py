@@ -1,71 +1,85 @@
-
+import random
+import pytest
+from pymilvus import DataType
 from utils.util_pymilvus import *
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
-from base.client_base import TestcaseBase
-
-import random
-import pytest
-import pandas as pd
-from faker import Faker
-
-Faker.seed(19530)
-fake_en = Faker("en_US")
-fake_zh = Faker("zh_CN")
-
-# patch faker to generate text with specific distribution
-cf.patch_faker_text(fake_en, cf.en_vocabularies_distribution)
-cf.patch_faker_text(fake_zh, cf.zh_vocabularies_distribution)
-
-pd.set_option("expand_frame_repr", False)
+from base.client_v2_base import TestMilvusClientV2Base
 
 prefix = "search_collection"
-search_num = 10
-max_dim = ct.max_dim
-min_dim = ct.min_dim
-epsilon = ct.epsilon
-hybrid_search_epsilon = 0.01
-gracefulTime = ct.gracefulTime
 default_nb = ct.default_nb
-default_nb_medium = ct.default_nb_medium
 default_nq = ct.default_nq
 default_dim = ct.default_dim
 default_limit = ct.default_limit
-max_limit = ct.max_limit
 default_search_exp = "int64 >= 0"
-default_search_string_exp = "varchar >= \"0\""
-default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
-default_invaild_string_exp = "varchar >= 0"
-default_json_search_exp = "json_field[\"number\"] >= 0"
-perfix_expr = 'varchar like "0%"'
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
-default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
-default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-uid = "test_search"
-nq = 1
-epsilon = 0.001
-field_name = default_float_vec_field_name
-binary_field_name = default_binary_vec_field_name
-search_param = {"nprobe": 1}
-entity = gen_entities(1, is_normal=True)
-entities = gen_entities(default_nb, is_normal=True)
-raw_vectors, binary_entities = gen_binary_entities(default_nb)
-default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
-index_name1 = cf.gen_unique_str("float")
-index_name2 = cf.gen_unique_str("varhar")
 half_nb = ct.default_nb // 2
-max_hybrid_search_req_num = ct.max_hybrid_search_req_num
+field_name = ct.default_float_vec_field_name
 
 
-class TestCollectionLoadOperation(TestcaseBase):
+class TestSearchLoadIndependent(TestMilvusClientV2Base):
     """ Test case of search combining load and other functions """
+
+    def _create_collection_with_partitions_and_data(self, client, nb=200, partition_num=1,
+                                                     is_index=False, dim=default_dim):
+        """
+        Helper: create a collection with default schema, partition_num extra partitions,
+        insert data split evenly across all partitions (including _default), optionally create
+        index and load.
+        Returns (collection_name, partition_names_list, data_per_partition_count).
+        partition_names_list[0] = "_default", partition_names_list[1] = "search_partition_0", etc.
+        """
+        collection_name = cf.gen_unique_str(prefix)
+        # Create schema
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Create extra partitions
+        partition_names = ["_default"]
+        for i in range(partition_num):
+            p_name = f"search_partition_{i}"
+            self.create_partition(client, collection_name, partition_name=p_name)
+            partition_names.append(p_name)
+
+        total_partitions = len(partition_names)
+        per_partition = nb // total_partitions
+
+        # Insert data evenly across partitions
+        if nb > 0:
+            start = 0
+            for p_name in partition_names:
+                data = cf.gen_default_rows_data(nb=per_partition, dim=dim, start=start, with_json=True)
+                self.insert(client, collection_name, data=data, partition_name=p_name)
+                start += per_partition
+            self.flush(client, collection_name)
+
+        if is_index:
+            idx = self.prepare_index_params(client)[0]
+            idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE",
+                          index_type="FLAT", params={})
+            self.create_index(client, collection_name, index_params=idx)
+            self.load_collection(client, collection_name)
+
+        return collection_name, partition_names, per_partition
+
+    def _create_index_flat(self, client, collection_name):
+        """Helper: create a FLAT index on the default float vector field."""
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(field_name=ct.default_float_vec_field_name, metric_type="COSINE",
+                      index_type="FLAT", params={})
+        self.create_index(client, collection_name, index_params=idx)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_load_collection_release_partition(self):
@@ -79,29 +93,35 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # delete data
         delete_ids = [i for i in range(50, 150)]
-        collection_w.delete(f"int64 in {delete_ids}")
+        self.delete(client, collection_name, filter=f"int64 in {delete_ids}")
         # load && release
-        collection_w.load()
-        partition_w1.release()
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, partition_names=[p1_name])
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 50, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 50, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_load_collection_release_collection(self):
@@ -116,30 +136,36 @@ class TestCollectionLoadOperation(TestcaseBase):
                 7. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # delete data
         delete_ids = [i for i in range(50, 150)]
-        collection_w.delete(f"int64 in {delete_ids}")
+        self.delete(client, collection_name, filter=f"int64 in {delete_ids}")
         # load && release
-        collection_w.load()
-        collection_w.release()
-        partition_w2.load()
+        self.load_collection(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 50, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 50, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_load_partition_release_collection(self):
@@ -153,29 +179,35 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # delete data
         delete_ids = [i for i in range(50, 150)]
-        collection_w.delete(f"int64 in {delete_ids}")
+        self.delete(client, collection_name, filter=f"int64 in {delete_ids}")
         # load && release
-        partition_w1.load()
-        collection_w.release()
+        self.load_partitions(client, collection_name, partition_names=[p1_name])
+        self.release_collection(client, collection_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_release_collection_load_partition(self):
@@ -190,30 +222,36 @@ class TestCollectionLoadOperation(TestcaseBase):
                 7. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # delete data
         delete_ids = [i for i in range(50, 150)]
-        collection_w.delete(f"int64 in {delete_ids}")
+        self.delete(client, collection_name, filter=f"int64 in {delete_ids}")
         # load && release
-        partition_w1.load()
-        collection_w.release()
-        partition_w2.load()
+        self.load_partitions(client, collection_name, partition_names=[p1_name])
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 50, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 50, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_load_partition_drop_partition(self):
@@ -227,30 +265,36 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # delete data
         delete_ids = [i for i in range(50, 150)]
-        collection_w.delete(f"int64 in {delete_ids}")
+        self.delete(client, collection_name, filter=f"int64 in {delete_ids}")
         # load && release
-        partition_w2.load()
-        partition_w2.release()
-        partition_w2.drop()
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
+        self.release_partitions(client, collection_name, partition_names=[p2_name])
+        self.drop_partition(client, collection_name, partition_name=p2_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not found',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_collection_delete_release_partition(self):
@@ -264,32 +308,37 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load
-        collection_w.load()
+        self.load_collection(client, collection_name)
         # delete data
         delete_ids = [i for i in range(50, 150)]
-        collection_w.delete(f"int64 in {delete_ids}")
+        self.delete(client, collection_name, filter=f"int64 in {delete_ids}")
         # release
-        partition_w1.release()
+        self.release_partitions(client, collection_name, partition_names=[p1_name])
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[
-                                partition_w1.name, partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name, p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 50, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_partition_delete_release_collection(self):
@@ -303,30 +352,37 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load
-        partition_w1.load()
+        self.load_partitions(client, collection_name, partition_names=[p1_name])
         # delete data
         delete_ids = [i for i in range(50, 150)]
-        collection_w.delete(f"int64 in {delete_ids}")
+        self.delete(client, collection_name, filter=f"int64 in {delete_ids}")
         # release
-        collection_w.release()
-        partition_w1.load()
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, partition_names=[p1_name])
         # search on collection, partition1, partition2
-        collection_w.query(expr='', output_fields=[ct.default_count_output],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"exp_res": [{ct.default_count_output: 50}]})
-        partition_w1.query(expr='', output_fields=[ct.default_count_output],
-                           check_task=CheckTasks.check_query_results,
-                           check_items={"exp_res": [{ct.default_count_output: 50}]})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        self.query(client, collection_name, filter='',
+                   output_fields=[ct.default_count_output],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": [{ct.default_count_output: 50}],
+                                "enable_milvus_client_api": True})
+        self.query(client, collection_name, filter='',
+                   output_fields=[ct.default_count_output],
+                   partition_names=[p1_name],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_res": [{ct.default_count_output: 50}],
+                                "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_delete_drop_partition(self):
@@ -340,30 +396,36 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load
-        partition_w1.load()
+        self.load_partitions(client, collection_name, partition_names=[p1_name])
         # delete data
         delete_ids = [i for i in range(50, 150)]
-        collection_w.delete(f"int64 in {delete_ids}")
+        self.delete(client, collection_name, filter=f"int64 in {delete_ids}")
         # release
-        partition_w2.drop()
+        self.drop_partition(client, collection_name, partition_name=p2_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 50, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 50, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not found',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_collection_release_partition_delete(self):
@@ -377,29 +439,35 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load && release
-        collection_w.load()
-        partition_w1.release()
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, partition_names=[p1_name])
         # delete data
         delete_ids = [i for i in range(50, 150)]
-        collection_w.delete(f"int64 in {delete_ids}")
+        self.delete(client, collection_name, filter=f"int64 in {delete_ids}")
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 50, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 50, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_release_collection_delete(self):
@@ -413,32 +481,37 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load && release
-        partition_w1.load()
-        collection_w.release()
+        self.load_partitions(client, collection_name, partition_names=[p1_name])
+        self.release_collection(client, collection_name)
         # delete data
         delete_ids = [i for i in range(50, 150)]
-        collection_w.delete(f"int64 in {delete_ids}")
-        collection_w.load()
+        self.delete(client, collection_name, filter=f"int64 in {delete_ids}")
+        self.load_collection(client, collection_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[
-                                partition_w1.name, partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name, p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 50, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 50, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_drop_partition_delete(self):
@@ -452,30 +525,45 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_wrap(name=prefix)
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        # Create schema
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=65535)
+        schema.add_field(ct.default_json_field_name, DataType.JSON)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema)
+
         p1_name = cf.gen_unique_str("par1")
-        partition_w1 = self.init_partition_wrap(collection_w, name=p1_name)
+        self.create_partition(client, collection_name, partition_name=p1_name)
         p2_name = cf.gen_unique_str("par2")
-        partition_w2 = self.init_partition_wrap(collection_w, name=p2_name)
-        collection_w.create_index(default_search_field, default_index_params)
+        self.create_partition(client, collection_name, partition_name=p2_name)
+        self._create_index_flat(client, collection_name)
         # load && release
-        partition_w2.load()
-        partition_w2.release()
-        partition_w2.drop()
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
+        self.release_partitions(client, collection_name, partition_names=[p2_name])
+        self.drop_partition(client, collection_name, partition_name=p2_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 10,
-                            partition_names=[partition_w1.name, partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 999, ct.err_msg: f'partition name {partition_w2.name} not found'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 10,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 999, ct.err_msg: 'failed to search: collection not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 10,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 999, ct.err_msg: f'partition name {partition_w2.name} not found'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=10,
+                    partition_names=[p1_name, p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 999, ct.err_msg: f'partition name {p2_name} not found',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=10,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 999, ct.err_msg: 'failed to search: collection not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=10,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 999, ct.err_msg: f'partition name {p2_name} not found',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_load_collection_release_partition(self):
@@ -489,31 +577,42 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        df = cf.gen_default_dataframe_data()
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=0, partition_num=1, is_index=True)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self.release_collection(client, collection_name)
         # insert data
-        partition_w1.insert(df[:100])
-        partition_w1.insert(df[100:200])
-        partition_w2.insert(df[200:300])
+        data1 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=0, with_json=True)
+        self.insert(client, collection_name, data=data1, partition_name=p1_name)
+        data2 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=100, with_json=True)
+        self.insert(client, collection_name, data=data2, partition_name=p1_name)
+        data3 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=200, with_json=True)
+        self.insert(client, collection_name, data=data3, partition_name=p2_name)
+        self.flush(client, collection_name)
         # compact
-        collection_w.compact()
-        collection_w.get_compaction_state()
+        self.compact(client, collection_name)
         # load && release
-        collection_w.load()
-        partition_w1.release()
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, partition_names=[p1_name])
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_load_collection_release_collection(self):
@@ -528,34 +627,44 @@ class TestCollectionLoadOperation(TestcaseBase):
                 7. search
         expected: No exception
         """
-        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        df = cf.gen_default_dataframe_data()
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=0, partition_num=1, is_index=True)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self.release_collection(client, collection_name)
         # insert data
-        partition_w1.insert(df[:100])
-        partition_w1.insert(df[100:200])
-        partition_w2.insert(df[200:300])
+        data1 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=0, with_json=True)
+        self.insert(client, collection_name, data=data1, partition_name=p1_name)
+        data2 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=100, with_json=True)
+        self.insert(client, collection_name, data=data2, partition_name=p1_name)
+        data3 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=200, with_json=True)
+        self.insert(client, collection_name, data=data3, partition_name=p2_name)
+        self.flush(client, collection_name)
         # compact
-        collection_w.compact()
-        collection_w.get_compaction_state()
+        self.compact(client, collection_name)
         # load && release
-        collection_w.load()
-        collection_w.release()
-        partition_w1.load()
+        self.load_collection(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, partition_names=[p1_name])
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[
-                                partition_w1.name, partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 200})
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    partition_names=[p1_name, p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 200, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_load_partition_release_collection(self):
@@ -569,33 +678,44 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        df = cf.gen_default_dataframe_data()
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=0, partition_num=1, is_index=True)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self.release_collection(client, collection_name)
         # insert data
-        partition_w1.insert(df[:100])
-        partition_w1.insert(df[100:200])
-        partition_w2.insert(df[200:300])
+        data1 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=0, with_json=True)
+        self.insert(client, collection_name, data=data1, partition_name=p1_name)
+        data2 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=100, with_json=True)
+        self.insert(client, collection_name, data=data2, partition_name=p1_name)
+        data3 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=200, with_json=True)
+        self.insert(client, collection_name, data=data3, partition_name=p2_name)
+        self.flush(client, collection_name)
         # compact
-        collection_w.compact()
-        collection_w.get_compaction_state()
+        self.compact(client, collection_name)
         # load && release
-        partition_w2.load()
-        collection_w.release()
-        partition_w1.load()
-        partition_w2.load()
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, partition_names=[p1_name])
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 300})
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 200})
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 300, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 200, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_compact_drop_partition(self):
@@ -609,33 +729,44 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        df = cf.gen_default_dataframe_data()
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=0, partition_num=1, is_index=True)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self.release_collection(client, collection_name)
         # insert data
-        partition_w1.insert(df[:100])
-        partition_w1.insert(df[100:200])
-        partition_w2.insert(df[200:300])
+        data1 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=0, with_json=True)
+        self.insert(client, collection_name, data=data1, partition_name=p1_name)
+        data2 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=100, with_json=True)
+        self.insert(client, collection_name, data=data2, partition_name=p1_name)
+        data3 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=200, with_json=True)
+        self.insert(client, collection_name, data=data3, partition_name=p2_name)
+        self.flush(client, collection_name)
         # load
-        collection_w.load()
+        self.load_collection(client, collection_name)
         # compact
-        collection_w.compact()
-        collection_w.get_compaction_state()
+        self.compact(client, collection_name)
         # release
-        partition_w2.release()
-        partition_w2.drop()
+        self.release_partitions(client, collection_name, partition_names=[p2_name])
+        self.drop_partition(client, collection_name, partition_name=p2_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 200})
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 200})
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 200, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 200, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not found',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_compact_release_collection(self):
@@ -649,33 +780,44 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        df = cf.gen_default_dataframe_data()
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=0, partition_num=1, is_index=True)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self.release_collection(client, collection_name)
         # insert data
-        partition_w1.insert(df[:100])
-        partition_w1.insert(df[100:200])
-        partition_w2.insert(df[200:300])
+        data1 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=0, with_json=True)
+        self.insert(client, collection_name, data=data1, partition_name=p1_name)
+        data2 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=100, with_json=True)
+        self.insert(client, collection_name, data=data2, partition_name=p1_name)
+        data3 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=200, with_json=True)
+        self.insert(client, collection_name, data=data3, partition_name=p2_name)
+        self.flush(client, collection_name)
         # load
-        partition_w2.load()
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
         # compact
-        collection_w.compact()
-        collection_w.get_compaction_state()
+        self.compact(client, collection_name)
         # release
-        collection_w.release()
-        partition_w2.release()
+        self.release_collection(client, collection_name)
+        self.release_partitions(client, collection_name, partition_names=[p2_name])
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_collection_release_partition_compact(self):
@@ -689,31 +831,42 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        df = cf.gen_default_dataframe_data()
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=0, partition_num=1, is_index=True)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self.release_collection(client, collection_name)
         # insert data
-        partition_w1.insert(df[:100])
-        partition_w1.insert(df[100:200])
-        partition_w2.insert(df[200:300])
+        data1 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=0, with_json=True)
+        self.insert(client, collection_name, data=data1, partition_name=p1_name)
+        data2 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=100, with_json=True)
+        self.insert(client, collection_name, data=data2, partition_name=p1_name)
+        data3 = cf.gen_default_rows_data(nb=100, dim=default_dim, start=200, with_json=True)
+        self.insert(client, collection_name, data=data3, partition_name=p2_name)
+        self.flush(client, collection_name)
         # load && release
-        collection_w.load()
-        partition_w1.release()
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, partition_names=[p1_name])
         # compact
-        collection_w.compact()
-        collection_w.get_compaction_state()
+        self.compact(client, collection_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 300,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=300,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_flush_load_collection_release_partition(self):
@@ -727,28 +880,34 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # flush
-        collection_w.flush()
+        self.flush(client, collection_name)
         # load && release
-        collection_w.load()
-        partition_w1.release()
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, partition_names=[p1_name])
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_flush_load_collection_release_collection(self):
@@ -763,29 +922,35 @@ class TestCollectionLoadOperation(TestcaseBase):
                 7. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # flush
-        collection_w.flush()
+        self.flush(client, collection_name)
         # load && release
-        collection_w.load()
-        collection_w.release()
-        partition_w2.load()
+        self.load_collection(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_flush_load_partition_release_collection(self):
@@ -799,28 +964,34 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # flush
-        collection_w.flush()
+        self.flush(client, collection_name)
         # load && release
-        partition_w2.load()
-        collection_w.release()
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
+        self.release_collection(client, collection_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_flush_load_partition_drop_partition(self):
@@ -834,31 +1005,36 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # flush
-        collection_w.flush()
+        self.flush(client, collection_name)
         # load && release
-        partition_w2.load()
-        partition_w2.release()
-        partition_w2.drop()
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
+        self.release_partitions(client, collection_name, partition_names=[p2_name])
+        self.drop_partition(client, collection_name, partition_name=p2_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[
-                                partition_w1.name, partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name, p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not found',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not found',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_flush_load_collection_drop_partition(self):
@@ -872,29 +1048,35 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # flush
-        collection_w.flush()
+        self.flush(client, collection_name)
         # load && release
-        collection_w.load()
-        partition_w2.release()
-        partition_w2.drop()
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, partition_names=[p2_name])
+        self.drop_partition(client, collection_name, partition_name=p2_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not found',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_flush_release_partition(self):
@@ -909,32 +1091,40 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load
-        collection_w.load()
+        self.load_collection(client, collection_name)
         # flush
-        collection_w.flush()
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 200})
+        self.flush(client, collection_name)
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 200, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
         # release
-        partition_w2.release()
-        # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        self.release_partitions(client, collection_name, partition_names=[p2_name])
+        # search on collection - returns results from loaded partitions only
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_flush_release_collection(self):
@@ -948,34 +1138,39 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load
-        partition_w2.load()
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
         # flush
-        collection_w.flush()
+        self.flush(client, collection_name)
         # release
-        collection_w.release()
+        self.release_collection(client, collection_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[
-                                partition_w1.name, partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name, p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_load_collection_flush_release_partition(self):
+    def test_load_collection_flush_drop_partition(self):
         """
         target: test delete load collection release partition
         method: 1. create a collection and 2 partitions
@@ -986,29 +1181,35 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load
-        partition_w1.load()
+        self.load_partitions(client, collection_name, partition_names=[p1_name])
         # flush
-        collection_w.flush()
+        self.flush(client, collection_name)
         # release
-        partition_w2.drop()
+        self.drop_partition(client, collection_name, partition_name=p2_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not found',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_release_partition_flush(self):
@@ -1022,28 +1223,34 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load && release
-        collection_w.load()
-        partition_w2.release()
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, partition_names=[p2_name])
         # flush
-        collection_w.flush()
+        self.flush(client, collection_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_release_collection_flush(self):
@@ -1058,31 +1265,36 @@ class TestCollectionLoadOperation(TestcaseBase):
                 7. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load && release
-        collection_w.load()
-        collection_w.release()
-        partition_w2.load()
+        self.load_collection(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
         # flush
-        collection_w.flush()
+        self.flush(client, collection_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[
-                                partition_w1.name, partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name, p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_partition_release_collection_flush(self):
@@ -1096,28 +1308,34 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load && release
-        partition_w2.load()
-        collection_w.release()
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
+        self.release_collection(client, collection_name)
         # flush
-        collection_w.flush()
+        self.flush(client, collection_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_partition_drop_partition_flush(self):
@@ -1131,29 +1349,35 @@ class TestCollectionLoadOperation(TestcaseBase):
                 6. search
         expected: No exception
         """
-        # insert data
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load && release
-        partition_w2.load()
-        partition_w2.release()
-        partition_w2.drop()
+        self.load_partitions(client, collection_name, partition_names=[p2_name])
+        self.release_partitions(client, collection_name, partition_names=[p2_name])
+        self.drop_partition(client, collection_name, partition_name=p2_name)
         # flush
-        collection_w.flush()
+        self.flush(client, collection_name)
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not found'})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not found',
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_release_collection_multi_times(self):
@@ -1164,27 +1388,33 @@ class TestCollectionLoadOperation(TestcaseBase):
                 3. search
         expected: No exception
         """
-        # init the collection
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load and release
-        for i in range(5):
-            collection_w.release()
-            partition_w2.load()
+        for _ in range(5):
+            self.release_collection(client, collection_name)
+            self.load_partitions(client, collection_name, partition_names=[p2_name])
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: 'not loaded'})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w2.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p1_name],
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: 'not loaded',
+                                 "enable_milvus_client_api": True})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    partition_names=[p2_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_release_all_partitions(self):
@@ -1195,22 +1425,24 @@ class TestCollectionLoadOperation(TestcaseBase):
                 3. search
         expected: No exception
         """
-        # init the collection
-        collection_w = self.init_collection_general(prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name, p2_name = partition_names[0], partition_names[1]
+        self._create_index_flat(client, collection_name)
         # load and release
-        collection_w.load()
-        partition_w1.release()
-        partition_w2.release()
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, partition_names=[p1_name])
+        self.release_partitions(client, collection_name, partition_names=[p2_name])
         # search on collection
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 65535,
-                                         ct.err_msg: "collection not loaded"})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 65535,
+                                 ct.err_msg: "collection not loaded",
+                                 "enable_milvus_client_api": True})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #24446")
     def test_search_load_collection_create_partition(self):
         """
         target: test load collection and create partition and search
@@ -1219,18 +1451,19 @@ class TestCollectionLoadOperation(TestcaseBase):
                 3. search
         expected: No exception
         """
-        # init the collection
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
-        # load and release
-        collection_w.load()
-        partition_w3 = collection_w.create_partition("_default3")[0]
+        client = self._client()
+        collection_name, _, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        self._create_index_flat(client, collection_name)
+        # load and create partition
+        self.load_collection(client, collection_name)
+        self.create_partition(client, collection_name, partition_name="_default3")
         # search on collection
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 200})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 200, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_load_partition_create_partition(self):
@@ -1241,15 +1474,17 @@ class TestCollectionLoadOperation(TestcaseBase):
                 3. search
         expected: No exception
         """
-        # init the collection
-        collection_w = self.init_collection_general(
-            prefix, True, 200, partition_num=1, is_index=False)[0]
-        partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
-        # load and release
-        partition_w1.load()
-        partition_w3 = collection_w.create_partition("_default3")[0]
+        client = self._client()
+        collection_name, partition_names, _ = \
+            self._create_collection_with_partitions_and_data(client, nb=200, partition_num=1, is_index=False)
+        p1_name = partition_names[0]
+        self._create_index_flat(client, collection_name)
+        # load and create partition
+        self.load_partitions(client, collection_name, partition_names=[p1_name])
+        self.create_partition(client, collection_name, partition_name="_default3")
         # search on collection
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 100})
+        self.search(client, collection_name, data=vectors[:1],
+                    anns_field=field_name, search_params=default_search_params, limit=200,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": 1, "limit": 100, "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
