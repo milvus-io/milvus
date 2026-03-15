@@ -338,7 +338,7 @@ ExecPlanNodeVisitor::setupRetrieveResult(
     tmp_retrieve_result.total_data_cnt_ = first_column->size();
     if (first_column->IsBitmap()) {
         BitsetTypeView view(first_column->GetRawData(), first_column->size());
-        if (query_context->element_level_query()) {
+        if (query_context->bitset_is_element_level()) {
             // Element-level query: bitset is element-level, need to convert to (doc_id, element_index)
             tmp_retrieve_result.element_level_ = true;
             tracer::AutoSpan _(
