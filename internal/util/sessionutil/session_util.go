@@ -119,7 +119,6 @@ type SessionRaw struct {
 	Address                  string `json:"Address,omitempty"`
 	Exclusive                bool   `json:"Exclusive,omitempty"`
 	Stopping                 bool   `json:"Stopping,omitempty"`
-	TriggerKill              bool
 	Version                  string             `json:"Version"`
 	IndexEngineVersion       IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
 	ScalarIndexEngineVersion IndexEngineVersion `json:"ScalarIndexEngineVersion,omitempty"`
@@ -140,10 +139,6 @@ func (s *SessionRaw) GetServerID() int64 {
 
 func (s *SessionRaw) GetServerLabel() map[string]string {
 	return s.ServerLabels
-}
-
-func (s *SessionRaw) IsTriggerKill() bool {
-	return s.TriggerKill
 }
 
 // Session is a struct to store service's session, including ServerID, ServerName,
@@ -297,11 +292,10 @@ func NewSessionWithEtcd(ctx context.Context, metaRoot string, client *clientv3.C
 
 // Init will initialize base struct of the Session, including ServerName, ServerID,
 // Address, Exclusive. ServerID is obtained in getServerID.
-func (s *Session) Init(serverName, address string, exclusive bool, triggerKill bool) {
+func (s *Session) Init(serverName, address string, exclusive bool) {
 	s.ServerName = serverName
 	s.Address = address
 	s.Exclusive = exclusive
-	s.TriggerKill = triggerKill
 	s.checkIDExist()
 	serverID, err := s.getServerID()
 	if err != nil {

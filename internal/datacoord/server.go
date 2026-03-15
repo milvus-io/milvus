@@ -672,13 +672,13 @@ func (s *Server) initSegmentManager() error {
 func (s *Server) initSession() error {
 	if s.icSession == nil {
 		s.icSession = sessionutil.NewSession(s.ctx)
-		s.icSession.Init(typeutil.IndexCoordRole, s.address, true, true)
+		s.icSession.Init(typeutil.IndexCoordRole, s.address, true)
 		s.icSession.SetEnableActiveStandBy(s.enableActiveStandBy)
 	}
 	if s.session == nil {
 		s.session = sessionutil.NewSession(s.ctx)
 
-		s.session.Init(typeutil.DataCoordRole, s.address, true, true)
+		s.session.Init(typeutil.DataCoordRole, s.address, true)
 		s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	}
 	return nil

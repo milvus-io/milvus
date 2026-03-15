@@ -110,7 +110,6 @@ func (suite *QueryNodeSuite) TestBasic() {
 	suite.True(suite.node.lifetime.GetState() == commonpb.StateCode_Healthy)
 
 	// register node to etcd
-	suite.node.session.TriggerKill = false
 	err = suite.node.Register()
 	suite.NoError(err)
 
