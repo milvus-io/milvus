@@ -97,10 +97,11 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
         int64_t length,
         const std::optional<CheckDataValid>& check_data_valid) override {
         std::unique_lock<std::shared_mutex> lck(mutex_);
-        AssertInfo(chunk_id < this->counter_,
+        const auto counter = this->counter_.load();
+        AssertInfo(chunk_id < counter,
                    fmt::format("index out of range, index={}, counter_={}",
                                chunk_id,
-                               this->counter_.load()));
+                               counter));
         if constexpr (!IsMmap || !IsVariableType<Type>) {
             auto ptr = (Type*)vec_[chunk_id].data();
             AssertInfo(
@@ -150,20 +151,22 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     void*
     get_chunk_data(int64_t index) override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        AssertInfo(index < this->counter_,
-                   fmt::format("index out of range, index={}, counter_={}",
-                               index,
-                               this->counter_.load()));
+        const auto counter = this->counter_.load();
+        AssertInfo(
+            index < counter,
+            fmt::format(
+                "index out of range, index={}, counter_={}", index, counter));
         return vec_[index].data();
     }
 
     int64_t
     get_chunk_size(int64_t index) override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        AssertInfo(index < this->counter_,
-                   fmt::format("index out of range, index={}, counter_={}",
-                               index,
-                               this->counter_.load()));
+        const auto counter = this->counter_.load();
+        AssertInfo(
+            index < counter,
+            fmt::format(
+                "index out of range, index={}, counter_={}", index, counter));
         return vec_[index].size();
     }
 
