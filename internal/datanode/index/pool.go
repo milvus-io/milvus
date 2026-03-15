@@ -28,38 +28,61 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-var (
-	vecIndexBuildPool         *conc.Pool[any]
-	vecIndexBuildPoolInitOnce sync.Once
-)
-
-func initVecIndexBuildPool() {
-	pt := paramtable.Get()
-	initPoolSize := pt.DataNodeCfg.MaxVecIndexBuildConcurrency.GetAsInt()
-	vecIndexBuildPool = conc.NewPool[any](
-		initPoolSize,
-	)
-
-	watchKey := pt.DataNodeCfg.MaxVecIndexBuildConcurrency.Key
-	pt.Watch(watchKey, config.NewHandler(watchKey, resizeVecIndexBuildPool))
-	log.Info("init vector index building pool done", zap.Int("size", initPoolSize))
+// indexBuildPool wraps a concurrency pool that auto-initializes from a ParamItem
+// and watches for dynamic config changes.
+type indexBuildPool struct {
+	name string
+	once sync.Once
+	pool *conc.Pool[any]
+	// param returns the ParamItem that controls pool size.
+	param func() *paramtable.ParamItem
 }
 
-func resizeVecIndexBuildPool(evt *config.Event) {
-	if evt.HasUpdated {
-		newSize := paramtable.Get().DataNodeCfg.MaxVecIndexBuildConcurrency.GetAsInt()
-		log := log.Ctx(context.Background()).With(zap.Int("newSize", newSize))
+func newIndexBuildPool(name string, param func() *paramtable.ParamItem) *indexBuildPool {
+	return &indexBuildPool{name: name, param: param}
+}
 
-		err := GetVecIndexBuildPool().Resize(newSize)
-		if err != nil {
-			log.Warn("failed to resize pool", zap.Error(err))
+func (p *indexBuildPool) init() {
+	item := p.param()
+	size := item.GetAsInt()
+	p.pool = conc.NewPool[any](size)
+
+	pt := paramtable.Get()
+	pt.Watch(item.Key, config.NewHandler(item.Key, p.resize))
+	log.Info("init index building pool done", zap.String("name", p.name), zap.Int("size", size))
+}
+
+func (p *indexBuildPool) resize(evt *config.Event) {
+	if evt.HasUpdated {
+		newSize := p.param().GetAsInt()
+		l := log.Ctx(context.Background()).With(zap.String("name", p.name), zap.Int("newSize", newSize))
+
+		if err := p.Get().Resize(newSize); err != nil {
+			l.Warn("failed to resize index build pool", zap.Error(err))
 			return
 		}
-		log.Info("vector index building pool resize successfully")
+		l.Info("index building pool resize successfully")
 	}
 }
 
+func (p *indexBuildPool) Get() *conc.Pool[any] {
+	p.once.Do(p.init)
+	return p.pool
+}
+
+var (
+	vecPool = newIndexBuildPool("vec", func() *paramtable.ParamItem {
+		return &paramtable.Get().DataNodeCfg.MaxVecIndexBuildConcurrency
+	})
+	standalonePool = newIndexBuildPool("standalone", func() *paramtable.ParamItem {
+		return &paramtable.Get().DataNodeCfg.StandaloneIndexBuildParallelism
+	})
+)
+
 func GetVecIndexBuildPool() *conc.Pool[any] {
-	vecIndexBuildPoolInitOnce.Do(initVecIndexBuildPool)
-	return vecIndexBuildPool
+	return vecPool.Get()
+}
+
+func GetStandaloneIndexBuildPool() *conc.Pool[any] {
+	return standalonePool.Get()
 }
