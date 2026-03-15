@@ -235,28 +235,41 @@ class DeletedRecord {
                                              snapshots_.back().second.size());
             }
 
+            bool need_rebuild = false;
             while (total_size - dumped_size > DUMP_BATCH_SIZE &&
                    it != accessor.end()) {
                 Timestamp dump_ts = 0;
 
-                for (auto size = 0; size < DUMP_BATCH_SIZE; ++it, ++size) {
+                for (auto size = 0;
+                     size < DUMP_BATCH_SIZE && it != accessor.end();
+                     ++it, ++size) {
                     bitmap.set(it->second);
                     if (size == DUMP_BATCH_SIZE - 1) {
                         dump_ts = it->first;
                     }
                 }
 
+                if (it == accessor.end() || !it.good()) {
+                    // Iterator exhausted before expected: elements
+                    // were inserted before cursor (same timestamp,
+                    // smaller row_id), making existing snapshots
+                    // incorrect — those deletes are missing from
+                    // the bitmap. Discard all snapshots and rebuild
+                    // from scratch.
+                    need_rebuild = true;
+                    break;
+                }
+
                 {
                     std::unique_lock<std::shared_mutex> lock(snap_lock_);
                     if (dump_ts == last_dump_ts) {
                         // only update
-                        snapshots_.back().second = std::move(bitmap.clone());
+                        snapshots_.back().second = bitmap.clone();
                         snap_next_pos_.back() = *it;
                     } else {
                         // add new snapshot
                         snapshots_.push_back(
-                            std::make_pair(dump_ts, std::move(bitmap.clone())));
-                        Assert(it != accessor.end() && it.good());
+                            std::make_pair(dump_ts, bitmap.clone()));
                         snap_next_pos_.push_back(*it);
                     }
 
@@ -274,6 +287,27 @@ class DeletedRecord {
                 }
 
                 dumped_size += DUMP_BATCH_SIZE;
+            }
+
+            if (need_rebuild) {
+                {
+                    std::unique_lock<std::shared_mutex> lock(snap_lock_);
+                    auto old_size = snapshots_.size();
+                    snapshots_.clear();
+                    snap_next_pos_.clear();
+                    dumped_entry_count_.store(0);
+                    LOG_INFO(
+                        "dump delete record snapshot detected elements "
+                        "before cursor, discarded {} snapshots and "
+                        "rebuilding from scratch, total size: {} "
+                        "for segment: {}",
+                        old_size,
+                        total_size,
+                        segment_id_);
+                }
+                // Continue outer loop — next iteration rebuilds
+                // from accessor.begin() with empty snapshots.
+                continue;
             }
         }
     }
