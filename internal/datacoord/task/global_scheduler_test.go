@@ -101,17 +101,24 @@ func TestGlobalScheduler_pickNode(t *testing.T) {
 	}, 1)
 	assert.True(t, nodeID == int64(1) || nodeID == int64(2)) // random
 
-	nodeID = scheduler.pickNode(map[int64]*session.WorkerSlots{
-		1: {
-			NodeID:         1,
-			AvailableSlots: 20,
-		},
-		2: {
-			NodeID:         2,
-			AvailableSlots: 30,
-		},
-	}, 100)
-	assert.Equal(t, int64(2), nodeID) // taskSlot > available, but node 2 has more available slots
+	slotsNoEnough := map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 20},
+		2: {NodeID: 2, AvailableSlots: 30},
+	}
+	nodeID = scheduler.pickNode(slotsNoEnough, 100)
+	assert.Equal(t, int64(2), nodeID) // fallback: pick node with max slots when none >= taskSlot
+	assert.Equal(t, int64(0), slotsNoEnough[2].AvailableSlots)
+
+	slots := map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100},
+	}
+	assert.Equal(t, int64(1), scheduler.pickNode(slots, 10))
+	assert.Equal(t, int64(90), slots[1].AvailableSlots)
+	assert.Equal(t, int64(1), scheduler.pickNode(slots, 10))
+	assert.Equal(t, int64(80), slots[1].AvailableSlots)
+	nodeID = scheduler.pickNode(slots, 100) // 80 < 100, use fallback
+	assert.Equal(t, int64(1), nodeID)
+	assert.Equal(t, int64(0), slots[1].AvailableSlots)
 
 	nodeID = scheduler.pickNode(map[int64]*session.WorkerSlots{
 		1: {
