@@ -43,6 +43,20 @@ func SetTextIndexLogs(textIndexLogs map[int64]*datapb.TextIndexStats) SegmentOpe
 	}
 }
 
+func SetStatslogs(statslogs []*datapb.FieldBinlog) SegmentOperator {
+	return func(segment *SegmentInfo) bool {
+		segment.Statslogs = statslogs
+		return true
+	}
+}
+
+func SetBm25Statslogs(bm25Statslogs []*datapb.FieldBinlog) SegmentOperator {
+	return func(segment *SegmentInfo) bool {
+		segment.Bm25Statslogs = bm25Statslogs
+		return true
+	}
+}
+
 func SetJsonKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) SegmentOperator {
 	return func(segment *SegmentInfo) bool {
 		if segment.JsonKeyStats == nil {

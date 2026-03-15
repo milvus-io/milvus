@@ -21,35 +21,37 @@ import (
 	"path"
 	"time"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func LoadBM25Stats(ctx context.Context, chunkManager storage.ChunkManager, segmentID int64, statsBinlogs []*datapb.FieldBinlog) (map[int64]*storage.BM25Stats, error) {
-	startTs := time.Now()
-	log := log.With(zap.Int64("segmentID", segmentID))
-	log.Info("begin to reload history BM25 stats", zap.Int("statsBinLogsLen", len(statsBinlogs)))
-
-	fieldList, fieldOffset := make([]int64, len(statsBinlogs)), make([]int, len(statsBinlogs))
-	logpaths := make([]string, 0)
-	for i, binlog := range statsBinlogs {
-		fieldList[i] = binlog.FieldID
-		fieldOffset[i] = len(binlog.Binlogs)
-		logpaths = append(logpaths, lo.Map(binlog.Binlogs, func(log *datapb.Binlog, _ int) string { return log.GetLogPath() })...)
+// LoadBM25StatsFromPaths loads BM25 stats from resolved file paths grouped by field ID.
+func LoadBM25StatsFromPaths(ctx context.Context, chunkManager storage.ChunkManager, segmentID int64, pathsByField map[int64][]string) (map[int64]*storage.BM25Stats, error) {
+	if len(pathsByField) == 0 {
+		return nil, nil
 	}
 
-	if len(logpaths) == 0 {
+	startTs := time.Now()
+	log := log.With(zap.Int64("segmentID", segmentID))
+	log.Info("begin to reload history BM25 stats")
+
+	fieldList := make([]int64, 0, len(pathsByField))
+	fieldOffset := make([]int, 0, len(pathsByField))
+	allPaths := make([]string, 0)
+	for fieldID, paths := range pathsByField {
+		fieldList = append(fieldList, fieldID)
+		fieldOffset = append(fieldOffset, len(paths))
+		allPaths = append(allPaths, paths...)
+	}
+
+	if len(allPaths) == 0 {
 		log.Warn("no BM25 stats to load")
 		return nil, nil
 	}
 
-	values, err := chunkManager.MultiRead(ctx, logpaths)
+	values, err := chunkManager.MultiRead(ctx, allPaths)
 	if err != nil {
 		log.Warn("failed to load BM25 stats files", zap.Error(err))
 		return nil, err
@@ -72,75 +74,53 @@ func LoadBM25Stats(ctx context.Context, chunkManager storage.ChunkManager, segme
 		cnt += fieldOffset[i]
 	}
 
-	// TODO ADD METRIC FOR LOAD BM25 TIME
 	log.Info("Successfully load BM25 stats", zap.Any("time", time.Since(startTs)))
 	return result, nil
 }
 
-func LoadStats(ctx context.Context, chunkManager storage.ChunkManager, schema *schemapb.CollectionSchema, segmentID int64, statsBinlogs []*datapb.FieldBinlog) ([]*storage.PkStatistics, error) {
-	startTs := time.Now()
-	log := log.With(zap.Int64("segmentID", segmentID))
-	log.Info("begin to init pk bloom filter", zap.Int("statsBinLogsLen", len(statsBinlogs)))
-
-	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return nil, err
-	}
-
-	// filter stats binlog files which is pk field stats log
-	bloomFilterFiles := []string{}
-	logType := storage.DefaultStatsType
-
-	for _, binlog := range statsBinlogs {
-		if binlog.FieldID != pkField.GetFieldID() {
-			continue
-		}
-	Loop:
-		for _, log := range binlog.GetBinlogs() {
-			_, logidx := path.Split(log.GetLogPath())
-			// if special status log exist
-			// only load one file
-			switch logidx {
-			case storage.CompoundStatsType.LogIdx():
-				bloomFilterFiles = []string{log.GetLogPath()}
-				logType = storage.CompoundStatsType
-				break Loop
-			default:
-				bloomFilterFiles = append(bloomFilterFiles, log.GetLogPath())
-			}
-		}
-	}
-
-	// no stats log to parse, initialize a new BF
-	if len(bloomFilterFiles) == 0 {
-		log.Warn("no stats files to load")
+// LoadStatsFromPaths loads bloom filter stats from resolved file paths.
+// It handles CompoundStatsType detection based on the last path component,
+// similar to LoadStats but accepts pre-resolved paths instead of FieldBinlog.
+func LoadStatsFromPaths(ctx context.Context, chunkManager storage.ChunkManager, segmentID int64, paths []string) ([]*storage.PkStatistics, error) {
+	if len(paths) == 0 {
 		return nil, nil
 	}
 
-	// read historical PK filter
-	values, err := chunkManager.MultiRead(ctx, bloomFilterFiles)
+	startTs := time.Now()
+	log := log.With(zap.Int64("segmentID", segmentID))
+	log.Info("begin to load bloom filter from paths", zap.Int("pathCount", len(paths)))
+
+	// Detect CompoundStatsType
+	logType := storage.DefaultStatsType
+	for _, p := range paths {
+		_, logidx := path.Split(p)
+		if logidx == storage.CompoundStatsType.LogIdx() {
+			paths = []string{p}
+			logType = storage.CompoundStatsType
+			break
+		}
+	}
+
+	values, err := chunkManager.MultiRead(ctx, paths)
 	if err != nil {
 		log.Warn("failed to load bloom filter files", zap.Error(err))
 		return nil, err
 	}
-	blobs := make([]*storage.Blob, 0)
-	for i := 0; i < len(values); i++ {
-		blobs = append(blobs, &storage.Blob{Value: values[i]})
+
+	blobs := make([]*storage.Blob, 0, len(values))
+	for _, v := range values {
+		blobs = append(blobs, &storage.Blob{Value: v})
 	}
 
 	var stats []*storage.PrimaryKeyStats
 	if logType == storage.CompoundStatsType {
 		stats, err = storage.DeserializeStatsList(blobs[0])
-		if err != nil {
-			log.Warn("failed to deserialize stats list", zap.Error(err))
-			return nil, err
-		}
 	} else {
 		stats, err = storage.DeserializeStats(blobs)
-		if err != nil {
-			log.Warn("failed to deserialize stats", zap.Error(err))
-			return nil, err
-		}
+	}
+	if err != nil {
+		log.Warn("failed to deserialize bloom filter stats", zap.Error(err))
+		return nil, err
 	}
 
 	var size uint
@@ -155,6 +135,6 @@ func LoadStats(ctx context.Context, chunkManager storage.ChunkManager, schema *s
 		result = append(result, pkStat)
 	}
 
-	log.Info("Successfully load pk stats", zap.Any("time", time.Since(startTs)), zap.Uint("size", size))
+	log.Info("Successfully load bloom filter from paths", zap.Any("time", time.Since(startTs)), zap.Uint("size", size))
 	return result, nil
 }

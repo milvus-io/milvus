@@ -29,67 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-func TestToRelativePath(t *testing.T) {
-	tests := []struct {
-		name     string
-		fullPath string
-		basePath string
-		rootPath string
-		expected string
-	}{
-		{
-			// basePath has depth 4 (insert_log/123/456/789), +1 for _delta/ = 5 levels of ..
-			name:     "deltalog relative to insert_log",
-			fullPath: "/data/delta_log/123/456/789/1",
-			basePath: "/data/insert_log/123/456/789",
-			rootPath: "/data",
-			expected: "../../../../../delta_log/123/456/789/1",
-		},
-		{
-			name:     "same collection different segment",
-			fullPath: "/milvus/delta_log/100/200/300/5",
-			basePath: "/milvus/insert_log/100/200/300",
-			rootPath: "/milvus",
-			expected: "../../../../../delta_log/100/200/300/5",
-		},
-		{
-			name:     "v3 deltalog under basePath/_delta/",
-			fullPath: "/data/insert_log/123/456/789/_delta/1",
-			basePath: "/data/insert_log/123/456/789",
-			rootPath: "/data",
-			expected: "1",
-		},
-		{
-			name:     "path without rootPath prefix",
-			fullPath: "/other/path/file",
-			basePath: "/data/insert_log/123/456/789",
-			rootPath: "/data",
-			expected: "/other/path/file",
-		},
-		{
-			name:     "empty rootPath",
-			fullPath: "delta_log/123/456/789/1",
-			basePath: "insert_log/123/456/789",
-			rootPath: "",
-			expected: "../../../../../delta_log/123/456/789/1",
-		},
-		{
-			name:     "v3 deltalog with empty rootPath",
-			fullPath: "insert_log/123/456/789/_delta/1",
-			basePath: "insert_log/123/456/789",
-			rootPath: "",
-			expected: "1",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := toRelativePath(tt.fullPath, tt.basePath, tt.rootPath)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestDeltaLogEntry(t *testing.T) {
 	entry := DeltaLogEntry{
 		Path:       "/data/delta_log/123/456/789/1",
@@ -138,6 +77,115 @@ func createBaseManifest(t *testing.T, basePath string, storageConfig *indexpb.St
 	manifestPath, err := pw.Close()
 	require.NoError(t, err)
 	return manifestPath
+}
+
+func TestStatsRoundtrip(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+
+	t.Run("no stats", func(t *testing.T) {
+		bp := filepath.Join(dir, "insert_log/1/2/3_no_stats")
+		manifestPath := createBaseManifest(t, bp, storageConfig)
+
+		stats, err := GetManifestStats(manifestPath, storageConfig)
+		require.NoError(t, err)
+		assert.Empty(t, stats)
+	})
+
+	t.Run("single bloom filter stat", func(t *testing.T) {
+		bp := filepath.Join(dir, "insert_log/1/2/3_bf")
+		manifestPath := createBaseManifest(t, bp, storageConfig)
+
+		statPath := filepath.Join(bp, "_stats/bloom_filter.100/1")
+		newManifest, err := AddStatsToManifest(manifestPath, storageConfig, []StatEntry{
+			{
+				Key:      "bloom_filter.100",
+				Files:    []string{statPath},
+				Metadata: map[string]string{"memory_size": "4096"},
+			},
+		})
+		require.NoError(t, err)
+
+		stats, err := GetManifestStats(newManifest, storageConfig)
+		require.NoError(t, err)
+		require.Contains(t, stats, "bloom_filter.100")
+
+		stat := stats["bloom_filter.100"]
+		require.Equal(t, 1, len(stat.Paths))
+		assert.Equal(t, statPath, stat.Paths[0])
+		assert.Equal(t, "4096", stat.Metadata["memory_size"])
+	})
+
+	t.Run("multiple stats with metadata", func(t *testing.T) {
+		bp := filepath.Join(dir, "insert_log/1/2/3_multi_stats")
+		manifestPath := createBaseManifest(t, bp, storageConfig)
+
+		entries := []StatEntry{
+			{
+				Key:      "bloom_filter.100",
+				Files:    []string{filepath.Join(bp, "_stats/bloom_filter.100/1")},
+				Metadata: map[string]string{"memory_size": "2048"},
+			},
+			{
+				Key:   "bm25.200",
+				Files: []string{filepath.Join(bp, "_stats/bm25.200/1")},
+			},
+			{
+				Key:   "text_index.300",
+				Files: []string{filepath.Join(bp, "_stats/text_index.300/f1"), filepath.Join(bp, "_stats/text_index.300/f2")},
+				Metadata: map[string]string{
+					"version":  "5",
+					"build_id": "42",
+				},
+			},
+		}
+		newManifest, err := AddStatsToManifest(manifestPath, storageConfig, entries)
+		require.NoError(t, err)
+
+		stats, err := GetManifestStats(newManifest, storageConfig)
+		require.NoError(t, err)
+		assert.Equal(t, 3, len(stats))
+
+		// bloom filter
+		bf := stats["bloom_filter.100"]
+		require.Equal(t, 1, len(bf.Paths))
+		assert.Equal(t, filepath.Join(bp, "_stats/bloom_filter.100/1"), bf.Paths[0])
+		assert.Equal(t, "2048", bf.Metadata["memory_size"])
+
+		// bm25
+		bm := stats["bm25.200"]
+		require.Equal(t, 1, len(bm.Paths))
+		assert.Equal(t, filepath.Join(bp, "_stats/bm25.200/1"), bm.Paths[0])
+
+		// text index with multiple files
+		ti := stats["text_index.300"]
+		require.Equal(t, 2, len(ti.Paths))
+		assert.Equal(t, filepath.Join(bp, "_stats/text_index.300/f1"), ti.Paths[0])
+		assert.Equal(t, filepath.Join(bp, "_stats/text_index.300/f2"), ti.Paths[1])
+		assert.Equal(t, "5", ti.Metadata["version"])
+		assert.Equal(t, "42", ti.Metadata["build_id"])
+	})
+
+	t.Run("empty stats input returns original manifest", func(t *testing.T) {
+		bp := filepath.Join(dir, "insert_log/1/2/3_empty_stats")
+		manifestPath := createBaseManifest(t, bp, storageConfig)
+
+		sameManifest, err := AddStatsToManifest(manifestPath, storageConfig, []StatEntry{})
+		require.NoError(t, err)
+		assert.Equal(t, manifestPath, sameManifest)
+	})
 }
 
 func TestGetDeltaLogPathsFromManifest(t *testing.T) {
