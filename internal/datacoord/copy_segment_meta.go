@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -310,6 +311,7 @@ type copySegmentMeta struct {
 	catalog      metastore.DataCoordCatalog // Persistent storage backend (etcd)
 	meta         *meta                      // Segment metadata for task execution
 	snapshotMeta *snapshotMeta              // Snapshot metadata for reading source data
+	alloc        allocator.Allocator        // For allocating new build IDs in copy segment tasks
 
 	// Snapshot restore reference tracker
 	restoreRefTracker *SnapshotRestoreRefTracker
@@ -342,7 +344,7 @@ type copySegmentMeta struct {
 // - Restoring state on startup enables crash recovery
 // - In-memory cache provides fast lookups without etcd round trips
 // - Metadata references enable tasks to access segment/snapshot data
-func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog, meta *meta, snapshotMeta *snapshotMeta) (CopySegmentMeta, error) {
+func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog, meta *meta, snapshotMeta *snapshotMeta, alloc allocator.Allocator) (CopySegmentMeta, error) {
 	// Load jobs and tasks from persistent storage
 	restoredJobs, err := catalog.ListCopySegmentJobs(ctx)
 	if err != nil {
@@ -358,6 +360,7 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 		catalog:           catalog,
 		meta:              meta,
 		snapshotMeta:      snapshotMeta,
+		alloc:             alloc,
 		restoreRefTracker: NewSnapshotRestoreRefTracker(),
 	}
 
@@ -367,6 +370,7 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 			copyMeta:     copySegmentMeta,
 			meta:         meta,
 			snapshotMeta: snapshotMeta,
+			alloc:        alloc,
 			tr:           timerecord.NewTimeRecorder("copy segment task"),
 			times:        taskcommon.NewTimes(),
 		}
@@ -628,6 +632,7 @@ func (m *copySegmentMeta) AddTask(ctx context.Context, task CopySegmentTask) err
 	t.copyMeta = m
 	t.meta = m.meta
 	t.snapshotMeta = m.snapshotMeta
+	t.alloc = m.alloc
 
 	err := m.catalog.SaveCopySegmentTask(ctx, t.task.Load())
 	if err != nil {
