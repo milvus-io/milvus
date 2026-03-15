@@ -339,7 +339,7 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		JsonKeyStatsDataFormat:           common.JSONStatsDataFormatVersion,
 		TaskSlot:                         st.taskSlot,
 		StorageVersion:                   segment.StorageVersion,
-		CurrentScalarIndexVersion:        st.ievm.GetCurrentScalarIndexEngineVersion(),
+		CurrentScalarIndexVersion:        st.ievm.ResolveScalarIndexVersion(),
 		JsonStatsMaxShreddingColumns:     Params.DataCoordCfg.JSONStatsMaxShreddingColumns.GetAsInt64(),
 		JsonStatsShreddingRatioThreshold: Params.DataCoordCfg.JSONStatsShreddingRatioThreshold.GetAsFloat(),
 		JsonStatsWriteBatchSize:          Params.DataCoordCfg.JSONStatsWriteBatchSize.GetAsInt64(),

@@ -534,7 +534,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 				Files:                     lo.Keys(uploaded),
 				LogSize:                   totalSize,
 				MemorySize:                totalSize,
-				CurrentScalarIndexVersion: common.CurrentScalarIndexEngineVersion,
+				CurrentScalarIndexVersion: getCurrentScalarIndexVersion(st.req.GetCurrentScalarIndexVersion()),
 			}
 			mu.Unlock()
 
