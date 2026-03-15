@@ -178,19 +178,20 @@ func (c *compactionInspector) getCompactionTasksNumBySignalID(triggerID int64) i
 }
 
 func newCompactionInspector(meta CompactionMeta,
-	allocator allocator.Allocator, handler Handler, scheduler task.GlobalScheduler, ievm IndexEngineVersionManager,
+	allocator allocator.Allocator, handler Handler, scheduler task.GlobalScheduler, analyzeScheduler task.GlobalScheduler, ievm IndexEngineVersionManager,
 ) *compactionInspector {
 	capacity := paramtable.Get().DataCoordCfg.CompactionTaskQueueCapacity.GetAsInt()
 	return &compactionInspector{
-		queueTasks:     NewCompactionQueue(capacity, getPrioritizer()),
-		meta:           meta,
-		allocator:      allocator,
-		stopCh:         make(chan struct{}),
-		executingTasks: make(map[int64]CompactionTask),
-		cleaningTasks:  make(map[int64]CompactionTask),
-		handler:        handler,
-		scheduler:      scheduler,
-		ievm:           ievm,
+		queueTasks:       NewCompactionQueue(capacity, getPrioritizer()),
+		meta:             meta,
+		allocator:        allocator,
+		stopCh:           make(chan struct{}),
+		executingTasks:   make(map[int64]CompactionTask),
+		cleaningTasks:    make(map[int64]CompactionTask),
+		handler:          handler,
+		scheduler:        scheduler,
+		analyzeScheduler: analyzeScheduler,
+		ievm:             ievm,
 	}
 }
 
