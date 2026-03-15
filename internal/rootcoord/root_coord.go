@@ -559,8 +559,16 @@ func (c *Core) initRbac(initCtx context.Context) error {
 	}
 
 	if Params.RoleCfg.Enabled.GetAsBool() {
-		return c.initBuiltinRoles(initCtx)
+		if err = c.initBuiltinRoles(initCtx); err != nil {
+			return err
+		}
 	}
+
+	// One-time migration: convert name-based grants to ID-based grants
+	if err = c.meta.MigrateGrantsToEntityID(initCtx); err != nil {
+		return errors.Wrap(err, "failed to migrate grants to entity ID")
+	}
+
 	return nil
 }
 
@@ -2702,9 +2710,7 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 			Status: merr.StatusWithErrorCode(fmt.Errorf("fail to expand privilege groups: %s", err.Error()), commonpb.ErrorCode_ListPolicyFailure),
 		}, nil
 	}
-	expandPolicies := lo.Map(expandGrants, func(r *milvuspb.GrantEntity, _ int) string {
-		return funcutil.PolicyForPrivilege(r.Role.Name, r.Object.Name, r.ObjectName, r.Grantor.Privilege.Name, r.DbName)
-	})
+	expandPolicies := funcutil.PrivilegesForPolicy(funcutil.PolicyForPrivileges(expandGrants))
 
 	userRoles, err := c.meta.ListUserRole(ctx, util.DefaultTenant)
 	if err != nil {

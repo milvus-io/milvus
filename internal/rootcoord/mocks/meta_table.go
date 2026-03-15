@@ -3241,6 +3241,52 @@ func (_c *IMetaTable_ListUserRole_Call) RunAndReturn(run func(context.Context, s
 	return _c
 }
 
+// MigrateGrantsToEntityID provides a mock function with given fields: ctx
+func (_m *IMetaTable) MigrateGrantsToEntityID(ctx context.Context) error {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MigrateGrantsToEntityID")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_MigrateGrantsToEntityID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MigrateGrantsToEntityID'
+type IMetaTable_MigrateGrantsToEntityID_Call struct {
+	*mock.Call
+}
+
+// MigrateGrantsToEntityID is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *IMetaTable_Expecter) MigrateGrantsToEntityID(ctx interface{}) *IMetaTable_MigrateGrantsToEntityID_Call {
+	return &IMetaTable_MigrateGrantsToEntityID_Call{Call: _e.mock.On("MigrateGrantsToEntityID", ctx)}
+}
+
+func (_c *IMetaTable_MigrateGrantsToEntityID_Call) Run(run func(ctx context.Context)) *IMetaTable_MigrateGrantsToEntityID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_MigrateGrantsToEntityID_Call) Return(_a0 error) *IMetaTable_MigrateGrantsToEntityID_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_MigrateGrantsToEntityID_Call) RunAndReturn(run func(context.Context) error) *IMetaTable_MigrateGrantsToEntityID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // OperatePrivilege provides a mock function with given fields: ctx, tenant, entity, operateType
 func (_m *IMetaTable) OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 	ret := _m.Called(ctx, tenant, entity, operateType)

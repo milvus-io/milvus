@@ -1928,7 +1928,6 @@ type proxyConfig struct {
 	MustUsePartitionKey             ParamItem `refreshable:"true"`
 	SkipAutoIDCheck                 ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck           ParamItem `refreshable:"true"`
-	ResolveAliasForPrivilege        ParamItem `refreshable:"true"`
 	MaxVarCharLength                ParamItem `refreshable:"false"`
 	MaxTextLength                   ParamItem `refreshable:"false"`
 	MaxResultEntries                ParamItem `refreshable:"true"`
@@ -2370,15 +2369,6 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall skip partition key check when inserting data",
 	}
 	p.SkipPartitionKeyCheck.Init(base.mgr)
-
-	p.ResolveAliasForPrivilege = ParamItem{
-		Key:          "proxy.resolveAliasForPrivilege",
-		Version:      "2.6.9",
-		DefaultValue: "true",
-		Doc:          "switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks",
-		Export:       true,
-	}
-	p.ResolveAliasForPrivilege.Init(base.mgr)
 
 	p.MaxVarCharLength = ParamItem{
 		Key:          "proxy.maxVarCharLength",

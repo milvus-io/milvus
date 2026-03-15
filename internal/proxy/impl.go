@@ -5703,8 +5703,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	req.Grantor.User = &milvuspb.UserEntity{Name: curUser}
 
 	// Resolve alias to actual collection name so grants are stored under the real name
-	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
-		req.CollectionName != util.AnyWord && req.CollectionName != "" {
+	if req.CollectionName != util.AnyWord && req.CollectionName != "" {
 		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.DbName, req.CollectionName)
 		if resolveErr != nil {
 			log.Warn("failed to resolve collection alias for privilege operation",
@@ -5776,8 +5775,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	req.Entity.Grantor.User = &milvuspb.UserEntity{Name: curUser}
 
 	// Resolve alias to actual collection name so grants are stored under the real name
-	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
-		req.Entity.Object != nil && req.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
+	if req.Entity.Object != nil && req.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
 		req.Entity.ObjectName != util.AnyWord && req.Entity.ObjectName != "" {
 		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
 		if resolveErr != nil {
@@ -5861,8 +5859,7 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 	req.Base.MsgType = commonpb.MsgType_SelectGrant
 
 	// Resolve alias to actual collection name so query matches grants stored under real names
-	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
-		req.Entity != nil && req.Entity.Object != nil && req.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
+	if req.Entity != nil && req.Entity.Object != nil && req.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
 		req.Entity.ObjectName != util.AnyWord && req.Entity.ObjectName != "" {
 		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
 		if resolveErr != nil {
