@@ -15,58 +15,232 @@
 
 namespace milvus {
 
-std::pair<std::vector<std::string_view>, FixedVector<bool>>
-StringChunk::StringViews(
-    std::optional<std::pair<int64_t, int64_t>> offset_len = std::nullopt) {
-    auto start_offset = 0;
-    auto len = row_nums_;
-    if (offset_len.has_value()) {
-        start_offset = offset_len->first;
-        len = offset_len->second;
-        AssertInfo(
-            start_offset >= 0 && start_offset < row_nums_,
-            "Retrieve string views with out-of-bound offset:{}, len:{}, wrong",
-            start_offset,
-            len);
-        AssertInfo(
-            len >= 0 && len <= row_nums_,
-            "Retrieve string views with out-of-bound offset:{}, len:{}, wrong",
-            start_offset,
-            len);
-        AssertInfo(
-            start_offset + len <= row_nums_,
-            "Retrieve string views with out-of-bound offset:{}, len:{}, wrong",
-            start_offset,
-            len);
-    }
+// === StringChunk DataView implementations ===
 
-    std::vector<std::string_view> ret;
-    ret.reserve(len);
-    auto end_offset = start_offset + len;
-    for (auto i = start_offset; i < end_offset; i++) {
-        ret.emplace_back(data_ + offsets_[i], offsets_[i + 1] - offsets_[i]);
-    }
-    if (nullable_) {
-        FixedVector<bool> res_valid(valid_.begin() + start_offset,
-                                    valid_.begin() + end_offset);
-        return {ret, std::move(res_valid)};
-    }
-    return {ret, {}};
+AnyDataView
+StringChunk::GetAnyDataView() const {
+    return GetAnyDataView(0, row_nums_);
 }
 
-std::pair<std::vector<std::string_view>, FixedVector<bool>>
-StringChunk::ViewsByOffsets(const FixedVector<int32_t>& offsets) {
-    std::vector<std::string_view> ret;
-    FixedVector<bool> valid_res;
-    size_t size = offsets.size();
-    ret.reserve(size);
-    valid_res.reserve(size);
-    for (auto i = 0; i < size; ++i) {
-        ret.emplace_back(data_ + offsets_[offsets[i]],
-                         offsets_[offsets[i] + 1] - offsets_[offsets[i]]);
-        valid_res.emplace_back(isValid(offsets[i]));
+AnyDataView
+StringChunk::GetAnyDataView(int64_t offset, int64_t length) const {
+    AssertInfo(offset >= 0 && offset < row_nums_,
+               "Retrieve string data view with out-of-bound offset:{}, len:{}, "
+               "row_nums:{}",
+               offset,
+               length,
+               row_nums_);
+    AssertInfo(length > 0 && length <= row_nums_,
+               "Retrieve string data view with out-of-bound offset:{}, len:{}, "
+               "row_nums:{}",
+               offset,
+               length,
+               row_nums_);
+    AssertInfo(offset + length <= row_nums_,
+               "Retrieve string data view with out-of-bound offset:{}, len:{}, "
+               "row_nums:{}",
+               offset,
+               length,
+               row_nums_);
+
+    std::vector<std::string_view> views;
+    views.reserve(length);
+    auto end_offset = offset + length;
+    for (auto i = offset; i < end_offset; i++) {
+        views.emplace_back(data_ + offsets_[i], offsets_[i + 1] - offsets_[i]);
     }
-    return {ret, valid_res};
+
+    FixedVector<bool> valid_data;
+    if (nullable_) {
+        valid_data.assign(valid_.begin() + offset, valid_.begin() + end_offset);
+    }
+
+    return AnyDataView(std::make_shared<ContiguousDataView<std::string_view>>(
+        std::move(views), std::move(valid_data), length));
+}
+
+AnyDataView
+StringChunk::GetAnyDataView(const FixedVector<int32_t>& offsets) const {
+    std::vector<std::string_view> views;
+    FixedVector<bool> valid_data;
+    size_t size = offsets.size();
+    views.reserve(size);
+    valid_data.reserve(size);
+
+    for (size_t i = 0; i < size; ++i) {
+        views.emplace_back(data_ + offsets_[offsets[i]],
+                           offsets_[offsets[i] + 1] - offsets_[offsets[i]]);
+        valid_data.emplace_back(IsValid(offsets[i]));
+    }
+
+    return AnyDataView(std::make_shared<ContiguousDataView<std::string_view>>(
+        std::move(views), std::move(valid_data), size));
+}
+
+// === JSONChunk DataView implementations ===
+
+AnyDataView
+JSONChunk::GetAnyDataView() const {
+    return GetAnyDataView(0, row_nums_);
+}
+
+AnyDataView
+JSONChunk::GetAnyDataView(int64_t offset, int64_t length) const {
+    AssertInfo(offset >= 0 && offset < row_nums_,
+               "Retrieve json data view with out-of-bound offset:{}, len:{}, "
+               "row_nums:{}",
+               offset,
+               length,
+               row_nums_);
+    AssertInfo(length > 0 && length <= row_nums_,
+               "Retrieve json data view with out-of-bound offset:{}, len:{}, "
+               "row_nums:{}",
+               offset,
+               length,
+               row_nums_);
+    AssertInfo(offset + length <= row_nums_,
+               "Retrieve json data view with out-of-bound offset:{}, len:{}, "
+               "row_nums:{}",
+               offset,
+               length,
+               row_nums_);
+
+    std::vector<std::string_view> views;
+    views.reserve(length);
+    auto end_offset = offset + length;
+    for (auto i = offset; i < end_offset; i++) {
+        views.emplace_back(data_ + offsets_[i], offsets_[i + 1] - offsets_[i]);
+    }
+
+    FixedVector<bool> valid_data;
+    if (nullable_) {
+        valid_data.assign(valid_.begin() + offset, valid_.begin() + end_offset);
+    }
+
+    return AnyDataView(std::make_shared<ContiguousDataView<std::string_view>>(
+        std::move(views), std::move(valid_data), length));
+}
+
+AnyDataView
+JSONChunk::GetAnyDataView(const FixedVector<int32_t>& offsets) const {
+    std::vector<std::string_view> views;
+    FixedVector<bool> valid_data;
+    size_t size = offsets.size();
+    views.reserve(size);
+    valid_data.reserve(size);
+
+    for (size_t i = 0; i < size; ++i) {
+        views.emplace_back(data_ + offsets_[offsets[i]],
+                           offsets_[offsets[i] + 1] - offsets_[offsets[i]]);
+        valid_data.emplace_back(IsValid(offsets[i]));
+    }
+
+    return AnyDataView(std::make_shared<ContiguousDataView<std::string_view>>(
+        std::move(views), std::move(valid_data), size));
+}
+
+// === ArrayChunk DataView implementations ===
+
+AnyDataView
+ArrayChunk::GetAnyDataView() const {
+    return GetAnyDataView(0, row_nums_);
+}
+
+AnyDataView
+ArrayChunk::GetAnyDataView(int64_t offset, int64_t length) const {
+    AssertInfo(offset >= 0 && offset < row_nums_,
+               "Retrieve array data view with out-of-bound offset:{}, len:{}, "
+               "row_nums:{}",
+               offset,
+               length,
+               row_nums_);
+    AssertInfo(length > 0 && length <= row_nums_,
+               "Retrieve array data view with out-of-bound offset:{}, len:{}, "
+               "row_nums:{}",
+               offset,
+               length,
+               row_nums_);
+    AssertInfo(offset + length <= row_nums_,
+               "Retrieve array data view with out-of-bound offset:{}, len:{}, "
+               "row_nums:{}",
+               offset,
+               length,
+               row_nums_);
+
+    std::vector<ArrayView> views;
+    views.reserve(length);
+    auto end_offset = offset + length;
+    for (auto i = offset; i < end_offset; i++) {
+        views.emplace_back(View(i));
+    }
+
+    FixedVector<bool> valid_data;
+    if (nullable_) {
+        valid_data.assign(valid_.begin() + offset, valid_.begin() + end_offset);
+    }
+
+    return AnyDataView(std::make_shared<ContiguousDataView<ArrayView>>(
+        std::move(views), std::move(valid_data), length));
+}
+
+AnyDataView
+ArrayChunk::GetAnyDataView(const FixedVector<int32_t>& offsets) const {
+    std::vector<ArrayView> views;
+    FixedVector<bool> valid_data;
+    size_t size = offsets.size();
+    views.reserve(size);
+    valid_data.reserve(size);
+
+    for (size_t i = 0; i < size; ++i) {
+        views.emplace_back(View(offsets[i]));
+        valid_data.emplace_back(IsValid(offsets[i]));
+    }
+
+    return AnyDataView(std::make_shared<ContiguousDataView<ArrayView>>(
+        std::move(views), std::move(valid_data), size));
+}
+
+// === VectorArrayChunk DataView implementations ===
+
+AnyDataView
+VectorArrayChunk::GetAnyDataView() const {
+    return GetAnyDataView(0, row_nums_);
+}
+
+AnyDataView
+VectorArrayChunk::GetAnyDataView(int64_t offset, int64_t length) const {
+    AssertInfo(
+        offset >= 0 && offset < row_nums_,
+        "Retrieve vector array data view with out-of-bound offset:{}, len:{}, "
+        "row_nums:{}",
+        offset,
+        length,
+        row_nums_);
+    AssertInfo(
+        length > 0 && length <= row_nums_,
+        "Retrieve vector array data view with out-of-bound offset:{}, len:{}, "
+        "row_nums:{}",
+        offset,
+        length,
+        row_nums_);
+    AssertInfo(
+        offset + length <= row_nums_,
+        "Retrieve vector array data view with out-of-bound offset:{}, len:{}, "
+        "row_nums:{}",
+        offset,
+        length,
+        row_nums_);
+
+    std::vector<VectorArrayView> views;
+    views.reserve(length);
+    auto end_offset = offset + length;
+    for (int64_t i = offset; i < end_offset; i++) {
+        views.emplace_back(View(i));
+    }
+
+    // VectorArrayChunk does not support null
+    return AnyDataView(std::make_shared<ContiguousDataView<VectorArrayView>>(
+        std::move(views), nullptr, length, dim_));
 }
 
 }  // namespace milvus
