@@ -436,8 +436,10 @@ func (m *ReplicaManager) removeReplicas(ctx context.Context, collectionID typeut
 		}
 	}
 
-	if m.coll2Replicas[collectionID].removeReplicas(replicas...) {
-		delete(m.coll2Replicas, collectionID)
+	if collReplicas, ok := m.coll2Replicas[collectionID]; ok {
+		if collReplicas.removeReplicas(replicas...) {
+			delete(m.coll2Replicas, collectionID)
+		}
 	}
 
 	return nil
