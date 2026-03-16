@@ -596,13 +596,17 @@ func TestDocInDocOutInsertInvalid(t *testing.T) {
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
 	}, nil).Once()
-	// invlaid insert request, will not be sent to proxy
+	// function output field data is now passed through to proxy for validation
+	insertErr := errors.Wrap(merr.ErrInvalidInsertData, "not allowed to provide data for BM25 function output field")
+	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+		Status: merr.Status(insertErr),
+	}, nil).Once()
 
 	testcase := requestBodyTestCase{
 		path:        versionalV2(EntityCategory, InsertAction),
 		requestBody: []byte(`{"collectionName": "book", "data": [{"book_id": 0, "word_count": 0, "book_intro": {"1": 0.1}, "varchar_field": "some text"}]}`),
 		errCode:     1804,
-		errMsg:      "not allowed to provide input data for function output field",
+		errMsg:      "not allowed to provide data for BM25 function output field",
 	}
 
 	sendReqAndVerify(t, testEngine, testcase.path, http.MethodPost, testcase)

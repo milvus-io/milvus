@@ -462,10 +462,12 @@ func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
 	schema := task.GetSchema()
 	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.Properties)
 	log.Info("allowNonBM25Outputs", zap.Any("allowNonBM25Outputs", allowNonBM25Outputs))
-	fieldIDs := lo.Keys(data.Data)
+	fieldIDs := lo.Keys(lo.PickBy(data.Data, func(_ int64, fd storage.FieldData) bool {
+		return fd.RowNum() > 0
+	}))
 	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, false)
 	if err != nil {
-		return err
+		return errors.Wrap(merr.ErrInvalidInsertData, err.Error())
 	}
 	log.Info("needProcessFunctions", zap.Any("needProcessFunctions", needProcessFunctions))
 	if embedding.HasNonBM25AndMinHashFunctions(schema.Functions, []int64{}) {
