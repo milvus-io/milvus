@@ -1148,8 +1148,11 @@ func TestAddFieldTask(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		// more ClusteringKey field
+		// more ClusteringKey field — use a valid type so the duplicate-key check is the gate
 		fSchema = &schemapb.FieldSchema{
+			Name:            "ck_field",
+			DataType:        schemapb.DataType_Int64,
+			Nullable:        true,
 			IsClusteringKey: true,
 		}
 		bytes, err = proto.Marshal(fSchema)
@@ -1188,6 +1191,20 @@ func TestAddFieldTask(t *testing.T) {
 			assert.Error(t, err, "expected error for unsupported clustering key type %v", unsupportedType)
 			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 		}
+
+		// valid clustering key type (Int64) should be accepted
+		fSchema = &schemapb.FieldSchema{
+			Name:            "valid_ck",
+			DataType:        schemapb.DataType_Int64,
+			Nullable:        true,
+			IsClusteringKey: true,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		task.oldSchema = freshSchema // no existing clustering key
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
 
 		// fieldName invalid
 		fSchema = &schemapb.FieldSchema{
