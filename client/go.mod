@@ -10,7 +10,7 @@ require (
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20260304062516-e7e54d966ef2
 	github.com/milvus-io/milvus/pkg/v2 v2.6.4-0.20251104142533-a2ce70d25256
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
-	github.com/samber/lo v1.27.0
+	github.com/samber/lo v1.52.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/gjson v1.17.1
 	go.uber.org/atomic v1.11.0
