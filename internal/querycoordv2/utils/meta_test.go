@@ -136,6 +136,104 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 	}
 }
 
+func TestReassignReplicaToRG_ScaleUpTransfersToSmallestRG(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	store := mocks.NewQueryCoordCatalog(t)
+	store.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil)
+	store.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	nodeMgr := session.NewNodeManager()
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+
+	// Setup: 1 replica in __default_resource_group
+	m.CollectionManager.PutCollection(ctx, CreateTestCollection(100, 1))
+	m.ReplicaManager.Put(ctx, meta.NewReplica(
+		&querypb.Replica{
+			ID:            10,
+			CollectionID:  100,
+			Nodes:         []int64{1, 2, 3},
+			ResourceGroup: meta.DefaultResourceGroupName,
+		},
+		typeutil.NewUniqueSet(),
+	))
+
+	// Create rg_for_replica_1, rg_for_replica_2, rg_for_replica_3
+	for _, rg := range []string{"rg_for_replica_1", "rg_for_replica_2", "rg_for_replica_3"} {
+		m.ResourceManager.AddResourceGroup(ctx, rg, &rgpb.ResourceGroupConfig{
+			Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
+			Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
+		})
+	}
+
+	// Scale up: 1 replica -> 3 replicas on rg1/rg2/rg3
+	toSpawn, toTransfer, toRelease, err := ReassignReplicaToRG(
+		ctx, m, 100, 3,
+		[]string{"rg_for_replica_1", "rg_for_replica_2", "rg_for_replica_3"},
+	)
+	require.NoError(t, err)
+	assert.Empty(t, toRelease, "should not release any replica during scale-up")
+
+	// The old replica (from __default_resource_group) should be transferred to rg_for_replica_1 (lex smallest)
+	assert.Contains(t, toTransfer, "rg_for_replica_1", "old replica should be transferred to lex-smallest RG")
+	assert.Equal(t, int64(10), toTransfer["rg_for_replica_1"][0].GetID(), "the transferred replica should be the original one")
+
+	// rg_for_replica_2 and rg_for_replica_3 should spawn new replicas
+	assert.Equal(t, 1, toSpawn["rg_for_replica_2"], "rg2 should spawn 1 new replica")
+	assert.Equal(t, 1, toSpawn["rg_for_replica_3"], "rg3 should spawn 1 new replica")
+}
+
+func TestReassignReplicaToRG_ScaleDownPreservesSmallestRG(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	store := mocks.NewQueryCoordCatalog(t)
+	store.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil)
+	store.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	nodeMgr := session.NewNodeManager()
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+
+	// Setup: 3 replicas in rg1/rg2/rg3
+	m.CollectionManager.PutCollection(ctx, CreateTestCollection(100, 3))
+	for i, rg := range []string{"rg_for_replica_1", "rg_for_replica_2", "rg_for_replica_3"} {
+		m.ResourceManager.AddResourceGroup(ctx, rg, &rgpb.ResourceGroupConfig{
+			Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
+			Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
+		})
+		m.ReplicaManager.Put(ctx, meta.NewReplica(
+			&querypb.Replica{
+				ID:            int64(10 + i),
+				CollectionID:  100,
+				Nodes:         []int64{},
+				ResourceGroup: rg,
+			},
+			typeutil.NewUniqueSet(),
+		))
+	}
+
+	// Scale down: 3 replicas -> 1 replica on __default_resource_group
+	_, toTransfer, toRelease, err := ReassignReplicaToRG(
+		ctx, m, 100, 1,
+		[]string{meta.DefaultResourceGroupName},
+	)
+	require.NoError(t, err)
+
+	// Should release 2 replicas (from rg3 and rg2, in that order)
+	assert.Len(t, toRelease, 2, "should release 2 replicas")
+	// The replica from rg_for_replica_1 (lex smallest, ID=10) should be preserved (transferred to __default)
+	assert.Contains(t, toTransfer, meta.DefaultResourceGroupName)
+	assert.Equal(t, int64(10), toTransfer[meta.DefaultResourceGroupName][0].GetID(),
+		"replica from lex-smallest RG should be preserved and transferred to __default")
+
+	// The released replicas should be from rg3 (ID=12) first, then rg2 (ID=11)
+	assert.Equal(t, int64(12), toRelease[0], "rg3's replica should be released first")
+	assert.Equal(t, int64(11), toRelease[1], "rg2's replica should be released second")
+}
+
 func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
