@@ -3202,7 +3202,7 @@ func Test_ShouldRebuildSegmentIndex_AutoUpgrade_ScalarUsesCorrectField(t *testin
 		mockVM.On("GetCurrentIndexEngineVersion").Return(int32(5)).Maybe()
 
 		trigger := &compactionTrigger{
-			meta:                       &meta{indexMeta: im, channelCPs: newChannelCps()},
+			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
 			indexEngineVersionManager: mockVM,
 		}
 
@@ -3226,7 +3226,7 @@ func Test_ShouldRebuildSegmentIndex_AutoUpgrade_ScalarUsesCorrectField(t *testin
 		mockVM.On("GetCurrentIndexEngineVersion").Return(int32(5)).Maybe()
 
 		trigger := &compactionTrigger{
-			meta:                       &meta{indexMeta: im, channelCPs: newChannelCps()},
+			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
 			indexEngineVersionManager: mockVM,
 		}
 
@@ -3266,7 +3266,7 @@ func Test_ShouldRebuildSegmentIndex_ForceRebuild_ScalarUsesCorrectField(t *testi
 		mockVM.On("ResolveScalarIndexVersion").Return(int32(3)).Maybe()
 
 		trigger := &compactionTrigger{
-			meta:                       &meta{indexMeta: im, channelCPs: newChannelCps()},
+			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
 			indexEngineVersionManager: mockVM,
 		}
 
@@ -3296,7 +3296,7 @@ func Test_ShouldRebuildSegmentIndex_ForceRebuild_ScalarUsesCorrectField(t *testi
 		mockVM.On("ResolveScalarIndexVersion").Return(int32(3)).Maybe()
 
 		trigger := &compactionTrigger{
-			meta:                       &meta{indexMeta: im, channelCPs: newChannelCps()},
+			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
 			indexEngineVersionManager: mockVM,
 		}
 
@@ -3321,10 +3321,10 @@ func Test_ShouldRebuildSegmentIndex_ForceRebuild_TargetExceedsMax_Converges(t *t
 
 		// Index was already rebuilt to clamped version (20), should NOT trigger again
 		segIdx := &model.SegmentIndex{
-			SegmentID:     segID,
-			CollectionID:  collID,
-			IndexID:       indexID,
-			IndexFileKeys: []string{"file1"},
+			SegmentID:           segID,
+			CollectionID:        collID,
+			IndexID:             indexID,
+			IndexFileKeys:       []string{"file1"},
 			CurrentIndexVersion: 20, // matches resolved (clamped) target
 		}
 		im := newTestIndexMeta(collID, segID, indexID, "HNSW", segIdx)
@@ -3334,7 +3334,7 @@ func Test_ShouldRebuildSegmentIndex_ForceRebuild_TargetExceedsMax_Converges(t *t
 		mockVM.On("ResolveVecIndexVersion").Return(int32(20)).Maybe()
 
 		trigger := &compactionTrigger{
-			meta:                       &meta{indexMeta: im, channelCPs: newChannelCps()},
+			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
 			indexEngineVersionManager: mockVM,
 		}
 
@@ -3365,7 +3365,7 @@ func Test_ShouldRebuildSegmentIndex_ForceRebuild_TargetExceedsMax_Converges(t *t
 		mockVM.On("ResolveScalarIndexVersion").Return(int32(5)).Maybe()
 
 		trigger := &compactionTrigger{
-			meta:                       &meta{indexMeta: im, channelCPs: newChannelCps()},
+			meta:                      &meta{indexMeta: im, channelCPs: newChannelCps()},
 			indexEngineVersionManager: mockVM,
 		}
 

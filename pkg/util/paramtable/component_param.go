@@ -4667,11 +4667,11 @@ type dataCoordConfig struct {
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
 	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
 	GrowingSegmentsMemSizeInMB     ParamItem `refreshable:"true"`
-	AutoUpgradeSegmentIndex             ParamItem `refreshable:"true"`
-	ForceRebuildSegmentIndex            ParamItem `refreshable:"true"`
-	TargetVecIndexVersion               ParamItem `refreshable:"true"`
-	ForceRebuildScalarSegmentIndex      ParamItem `refreshable:"true"`
-	TargetScalarIndexVersion            ParamItem `refreshable:"true"`
+	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
+	ForceRebuildSegmentIndex       ParamItem `refreshable:"true"`
+	TargetVecIndexVersion          ParamItem `refreshable:"true"`
+	ForceRebuildScalarSegmentIndex ParamItem `refreshable:"true"`
+	TargetScalarIndexVersion       ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 	BlockingL0EntryNum             ParamItem `refreshable:"true"`
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
