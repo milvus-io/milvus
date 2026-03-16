@@ -5939,9 +5939,14 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 
 	priCache := privilege.GetPrivilegeCache()
 	if priCache != nil {
+		// New proxy prefers ID-based key; falls back to name-based for old rootcoord
+		opKey := req.GetOpKeyIDBased()
+		if opKey == "" {
+			opKey = req.GetOpKey()
+		}
 		err := priCache.RefreshPolicyInfo(typeutil.CacheOp{
 			OpType: typeutil.CacheOpType(req.OpType),
-			OpKey:  req.OpKey,
+			OpKey:  opKey,
 		})
 		if err != nil {
 			log.Warn("fail to refresh policy info",

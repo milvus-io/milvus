@@ -2281,210 +2281,147 @@ func TestRBAC_Grant(t *testing.T) {
 		validRole       = "role1"
 		invalidRole     = "role2"
 		keyNotExistRole = "role3"
-		errorSaveRole   = "role100"
 
-		validUser   = "user1"
-		invalidUser = "user2"
+		validUser = "user1"
 
-		validPrivilege        = "write"
-		invalidPrivilege      = "wal"
-		keyNotExistPrivilege  = "read"
-		keyNotExistPrivilege2 = "read2"
+		validPrivilege       = "write"
+		invalidPrivilege     = "wal"
+		keyNotExistPrivilege = "read"
 	)
 	t.Run("test AlterGrant", func(t *testing.T) {
-		var (
-			kvmock = mocks.NewTxnKV(t)
-			c      = NewCatalog(kvmock, nil)
-		)
-
-		// In the rewritten AlterGrant, the primary key always uses CombineObjectName(dbName, objName).
-		// For dbID=0,collectionID=0 (non-dual-write), key format: {role}/{objectType}/{dbName}.{objName}
-		validRoleKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, validRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
-		validRoleValue := crypto.MD5(validRoleKey)
-
-		invalidRoleKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
-
-		keyNotExistRoleKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
-		keyNotExistRoleValue := crypto.MD5(keyNotExistRoleKey)
-
-		errorSaveRoleKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, errorSaveRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
-
-		// Mock grantee-privileges Load calls
-		kvmock.EXPECT().Load(mock.Anything, validRoleKey).Call.
-			Return(func(ctx context.Context, key string) string { return validRoleValue }, nil)
-		kvmock.EXPECT().Load(mock.Anything, invalidRoleKey).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return fmt.Errorf("mock load error, key=%s", key)
-			})
-		// Backward compat load (without db prefix) for invalid role
-		kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, objName)).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return fmt.Errorf("mock load error, key=%s", key)
-			})
-		kvmock.EXPECT().Load(mock.Anything, keyNotExistRoleKey).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return merr.WrapErrIoKeyNotFound(key)
-			})
-		// Backward compat load for not-exist role
-		kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, objName)).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return merr.WrapErrIoKeyNotFound(key)
-			})
-		kvmock.EXPECT().Load(mock.Anything, errorSaveRoleKey).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return merr.WrapErrIoKeyNotFound(key)
-			})
-		// Backward compat load for error-save role
-		kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, errorSaveRole, object, objName)).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return merr.WrapErrIoKeyNotFound(key)
-			})
-		kvmock.EXPECT().Save(mock.Anything, keyNotExistRoleKey, mock.Anything).Return(nil)
-		kvmock.EXPECT().Save(mock.Anything, errorSaveRoleKey, mock.Anything).Return(errors.New("mock save error role"))
-
-		validPrivilegeKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, validRoleValue, validPrivilege)
-		invalidPrivilegeKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, validRoleValue, invalidPrivilege)
-		keyNotExistPrivilegeKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, validRoleValue, keyNotExistPrivilege)
-		keyNotExistPrivilegeKey2 := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, keyNotExistRoleValue, keyNotExistPrivilege2)
-
-		// Mock grantee-id Load calls
-		kvmock.EXPECT().Load(mock.Anything, validPrivilegeKey).Call.Return("", nil)
-		kvmock.EXPECT().Load(mock.Anything, invalidPrivilegeKey).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return fmt.Errorf("mock load error, key=%s", key)
-			})
-		kvmock.EXPECT().Load(mock.Anything, keyNotExistPrivilegeKey).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return merr.WrapErrIoKeyNotFound(key)
-			})
-		kvmock.EXPECT().Load(mock.Anything, keyNotExistPrivilegeKey2).Call.
-			Return("", func(ctx context.Context, key string) error {
-				return merr.WrapErrIoKeyNotFound(key)
-			})
-		// Catch-all for any unmatched Load calls (e.g., privilege checks under newly created grantees)
-		kvmock.EXPECT().Load(mock.Anything, mock.Anything).Call.Return("", nil)
-
-		t.Run("test Grant", func(t *testing.T) {
-			kvmock.EXPECT().Save(mock.Anything, mock.Anything, validUser).Return(nil)
-			kvmock.EXPECT().Save(mock.Anything, mock.Anything, invalidUser).Return(errors.New("mock save invalid user"))
-
-			tests := []struct {
-				isValid bool
-
-				userName      string
-				roleName      string
-				privilegeName string
-
-				ignorable   bool
-				description string
-			}{
-				// exist role
-				{false, validUser, validRole, invalidPrivilege, false, "grant exist Role with error Privilege"},
-				{false, validUser, validRole, validPrivilege, true, "grant exist Role with exist Privilege, ignorable"},
-				{false, invalidUser, validRole, keyNotExistPrivilege, false, "grant exist Role with not exist Privilege with invalid user"},
-				{true, validUser, validRole, keyNotExistPrivilege, true, "grant exist Role with not exist Privilege with valid user"},
-				// error role
-				{false, validUser, invalidRole, invalidPrivilege, false, "grant invalid role with invalid privilege"},
-				{false, validUser, invalidRole, validPrivilege, false, "grant invalid role with valid privilege"},
-				{false, validUser, invalidRole, keyNotExistPrivilege, false, "grant invalid role with not exist privilege"},
-				{false, validUser, errorSaveRole, keyNotExistPrivilege, false, "grant error role with not exist privilege"},
-				// not exist role
-				{false, validUser, keyNotExistRole, validPrivilege, true, "grant not exist role with exist privilege"},
-				{true, validUser, keyNotExistRole, keyNotExistPrivilege2, false, "grant not exist role with not exist privilege"},
+		makeEntity := func(roleName, privilegeName string) *milvuspb.GrantEntity {
+			return &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: roleName},
+				Object:     &milvuspb.ObjectEntity{Name: object},
+				ObjectName: objName,
+				DbName:     util.DefaultDBName,
+				Grantor: &milvuspb.GrantorEntity{
+					User:      &milvuspb.UserEntity{Name: validUser},
+					Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
+				},
 			}
+		}
 
-			for _, test := range tests {
-				t.Run(test.description, func(t *testing.T) {
-					err := c.AlterGrant(ctx, tenant, &milvuspb.GrantEntity{
-						Role:       &milvuspb.RoleEntity{Name: test.roleName},
-						Object:     &milvuspb.ObjectEntity{Name: object},
-						ObjectName: objName,
-						DbName:     util.DefaultDBName,
-						Grantor: &milvuspb.GrantorEntity{
-							User:      &milvuspb.UserEntity{Name: test.userName},
-							Privilege: &milvuspb.PrivilegeEntity{Name: test.privilegeName},
-						},
-					}, milvuspb.OperatePrivilegeType_Grant, 0, 0)
+		t.Run("grant: role load hard error", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return("", fmt.Errorf("mock load error"))
+			// Legacy fallback also fails
+			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, objName)).Return("", fmt.Errorf("mock load error"))
 
-					if test.isValid {
-						assert.NoError(t, err)
-					} else {
-						assert.Error(t, err)
-						_, ok := err.(*common.IgnorableError)
-						if test.ignorable {
-							assert.True(t, ok)
-						} else {
-							assert.False(t, ok)
-						}
-					}
-				})
-			}
+			err := c.AlterGrant(ctx, tenant, makeEntity(invalidRole, validPrivilege), milvuspb.OperatePrivilegeType_Grant, 0, 0)
+			assert.Error(t, err)
+			assert.False(t, common.IsIgnorableError(err))
 		})
 
-		t.Run("test Revoke", func(t *testing.T) {
-			invalidPrivilegeRemove := "p-remove"
-			invalidPrivilegeRemoveKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, validRoleValue, invalidPrivilegeRemove)
+		t.Run("grant: privilege already exists returns ignorable", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, validRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			granteeID := "gid-valid"
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return(granteeID, nil)
+			privKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, granteeID, validPrivilege)
+			kvmock.EXPECT().Load(mock.Anything, privKey).Return("user1", nil) // already exists
+			// No MultiSaveAndRemove expected (no saves/removes)
 
-			kvmock.EXPECT().Load(mock.Anything, invalidPrivilegeRemoveKey).Call.Return("", nil)
-			kvmock.EXPECT().Remove(mock.Anything, invalidPrivilegeRemoveKey).Return(errors.New("mock remove error"))
-			kvmock.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
-			tests := []struct {
-				isValid bool
+			err := c.AlterGrant(ctx, tenant, makeEntity(validRole, validPrivilege), milvuspb.OperatePrivilegeType_Grant, 0, 0)
+			assert.Error(t, err)
+			assert.True(t, common.IsIgnorableError(err))
+		})
 
-				userName      string
-				roleName      string
-				privilegeName string
+		t.Run("grant: privilege load hard error", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, validRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			granteeID := "gid-valid"
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return(granteeID, nil)
+			privKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, granteeID, invalidPrivilege)
+			kvmock.EXPECT().Load(mock.Anything, privKey).Return("", fmt.Errorf("mock privilege load error"))
 
-				ignorable   bool
-				description string
-			}{
-				// invalid role
-				{false, validUser, invalidRole, validPrivilege, false, "invalid role"},
-				{false, validUser, invalidRole, invalidPrivilege, false, "invalid role, invalid privilege"},
-				{false, validUser, invalidRole, keyNotExistPrivilege, false, "invalid role, not exist privilege"},
-				// not exist role
-				{false, validUser, keyNotExistRole, validPrivilege, true, "not exist role with exist privilege"},
-				// exist role
-				{false, validUser, validRole, invalidPrivilege, false, "exist role with invalid privilege"},
-				{false, validUser, validRole, keyNotExistPrivilege, true, "exist role with not exist privilege"},
-				{true, validUser, validRole, validPrivilege, false, "exist role with exist privilege success to remove"},
-				{false, validUser, validRole, invalidPrivilegeRemove, false, "exist role with exist privilege fail to remove"},
-			}
+			err := c.AlterGrant(ctx, tenant, makeEntity(validRole, invalidPrivilege), milvuspb.OperatePrivilegeType_Grant, 0, 0)
+			assert.Error(t, err)
+			assert.False(t, common.IsIgnorableError(err))
+		})
 
-			for _, test := range tests {
-				t.Run(test.description, func(t *testing.T) {
-					err := c.AlterGrant(ctx, tenant, &milvuspb.GrantEntity{
-						Role:       &milvuspb.RoleEntity{Name: test.roleName},
-						Object:     &milvuspb.ObjectEntity{Name: object},
-						ObjectName: objName,
-						DbName:     util.DefaultDBName,
-						Grantor: &milvuspb.GrantorEntity{
-							User:      &milvuspb.UserEntity{Name: test.userName},
-							Privilege: &milvuspb.PrivilegeEntity{Name: test.privilegeName},
-						},
-					}, milvuspb.OperatePrivilegeType_Revoke, 0, 0)
+		t.Run("grant: new role + new privilege atomically saved", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return("", merr.WrapErrIoKeyNotFound(granteeKey))
+			// Legacy fallback
+			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, objName)).Return("", merr.WrapErrIoKeyNotFound(""))
 
-					if test.isValid {
-						assert.NoError(t, err)
-					} else {
-						assert.Error(t, err)
-						_, ok := err.(*common.IgnorableError)
-						if test.ignorable {
-							assert.True(t, ok)
-						} else {
-							assert.False(t, ok)
-						}
-					}
-				})
-			}
+			newGranteeID := crypto.MD5(granteeKey)
+			privKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, newGranteeID, keyNotExistPrivilege)
+			kvmock.EXPECT().Load(mock.Anything, privKey).Return("", merr.WrapErrIoKeyNotFound(privKey))
+
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
+				map[string]string{granteeKey: newGranteeID, privKey: validUser},
+				([]string)(nil)).Return(nil)
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(keyNotExistRole, keyNotExistPrivilege), milvuspb.OperatePrivilegeType_Grant, 0, 0)
+			assert.NoError(t, err)
+		})
+
+		t.Run("revoke: role not found returns ignorable", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return("", merr.WrapErrIoKeyNotFound(granteeKey))
+			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, keyNotExistRole, object, objName)).Return("", merr.WrapErrIoKeyNotFound(""))
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(keyNotExistRole, validPrivilege), milvuspb.OperatePrivilegeType_Revoke, 0, 0)
+			assert.Error(t, err)
+			assert.True(t, common.IsIgnorableError(err))
+		})
+
+		t.Run("revoke: privilege not found returns ignorable", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, validRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			granteeID := "gid-valid"
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return(granteeID, nil)
+			privKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, granteeID, keyNotExistPrivilege)
+			kvmock.EXPECT().Load(mock.Anything, privKey).Return("", merr.WrapErrIoKeyNotFound(privKey))
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(validRole, keyNotExistPrivilege), milvuspb.OperatePrivilegeType_Revoke, 0, 0)
+			assert.Error(t, err)
+			assert.True(t, common.IsIgnorableError(err))
+		})
+
+		t.Run("revoke: exist privilege atomically removed", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, validRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			granteeID := "gid-valid"
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return(granteeID, nil)
+			privKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, granteeID, validPrivilege)
+			kvmock.EXPECT().Load(mock.Anything, privKey).Return("user1", nil) // exists
+
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
+				map[string]string{},
+				[]string{privKey}).Return(nil)
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(validRole, validPrivilege), milvuspb.OperatePrivilegeType_Revoke, 0, 0)
+			assert.NoError(t, err)
+		})
+
+		t.Run("revoke: role load hard error", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+			granteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, funcutil.CombineObjectName(util.DefaultDBName, objName))
+			kvmock.EXPECT().Load(mock.Anything, granteeKey).Return("", fmt.Errorf("mock load error"))
+			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, invalidRole, object, objName)).Return("", fmt.Errorf("mock load error"))
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(invalidRole, validPrivilege), milvuspb.OperatePrivilegeType_Revoke, 0, 0)
+			assert.Error(t, err)
+			assert.False(t, common.IsIgnorableError(err))
 		})
 	})
 
-	t.Run("test AlterGrant dual-write", func(t *testing.T) {
+	t.Run("test AlterGrant dual-write atomic", func(t *testing.T) {
 		var (
-			kvmock = mocks.NewTxnKV(t)
-			c      = NewCatalog(kvmock, nil)
-
 			role            = "admin"
 			object          = "Collection"
 			collName        = "myCol"
@@ -2522,81 +2459,108 @@ func TestRBAC_Grant(t *testing.T) {
 			}
 		}
 
-		t.Run("grant writes both ID-based and name-based keys", func(t *testing.T) {
-			// Primary key: not found → create new grantee
+		t.Run("grant atomically writes both ID-based and name-based keys", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+
+			// Primary key: not found → create new grantee (collected in saves)
 			kvmock.EXPECT().Load(mock.Anything, primaryKey).
 				Return("", merr.WrapErrIoKeyNotFound(primaryKey)).Once()
-			kvmock.EXPECT().Save(mock.Anything, primaryKey, primaryGranteeID).Return(nil).Once()
-			// Primary privilege: not found → save
+			// Primary privilege: not found → save (collected in saves)
 			kvmock.EXPECT().Load(mock.Anything, primaryIDKey).
 				Return("", merr.WrapErrIoKeyNotFound(primaryIDKey)).Once()
-			kvmock.EXPECT().Save(mock.Anything, primaryIDKey, grantor).Return(nil).Once()
 
-			// Secondary (name-based): not found → create new grantee
+			// Secondary (name-based): not found → create new grantee (collected in saves)
 			kvmock.EXPECT().Load(mock.Anything, nameKey).
 				Return("", merr.WrapErrIoKeyNotFound(nameKey)).Once()
 			// Legacy fallback: also not found
 			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, collName)).
 				Return("", merr.WrapErrIoKeyNotFound("")).Once()
-			kvmock.EXPECT().Save(mock.Anything, nameKey, nameGranteeID).Return(nil).Once()
-			// Secondary privilege: not found → save
+			// Secondary privilege: not found → save (collected in saves)
 			kvmock.EXPECT().Load(mock.Anything, nameIDKey).
 				Return("", merr.WrapErrIoKeyNotFound(nameIDKey)).Once()
-			kvmock.EXPECT().Save(mock.Anything, nameIDKey, grantor).Return(nil).Once()
+
+			// All saves happen atomically in one MultiSaveAndRemove
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
+				map[string]string{
+					primaryKey:   primaryGranteeID,
+					primaryIDKey: grantor,
+					nameKey:      nameGranteeID,
+					nameIDKey:    grantor,
+				},
+				([]string)(nil)).Return(nil).Once()
 
 			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Grant, dbID, colID)
 			assert.NoError(t, err)
 		})
 
-		t.Run("grant primary already exists returns ignorable, secondary still written", func(t *testing.T) {
-			// Primary key: exists → grantee loaded
+		t.Run("grant both exist returns ignorable, no writes", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+
+			// Primary: exists → ignorable
 			kvmock.EXPECT().Load(mock.Anything, primaryKey).Return(primaryGranteeID, nil).Once()
-			// Primary privilege: exists → ignorable
 			kvmock.EXPECT().Load(mock.Anything, primaryIDKey).Return(grantor, nil).Once()
 
-			// Secondary: also exists
+			// Secondary: also exists → ignorable
 			kvmock.EXPECT().Load(mock.Anything, nameKey).Return(nameGranteeID, nil).Once()
 			kvmock.EXPECT().Load(mock.Anything, nameIDKey).Return(grantor, nil).Once()
 
+			// No MultiSaveAndRemove call expected (no saves/removes)
 			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Grant, dbID, colID)
 			assert.Error(t, err)
 			assert.True(t, common.IsIgnorableError(err))
 		})
 
-		t.Run("revoke removes both ID-based and name-based keys", func(t *testing.T) {
-			// Primary key: exists
-			kvmock.EXPECT().Load(mock.Anything, primaryKey).Return(primaryGranteeID, nil).Once()
-			// Primary privilege: exists → remove
-			kvmock.EXPECT().Load(mock.Anything, primaryIDKey).Return(grantor, nil).Once()
-			kvmock.EXPECT().Remove(mock.Anything, primaryIDKey).Return(nil).Once()
+		t.Run("revoke atomically removes both ID-based and name-based keys", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
 
-			// Secondary: exists
+			// Primary: exists → collect remove
+			kvmock.EXPECT().Load(mock.Anything, primaryKey).Return(primaryGranteeID, nil).Once()
+			kvmock.EXPECT().Load(mock.Anything, primaryIDKey).Return(grantor, nil).Once()
+
+			// Secondary: exists → collect remove
 			kvmock.EXPECT().Load(mock.Anything, nameKey).Return(nameGranteeID, nil).Once()
 			kvmock.EXPECT().Load(mock.Anything, nameIDKey).Return(grantor, nil).Once()
-			kvmock.EXPECT().Remove(mock.Anything, nameIDKey).Return(nil).Once()
+
+			// Atomic remove of both keys
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
+				map[string]string{},
+				mock.MatchedBy(func(removes []string) bool {
+					return len(removes) == 2
+				})).Return(nil).Once()
 
 			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Revoke, dbID, colID)
 			assert.NoError(t, err)
 		})
 
-		t.Run("revoke primary not found but secondary exists still cleans up", func(t *testing.T) {
-			// Primary key: not found → ignorable
+		t.Run("revoke primary not found, secondary removed atomically", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+
+			// Primary: not found → ignorable
 			kvmock.EXPECT().Load(mock.Anything, primaryKey).
 				Return("", merr.WrapErrIoKeyNotFound(primaryKey)).Once()
 
-			// Secondary: exists → remove
+			// Secondary: exists → collect remove
 			kvmock.EXPECT().Load(mock.Anything, nameKey).Return(nameGranteeID, nil).Once()
 			kvmock.EXPECT().Load(mock.Anything, nameIDKey).Return(grantor, nil).Once()
-			kvmock.EXPECT().Remove(mock.Anything, nameIDKey).Return(nil).Once()
+
+			// Atomic remove of secondary key only
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
+				map[string]string{},
+				[]string{nameIDKey}).Return(nil).Once()
 
 			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Revoke, dbID, colID)
-			// Should return ignorable from primary
 			assert.Error(t, err)
 			assert.True(t, common.IsIgnorableError(err))
 		})
 
 		t.Run("revoke primary hard error stops immediately", func(t *testing.T) {
-			// Primary key: hard error (not key-not-found)
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+
 			kvmock.EXPECT().Load(mock.Anything, primaryKey).
 				Return("", errors.New("etcd unavailable")).Once()
 
@@ -2607,13 +2571,14 @@ func TestRBAC_Grant(t *testing.T) {
 		})
 
 		t.Run("grant secondary hard error propagated", func(t *testing.T) {
-			// Primary: success
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+
+			// Primary: success (collected in saves)
 			kvmock.EXPECT().Load(mock.Anything, primaryKey).
 				Return("", merr.WrapErrIoKeyNotFound(primaryKey)).Once()
-			kvmock.EXPECT().Save(mock.Anything, primaryKey, primaryGranteeID).Return(nil).Once()
 			kvmock.EXPECT().Load(mock.Anything, primaryIDKey).
 				Return("", merr.WrapErrIoKeyNotFound(primaryIDKey)).Once()
-			kvmock.EXPECT().Save(mock.Anything, primaryIDKey, grantor).Return(nil).Once()
 
 			// Secondary: hard error on Load
 			kvmock.EXPECT().Load(mock.Anything, nameKey).
@@ -2627,8 +2592,10 @@ func TestRBAC_Grant(t *testing.T) {
 			assert.False(t, common.IsIgnorableError(err))
 		})
 
-		t.Run("non-dual-write skips secondary key", func(t *testing.T) {
-			// dbID=0, collectionID=0 → no dual-write
+		t.Run("non-dual-write atomically writes single key", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+
 			nameOnlyKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, funcutil.CombineObjectName(dbName, collName))
 			nameOnlyGranteeID := crypto.MD5(nameOnlyKey)
 			nameOnlyIDKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, nameOnlyGranteeID, privilege)
@@ -2638,14 +2605,46 @@ func TestRBAC_Grant(t *testing.T) {
 			// Legacy fallback
 			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, collName)).
 				Return("", merr.WrapErrIoKeyNotFound("")).Once()
-			kvmock.EXPECT().Save(mock.Anything, nameOnlyKey, nameOnlyGranteeID).Return(nil).Once()
 			kvmock.EXPECT().Load(mock.Anything, nameOnlyIDKey).
 				Return("", merr.WrapErrIoKeyNotFound(nameOnlyIDKey)).Once()
-			kvmock.EXPECT().Save(mock.Anything, nameOnlyIDKey, grantor).Return(nil).Once()
 
-			// No secondary key calls expected
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
+				map[string]string{
+					nameOnlyKey:   nameOnlyGranteeID,
+					nameOnlyIDKey: grantor,
+				},
+				([]string)(nil)).Return(nil).Once()
+
 			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Grant, 0, 0)
 			assert.NoError(t, err)
+		})
+
+		t.Run("MultiSaveAndRemove failure returns error", func(t *testing.T) {
+			kvmock := mocks.NewTxnKV(t)
+			c := NewCatalog(kvmock, nil)
+
+			// Primary: new key
+			kvmock.EXPECT().Load(mock.Anything, primaryKey).
+				Return("", merr.WrapErrIoKeyNotFound(primaryKey)).Once()
+			kvmock.EXPECT().Load(mock.Anything, primaryIDKey).
+				Return("", merr.WrapErrIoKeyNotFound(primaryIDKey)).Once()
+			// Secondary: new key
+			kvmock.EXPECT().Load(mock.Anything, nameKey).
+				Return("", merr.WrapErrIoKeyNotFound(nameKey)).Once()
+			kvmock.EXPECT().Load(mock.Anything, funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
+				fmt.Sprintf("%s/%s/%s", role, object, collName))).
+				Return("", merr.WrapErrIoKeyNotFound("")).Once()
+			kvmock.EXPECT().Load(mock.Anything, nameIDKey).
+				Return("", merr.WrapErrIoKeyNotFound(nameIDKey)).Once()
+
+			// Atomic commit fails
+			kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+				Return(errors.New("etcd commit failed")).Once()
+
+			err := c.AlterGrant(ctx, tenant, makeEntity(), milvuspb.OperatePrivilegeType_Grant, dbID, colID)
+			assert.Error(t, err)
+			assert.False(t, common.IsIgnorableError(err))
+			assert.Contains(t, err.Error(), "etcd commit failed")
 		})
 	})
 
@@ -3963,5 +3962,93 @@ func TestMigrateGrantsToEntityID(t *testing.T) {
 
 		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
 		assert.Error(t, err)
+	})
+
+	t.Run("wildcard grant migration: migrates dbName only", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKey).Return("", errors.New("not found"))
+		granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+
+		// Wildcard grant: default.* should be migrated to dbID:1.*
+		key1 := granteeKey + "/role1/Collection/default.*"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1}, []string{"gid1"}, nil)
+
+		// The old grantee-id sub-keys for gid1
+		oldIDPrefix := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "gid1/")
+		oldIDKey := oldIDPrefix + "PrivilegeLoad"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldIDPrefix).Return(
+			[]string{oldIDKey}, []string{"user1"}, nil)
+
+		// Build expected new key with dbID:1.* format (only dbName migrated, objectName stays *)
+		newGranteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
+			fmt.Sprintf("role1/Collection/%s", funcutil.CombineObjectName("dbID:1", "*")))
+		newID := crypto.MD5(newGranteeKey)
+		newIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, fmt.Sprintf("%s/PrivilegeLoad", newID))
+
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
+			map[string]string{newGranteeKey: newID, newIDKey: "user1"},
+			([]string)(nil)).Return(nil)
+		kvmock.EXPECT().Save(mock.Anything, GrantMigrationToIDKey, "done").Return(nil)
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("wildcard grant already ID-based: skipped", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKey).Return("", errors.New("not found"))
+		granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+
+		// Already ID-based wildcard grant: dbID:1.* should be skipped
+		key1 := granteeKey + "/role1/Collection/dbID:1.*"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1}, []string{"gid1"}, nil)
+
+		kvmock.EXPECT().Save(mock.Anything, GrantMigrationToIDKey, "done").Return(nil)
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("wildcard grant with non-existent db: removes stale grant", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKey).Return("", errors.New("not found"))
+		granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+
+		// Wildcard grant for non-existent database
+		key1 := granteeKey + "/role1/Collection/gone_db.*"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1}, []string{"gid1"}, nil)
+
+		oldIDPrefix := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "gid1/")
+		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
+			[]string{oldIDPrefix}).Return(nil)
+		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything,
+			[]string{key1}).Return(nil)
+		kvmock.EXPECT().Save(mock.Anything, GrantMigrationToIDKey, "done").Return(nil)
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("all-database wildcard grant (star.star) skipped", func(t *testing.T) {
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil)
+		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKey).Return("", errors.New("not found"))
+		granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+
+		// All-database wildcard grant: *.* should be skipped entirely (no migration, no removal)
+		key1 := granteeKey + "/role1/Collection/*.*"
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
+			[]string{key1}, []string{"gid1"}, nil)
+
+		kvmock.EXPECT().Save(mock.Anything, GrantMigrationToIDKey, "done").Return(nil)
+
+		err := c.MigrateGrantsToEntityID(ctx, tenant, collectionNameToID, dbNameToID)
+		assert.NoError(t, err)
 	})
 }

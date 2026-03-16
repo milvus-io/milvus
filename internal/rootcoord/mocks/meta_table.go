@@ -3065,9 +3065,9 @@ func (_c *IMetaTable_ListFileResource_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
-// ListPolicy provides a mock function with given fields: ctx, tenant
-func (_m *IMetaTable) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.GrantEntity, error) {
-	ret := _m.Called(ctx, tenant)
+// ListPolicy provides a mock function with given fields: ctx, tenant, supportIDBased
+func (_m *IMetaTable) ListPolicy(ctx context.Context, tenant string, supportIDBased bool) ([]*milvuspb.GrantEntity, error) {
+	ret := _m.Called(ctx, tenant, supportIDBased)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListPolicy")
@@ -3075,19 +3075,19 @@ func (_m *IMetaTable) ListPolicy(ctx context.Context, tenant string) ([]*milvusp
 
 	var r0 []*milvuspb.GrantEntity
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*milvuspb.GrantEntity, error)); ok {
-		return rf(ctx, tenant)
+	if rf, ok := ret.Get(0).(func(context.Context, string, bool) ([]*milvuspb.GrantEntity, error)); ok {
+		return rf(ctx, tenant, supportIDBased)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) []*milvuspb.GrantEntity); ok {
-		r0 = rf(ctx, tenant)
+	if rf, ok := ret.Get(0).(func(context.Context, string, bool) []*milvuspb.GrantEntity); ok {
+		r0 = rf(ctx, tenant, supportIDBased)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*milvuspb.GrantEntity)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = rf(ctx, tenant)
+	if rf, ok := ret.Get(1).(func(context.Context, string, bool) error); ok {
+		r1 = rf(ctx, tenant, supportIDBased)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3103,13 +3103,14 @@ type IMetaTable_ListPolicy_Call struct {
 // ListPolicy is a helper method to define mock.On call
 //   - ctx context.Context
 //   - tenant string
-func (_e *IMetaTable_Expecter) ListPolicy(ctx interface{}, tenant interface{}) *IMetaTable_ListPolicy_Call {
-	return &IMetaTable_ListPolicy_Call{Call: _e.mock.On("ListPolicy", ctx, tenant)}
+//   - supportIDBased bool
+func (_e *IMetaTable_Expecter) ListPolicy(ctx interface{}, tenant interface{}, supportIDBased interface{}) *IMetaTable_ListPolicy_Call {
+	return &IMetaTable_ListPolicy_Call{Call: _e.mock.On("ListPolicy", ctx, tenant, supportIDBased)}
 }
 
-func (_c *IMetaTable_ListPolicy_Call) Run(run func(ctx context.Context, tenant string)) *IMetaTable_ListPolicy_Call {
+func (_c *IMetaTable_ListPolicy_Call) Run(run func(ctx context.Context, tenant string, supportIDBased bool)) *IMetaTable_ListPolicy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string))
+		run(args[0].(context.Context), args[1].(string), args[2].(bool))
 	})
 	return _c
 }
@@ -3119,7 +3120,7 @@ func (_c *IMetaTable_ListPolicy_Call) Return(_a0 []*milvuspb.GrantEntity, _a1 er
 	return _c
 }
 
-func (_c *IMetaTable_ListPolicy_Call) RunAndReturn(run func(context.Context, string) ([]*milvuspb.GrantEntity, error)) *IMetaTable_ListPolicy_Call {
+func (_c *IMetaTable_ListPolicy_Call) RunAndReturn(run func(context.Context, string, bool) ([]*milvuspb.GrantEntity, error)) *IMetaTable_ListPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3237,6 +3238,64 @@ func (_c *IMetaTable_ListUserRole_Call) Return(_a0 []string, _a1 error) *IMetaTa
 }
 
 func (_c *IMetaTable_ListUserRole_Call) RunAndReturn(run func(context.Context, string) ([]string, error)) *IMetaTable_ListUserRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LookupCollectionAndDBID provides a mock function with given fields: ctx, dbName, collectionName
+func (_m *IMetaTable) LookupCollectionAndDBID(ctx context.Context, dbName string, collectionName string) (int64, int64) {
+	ret := _m.Called(ctx, dbName, collectionName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LookupCollectionAndDBID")
+	}
+
+	var r0 int64
+	var r1 int64
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (int64, int64)); ok {
+		return rf(ctx, dbName, collectionName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) int64); ok {
+		r0 = rf(ctx, dbName, collectionName)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) int64); ok {
+		r1 = rf(ctx, dbName, collectionName)
+	} else {
+		r1 = ret.Get(1).(int64)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_LookupCollectionAndDBID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LookupCollectionAndDBID'
+type IMetaTable_LookupCollectionAndDBID_Call struct {
+	*mock.Call
+}
+
+// LookupCollectionAndDBID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbName string
+//   - collectionName string
+func (_e *IMetaTable_Expecter) LookupCollectionAndDBID(ctx interface{}, dbName interface{}, collectionName interface{}) *IMetaTable_LookupCollectionAndDBID_Call {
+	return &IMetaTable_LookupCollectionAndDBID_Call{Call: _e.mock.On("LookupCollectionAndDBID", ctx, dbName, collectionName)}
+}
+
+func (_c *IMetaTable_LookupCollectionAndDBID_Call) Run(run func(ctx context.Context, dbName string, collectionName string)) *IMetaTable_LookupCollectionAndDBID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_LookupCollectionAndDBID_Call) Return(_a0 int64, _a1 int64) *IMetaTable_LookupCollectionAndDBID_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_LookupCollectionAndDBID_Call) RunAndReturn(run func(context.Context, string, string) (int64, int64)) *IMetaTable_LookupCollectionAndDBID_Call {
 	_c.Call.Return(run)
 	return _c
 }

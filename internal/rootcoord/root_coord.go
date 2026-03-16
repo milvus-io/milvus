@@ -2685,7 +2685,7 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 		}, nil
 	}
 
-	policies, err := c.meta.ListPolicy(ctx, util.DefaultTenant)
+	policies, err := c.meta.ListPolicy(ctx, util.DefaultTenant, in.GetSupportIdBasedPolicy())
 	if err != nil {
 		ctxLog.Error("fail to list policy", zap.Error(err))
 		return &internalpb.ListPolicyResponse{

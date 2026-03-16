@@ -172,16 +172,6 @@ func ExtractCollectionID(objectName string) (int64, error) {
 	return id, err
 }
 
-// PolicyForResourceByID constructs an ID-based resource string "Collection-default.colID:12345".
-func PolicyForResourceByID(dbName string, objectType string, collectionID int64) string {
-	return PolicyForResource(dbName, objectType, FormatCollectionID(collectionID))
-}
-
-// PolicyForPrivilegeByID constructs an ID-based policy JSON string.
-func PolicyForPrivilegeByID(roleName string, dbName string, objectType string, collectionID int64, privilege string) string {
-	return PolicyForPrivilege(roleName, objectType, FormatCollectionID(collectionID), privilege, dbName)
-}
-
 const databaseIDPrefix = "dbID:"
 
 // FormatDatabaseID returns the ID-based database name format "dbID:123".

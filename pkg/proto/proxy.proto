@@ -65,7 +65,8 @@ message UpdateCredCacheRequest {
 message RefreshPolicyInfoCacheRequest {
   common.MsgBase base = 1;
   int32 opType = 2;
-  string opKey = 3;
+  string opKey = 3;              // name-based policy key (backward compatible)
+  string opKeyIDBased = 4;       // ID-based policy key (new proxy reads this first)
 }
 
 // Deprecated: use ClusterLimiter instead it

@@ -1261,57 +1261,60 @@ func (kc *Catalog) ListUser(ctx context.Context, tenant string, entity *milvuspb
 
 func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType, dbID int64, collectionID int64) error {
 	privilegeName := entity.Grantor.Privilege.Name
-	isDualWrite := entity.Object.Name == "Collection" && collectionID > 0 && dbID > 0
+	// Dual-write when we have an ID-based alternative:
+	// - specific collection: dbID > 0 && collectionID > 0
+	// - wildcard collection (*): dbID > 0 && collectionID == 0
+	isDualWrite := entity.Object.Name == "Collection" && dbID > 0
 
 	// buildGranteeKey constructs the first-level grantee-privileges key.
 	buildGranteeKey := func(dbPart, objPart string) string {
 		return fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, entity.Role.Name, entity.Object.Name, funcutil.CombineObjectName(dbPart, objPart))
 	}
 
-	// Primary key: ID-based for Collection grants, name-based for others
-	var primaryKey string
-	if isDualWrite {
-		primaryKey = buildGranteeKey(funcutil.FormatDatabaseID(dbID), funcutil.FormatCollectionID(collectionID))
-	} else {
-		primaryKey = buildGranteeKey(entity.DbName, entity.ObjectName)
-	}
+	// Collect all save/remove operations for atomic commit
+	saves := make(map[string]string)
+	var removes []string
+	var ignorableErr error // track "already granted" / "not found" for caller
 
-	// alterSingleGrant performs grant/revoke on a single grantee key + its grantee-id sub-key.
-	// allowLegacyFallback: only try old-format key (without dbName prefix) for name-based keys,
-	// not for ID-based primary keys which would match the wrong grantee bucket.
-	alterSingleGrant := func(granteeKey string, allowLegacyFallback bool) error {
-		// Load or create grantee ID
-		var granteeID string
+	// getOrCreateGranteeID gets the existing grantee ID or creates a new one for a given key.
+	// It populates saves map for new grantee keys.
+	// Returns (granteeID, error). If the grant doesn't exist for revoke, returns ignorable error.
+	getOrCreateGranteeID := func(granteeKey string, allowLegacyFallback bool) (string, error) {
 		if v, err := kc.Txn.Load(ctx, granteeKey); err == nil {
-			granteeID = v
+			return v, nil
 		} else {
 			// Compatible with old grants that didn't include dbName prefix
 			if allowLegacyFallback && entity.DbName == util.DefaultDBName {
 				if v2, err2 := kc.Txn.Load(ctx, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, entity.Role.Name, entity.Object.Name, entity.ObjectName)); err2 == nil {
-					granteeID = v2
+					return v2, nil
 				}
 			}
-			if granteeID == "" {
-				if funcutil.IsRevoke(operateType) {
-					if errors.Is(err, merr.ErrIoKeyNotFound) {
-						return common.NewIgnorableError(fmt.Errorf("the grant[%s] isn't existed", granteeKey))
-					}
-					return err
+			if funcutil.IsRevoke(operateType) {
+				if errors.Is(err, merr.ErrIoKeyNotFound) {
+					return "", common.NewIgnorableError(fmt.Errorf("the grant[%s] isn't existed", granteeKey))
 				}
-				if !errors.Is(err, merr.ErrIoKeyNotFound) {
-					return err
-				}
-				granteeID = crypto.MD5(granteeKey)
-				if err = kc.Txn.Save(ctx, granteeKey, granteeID); err != nil {
-					log.Ctx(ctx).Error("fail to allocate id when altering the grant", zap.Error(err))
-					return err
-				}
+				return "", err
 			}
+			if !errors.Is(err, merr.ErrIoKeyNotFound) {
+				return "", err
+			}
+			// Grant: create new grantee ID
+			granteeID := crypto.MD5(granteeKey)
+			saves[granteeKey] = granteeID
+			return granteeID, nil
+		}
+	}
+
+	// collectGrantOps resolves grantee ID and collects the grant/revoke operation for a single key.
+	collectGrantOps := func(granteeKey string, allowLegacyFallback bool) error {
+		granteeID, err := getOrCreateGranteeID(granteeKey, allowLegacyFallback)
+		if err != nil {
+			return err
 		}
 
 		// Operate on grantee-id sub-key
 		idKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, granteeID, privilegeName)
-		_, err := kc.Txn.Load(ctx, idKey)
+		_, err = kc.Txn.Load(ctx, idKey)
 		if err != nil {
 			if !errors.Is(err, merr.ErrIoKeyNotFound) {
 				return err
@@ -1320,48 +1323,59 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 				return common.NewIgnorableError(fmt.Errorf("the grantee-id[%s] isn't existed", idKey))
 			}
 			if funcutil.IsGrant(operateType) {
-				if err = kc.Txn.Save(ctx, idKey, entity.Grantor.User.Name); err != nil {
-					log.Ctx(ctx).Error("fail to save the grantee id", zap.String("key", idKey), zap.Error(err))
-				}
-				return err
+				saves[idKey] = entity.Grantor.User.Name
+				return nil
 			}
 			return nil
 		}
 		if funcutil.IsRevoke(operateType) {
-			if err = kc.Txn.Remove(ctx, idKey); err != nil {
-				log.Ctx(ctx).Error("fail to remove the grantee id", zap.String("key", idKey), zap.Error(err))
-				return err
-			}
+			removes = append(removes, idKey)
 			return nil
 		}
 		return common.NewIgnorableError(fmt.Errorf("the privilege[%s] has been granted", privilegeName))
 	}
 
-	// Execute on primary key (no legacy fallback for ID-based keys)
-	primaryErr := alterSingleGrant(primaryKey, !isDualWrite)
-	if primaryErr != nil && !common.IsIgnorableError(primaryErr) {
-		return primaryErr
+	// Collect operations for primary key
+	var primaryKey string
+	if isDualWrite {
+		objPart := entity.ObjectName // wildcard "*" stays as-is
+		if collectionID > 0 {
+			objPart = funcutil.FormatCollectionID(collectionID)
+		}
+		primaryKey = buildGranteeKey(funcutil.FormatDatabaseID(dbID), objPart)
+	} else {
+		primaryKey = buildGranteeKey(entity.DbName, entity.ObjectName)
 	}
 
-	// Dual-write: also write name-based key for rollback safety.
-	// Always attempt secondary even if primary returned ignorable error,
-	// so revoke properly cleans up both keys.
+	if err := collectGrantOps(primaryKey, !isDualWrite); err != nil {
+		if !common.IsIgnorableError(err) {
+			return err
+		}
+		ignorableErr = err
+	}
+
+	// Collect operations for secondary (name-based) key
 	if isDualWrite {
 		nameKey := buildGranteeKey(entity.DbName, entity.ObjectName)
-		if err := alterSingleGrant(nameKey, true); err != nil {
+		if err := collectGrantOps(nameKey, true); err != nil {
 			if !common.IsIgnorableError(err) {
 				return err
 			}
-			log.Ctx(ctx).Warn("dual-write: ignorable error on name-based grant key",
-				zap.String("key", nameKey), zap.Error(err))
+			if ignorableErr == nil {
+				ignorableErr = err
+			}
 		}
 	}
 
-	// Propagate ignorable error from primary after secondary is attempted
-	if primaryErr != nil {
-		return primaryErr
+	// Atomic commit: apply all saves and removes in one transaction
+	if len(saves) > 0 || len(removes) > 0 {
+		if err := kc.Txn.MultiSaveAndRemove(ctx, saves, removes); err != nil {
+			log.Ctx(ctx).Error("fail to commit grant operations atomically", zap.Error(err))
+			return err
+		}
 	}
-	return nil
+
+	return ignorableErr
 }
 
 func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
@@ -1546,67 +1560,14 @@ func (kc *Catalog) MigrateGrantsToEntityID(ctx context.Context, tenant string,
 	var removeKeys []string
 	var removeIDPrefixes []string
 
-	for i, key := range keys {
-		grantInfos := typeutil.AfterN(key, granteeKey, "/")
-		if len(grantInfos) != 3 {
-			continue
-		}
-		// Only migrate Collection grants that are name-based (not wildcard, not already ID-based)
-		if grantInfos[1] != "Collection" {
-			continue
-		}
-		dbName, objectName := funcutil.SplitObjectName(grantInfos[2])
-		if objectName == util.AnyWord || funcutil.IsIDBasedObjectName(objectName) {
-			continue
-		}
-		// Also skip if dbName is already ID-based (already migrated)
-		if funcutil.IsIDBasedDBName(dbName) {
-			continue
-		}
-
-		// Resolve database name to ID
-		dbID, dbResolveErr := dbNameToID(dbName)
-		if dbResolveErr != nil {
-			log.Ctx(ctx).Warn("database not found during grant migration, removing stale grant",
-				zap.String("dbName", dbName), zap.String("collectionName", objectName), zap.Error(dbResolveErr))
-			// Reconstruct logical key (without etcd rootPath) to avoid double-prefix on deletion
-			logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, grantInfos[0], grantInfos[1], grantInfos[2])
-			removeKeys = append(removeKeys, logicalKey)
-			oldID := values[i]
-			removeIDPrefixes = append(removeIDPrefixes, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, oldID))
-			continue
-		}
-
-		// Resolve collection name to ID
-		collID, resolveErr := collectionNameToID(dbName, objectName)
-		if resolveErr != nil {
-			// Collection no longer exists — delete the stale grant
-			log.Ctx(ctx).Warn("collection not found during grant migration, removing stale grant",
-				zap.String("dbName", dbName), zap.String("collectionName", objectName), zap.Error(resolveErr))
-			// Reconstruct logical key (without etcd rootPath) to avoid double-prefix on deletion
-			logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, grantInfos[0], grantInfos[1], grantInfos[2])
-			removeKeys = append(removeKeys, logicalKey)
-			oldID := values[i]
-			removeIDPrefixes = append(removeIDPrefixes, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, oldID))
-			continue
-		}
-
-		// Build new grantee key with ID-based format: dbID:{dbID}.colID:{colID}
-		newGranteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, grantInfos[0], grantInfos[1],
-			funcutil.CombineObjectName(funcutil.FormatDatabaseID(dbID), funcutil.FormatCollectionID(collID)))
-		newID := crypto.MD5(newGranteeKey)
-
-		// Save new grantee key → new ID (additive: old name-based key is kept for rollback safety)
-		saves[newGranteeKey] = newID
-
-		// Migrate grantee-id sub-keys from old ID to new ID
-		oldID := values[i]
+	// migrateGranteeSubKeys copies grantee-id sub-keys from old ID to new ID.
+	migrateGranteeSubKeys := func(oldID, newID string) {
 		oldIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, oldID)
 		idKeys, idValues, idErr := kc.Txn.LoadWithPrefix(ctx, oldIDPrefix)
 		if idErr != nil {
 			log.Ctx(ctx).Warn("fail to load grantee-id sub-keys during migration",
 				zap.String("prefix", oldIDPrefix), zap.Error(idErr))
-			continue
+			return
 		}
 		for j, idKey := range idKeys {
 			privilegeName := typeutil.After(idKey, oldIDPrefix)
@@ -1616,7 +1577,78 @@ func (kc *Catalog) MigrateGrantsToEntityID(ctx context.Context, tenant string,
 			newIDKey := fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, newID, privilegeName)
 			saves[newIDKey] = idValues[j]
 		}
-		// Note: old grantee-id sub-keys are NOT removed (additive migration for rollback safety)
+	}
+
+	removeStaleGrant := func(i int, grantInfos []string) {
+		logicalKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, grantInfos[0], grantInfos[1], grantInfos[2])
+		removeKeys = append(removeKeys, logicalKey)
+		oldID := values[i]
+		removeIDPrefixes = append(removeIDPrefixes, funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, oldID))
+	}
+
+	for i, key := range keys {
+		grantInfos := typeutil.AfterN(key, granteeKey+"/", "/")
+		if len(grantInfos) != 3 {
+			continue
+		}
+		objType := grantInfos[1]
+
+		// Only migrate Collection grants
+		if objType != "Collection" {
+			continue
+		}
+		dbName, objectName := funcutil.SplitObjectName(grantInfos[2])
+
+		// Skip grants that are already fully ID-based
+		if funcutil.IsIDBasedObjectName(objectName) && funcutil.IsIDBasedDBName(dbName) {
+			continue
+		}
+		// Skip if only dbName is already ID-based (wildcard with ID-based db)
+		if objectName == util.AnyWord && funcutil.IsIDBasedDBName(dbName) {
+			continue
+		}
+		// Skip non-wildcard grants that already have ID-based objectName
+		if funcutil.IsIDBasedObjectName(objectName) {
+			continue
+		}
+		// Skip all-database wildcard grants (*.*) — no dbName to migrate
+		if dbName == util.AnyWord {
+			continue
+		}
+
+		// Resolve dbName → dbID
+		dbID, dbResolveErr := dbNameToID(dbName)
+		if dbResolveErr != nil {
+			log.Ctx(ctx).Warn("database not found during grant migration, removing stale grant",
+				zap.String("dbName", dbName), zap.String("collectionName", objectName), zap.Error(dbResolveErr))
+			removeStaleGrant(i, grantInfos)
+			continue
+		}
+
+		// Wildcard grant: only migrate the dbName part (default.* → dbID:1.*)
+		if objectName == util.AnyWord {
+			newGranteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, grantInfos[0], grantInfos[1],
+				funcutil.CombineObjectName(funcutil.FormatDatabaseID(dbID), util.AnyWord))
+			newID := crypto.MD5(newGranteeKey)
+			saves[newGranteeKey] = newID
+			migrateGranteeSubKeys(values[i], newID)
+			continue
+		}
+
+		// Specific grant: migrate both dbName and objectName
+		collID, resolveErr := collectionNameToID(dbName, objectName)
+		if resolveErr != nil {
+			log.Ctx(ctx).Warn("collection not found during grant migration, removing stale grant",
+				zap.String("dbName", dbName), zap.String("collectionName", objectName), zap.Error(resolveErr))
+			removeStaleGrant(i, grantInfos)
+			continue
+		}
+
+		newGranteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, grantInfos[0], grantInfos[1],
+			funcutil.CombineObjectName(funcutil.FormatDatabaseID(dbID), funcutil.FormatCollectionID(collID)))
+		newID := crypto.MD5(newGranteeKey)
+		saves[newGranteeKey] = newID
+		migrateGranteeSubKeys(values[i], newID)
 	}
 
 	// Apply changes: remove stale grants, save new ID-based keys

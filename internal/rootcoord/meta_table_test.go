@@ -526,7 +526,7 @@ func TestRbacDropGrant(t *testing.T) {
 func TestRbacListPolicy(t *testing.T) {
 	mt := generateMetaTable(t)
 
-	policies, err := mt.ListPolicy(context.TODO(), util.DefaultTenant)
+	policies, err := mt.ListPolicy(context.TODO(), util.DefaultTenant, false)
 	assert.NoError(t, err)
 	assert.Empty(t, policies)
 
@@ -2620,4 +2620,255 @@ func TestMetaTable_TruncateCollection(t *testing.T) {
 	require.False(t, ok)
 	require.Equal(t, 1, len(coll.ShardInfos))
 	require.Equal(t, uint64(1000), coll.ShardInfos["vchannel1"].LastTruncateTimeTick)
+}
+
+func TestConvertGrantsToNameBased(t *testing.T) {
+	mt := &MetaTable{
+		dbName2Meta: map[string]*model.Database{
+			"mydb": model.NewDatabase(100, "mydb", pb.DatabaseState_DatabaseCreated, nil),
+		},
+		collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			200: {CollectionID: 200, Name: "mycoll"},
+		},
+	}
+
+	t.Run("resolve ID-based dbName and objectName", func(t *testing.T) {
+		entities := []*milvuspb.GrantEntity{
+			{
+				Role:       &milvuspb.RoleEntity{Name: "role1"},
+				Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+				DbName:     funcutil.FormatDatabaseID(100),
+				ObjectName: funcutil.FormatCollectionID(200),
+				Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"}},
+			},
+		}
+		resolved := mt.convertGrantsToNameBased(entities)
+		assert.Equal(t, 1, len(resolved))
+		assert.Equal(t, "mydb", resolved[0].DbName)
+		assert.Equal(t, "mycoll", resolved[0].ObjectName)
+	})
+
+	t.Run("keep name-based entries unchanged", func(t *testing.T) {
+		entities := []*milvuspb.GrantEntity{
+			{
+				Role:       &milvuspb.RoleEntity{Name: "role1"},
+				Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+				DbName:     "mydb",
+				ObjectName: "mycoll",
+				Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"}},
+			},
+		}
+		resolved := mt.convertGrantsToNameBased(entities)
+		assert.Equal(t, 1, len(resolved))
+		assert.Equal(t, "mydb", resolved[0].DbName)
+		assert.Equal(t, "mycoll", resolved[0].ObjectName)
+	})
+
+	t.Run("deduplicate ID-based and name-based entries", func(t *testing.T) {
+		entities := []*milvuspb.GrantEntity{
+			{
+				Role:       &milvuspb.RoleEntity{Name: "role1"},
+				Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+				DbName:     "mydb",
+				ObjectName: "mycoll",
+				Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"}},
+			},
+			{
+				Role:       &milvuspb.RoleEntity{Name: "role1"},
+				Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+				DbName:     funcutil.FormatDatabaseID(100),
+				ObjectName: funcutil.FormatCollectionID(200),
+				Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"}},
+			},
+		}
+		resolved := mt.convertGrantsToNameBased(entities)
+		assert.Equal(t, 1, len(resolved))
+	})
+
+	t.Run("unresolvable IDs stay as-is", func(t *testing.T) {
+		entities := []*milvuspb.GrantEntity{
+			{
+				Role:       &milvuspb.RoleEntity{Name: "role1"},
+				Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+				DbName:     funcutil.FormatDatabaseID(999),
+				ObjectName: funcutil.FormatCollectionID(999),
+				Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"}},
+			},
+		}
+		resolved := mt.convertGrantsToNameBased(entities)
+		assert.Equal(t, 1, len(resolved))
+		assert.Equal(t, funcutil.FormatDatabaseID(999), resolved[0].DbName)
+		assert.Equal(t, funcutil.FormatCollectionID(999), resolved[0].ObjectName)
+	})
+
+	t.Run("nil grantor privilege", func(t *testing.T) {
+		entities := []*milvuspb.GrantEntity{
+			{
+				Role:       &milvuspb.RoleEntity{Name: "role1"},
+				Object:     &milvuspb.ObjectEntity{Name: "Global"},
+				DbName:     "mydb",
+				ObjectName: "*",
+			},
+		}
+		resolved := mt.convertGrantsToNameBased(entities)
+		assert.Equal(t, 1, len(resolved))
+	})
+}
+
+func TestLookupCollectionAndDBID(t *testing.T) {
+	mt := &MetaTable{
+		dbName2Meta: map[string]*model.Database{
+			util.DefaultDBName: model.NewDatabase(1, util.DefaultDBName, pb.DatabaseState_DatabaseCreated, nil),
+			"mydb":             model.NewDatabase(2, "mydb", pb.DatabaseState_DatabaseCreated, nil),
+		},
+		names:   newNameDb(),
+		aliases: newNameDb(),
+	}
+	mt.names.insert(util.DefaultDBName, "coll1", 100)
+	mt.aliases.insert(util.DefaultDBName, "alias1", 100)
+	mt.names.insert("mydb", "coll2", 200)
+
+	t.Run("resolve by collection name", func(t *testing.T) {
+		dbID, collID := mt.LookupCollectionAndDBID(context.TODO(), util.DefaultDBName, "coll1")
+		assert.Equal(t, int64(1), dbID)
+		assert.Equal(t, int64(100), collID)
+	})
+
+	t.Run("resolve by alias", func(t *testing.T) {
+		dbID, collID := mt.LookupCollectionAndDBID(context.TODO(), util.DefaultDBName, "alias1")
+		assert.Equal(t, int64(1), dbID)
+		assert.Equal(t, int64(100), collID)
+	})
+
+	t.Run("empty dbName defaults to default db", func(t *testing.T) {
+		dbID, collID := mt.LookupCollectionAndDBID(context.TODO(), "", "coll1")
+		assert.Equal(t, int64(1), dbID)
+		assert.Equal(t, int64(100), collID)
+	})
+
+	t.Run("non-default database", func(t *testing.T) {
+		dbID, collID := mt.LookupCollectionAndDBID(context.TODO(), "mydb", "coll2")
+		assert.Equal(t, int64(2), dbID)
+		assert.Equal(t, int64(200), collID)
+	})
+
+	t.Run("non-existent collection returns InvalidCollectionID", func(t *testing.T) {
+		_, collID := mt.LookupCollectionAndDBID(context.TODO(), util.DefaultDBName, "no_such_coll")
+		assert.Equal(t, InvalidCollectionID, collID)
+	})
+
+	t.Run("non-existent database returns InvalidCollectionID", func(t *testing.T) {
+		_, collID := mt.LookupCollectionAndDBID(context.TODO(), "no_such_db", "coll1")
+		assert.Equal(t, InvalidCollectionID, collID)
+	})
+
+	t.Run("wildcard collectionName returns dbID only", func(t *testing.T) {
+		dbID, collID := mt.LookupCollectionAndDBID(context.TODO(), util.DefaultDBName, util.AnyWord)
+		assert.Equal(t, int64(1), dbID)
+		assert.Equal(t, InvalidCollectionID, collID)
+	})
+
+	t.Run("empty collectionName returns dbID only", func(t *testing.T) {
+		dbID, collID := mt.LookupCollectionAndDBID(context.TODO(), util.DefaultDBName, "")
+		assert.Equal(t, int64(1), dbID)
+		assert.Equal(t, InvalidCollectionID, collID)
+	})
+}
+
+func TestMigrateGrantsToEntityID(t *testing.T) {
+	t.Run("catalog returns error", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.EXPECT().MigrateGrantsToEntityID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("migrate error"))
+		mt := &MetaTable{
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		err := mt.MigrateGrantsToEntityID(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("catalog succeeds", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.EXPECT().MigrateGrantsToEntityID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		mt := &MetaTable{
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+		}
+		err := mt.MigrateGrantsToEntityID(context.TODO())
+		assert.NoError(t, err)
+	})
+}
+
+func TestOperatePrivilege_CollectionIDResolution(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	mt := &MetaTable{
+		dbName2Meta: map[string]*model.Database{
+			util.DefaultDBName: model.NewDatabase(1, util.DefaultDBName, pb.DatabaseState_DatabaseCreated, nil),
+		},
+		names:   newNameDb(),
+		aliases: newNameDb(),
+		catalog: catalog,
+	}
+	mt.names.insert(util.DefaultDBName, "real_coll", 300)
+
+	t.Run("grant on existing collection resolves ID", func(t *testing.T) {
+		catalog.EXPECT().AlterGrant(mock.Anything, mock.Anything, mock.Anything, mock.Anything, int64(1), int64(300)).Return(nil).Once()
+		entity := &milvuspb.GrantEntity{
+			Grantor: &milvuspb.GrantorEntity{
+				User:      &milvuspb.UserEntity{Name: "root"},
+				Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"},
+			},
+			Role:       &milvuspb.RoleEntity{Name: "role1"},
+			Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+			ObjectName: "real_coll",
+		}
+		err := mt.OperatePrivilege(context.TODO(), util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
+		assert.NoError(t, err)
+	})
+
+	t.Run("grant on non-existent collection returns error", func(t *testing.T) {
+		entity := &milvuspb.GrantEntity{
+			Grantor: &milvuspb.GrantorEntity{
+				User:      &milvuspb.UserEntity{Name: "root"},
+				Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"},
+			},
+			Role:       &milvuspb.RoleEntity{Name: "role1"},
+			Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+			ObjectName: "no_such_coll",
+		}
+		err := mt.OperatePrivilege(context.TODO(), util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, merr.ErrCollectionNotFound))
+	})
+
+	t.Run("revoke on non-existent collection is skipped", func(t *testing.T) {
+		entity := &milvuspb.GrantEntity{
+			Grantor: &milvuspb.GrantorEntity{
+				User:      &milvuspb.UserEntity{Name: "root"},
+				Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"},
+			},
+			Role:       &milvuspb.RoleEntity{Name: "role1"},
+			Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+			ObjectName: "no_such_coll",
+		}
+		err := mt.OperatePrivilege(context.TODO(), util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Revoke)
+		assert.NoError(t, err)
+	})
+
+	t.Run("AnyWord skips ID resolution", func(t *testing.T) {
+		catalog.EXPECT().AlterGrant(mock.Anything, mock.Anything, mock.Anything, mock.Anything, int64(0), int64(0)).Return(nil).Once()
+		entity := &milvuspb.GrantEntity{
+			Grantor: &milvuspb.GrantorEntity{
+				User:      &milvuspb.UserEntity{Name: "root"},
+				Privilege: &milvuspb.PrivilegeEntity{Name: "Insert"},
+			},
+			Role:       &milvuspb.RoleEntity{Name: "role1"},
+			Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+			ObjectName: util.AnyWord,
+		}
+		err := mt.OperatePrivilege(context.TODO(), util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
+		assert.NoError(t, err)
+	})
 }

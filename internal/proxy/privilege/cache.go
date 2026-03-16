@@ -72,7 +72,9 @@ func InitPrivilegeCache(ctx context.Context, mixCoord types.MixCoordClient) erro
 	privilegeCache := NewPrivilegeCache(mixCoord)
 	// The privilege info is a little more. And to get this info, the query operation of involving multiple table queries is required.
 	cacheInst.Store(privilegeCache)
-	resp, err := mixCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
+	resp, err := mixCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{
+		SupportIdBasedPolicy: true,
+	})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		log.Error("fail to init meta cache", zap.Error(err))
 		return err
@@ -243,7 +245,9 @@ func (m *privilegeCache) RefreshPolicyInfo(op typeutil.CacheOp) (err error) {
 			}
 		}
 	case typeutil.CacheRefresh:
-		resp, err := m.mixCoord.ListPolicy(context.Background(), &internalpb.ListPolicyRequest{})
+		resp, err := m.mixCoord.ListPolicy(context.Background(), &internalpb.ListPolicyRequest{
+			SupportIdBasedPolicy: true,
+		})
 		if err != nil {
 			log.Error("fail to init meta cache", zap.Error(err))
 			return err

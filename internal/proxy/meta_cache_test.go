@@ -435,7 +435,7 @@ func (c *MockMixCoordClientInterface) ListDatabases(ctx context.Context, in *mil
 }
 
 func (c *MockMixCoordClientInterface) DescribeDatabase(ctx context.Context, req *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error) {
-	panic("implement me")
+	return nil, errors.New("not implemented")
 }
 
 func (c *MockMixCoordClientInterface) AlterDatabase(ctx context.Context, request *rootcoordpb.AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

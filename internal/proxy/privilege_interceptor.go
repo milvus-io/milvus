@@ -91,26 +91,56 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		zap.Int32("object_index", objectNameIndex), zap.String("object_name", objectName),
 		zap.Int32("object_indexs", objectNameIndexs), zap.Strings("object_names", objectNames))
 
+	// Pre-resolve IDs and aliases once before the role loop (hot path optimization).
+	isCollectionType := objectType == commonpb.ObjectType_Collection.String()
+	idDBStr := "" // pre-resolved ID-based database string, empty if unresolvable
+	if isCollectionType && dbName != "" && dbName != util.AnyWord {
+		if dbID, err := getDBIDFromCache(ctx, dbName); err == nil {
+			idDBStr = funcutil.FormatDatabaseID(dbID)
+		}
+	}
+
+	// policyResourceForObj returns the ID-based resource string for enforcement.
+	// New proxy uses pure ID-based enforcement for Collection type;
+	// non-Collection types (Global, User) remain name-based.
+	policyResourceForObj := func(objName string) string {
+		if isCollectionType && idDBStr != "" {
+			// Wildcard (*) keeps objName as-is; specific collections resolve to colID
+			if objName == util.AnyWord || objName == "" {
+				return funcutil.PolicyForResource(idDBStr, objectType, objName)
+			}
+			if colID, err := getCollectionIDFromCache(ctx, dbName, objName); err == nil {
+				return funcutil.PolicyForResource(idDBStr, objectType, funcutil.FormatCollectionID(colID))
+			}
+			// Collection resolution failed — fall back to name-based with alias resolution
+			resolvedName := objName
+			if actual, resolveErr := resolveCollectionAlias(ctx, dbName, objName); resolveErr == nil {
+				resolvedName = actual
+			}
+			return funcutil.PolicyForResource(dbName, objectType, resolvedName)
+		}
+		resolvedName := objName
+		if isCollectionType {
+			if actual, resolveErr := resolveCollectionAlias(ctx, dbName, objName); resolveErr == nil {
+				resolvedName = actual
+			}
+		}
+		return funcutil.PolicyForResource(dbName, objectType, resolvedName)
+	}
+
 	e := privilege.GetEnforcer()
 	for _, roleName := range roleNames {
 		permitFunc := func(objName string) (bool, error) {
-			// Resolve collection alias to real name so the resource string
-			// matches the name-based Casbin policies (ID→name converted by ListPolicy).
-			if objectType == commonpb.ObjectType_Collection.String() && objName != util.AnyWord && objName != "" {
-				if resolved, err := resolveCollectionAlias(ctx, dbName, objName); err == nil {
-					objName = resolved
-				}
-			}
-			object := funcutil.PolicyForResource(dbName, objectType, objName)
-			isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
+			resource := policyResourceForObj(objName)
+			isPermit, cached, version := privilege.GetResultCache(roleName, resource, objectPrivilege)
 			if cached {
 				return isPermit, nil
 			}
-			isPermit, err := e.Enforce(roleName, object, objectPrivilege)
+			isPermit, err := e.Enforce(roleName, resource, objectPrivilege)
 			if err != nil {
 				return false, err
 			}
-			privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
+			privilege.SetResultCache(roleName, resource, objectPrivilege, isPermit, version)
 			return isPermit, nil
 		}
 
@@ -175,11 +205,32 @@ func isSelectMyRoleGrants(req interface{}, roleNames []string) bool {
 }
 
 // resolveCollectionAlias resolves an alias to its actual collection name.
-// Used by alias tasks to ensure real collection name is passed to rootcoord.
 func resolveCollectionAlias(ctx context.Context, dbName, nameOrAlias string) (string, error) {
 	cache := globalMetaCache
 	if cache == nil {
 		return nameOrAlias, merr.WrapErrServiceInternal("meta cache not initialized")
 	}
 	return cache.ResolveCollectionAlias(ctx, dbName, nameOrAlias)
+}
+
+// getDBIDFromCache gets a database ID from globalMetaCache by name.
+func getDBIDFromCache(ctx context.Context, dbName string) (int64, error) {
+	cache := globalMetaCache
+	if cache == nil {
+		return 0, merr.WrapErrServiceInternal("meta cache not initialized")
+	}
+	dbInfo, err := cache.GetDatabaseInfo(ctx, dbName)
+	if err != nil {
+		return 0, err
+	}
+	return dbInfo.dbID, nil
+}
+
+// getCollectionIDFromCache gets a collection ID from globalMetaCache by name/alias.
+func getCollectionIDFromCache(ctx context.Context, dbName, collName string) (int64, error) {
+	cache := globalMetaCache
+	if cache == nil {
+		return 0, merr.WrapErrServiceInternal("meta cache not initialized")
+	}
+	return cache.GetCollectionID(ctx, dbName, collName)
 }

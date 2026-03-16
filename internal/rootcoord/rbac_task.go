@@ -35,6 +35,50 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// convertGrantsToIDBased converts name-based Collection grants to ID-based grants for the new proxy.
+// Non-Collection grants (Global, User) pass through unchanged.
+func convertGrantsToIDBased(ctx context.Context, core *Core, grants []*milvuspb.GrantEntity) []*milvuspb.GrantEntity {
+	mt, ok := core.meta.(*MetaTable)
+	if !ok {
+		return grants
+	}
+	idBasedGrants := make([]*milvuspb.GrantEntity, 0, len(grants))
+	for _, g := range grants {
+		if g.Object.GetName() == "Collection" {
+			if g.ObjectName == util.AnyWord {
+				// Wildcard grant: convert dbName to ID-based, keep objectName as "*"
+				if g.DbName != util.AnyWord {
+					if dbID := mt.lookupDBID(ctx, g.DbName); dbID > 0 {
+						idBasedGrants = append(idBasedGrants, &milvuspb.GrantEntity{
+							Role:       g.Role,
+							Object:     g.Object,
+							ObjectName: util.AnyWord,
+							DbName:     funcutil.FormatDatabaseID(dbID),
+							Grantor:    g.Grantor,
+						})
+						continue
+					}
+				}
+			} else {
+				// Specific grant: convert both dbName and objectName to ID-based
+				dbID, colID := mt.LookupCollectionAndDBID(ctx, g.DbName, g.ObjectName)
+				if colID != InvalidCollectionID {
+					idBasedGrants = append(idBasedGrants, &milvuspb.GrantEntity{
+						Role:       g.Role,
+						Object:     g.Object,
+						ObjectName: funcutil.FormatCollectionID(colID),
+						DbName:     funcutil.FormatDatabaseID(dbID),
+						Grantor:    g.Grantor,
+					})
+					continue
+				}
+			}
+		}
+		idBasedGrants = append(idBasedGrants, g)
+	}
+	return idBasedGrants
+}
+
 func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 	privName := entity.Grantor.Privilege.Name
 	if err := func() error {
@@ -101,9 +145,11 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 			})
 		}
 		if len(expandGrants) > 0 {
+			idBasedGrants := convertGrantsToIDBased(ctx, core, expandGrants)
 			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-				OpType: opType,
-				OpKey:  funcutil.PolicyForPrivileges(expandGrants),
+				OpType:       opType,
+				OpKey:        funcutil.PolicyForPrivileges(expandGrants),
+				OpKeyIDBased: funcutil.PolicyForPrivileges(idBasedGrants),
 			}); err != nil {
 				log.Ctx(ctx).Warn("fail to refresh policy info cache", zap.Any("in", entity), zap.Error(err))
 				return err
@@ -197,9 +243,11 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 
 		if len(rolesToRevoke) > 0 {
 			opType := int32(typeutil.CacheRevokePrivilege)
+			idBasedRevoke := convertGrantsToIDBased(ctx, core, rolesToRevoke)
 			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-				OpType: opType,
-				OpKey:  funcutil.PolicyForPrivileges(rolesToRevoke),
+				OpType:       opType,
+				OpKey:        funcutil.PolicyForPrivileges(rolesToRevoke),
+				OpKeyIDBased: funcutil.PolicyForPrivileges(idBasedRevoke),
 			}); err != nil {
 				log.Ctx(ctx).Warn("fail to refresh policy info cache for revoke privileges in operate privilege group", zap.Any("in", in), zap.Error(err))
 				return err
@@ -208,9 +256,11 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 
 		if len(rolesToGrant) > 0 {
 			opType := int32(typeutil.CacheGrantPrivilege)
+			idBasedGrant := convertGrantsToIDBased(ctx, core, rolesToGrant)
 			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-				OpType: opType,
-				OpKey:  funcutil.PolicyForPrivileges(rolesToGrant),
+				OpType:       opType,
+				OpKey:        funcutil.PolicyForPrivileges(rolesToGrant),
+				OpKeyIDBased: funcutil.PolicyForPrivileges(idBasedGrant),
 			}); err != nil {
 				log.Ctx(ctx).Warn("fail to refresh policy info cache for grants privilege in operate privilege group", zap.Any("in", in), zap.Error(err))
 				return err

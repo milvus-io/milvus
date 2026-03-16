@@ -937,7 +937,7 @@ func TestRootCoord_ListPolicy(t *testing.T) {
 		c := newTestCore(withHealthyCode(), withMeta(meta))
 		ctx := context.Background()
 
-		meta.EXPECT().ListPolicy(ctx, util.DefaultTenant).Return([]*milvuspb.GrantEntity{
+		meta.EXPECT().ListPolicy(ctx, util.DefaultTenant, false).Return([]*milvuspb.GrantEntity{
 			{
 				ObjectName: "*",
 				Object: &milvuspb.ObjectEntity{
@@ -1662,6 +1662,26 @@ func TestCore_InitRBAC(t *testing.T) {
 
 		err := c.initRbac(context.TODO())
 		assert.NoError(t, err)
+	})
+
+	t.Run("migrate grants to entity ID fails", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+		meta.EXPECT().CreateRole(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+		meta.EXPECT().OperatePrivilege(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(3)
+		meta.EXPECT().MigrateGrantsToEntityID(mock.Anything).Return(errors.New("migrate error")).Once()
+
+		Params.Save(Params.RoleCfg.Enabled.Key, "false")
+		Params.Save(Params.CommonCfg.EnablePublicPrivilege.Key, "true")
+
+		defer func() {
+			Params.Reset(Params.RoleCfg.Enabled.Key)
+			Params.Reset(Params.CommonCfg.EnablePublicPrivilege.Key)
+		}()
+
+		err := c.initRbac(context.TODO())
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "migrate")
 	})
 }
 
