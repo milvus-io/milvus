@@ -387,17 +387,12 @@ func (loader *segmentLoader) Load(ctx context.Context,
 					zap.Int64("segmentID", loadInfo.GetSegmentID()))
 
 				// Check for truncated segment ID collision with other segments being loaded.
-				// Virtual PK only preserves lower 32 bits of segmentID; a collision means
-				// two segments produce overlapping PK spaces.
-				truncatedID := loadInfo.GetSegmentID() & 0xFFFFFFFF
-				for _, otherInfo := range infos {
-					if otherInfo.GetSegmentID() != loadInfo.GetSegmentID() &&
-						(otherInfo.GetSegmentID()&0xFFFFFFFF) == truncatedID {
-						log.Warn("virtual PK collision detected: two segments share truncated segment ID",
-							zap.Int64("segmentID1", loadInfo.GetSegmentID()),
-							zap.Int64("segmentID2", otherInfo.GetSegmentID()),
-							zap.Int64("truncatedID", truncatedID))
-					}
+				collisions := detectVirtualPKCollisions(loadInfo.GetSegmentID(), infos)
+				for _, collidingID := range collisions {
+					log.Warn("virtual PK collision detected: two segments share truncated segment ID",
+						zap.Int64("segmentID1", loadInfo.GetSegmentID()),
+						zap.Int64("segmentID2", collidingID),
+						zap.Int64("truncatedID", loadInfo.GetSegmentID()&0xFFFFFFFF))
 				}
 			} else {
 				bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
@@ -854,6 +849,21 @@ func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*Index
 	}
 
 	return indexedFieldInfos, fieldBinlogs
+}
+
+// detectVirtualPKCollisions checks if any segments in infos share the same
+// truncated (lower 32 bits) segment ID as segmentID. A collision means two
+// segments produce overlapping virtual PK spaces.
+func detectVirtualPKCollisions(segmentID int64, infos []*querypb.SegmentLoadInfo) []int64 {
+	truncatedID := segmentID & 0xFFFFFFFF
+	var collisions []int64
+	for _, info := range infos {
+		if info.GetSegmentID() != segmentID &&
+			(info.GetSegmentID()&0xFFFFFFFF) == truncatedID {
+			collisions = append(collisions, info.GetSegmentID())
+		}
+	}
+	return collisions
 }
 
 func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) (

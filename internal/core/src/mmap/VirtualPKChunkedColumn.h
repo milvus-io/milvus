@@ -35,6 +35,7 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
     explicit VirtualPKChunkedColumn(int64_t segment_id, int64_t num_rows)
         : segment_id_(segment_id),
           truncated_segment_id_(milvus::GetTruncatedSegmentID(segment_id)),
+          shifted_segment_id_(truncated_segment_id_ << 32),
           num_rows_(num_rows) {
         num_rows_until_chunk_ = {0, num_rows_};
     }
@@ -213,8 +214,7 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
         // Pre-compute all virtual PKs to ensure pointers remain valid
         std::vector<int64_t> virtual_pks(count);
         for (int64_t i = 0; i < count; i++) {
-            virtual_pks[i] =
-                milvus::GetVirtualPK(truncated_segment_id_, offsets[i]);
+            virtual_pks[i] = ComputeVirtualPK(offsets[i]);
         }
         for (int64_t i = 0; i < count; i++) {
             fn(reinterpret_cast<const char*>(&virtual_pks[i]), i);
@@ -229,8 +229,7 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
                          bool small_int_raw_type = false) override {
         auto typed_dst = static_cast<int64_t*>(dst);
         for (int64_t i = 0; i < count; i++) {
-            typed_dst[i] =
-                milvus::GetVirtualPK(truncated_segment_id_, offsets[i]);
+            typed_dst[i] = ComputeVirtualPK(offsets[i]);
         }
     }
 
@@ -251,7 +250,7 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
                    "offset {} is out of range, num_rows: {}",
                    offset,
                    num_rows_);
-        return milvus::GetVirtualPK(truncated_segment_id_, offset);
+        return ComputeVirtualPK(offset);
     }
 
     // Get the segment ID used for virtual PK generation
@@ -267,19 +266,26 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
     }
 
  private:
+    // Compute virtual PK from an offset using the pre-shifted segment ID.
+    // Centralizes the inlined formula so all call sites stay consistent.
+    inline int64_t
+    ComputeVirtualPK(int64_t offset) const {
+        return shifted_segment_id_ | (offset & 0xFFFFFFFF);
+    }
+
     void
     EnsureMaterialized() const {
         std::call_once(materialize_once_, [this]() {
             materialized_pks_.resize(num_rows_);
             for (int64_t i = 0; i < num_rows_; i++) {
-                materialized_pks_[i] =
-                    milvus::GetVirtualPK(truncated_segment_id_, i);
+                materialized_pks_[i] = ComputeVirtualPK(i);
             }
         });
     }
 
     int64_t segment_id_;
     int64_t truncated_segment_id_;
+    int64_t shifted_segment_id_;  // truncated_segment_id_ << 32, pre-computed
     int64_t num_rows_;
     std::vector<int64_t> num_rows_until_chunk_;
     mutable std::once_flag materialize_once_;

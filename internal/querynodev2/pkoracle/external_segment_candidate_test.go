@@ -200,6 +200,17 @@ func TestExternalSegmentCandidate_CandidateInterface(t *testing.T) {
 	assert.Equal(t, segmentID, candidate.ID())
 	assert.Equal(t, partitionID, candidate.Partition())
 	assert.Equal(t, segType, candidate.Type())
+
+	// PkCandidateExist: always true for external candidates
+	assert.True(t, candidate.PkCandidateExist())
+
+	// Stats: always nil for external candidates
+	assert.Nil(t, candidate.Stats())
+
+	// No-op methods: should not panic
+	candidate.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1)})
+	candidate.Charge()
+	candidate.Refund()
 }
 
 func TestExternalSegmentCandidate_EdgeCases(t *testing.T) {

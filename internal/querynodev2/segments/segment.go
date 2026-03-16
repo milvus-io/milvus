@@ -271,6 +271,13 @@ func (s *baseSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
 		}
 		return allPositive
 	}
+	if s.pkCandidate == nil {
+		allPositive := make([]bool, lc.Size())
+		for i := 0; i < lc.Size(); i++ {
+			allPositive[i] = true
+		}
+		return allPositive
+	}
 	return s.pkCandidate.BatchPkExist(lc)
 }
 
