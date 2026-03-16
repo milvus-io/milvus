@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -100,13 +100,16 @@ func NewSuffixSnapshot(metaKV kv.MetaKv, sep, root, snapshot string) (*SuffixSna
 		return nil, retry.Unrecoverable(errors.New("MetaKv is nil"))
 	}
 
-	// handles trailing / logic
-	tk := path.Join(snapshot, "k")
-	snapshotLen := len(tk) - 1
-	// makes sure snapshot has trailing '/'
-	snapshot = tk[:len(tk)-1]
-	tk = path.Join(root, "k")
-	rootLen := len(tk) - 1
+	// ensure snapshot has trailing '/'
+	if !strings.HasSuffix(snapshot, "/") {
+		snapshot += "/"
+	}
+	snapshotLen := len(snapshot)
+	// keep empty root unchanged to preserve rootLen=0 behavior.
+	if root != "" && !strings.HasSuffix(root, "/") {
+		root += "/"
+	}
+	rootLen := len(root)
 
 	ss := &SuffixSnapshot{
 		MetaKv:         metaKV,
@@ -134,15 +137,15 @@ func (ss *SuffixSnapshot) hideRootPrefix(value string) string {
 }
 
 // composeSnapshotPrefix build a prefix for load snapshots
-// formated like [snapshotPrefix]/key[sep]
+// formated like [snapshotPrefix]key[sep]
 func (ss *SuffixSnapshot) composeSnapshotPrefix(key string) string {
-	return path.Join(ss.snapshotPrefix, key+ss.separator)
+	return ss.snapshotPrefix + key + ss.separator
 }
 
 // ComposeSnapshotKey used in migration tool also, in case of any rules change.
 func ComposeSnapshotKey(snapshotPrefix string, key string, separator string, ts typeutil.Timestamp) string {
 	// [key][sep][ts]
-	return path.Join(snapshotPrefix, fmt.Sprintf("%s%s%d", key, separator, ts))
+	return util.GetPath(snapshotPrefix, fmt.Sprintf("%s%s%d", key, separator, ts))
 }
 
 // composeTSKey unified tsKey composing method
@@ -460,7 +463,7 @@ func (ss *SuffixSnapshot) LoadWithPrefix(ctx context.Context, key string, ts typ
 	latestOriginalKey := ""
 	tValueGroups := make([]tsv, 0)
 
-	prefix := path.Join(ss.snapshotPrefix, key)
+	prefix := ss.snapshotPrefix + key
 	appendResultFn := func(ts typeutil.Timestamp) {
 		value, ok := binarySearchRecords(tValueGroups, ts)
 		if !ok || ss.isTombstone(value) {
