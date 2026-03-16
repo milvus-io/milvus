@@ -5750,7 +5750,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 
 	p.ForceRebuildScalarSegmentIndex = ParamItem{
 		Key:          "dataCoord.forceRebuildScalarSegmentIndex",
-		Version:      "2.5.10",
+		Version:      "3.0.0",
 		DefaultValue: "false",
 		PanicIfEmpty: true,
 		Doc:          "force rebuild scalar segment index to specified scalar index engine's version",
@@ -5760,7 +5760,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 
 	p.TargetScalarIndexVersion = ParamItem{
 		Key:          "dataCoord.targetScalarIndexVersion",
-		Version:      "2.5.10",
+		Version:      "3.0.0",
 		DefaultValue: "-1",
 		PanicIfEmpty: true,
 		Doc: `if param forceRebuildScalarSegmentIndex is enabled, the scalar index will be rebuilt to aligned with targetScalarIndexVersion.

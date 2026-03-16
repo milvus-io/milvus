@@ -20,10 +20,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
-
-	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 type utilSuite struct {
@@ -42,20 +39,6 @@ func (s *utilSuite) Test_mapToKVPairs() {
 
 func Test_utilSuite(t *testing.T) {
 	suite.Run(t, new(utilSuite))
-}
-
-func Test_getCurrentScalarIndexVersion(t *testing.T) {
-	// getCurrentScalarIndexVersion delegates to common.ClampScalarIndexVersion.
-	// This test verifies the delegation is correct and hasn't been changed
-	// to use CurrentScalarIndexEngineVersion (which would be wrong).
-	maximum := common.MaximumScalarIndexEngineVersion
-
-	assert.Equal(t, int32(0), getCurrentScalarIndexVersion(0))
-	assert.Equal(t, maximum, getCurrentScalarIndexVersion(maximum))
-	assert.Equal(t, maximum, getCurrentScalarIndexVersion(maximum+1))
-
-	// Verify it matches the shared helper
-	assert.Equal(t, common.ClampScalarIndexVersion(maximum+5), getCurrentScalarIndexVersion(maximum+5))
 }
 
 func generateFloats(num int) []float32 {
