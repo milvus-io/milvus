@@ -787,7 +787,7 @@ func buildIndexParams(
 		InsertFiles:                      files,
 		FieldSchema:                      field,
 		StorageConfig:                    storageConfig,
-		CurrentScalarIndexVersion:        req.GetCurrentScalarIndexVersion(),
+		CurrentScalarIndexVersion:        getCurrentScalarIndexVersion(req.GetCurrentScalarIndexVersion()),
 		StorageVersion:                   req.GetStorageVersion(),
 		JsonStatsMaxShreddingColumns:     options.JsonStatsMaxShreddingColumns,
 		JsonStatsShreddingRatioThreshold: options.JsonStatsShreddingRatio,

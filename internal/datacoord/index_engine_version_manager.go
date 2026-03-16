@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 )
@@ -274,6 +275,11 @@ func (m *versionManagerImpl) ResolveScalarIndexVersion() int32 {
 		} else {
 			version = max(version, Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt32())
 		}
+	}
+	if version < common.MinimalScalarIndexEngineVersion {
+		log.Warn("targetScalarIndexVersion below minimum, clamping",
+			zap.Int32("target", version), zap.Int32("minimum", common.MinimalScalarIndexEngineVersion))
+		version = common.MinimalScalarIndexEngineVersion
 	}
 	if maxVersion := m.GetMaximumScalarIndexEngineVersion(); version > maxVersion {
 		log.Warn("targetScalarIndexVersion exceeds cluster maximum, clamping",

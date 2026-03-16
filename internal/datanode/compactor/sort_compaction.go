@@ -595,7 +595,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				InsertFiles:               files,
 				FieldSchema:               field,
 				StorageConfig:             newStorageConfig,
-				CurrentScalarIndexVersion: t.plan.GetCurrentScalarIndexVersion(),
+				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(t.plan.GetCurrentScalarIndexVersion()),
 				StorageVersion:            t.storageVersion,
 				Manifest:                  segment.GetManifest(),
 			}
