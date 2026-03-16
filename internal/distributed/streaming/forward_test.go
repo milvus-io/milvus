@@ -39,6 +39,10 @@ import (
 )
 
 func TestForwardDMLToLegacyProxy(t *testing.T) {
+	// Run in standalone mode so DQL forwarding is also enabled.
+	paramtable.SetRole(typeutil.StandaloneRole)
+	defer paramtable.SetRole("")
+
 	etcdCli, _ := kvfactory.GetEtcdAndPath()
 	oldProxyPort := paramtable.Get().ProxyGrpcClientCfg.Port.SwapTempValue("19588")
 	defer paramtable.Get().ProxyGrpcClientCfg.Port.SwapTempValue(oldProxyPort)
@@ -94,7 +98,7 @@ func TestForwardDMLToLegacyProxy(t *testing.T) {
 		assert.Nil(t, resp)
 	}
 
-	// Only DML requests will be handled by the forward service.
+	// Only DML/DQL requests will be handled by the forward service.
 	resp, err := interceptor(context.Background(), &milvuspb.CreateCollectionRequest{}, &grpc.UnaryServerInfo{
 		FullMethod: milvuspb.MilvusService_CreateCollection_FullMethodName,
 	}, func(ctx context.Context, req any) (any, error) {
@@ -132,5 +136,35 @@ func TestForwardDMLToLegacyProxy(t *testing.T) {
 			return merr.Success(), nil
 		})
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
+	}
+}
+
+func TestForwardDQLSkippedInClusterMode(t *testing.T) {
+	// In cluster mode (non-standalone), DQL should not be forwarded.
+	paramtable.SetRole("proxy")
+	defer paramtable.SetRole("")
+
+	// No need to set up a real forward service — DQL should never reach it in cluster mode.
+
+	interceptor := ForwardLegacyProxyUnaryServerInterceptor()
+
+	// DQL requests should go directly to handler, not forwarded.
+	dqlReqs := []any{
+		&milvuspb.SearchRequest{},
+		&milvuspb.HybridSearchRequest{},
+		&milvuspb.QueryRequest{},
+	}
+	dqlMethods := []string{
+		milvuspb.MilvusService_Search_FullMethodName,
+		milvuspb.MilvusService_HybridSearch_FullMethodName,
+		milvuspb.MilvusService_Query_FullMethodName,
+	}
+	for idx, req := range dqlReqs {
+		resp, err := interceptor(context.Background(), req, &grpc.UnaryServerInfo{
+			FullMethod: dqlMethods[idx],
+		}, func(ctx context.Context, req any) (any, error) {
+			return merr.Success(), nil
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err), "DQL should not be forwarded in cluster mode")
 	}
 }

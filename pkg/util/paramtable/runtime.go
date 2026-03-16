@@ -99,10 +99,17 @@ func GetStringNodeID() string {
 
 func SetRole(role string) {
 	runtimeParam.role.Store(role)
+	runtimeParam.isStandalone.Store(role == typeutil.StandaloneRole)
 }
 
 func GetRole() string {
 	return runtimeParam.role.Load()
+}
+
+// IsStandalone returns true if the current node is running in standalone mode.
+// This is a fast path that avoids string comparison on every call.
+func IsStandalone() bool {
+	return runtimeParam.isStandalone.Load()
 }
 
 func SetCreateTime(d time.Time) {

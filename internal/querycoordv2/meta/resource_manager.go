@@ -19,6 +19,7 @@ package meta
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -215,6 +216,17 @@ func (rm *ResourceManager) updateResourceGroups(ctx context.Context, rgs map[str
 		modifiedRG = append(modifiedRG, rg)
 	}
 
+	// Detect node transfer intent: if rgA is being zeroed (old request=N,limit=N → new 0,0)
+	// and rgB's new config matches rgA's old (new request=N,limit=N), directly move rgA's
+	// nodes to rgB. This preserves node assignment stability during RG transitions.
+	rm.transferNodesOnRGSwap(modifiedRG)
+
+	// Rebuild updates slice since node lists may have changed.
+	updates = updates[:0]
+	for _, rg := range modifiedRG {
+		updates = append(updates, rg.GetMeta())
+	}
+
 	if err := rm.catalog.SaveResourceGroup(ctx, updates...); err != nil {
 		for rgName, cfg := range rgs {
 			log.Warn("failed to update resource group",
@@ -238,6 +250,77 @@ func (rm *ResourceManager) updateResourceGroups(ctx context.Context, rgs map[str
 	// notify that resource group config has been changed.
 	rm.rgChangedNotifier.NotifyAll()
 	return nil
+}
+
+// transferNodesOnRGSwap detects "RG rename" intent in a batch config update and
+// directly transfers nodes between paired RGs to preserve node assignment stability.
+//
+// During replica scale-up/down, the external control plane changes RG names
+// (e.g., __default_resource_group → rg_for_replica_1). Without this optimization,
+// nodes would first be pushed to __recycle_resource_group by the async resource_observer,
+// then pulled into rg_for_replica_1 — with non-deterministic node selection at each hop,
+// breaking the original node-to-replica mapping and potentially causing replica unavailability.
+//
+// Detection: for each RG being zeroed (old config request=N,limit=N → new 0,0),
+// find the first unmatched RG in the same batch whose new config matches (request=N,limit=N).
+// RGs are sorted by name so the lexicographically smallest recipient wins.
+func (rm *ResourceManager) transferNodesOnRGSwap(modifiedRGs []*ResourceGroup) {
+	// Sort by name for deterministic matching order.
+	sort.Slice(modifiedRGs, func(i, j int) bool {
+		return modifiedRGs[i].GetName() < modifiedRGs[j].GetName()
+	})
+
+	matched := make(map[int]bool)
+	for i, rg := range modifiedRGs {
+		// Find a zeroed RG: new config (0,0) but old config had (N,N) with nodes.
+		newReq := rg.GetConfig().GetRequests().GetNodeNum()
+		newLim := rg.GetConfig().GetLimits().GetNodeNum()
+		if newReq != 0 || newLim != 0 {
+			continue
+		}
+		oldRG := rm.groups[rg.GetName()]
+		if oldRG == nil {
+			continue
+		}
+		oldReq := oldRG.GetConfig().GetRequests().GetNodeNum()
+		oldLim := oldRG.GetConfig().GetLimits().GetNodeNum()
+		nodes := oldRG.GetNodes()
+		if oldReq <= 0 || oldLim <= 0 || len(nodes) == 0 {
+			continue
+		}
+
+		// Find the first unmatched recipient whose new (request, limit) == old (request, limit).
+		for j, candidate := range modifiedRGs {
+			if j == i || matched[j] || candidate.NodeNum() > 0 {
+				continue
+			}
+			cReq := candidate.GetConfig().GetRequests().GetNodeNum()
+			cLim := candidate.GetConfig().GetLimits().GetNodeNum()
+			if cReq != oldReq || cLim != oldLim {
+				continue
+			}
+
+			// Swap nodes from donor to recipient.
+			donorMut := rg.CopyForWrite()
+			recipientMut := candidate.CopyForWrite()
+			for _, node := range nodes {
+				donorMut.UnassignNode(node)
+				recipientMut.AssignNode(node)
+				rm.nodeIDMap[node] = candidate.GetName()
+			}
+			modifiedRGs[i] = donorMut.ToResourceGroup()
+			modifiedRGs[j] = recipientMut.ToResourceGroup()
+			matched[i] = true
+			matched[j] = true
+
+			log.Info("direct node transfer on RG swap",
+				zap.String("from", rg.GetName()),
+				zap.String("to", candidate.GetName()),
+				zap.Int64s("nodes", nodes),
+			)
+			break
+		}
+	}
 }
 
 // Deprecated: only for compatibility with unittest.

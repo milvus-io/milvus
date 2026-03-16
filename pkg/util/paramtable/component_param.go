@@ -7048,11 +7048,12 @@ so we set 1 second here as a threshold.`,
 
 // runtimeConfig is just a private environment value table.
 type runtimeConfig struct {
-	createTime atomic.Time
-	updateTime atomic.Time
-	role       atomic.String
-	nodeID     atomic.Int64
-	components typeutil.ConcurrentSet[string]
+	createTime   atomic.Time
+	updateTime   atomic.Time
+	role         atomic.String
+	nodeID       atomic.Int64
+	isStandalone atomic.Bool // cached flag derived from role, avoids repeated string comparison
+	components   typeutil.ConcurrentSet[string]
 }
 
 type integrationTestConfig struct {
