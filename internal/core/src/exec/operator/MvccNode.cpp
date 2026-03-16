@@ -73,6 +73,49 @@ PhyMvccNode::GetOutput() {
     }
 
     tracer::AddEvent(fmt::format("input_rows: {}", active_count_));
+
+    // ── Three-level fast path for sealed segments without filters ──
+    // When MvccNode is the source (no scalar filter upstream) on a sealed
+    // segment with no collection-level TTL, and the query timestamp covers
+    // all data in the segment (query_ts >= max_insert_ts), we can skip
+    // expensive bitmap ops. The timestamp guard ensures correctness under
+    // Bounded/Eventually consistency where query_ts may lag behind.
+    if (is_source_node_ && segment_->type() == SegmentType::Sealed &&
+        collection_ttl_timestamp_ == 0 &&
+        query_timestamp_ >= segment_->get_max_timestamp()) {
+        // Level 1: Sealed + no deletes → all rows visible, skip everything
+        if (segment_->get_deleted_count() == 0) {
+            is_finished_ = true;
+            query_context->set_all_rows_visible(true);
+
+            // Reuse thread-local zero bitmap to avoid per-query allocation.
+            // INVARIANT: This cached bitmap is never read by downstream operators.
+            // all_rows_visible=true causes VectorSearchNode to use empty BitsetView
+            // directly, bypassing this bitmap entirely. The cache exists only to
+            // satisfy the Operator interface (GetOutput must return non-null
+            // RowVectorPtr with size>0).
+            thread_local int64_t cached_size = 0;
+            thread_local RowVectorPtr cached_output;
+            if (cached_size != active_count_) {
+                auto col = std::make_shared<ColumnVector>(
+                    TargetBitmap(active_count_), TargetBitmap(active_count_));
+                cached_output =
+                    std::make_shared<RowVector>(std::vector<VectorPtr>{col});
+                cached_size = active_count_;
+            }
+            return cached_output;
+        }
+
+        // Level 2: Sealed + has deletes → only apply delete mask, skip timestamps
+        auto col_input = std::make_shared<ColumnVector>(
+            TargetBitmap(active_count_), TargetBitmap(active_count_));
+        TargetBitmapView data(col_input->GetRawData(), col_input->size());
+        segment_->mask_with_delete(data, active_count_, query_timestamp_);
+        is_finished_ = true;
+        return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
+    }
+
+    // Level 3: Default path (has filter / growing / TTL)
     // the first vector is filtering result and second bitset is a valid bitset
     // if valid_bitset[i]==false, means result[i] is null
     auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(

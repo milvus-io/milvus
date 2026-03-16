@@ -64,6 +64,7 @@ set(MILVUS_TEST_FILES
         test_query_order_by.cpp
         test_determine_use_index.cpp
         test_virtual_pk.cpp
+        test_mvcc_fast_path.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )

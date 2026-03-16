@@ -109,6 +109,39 @@ PhyVectorSearchNode::GetOutput() {
         search_info_.array_offsets_ = array_offsets;
     }
 
+    // Fast path: MvccNode set all_rows_visible flag on QueryContext, meaning
+    // no filtering is needed (sealed segment, no deletes, no scalar filter,
+    // no TTL). Pass an empty BitsetView to Knowhere so it uses
+    // IDSelectorAll — the fastest search path.
+    if (query_context_->get_all_rows_visible() && !ph.element_level_) {
+        milvus::SearchResult search_result;
+        milvus::BitsetView empty_view;
+        auto op_context = query_context_->get_op_context();
+        segment_->vector_search(search_info_,
+                                src_data,
+                                src_offsets,
+                                num_queries,
+                                query_timestamp_,
+                                empty_view,
+                                op_context,
+                                search_result);
+        search_result.total_data_cnt_ = active_count_;
+
+        span.GetSpan()->SetAttribute(
+            "result_count",
+            static_cast<int>(search_result.seg_offsets_.size()));
+        query_context_->set_search_result(std::move(search_result));
+
+        std::chrono::high_resolution_clock::time_point vector_end =
+            std::chrono::high_resolution_clock::now();
+        double vector_cost =
+            std::chrono::duration<double, std::micro>(vector_end - vector_start)
+                .count();
+        milvus::monitor::internal_core_search_latency_vector.Observe(
+            vector_cost / 1000);
+        return input_;
+    }
+
     // There are two types of execution: pre-filter and iterative filter
     // For **pre-filter**, we have execution path: FilterBitsNode -> MvccNode -> ElementFilterBitsNode -> VectorSearchNode -> ...
     // For **iterative filter**, we have execution path: MvccNode -> VectorSearchNode -> ElementFilterNode -> FilterNode -> ...
