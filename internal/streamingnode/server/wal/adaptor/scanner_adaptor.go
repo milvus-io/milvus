@@ -330,7 +330,7 @@ func (c *slowdownCheckerImpl) Check() bool {
 }
 
 // SlowdownStartupHWM returns the high watermark to start slowdown from.
-// Uses the current append rate as the startup HWM.
+// Uses the current read rate as the startup HWM.
 func (c *slowdownCheckerImpl) SlowdownStartupHWM() int64 {
 	return int64(c.readRateCounter.Rate())
 }

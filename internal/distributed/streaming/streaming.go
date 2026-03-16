@@ -2,7 +2,6 @@ package streaming
 
 import (
 	"context"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -45,18 +44,6 @@ func WAL() WALAccesser {
 type AppendOption struct {
 	BarrierTimeTick uint64 // BarrierTimeTick is the barrier time tick of the message.
 	// Must be allocated from tso, otherwise undetermined behavior.
-}
-
-type TxnOption struct {
-	// VChannel is the target vchannel to write.
-	// TODO: support cross-wal txn in future.
-	VChannel string
-
-	// Keepalive is the time to keepalive of the transaction.
-	// If the txn don't append message in the keepalive time, the txn will be expired.
-	// Only make sense when keepalive is greater than 1ms.
-	// The default value is 0, which means the keepalive is setted by the wal at streaming node.
-	Keepalive time.Duration
 }
 
 type ReadOption struct {

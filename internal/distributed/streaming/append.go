@@ -47,12 +47,3 @@ func assertValidBroadcastMessage(msg message.BroadcastMutableMessage) {
 		panic("self controlled message is not allowed to broadcast append from client")
 	}
 }
-
-// We only support delete and insert message for txn now.
-func assertIsDmlMessage(msgs ...message.MutableMessage) {
-	for _, msg := range msgs {
-		if msg.MessageType() != message.MessageTypeInsert && msg.MessageType() != message.MessageTypeDelete {
-			panic("only insert and delete message is allowed in txn")
-		}
-	}
-}
