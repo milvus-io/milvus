@@ -5,23 +5,62 @@ import (
 	"os"
 	"sort"
 
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func ShowYaml(filepath string) {
-	reader := viper.New()
-	reader.SetConfigFile(filepath)
-	if err := reader.ReadInConfig(); err != nil {
+	data, err := os.ReadFile(filepath)
+	if err != nil {
 		log.Warn("read config failed", zap.Error(err))
 		os.Exit(-3)
 	}
-	keys := reader.AllKeys()
+
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		log.Warn("parse config failed", zap.Error(err))
+		os.Exit(-3)
+	}
+
+	flat := make(map[string]string)
+	flattenYaml("", raw, flat)
+
+	keys := make([]string, 0, len(flat))
+	for k := range flat {
+		keys = append(keys, k)
+	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		v := reader.GetString(key)
-		fmt.Fprintln(os.Stdout, key, "=", v)
+		fmt.Fprintln(os.Stdout, key, "=", flat[key])
+	}
+}
+
+func flattenYaml(prefix string, m map[string]interface{}, out map[string]string) {
+	for k, v := range m {
+		fullKey := k
+		if prefix != "" {
+			fullKey = prefix + "." + k
+		}
+		switch val := v.(type) {
+		case map[string]interface{}:
+			flattenYaml(fullKey, val, out)
+		case []interface{}:
+			for i, item := range val {
+				childKey := fmt.Sprintf("%s.%d", fullKey, i)
+				if nested, ok := item.(map[string]interface{}); ok {
+					flattenYaml(childKey, nested, out)
+				} else {
+					out[childKey] = fmt.Sprintf("%v", item)
+				}
+			}
+		default:
+			if val == nil {
+				out[fullKey] = ""
+			} else {
+				out[fullKey] = fmt.Sprintf("%v", val)
+			}
+		}
 	}
 }
