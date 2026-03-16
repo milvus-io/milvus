@@ -1163,6 +1163,32 @@ func TestAddFieldTask(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
+		// unsupported clustering key type (JSON, Bool, Array)
+		// Use a fresh schema (no existing clustering key) so the type check is the only gate
+		freshSchema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, int64Field, false)
+		task.oldSchema = freshSchema
+		for _, unsupportedType := range []schemapb.DataType{
+			schemapb.DataType_JSON,
+			schemapb.DataType_Bool,
+			schemapb.DataType_Array,
+		} {
+			fSchema = &schemapb.FieldSchema{
+				Name:            "ck_field",
+				DataType:        unsupportedType,
+				Nullable:        true,
+				IsClusteringKey: true,
+			}
+			if unsupportedType == schemapb.DataType_Array {
+				fSchema.ElementType = schemapb.DataType_Int64
+			}
+			bytes, err = proto.Marshal(fSchema)
+			assert.NoError(t, err)
+			task.Schema = bytes
+			err = task.PreExecute(ctx)
+			assert.Error(t, err, "expected error for unsupported clustering key type %v", unsupportedType)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		}
+
 		// fieldName invalid
 		fSchema = &schemapb.FieldSchema{
 			Name: "",
