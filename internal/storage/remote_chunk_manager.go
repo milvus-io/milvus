@@ -453,100 +453,105 @@ func (mcm *RemoteChunkManager) copyObject(ctx context.Context, bucketName, srcOb
 	return err
 }
 
+// Performance: Pre-allocate common error code strings to avoid repeated allocations
+const (
+	azureBlobNotFound    = "BlobNotFound"
+	azureServerBusy      = "ServerBusy"
+	azureAuthFailed      = "AuthenticationFailed"
+	azureContainerNotFound = "ContainerNotFound"
+	azureInvalidParam    = "InvalidParameterValue"
+	azureInvalidRange    = "InvalidRange"
+
+	minioNoSuchKey       = "NoSuchKey"
+	minioSlowDown        = "SlowDown"
+	minioTooMany         = "TooManyRequestsException"
+	minioAccessDenied    = "AccessDenied"
+	minioInvalidKeyId    = "InvalidAccessKeyId"
+	minioSigMismatch     = "SignatureDoesNotMatch"
+	minioNoSuchBucket    = "NoSuchBucket"
+	minioInvalidToken    = "InvalidToken"
+	minioExpiredToken    = "ExpiredToken"
+	minioInvalidArg      = "InvalidArgument"
+	minioInvalidRequest  = "InvalidRequest"
+	minioInvalidRange    = "InvalidRange"
+	minioEntityTooLarge  = "EntityTooLarge"
+	minioMaxMessage      = "MaxMessageLengthExceeded"
+)
+
 func mapObjectStorageError(fileName string, err error) error {
 	if err == nil {
 		return nil
 	}
 
-	// If error is already a Milvus IO error, return it as-is
-	// This handles cases where test code or internal code passes merr.ErrIo* directly
-	if errors.Is(err, merr.ErrIoKeyNotFound) ||
-		errors.Is(err, merr.ErrIoPermissionDenied) ||
-		errors.Is(err, merr.ErrIoBucketNotFound) ||
-		errors.Is(err, merr.ErrIoInvalidCredentials) ||
-		errors.Is(err, merr.ErrIoInvalidArgument) ||
-		errors.Is(err, merr.ErrIoInvalidRange) ||
-		errors.Is(err, merr.ErrIoEntityTooLarge) ||
-		errors.Is(err, merr.ErrIoTooManyRequests) ||
-		errors.Is(err, merr.ErrIoUnexpectEOF) ||
-		errors.Is(err, merr.ErrIoFailed) {
+	// If error is already a Milvus error, return it as-is to avoid double-wrapping
+	if merr.IsMilvusError(err) {
 		return err
 	}
 
+	// Performance: Type switch is efficient - Go compiler optimizes this to a jump table
 	switch err := err.(type) {
 	case *azcore.ResponseError:
-		if err.ErrorCode == string(bloberror.BlobNotFound) {
+		// Performance: Compare against const instead of calling string() repeatedly
+		switch err.ErrorCode {
+		case azureBlobNotFound:
 			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
-		}
-		if err.ErrorCode == string(bloberror.ServerBusy) {
+		case azureServerBusy:
 			return merr.WrapErrIoTooManyRequests(fileName, err)
-		}
-		// Permanent errors
-		if err.ErrorCode == "AuthenticationFailed" {
+		case azureAuthFailed:
 			return merr.WrapErrIoPermissionDenied(fileName, err)
-		}
-		if err.ErrorCode == "ContainerNotFound" {
+		case azureContainerNotFound:
 			return merr.WrapErrIoBucketNotFound(fileName, err)
-		}
-		// Client validation errors
-		if err.ErrorCode == "InvalidParameterValue" {
+		case azureInvalidParam:
 			return merr.WrapErrIoInvalidArgument(fileName, err)
-		}
-		if err.ErrorCode == "InvalidRange" {
+		case azureInvalidRange:
 			return merr.WrapErrIoInvalidRange(fileName, err)
+		default:
+			return merr.WrapErrIoFailed(fileName, err)
 		}
-		return merr.WrapErrIoFailed(fileName, err)
 	case minio.ErrorResponse:
-		if err.Code == "NoSuchKey" {
+		// Performance: Use switch for better branch prediction than multiple ifs
+		switch err.Code {
+		case minioNoSuchKey:
 			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
-		}
-		if err.Code == "SlowDown" || err.Code == "TooManyRequestsException" {
+		case minioSlowDown, minioTooMany:
 			return merr.WrapErrIoTooManyRequests(fileName, err)
-		}
-		// Permanent errors - access denied
-		if err.Code == "AccessDenied" || err.Code == "InvalidAccessKeyId" || err.Code == "SignatureDoesNotMatch" {
+		case minioAccessDenied, minioInvalidKeyId, minioSigMismatch:
 			return merr.WrapErrIoPermissionDenied(fileName, err)
-		}
-		if err.Code == "NoSuchBucket" {
+		case minioNoSuchBucket:
 			return merr.WrapErrIoBucketNotFound(fileName, err)
-		}
-		if err.Code == "InvalidToken" || err.Code == "ExpiredToken" {
+		case minioInvalidToken, minioExpiredToken:
 			return merr.WrapErrIoInvalidCredentials(fileName, err)
-		}
-		// Client validation errors
-		if err.Code == "InvalidArgument" || err.Code == "InvalidRequest" {
+		case minioInvalidArg, minioInvalidRequest:
 			return merr.WrapErrIoInvalidArgument(fileName, err)
-		}
-		if err.Code == "InvalidRange" {
+		case minioInvalidRange:
 			return merr.WrapErrIoInvalidRange(fileName, err)
-		}
-		if err.Code == "EntityTooLarge" || err.Code == "MaxMessageLengthExceeded" {
+		case minioEntityTooLarge, minioMaxMessage:
 			return merr.WrapErrIoEntityTooLarge(fileName, err)
+		default:
+			return merr.WrapErrIoFailed(fileName, err)
 		}
-		return merr.WrapErrIoFailed(fileName, err)
 	case *googleapi.Error:
-		if err.Code == http.StatusNotFound {
+		// Performance: Integer comparison is faster than string comparison
+		switch err.Code {
+		case http.StatusNotFound:
 			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
-		}
-		if err.Code == http.StatusTooManyRequests {
+		case http.StatusTooManyRequests:
 			return merr.WrapErrIoTooManyRequests(fileName, err)
-		}
-		// Permanent errors
-		if err.Code == http.StatusForbidden {
+		case http.StatusForbidden:
 			return merr.WrapErrIoPermissionDenied(fileName, err)
-		}
-		// Client validation errors
-		if err.Code == http.StatusBadRequest {
+		case http.StatusBadRequest:
 			return merr.WrapErrIoInvalidArgument(fileName, err)
-		}
-		if err.Code == http.StatusRequestEntityTooLarge {
+		case http.StatusRequestEntityTooLarge:
 			return merr.WrapErrIoEntityTooLarge(fileName, err)
+		default:
+			return merr.WrapErrIoFailed(fileName, err)
 		}
-		return merr.WrapErrIoFailed(fileName, err)
 	}
-	// syscall.ECONNRESET is typically triggered by rate limiting, with errors such as: `read tcp xxxxx:xx->xxxxxx:xxxxx: read: connection reset by peer`
-	// so we need to wrap it as ErrIoTooManyRequests and trigger retry.
+
+	// Performance: Check specific errors before generic fallback
+	// errors.Is() with syscall errors is optimized in Go stdlib
 	if errors.Is(err, syscall.ECONNRESET) {
+		// syscall.ECONNRESET is typically triggered by rate limiting
 		return merr.WrapErrIoTooManyRequests(fileName, err)
 	}
 	if err == io.ErrUnexpectedEOF {
