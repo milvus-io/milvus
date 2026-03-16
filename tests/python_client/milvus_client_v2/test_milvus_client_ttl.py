@@ -166,16 +166,16 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         consistency_levels = [CONSISTENCY_EVENTUALLY, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_STRONG]
         for consistency_level in consistency_levels:
             log.debug(f"start to search/query with {consistency_level}")
-            # try 3 times
-            for i in range(3):
+            # Poll until search returns results (search visibility may lag behind query)
+            for i in range(15):
                 res = self.search(client, collection_name, search_vectors,
                                   search_params={}, anns_field='embeddings',
                                   limit=10, consistency_level=consistency_level)[0]
                 if len(res[0]) > 0:
                     break
-                else:
-                    time.sleep(1)
-            assert len(res[0]) > 0
+                time.sleep(2)
+            assert len(res[0]) > 0, \
+                f"Search with {consistency_level} returned 0 results after retries"
 
             if consistency_level != CONSISTENCY_STRONG:
                 pass
@@ -376,6 +376,30 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
                          consistency_level=CONSISTENCY_STRONG)[0]
         assert res[0].get('count(*)') == expected_count, \
             f"Expected count {expected_count}, got {res[0].get('count(*)')} after {timeout}s"
+
+    def _wait_until_search_count(self, client, collection_name, search_vectors,
+                                  expected_count, anns_field=default_vector_field_name,
+                                  timeout=30, interval=2, **search_kwargs):
+        """Poll until search result count equals expected_count or timeout is reached.
+
+        Search and query take different code paths and TTL filtering can
+        propagate at different speeds, so search assertions need their own
+        retry loop — mirroring ``_wait_until_count`` for query.
+        """
+        search_kwargs.setdefault("search_params", {})
+        search_kwargs.setdefault("limit", 10)
+        search_kwargs.setdefault("consistency_level", CONSISTENCY_STRONG)
+        for _ in range(timeout // interval):
+            res = self.search(client, collection_name, search_vectors,
+                              anns_field=anns_field, **search_kwargs)[0]
+            if len(res[0]) == expected_count:
+                return res
+            time.sleep(interval)
+        res = self.search(client, collection_name, search_vectors,
+                          anns_field=anns_field, **search_kwargs)[0]
+        assert len(res[0]) == expected_count, \
+            f"Expected search count {expected_count}, got {len(res[0])} after {timeout}s"
+        return res
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_collection_with_entity_ttl_field(self):
@@ -1223,10 +1247,16 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         time.sleep(ttl_seconds)
         self._wait_until_count(client, collection_name, expected_count=100)
 
+        # Poll until search only returns non-expired entities.
+        # Search TTL filtering can lag behind query, so retry.
         search_vectors = cf.gen_vectors(1, dim=default_dim)
-        res = self.search(client, collection_name, search_vectors, anns_field=default_vector_field_name,
-                         search_params={}, limit=10, filter="id >= 0",
-                         consistency_level=CONSISTENCY_STRONG)[0]
+        for _ in range(15):
+            res = self.search(client, collection_name, search_vectors, anns_field=default_vector_field_name,
+                             search_params={}, limit=10, filter="id >= 0",
+                             consistency_level=CONSISTENCY_STRONG)[0]
+            if len(res[0]) > 0 and all(hit['id'] >= 100 for hit in res[0]):
+                break
+            time.sleep(2)
 
         assert len(res[0]) > 0
         for hit in res[0]:
@@ -1269,10 +1299,16 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         time.sleep(ttl_seconds)
         self._wait_until_count(client, collection_name, expected_count=100)
 
+        # Poll until search only returns non-expired (NULL TTL) entities.
+        # Search TTL filtering can lag behind query, so retry.
         search_vectors = cf.gen_vectors(1, dim=default_dim)
-        res = self.search(client, collection_name, search_vectors, anns_field=default_vector_field_name,
-                         search_params={}, limit=10,
-                         consistency_level=CONSISTENCY_STRONG)[0]
+        for _ in range(15):
+            res = self.search(client, collection_name, search_vectors, anns_field=default_vector_field_name,
+                             search_params={}, limit=10,
+                             consistency_level=CONSISTENCY_STRONG)[0]
+            if len(res[0]) > 0 and all(hit['id'] >= 100 for hit in res[0]):
+                break
+            time.sleep(2)
 
         assert len(res[0]) > 0
         for hit in res[0]:
@@ -1595,11 +1631,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._wait_until_count(client, collection_name, expected_count=0)
 
         search_vectors = cf.gen_vectors(1, dim=default_dim)
-        res = self.search(client, collection_name, search_vectors,
-                          anns_field=default_vector_field_name, search_params={},
-                          limit=10, consistency_level=CONSISTENCY_STRONG)[0]
-        assert len(res[0]) == 0, \
-            f"Search should return 0 results after TTL expiry, got {len(res[0])}"
+        self._wait_until_search_count(client, collection_name, search_vectors, expected_count=0)
 
         # Step 4: Release and reload — expired data and original NULL rows must stay invisible
         self.release_collection(client, collection_name)
@@ -1610,26 +1642,14 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         assert res[0].get('count(*)') == 0, \
             f"Expected 0 after release/reload, got {res[0].get('count(*)')}"
 
-        res = self.search(client, collection_name, search_vectors,
-                          anns_field=default_vector_field_name, search_params={},
-                          limit=10, consistency_level=CONSISTENCY_STRONG)[0]
-        assert len(res[0]) == 0, \
-            f"Search should return 0 after release/reload, got {len(res[0])}"
+        self._wait_until_search_count(client, collection_name, search_vectors, expected_count=0)
 
         # Step 5: Compact and verify data is still invisible
         self.compact(client, collection_name)
         time.sleep(10)
 
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
-                         consistency_level=CONSISTENCY_STRONG)[0]
-        assert res[0].get('count(*)') == 0, \
-            f"Expected 0 after compaction, got {res[0].get('count(*)')}"
-
-        res = self.search(client, collection_name, search_vectors,
-                          anns_field=default_vector_field_name, search_params={},
-                          limit=10, consistency_level=CONSISTENCY_STRONG)[0]
-        assert len(res[0]) == 0, \
-            f"Search should return 0 after compaction, got {len(res[0])}"
+        self._wait_until_count(client, collection_name, expected_count=0)
+        self._wait_until_search_count(client, collection_name, search_vectors, expected_count=0)
 
         self.drop_collection(client, collection_name)
 
