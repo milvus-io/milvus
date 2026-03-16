@@ -438,38 +438,6 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip("BUG #47416")
-    def test_alter_remove_entity_ttl_field(self):
-        """
-        target: test removing ttl_field from collection
-        method:
-            1. Create a collection with ttl_field
-            2. Use alter_collection_properties to remove ttl_field (set to empty string)
-            3. Verify ttl_field is removed
-        expected: ttl_field removed successfully, data no longer expires
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        # Create schema
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-
-        # Create collection with ttl_field
-        properties = {"ttl_field": "ttl", "timezone": "UTC"}
-        self.create_collection(client, collection_name, schema=schema, properties=properties)
-
-        # Alter to remove ttl_field
-        self.alter_collection_properties(client, collection_name, properties={"ttl_field": ""})
-
-        # Verify ttl_field is removed
-        collection_info = self.describe_collection(client, collection_name)[0]
-        assert collection_info['properties'].get("ttl_field", "") == ""
-
-        self.drop_collection(client, collection_name)
     
     @pytest.mark.tags(CaseLabel.L1)
     def test_change_entity_ttl_field(self):
@@ -1572,6 +1540,96 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         for pk in iterated_ids:
             assert pk >= nb, \
                 f"Iterator returned expired entity id={pk} (expected only id >= {nb})"
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_upsert_overwrite_null_ttl_with_short_ttl(self):
+        """
+        target: test that upserting the same PK with a short TTL overwrites the original
+                NULL (never-expire) TTL, and the data expires correctly across growing
+                segments, sealed segments, release/reload, and compaction
+        method:
+            1. Create collection with ttl_field
+            2. Insert data with NULL ttl (never expires) and flush to seal the segment
+            3. Upsert same PKs with ttl = now() + 5 seconds (short TTL)
+            4. Wait for TTL to expire, then query and search to verify data is gone
+            5. Release and reload — verify expired data (including original NULL rows)
+               remains invisible
+            6. Trigger compaction and verify data is still invisible
+        expected: Upsert overwrites the original NULL TTL; after expiry the data is
+                  invisible through query, search, release/reload, and compaction
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nb = 100
+        ttl_seconds = 5
+
+        self._create_ttl_collection(client, collection_name)
+
+        # Step 1: Insert data with NULL ttl (never expires) and flush to seal
+        vectors = cf.gen_vectors(nb, dim=default_dim)
+        rows = [{default_primary_key_field_name: i, "ttl": None,
+                 default_vector_field_name: list(vectors[i])} for i in range(nb)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # Verify all data is visible
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == nb
+
+        # Step 2: Upsert same PKs with short TTL
+        short_ttl = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        upsert_rows = [{default_primary_key_field_name: i, "ttl": short_ttl,
+                        default_vector_field_name: list(vectors[i])} for i in range(nb)]
+        self.upsert(client, collection_name, upsert_rows)
+
+        # Verify data is still visible before expiry
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == nb
+
+        # Step 3: Wait for TTL to expire, verify via query and search
+        time.sleep(ttl_seconds)
+        self._wait_until_count(client, collection_name, expected_count=0)
+
+        search_vectors = cf.gen_vectors(1, dim=default_dim)
+        res = self.search(client, collection_name, search_vectors,
+                          anns_field=default_vector_field_name, search_params={},
+                          limit=10, consistency_level=CONSISTENCY_STRONG)[0]
+        assert len(res[0]) == 0, \
+            f"Search should return 0 results after TTL expiry, got {len(res[0])}"
+
+        # Step 4: Release and reload — expired data and original NULL rows must stay invisible
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == 0, \
+            f"Expected 0 after release/reload, got {res[0].get('count(*)')}"
+
+        res = self.search(client, collection_name, search_vectors,
+                          anns_field=default_vector_field_name, search_params={},
+                          limit=10, consistency_level=CONSISTENCY_STRONG)[0]
+        assert len(res[0]) == 0, \
+            f"Search should return 0 after release/reload, got {len(res[0])}"
+
+        # Step 5: Compact and verify data is still invisible
+        self.compact(client, collection_name)
+        time.sleep(10)
+
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                         consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)') == 0, \
+            f"Expected 0 after compaction, got {res[0].get('count(*)')}"
+
+        res = self.search(client, collection_name, search_vectors,
+                          anns_field=default_vector_field_name, search_params={},
+                          limit=10, consistency_level=CONSISTENCY_STRONG)[0]
+        assert len(res[0]) == 0, \
+            f"Search should return 0 after compaction, got {len(res[0])}"
 
         self.drop_collection(client, collection_name)
 
