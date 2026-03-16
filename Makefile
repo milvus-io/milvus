@@ -80,7 +80,7 @@ GOFUMPT_VERSION := 0.5.0
 GOFUMPT_OUTPUT := $(shell $(INSTALL_PATH)/gofumpt --version 2>/dev/null)
 INSTALL_GOFUMPT := $(findstring $(GOFUMPT_VERSION),$(GOFUMPT_OUTPUT))
 # gotestsum
-GOTESTSUM_VERSION := 1.11.0
+GOTESTSUM_VERSION := 1.13.0
 GOTESTSUM_OUTPUT := $(shell $(INSTALL_PATH)/gotestsum --version 2>/dev/null)
 INSTALL_GOTESTSUM := $(findstring $(GOTESTSUM_VERSION),$(GOTESTSUM_OUTPUT))
 # protoc-gen-go
