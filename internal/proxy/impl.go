@@ -7252,7 +7252,7 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 		return merr.WrapErrParameterMissing("start_message_id")
 	}
 
-	startMsgID := message.MustUnmarshalMessageID(req.GetStartMessageId().GetId())
+	startMsgID := message.MustUnmarshalMessageID(req.GetStartMessageId())
 
 	// Use exclusive start position (dump messages AFTER start_message_id)
 	// This is appropriate for salvage scenarios where start_message_id is the last synced message
