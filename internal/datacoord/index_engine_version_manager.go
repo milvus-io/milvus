@@ -8,7 +8,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 )
@@ -250,43 +249,55 @@ func (m *versionManagerImpl) GetMaximumScalarIndexEngineVersion() int32 {
 	return maximum
 }
 
+// clampVersion clamps v into [minV, maxV], logging a warning on each adjustment.
+func clampVersion(v, minV, maxV int32, name string) int32 {
+	if v < minV {
+		log.Warn(name+" below cluster minimum, clamping",
+			zap.Int32("target", v), zap.Int32("minimum", minV))
+		v = minV
+	}
+	if v > maxV {
+		log.Warn(name+" exceeds cluster maximum, clamping",
+			zap.Int32("target", v), zap.Int32("maximum", maxV))
+		v = maxV
+	}
+	return v
+}
+
 func (m *versionManagerImpl) ResolveVecIndexVersion() int32 {
 	version := m.GetCurrentIndexEngineVersion()
 	if Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt64() != -1 {
+		target := Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32()
 		if Params.DataCoordCfg.ForceRebuildSegmentIndex.GetAsBool() {
-			version = Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32()
+			version = target
 		} else {
-			version = max(version, Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32())
+			version = max(version, target)
 		}
 	}
-	if maxVersion := m.GetMaximumIndexEngineVersion(); version > maxVersion {
-		log.Warn("targetVecIndexVersion exceeds cluster maximum, clamping",
-			zap.Int32("target", version), zap.Int32("maximum", maxVersion))
-		version = maxVersion
-	}
-	return version
+	return clampVersion(
+		version,
+		m.GetMinimalIndexEngineVersion(),
+		m.GetMaximumIndexEngineVersion(),
+		"targetVecIndexVersion",
+	)
 }
 
 func (m *versionManagerImpl) ResolveScalarIndexVersion() int32 {
 	version := m.GetCurrentScalarIndexEngineVersion()
 	if Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt64() != -1 {
+		target := Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt32()
 		if Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.GetAsBool() {
-			version = Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt32()
+			version = target
 		} else {
-			version = max(version, Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt32())
+			version = max(version, target)
 		}
 	}
-	if version < common.MinimalScalarIndexEngineVersion {
-		log.Warn("targetScalarIndexVersion below minimum, clamping",
-			zap.Int32("target", version), zap.Int32("minimum", common.MinimalScalarIndexEngineVersion))
-		version = common.MinimalScalarIndexEngineVersion
-	}
-	if maxVersion := m.GetMaximumScalarIndexEngineVersion(); version > maxVersion {
-		log.Warn("targetScalarIndexVersion exceeds cluster maximum, clamping",
-			zap.Int32("target", version), zap.Int32("maximum", maxVersion))
-		version = maxVersion
-	}
-	return version
+	return clampVersion(
+		version,
+		m.GetMinimalScalarIndexEngineVersion(),
+		m.GetMaximumScalarIndexEngineVersion(),
+		"targetScalarIndexVersion",
+	)
 }
 
 func (m *versionManagerImpl) GetIndexNonEncoding() bool {
