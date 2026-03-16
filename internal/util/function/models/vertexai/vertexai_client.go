@@ -69,6 +69,30 @@ type ErrorInfo struct {
 	RequestID string `json:"request_id"`
 }
 
+// Gemini-specific types for :embedContent endpoint
+
+type GeminiPart struct {
+	Text string `json:"text"`
+}
+
+type GeminiContent struct {
+	Parts []GeminiPart `json:"parts"`
+}
+
+type GeminiEmbedContentRequest struct {
+	Content              GeminiContent `json:"content"`
+	TaskType             string        `json:"taskType,omitempty"`
+	OutputDimensionality int64         `json:"outputDimensionality,omitempty"`
+}
+
+type GeminiEmbeddingValues struct {
+	Values []float32 `json:"values"`
+}
+
+type GeminiEmbedContentResponse struct {
+	Embedding GeminiEmbeddingValues `json:"embedding"`
+}
+
 type VertexAIEmbedding struct {
 	url     string
 	jsonKey []byte
@@ -109,6 +133,41 @@ func (c *VertexAIEmbedding) getAccessToken() (string, error) {
 		return "", fmt.Errorf("Failed to get token: %v", err)
 	}
 	return token.AccessToken, nil
+}
+
+func (c *VertexAIEmbedding) GeminiEmbedding(url string, text string, dim int64, taskType string, timeoutSec int64) (*GeminiEmbedContentResponse, error) {
+	req := GeminiEmbedContentRequest{
+		Content: GeminiContent{
+			Parts: []GeminiPart{{Text: text}},
+		},
+	}
+	if taskType != "" {
+		req.TaskType = taskType
+	}
+	if dim > 0 {
+		req.OutputDimensionality = dim
+	}
+
+	var token string
+	var err error
+	if c.token != "" {
+		token = c.token
+	} else {
+		token, err = c.getAccessToken()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	headers := map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": fmt.Sprintf("Bearer %s", token),
+	}
+	res, err := models.PostRequest[GeminiEmbedContentResponse](req, url, headers, timeoutSec)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int64, taskType string, timeoutSec int64) (*EmbeddingResponse, error) {
