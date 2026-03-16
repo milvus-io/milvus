@@ -1626,11 +1626,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self._wait_until_count(client, collection_name, expected_count=0)
 
         search_vectors = cf.gen_vectors(1, dim=default_dim)
-        res = self.search(client, collection_name, search_vectors,
-                          anns_field=default_vector_field_name, search_params={},
-                          limit=10, consistency_level=CONSISTENCY_STRONG)[0]
-        assert len(res[0]) == 0, \
-            f"Search should return 0 results after TTL expiry, got {len(res[0])}"
+        self._wait_until_search_count(client, collection_name, search_vectors, expected_count=0)
 
         # Step 4: Release and reload — expired data and original NULL rows must stay invisible
         self.release_collection(client, collection_name)
@@ -1641,26 +1637,14 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         assert res[0].get('count(*)') == 0, \
             f"Expected 0 after release/reload, got {res[0].get('count(*)')}"
 
-        res = self.search(client, collection_name, search_vectors,
-                          anns_field=default_vector_field_name, search_params={},
-                          limit=10, consistency_level=CONSISTENCY_STRONG)[0]
-        assert len(res[0]) == 0, \
-            f"Search should return 0 after release/reload, got {len(res[0])}"
+        self._wait_until_search_count(client, collection_name, search_vectors, expected_count=0)
 
         # Step 5: Compact and verify data is still invisible
         self.compact(client, collection_name)
         time.sleep(10)
 
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
-                         consistency_level=CONSISTENCY_STRONG)[0]
-        assert res[0].get('count(*)') == 0, \
-            f"Expected 0 after compaction, got {res[0].get('count(*)')}"
-
-        res = self.search(client, collection_name, search_vectors,
-                          anns_field=default_vector_field_name, search_params={},
-                          limit=10, consistency_level=CONSISTENCY_STRONG)[0]
-        assert len(res[0]) == 0, \
-            f"Search should return 0 after compaction, got {len(res[0])}"
+        self._wait_until_count(client, collection_name, expected_count=0)
+        self._wait_until_search_count(client, collection_name, search_vectors, expected_count=0)
 
         self.drop_collection(client, collection_name)
 
