@@ -27,9 +27,9 @@ DEFAULT_EMB_LIST_INDEX_PARAM = {
     "metric_type": "MAX_SIM_COSINE",
     "params": {"M": 16, "efConstruction": 200},
 }
-DEFAULT_SEARCH_PARAM = {"metric_type": "L2", "params": {"ef": 64}}
+DEFAULT_SEARCH_PARAM = {"params": {"ef": 64}}
 DEFAULT_INT8_INDEX_PARAM = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 48, "efConstruction": 500}}
-DEFAULT_INT8_SEARCH_PARAM = {"metric_type": "L2", "params": {"ef": 64}}
+DEFAULT_INT8_SEARCH_PARAM = {"params": {"ef": 64}}
 DEFAULT_BINARY_INDEX_PARAM = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"M": 48}}
 DEFAULT_BINARY_SEARCH_PARAM = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
 DEFAULT_BM25_INDEX_PARAM = {
