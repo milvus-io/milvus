@@ -35,7 +35,6 @@ default_int32_array_field_name = ct.default_int32_array_field_name
 default_string_array_field_name = ct.default_string_array_field_name
 default_int32_field_name = ct.default_int32_field_name
 default_int32_value = ct.default_int32_value
-PU_DEFAULT_COLLECTION = "test_pu_not_nullable_default" + cf.gen_unique_str("_")
 PU_DEFAULT_DIM = 4
 
 
@@ -1641,11 +1640,12 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
 
         expected_step3 = [
             {default_primary_key_field_name: 0, "name": "mixed_key_0", "tag": "upd_tag_0"},
+            {default_primary_key_field_name: 1, "name": "mixed_key_1", "tag": "upd_tag_1"},
             {default_primary_key_field_name: 1000, "name": "mixed_key_1000", "category": "cat_A"},
             {default_primary_key_field_name: 1001, "name": "mixed_key_1001", "category": "cat_B"},
         ]
         self.query(client, collection_name,
-                   filter=f"{default_primary_key_field_name} in [0, 1000, 1001]",
+                   filter=f"{default_primary_key_field_name} in [0, 1, 1000, 1001]",
                    output_fields=["name", "tag", "category"],
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: expected_step3,
@@ -1831,6 +1831,13 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         assert res[0]["tag"] is None
         assert res[0]["category"] == "seed_category"
 
+        # Verify filter behavior on null dynamic field
+        res_null = self.query(client, collection_name,
+                              filter="tag is null",
+                              output_fields=["tag"])[0]
+        assert len(res_null) >= 1
+        assert any(r[default_primary_key_field_name] == 1 for r in res_null)
+
         self.drop_collection(client, collection_name)
 
 
@@ -1863,10 +1870,14 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
     Each test uses a distinct PK range to avoid cross-test interference.
     """
 
+    PU_DEFAULT_COLLECTION = "test_pu_not_nullable_default" + cf.gen_unique_str("_")
+
     @pytest.fixture(scope="module", autouse=True)
     def prepare_default_value_collection(self, request):
+        # Note: using raw client API here because module-scoped fixtures
+        # run outside the per-test wrapper lifecycle (setup_method/teardown_method).
         client = self._client()
-        collection_name = PU_DEFAULT_COLLECTION
+        collection_name = self.PU_DEFAULT_COLLECTION
         if client.has_collection(collection_name):
             client.drop_collection(collection_name)
 
@@ -1911,8 +1922,8 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
         def teardown():
             try:
                 c = self._client()
-                if c.has_collection(PU_DEFAULT_COLLECTION):
-                    c.drop_collection(PU_DEFAULT_COLLECTION)
+                if c.has_collection(self.PU_DEFAULT_COLLECTION):
+                    c.drop_collection(self.PU_DEFAULT_COLLECTION)
             except Exception:
                 pass
         request.addfinalizer(teardown)
@@ -1927,7 +1938,7 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
             3. Partial update id=2 text only, verify vector preserved
         """
         client = self._client()
-        cn = PU_DEFAULT_COLLECTION
+        cn = self.PU_DEFAULT_COLLECTION
         pk = default_primary_key_field_name
         vec = default_vector_field_name
 
@@ -1964,7 +1975,7 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
             3. Partial update id=4 vector only, verify score preserved as 0
         """
         client = self._client()
-        cn = PU_DEFAULT_COLLECTION
+        cn = self.PU_DEFAULT_COLLECTION
         pk = default_primary_key_field_name
         vec = default_vector_field_name
 
@@ -1995,7 +2006,7 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
             2. Partial update id=6 weight only, verify vector preserved
         """
         client = self._client()
-        cn = PU_DEFAULT_COLLECTION
+        cn = self.PU_DEFAULT_COLLECTION
         pk = default_primary_key_field_name
         vec = default_vector_field_name
 
@@ -2018,7 +2029,7 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
             2. Partial update id=8 flag to True, verify vector preserved
         """
         client = self._client()
-        cn = PU_DEFAULT_COLLECTION
+        cn = self.PU_DEFAULT_COLLECTION
         pk = default_primary_key_field_name
         vec = default_vector_field_name
 
@@ -2043,7 +2054,7 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
             4. Partial update weight only → check text, score, flag preserved
         """
         client = self._client()
-        cn = PU_DEFAULT_COLLECTION
+        cn = self.PU_DEFAULT_COLLECTION
         pk = default_primary_key_field_name
         vec = default_vector_field_name
 
@@ -2093,7 +2104,7 @@ class TestPartialUpdateNotNullableDefault(TestMilvusClientV2Base):
             4. Verify text still preserved
         """
         client = self._client()
-        cn = PU_DEFAULT_COLLECTION
+        cn = self.PU_DEFAULT_COLLECTION
         pk = default_primary_key_field_name
         vec = default_vector_field_name
 
