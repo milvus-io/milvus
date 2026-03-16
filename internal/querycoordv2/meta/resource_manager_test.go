@@ -1233,3 +1233,122 @@ func TestResourceManager_CheckNodesInResourceGroup_AllNodesHealthy(t *testing.T)
 	assert.Contains(t, finalNodes, int64(1002), "Healthy node should remain")
 	assert.Equal(t, 2, len(finalNodes), "Should have exactly 2 nodes")
 }
+
+func (suite *ResourceManagerSuite) TestTransferNodesOnRGSwap_ScaleUp() {
+	ctx := suite.ctx
+	// Setup: default(3,3) with 3 nodes.
+	suite.manager.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
+		DefaultResourceGroupName: newResourceGroupConfig(3, 3),
+	})
+	suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(0, 0))
+	for i := int64(1); i <= 3; i++ {
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   i,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
+		suite.manager.HandleNodeUp(ctx, i)
+	}
+	suite.Equal(3, suite.manager.GetResourceGroup(ctx, DefaultResourceGroupName).NodeNum())
+	originalNodes := suite.manager.GetResourceGroup(ctx, DefaultResourceGroupName).GetNodes()
+
+	// Scale-up: default(3,3) -> (0,0), rg1(0,0) -> (3,3) in one batch.
+	// transferNodesOnRGSwap should move default's nodes directly to rg1.
+	suite.manager.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
+		DefaultResourceGroupName: newResourceGroupConfig(0, 0),
+		"rg1":                    newResourceGroupConfig(3, 3),
+	})
+
+	suite.Equal(0, suite.manager.GetResourceGroup(ctx, DefaultResourceGroupName).NodeNum())
+	suite.Equal(3, suite.manager.GetResourceGroup(ctx, "rg1").NodeNum())
+	// Verify the exact same nodes were transferred.
+	rg1Nodes := suite.manager.GetResourceGroup(ctx, "rg1").GetNodes()
+	suite.ElementsMatch(originalNodes, rg1Nodes, "rg1 should have the exact same nodes as original default")
+}
+
+func (suite *ResourceManagerSuite) TestTransferNodesOnRGSwap_ScaleDown() {
+	ctx := suite.ctx
+	// Setup: rg1(3,3) with 3 nodes, default(0,0).
+	suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(3, 3))
+	for i := int64(1); i <= 3; i++ {
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   i,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
+		suite.manager.HandleNodeUp(ctx, i)
+	}
+	suite.manager.AutoRecoverResourceGroup(ctx, "rg1")
+	suite.Equal(3, suite.manager.GetResourceGroup(ctx, "rg1").NodeNum())
+	originalNodes := suite.manager.GetResourceGroup(ctx, "rg1").GetNodes()
+
+	// Scale-down: rg1(3,3) -> (0,0), default(0,0) -> (3,3).
+	suite.manager.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
+		"rg1":                    newResourceGroupConfig(0, 0),
+		DefaultResourceGroupName: newResourceGroupConfig(3, 3),
+	})
+
+	suite.Equal(3, suite.manager.GetResourceGroup(ctx, DefaultResourceGroupName).NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup(ctx, "rg1").NodeNum())
+	defaultNodes := suite.manager.GetResourceGroup(ctx, DefaultResourceGroupName).GetNodes()
+	suite.ElementsMatch(originalNodes, defaultNodes, "default should have the exact same nodes as original rg1")
+}
+
+func (suite *ResourceManagerSuite) TestTransferNodesOnRGSwap_NoMatchWhenConfigDiffers() {
+	ctx := suite.ctx
+	// Setup: default(3,3) with 3 nodes.
+	suite.manager.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
+		DefaultResourceGroupName: newResourceGroupConfig(3, 3),
+	})
+	for i := int64(1); i <= 3; i++ {
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   i,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
+		suite.manager.HandleNodeUp(ctx, i)
+	}
+	suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(0, 0))
+
+	// No match: default(3,3) -> (0,0), but rg1 -> (5,5) != (3,3).
+	suite.manager.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
+		DefaultResourceGroupName: newResourceGroupConfig(0, 0),
+		"rg1":                    newResourceGroupConfig(5, 5),
+	})
+
+	// No swap should happen; nodes remain in default (now redundant, but not moved).
+	suite.Equal(3, suite.manager.GetResourceGroup(ctx, DefaultResourceGroupName).NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup(ctx, "rg1").NodeNum())
+}
+
+func (suite *ResourceManagerSuite) TestTransferNodesOnRGSwap_LexOrder() {
+	ctx := suite.ctx
+	// Setup: default(3,3) with 3 nodes, rg1 and rg2 both want (3,3).
+	suite.manager.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
+		DefaultResourceGroupName: newResourceGroupConfig(3, 3),
+	})
+	suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(0, 0))
+	suite.manager.AddResourceGroup(ctx, "rg2", newResourceGroupConfig(0, 0))
+	for i := int64(1); i <= 3; i++ {
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   i,
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
+		suite.manager.HandleNodeUp(ctx, i)
+	}
+	originalNodes := suite.manager.GetResourceGroup(ctx, DefaultResourceGroupName).GetNodes()
+
+	// Both rg1 and rg2 match default's old config. Lex-smallest (rg1) should win.
+	suite.manager.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
+		DefaultResourceGroupName: newResourceGroupConfig(0, 0),
+		"rg1":                    newResourceGroupConfig(3, 3),
+		"rg2":                    newResourceGroupConfig(3, 3),
+	})
+
+	suite.Equal(0, suite.manager.GetResourceGroup(ctx, DefaultResourceGroupName).NodeNum())
+	suite.Equal(3, suite.manager.GetResourceGroup(ctx, "rg1").NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup(ctx, "rg2").NodeNum())
+	rg1Nodes := suite.manager.GetResourceGroup(ctx, "rg1").GetNodes()
+	suite.ElementsMatch(originalNodes, rg1Nodes, "lex-smallest rg1 should get the nodes")
+}
