@@ -160,6 +160,65 @@ func TestStatsWriter_UpgradePrimaryKey(t *testing.T) {
 	}
 }
 
+func TestDeserializeBloomFilterStats(t *testing.T) {
+	// Build a compound stats blob using GenerateList.
+	stat, err := NewPrimaryKeyStats(1, int64(schemapb.DataType_Int64), 100)
+	assert.NoError(t, err)
+	stat.Update(NewInt64PrimaryKey(1))
+	stat.Update(NewInt64PrimaryKey(2))
+
+	sw := &StatsWriter{}
+	sw.GenerateList([]*PrimaryKeyStats{stat})
+	compoundBlob := &Blob{Value: sw.GetBuffer()}
+
+	// Build a default (per-row) stats blob.
+	sw2 := &StatsWriter{}
+	err = sw2.GenerateByData(common.RowIDField, schemapb.DataType_Int64, &Int64FieldData{
+		Data: []int64{10, 20},
+	})
+	assert.NoError(t, err)
+	defaultBlob := &Blob{Value: sw2.GetBuffer()}
+
+	t.Run("compound path at non-zero index", func(t *testing.T) {
+		// The compound blob is at index 1 (not 0). Before the fix this
+		// would incorrectly use blobs[0] (the default blob) and fail.
+		paths := []string{
+			"root/stats/0",
+			"root/stats/" + CompoundStatsType.LogIdx(),
+		}
+		blobs := []*Blob{defaultBlob, compoundBlob}
+
+		stats, err := DeserializeBloomFilterStats(paths, blobs)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(stats))
+		assert.True(t, stats[0].MinPk.EQ(NewInt64PrimaryKey(1)))
+		assert.True(t, stats[0].MaxPk.EQ(NewInt64PrimaryKey(2)))
+	})
+
+	t.Run("compound path at index zero", func(t *testing.T) {
+		paths := []string{
+			"root/stats/" + CompoundStatsType.LogIdx(),
+		}
+		blobs := []*Blob{compoundBlob}
+
+		stats, err := DeserializeBloomFilterStats(paths, blobs)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(stats))
+		assert.True(t, stats[0].MinPk.EQ(NewInt64PrimaryKey(1)))
+	})
+
+	t.Run("default stats fallback", func(t *testing.T) {
+		paths := []string{"root/stats/0"}
+		blobs := []*Blob{defaultBlob}
+
+		stats, err := DeserializeBloomFilterStats(paths, blobs)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(stats))
+		assert.True(t, stats[0].MinPk.EQ(NewInt64PrimaryKey(10)))
+		assert.True(t, stats[0].MaxPk.EQ(NewInt64PrimaryKey(20)))
+	})
+}
+
 func TestDeserializeStatsFailed(t *testing.T) {
 	blob := &Blob{
 		Value: []byte("abc"),

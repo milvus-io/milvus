@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -294,6 +295,21 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack) (map
 	var files []string
 	var memorySize int64
 
+	// Preserve existing bloom filter files from previous batches.
+	// loon_transaction_update_stat uses replace semantics, so we must
+	// merge previously written files into the new entry.
+	statKey := fmt.Sprintf("bloom_filter.%d", pkFieldID)
+	existingStats, err := packed.GetManifestStats(bw.manifestPath, bw.storageConfig)
+	if err == nil {
+		if existing, ok := existingStats[statKey]; ok && len(existing.Paths) > 0 {
+			files = append(files, existing.Paths...)
+			if memStr, ok := existing.Metadata["memory_size"]; ok {
+				existingMem, _ := strconv.ParseInt(memStr, 10, 64)
+				memorySize += existingMem
+			}
+		}
+	}
+
 	// Write batch stats blob via filesystem FFI.
 	id, err := bw.allocator.AllocOne()
 	if err != nil {
@@ -327,7 +343,7 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack) (map
 	// Register stats in manifest
 	newManifest, err := packed.AddStatsToManifest(bw.manifestPath, bw.storageConfig, []packed.StatEntry{
 		{
-			Key:      fmt.Sprintf("bloom_filter.%d", pkFieldID),
+			Key:      statKey,
 			Files:    files,
 			Metadata: map[string]string{"memory_size": fmt.Sprintf("%d", memorySize)},
 		},
@@ -368,6 +384,22 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack)
 		memorySize int64
 	}
 	fieldMap := make(map[int64]*fieldStats)
+
+	// Preserve existing BM25 stat files from previous batches.
+	existingStats, err := packed.GetManifestStats(bw.manifestPath, bw.storageConfig)
+	if err == nil {
+		for key, existing := range existingStats {
+			prefix, fieldID, ok := packed.ParseStatKey(key)
+			if !ok || prefix != "bm25" || len(existing.Paths) == 0 {
+				continue
+			}
+			fs := &fieldStats{files: existing.Paths}
+			if memStr, ok := existing.Metadata["memory_size"]; ok {
+				fs.memorySize, _ = strconv.ParseInt(memStr, 10, 64)
+			}
+			fieldMap[fieldID] = fs
+		}
+	}
 
 	for fieldID, blob := range bm25Blobs {
 		id, err := bw.allocator.AllocOne()

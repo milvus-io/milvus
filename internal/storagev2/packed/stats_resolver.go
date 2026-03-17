@@ -188,7 +188,7 @@ func (r *StatsResolver) BM25StatsPaths() (map[int64][]string, error) {
 
 	result := make(map[int64][]string)
 	for key, stat := range r.manifestStats {
-		prefix, fieldID, ok := parseStatKey(key)
+		prefix, fieldID, ok := ParseStatKey(key)
 		if !ok || prefix != "bm25" || len(stat.Paths) == 0 {
 			continue
 		}
@@ -229,7 +229,7 @@ func (r *StatsResolver) TextAndJSONIndexStats() (
 	jsonKeyIndexInfo := make(map[int64]*datapb.JsonKeyStats)
 
 	for key, stat := range r.manifestStats {
-		prefix, fieldID, ok := parseStatKey(key)
+		prefix, fieldID, ok := ParseStatKey(key)
 		if !ok {
 			continue
 		}
@@ -309,8 +309,8 @@ func (r *StatsResolver) resolveStatPaths(paths []string) []string {
 	return paths
 }
 
-// parseStatKey parses a "type.fieldID" stat key into its type prefix and field ID.
-func parseStatKey(key string) (string, int64, bool) {
+// ParseStatKey parses a "type.fieldID" stat key into its type prefix and field ID.
+func ParseStatKey(key string) (string, int64, bool) {
 	idx := strings.LastIndex(key, ".")
 	if idx < 0 {
 		return "", 0, false

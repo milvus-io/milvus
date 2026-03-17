@@ -350,3 +350,197 @@ func (s *PackWriterV3Suite) TestV3InheritsV2Fields() {
 	s.Equal(s.currentSplit, bw.columnGroups)
 	s.Equal(manifestPath, bw.manifestPath)
 }
+
+// genInsertDataWithPKOffset generates insert data with PKs starting at pkOffset+1.
+func genInsertDataWithPKOffset(size int, pkOffset int, schema *schemapb.CollectionSchema) []*storage.InsertData {
+	buf, _ := storage.NewInsertData(schema)
+	for i := 0; i < size; i++ {
+		data := make(map[storage.FieldID]any)
+		data[common.RowIDField] = int64(pkOffset + i + 1)
+		data[common.TimeStampField] = int64(pkOffset + i + 1)
+		data[100] = int64(pkOffset + i + 1) // pk field
+
+		vector := make([]float32, 128)
+		for j := range vector {
+			vector[j] = float32(i+j) * 0.01
+		}
+		data[101] = vector
+
+		vectorData := []float32{float32(i) * 0.1, float32(i) * 0.2}
+		vectorArray := &schemapb.VectorField{
+			Dim: 128,
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: vectorData},
+			},
+		}
+		data[103] = vectorArray
+		buf.Append(data)
+	}
+	return []*storage.InsertData{buf}
+}
+
+// TestMultiBatchStatsAccumulation verifies that bloom filter and BM25 stat files
+// from multiple batches accumulate in the manifest rather than being replaced.
+// This is the regression test for the bug where loon_transaction_update_stat
+// replaced the previous batch's stat entry, leaving only the last batch's
+// bloom filter in the manifest.
+func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(10001) // unique ID to avoid manifest collision with other tests
+	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+	batchRows := 5
+
+	bfs := pkoracle.NewBloomFilterSet()
+
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, -1)
+
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ManifestPath: manifestPath,
+	}, bfs, nil)
+	metacache.UpdateNumOfRows(1000)(seg)
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().Collection().Return(collectionID).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return().Maybe()
+
+	bfKey := fmt.Sprintf("bloom_filter.%d", 100) // pk field ID
+
+	// Batch 1: PKs 1..5
+	pack1 := new(SyncPack).
+		WithCollectionID(collectionID).
+		WithPartitionID(partitionID).
+		WithSegmentID(segmentID).
+		WithChannelName(channelName).
+		WithInsertData(genInsertDataWithPKOffset(batchRows, 0, s.schema)).
+		WithBatchRows(int64(batchRows))
+
+	bw1 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
+	_, _, _, _, manifest1, _, err := bw1.Write(context.Background(), pack1)
+	s.Require().NoError(err)
+
+	stats1, err := packed.GetManifestStats(manifest1, s.storageConfig)
+	s.Require().NoError(err)
+	count1 := len(stats1[bfKey].Paths)
+	s.Greater(count1, 0, "batch 1 should produce bloom filter files")
+
+	// Batch 2: PKs 6..10, starting from the manifest written by batch 1
+	pack2 := new(SyncPack).
+		WithCollectionID(collectionID).
+		WithPartitionID(partitionID).
+		WithSegmentID(segmentID).
+		WithChannelName(channelName).
+		WithInsertData(genInsertDataWithPKOffset(batchRows, batchRows, s.schema)).
+		WithBatchRows(int64(batchRows))
+
+	bw2 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifest1)
+	_, _, _, _, manifest2, _, err := bw2.Write(context.Background(), pack2)
+	s.Require().NoError(err)
+
+	stats2, err := packed.GetManifestStats(manifest2, s.storageConfig)
+	s.Require().NoError(err)
+	count2 := len(stats2[bfKey].Paths)
+	s.Greater(count2, count1, "batch 2 should accumulate more bloom filter files than batch 1")
+
+	// Batch 3: PKs 11..15
+	pack3 := new(SyncPack).
+		WithCollectionID(collectionID).
+		WithPartitionID(partitionID).
+		WithSegmentID(segmentID).
+		WithChannelName(channelName).
+		WithInsertData(genInsertDataWithPKOffset(batchRows, batchRows*2, s.schema)).
+		WithBatchRows(int64(batchRows))
+
+	bw3 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifest2)
+	_, _, _, _, manifest3, _, err := bw3.Write(context.Background(), pack3)
+	s.Require().NoError(err)
+
+	stats3, err := packed.GetManifestStats(manifest3, s.storageConfig)
+	s.Require().NoError(err)
+	count3 := len(stats3[bfKey].Paths)
+	s.Greater(count3, count2, "batch 3 should accumulate more bloom filter files than batch 2")
+	s.NotEmpty(stats3[bfKey].Metadata["memory_size"], "memory_size metadata should be set")
+}
+
+// TestMultiBatchBM25StatsAccumulation verifies that BM25 stat files from
+// multiple batches accumulate in the manifest.
+func (s *PackWriterV3Suite) TestMultiBatchBM25StatsAccumulation() {
+	collectionID := int64(123)
+	partitionID := int64(456)
+	segmentID := int64(10002) // unique ID to avoid manifest collision with other tests
+	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
+	batchRows := 5
+
+	bfs := pkoracle.NewBloomFilterSet()
+
+	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+	basePath := path.Join(common.SegmentInsertLogPath, k)
+	manifestPath := packed.MarshalManifestPath(basePath, -1)
+
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ManifestPath: manifestPath,
+	}, bfs, nil)
+	metacache.UpdateNumOfRows(1000)(seg)
+	mc := metacache.NewMockMetaCache(s.T())
+	mc.EXPECT().Collection().Return(collectionID).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
+	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
+	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
+		action(seg)
+	}).Return().Maybe()
+
+	bm25FieldID := int64(200)
+	makeBM25Stats := func() map[int64]*storage.BM25Stats {
+		stats := storage.NewBM25Stats()
+		stats.Append(map[uint32]float32{1: 1.0, 2: 2.0})
+		return map[int64]*storage.BM25Stats{bm25FieldID: stats}
+	}
+
+	bm25Key := fmt.Sprintf("bm25.%d", bm25FieldID)
+
+	// Batch 1
+	pack1 := new(SyncPack).
+		WithCollectionID(collectionID).
+		WithPartitionID(partitionID).
+		WithSegmentID(segmentID).
+		WithChannelName(channelName).
+		WithInsertData(genInsertDataWithPKOffset(batchRows, 0, s.schema)).
+		WithBatchRows(int64(batchRows)).
+		WithBM25Stats(makeBM25Stats())
+
+	bw1 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
+	_, _, _, _, manifest1, _, err := bw1.Write(context.Background(), pack1)
+	s.Require().NoError(err)
+
+	stats1, err := packed.GetManifestStats(manifest1, s.storageConfig)
+	s.Require().NoError(err)
+	count1 := len(stats1[bm25Key].Paths)
+	s.Greater(count1, 0, "batch 1 should produce bm25 stat files")
+
+	// Batch 2
+	pack2 := new(SyncPack).
+		WithCollectionID(collectionID).
+		WithPartitionID(partitionID).
+		WithSegmentID(segmentID).
+		WithChannelName(channelName).
+		WithInsertData(genInsertDataWithPKOffset(batchRows, batchRows, s.schema)).
+		WithBatchRows(int64(batchRows)).
+		WithBM25Stats(makeBM25Stats())
+
+	bw2 := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifest1)
+	_, _, _, _, manifest2, _, err := bw2.Write(context.Background(), pack2)
+	s.Require().NoError(err)
+
+	stats2, err := packed.GetManifestStats(manifest2, s.storageConfig)
+	s.Require().NoError(err)
+	count2 := len(stats2[bm25Key].Paths)
+	s.Greater(count2, count1, "batch 2 should accumulate more bm25 files than batch 1")
+	s.NotEmpty(stats2[bm25Key].Metadata["memory_size"], "memory_size metadata should be set")
+}

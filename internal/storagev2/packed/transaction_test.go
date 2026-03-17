@@ -15,6 +15,7 @@
 package packed
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -186,6 +187,140 @@ func TestStatsRoundtrip(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, manifestPath, sameManifest)
 	})
+}
+
+// TestStatsUpdateReplacesEntry verifies that calling AddStatsToManifest
+// with the same key in separate transactions replaces (not appends) files.
+// This is the underlying behavior that caused the multi-batch import bug:
+// each batch overwrote the previous batch's bloom filter entry.
+func TestStatsUpdateReplacesEntry(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+
+	bp := filepath.Join(dir, "insert_log/1/2/3_replace_test")
+	manifestPath := createBaseManifest(t, bp, storageConfig)
+
+	// Transaction 1: write bloom_filter.100 with file1
+	file1 := filepath.Join(bp, "_stats/bloom_filter.100/1001")
+	m1, err := AddStatsToManifest(manifestPath, storageConfig, []StatEntry{
+		{
+			Key:      "bloom_filter.100",
+			Files:    []string{file1},
+			Metadata: map[string]string{"memory_size": "100"},
+		},
+	})
+	require.NoError(t, err)
+
+	// Transaction 2: write bloom_filter.100 with file2 only (simulating naive per-batch write)
+	file2 := filepath.Join(bp, "_stats/bloom_filter.100/1002")
+	m2, err := AddStatsToManifest(m1, storageConfig, []StatEntry{
+		{
+			Key:      "bloom_filter.100",
+			Files:    []string{file2},
+			Metadata: map[string]string{"memory_size": "200"},
+		},
+	})
+	require.NoError(t, err)
+
+	// Verify: only file2 survives (update_stat replaces the entry)
+	stats, err := GetManifestStats(m2, storageConfig)
+	require.NoError(t, err)
+	bf := stats["bloom_filter.100"]
+	assert.Equal(t, 1, len(bf.Paths), "update_stat should replace, leaving only the last write's file")
+	assert.Equal(t, file2, bf.Paths[0])
+	assert.Equal(t, "200", bf.Metadata["memory_size"])
+}
+
+// TestStatsAccumulationAcrossTransactions verifies the fix: when files
+// from the previous manifest are merged before update, all files survive.
+func TestStatsAccumulationAcrossTransactions(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.CommonCfg.StorageType.Key, "local")
+	dir := t.TempDir()
+	pt.Save(pt.LocalStorageCfg.Path.Key, dir)
+	t.Cleanup(func() {
+		pt.Reset(pt.CommonCfg.StorageType.Key)
+		pt.Reset(pt.LocalStorageCfg.Path.Key)
+	})
+
+	storageConfig := &indexpb.StorageConfig{
+		RootPath:    dir,
+		StorageType: "local",
+	}
+
+	bp := filepath.Join(dir, "insert_log/1/2/3_accum_test")
+	manifestPath := createBaseManifest(t, bp, storageConfig)
+
+	// Simulate 3 import batches with the accumulation fix:
+	// Before each update, read existing files and merge.
+	currentManifest := manifestPath
+	allBloomFiles := []string{}
+	allBM25Files := []string{}
+
+	for batch := 0; batch < 3; batch++ {
+		bfFile := filepath.Join(bp, fmt.Sprintf("_stats/bloom_filter.100/%d", 1001+batch))
+		bm25File := filepath.Join(bp, fmt.Sprintf("_stats/bm25.200/%d", 2001+batch))
+
+		// Read existing stats from current manifest
+		existingStats, err := GetManifestStats(currentManifest, storageConfig)
+		require.NoError(t, err)
+
+		// Merge existing bloom filter files
+		bfFiles := []string{}
+		if existing, ok := existingStats["bloom_filter.100"]; ok {
+			bfFiles = append(bfFiles, existing.Paths...)
+		}
+		bfFiles = append(bfFiles, bfFile)
+		allBloomFiles = append(allBloomFiles, bfFile)
+
+		// Merge existing BM25 files
+		bmFiles := []string{}
+		if existing, ok := existingStats["bm25.200"]; ok {
+			bmFiles = append(bmFiles, existing.Paths...)
+		}
+		bmFiles = append(bmFiles, bm25File)
+		allBM25Files = append(allBM25Files, bm25File)
+
+		newManifest, err := AddStatsToManifest(currentManifest, storageConfig, []StatEntry{
+			{
+				Key:      "bloom_filter.100",
+				Files:    bfFiles,
+				Metadata: map[string]string{"memory_size": fmt.Sprintf("%d", (batch+1)*100)},
+			},
+			{
+				Key:   "bm25.200",
+				Files: bmFiles,
+			},
+		})
+		require.NoError(t, err)
+		currentManifest = newManifest
+	}
+
+	// Verify: all 3 bloom filter files and 3 BM25 files survive
+	stats, err := GetManifestStats(currentManifest, storageConfig)
+	require.NoError(t, err)
+
+	bf := stats["bloom_filter.100"]
+	require.Equal(t, 3, len(bf.Paths), "bloom filter should have files from all 3 batches")
+	assert.Equal(t, allBloomFiles, bf.Paths)
+	assert.Equal(t, "300", bf.Metadata["memory_size"])
+
+	bm := stats["bm25.200"]
+	require.Equal(t, 3, len(bm.Paths), "bm25 stats should have files from all 3 batches")
+	assert.Equal(t, allBM25Files, bm.Paths)
 }
 
 func TestGetDeltaLogPathsFromManifest(t *testing.T) {

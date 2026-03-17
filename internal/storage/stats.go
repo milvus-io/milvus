@@ -505,10 +505,10 @@ func (m *BM25Stats) GetAvgdl() float64 {
 // from the paths and deserializes accordingly. Compound format is detected
 // when any path has a basename matching CompoundStatsType.LogIdx().
 func DeserializeBloomFilterStats(paths []string, blobs []*Blob) ([]*PrimaryKeyStats, error) {
-	for _, p := range paths {
+	for i, p := range paths {
 		_, logidx := path.Split(p)
 		if logidx == CompoundStatsType.LogIdx() {
-			return DeserializeStatsList(blobs[0])
+			return DeserializeStatsList(blobs[i])
 		}
 	}
 	return DeserializeStats(blobs)

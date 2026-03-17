@@ -28,45 +28,45 @@ import (
 
 func TestParseStatKey(t *testing.T) {
 	t.Run("valid bloom_filter key", func(t *testing.T) {
-		prefix, fieldID, ok := parseStatKey("bloom_filter.100")
+		prefix, fieldID, ok := ParseStatKey("bloom_filter.100")
 		assert.True(t, ok)
 		assert.Equal(t, "bloom_filter", prefix)
 		assert.Equal(t, int64(100), fieldID)
 	})
 
 	t.Run("valid bm25 key", func(t *testing.T) {
-		prefix, fieldID, ok := parseStatKey("bm25.200")
+		prefix, fieldID, ok := ParseStatKey("bm25.200")
 		assert.True(t, ok)
 		assert.Equal(t, "bm25", prefix)
 		assert.Equal(t, int64(200), fieldID)
 	})
 
 	t.Run("valid text_index key", func(t *testing.T) {
-		prefix, fieldID, ok := parseStatKey("text_index.50")
+		prefix, fieldID, ok := ParseStatKey("text_index.50")
 		assert.True(t, ok)
 		assert.Equal(t, "text_index", prefix)
 		assert.Equal(t, int64(50), fieldID)
 	})
 
 	t.Run("valid json_key_index key", func(t *testing.T) {
-		prefix, fieldID, ok := parseStatKey("json_key_index.30")
+		prefix, fieldID, ok := ParseStatKey("json_key_index.30")
 		assert.True(t, ok)
 		assert.Equal(t, "json_key_index", prefix)
 		assert.Equal(t, int64(30), fieldID)
 	})
 
 	t.Run("invalid key no dot", func(t *testing.T) {
-		_, _, ok := parseStatKey("bloom_filter")
+		_, _, ok := ParseStatKey("bloom_filter")
 		assert.False(t, ok)
 	})
 
 	t.Run("invalid key non-numeric fieldID", func(t *testing.T) {
-		_, _, ok := parseStatKey("bloom_filter.abc")
+		_, _, ok := ParseStatKey("bloom_filter.abc")
 		assert.False(t, ok)
 	})
 
 	t.Run("empty string", func(t *testing.T) {
-		_, _, ok := parseStatKey("")
+		_, _, ok := ParseStatKey("")
 		assert.False(t, ok)
 	})
 }
