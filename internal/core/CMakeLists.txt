@@ -62,6 +62,10 @@ if (CMAKE_COMPILER_IS_GNUCC)
         # TODO: this workaround may removed when protobuf upgraded
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
     endif ()
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 12.99)
+        # gcc>=13 removed implicit includes for <cstdint>, <cstdlib>, <algorithm> etc.
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -include cstdint -include cstdlib -include algorithm")
+    endif ()
 endif ()
 
 set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
