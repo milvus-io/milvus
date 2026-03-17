@@ -454,17 +454,17 @@ func (rm *ResourceManager) DropResourceGroup(ctx context.Context, rgName string)
 	return nil
 }
 
-// GetNodesOfMultiRG return nodes of multi rg, it can be used to get a consistent view of nodes of multi rg.
-func (rm *ResourceManager) GetNodesOfMultiRG(ctx context.Context, rgName []string) (map[string]typeutil.UniqueSet, error) {
+// GetResourceGroups return snapshots of multi resource groups, it can be used to get a consistent view of multi rg.
+func (rm *ResourceManager) GetResourceGroups(ctx context.Context, rgNames []string) (map[string]*ResourceGroup, error) {
 	rm.rwmutex.RLock()
 	defer rm.rwmutex.RUnlock()
 
-	ret := make(map[string]typeutil.UniqueSet)
-	for _, name := range rgName {
+	ret := make(map[string]*ResourceGroup, len(rgNames))
+	for _, name := range rgNames {
 		if rm.groups[name] == nil {
 			return nil, merr.WrapErrResourceGroupNotFound(name)
 		}
-		ret[name] = typeutil.NewUniqueSet(rm.groups[name].GetNodes()...)
+		ret[name] = rm.groups[name].Snapshot()
 	}
 	return ret, nil
 }

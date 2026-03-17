@@ -45,7 +45,7 @@ type ReplicaManagerInterface interface {
 	Recover(ctx context.Context, collections []int64) error
 	Get(ctx context.Context, id typeutil.UniqueID) *Replica
 	Spawn(ctx context.Context, collection int64,
-		replicaNumInRG map[string]int, channels []string, loadPriority commonpb.LoadPriority) ([]*Replica, error)
+		replicaNumInRG map[string]int, channels []string, loadPriority commonpb.LoadPriority, opts ...SpawnOption) ([]*Replica, error)
 
 	// Replica manipulation
 	TransferReplica(ctx context.Context, collectionID typeutil.UniqueID, srcRGName string, dstRGName string, replicaNum int) error
@@ -60,7 +60,7 @@ type ReplicaManagerInterface interface {
 	GetByResourceGroup(ctx context.Context, rgName string) []*Replica
 
 	// Node management
-	RecoverNodesInCollection(ctx context.Context, collectionID typeutil.UniqueID, rgs map[string]typeutil.UniqueSet) error
+	RecoverNodesInCollection(ctx context.Context, collectionID typeutil.UniqueID, rgs map[string]*ResourceGroup) error
 	RemoveNode(ctx context.Context, replicaID typeutil.UniqueID, nodes ...typeutil.UniqueID) error
 	RemoveSQNode(ctx context.Context, replicaID typeutil.UniqueID, nodes ...typeutil.UniqueID) error
 
@@ -239,10 +239,32 @@ func (m *ReplicaManager) AllocateReplicaID(ctx context.Context) (int64, error) {
 	return m.idAllocator()
 }
 
+// SpawnOption is a functional option for Spawn.
+type SpawnOption func(*spawnConfig)
+
+type spawnConfig struct {
+	needWaitRGReady bool
+}
+
+// WithNeedWaitRGReady returns a SpawnOption that sets the needWaitRGReady flag on spawned replicas.
+// When enabled, the first node assignment for these replicas will be deferred
+// until their resource groups have all requested nodes ready (MissingNumOfNodes == 0).
+// This prevents unbalanced segment loading during replica scale-up.
+func WithNeedWaitRGReady() SpawnOption {
+	return func(cfg *spawnConfig) {
+		cfg.needWaitRGReady = true
+	}
+}
+
 // Spawn spawns N replicas at resource group for given collection in ReplicaManager.
 func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNumInRG map[string]int,
-	channels []string, loadPriority commonpb.LoadPriority,
+	channels []string, loadPriority commonpb.LoadPriority, opts ...SpawnOption,
 ) ([]*Replica, error) {
+	cfg := &spawnConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -262,11 +284,14 @@ func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNum
 				CollectionID:  collection,
 				ResourceGroup: rgName,
 			}, loadPriority)
-			if enableChannelExclusiveMode {
-				mutableReplica := replica.CopyForWrite()
-				mutableReplica.TryEnableChannelExclusiveMode(channels...)
-				replica = mutableReplica.IntoReplica()
+			mutableReplica := replica.CopyForWrite()
+			if cfg.needWaitRGReady {
+				mutableReplica.SetNeedWaitRGReady(true)
 			}
+			if enableChannelExclusiveMode {
+				mutableReplica.TryEnableChannelExclusiveMode(channels...)
+			}
+			replica = mutableReplica.IntoReplica()
 			replicas = append(replicas, replica)
 		}
 	}
@@ -517,8 +542,18 @@ func (m *ReplicaManager) GetByResourceGroup(ctx context.Context, rgName string) 
 // 1. Move the rw nodes to ro nodes if they are not in related resource group.
 // 2. Add new incoming nodes into the replica if they are not in-used by other replicas of same collection.
 // 3. replicas in same resource group will shared the nodes in resource group fairly.
-func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectionID typeutil.UniqueID, rgs map[string]typeutil.UniqueSet) error {
-	if err := m.validateResourceGroups(rgs); err != nil {
+func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectionID typeutil.UniqueID, rgs map[string]*ResourceGroup) error {
+	// Build node sets from resource groups.
+	rgNodeSets := make(map[string]typeutil.UniqueSet, len(rgs))
+	for rgName, rg := range rgs {
+		if rg == nil {
+			rgNodeSets[rgName] = typeutil.NewUniqueSet()
+		} else {
+			rgNodeSets[rgName] = typeutil.NewUniqueSet(rg.GetNodes()...)
+		}
+	}
+
+	if err := m.validateResourceGroups(rgNodeSets); err != nil {
 		return err
 	}
 
@@ -526,7 +561,7 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 	defer m.rwmutex.Unlock()
 
 	// create a helper to do the recover.
-	helper, err := m.getCollectionAssignmentHelper(collectionID, rgs)
+	helper, err := m.getCollectionAssignmentHelper(collectionID, rgNodeSets)
 	if err != nil {
 		return err
 	}
@@ -535,6 +570,21 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 	// recover node by resource group.
 	helper.RangeOverResourceGroup(func(replicaHelper *replicasInSameRGAssignmentHelper) {
 		replicaHelper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
+			replica := m.replicas[assignment.GetReplicaID()]
+			// For replicas with needWaitRGReady flag, skip assignment if the RG still has missing nodes.
+			if replica.NeedWaitRGReady() {
+				rgName := replica.GetResourceGroup()
+				if rg := rgs[rgName]; rg != nil && rg.MissingNumOfNodes() > 0 {
+					log.RatedInfo(10, "defer node assignment for new replica, resource group not ready",
+						zap.Int64("collectionID", collectionID),
+						zap.Int64("replicaID", replica.GetID()),
+						zap.String("rgName", rgName),
+						zap.Int("missingNodes", rg.MissingNumOfNodes()),
+					)
+					return
+				}
+			}
+
 			roNodes := assignment.GetNewRONodes()
 			recoverableNodes, incomingNodeCount := assignment.GetRecoverNodesAndIncomingNodeCount()
 			// There may be not enough incoming nodes for current replica,
@@ -545,10 +595,14 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 				// nothing to do.
 				return
 			}
-			mutableReplica := m.replicas[assignment.GetReplicaID()].CopyForWrite()
+			mutableReplica := replica.CopyForWrite()
 			mutableReplica.AddRONode(roNodes...)          // rw -> ro
 			mutableReplica.AddRWNode(recoverableNodes...) // ro -> rw
 			mutableReplica.AddRWNode(incomingNode...)     // unused -> rw
+			// Clear needWaitRGReady flag after first successful node assignment.
+			if mutableReplica.NeedWaitRGReady() {
+				mutableReplica.SetNeedWaitRGReady(false)
+			}
 			log.Info(
 				"new replica recovery found",
 				zap.Int64("collectionID", collectionID),

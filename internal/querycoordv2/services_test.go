@@ -1594,7 +1594,8 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
 		suite.Contains(resp.Reason, "mock error")
 
-		suite.meta.ReplicaManager.RecoverNodesInCollection(ctx, collection, map[string]typeutil.UniqueSet{meta.DefaultResourceGroupName: typeutil.NewUniqueSet(10)})
+		rgs, _ := suite.meta.ResourceManager.GetResourceGroups(ctx, []string{meta.DefaultResourceGroupName})
+		suite.meta.ReplicaManager.RecoverNodesInCollection(ctx, collection, rgs)
 		req.SourceNodeIDs = []int64{10}
 		resp, err = server.LoadBalance(ctx, req)
 		suite.NoError(err)
