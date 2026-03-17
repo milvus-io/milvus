@@ -219,6 +219,10 @@ func (mgr *TargetManager) RemoveCollection(ctx context.Context, collectionID int
 				paramtable.GetStringNodeID(),
 				channelName,
 			)
+			metrics.QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds.DeleteLabelValues(
+				paramtable.GetStringNodeID(),
+				channelName,
+			)
 		}
 	}
 
