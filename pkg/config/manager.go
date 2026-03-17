@@ -106,11 +106,6 @@ func NewManager() *Manager {
 		immutableKeys: typeutil.NewConcurrentSet[string](),
 		configCache:   make(map[string]any),
 	}
-	resetConfigCacheFunc := NewHandler("reset.config.cache", func(event *Event) {
-		keyToRemove := strings.NewReplacer("/", ".").Replace(event.Key)
-		manager.EvictCachedValue(keyToRemove)
-	})
-	manager.Dispatcher.RegisterForKeyPrefix("", resetConfigCacheFunc)
 	return manager
 }
 
