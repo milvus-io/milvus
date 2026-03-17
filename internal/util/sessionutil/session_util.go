@@ -162,7 +162,7 @@ type Session struct {
 	watchCancel       atomic.Pointer[context.CancelFunc]
 	wg                sync.WaitGroup
 
-	metaRoot string
+	metaRoot       string
 	isMixCoordMode atomic.Bool
 
 	registered         atomic.Value
