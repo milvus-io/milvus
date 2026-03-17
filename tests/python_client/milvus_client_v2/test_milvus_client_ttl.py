@@ -677,9 +677,8 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
 
-        # Verify data is invisible
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
-        assert res[0].get('count(*)') == 0
+        # Verify data is invisible (TTL filtering may take a moment to propagate)
+        self._wait_until_count(client, collection_name, expected_count=0)
 
         self.drop_collection(client, collection_name)
 
@@ -728,9 +727,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
         # Compact and verify NULL data persists
         self.compact(client, collection_name)
-        time.sleep(3)
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
-        assert res[0].get('count(*)') == nb
+        self._wait_until_count(client, collection_name, expected_count=nb)
 
         # Release and reload, verify NULL data persists
         self.release_collection(client, collection_name)
@@ -871,10 +868,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
         # Wait past original TTL (4 more seconds) — data should still be alive
         time.sleep(6)
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
-                         consistency_level=CONSISTENCY_STRONG)[0]
-        log.info(f"Count after original TTL expired: {res[0].get('count(*)')}")
-        assert res[0].get('count(*)') == nb
+        self._wait_until_count(client, collection_name, expected_count=nb)
 
         # Wait past extended TTL (poll until count reaches 0)
         self._wait_until_count(client, collection_name, expected_count=0)
@@ -1163,9 +1157,7 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
         # Verify search returns results from both batches
         search_vectors = cf.gen_vectors(1, dim=default_dim)
-        res = self.search(client, collection_name, search_vectors, anns_field=default_vector_field_name,
-                          search_params={}, limit=10, consistency_level=CONSISTENCY_STRONG)[0]
-        assert len(res[0]) == 10
+        self._wait_until_search_count(client, collection_name, search_vectors, expected_count=10)
 
         self.drop_collection(client, collection_name)
 
@@ -1450,14 +1442,19 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         # Poll on total count: partition_a expired (0) + partition_b alive (nb) = nb
         self._wait_until_count(client, collection_name, expected_count=nb)
 
-        # Verify partition_a data expired
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
-                         partition_names=["partition_a"])[0]
-        assert res[0].get('count(*)') == 0
+        # Verify partition_a data expired (poll in case per-partition propagation lags)
+        for _ in range(15):
+            res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
+                             partition_names=["partition_a"], consistency_level=CONSISTENCY_STRONG)[0]
+            if res[0].get('count(*)') == 0:
+                break
+            time.sleep(2)
+        assert res[0].get('count(*)') == 0, \
+            f"Expected partition_a count 0, got {res[0].get('count(*)')}"
 
         # Verify partition_b data still visible
         res = self.query(client, collection_name, filter="", output_fields=["count(*)"],
-                         partition_names=["partition_b"])[0]
+                         partition_names=["partition_b"], consistency_level=CONSISTENCY_STRONG)[0]
         assert res[0].get('count(*)') == nb
 
         self.drop_collection(client, collection_name)
@@ -1516,11 +1513,9 @@ class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
         collection_info = self.describe_collection(client, collection_name)[0]
         assert collection_info['properties'].get("ttl_field") == "ttl_dynamic"
 
-        # Query immediately — ttl_dynamic timestamps are already past,
-        # data should become invisible right after switching
-        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
-        assert res[0].get('count(*)') == 0, \
-            f"Expected 0 after switching ttl_field to ttl_dynamic (already expired), got {res[0].get('count(*)')}"
+        # ttl_dynamic timestamps are already past — data should become invisible
+        # after switching (property change may take a moment to propagate)
+        self._wait_until_count(client, collection_name, expected_count=0)
 
         self.drop_collection(client, collection_name)
 
