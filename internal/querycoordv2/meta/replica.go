@@ -2,6 +2,7 @@ package meta
 
 import (
 	"sort"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -78,12 +79,13 @@ type Replica struct {
 	// include the rebalance node.
 	loadPriority commonpb.LoadPriority
 
-	// needWaitRGReady is an in-memory only flag (not persisted).
-	// When true, the first node assignment for this replica should wait until
-	// its resource group has all requested nodes ready (MissingNumOfNodes == 0).
+	// waitRGReadyAt is an in-memory only timestamp (not persisted).
+	// When non-zero, the first node assignment for this replica should wait until
+	// its resource group has all requested nodes ready (MissingNumOfNodes == 0),
+	// or until the configured timeout has elapsed since this timestamp.
 	// This prevents unbalanced segment loading during replica scale-up.
-	// The flag is explicitly cleared after the first successful node assignment.
-	needWaitRGReady bool
+	// The field is explicitly cleared after the first successful node assignment.
+	waitRGReadyAt time.Time
 }
 
 // Deprecated: may break the consistency of ReplicaManager, use `Spawn` of `ReplicaManager` or `newReplica` instead.
@@ -126,8 +128,13 @@ func (replica *Replica) LoadPriority() commonpb.LoadPriority {
 
 // NeedWaitRGReady returns whether this replica should wait for its resource group
 // to have all requested nodes before the first node assignment.
+// Returns false if the wait has expired.
 func (replica *Replica) NeedWaitRGReady() bool {
-	return replica.needWaitRGReady
+	if replica.waitRGReadyAt.IsZero() {
+		return false
+	}
+	timeout := paramtable.Get().QueryCoordCfg.ClusterLevelLoadWaitRGReadyTimeout.GetAsDurationByParse()
+	return time.Since(replica.waitRGReadyAt) < timeout
 }
 
 // GetID returns the id of the replica.
@@ -283,13 +290,13 @@ func (replica *Replica) CopyForWrite() *mutableReplica {
 
 	return &mutableReplica{
 		Replica: &Replica{
-			replicaPB:       proto.Clone(replica.replicaPB).(*querypb.Replica),
-			rwNodes:         typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
-			roNodes:         typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
-			rwSQNodes:       typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
-			roSQNodes:       typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
-			loadPriority:    replica.LoadPriority(),
-			needWaitRGReady: replica.needWaitRGReady,
+			replicaPB:     proto.Clone(replica.replicaPB).(*querypb.Replica),
+			rwNodes:       typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
+			roNodes:       typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
+			rwSQNodes:     typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
+			roSQNodes:     typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
+			loadPriority:  replica.LoadPriority(),
+			waitRGReadyAt: replica.waitRGReadyAt,
 		},
 		exclusiveRWNodeToChannel: exclusiveRWNodeToChannel,
 	}
@@ -311,10 +318,11 @@ func (replica *mutableReplica) SetResourceGroup(resourceGroup string) {
 	replica.replicaPB.ResourceGroup = resourceGroup
 }
 
-// SetNeedWaitRGReady sets the in-memory flag indicating this replica should wait
-// for its resource group to be fully ready before the first node assignment.
-func (replica *mutableReplica) SetNeedWaitRGReady(need bool) {
-	replica.needWaitRGReady = need
+// SetWaitRGReadyAt sets the timestamp from which this replica should wait for
+// its resource group to be fully ready before the first node assignment.
+// Pass zero time to clear the wait.
+func (replica *mutableReplica) SetWaitRGReadyAt(t time.Time) {
+	replica.waitRGReadyAt = t
 }
 
 // AddRWNode adds the node to rw nodes of the replica.
