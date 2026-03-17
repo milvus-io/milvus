@@ -2554,6 +2554,7 @@ type queryCoordConfig struct {
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
 	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
+	ClusterLevelLoadWaitRGReadyTimeout ParamItem `refreshable:"true"`
 
 	// balance batch size in one trigger
 	BalanceSegmentBatchSize            ParamItem `refreshable:"true"`
@@ -3163,6 +3164,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.ClusterLevelLoadResourceGroups.Init(base.mgr)
+
+	p.ClusterLevelLoadWaitRGReadyTimeout = ParamItem{
+		Key:          "queryCoord.clusterLevelLoadWaitRGReadyTimeout",
+		Version:      "2.6.13",
+		DefaultValue: "3m",
+		Doc:          "timeout for waiting resource group to have all requested nodes before assigning nodes to new replicas during cluster-level load config scale-up. 0 means no waiting.",
+		Export:       false,
+	}
+	p.ClusterLevelLoadWaitRGReadyTimeout.Init(base.mgr)
 
 	p.AutoBalanceInterval = ParamItem{
 		Key:          "queryCoord.autoBalanceInterval",
