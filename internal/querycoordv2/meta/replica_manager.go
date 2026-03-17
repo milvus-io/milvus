@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -243,16 +244,17 @@ func (m *ReplicaManager) AllocateReplicaID(ctx context.Context) (int64, error) {
 type SpawnOption func(*spawnConfig)
 
 type spawnConfig struct {
-	needWaitRGReady bool
+	waitRGReady bool
 }
 
-// WithNeedWaitRGReady returns a SpawnOption that sets the needWaitRGReady flag on spawned replicas.
+// WithNeedWaitRGReady returns a SpawnOption that enables waiting for resource group readiness.
 // When enabled, the first node assignment for these replicas will be deferred
-// until their resource groups have all requested nodes ready (MissingNumOfNodes == 0).
+// until their resource groups have all requested nodes ready (MissingNumOfNodes == 0),
+// or until the configured timeout (queryCoord.waitRGReadyTimeout) has elapsed.
 // This prevents unbalanced segment loading during replica scale-up.
 func WithNeedWaitRGReady() SpawnOption {
 	return func(cfg *spawnConfig) {
-		cfg.needWaitRGReady = true
+		cfg.waitRGReady = true
 	}
 }
 
@@ -285,8 +287,8 @@ func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNum
 				ResourceGroup: rgName,
 			}, loadPriority)
 			mutableReplica := replica.CopyForWrite()
-			if cfg.needWaitRGReady {
-				mutableReplica.SetNeedWaitRGReady(true)
+			if cfg.waitRGReady {
+				mutableReplica.SetWaitRGReadyAt(time.Now())
 			}
 			if enableChannelExclusiveMode {
 				mutableReplica.TryEnableChannelExclusiveMode(channels...)
@@ -599,9 +601,9 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 			mutableReplica.AddRONode(roNodes...)          // rw -> ro
 			mutableReplica.AddRWNode(recoverableNodes...) // ro -> rw
 			mutableReplica.AddRWNode(incomingNode...)     // unused -> rw
-			// Clear needWaitRGReady flag after first successful node assignment.
+			// Clear waitRGReady after first successful node assignment.
 			if mutableReplica.NeedWaitRGReady() {
-				mutableReplica.SetNeedWaitRGReady(false)
+				mutableReplica.SetWaitRGReadyAt(time.Time{})
 			}
 			log.Info(
 				"new replica recovery found",
