@@ -43,6 +43,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// newTestResourceGroup creates a ResourceGroup for testing with given nodes.
+func newTestResourceGroup(name string, nodes typeutil.UniqueSet) *ResourceGroup {
+	return &ResourceGroup{
+		name:  name,
+		nodes: nodes,
+		cfg:   newResourceGroupConfig(int32(nodes.Len()), int32(nodes.Len())),
+	}
+}
+
 type collectionLoadConfig struct {
 	spawnConfig map[string]int
 }
@@ -59,7 +68,7 @@ func (c *collectionLoadConfig) getTotalSpawn() int {
 type ReplicaManagerSuite struct {
 	suite.Suite
 
-	rgs         map[string]typeutil.UniqueSet
+	rgNodes     map[string]typeutil.UniqueSet
 	collections map[int64]collectionLoadConfig
 	idAllocator func() (int64, error)
 	kv          kv.MetaKv
@@ -71,7 +80,7 @@ type ReplicaManagerSuite struct {
 func (suite *ReplicaManagerSuite) SetupSuite() {
 	paramtable.Init()
 
-	suite.rgs = map[string]typeutil.UniqueSet{
+	suite.rgNodes = map[string]typeutil.UniqueSet{
 		"RG1": typeutil.NewUniqueSet(1),
 		"RG2": typeutil.NewUniqueSet(2, 3),
 		"RG3": typeutil.NewUniqueSet(4, 5, 6),
@@ -199,7 +208,7 @@ func (suite *ReplicaManagerSuite) TestGet() {
 
 		expectedNodes := make([]int64, 0)
 		for rg := range collectionCfg.spawnConfig {
-			expectedNodes = append(expectedNodes, suite.rgs[rg].Collect()...)
+			expectedNodes = append(expectedNodes, suite.rgNodes[rg].Collect()...)
 		}
 		suite.ElementsMatch(nodes, expectedNodes)
 
@@ -291,7 +300,7 @@ func (suite *ReplicaManagerSuite) TestNodeManipulate() {
 	ctx := suite.ctx
 
 	// add node into rg.
-	rgs := map[string]typeutil.UniqueSet{
+	rgNodes := map[string]typeutil.UniqueSet{
 		"RG1": typeutil.NewUniqueSet(1, 7),
 		"RG2": typeutil.NewUniqueSet(2, 3, 8),
 		"RG3": typeutil.NewUniqueSet(4, 5, 6, 9),
@@ -299,13 +308,13 @@ func (suite *ReplicaManagerSuite) TestNodeManipulate() {
 
 	// Add node into rg.
 	for collectionID, cfg := range suite.collections {
-		rgsOfCollection := make(map[string]typeutil.UniqueSet)
+		rgsOfCollection := make(map[string]*ResourceGroup)
 		for rg := range cfg.spawnConfig {
-			rgsOfCollection[rg] = rgs[rg]
+			rgsOfCollection[rg] = newTestResourceGroup(rg, rgNodes[rg])
 		}
 		mgr.RecoverNodesInCollection(ctx, collectionID, rgsOfCollection)
 		for rg := range cfg.spawnConfig {
-			for _, node := range rgs[rg].Collect() {
+			for _, node := range rgNodes[rg].Collect() {
 				replica := mgr.GetByCollectionAndNode(ctx, collectionID, node)
 				suite.Contains(replica.GetNodes(), node)
 			}
@@ -317,7 +326,7 @@ func (suite *ReplicaManagerSuite) TestNodeManipulate() {
 	mgr.Recover(ctx, lo.Keys(suite.collections))
 	for collectionID, cfg := range suite.collections {
 		for rg := range cfg.spawnConfig {
-			for _, node := range rgs[rg].Collect() {
+			for _, node := range rgNodes[rg].Collect() {
 				replica := mgr.GetByCollectionAndNode(ctx, collectionID, node)
 				suite.Contains(replica.GetNodes(), node)
 			}
@@ -333,10 +342,10 @@ func (suite *ReplicaManagerSuite) spawnAll() {
 		replicas, err := mgr.Spawn(ctx, id, cfg.spawnConfig, nil, commonpb.LoadPriority_LOW)
 		suite.NoError(err)
 		totalSpawn := 0
-		rgsOfCollection := make(map[string]typeutil.UniqueSet)
+		rgsOfCollection := make(map[string]*ResourceGroup)
 		for rg, spawnNum := range cfg.spawnConfig {
 			totalSpawn += spawnNum
-			rgsOfCollection[rg] = suite.rgs[rg]
+			rgsOfCollection[rg] = newTestResourceGroup(rg, suite.rgNodes[rg])
 		}
 		mgr.RecoverNodesInCollection(ctx, id, rgsOfCollection)
 		suite.Len(replicas, totalSpawn)
@@ -370,7 +379,7 @@ func (suite *ReplicaManagerSuite) clearMemory() {
 type ReplicaManagerV2Suite struct {
 	suite.Suite
 
-	rgs             map[string]typeutil.UniqueSet
+	rgNodes         map[string]typeutil.UniqueSet
 	sqNodes         typeutil.UniqueSet
 	outboundSQNodes []int64
 	collections     map[int64]collectionLoadConfig
@@ -383,7 +392,7 @@ type ReplicaManagerV2Suite struct {
 func (suite *ReplicaManagerV2Suite) SetupSuite() {
 	paramtable.Init()
 
-	suite.rgs = map[string]typeutil.UniqueSet{
+	suite.rgNodes = map[string]typeutil.UniqueSet{
 		"RG1": typeutil.NewUniqueSet(1),
 		"RG2": typeutil.NewUniqueSet(2, 3),
 		"RG3": typeutil.NewUniqueSet(4, 5, 6),
@@ -443,14 +452,14 @@ func (suite *ReplicaManagerV2Suite) TestSpawn() {
 	for id, cfg := range suite.collections {
 		replicas, err := mgr.Spawn(ctx, id, cfg.spawnConfig, nil, commonpb.LoadPriority_LOW)
 		suite.NoError(err)
-		rgsOfCollection := make(map[string]typeutil.UniqueSet)
+		rgsOfCollection := make(map[string]*ResourceGroup)
 		for rg := range cfg.spawnConfig {
-			rgsOfCollection[rg] = suite.rgs[rg]
+			rgsOfCollection[rg] = newTestResourceGroup(rg, suite.rgNodes[rg])
 		}
 		mgr.RecoverNodesInCollection(ctx, id, rgsOfCollection)
 		mgr.RecoverSQNodesInCollection(ctx, id, suite.sqNodes)
 		for rg := range cfg.spawnConfig {
-			for _, node := range suite.rgs[rg].Collect() {
+			for _, node := range suite.rgNodes[rg].Collect() {
 				replica := mgr.GetByCollectionAndNode(ctx, id, node)
 				suite.Contains(replica.GetNodes(), node)
 			}
@@ -480,7 +489,7 @@ func (suite *ReplicaManagerV2Suite) testIfBalanced() {
 			minimumNodes := -1
 			nodes := make([]int64, 0)
 			for _, r := range replicas {
-				availableNodes := suite.rgs[r.GetResourceGroup()]
+				availableNodes := suite.rgNodes[r.GetResourceGroup()]
 				if maximumNodes == -1 || r.RWNodesCount() > maximumNodes {
 					maximumNodes = r.RWNodesCount()
 				}
@@ -503,7 +512,7 @@ func (suite *ReplicaManagerV2Suite) testIfBalanced() {
 					return true
 				})
 			}
-			suite.ElementsMatch(nodes, suite.rgs[replicas[0].GetResourceGroup()].Collect())
+			suite.ElementsMatch(nodes, suite.rgNodes[replicas[0].GetResourceGroup()].Collect())
 			suite.True(maximumNodes-minimumNodes <= 1)
 		}
 		availableSQNodes := suite.sqNodes.Clone()
@@ -533,15 +542,15 @@ func (suite *ReplicaManagerV2Suite) TestTransferReplicaAndAddNode() {
 	ctx := suite.ctx
 	suite.mgr.TransferReplica(ctx, 1005, "RG4", "RG5", 1)
 	suite.recoverReplica(1, false)
-	suite.rgs["RG5"].Insert(16, 17, 18)
+	suite.rgNodes["RG5"].Insert(16, 17, 18)
 	suite.sqNodes.Insert(20, 21, 22)
 	suite.recoverReplica(2, true)
 	suite.testIfBalanced()
 }
 
 func (suite *ReplicaManagerV2Suite) TestTransferNode() {
-	suite.rgs["RG4"].Remove(7)
-	suite.rgs["RG5"].Insert(7)
+	suite.rgNodes["RG4"].Remove(7)
+	suite.rgNodes["RG5"].Insert(7)
 	suite.outboundSQNodes = []int64{16, 17, 18}
 	suite.recoverReplica(2, true)
 	suite.testIfBalanced()
@@ -554,9 +563,9 @@ func (suite *ReplicaManagerV2Suite) recoverReplica(k int, clearOutbound bool) {
 	for i := 0; i < k; i++ {
 		// do a recover
 		for id, cfg := range suite.collections {
-			rgsOfCollection := make(map[string]typeutil.UniqueSet)
+			rgsOfCollection := make(map[string]*ResourceGroup)
 			for rg := range cfg.spawnConfig {
-				rgsOfCollection[rg] = suite.rgs[rg]
+				rgsOfCollection[rg] = newTestResourceGroup(rg, suite.rgNodes[rg])
 			}
 			sqNodes := suite.sqNodes.Clone()
 			sqNodes.Remove(suite.outboundSQNodes...)

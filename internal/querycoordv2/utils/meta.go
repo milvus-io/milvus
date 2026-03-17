@@ -89,7 +89,7 @@ func RecoverReplicaOfCollection(ctx context.Context, m *meta.Meta, collectionID 
 		logger.Error("no resource group found for collection")
 		return
 	}
-	rgs, err := m.ResourceManager.GetNodesOfMultiRG(ctx, rgNames.Collect())
+	rgs, err := m.ResourceManager.GetResourceGroups(ctx, rgNames.Collect())
 	if err != nil {
 		logger.Error("unreachable code as expected, fail to get resource group for replica", zap.Error(err))
 		return

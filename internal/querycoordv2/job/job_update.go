@@ -44,6 +44,7 @@ type UpdateLoadConfigJob struct {
 	collectionObserver       *observers.CollectionObserver
 	proxyManager             proxyutil.ProxyClientManagerInterface
 	userSpecifiedReplicaMode bool
+	needWaitRGReady          bool
 }
 
 func NewUpdateLoadConfigJob(ctx context.Context,
@@ -54,6 +55,7 @@ func NewUpdateLoadConfigJob(ctx context.Context,
 	collectionObserver *observers.CollectionObserver,
 	proxyManager proxyutil.ProxyClientManagerInterface,
 	userSpecifiedReplicaMode bool,
+	needWaitRGReady bool,
 ) *UpdateLoadConfigJob {
 	collectionID := req.GetCollectionIDs()[0]
 	return &UpdateLoadConfigJob{
@@ -67,6 +69,7 @@ func NewUpdateLoadConfigJob(ctx context.Context,
 		newReplicaNumber:         req.GetReplicaNumber(),
 		newResourceGroups:        req.GetResourceGroups(),
 		userSpecifiedReplicaMode: userSpecifiedReplicaMode,
+		needWaitRGReady:          needWaitRGReady,
 	}
 }
 
@@ -108,7 +111,11 @@ func (job *UpdateLoadConfigJob) Execute() error {
 
 	// 3. try to spawn new replica
 	channels := job.targetMgr.GetDmChannelsByCollection(job.ctx, job.collectionID, meta.CurrentTargetFirst)
-	newReplicas, spawnErr := job.meta.ReplicaManager.Spawn(job.ctx, job.collectionID, toSpawn, lo.Keys(channels), commonpb.LoadPriority_LOW)
+	var spawnOpts []meta.SpawnOption
+	if job.needWaitRGReady {
+		spawnOpts = append(spawnOpts, meta.WithNeedWaitRGReady())
+	}
+	newReplicas, spawnErr := job.meta.ReplicaManager.Spawn(job.ctx, job.collectionID, toSpawn, lo.Keys(channels), commonpb.LoadPriority_LOW, spawnOpts...)
 	if spawnErr != nil {
 		log.Warn("failed to spawn replica", zap.Error(spawnErr))
 		err := spawnErr
