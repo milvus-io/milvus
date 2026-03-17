@@ -77,6 +77,13 @@ type Replica struct {
 	// node used by replica but cannot add more channel on it.
 	// include the rebalance node.
 	loadPriority commonpb.LoadPriority
+
+	// needWaitRGReady is an in-memory only flag (not persisted).
+	// When true, the first node assignment for this replica should wait until
+	// its resource group has all requested nodes ready (MissingNumOfNodes == 0).
+	// This prevents unbalanced segment loading during replica scale-up.
+	// The flag is explicitly cleared after the first successful node assignment.
+	needWaitRGReady bool
 }
 
 // Deprecated: may break the consistency of ReplicaManager, use `Spawn` of `ReplicaManager` or `newReplica` instead.
@@ -115,6 +122,12 @@ func NewReplicaWithPriority(replica *querypb.Replica, priority commonpb.LoadPrio
 
 func (replica *Replica) LoadPriority() commonpb.LoadPriority {
 	return replica.loadPriority // TODO: the load priority doesn't persisted into the replica recovery info.
+}
+
+// NeedWaitRGReady returns whether this replica should wait for its resource group
+// to have all requested nodes before the first node assignment.
+func (replica *Replica) NeedWaitRGReady() bool {
+	return replica.needWaitRGReady
 }
 
 // GetID returns the id of the replica.
@@ -270,12 +283,13 @@ func (replica *Replica) CopyForWrite() *mutableReplica {
 
 	return &mutableReplica{
 		Replica: &Replica{
-			replicaPB:    proto.Clone(replica.replicaPB).(*querypb.Replica),
-			rwNodes:      typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
-			roNodes:      typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
-			rwSQNodes:    typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
-			roSQNodes:    typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
-			loadPriority: replica.LoadPriority(),
+			replicaPB:       proto.Clone(replica.replicaPB).(*querypb.Replica),
+			rwNodes:         typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
+			roNodes:         typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
+			rwSQNodes:       typeutil.NewUniqueSet(replica.replicaPB.RwSqNodes...),
+			roSQNodes:       typeutil.NewUniqueSet(replica.replicaPB.RoSqNodes...),
+			loadPriority:    replica.LoadPriority(),
+			needWaitRGReady: replica.needWaitRGReady,
 		},
 		exclusiveRWNodeToChannel: exclusiveRWNodeToChannel,
 	}
@@ -295,6 +309,12 @@ type mutableReplica struct {
 // SetResourceGroup sets the resource group name of the replica.
 func (replica *mutableReplica) SetResourceGroup(resourceGroup string) {
 	replica.replicaPB.ResourceGroup = resourceGroup
+}
+
+// SetNeedWaitRGReady sets the in-memory flag indicating this replica should wait
+// for its resource group to be fully ready before the first node assignment.
+func (replica *mutableReplica) SetNeedWaitRGReady(need bool) {
+	replica.needWaitRGReady = need
 }
 
 // AddRWNode adds the node to rw nodes of the replica.

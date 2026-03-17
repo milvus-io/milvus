@@ -839,6 +839,33 @@ func (suite *ReplicaSuite) TestTryEnableChannelExclusiveModeInsufficientNodes() 
 	}
 }
 
+func (suite *ReplicaSuite) TestNeedWaitRGReady() {
+	// Default replica should not have the flag set
+	r := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  2,
+		ResourceGroup: DefaultResourceGroupName,
+	})
+	suite.False(r.NeedWaitRGReady(), "default replica should not need to wait for RG ready")
+
+	// Set the flag via mutableReplica
+	mutable := r.CopyForWrite()
+	mutable.SetNeedWaitRGReady(true)
+	r2 := mutable.IntoReplica()
+	suite.True(r2.NeedWaitRGReady(), "flag should be set after SetNeedWaitRGReady(true)")
+
+	// CopyForWrite should carry the flag
+	mutable2 := r2.CopyForWrite()
+	r3 := mutable2.IntoReplica()
+	suite.True(r3.NeedWaitRGReady(), "CopyForWrite should carry needWaitRGReady flag")
+
+	// Explicitly clear the flag
+	mutable3 := r3.CopyForWrite()
+	mutable3.SetNeedWaitRGReady(false)
+	r4 := mutable3.IntoReplica()
+	suite.False(r4.NeedWaitRGReady(), "flag should be cleared after SetNeedWaitRGReady(false)")
+}
+
 func TestReplica(t *testing.T) {
 	suite.Run(t, new(ReplicaSuite))
 }
