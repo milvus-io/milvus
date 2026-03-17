@@ -47,6 +47,83 @@
 namespace milvus {
 namespace exec {
 
+// Replaces per-row std::set copy with a value->bit-index map built once.
+// For <= 64 targets uses uint64_t bitmask (zero heap alloc per row).
+// For > 64 targets uses vector<uint64_t> dynamic bitset.
+template <typename T>
+class ContainsAllMatcher {
+ public:
+    explicit ContainsAllMatcher(const std::set<T>& targets) {
+        target_count_ = targets.size();
+        use_small_ = (target_count_ <= 64);
+        uint32_t idx = 0;
+        for (const auto& t : targets) {
+            value_to_bit_[t] = idx++;
+        }
+        if (use_small_) {
+            full_mask_ = (target_count_ == 64)
+                             ? ~uint64_t(0)
+                             : (uint64_t(1) << target_count_) - 1;
+        } else {
+            num_words_ = (target_count_ + 63) / 64;
+        }
+    }
+
+    // Small path: look up a value and set its bit. Returns true when all
+    // targets have been found.
+    bool
+    set_if_found(const T& val, uint64_t& found) const {
+        auto it = value_to_bit_.find(val);
+        if (it != value_to_bit_.end()) {
+            found |= (uint64_t(1) << it->second);
+            return found == full_mask_;
+        }
+        return false;
+    }
+
+    // Large path: returns true when all targets found.
+    bool
+    set_if_found(const T& val,
+                 std::vector<uint64_t>& found,
+                 size_t& remaining) const {
+        auto it = value_to_bit_.find(val);
+        if (it != value_to_bit_.end()) {
+            uint32_t idx = it->second;
+            uint64_t bit = uint64_t(1) << (idx % 64);
+            uint64_t& word = found[idx / 64];
+            if (!(word & bit)) {
+                word |= bit;
+                return --remaining == 0;
+            }
+        }
+        return false;
+    }
+
+    bool
+    use_small() const {
+        return use_small_;
+    }
+    size_t
+    target_count() const {
+        return target_count_;
+    }
+    uint64_t
+    full_mask() const {
+        return full_mask_;
+    }
+    size_t
+    num_words() const {
+        return num_words_;
+    }
+
+ private:
+    ankerl::unordered_dense::map<T, uint32_t> value_to_bit_;
+    size_t target_count_{0};
+    bool use_small_{true};
+    uint64_t full_mask_{0};
+    size_t num_words_{0};
+};
+
 void
 PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span(
@@ -831,9 +908,12 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
     auto elements =
         std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
     int processed_cursor = 0;
+    ContainsAllMatcher<GetType> matcher(*elements);
+    std::vector<uint64_t> found_large(
+        matcher.use_small() ? 0 : matcher.num_words());
     auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &bitmap_input, &matcher, &
+         found_large ]<FilterType filter_type = FilterType::sequential>(
             const milvus::ArrayView* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -848,15 +928,32 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
             return;
         }
         auto executor = [&](size_t i) {
-            std::set<GetType> tmp_elements(elements);
-            // Note: array can only be iterated once
-            for (int j = 0; j < data[i].length(); ++j) {
-                tmp_elements.erase(data[i].template get_data<GetType>(j));
-                if (tmp_elements.size() == 0) {
-                    return true;
-                }
+            if (static_cast<size_t>(data[i].length()) <
+                matcher.target_count()) {
+                return false;
             }
-            return tmp_elements.size() == 0;
+            if (matcher.use_small()) {
+                uint64_t found = 0;
+                for (int j = 0; j < data[i].length(); ++j) {
+                    if (matcher.set_if_found(
+                            data[i].template get_data<GetType>(j), found)) {
+                        return true;
+                    }
+                }
+                return found == matcher.full_mask();
+            } else {
+                std::fill(found_large.begin(), found_large.end(), 0);
+                size_t remaining = matcher.target_count();
+                for (int j = 0; j < data[i].length(); ++j) {
+                    if (matcher.set_if_found(
+                            data[i].template get_data<GetType>(j),
+                            found_large,
+                            remaining)) {
+                        return true;
+                    }
+                }
+                return remaining == 0;
+            }
         };
         bool has_bitmap_input = !bitmap_input.empty();
         for (int i = 0; i < size; ++i) {
@@ -944,9 +1041,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     auto elements =
         std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
     int processed_cursor = 0;
+    ContainsAllMatcher<GetType> matcher(*elements);
+    std::vector<uint64_t> found_large(
+        matcher.use_small() ? 0 : matcher.num_words());
     auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &bitmap_input, &matcher, &
+         found_large ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -967,31 +1067,60 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
             if (array.error()) {
                 return false;
             }
-            std::set<GetType> tmp_elements(elements);
-            // Note: array can only be iterated once
-            for (auto&& it : array) {
-                auto val = it.template get<GetType>();
-                if (val.error()) {
-                    if constexpr (std::is_same_v<GetType, int64_t>) {
-                        auto double_val = it.template get<double>();
-                        if (!double_val.error() &&
-                            double_val.value() ==
-                                std::floor(double_val.value())) {
-                            tmp_elements.erase(
-                                static_cast<int64_t>(double_val.value()));
-                            if (tmp_elements.size() == 0) {
-                                return true;
+            if (matcher.use_small()) {
+                uint64_t found = 0;
+                for (auto&& it : array) {
+                    auto val = it.template get<GetType>();
+                    if (val.error()) {
+                        if constexpr (std::is_same_v<GetType, int64_t>) {
+                            auto double_val = it.template get<double>();
+                            if (!double_val.error() &&
+                                double_val.value() ==
+                                    std::floor(double_val.value())) {
+                                if (matcher.set_if_found(
+                                        static_cast<int64_t>(
+                                            double_val.value()),
+                                        found)) {
+                                    return true;
+                                }
                             }
                         }
+                        continue;
                     }
-                    continue;
+                    if (matcher.set_if_found(val.value(), found)) {
+                        return true;
+                    }
                 }
-                tmp_elements.erase(val.value());
-                if (tmp_elements.size() == 0) {
-                    return true;
+                return found == matcher.full_mask();
+            } else {
+                std::fill(found_large.begin(), found_large.end(), 0);
+                size_t remaining = matcher.target_count();
+                for (auto&& it : array) {
+                    auto val = it.template get<GetType>();
+                    if (val.error()) {
+                        if constexpr (std::is_same_v<GetType, int64_t>) {
+                            auto double_val = it.template get<double>();
+                            if (!double_val.error() &&
+                                double_val.value() ==
+                                    std::floor(double_val.value())) {
+                                if (matcher.set_if_found(
+                                        static_cast<int64_t>(
+                                            double_val.value()),
+                                        found_large,
+                                        remaining)) {
+                                    return true;
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    if (matcher.set_if_found(
+                            val.value(), found_large, remaining)) {
+                        return true;
+                    }
                 }
+                return remaining == 0;
             }
-            return tmp_elements.size() == 0;
         };
         bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
@@ -1099,9 +1228,14 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
             }
         }
         // process shared data
-        auto shared_executor = [&elements, &res_view](milvus::BsonView bson,
-                                                      uint32_t row_offset,
-                                                      uint32_t value_offset) {
+        ContainsAllMatcher<GetType> shared_matcher(*elements);
+        std::vector<uint64_t> shared_found_large(
+            shared_matcher.use_small() ? 0 : shared_matcher.num_words());
+        auto shared_executor = [&shared_matcher,
+                                &res_view,
+                                &shared_found_large](milvus::BsonView bson,
+                                                     uint32_t row_offset,
+                                                     uint32_t value_offset) {
             auto val = bson.ParseAsArrayAtOffset(value_offset);
 
             if (!val.has_value()) {
@@ -1109,36 +1243,73 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                 return;
             }
 
-            std::set<GetType> tmp_elements(*elements);
-            for (const auto& element : val.value()) {
-                auto value = milvus::BsonView::GetValueFromBsonView<GetType>(
-                    element.get_value());
-                if (!value.has_value()) {
-                    if constexpr (std::is_same_v<GetType, int64_t>) {
-                        auto double_value =
-                            milvus::BsonView::GetValueFromBsonView<double>(
-                                element.get_value());
-                        if (double_value.has_value()) {
-                            if (double_value.value() ==
-                                std::floor(double_value.value())) {
-                                tmp_elements.erase(
-                                    static_cast<int64_t>(double_value.value()));
-                            }
-                            if (tmp_elements.size() == 0) {
-                                res_view[row_offset] = true;
-                                return;
+            if (shared_matcher.use_small()) {
+                uint64_t found = 0;
+                for (const auto& element : val.value()) {
+                    auto value =
+                        milvus::BsonView::GetValueFromBsonView<GetType>(
+                            element.get_value());
+                    if (!value.has_value()) {
+                        if constexpr (std::is_same_v<GetType, int64_t>) {
+                            auto double_value =
+                                milvus::BsonView::GetValueFromBsonView<double>(
+                                    element.get_value());
+                            if (double_value.has_value() &&
+                                double_value.value() ==
+                                    std::floor(double_value.value())) {
+                                if (shared_matcher.set_if_found(
+                                        static_cast<int64_t>(
+                                            double_value.value()),
+                                        found)) {
+                                    res_view[row_offset] = true;
+                                    return;
+                                }
                             }
                         }
+                        continue;
                     }
-                    continue;
+                    if (shared_matcher.set_if_found(value.value(), found)) {
+                        res_view[row_offset] = true;
+                        return;
+                    }
                 }
-                tmp_elements.erase(value.value());
-                if (tmp_elements.size() == 0) {
-                    res_view[row_offset] = true;
-                    return;
+                res_view[row_offset] = (found == shared_matcher.full_mask());
+            } else {
+                std::fill(
+                    shared_found_large.begin(), shared_found_large.end(), 0);
+                size_t remaining = shared_matcher.target_count();
+                for (const auto& element : val.value()) {
+                    auto value =
+                        milvus::BsonView::GetValueFromBsonView<GetType>(
+                            element.get_value());
+                    if (!value.has_value()) {
+                        if constexpr (std::is_same_v<GetType, int64_t>) {
+                            auto double_value =
+                                milvus::BsonView::GetValueFromBsonView<double>(
+                                    element.get_value());
+                            if (double_value.has_value() &&
+                                double_value.value() ==
+                                    std::floor(double_value.value())) {
+                                if (shared_matcher.set_if_found(
+                                        static_cast<int64_t>(
+                                            double_value.value()),
+                                        shared_found_large,
+                                        remaining)) {
+                                    res_view[row_offset] = true;
+                                    return;
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    if (shared_matcher.set_if_found(
+                            value.value(), shared_found_large, remaining)) {
+                        res_view[row_offset] = true;
+                        return;
+                    }
                 }
+                res_view[row_offset] = (remaining == 0);
             }
-            res_view[row_offset] = tmp_elements.empty();
         };
         {
             milvus::ScopedTimer timer(
