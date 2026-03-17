@@ -82,7 +82,7 @@ func adaptImplsToRWWAL(
 		flusher:                flusher,
 		writeMetrics:           metricsutil.NewWriteMetrics(roWAL.Channel(), roWAL.WALName()),
 		isFenced:               atomic.NewBool(false),
-		appendRateCounter:      utility.NewRateCounter(10 * time.Second), // 10 second sliding window
+		appendRateCounter:      utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
 	wal.writeMetrics.SetLogger(wal.roWALAdaptorImpl.Logger())
 	interceptorParam.WAL.Set(wal)
@@ -102,7 +102,7 @@ type walAdaptorImpl struct {
 	flusher                *flusherimpl.WALFlusherImpl
 	writeMetrics           *metricsutil.WriteMetrics
 	isFenced               *atomic.Bool
-	appendRateCounter      *utility.RateCounter // tracks append rate (bytes/sec)
+	appendRateCounter      *utility.AverageRateCounter // tracks append rate (bytes/sec)
 }
 
 // Metrics returns the metrics of the wal.
@@ -330,7 +330,6 @@ func (w *walAdaptorImpl) Close() {
 
 	w.Logger().Info("wal close done, close interceptors...")
 	w.interceptorBuildResult.Close()
-	w.appendExecutionPool.Free()
 
 	w.Logger().Info("close the write ahead buffer...")
 	w.param.WriteAheadBuffer.Close()

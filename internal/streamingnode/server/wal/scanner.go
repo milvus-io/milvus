@@ -37,7 +37,7 @@ type ReadOption struct {
 
 	// AppendRateCounter is a reference to the WAL's append rate counter.
 	// Used by the scanner to compare read rate vs append rate for slowdown control.
-	AppendRateCounter *utility.RateCounter
+	AppendRateCounter *utility.AverageRateCounter
 }
 
 // Scanner is the interface for reading records from the wal.

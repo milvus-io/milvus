@@ -7194,8 +7194,8 @@ so we set 1 second here as a threshold.`,
 	p.WALRateLimitNodeMemorySlowdownThreshold = ParamItem{
 		Key:          "streaming.walRateLimit.nodeMemory.slowdownThreshold",
 		Version:      "2.6.9",
-		Doc:          "When the memory usage is greater than this threshold, the node memory rate limiter will enter slowdown mode, 0.9 by default.",
-		DefaultValue: "0.9",
+		Doc:          "When the memory usage is greater than this threshold, the node memory rate limiter will enter slowdown mode, 0.85 by default.",
+		DefaultValue: "0.85",
 		Export:       false,
 	}
 	p.WALRateLimitNodeMemorySlowdownThreshold.Init(base.mgr)
@@ -7203,8 +7203,8 @@ so we set 1 second here as a threshold.`,
 	p.WALRateLimitNodeMemoryRejectThreshold = ParamItem{
 		Key:          "streaming.walRateLimit.nodeMemory.rejectThreshold",
 		Version:      "2.6.9",
-		Doc:          "When the memory usage is greater than this threshold, the node memory rate limiter will enter reject mode, 0.95 by default.",
-		DefaultValue: "0.95",
+		Doc:          "When the memory usage is greater than this threshold, the node memory rate limiter will enter reject mode, 0.90 by default.",
+		DefaultValue: "0.90",
 		Export:       false,
 	}
 	p.WALRateLimitNodeMemoryRejectThreshold.Init(base.mgr)
@@ -7212,38 +7212,38 @@ so we set 1 second here as a threshold.`,
 	p.WALRateLimitNodeMemoryRecoverThreshold = ParamItem{
 		Key:          "streaming.walRateLimit.nodeMemory.recoverThreshold",
 		Version:      "2.6.9",
-		Doc:          "When the memory usage is less than this threshold, the node memory rate limiter will enter recovery mode, 0.85 by default.",
-		DefaultValue: "0.85",
+		Doc:          "When the memory usage is less than this threshold, the node memory rate limiter will enter recovery mode, 0.80 by default.",
+		DefaultValue: "0.80",
 		Export:       false,
 	}
 	p.WALRateLimitNodeMemoryRecoverThreshold.Init(base.mgr)
 
 	p.WALRateLimitNodeMemoryAdaptiveRateLimit.init(base, "streaming.walRateLimit.nodeMemory.adaptiveRateLimit", AdaptiveRateLimitConfigDefaultValue{
 		SlowdownStartupDelayInterval: "0",
-		SlowdownHWM:                  "8mb",
-		SlowdownLWM:                  "512kb",
-		SlowdownDecreaseInterval:     "30s",
+		SlowdownHWM:                  "4mb",
+		SlowdownLWM:                  "256kb",
+		SlowdownDecreaseInterval:     "10s",
 		SlowdownDecreaseRatio:        "0.8",
 		SlowdownRejectDelayInterval:  "0",
-		RecoveryHWM:                  "32mb",
-		RecoveryLWM:                  "2mb",
+		RecoveryHWM:                  "16mb",
+		RecoveryLWM:                  "1mb",
 		RecoveryNormalDelayInterval:  "10s",
-		RecoveryIncremental:          "512kb",
+		RecoveryIncremental:          "256kb",
 		RecoveryIncreaseInterval:     "1s",
 		Export:                       false,
 	})
 
 	p.WALRateLimitRecoveryStorageAdaptiveRateLimit.init(base, "streaming.walRateLimit.recoveryStorage.adaptiveRateLimit", AdaptiveRateLimitConfigDefaultValue{
 		SlowdownStartupDelayInterval: "30s",
-		SlowdownHWM:                  "16mb",
-		SlowdownLWM:                  "1mb",
-		SlowdownDecreaseInterval:     "30s",
+		SlowdownHWM:                  "32mb",
+		SlowdownLWM:                  "512kb",
+		SlowdownDecreaseInterval:     "10s",
 		SlowdownDecreaseRatio:        "0.8",
-		SlowdownRejectDelayInterval:  "2m",
+		SlowdownRejectDelayInterval:  "90s",
 		RecoveryHWM:                  "32mb",
-		RecoveryLWM:                  "2mb",
-		RecoveryNormalDelayInterval:  "1m",
-		RecoveryIncremental:          "512kb",
+		RecoveryLWM:                  "1mb",
+		RecoveryNormalDelayInterval:  "30s",
+		RecoveryIncremental:          "1mb",
 		RecoveryIncreaseInterval:     "1s",
 		Export:                       false,
 	})

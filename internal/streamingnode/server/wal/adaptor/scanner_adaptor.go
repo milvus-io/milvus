@@ -78,7 +78,7 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 		cleanup:         func() {},
 		ScannerHelper:   helper.NewScannerHelper(name),
 		metrics:         scanMetrics,
-		readRateCounter: utility.NewRateCounter(10 * time.Second), // 10 second sliding window
+		readRateCounter: utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
 	go s.execute()
 	return s
@@ -114,7 +114,7 @@ func newScannerAdaptor(
 		cleanup:         cleanup,
 		ScannerHelper:   helper.NewScannerHelper(name),
 		metrics:         scanMetrics,
-		readRateCounter: utility.NewRateCounter(10 * time.Second), // 10 second sliding window
+		readRateCounter: utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
 	go s.execute()
 	return s
@@ -135,7 +135,7 @@ type scannerAdaptorImpl struct {
 	cleanup         func()
 	clearOnce       sync.Once
 	metrics         *metricsutil.ScannerMetrics
-	readRateCounter *utility.RateCounter // tracks read rate (bytes/sec)
+	readRateCounter *utility.AverageRateCounter // tracks read rate (bytes/sec)
 }
 
 // Channel returns the channel assignment info of the wal.
@@ -318,8 +318,8 @@ func (s *scannerAdaptorImpl) createSlowdownChecker() ratelimit.SlowdownChecker {
 
 // slowdownCheckerImpl implements ratelimit.SlowdownChecker interface.
 type slowdownCheckerImpl struct {
-	readRateCounter   *utility.RateCounter
-	appendRateCounter *utility.RateCounter
+	readRateCounter   *utility.AverageRateCounter
+	appendRateCounter *utility.AverageRateCounter
 }
 
 // Check returns true if slowdown should continue, false if it should exit to recovery.
