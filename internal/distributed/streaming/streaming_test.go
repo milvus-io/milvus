@@ -184,13 +184,11 @@ func TestStreamingProduce(t *testing.T) {
 				WithVChannel(vChannels[0]).
 				BuildMutable()
 			msgs = append(msgs, msg)
-			fmt.Printf("%+v\n", err)
 		}
 		err := streaming.WAL().AppendMessages(context.Background(), msgs...).UnwrapFirstError()
 		if err != nil {
 			t.Errorf("txn failed: %v", err)
 		}
-		t.Logf("txn commit: %+v\n", resp)
 	}
 
 	for _, vChannel := range vChannels {
