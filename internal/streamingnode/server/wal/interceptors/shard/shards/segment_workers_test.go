@@ -415,7 +415,7 @@ func TestSegmentAllocWorker_DoLoop(t *testing.T) {
 	})
 
 	t.Run("context canceled during retry", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is stored and called later
 
 		mockWAL := mock_wal.NewMockWAL(t)
 		mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {
@@ -871,7 +871,7 @@ func TestSegmentFlushWorker_ContextCanceledDuringRetry(t *testing.T) {
 	}, 100)
 	segment.Flush(policy.PolicyCapacity())
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is stored and called later
 
 	mockWAL := mock_wal.NewMockWAL(t)
 	mockWAL.EXPECT().Available().RunAndReturn(func() <-chan struct{} {

@@ -191,7 +191,7 @@ func (highlight *SemanticHighlight) Process(ctx context.Context, topks []int64, 
 	start := int64(0)
 
 	for i, query := range highlight.queries {
-		size := topks[i]
+		size := topks[i] //nolint:gosec // G602 index bounded by queries length
 		singleQueryHighlights, singleQueryScores, err := highlight.processOneQuery(ctx, query, documents[start:start+size])
 		if err != nil {
 			return nil, nil, err

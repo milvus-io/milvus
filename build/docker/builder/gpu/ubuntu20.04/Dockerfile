@@ -44,15 +44,17 @@ ENV GOPATH /go
 ENV GOROOT /usr/local/go
 ENV GO111MODULE on
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.12.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
+RUN mkdir -p /usr/local/go && \
+    curl -fsSL --retry 3 --retry-delay 5 -o /tmp/go.tar.gz "https://go.dev/dl/go1.26.1.linux-$TARGETARCH.tar.gz" && \
+    tar --strip-components=1 -xz -C /usr/local/go -f /tmp/go.tar.gz && rm /tmp/go.tar.gz && \
     mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ${GOROOT}/bin v1.46.2 && \
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ${GOROOT}/bin v2.11.2 && \
     # export GO111MODULE=on && go get github.com/quasilyte/go-ruleguard/cmd/ruleguard@v0.2.1 && \
     go install github.com/ramya-rao-a/go-outline@latest && \
     go install golang.org/x/tools/gopls@latest && \
     go install github.com/uudashr/gopkgs/v2/cmd/gopkgs@latest && \
     go install github.com/go-delve/delve/cmd/dlv@latest && \
-    go install honnef.co/go/tools/cmd/staticcheck@2022.1 && \
+    go install honnef.co/go/tools/cmd/staticcheck@latest && \
     go clean --modcache && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
 

@@ -91,7 +91,7 @@ func NewCheckerController(
 }
 
 func (controller *CheckerController) Start() {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is stored and called later
 	controller.cancel = cancel
 
 	for typ := range controller.checkers {

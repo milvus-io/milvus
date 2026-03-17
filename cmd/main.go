@@ -43,10 +43,10 @@ func main() {
 	// execute command as a subprocess if the command contains "--run-with-subprocess"
 	if idx > 0 {
 		args := slices.Delete(os.Args, idx, idx+1)
-		log.Println("run subprocess with cmd:", args)
+		log.Println("run subprocess with cmd:", args) //nolint:gosec // G706 logging command-line args is intentional
 
 		/* #nosec G204 */
-		cmd := exec.Command(args[0], args[1:]...)
+		cmd := exec.Command(args[0], args[1:]...) //nolint:gosec // G702 command args come from os.Args, not user input
 
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

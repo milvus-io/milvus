@@ -59,7 +59,7 @@ type BulkImportOption struct {
 }
 
 func (opt *BulkImportOption) GetRequest() ([]byte, error) {
-	return json.Marshal(opt)
+	return json.Marshal(opt) //nolint:gosec // G117 AccessKey is a config field name, not a leaked secret
 }
 
 func (opt *BulkImportOption) WithPartition(partitionName string) *BulkImportOption {
@@ -309,7 +309,7 @@ func GetImportProgress(ctx context.Context, option *GetImportProgressOption) (*G
 
 func doPostRequest(req *http.Request, response any) error {
 	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704 URL is constructed internally from trusted config
 	if err != nil {
 		return err
 	}

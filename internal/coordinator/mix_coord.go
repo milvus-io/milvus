@@ -293,7 +293,7 @@ func (s *mixCoordImpl) checkExpiredPOSIXDIR() {
 
 func (s *mixCoordImpl) startPosixCleanupTask() {
 	s.posixCleanupStartOnce.Do(func() {
-		ctx, cancel := context.WithCancel(s.ctx)
+		ctx, cancel := context.WithCancel(s.ctx) //nolint:gosec // G118 false positive - cancel is stored and called later
 		s.posixCleanupCancel = cancel
 
 		s.posixCleanupWg.Add(1)
