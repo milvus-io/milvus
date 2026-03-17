@@ -1587,7 +1587,7 @@ func (kc *Catalog) MigrateGrantsToEntityID(ctx context.Context, tenant string,
 	}
 
 	for i, key := range keys {
-		grantInfos := typeutil.AfterN(key, granteeKey+"/", "/")
+		grantInfos := typeutil.AfterN(key, granteeKey, "/")
 		if len(grantInfos) != 3 {
 			continue
 		}

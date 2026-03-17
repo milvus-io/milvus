@@ -2631,8 +2631,7 @@ func TestRBAC_Grant(t *testing.T) {
 			// Secondary: new key
 			kvmock.EXPECT().Load(mock.Anything, nameKey).
 				Return("", merr.WrapErrIoKeyNotFound(nameKey)).Once()
-			kvmock.EXPECT().Load(mock.Anything, funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
-				fmt.Sprintf("%s/%s/%s", role, object, collName))).
+			kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, role, object, collName)).
 				Return("", merr.WrapErrIoKeyNotFound("")).Once()
 			kvmock.EXPECT().Load(mock.Anything, nameIDKey).
 				Return("", merr.WrapErrIoKeyNotFound(nameIDKey)).Once()
@@ -3968,24 +3967,23 @@ func TestMigrateGrantsToEntityID(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock, nil)
 		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKey).Return("", errors.New("not found"))
-		granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 
 		// Wildcard grant: default.* should be migrated to dbID:1.*
-		key1 := granteeKey + "/role1/Collection/default.*"
+		key1 := granteeKey + "role1/Collection/default.*"
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
 			[]string{key1}, []string{"gid1"}, nil)
 
 		// The old grantee-id sub-keys for gid1
-		oldIDPrefix := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "gid1/")
+		oldIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
 		oldIDKey := oldIDPrefix + "PrivilegeLoad"
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, oldIDPrefix).Return(
 			[]string{oldIDKey}, []string{"user1"}, nil)
 
 		// Build expected new key with dbID:1.* format (only dbName migrated, objectName stays *)
-		newGranteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
-			fmt.Sprintf("role1/Collection/%s", funcutil.CombineObjectName("dbID:1", "*")))
+		newGranteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, "role1", "Collection", funcutil.CombineObjectName("dbID:1", "*"))
 		newID := crypto.MD5(newGranteeKey)
-		newIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, fmt.Sprintf("%s/PrivilegeLoad", newID))
+		newIDKey := fmt.Sprintf("%s/%s/PrivilegeLoad", GranteeIDPrefix, newID)
 
 		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything,
 			map[string]string{newGranteeKey: newID, newIDKey: "user1"},
@@ -4000,10 +3998,10 @@ func TestMigrateGrantsToEntityID(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock, nil)
 		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKey).Return("", errors.New("not found"))
-		granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 
 		// Already ID-based wildcard grant: dbID:1.* should be skipped
-		key1 := granteeKey + "/role1/Collection/dbID:1.*"
+		key1 := granteeKey + "role1/Collection/dbID:1.*"
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
 			[]string{key1}, []string{"gid1"}, nil)
 
@@ -4017,14 +4015,14 @@ func TestMigrateGrantsToEntityID(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock, nil)
 		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKey).Return("", errors.New("not found"))
-		granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 
 		// Wildcard grant for non-existent database
-		key1 := granteeKey + "/role1/Collection/gone_db.*"
+		key1 := granteeKey + "role1/Collection/gone_db.*"
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
 			[]string{key1}, []string{"gid1"}, nil)
 
-		oldIDPrefix := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "gid1/")
+		oldIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, "gid1")
 		kvmock.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, (map[string]string)(nil),
 			[]string{oldIDPrefix}).Return(nil)
 		kvmock.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything,
@@ -4039,10 +4037,10 @@ func TestMigrateGrantsToEntityID(t *testing.T) {
 		kvmock := mocks.NewTxnKV(t)
 		c := NewCatalog(kvmock, nil)
 		kvmock.EXPECT().Load(mock.Anything, GrantMigrationToIDKey).Return("", errors.New("not found"))
-		granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+		granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 
 		// All-database wildcard grant: *.* should be skipped entirely (no migration, no removal)
-		key1 := granteeKey + "/role1/Collection/*.*"
+		key1 := granteeKey + "role1/Collection/*.*"
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeKey).Return(
 			[]string{key1}, []string{"gid1"}, nil)
 

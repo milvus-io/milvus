@@ -2858,7 +2858,7 @@ func TestOperatePrivilege_CollectionIDResolution(t *testing.T) {
 	})
 
 	t.Run("AnyWord skips ID resolution", func(t *testing.T) {
-		catalog.EXPECT().AlterGrant(mock.Anything, mock.Anything, mock.Anything, mock.Anything, int64(0), int64(0)).Return(nil).Once()
+		catalog.EXPECT().AlterGrant(mock.Anything, mock.Anything, mock.Anything, mock.Anything, int64(1), int64(0)).Return(nil).Once()
 		entity := &milvuspb.GrantEntity{
 			Grantor: &milvuspb.GrantorEntity{
 				User:      &milvuspb.UserEntity{Name: "root"},
