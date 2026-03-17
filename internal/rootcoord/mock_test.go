@@ -764,7 +764,7 @@ func cleanTestEnv() {
 	if path == "" {
 		return
 	}
-	if err := os.RemoveAll(path); err != nil {
+	if err := os.RemoveAll(path); err != nil { //nolint:gosec // G703 test cleanup, path from test fixture
 		log.Warn("failed to clean test directories", zap.Error(err), zap.String("path", path))
 	}
 	log.Debug("clean test environment", zap.String("path", path))

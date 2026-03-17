@@ -309,7 +309,7 @@ func PostRequest[T Response](req any, url string, headers map[string]string, tim
 }
 
 func send(req *http.Request) ([]byte, error) {
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704 URL is constructed internally, not from user input
 	if err != nil {
 		return nil, fmt.Errorf("Call service failed, errs:[%v]", err)
 	}

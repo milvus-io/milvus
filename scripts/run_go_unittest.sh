@@ -31,6 +31,11 @@ MILVUS_DIR="${ROOT_DIR}/internal/"
 PKG_DIR="${ROOT_DIR}/pkg/"
 echo "Running go unittest under $MILVUS_DIR & $PKG_DIR"
 
+# Go 1.26.1 has a bug in the bundled go vet printf analyzer (refactor/satisfy
+# panics on *ast.StructType return types). Disable go vet during 'go test' runs;
+# golangci-lint provides equivalent checks with its own analysis pipeline.
+VET_FLAG="-vet=off"
+
 TEST_ALL=1
 TEST_TAG="ALL"
 
@@ -60,120 +65,120 @@ done
 
 function test_proxy()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/proxy/..." -failfast -count=1 -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/proxy/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/proxy/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/distributed/proxy/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_querynode()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/querynodev2/..." -failfast -count=1 -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/querynode/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/querynodev2/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/distributed/querynode/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 
 function test_kv()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/kv/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/kv/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_mq()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test $(go list "${MILVUS_DIR}/mq/..." | grep -v kafka)  -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} $(go list "${MILVUS_DIR}/mq/..." | grep -v kafka)  -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_storage()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/storage" -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/storage" -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_allocator()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/allocator/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/allocator/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_tso()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/tso/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/tso/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_util()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util/funcutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/util/funcutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 pushd pkg
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/util/retry/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${PKG_DIR}/util/retry/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 popd
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util/sessionutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util/typeutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util/importutilv2/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util/proxyutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util/initcore/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util/cgo/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util/streamingutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/util/sessionutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/util/typeutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/util/importutilv2/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/util/proxyutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/util/initcore/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/util/cgo/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/util/streamingutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 }
 
 function test_pkg()
 {
 pushd pkg
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/common/..." -failfast -count=1   -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/config/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/log/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/mq/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/tracer/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/util/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/streaming/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${PKG_DIR}/common/..." -failfast -count=1   -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${PKG_DIR}/config/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${PKG_DIR}/log/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${PKG_DIR}/mq/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${PKG_DIR}/tracer/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${PKG_DIR}/util/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${PKG_DIR}/streaming/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 popd
 }
 
 function test_datanode
 {
 
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/datanode/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/datanode/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/datanode/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/distributed/datanode/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 
 }
 
 function test_rootcoord()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/rootcoord/..." -failfast  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/rootcoord/..." -failfast  -ldflags="-r ${RPATH}"
 }
 
 function test_datacoord()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/datacoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/datacoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_querycoord()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/querycoordv2/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/querycoordv2/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 }
 
 function test_metastore()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/metastore/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/metastore/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_cmd()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${ROOT_DIR}/cmd/tools/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${ROOT_DIR}/cmd/tools/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_streaming()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/streamingcoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/streamingnode/..." -failfast -count=1 -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util/streamingutil/..." -failfast -count=1 -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/streaming/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/streamingcoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/streamingnode/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/util/streamingutil/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/distributed/streaming/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 pushd pkg
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/streaming/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${PKG_DIR}/streaming/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 popd
 }
 
 function test_mixcoord() {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/mixcoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/distributed/mixcoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_cdc() {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/cdc/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="./...=-N -l" -race -cover -tags dynamic,test ${VET_FLAG} "${MILVUS_DIR}/cdc/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_all()

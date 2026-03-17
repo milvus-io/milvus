@@ -48,7 +48,7 @@ func NewResourceObserver(meta *meta.Meta) *ResourceObserver {
 
 func (ob *ResourceObserver) Start() {
 	ob.startOnce.Do(func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is stored and called later
 		ob.cancel = cancel
 
 		ob.wg.Add(1)

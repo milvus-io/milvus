@@ -25,10 +25,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -168,7 +170,9 @@ func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
 		_, collectionID, err = DecodeTicket(ticket)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to decode ticket, %s"}`, err.Error())))
+			if _, werr := w.Write([]byte(fmt.Sprintf(`{"msg": "failed to decode ticket, %s"}`, err.Error()))); werr != nil {
+				log.Warn("failed to write HTTP response", zap.Error(werr))
+			}
 			return
 		}
 	}
@@ -225,14 +229,16 @@ func (node *Proxy) ListQueryNode(w http.ResponseWriter, req *http.Request) {
 }
 
 func (node *Proxy) GetQueryNodeDistribution(w http.ResponseWriter, req *http.Request) {
-	err := req.ParseForm()
+	err := req.ParseForm() //nolint:gosec // G120 internal management endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
+		if _, werr := w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error()))); werr != nil {
+			log.Warn("failed to write HTTP response", zap.Error(werr))
+		}
 		return
 	}
 
-	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64)
+	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // G120 internal management endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to get query node distribution, %s"}`, err.Error())))
@@ -341,14 +347,16 @@ func (node *Proxy) CheckQueryCoordBalanceStatus(w http.ResponseWriter, req *http
 }
 
 func (node *Proxy) SuspendQueryNode(w http.ResponseWriter, req *http.Request) {
-	err := req.ParseForm()
+	err := req.ParseForm() //nolint:gosec // G120 internal management endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
+		if _, werr := w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error()))); werr != nil {
+			log.Warn("failed to write HTTP response", zap.Error(werr))
+		}
 		return
 	}
 
-	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64)
+	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // G120 internal management endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to suspend node, %s"}`, err.Error())))
@@ -374,14 +382,16 @@ func (node *Proxy) SuspendQueryNode(w http.ResponseWriter, req *http.Request) {
 }
 
 func (node *Proxy) ResumeQueryNode(w http.ResponseWriter, req *http.Request) {
-	err := req.ParseForm()
+	err := req.ParseForm() //nolint:gosec // G120 internal management endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
+		if _, werr := w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error()))); werr != nil {
+			log.Warn("failed to write HTTP response", zap.Error(werr))
+		}
 		return
 	}
 
-	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64)
+	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // G120 internal management endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to resume node, %s"}`, err.Error())))
@@ -407,10 +417,12 @@ func (node *Proxy) ResumeQueryNode(w http.ResponseWriter, req *http.Request) {
 }
 
 func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
-	err := req.ParseForm()
+	err := req.ParseForm() //nolint:gosec // G120 internal management endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
+		if _, werr := w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error()))); werr != nil {
+			log.Warn("failed to write HTTP response", zap.Error(werr))
+		}
 		return
 	}
 
@@ -418,7 +430,7 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 		Base: commonpbutil.NewMsgBase(),
 	}
 
-	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64)
+	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64) //nolint:gosec // G120 internal management endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": failed to transfer segment", %s"}`, err.Error())))
@@ -426,7 +438,7 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 	}
 	request.SourceNodeID = source
 
-	target := req.FormValue("target_node_id")
+	target := req.FormValue("target_node_id") //nolint:gosec // G120 internal management endpoint
 	if len(target) == 0 {
 		request.ToAllNodes = true
 	} else {
@@ -439,7 +451,7 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 		request.TargetNodeID = value
 	}
 
-	segmentID := req.FormValue("segment_id")
+	segmentID := req.FormValue("segment_id") //nolint:gosec // G120 internal management endpoint
 	if len(segmentID) == 0 {
 		request.TransferAll = true
 	} else {
@@ -452,14 +464,16 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 		request.SegmentID = value
 	}
 
-	copyMode := req.FormValue("copy_mode")
+	copyMode := req.FormValue("copy_mode") //nolint:gosec // G120 internal management endpoint
 	if len(copyMode) == 0 {
 		request.CopyMode = true
 	} else {
 		value, err := strconv.ParseBool(copyMode)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error())))
+			if _, werr := w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer segment, %s"}`, err.Error()))); werr != nil {
+				log.Warn("failed to write HTTP response", zap.Error(werr))
+			}
 			return
 		}
 		request.CopyMode = value
@@ -482,10 +496,12 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 }
 
 func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
-	err := req.ParseForm()
+	err := req.ParseForm() //nolint:gosec // G120 internal management endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer channel, %s"}`, err.Error())))
+		if _, werr := w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer channel, %s"}`, err.Error()))); werr != nil {
+			log.Warn("failed to write HTTP response", zap.Error(werr))
+		}
 		return
 	}
 
@@ -493,7 +509,7 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 		Base: commonpbutil.NewMsgBase(),
 	}
 
-	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64)
+	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64) //nolint:gosec // G120 internal management endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": failed to transfer channel", %s"}`, err.Error())))
@@ -501,7 +517,7 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 	}
 	request.SourceNodeID = source
 
-	target := req.FormValue("target_node_id")
+	target := req.FormValue("target_node_id") //nolint:gosec // G120 internal management endpoint
 	if len(target) == 0 {
 		request.ToAllNodes = true
 	} else {
@@ -514,21 +530,23 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 		request.TargetNodeID = value
 	}
 
-	channel := req.FormValue("channel_name")
+	channel := req.FormValue("channel_name") //nolint:gosec // G120 internal management endpoint
 	if len(channel) == 0 {
 		request.TransferAll = true
 	} else {
 		request.ChannelName = channel
 	}
 
-	copyMode := req.FormValue("copy_mode")
+	copyMode := req.FormValue("copy_mode") //nolint:gosec // G120 internal management endpoint
 	if len(copyMode) == 0 {
 		request.CopyMode = false
 	} else {
 		value, err := strconv.ParseBool(copyMode)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer channel, %s"}`, err.Error())))
+			if _, werr := w.Write([]byte(fmt.Sprintf(`{"msg": "failed to transfer channel, %s"}`, err.Error()))); werr != nil {
+				log.Warn("failed to write HTTP response", zap.Error(werr))
+			}
 			return
 		}
 		request.CopyMode = value
@@ -551,21 +569,23 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 }
 
 func (node *Proxy) CheckQueryNodeDistribution(w http.ResponseWriter, req *http.Request) {
-	err := req.ParseForm()
+	err := req.ParseForm() //nolint:gosec // G120 internal management endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())))
+		if _, werr := w.Write([]byte(fmt.Sprintf(`{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error()))); werr != nil {
+			log.Warn("failed to write HTTP response", zap.Error(werr))
+		}
 		return
 	}
 
-	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64)
+	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64) //nolint:gosec // G120 internal management endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": failed to check whether query node has same distribution", %s"}`, err.Error())))
 		return
 	}
 
-	target, err := strconv.ParseInt(req.FormValue("target_node_id"), 10, 64)
+	target, err := strconv.ParseInt(req.FormValue("target_node_id"), 10, 64) //nolint:gosec // G120 internal management endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())))

@@ -55,7 +55,7 @@ func getVertexAIJsonKey() ([]byte, error) {
 		return vtxKey.jsonKey, nil
 	}
 
-	jsonKey, err := os.ReadFile(jsonKeyPath)
+	jsonKey, err := os.ReadFile(jsonKeyPath) //nolint:gosec // G703 path from trusted config, not user input
 	if err != nil {
 		return nil, fmt.Errorf("Vertexai: read credentials file failed, %v", err)
 	}

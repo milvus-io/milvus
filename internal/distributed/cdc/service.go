@@ -48,7 +48,7 @@ type Server struct {
 
 // NewServer create a new CDC server.
 func NewServer(ctx context.Context) (*Server, error) {
-	ctx1, cancel := context.WithCancel(ctx)
+	ctx1, cancel := context.WithCancel(ctx) //nolint:gosec // G118 false positive - cancel is stored and called later
 	return &Server{
 		ctx:            ctx1,
 		cancel:         cancel,

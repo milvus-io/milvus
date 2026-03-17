@@ -191,7 +191,7 @@ func testCall(t *testing.T, compressed bool) {
 
 	t.Run("Call canceled in caller func", func(t *testing.T) {
 		initClient()
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is stored and called later
 		errMock := errors.New("mocked")
 		_, err := base.Call(ctx, func(client *mockClient) (any, error) {
 			cancel()
@@ -331,7 +331,7 @@ func TestClientBase_Recall(t *testing.T) {
 
 	t.Run("ReCall canceled in caller func", func(t *testing.T) {
 		initClient()
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is stored and called later
 		errMock := errors.New("mocked")
 		_, err := base.ReCall(ctx, func(client *mockClient) (any, error) {
 			cancel()

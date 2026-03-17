@@ -18,7 +18,7 @@ import (
 )
 
 func CreateContext(t *testing.T, timeout time.Duration) context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout) //nolint:gosec // G118 cancel is called via t.Cleanup
 	t.Cleanup(func() {
 		cancel()
 	})

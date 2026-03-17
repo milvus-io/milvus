@@ -110,7 +110,7 @@ func (n *nodeC) Operate(in []Msg) []Msg {
 func createExampleFlowGraph() (*TimeTickedFlowGraph, chan float64, chan float64, context.CancelFunc, error) {
 	const MaxQueueLength = 1024
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is stored and called later
 	inputChan := make(chan float64, MaxQueueLength)
 	outputChan := make(chan float64, MaxQueueLength)
 
