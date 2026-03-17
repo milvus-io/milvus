@@ -231,6 +231,16 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
             diff.indexes_to_drop.insert(FieldId(load_index_info.field_id));
         }
     }
+
+    // When a new/replaced index has raw data, mark the field data for drop.
+    // The actual drop is safe: DropFieldData guards against multi-field column
+    // groups and PK fields.
+    for (const auto& field_id : new_info.field_index_has_raw_data_) {
+        if (diff.indexes_to_load.count(field_id) > 0 ||
+            diff.indexes_to_replace.count(field_id) > 0) {
+            diff.field_data_to_drop.emplace(field_id);
+        }
+    }
 }
 
 void
@@ -384,14 +394,55 @@ void
 SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
                                          SegmentLoadInfo& new_info) {
     // Find fields that were previously skipped (index had raw data)
-    // but now need loading (index no longer has raw data or was dropped)
+    // but now need loading (index no longer has raw data or was dropped).
+    // These fields need their raw data restored since the index no longer
+    // provides it. We put them into load paths (binlogs/column_groups) so
+    // that ApplyLoadDiff can rebuild the data from storage.
     for (const auto& field_id : field_index_has_raw_data_) {
-        // If new_info doesn't have this field in index_has_raw_data_,
-        // we need to reload the field data
-        if (new_info.field_index_has_raw_data_.find(field_id) ==
+        if (new_info.field_index_has_raw_data_.find(field_id) !=
             new_info.field_index_has_raw_data_.end()) {
-            diff.fields_to_reload.emplace_back(field_id);
+            continue;  // Still has raw data in index, no action needed
         }
+
+        if (!new_info.HasManifestPath()) {
+            // Binlog mode: find the field's binlog and add to binlogs_to_load
+            for (int i = 0; i < new_info.GetBinlogPathCount(); i++) {
+                auto& binlog = new_info.GetBinlogPath(i);
+                std::vector<int64_t> child_fields(binlog.child_fields().begin(),
+                                                  binlog.child_fields().end());
+                if (child_fields.empty()) {
+                    child_fields.emplace_back(binlog.fieldid());
+                }
+                for (auto child_id : child_fields) {
+                    if (FieldId(child_id) == field_id) {
+                        // Use replace since the field may still exist
+                        // (e.g. multi-field group where drop was skipped)
+                        diff.binlogs_to_replace.emplace_back(
+                            std::vector<FieldId>{field_id}, binlog);
+                        goto next_field;
+                    }
+                }
+            }
+        } else {
+            // Manifest mode: find the field's column group
+            auto column_groups = new_info.GetColumnGroups();
+            if (column_groups) {
+                for (size_t i = 0; i < column_groups->size(); i++) {
+                    auto cg = column_groups->at(i);
+                    for (const auto& column : cg->columns) {
+                        if (FieldId(std::stoll(column)) == field_id) {
+                            // Use replace since the field may still exist
+                            diff.column_groups_to_replace.emplace_back(
+                                static_cast<int>(i),
+                                std::vector<FieldId>{field_id});
+                            goto next_field;
+                        }
+                    }
+                }
+            }
+        }
+
+    next_field:;
     }
 }
 

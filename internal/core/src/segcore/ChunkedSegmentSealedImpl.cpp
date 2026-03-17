@@ -207,10 +207,9 @@ ChunkedSegmentSealedImpl::LoadVecIndex(LoadIndexInfo& info, bool is_replace) {
             info.num_rows,
             info.dim);
 
-    if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id)) {
-        fields_.rlock()->at(field_id)->CancelWarmup();
-        fields_.rlock()->at(field_id)->ManualEvictCache();
-    }
+    // Note: raw data lifecycle (eviction/drop) is handled by LoadDiff + ApplyLoadDiff,
+    // not here. This avoids unsafe ManualEvictCache on column groups.
+
     if (get_bit(binlog_index_bitset_, field_id)) {
         set_bit(binlog_index_bitset_, field_id, false);
         vector_indexings_.drop_field_indexing(field_id);
@@ -309,15 +308,8 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
 
     set_bit(index_ready_bitset_, field_id, true);
     index_has_raw_data_[field_id] = request.has_raw_data;
-    // release field column if the index contains raw data
-    // only release non-primary field when in pk sorted mode
-    if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id) &&
-        !is_pk) {
-        // We do not erase the primary key field: if insert record is evicted from memory, when reloading it'll
-        // need the pk field again.
-        fields_.rlock()->at(field_id)->CancelWarmup();
-        fields_.rlock()->at(field_id)->ManualEvictCache();
-    }
+    // Note: raw data lifecycle (eviction/drop) is handled by LoadDiff + ApplyLoadDiff,
+    // not here. This avoids unsafe ManualEvictCache on column groups.
     LOG_INFO(
         "Has load scalar index done, fieldID:{}. segmentID:{}, has_raw_data:{}",
         info.field_id,
@@ -1119,7 +1111,38 @@ ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id) {
                field_id.get());
     std::unique_lock<std::shared_mutex> lck(mutex_);
     if (get_bit(field_data_ready_bitset_, field_id)) {
-        fields_.rlock()->at(field_id)->CancelWarmup();
+        auto column = get_column(field_id);
+        // Multi-field column group: skip drop to avoid breaking shared storage.
+        // The memory stays but queries will use index raw data path instead.
+        if (column && column->IsInMultiFieldColumnGroup()) {
+            LOG_INFO(
+                "Skip dropping field {} in segment {}: multi-field column "
+                "group",
+                field_id.get(),
+                id_);
+            // Still drop binlog index if present
+            if (get_bit(binlog_index_bitset_, field_id)) {
+                set_bit(binlog_index_bitset_, field_id, false);
+                vector_indexings_.drop_field_indexing(field_id);
+            }
+            return;
+        }
+        // PK field: skip drop because insert record reload depends on PK data
+        if (schema_->get_primary_field_id().has_value() &&
+            schema_->get_primary_field_id().value() == field_id) {
+            LOG_INFO(
+                "Skip dropping pk field {} in segment {}", field_id.get(), id_);
+            // Still drop binlog index if present
+            if (get_bit(binlog_index_bitset_, field_id)) {
+                set_bit(binlog_index_bitset_, field_id, false);
+                vector_indexings_.drop_field_indexing(field_id);
+            }
+            return;
+        }
+        // Single-field column: fully erase + clear bitset
+        if (column) {
+            column->CancelWarmup();
+        }
         fields_.wlock()->erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
     }
@@ -3091,22 +3114,13 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
         LoadBatchIndexes(trace_ctx, diff.indexes_to_replace, op_ctx, true);
     }
 
-    // reload fields
+    // reload fields (warmup for fields already in memory)
     if (!diff.fields_to_reload.empty()) {
         ReloadColumns(diff.fields_to_reload, op_ctx);
     }
 
-    // drop index, must after reload binlog
-    if (!diff.indexes_to_drop.empty()) {
-        for (auto field_id : diff.indexes_to_drop) {
-            // Skip drop if this field already has a replacement or new index loaded
-            if (diff.indexes_to_replace.count(field_id) > 0 ||
-                diff.indexes_to_load.count(field_id) > 0) {
-                continue;
-            }
-            DropIndex(field_id);
-        }
-    }
+    // Load field data from storage BEFORE dropping indexes, so that queries
+    // always have a data source available during the transition.
 
     // load column groups
     bool has_cg_changes = !diff.column_groups_to_load.empty() ||
@@ -3159,11 +3173,6 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
         }
     }
 
-    // load pre-built text indexes
-    if (!diff.text_indexes_to_load.empty()) {
-        LoadBatchTextIndexes(op_ctx, diff.text_indexes_to_load);
-    }
-
     // Load new field binlogs
     if (!diff.binlogs_to_load.empty()) {
         LoadBatchFieldData(trace_ctx, diff.binlogs_to_load, op_ctx);
@@ -3171,6 +3180,24 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
     // Replace field binlogs
     if (!diff.binlogs_to_replace.empty()) {
         LoadBatchFieldData(trace_ctx, diff.binlogs_to_replace, op_ctx, true);
+    }
+
+    // drop index — field data is already loaded/restored above, so queries
+    // can fall back to raw data after the index is dropped.
+    if (!diff.indexes_to_drop.empty()) {
+        for (auto field_id : diff.indexes_to_drop) {
+            // Skip drop if this field already has a replacement or new index loaded
+            if (diff.indexes_to_replace.count(field_id) > 0 ||
+                diff.indexes_to_load.count(field_id) > 0) {
+                continue;
+            }
+            DropIndex(field_id);
+        }
+    }
+
+    // load pre-built text indexes
+    if (!diff.text_indexes_to_load.empty()) {
+        LoadBatchTextIndexes(op_ctx, diff.text_indexes_to_load);
     }
 
     // fill default values for fields without data sources (schema evolution)
@@ -3186,7 +3213,8 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
         }
     }
 
-    // drop field
+    // Drop field data last — only for fields whose new index has raw data.
+    // DropFieldData guards against multi-field column groups and PK fields.
     if (!diff.field_data_to_drop.empty()) {
         for (auto field_id : diff.field_data_to_drop) {
             DropFieldData(field_id);
