@@ -191,17 +191,15 @@ namespace exec {
                real_batch_size);                                             \
     return res_vec;
 
-bool
-PhyGISFunctionFilterExpr::CanUseIndex(
-    proto::plan::GISFunctionFilterExpr_GISOp op) const {
-    if (!SegmentExpr::CanUseIndex()) {
-        return false;
+void
+PhyGISFunctionFilterExpr::DetermineExecPath() {
+    SegmentExpr::DetermineExecPath();
+    if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
     }
-    switch (op) {
-        case proto::plan::GISFunctionFilterExpr_GISOp_STIsValid:
-            return false;
-        default:
-            return true;
+    // STIsValid operation cannot use index
+    if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_STIsValid) {
+        exec_path_ = ExprExecPath::RawData;
     }
 }
 
@@ -210,7 +208,7 @@ PhyGISFunctionFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     AssertInfo(expr_->column_.data_type_ == DataType::GEOMETRY,
                "unsupported data type: {}",
                expr_->column_.data_type_);
-    if (CanUseIndex(expr_->op_)) {
+    if (exec_path_ == ExprExecPath::ScalarIndex) {
         result = EvalForIndexSegment();
     } else {
         result = EvalForDataSegment();

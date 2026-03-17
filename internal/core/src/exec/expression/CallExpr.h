@@ -87,6 +87,24 @@ class PhyCallExpr : public Expr {
         return std::nullopt;
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        for (const auto& input : inputs_) {
+            if (!input->CanExecuteAllAtOnce()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        batch_size_ = active_count_;
+        for (auto& input : inputs_) {
+            input->SetExecuteAllAtOnce();
+        }
+    }
+
  private:
     std::shared_ptr<const milvus::expr::CallExpr> expr_;
 
