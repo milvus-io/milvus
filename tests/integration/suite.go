@@ -82,7 +82,7 @@ func (s *MiniClusterSuite) SetupSuite() {
 	paramtable.Init()
 	s.T().Log("Setup test...")
 	s.T().Log("Setup case timeout", caseTimeout)
-	ctx, cancel := context.WithTimeout(context.Background(), caseTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), caseTimeout) //nolint:gosec // G118 false positive - cancel is stored and called later
 	s.cancelFunc = cancel
 
 	s.Cluster = cluster.NewMiniClusterV3(ctx, cluster.WithExtraEnv(s.envConfigs), cluster.WithWorkDir(s.WorkDir()))

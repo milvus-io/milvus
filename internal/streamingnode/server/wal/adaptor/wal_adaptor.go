@@ -39,7 +39,7 @@ func adaptImplsToROWAL(
 		log.FieldComponent("wal"),
 		zap.String("channel", basicWAL.Channel().String()),
 	)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is stored and called later
 	roWAL := &roWALAdaptorImpl{
 		roWALImpls:      basicWAL,
 		lifetime:        typeutil.NewLifetime(),

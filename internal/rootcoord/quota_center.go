@@ -186,7 +186,7 @@ type QuotaCenter struct {
 // NewQuotaCenter returns a new QuotaCenter.
 func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, mixCoord types.MixCoord, tsoAllocator tso.Allocator, meta IMetaTable,
 ) *QuotaCenter {
-	ctx, cancel := context.WithCancel(context.TODO())
+	ctx, cancel := context.WithCancel(context.TODO()) //nolint:gosec // G118 false positive - cancel is stored and called later
 
 	q := &QuotaCenter{
 		ctx:                  ctx,

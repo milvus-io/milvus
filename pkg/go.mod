@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus/pkg/v2
 
-go 1.24.12
+go 1.26.1
 
 require (
 	cloud.google.com/go/storage v1.50.0

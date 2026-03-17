@@ -1,4 +1,4 @@
-FROM golang:1.24.12 as builder
+FROM golang:1.26.1 as builder
 
 # Define a build argument with an empty default value
 ARG CUSTOM_GOPROXY=""
@@ -6,7 +6,7 @@ ARG CUSTOM_GOPROXY=""
 # Set the GOPROXY environment variable, using the specified value if provided, or a default if not
 ENV GOPROXY=${CUSTOM_GOPROXY:-https://proxy.golang.org}
 
-RUN go install gotest.tools/gotestsum@v1.12.0
+RUN go install gotest.tools/gotestsum@v1.13.0
 
 # Set the Current Working Directory inside the container
 WORKDIR /milvus

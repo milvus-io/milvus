@@ -16,7 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
 
 
 # Install go
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.12.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
+RUN mkdir -p /usr/local/go && \
+    curl -fsSL --retry 3 --retry-delay 5 -o /tmp/go.tar.gz "https://go.dev/dl/go1.26.1.linux-$TARGETARCH.tar.gz" && \
+    tar --strip-components=1 -xz -C /usr/local/go -f /tmp/go.tar.gz && \
+    rm /tmp/go.tar.gz
 # Install conan
 RUN pip3 install conan==1.66.0
 # Install rust

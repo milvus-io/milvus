@@ -135,7 +135,7 @@ func TestContextDeadline(t *testing.T) {
 }
 
 func TestContextCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118 false positive - cancel is called later
 
 	mockErr := errors.New("mock error")
 	testFn := func() error {
