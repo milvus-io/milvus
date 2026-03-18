@@ -1327,6 +1327,8 @@ getCacheWarmupPolicy(const std::string& warmup_policy,
             return CacheWarmupPolicy::CacheWarmupPolicy_Disable;
         } else if (warmup_policy == "sync") {
             return CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+        } else if (warmup_policy == "async") {
+            return CacheWarmupPolicy::CacheWarmupPolicy_Async;
         }
         // Unknown policy string, should not happen, been checked by milvus proxy side
         AssertInfo(false, "Unknown warmup policy '{}'", warmup_policy);

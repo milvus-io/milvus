@@ -221,7 +221,7 @@ func filterSystemFields(outputFieldIDs []UniqueID) []UniqueID {
 }
 
 // parseQueryParams get limit and offset from queryParamsPair, both are optional.
-func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, error) {
+func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, bigTopKEnabled bool) (*queryParams, error) {
 	var (
 		limit             int64
 		offset            int64
@@ -291,7 +291,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 			}
 		}
 		// validate max result window.
-		if err = validateMaxQueryResultWindow(offset, limit); err != nil {
+		if err = validateMaxQueryResultWindow(offset, limit, bigTopKEnabled); err != nil {
 			return nil, fmt.Errorf("invalid max query result window, %w", err)
 		}
 	}
@@ -523,7 +523,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.RetrieveRequest.IgnoreGrowing, err = isIgnoreGrowing(t.request.GetQueryParams()); err != nil {
 		return err
 	}
-	queryParams, err := parseQueryParams(t.request.GetQueryParams())
+	queryParams, err := parseQueryParams(t.request.GetQueryParams(), colInfo.bigTopKOptimization)
 	if err != nil {
 		return err
 	}
@@ -563,10 +563,13 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.plan.GetQuery().Limit = t.RetrieveRequest.Limit
 
-	// global agg only return one line as result which will not incur memory risks
-	globalAgg := len(t.userAggregates) > 0 && len(t.GetGroupByFieldIds()) == 0
+	// Aggregation queries have bounded result sizes:
+	// - global aggregation (no GROUP BY) returns exactly one row
+	// - GROUP BY aggregation returns at most one row per distinct group value
+	// Both are safe without a limit, so exempt them from the limit requirement.
+	hasAgg := len(t.userAggregates) > 0
 
-	if planparserv2.IsAlwaysTruePlan(t.plan) && t.RetrieveRequest.Limit == typeutil.Unlimited && !globalAgg {
+	if planparserv2.IsAlwaysTruePlan(t.plan) && t.RetrieveRequest.Limit == typeutil.Unlimited && !hasAgg {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("empty expression should be used with limit"))
 	}
 
@@ -592,8 +595,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	// count with pagination
-	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited {
+	// count(*) without GROUP BY is a single-value result, pagination is meaningless.
+	// But count(*) with GROUP BY + limit is valid (limits the number of groups returned).
+	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited && len(t.GetGroupByFieldIds()) == 0 {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed"))
 	}
 	t.plan.Namespace = t.request.Namespace
@@ -869,11 +873,22 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		loopEnd int
 	)
 
+	// Detect if this is an element-level query
+	isElementLevel := len(retrieveResults) > 0 && retrieveResults[0].GetElementLevel()
+
 	validRetrieveResults := []*internalpb.RetrieveResults{}
 	for _, r := range retrieveResults {
 		size := typeutil.GetSizeOfIDs(r.GetIds())
 		if r == nil || len(r.GetFieldsData()) == 0 || size == 0 {
 			continue
+		}
+		// Validate element-level consistency: if any result is element-level, all must be
+		if isElementLevel && !r.GetElementLevel() {
+			return nil, fmt.Errorf("inconsistent element-level flag: expected all results to be element-level")
+		}
+		// Validate element_indices length matches ids length for element-level
+		if isElementLevel && len(r.GetElementIndices()) != size {
+			return nil, fmt.Errorf("element_indices length (%d) does not match ids length (%d)", len(r.GetElementIndices()), size)
 		}
 		validRetrieveResults = append(validRetrieveResults, r)
 		loopEnd += size
@@ -889,21 +904,39 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		idxComputers[i] = typeutil.NewFieldDataIdxComputer(vr.GetFieldsData())
 	}
 
+	// Used in element-level query to limit the number of elements returned
+	var elementLimit int = -1
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
 		// IReduceInOrderForBest will try to get as many results as possible
 		// so loopEnd in this case will be set to the sum of all results' size
 		// to get as many qualified results as possible
 		if reduce.ShouldUseInputLimit(queryParams.reduceType) {
-			loopEnd = int(queryParams.limit)
+			if !isElementLevel {
+				loopEnd = int(queryParams.limit)
+			}
+			elementLimit = int(queryParams.limit)
 		}
 	}
 
 	// handle offset
 	if queryParams != nil && queryParams.offset > 0 {
-		for i := int64(0); i < queryParams.offset; i++ {
+		var skipped int64
+		for skipped < queryParams.offset {
 			sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
 			if sel == -1 || (reduce.ShouldStopWhenDrained(queryParams.reduceType) && drainOneResult) {
 				return ret, nil
+			}
+			if isElementLevel {
+				elemIndices := validRetrieveResults[sel].GetElementIndices()[cursors[sel]]
+				indicesCount := int64(len(elemIndices.GetIndices()))
+				if skipped+indicesCount > queryParams.offset {
+					elemIndices.Indices = elemIndices.Indices[queryParams.offset-skipped:]
+					break
+				} else {
+					skipped += indicesCount
+				}
+			} else {
+				skipped++
 			}
 			cursors[sel]++
 		}
@@ -911,14 +944,25 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 
 	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].GetFieldsData(), int64(loopEnd))
 	var retSize int64
+	var availableCount int // for element-level: element count; for doc-level: doc count
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for j := 0; j < loopEnd; j++ {
+	for j := 0; j < loopEnd && (elementLimit == -1 || availableCount < elementLimit); j++ {
 		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
 		if sel == -1 || (reduce.ShouldStopWhenDrained(queryParams.reduceType) && drainOneResult) {
 			break
 		}
+
+		// Get element indices for element-level query
+		var elemCount int = 1 // default for doc-level
+		if isElementLevel {
+			elemIndices := validRetrieveResults[sel].GetElementIndices()[cursors[sel]]
+			elemCount = len(elemIndices.GetIndices())
+			ret.ElementIndices = append(ret.ElementIndices, convertInternalElementIndicesToMilvus(elemIndices))
+		}
+
 		fieldIdxs := idxComputers[sel].Compute(cursors[sel])
 		retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel], fieldIdxs...)
+		availableCount += elemCount
 
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {
@@ -929,6 +973,21 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	}
 
 	return ret, nil
+}
+
+// convertInternalElementIndicesToMilvus converts internalpb.ElementIndices (int32) to milvuspb.ElementIndices (int64)
+func convertInternalElementIndicesToMilvus(src *internalpb.ElementIndices) *milvuspb.ElementIndices {
+	if src == nil {
+		return nil
+	}
+	indices := src.GetIndices()
+	data := make([]int64, len(indices))
+	for i, v := range indices {
+		data[i] = int64(v)
+	}
+	return &milvuspb.ElementIndices{
+		Indices: &schemapb.LongArray{Data: data},
+	}
 }
 
 func reduceRetrieveResultsAndFillIfEmpty(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams, outputFieldsID []int64, schema *schemapb.CollectionSchema) (*milvuspb.QueryResults, error) {

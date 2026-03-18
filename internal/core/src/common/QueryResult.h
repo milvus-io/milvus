@@ -162,7 +162,6 @@ class ChunkMergeIterator : public VectorIterator {
                        const std::vector<int64_t>& total_rows_until_chunk = {},
                        bool larger_is_closer = false)
         : offset_mapping_(&offset_mapping),
-          larger_is_closer_(larger_is_closer),
           heap_(OffsetDisPairComparator(larger_is_closer)) {
         iterators_.reserve(chunk_count);
     }
@@ -240,7 +239,6 @@ class ChunkMergeIterator : public VectorIterator {
     bool sealed = false;
     const milvus::OffsetMapping* offset_mapping_ = nullptr;
     std::vector<int64_t> total_rows_until_chunk_;
-    bool larger_is_closer_ = false;
     //currently, ChunkMergeIterator is guaranteed to be used serially without concurrent problem, in the future
     //we may need to add mutex to protect the variable sealed
 };
@@ -370,6 +368,13 @@ struct RetrieveResult {
     bool has_more_result = true;
     // record the storage usage in retrieve
     StorageCost retrieve_storage_cost_;
+
+    // Element-level query support
+    // When element_level_ is true:
+    //   - result_offsets_ contains unique doc_ids (no duplicates)
+    //   - element_indices_[i] contains all matching element indices for result_offsets_[i]
+    bool element_level_{false};
+    std::vector<std::vector<int32_t>> element_indices_;
 };
 
 using RetrieveResultPtr = std::shared_ptr<RetrieveResult>;

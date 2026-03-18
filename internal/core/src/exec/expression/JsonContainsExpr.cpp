@@ -32,9 +32,11 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/type_c.h"
+#include "common/ScopedTimer.h"
 #include "exec/expression/EvalCtx.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
+#include "monitor/Monitor.h"
 #include "index/ScalarIndex.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "index/json_stats/utils.h"
@@ -45,12 +47,90 @@
 namespace milvus {
 namespace exec {
 
+// Replaces per-row std::set copy with a value->bit-index map built once.
+// For <= 64 targets uses uint64_t bitmask (zero heap alloc per row).
+// For > 64 targets uses vector<uint64_t> dynamic bitset.
+template <typename T>
+class ContainsAllMatcher {
+ public:
+    explicit ContainsAllMatcher(const std::set<T>& targets) {
+        target_count_ = targets.size();
+        use_small_ = (target_count_ <= 64);
+        uint32_t idx = 0;
+        for (const auto& t : targets) {
+            value_to_bit_[t] = idx++;
+        }
+        if (use_small_) {
+            full_mask_ = (target_count_ == 64)
+                             ? ~uint64_t(0)
+                             : (uint64_t(1) << target_count_) - 1;
+        } else {
+            num_words_ = (target_count_ + 63) / 64;
+        }
+    }
+
+    // Small path: look up a value and set its bit. Returns true when all
+    // targets have been found.
+    bool
+    set_if_found(const T& val, uint64_t& found) const {
+        auto it = value_to_bit_.find(val);
+        if (it != value_to_bit_.end()) {
+            found |= (uint64_t(1) << it->second);
+            return found == full_mask_;
+        }
+        return false;
+    }
+
+    // Large path: returns true when all targets found.
+    bool
+    set_if_found(const T& val,
+                 std::vector<uint64_t>& found,
+                 size_t& remaining) const {
+        auto it = value_to_bit_.find(val);
+        if (it != value_to_bit_.end()) {
+            uint32_t idx = it->second;
+            uint64_t bit = uint64_t(1) << (idx % 64);
+            uint64_t& word = found[idx / 64];
+            if (!(word & bit)) {
+                word |= bit;
+                return --remaining == 0;
+            }
+        }
+        return false;
+    }
+
+    bool
+    use_small() const {
+        return use_small_;
+    }
+    size_t
+    target_count() const {
+        return target_count_;
+    }
+    uint64_t
+    full_mask() const {
+        return full_mask_;
+    }
+    size_t
+    num_words() const {
+        return num_words_;
+    }
+
+ private:
+    ankerl::unordered_dense::map<T, uint32_t> value_to_bit_;
+    size_t target_count_{0};
+    bool use_small_{true};
+    uint64_t full_mask_{0};
+    size_t num_words_{0};
+};
+
 void
 PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span(
         "PhyJsonContainsFilterExpr::Eval", tracer::GetRootSpan(), true);
     span.GetSpan()->SetAttribute("data_type",
                                  static_cast<int>(expr_->column_.data_type_));
+    span.GetSpan()->SetAttribute("json_filter_expr_type", "json_contains");
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
@@ -77,7 +157,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     switch (expr_->column_.data_type_) {
         case DataType::ARRAY: {
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 result = EvalArrayContainsForIndexSegment(
                     expr_->column_.element_type_);
             } else {
@@ -86,7 +166,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 result = EvalArrayContainsForIndexSegment(
                     value_type_ == DataType::INT64 ? DataType::DOUBLE
                                                    : value_type_);
@@ -330,10 +410,16 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
 
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
+        milvus::ScopedTimer timer("json_contains_by_stats", [this](double us) {
+            json_filter_stats_latency_us_ += us;
+        });
         return ExecJsonContainsByStats<ExprValueType>();
     }
+
+    milvus::ScopedTimer timer("json_contains_bruteforce", [this](double us) {
+        json_filter_bruteforce_latency_us_ += us;
+    });
 
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
@@ -495,6 +581,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
         TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
         // process shredding data for ARRAY type (non-shared)
         {
+            milvus::ScopedTimer timer(
+                "json_contains_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
             auto target_field = index->GetShreddingField(
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
@@ -543,17 +632,20 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
                 }
             }
         };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -561,10 +653,17 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
+        milvus::ScopedTimer timer(
+            "json_contains_array_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecJsonContainsArrayByStats();
     }
+
+    milvus::ScopedTimer timer(
+        "json_contains_array_bruteforce",
+        [this](double us) { json_filter_bruteforce_latency_us_ += us; });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -711,6 +810,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
 
         // process shredding data for ARRAY type (non-shared)
         {
+            milvus::ScopedTimer timer(
+                "json_contains_array_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
             auto target_field = index->GetShreddingField(
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
@@ -749,17 +851,20 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
             }
             return false;
         };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_array_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 template <typename ExprValueType>
@@ -797,9 +902,12 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
     auto elements =
         std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
     int processed_cursor = 0;
+    ContainsAllMatcher<GetType> matcher(*elements);
+    std::vector<uint64_t> found_large(
+        matcher.use_small() ? 0 : matcher.num_words());
     auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &bitmap_input, &matcher, &
+         found_large ]<FilterType filter_type = FilterType::sequential>(
             const milvus::ArrayView* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -814,15 +922,32 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
             return;
         }
         auto executor = [&](size_t i) {
-            std::set<GetType> tmp_elements(elements);
-            // Note: array can only be iterated once
-            for (int j = 0; j < data[i].length(); ++j) {
-                tmp_elements.erase(data[i].template get_data<GetType>(j));
-                if (tmp_elements.size() == 0) {
-                    return true;
-                }
+            if (static_cast<size_t>(data[i].length()) <
+                matcher.target_count()) {
+                return false;
             }
-            return tmp_elements.size() == 0;
+            if (matcher.use_small()) {
+                uint64_t found = 0;
+                for (int j = 0; j < data[i].length(); ++j) {
+                    if (matcher.set_if_found(
+                            data[i].template get_data<GetType>(j), found)) {
+                        return true;
+                    }
+                }
+                return found == matcher.full_mask();
+            } else {
+                std::fill(found_large.begin(), found_large.end(), 0);
+                size_t remaining = matcher.target_count();
+                for (int j = 0; j < data[i].length(); ++j) {
+                    if (matcher.set_if_found(
+                            data[i].template get_data<GetType>(j),
+                            found_large,
+                            remaining)) {
+                        return true;
+                    }
+                }
+                return remaining == 0;
+            }
         };
         bool has_bitmap_input = !bitmap_input.empty();
         for (int i = 0; i < size; ++i) {
@@ -873,10 +998,17 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
 
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
+        milvus::ScopedTimer timer(
+            "json_contains_all_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecJsonContainsAllByStats<ExprValueType>();
     }
+
+    milvus::ScopedTimer timer(
+        "json_contains_all_bruteforce",
+        [this](double us) { json_filter_bruteforce_latency_us_ += us; });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -902,9 +1034,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     auto elements =
         std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
     int processed_cursor = 0;
+    ContainsAllMatcher<GetType> matcher(*elements);
+    std::vector<uint64_t> found_large(
+        matcher.use_small() ? 0 : matcher.num_words());
     auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &bitmap_input, &matcher, &
+         found_large ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -925,31 +1060,60 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
             if (array.error()) {
                 return false;
             }
-            std::set<GetType> tmp_elements(elements);
-            // Note: array can only be iterated once
-            for (auto&& it : array) {
-                auto val = it.template get<GetType>();
-                if (val.error()) {
-                    if constexpr (std::is_same_v<GetType, int64_t>) {
-                        auto double_val = it.template get<double>();
-                        if (!double_val.error() &&
-                            double_val.value() ==
-                                std::floor(double_val.value())) {
-                            tmp_elements.erase(
-                                static_cast<int64_t>(double_val.value()));
-                            if (tmp_elements.size() == 0) {
-                                return true;
+            if (matcher.use_small()) {
+                uint64_t found = 0;
+                for (auto&& it : array) {
+                    auto val = it.template get<GetType>();
+                    if (val.error()) {
+                        if constexpr (std::is_same_v<GetType, int64_t>) {
+                            auto double_val = it.template get<double>();
+                            if (!double_val.error() &&
+                                double_val.value() ==
+                                    std::floor(double_val.value())) {
+                                if (matcher.set_if_found(
+                                        static_cast<int64_t>(
+                                            double_val.value()),
+                                        found)) {
+                                    return true;
+                                }
                             }
                         }
+                        continue;
                     }
-                    continue;
+                    if (matcher.set_if_found(val.value(), found)) {
+                        return true;
+                    }
                 }
-                tmp_elements.erase(val.value());
-                if (tmp_elements.size() == 0) {
-                    return true;
+                return found == matcher.full_mask();
+            } else {
+                std::fill(found_large.begin(), found_large.end(), 0);
+                size_t remaining = matcher.target_count();
+                for (auto&& it : array) {
+                    auto val = it.template get<GetType>();
+                    if (val.error()) {
+                        if constexpr (std::is_same_v<GetType, int64_t>) {
+                            auto double_val = it.template get<double>();
+                            if (!double_val.error() &&
+                                double_val.value() ==
+                                    std::floor(double_val.value())) {
+                                if (matcher.set_if_found(
+                                        static_cast<int64_t>(
+                                            double_val.value()),
+                                        found_large,
+                                        remaining)) {
+                                    return true;
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    if (matcher.set_if_found(
+                            val.value(), found_large, remaining)) {
+                        return true;
+                    }
                 }
+                return remaining == 0;
             }
-            return tmp_elements.size() == 0;
         };
         bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
@@ -1038,6 +1202,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
         TargetBitmapView valid_res_view(*cached_index_chunk_valid_res_);
         // process shredding data for ARRAY type (non-shared)
         {
+            milvus::ScopedTimer timer(
+                "json_contains_all_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
             auto target_field = index->GetShreddingField(
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
@@ -1054,10 +1221,14 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
             }
         }
         // process shared data
-        auto shared_executor = [this, &elements, &res_view](
-                                   milvus::BsonView bson,
-                                   uint32_t row_offset,
-                                   uint32_t value_offset) {
+        ContainsAllMatcher<GetType> shared_matcher(*elements);
+        std::vector<uint64_t> shared_found_large(
+            shared_matcher.use_small() ? 0 : shared_matcher.num_words());
+        auto shared_executor = [&shared_matcher,
+                                &res_view,
+                                &shared_found_large](milvus::BsonView bson,
+                                                     uint32_t row_offset,
+                                                     uint32_t value_offset) {
             auto val = bson.ParseAsArrayAtOffset(value_offset);
 
             if (!val.has_value()) {
@@ -1065,48 +1236,88 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                 return;
             }
 
-            std::set<GetType> tmp_elements(*elements);
-            for (const auto& element : val.value()) {
-                auto value = milvus::BsonView::GetValueFromBsonView<GetType>(
-                    element.get_value());
-                if (!value.has_value()) {
-                    if constexpr (std::is_same_v<GetType, int64_t>) {
-                        auto double_value =
-                            milvus::BsonView::GetValueFromBsonView<double>(
-                                element.get_value());
-                        if (double_value.has_value()) {
-                            if (double_value.value() ==
-                                std::floor(double_value.value())) {
-                                tmp_elements.erase(
-                                    static_cast<int64_t>(double_value.value()));
-                            }
-                            if (tmp_elements.size() == 0) {
-                                res_view[row_offset] = true;
-                                return;
+            if (shared_matcher.use_small()) {
+                uint64_t found = 0;
+                for (const auto& element : val.value()) {
+                    auto value =
+                        milvus::BsonView::GetValueFromBsonView<GetType>(
+                            element.get_value());
+                    if (!value.has_value()) {
+                        if constexpr (std::is_same_v<GetType, int64_t>) {
+                            auto double_value =
+                                milvus::BsonView::GetValueFromBsonView<double>(
+                                    element.get_value());
+                            if (double_value.has_value() &&
+                                double_value.value() ==
+                                    std::floor(double_value.value())) {
+                                if (shared_matcher.set_if_found(
+                                        static_cast<int64_t>(
+                                            double_value.value()),
+                                        found)) {
+                                    res_view[row_offset] = true;
+                                    return;
+                                }
                             }
                         }
+                        continue;
                     }
-                    continue;
+                    if (shared_matcher.set_if_found(value.value(), found)) {
+                        res_view[row_offset] = true;
+                        return;
+                    }
                 }
-                tmp_elements.erase(value.value());
-                if (tmp_elements.size() == 0) {
-                    res_view[row_offset] = true;
-                    return;
+                res_view[row_offset] = (found == shared_matcher.full_mask());
+            } else {
+                std::fill(
+                    shared_found_large.begin(), shared_found_large.end(), 0);
+                size_t remaining = shared_matcher.target_count();
+                for (const auto& element : val.value()) {
+                    auto value =
+                        milvus::BsonView::GetValueFromBsonView<GetType>(
+                            element.get_value());
+                    if (!value.has_value()) {
+                        if constexpr (std::is_same_v<GetType, int64_t>) {
+                            auto double_value =
+                                milvus::BsonView::GetValueFromBsonView<double>(
+                                    element.get_value());
+                            if (double_value.has_value() &&
+                                double_value.value() ==
+                                    std::floor(double_value.value())) {
+                                if (shared_matcher.set_if_found(
+                                        static_cast<int64_t>(
+                                            double_value.value()),
+                                        shared_found_large,
+                                        remaining)) {
+                                    res_view[row_offset] = true;
+                                    return;
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    if (shared_matcher.set_if_found(
+                            value.value(), shared_found_large, remaining)) {
+                        res_view[row_offset] = true;
+                        return;
+                    }
                 }
+                res_view[row_offset] = (remaining == 0);
             }
-            res_view[row_offset] = tmp_elements.empty();
         };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_all_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -1114,10 +1325,17 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
+        milvus::ScopedTimer timer(
+            "json_contains_all_difftype_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecJsonContainsAllWithDiffTypeByStats();
     }
+
+    milvus::ScopedTimer timer(
+        "json_contains_all_difftype_bruteforce",
+        [this](double us) { json_filter_bruteforce_latency_us_ += us; });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -1133,10 +1351,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
 
     auto elements = expr_->vals_;
     std::unordered_set<int> elements_index;
-    int i = 0;
-    for (auto& element : elements) {
+    for (int i = 0; i < static_cast<int>(elements.size()); i++) {
         elements_index.insert(i);
-        i++;
     }
 
     int processed_cursor = 0;
@@ -1296,10 +1512,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto elements = expr_->vals_;
     std::set<int> elements_index;
-    int i = 0;
-    for (auto& element : elements) {
+    for (int i = 0; i < static_cast<int>(elements.size()); i++) {
         elements_index.insert(i);
-        i++;
     }
     if (elements.empty()) {
         MoveCursor();
@@ -1323,6 +1537,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
 
         // process shredding data for ARRAY type (non-shared)
         {
+            milvus::ScopedTimer timer(
+                "json_contains_all_difftype_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
             auto target_field = index->GetShreddingField(
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
@@ -1431,17 +1648,20 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
             }
             res_view[row_offset] = tmp_elements_index.size() == 0;
         };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_all_difftype_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -1449,10 +1669,17 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
+        milvus::ScopedTimer timer(
+            "json_contains_all_array_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecJsonContainsAllArrayByStats();
     }
+
+    milvus::ScopedTimer timer(
+        "json_contains_all_array_bruteforce",
+        [this](double us) { json_filter_bruteforce_latency_us_ += us; });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -1599,6 +1826,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
 
         // process shredding data for ARRAY type (non-shared)
         {
+            milvus::ScopedTimer timer(
+                "json_contains_all_array_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
             auto target_field = index->GetShreddingField(
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
@@ -1644,17 +1874,20 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
             res_view[row_offset] =
                 exist_elements_index.size() == elements.size();
         };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_all_array_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -1662,10 +1895,17 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
+        milvus::ScopedTimer timer(
+            "json_contains_difftype_by_stats",
+            [this](double us) { json_filter_stats_latency_us_ += us; });
         return ExecJsonContainsWithDiffTypeByStats();
     }
+
+    milvus::ScopedTimer timer(
+        "json_contains_difftype_bruteforce",
+        [this](double us) { json_filter_bruteforce_latency_us_ += us; });
+
     auto real_batch_size =
         has_offset_input_ ? input->size() : GetNextBatchSize();
     if (real_batch_size == 0) {
@@ -1682,10 +1922,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
 
     auto elements = expr_->vals_;
     std::unordered_set<int> elements_index;
-    int i = 0;
-    for (auto& element : elements) {
+    for (int i = 0; i < static_cast<int>(elements.size()); i++) {
         elements_index.insert(i);
-        i++;
     }
 
     size_t processed_cursor = 0;
@@ -1855,6 +2093,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
 
         // process shredding data for ARRAY type (non-shared)
         {
+            milvus::ScopedTimer timer(
+                "json_contains_difftype_stats_shredding_data",
+                [this](double us) { json_stats_shredding_latency_us_ += us; });
             auto target_field = index->GetShreddingField(
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
@@ -1954,17 +2195,20 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                 }
             }
         };
-        index->ExecuteForSharedData(
-            op_ctx_, bson_index_, pointer, shared_executor);
+        {
+            milvus::ScopedTimer timer(
+                "json_contains_difftype_stats_shared_data",
+                [this](double us) { json_stats_shared_latency_us_ += us; });
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
+        }
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -2022,31 +2266,60 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
         elements.insert(GetValueWithCastNumber<GetType>(element));
     }
     boost::container::vector<GetType> elems(elements.begin(), elements.end());
+
+    // Get array offsets for nested index (needed for element-to-row conversion)
+    auto array_offsets = segment_->GetArrayOffsets(expr_->column_.field_id_);
+
     auto execute_sub_batch =
-        [this](Index* index_ptr,
-               const boost::container::vector<GetType>& vals) {
-            switch (expr_->op_) {
-                case proto::plan::JSONContainsExpr_JSONOp_Contains:
-                case proto::plan::JSONContainsExpr_JSONOp_ContainsAny: {
-                    return index_ptr->In(vals.size(), vals.data());
-                }
-                case proto::plan::JSONContainsExpr_JSONOp_ContainsAll: {
-                    TargetBitmap result(index_ptr->Count());
-                    result.set();
-                    for (size_t i = 0; i < vals.size(); i++) {
-                        auto sub = index_ptr->In(1, &vals[i]);
-                        result &= sub;
-                    }
-                    return result;
-                }
-                default:
-                    ThrowInfo(
-                        ExprInvalid,
-                        "unsupported array contains type {}",
-                        proto::plan::JSONContainsExpr_JSONOp_Name(expr_->op_));
+        [this, &array_offsets](
+            Index* index_ptr,
+            const boost::container::vector<GetType>& vals) -> TargetBitmap {
+        // Query helper: for nested index, convert element-level to row-level
+        auto query_in = [&](size_t n, const GetType* data) -> TargetBitmap {
+            auto element_bitset = index_ptr->In(n, data);
+            if (!index_ptr->IsNestedIndex()) {
+                return element_bitset;
             }
+            AssertInfo(array_offsets != nullptr,
+                       "array offsets not found for field {}",
+                       expr_->column_.field_id_.get());
+            return array_offsets->ForEachRowElementRange(
+                [&element_bitset](int32_t elem_start, int32_t elem_end) {
+                    for (int32_t i = elem_start; i < elem_end; ++i) {
+                        if (element_bitset[i]) {
+                            return true;
+                        }
+                    }
+                    return false;
+                },
+                0,
+                active_count_);
         };
-    auto res = ProcessIndexChunks<GetType>(execute_sub_batch, elems);
+
+        switch (expr_->op_) {
+            case proto::plan::JSONContainsExpr_JSONOp_Contains:
+            case proto::plan::JSONContainsExpr_JSONOp_ContainsAny:
+                return query_in(vals.size(), vals.data());
+
+            case proto::plan::JSONContainsExpr_JSONOp_ContainsAll: {
+                TargetBitmap result(active_count_);
+                result.set();
+                for (size_t i = 0; i < vals.size(); i++) {
+                    result &= query_in(1, &vals[i]);
+                }
+                return result;
+            }
+            default:
+                ThrowInfo(
+                    ExprInvalid,
+                    "unsupported array contains type {}",
+                    proto::plan::JSONContainsExpr_JSONOp_Name(expr_->op_));
+        }
+    };
+
+    // Use WithRowLevel version since func handles element-to-row conversion for nested index
+    auto res =
+        ProcessIndexChunksWithRowLevel<GetType>(execute_sub_batch, elems);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -2054,5 +2327,6 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
                real_batch_size);
     return res;
 }
+
 }  //namespace exec
 }  // namespace milvus

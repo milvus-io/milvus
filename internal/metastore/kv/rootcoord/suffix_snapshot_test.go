@@ -225,6 +225,27 @@ func Test_ComposeIsTsKey(t *testing.T) {
 	}
 }
 
+func TestComposeSnapshotKey(t *testing.T) {
+	key := "root-coord/collection/1"
+	sep := "_ts"
+	ts := typeutil.Timestamp(100)
+
+	// ComposeSnapshotKey should normalize snapshotPrefix with a trailing slash.
+	assert.Equal(t, "snapshots/"+key+sep+"100", ComposeSnapshotKey("snapshots", key, sep, ts))
+	assert.Equal(t, "snapshots/"+key+sep+"100", ComposeSnapshotKey("snapshots/", key, sep, ts))
+}
+
+func Test_SuffixSnapshotEmptyRootPrefix(t *testing.T) {
+	sep := "_ts"
+	ss, err := NewSuffixSnapshot(etcdkv.NewEtcdKV(nil, ""), sep, "", snapshotPrefix)
+	require.NoError(t, err)
+	defer ss.Close()
+
+	// Empty root should not trim the first byte when hiding root prefix.
+	key := ss.composeTSKey("k", 100)
+	assert.Equal(t, key, ss.hideRootPrefix(key))
+}
+
 func Test_SuffixSnaphotIsTSOfKey(t *testing.T) {
 	sep := "_ts"
 	ss, err := NewSuffixSnapshot(etcdkv.NewEtcdKV(nil, ""), sep, "", snapshotPrefix)

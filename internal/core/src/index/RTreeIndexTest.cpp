@@ -156,10 +156,7 @@ class RTreeIndexTest : public ::testing::Test {
         // set geometry data type in field schema for index schema checks
         field_meta_.field_schema.set_data_type(
             ::milvus::proto::schema::DataType::Geometry);
-        index_meta_ = milvus::storage::IndexMeta{.segment_id = 1,
-                                                 .field_id = 100,
-                                                 .build_id = 1,
-                                                 .index_version = 1};
+        index_meta_ = milvus::storage::IndexMeta{1, 100, 1, 1};
     }
 
     void
@@ -262,9 +259,13 @@ TEST_F(RTreeIndexTest, Load_WithFileNamesOnly) {
     for (const auto& path : stats->GetIndexFiles()) {
         filenames.emplace_back(
             boost::filesystem::path(path).filename().string());
-        // make sure file exists in remote storage
-        ASSERT_TRUE(chunk_manager_->Exist(path));
-        ASSERT_GT(chunk_manager_->Size(path), 0);
+        // In V2 mode, files are stored via chunk_manager.
+        // In V3 mode, files are stored via ArrowFileSystem (fs_),
+        // so chunk_manager won't find them.
+        if (!milvus::index::kScalarIndexUseV3) {
+            ASSERT_TRUE(chunk_manager_->Exist(path));
+            ASSERT_GT(chunk_manager_->Size(path), 0);
+        }
     }
 
     // Load using filename only list
@@ -366,6 +367,24 @@ TEST_F(RTreeIndexTest, Build_ConfigAndMetaJson) {
 
     rtree.Build(build_cfg);
     auto stats = rtree.Upload({});
+
+    if (milvus::index::kScalarIndexUseV3) {
+        // V3 mode: verify upload produced a single packed file and can be loaded
+        auto index_files = stats->GetIndexFiles();
+        ASSERT_EQ(index_files.size(), 1);
+
+        milvus::storage::FileManagerContext ctx_load(
+            field_meta_, index_meta_, chunk_manager_, fs_);
+        ctx_load.set_for_loading_index(true);
+        milvus::index::RTreeIndex<std::string> rtree_load(ctx_load);
+
+        nlohmann::json cfg;
+        cfg["index_files"] = index_files;
+        milvus::tracer::TraceContext trace_ctx;
+        rtree_load.Load(trace_ctx, cfg);
+        ASSERT_EQ(rtree_load.Count(), 2);
+        return;
+    }
 
     // Cache remote index files locally
     milvus::storage::DiskFileManagerImpl diskfm(
@@ -745,7 +764,7 @@ TEST_F(RTreeIndexTest, GIS_Index_Exact_Filtering) {
     auto schema = std::make_shared<Schema>();
     auto pk_id = schema->AddDebugField("id", DataType::INT64);
     auto dim = 16;
-    auto vec_id = schema->AddDebugField(
+    schema->AddDebugField(
         "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
     auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
     schema->set_primary_field_id(pk_id);

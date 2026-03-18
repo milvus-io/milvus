@@ -53,6 +53,13 @@ func TestToRelativePath(t *testing.T) {
 			expected: "../../../../../delta_log/100/200/300/5",
 		},
 		{
+			name:     "v3 deltalog under basePath/_delta/",
+			fullPath: "/data/insert_log/123/456/789/_delta/1",
+			basePath: "/data/insert_log/123/456/789",
+			rootPath: "/data",
+			expected: "1",
+		},
+		{
 			name:     "path without rootPath prefix",
 			fullPath: "/other/path/file",
 			basePath: "/data/insert_log/123/456/789",
@@ -65,6 +72,13 @@ func TestToRelativePath(t *testing.T) {
 			basePath: "insert_log/123/456/789",
 			rootPath: "",
 			expected: "../../../../../delta_log/123/456/789/1",
+		},
+		{
+			name:     "v3 deltalog with empty rootPath",
+			fullPath: "insert_log/123/456/789/_delta/1",
+			basePath: "insert_log/123/456/789",
+			rootPath: "",
+			expected: "1",
 		},
 	}
 
@@ -187,6 +201,23 @@ func TestGetDeltaLogPathsFromManifest(t *testing.T) {
 		require.Equal(t, 2, len(paths))
 		assert.Contains(t, paths[0], "delta_log/1/2/3/201")
 		assert.Contains(t, paths[1], "delta_log/1/2/3/202")
+	})
+
+	t.Run("v3 delta log under basePath/_delta/", func(t *testing.T) {
+		bp := filepath.Join(dir, "insert_log/1/2/3_v3delta")
+		manifestPath := createBaseManifest(t, bp, storageConfig)
+
+		// V3 deltaPath: basePath/_delta/{logID}
+		deltaFullPath := filepath.Join(bp, "_delta/501")
+		newManifest, err := AddDeltaLogsToManifest(manifestPath, storageConfig, []DeltaLogEntry{
+			{Path: deltaFullPath, NumEntries: 8},
+		})
+		require.NoError(t, err)
+
+		paths, err := GetDeltaLogPathsFromManifest(newManifest, storageConfig)
+		assert.NoError(t, err)
+		require.Equal(t, 1, len(paths))
+		assert.Contains(t, paths[0], "_delta/501")
 	})
 
 	t.Run("empty deltaLogs input returns original manifest", func(t *testing.T) {

@@ -90,12 +90,12 @@ TEST(IterativeFilter, SealedIndex) {
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
-    auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    schema->AddDebugField("int8", DataType::INT8);
+    schema->AddDebugField("int16", DataType::INT16);
+    schema->AddDebugField("int32", DataType::INT32);
+    schema->AddDebugField("int64", DataType::INT64);
     auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
+    schema->AddDebugField("bool", DataType::BOOL);
     schema->set_primary_field_id(str_fid);
     size_t N = 50;
 
@@ -115,7 +115,6 @@ TEST(IterativeFilter, SealedIndex) {
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(load_index_info);
     int topK = 10;
-    int group_size = 3;
 
     ScopedSchemaHandle handle(*schema);
 
@@ -210,14 +209,14 @@ TEST(IterativeFilter, SealedData) {
     //0. prepare schema
     int dim = 64;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
-    auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
-    auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
-    auto int32_fid = schema->AddDebugField("int32", DataType::INT32);
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    schema->AddDebugField("int8", DataType::INT8);
+    schema->AddDebugField("int16", DataType::INT16);
+    schema->AddDebugField("int32", DataType::INT32);
+    schema->AddDebugField("int64", DataType::INT64);
     auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
+    schema->AddDebugField("bool", DataType::BOOL);
     schema->set_primary_field_id(str_fid);
     size_t N = 100;
 
@@ -261,12 +260,11 @@ TEST(IterativeFilter, SealedData) {
 
 TEST(IterativeFilter, GrowingRawData) {
     int dim = 128;
-    uint64_t seed = 512;
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::L2;
     auto int64_field_id = schema->AddDebugField("int64", DataType::INT64);
-    auto int32_field_id = schema->AddDebugField("int32", DataType::INT32);
-    auto vec_field_id = schema->AddDebugField(
+    schema->AddDebugField("int32", DataType::INT32);
+    schema->AddDebugField(
         "embeddings", DataType::VECTOR_FLOAT, 128, metric_type);
     schema->set_primary_field_id(int64_field_id);
 
@@ -330,11 +328,10 @@ TEST(IterativeFilter, GrowingRawData) {
 
 TEST(IterativeFilter, GrowingIndex) {
     int dim = 128;
-    uint64_t seed = 512;
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::L2;
     auto int64_field_id = schema->AddDebugField("int64", DataType::INT64);
-    auto int32_field_id = schema->AddDebugField("int32", DataType::INT32);
+    schema->AddDebugField("int32", DataType::INT32);
     auto vec_field_id = schema->AddDebugField(
         "embeddings", DataType::VECTOR_FLOAT, 128, metric_type);
     schema->set_primary_field_id(int64_field_id);

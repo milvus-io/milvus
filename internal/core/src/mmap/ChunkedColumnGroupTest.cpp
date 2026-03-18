@@ -139,8 +139,8 @@ class ChunkedColumnGroupTest : public ::testing::Test {
                                       std::nullopt);
 
         // Create chunks
-        int64_chunk = std::move(create_chunk_int64(int64_data));
-        string_chunk = std::move(create_chunk_string(string_data));
+        int64_chunk = create_chunk_int64(int64_data);
+        string_chunk = create_chunk_string(string_data);
     }
 
     FixedVector<int64_t> int64_data;

@@ -180,6 +180,13 @@ class HybridScalarIndex : public ScalarIndex<T> {
     IndexStatsPtr
     Upload(const Config& config = {}) override;
 
+    void
+    WriteEntries(storage::IndexEntryWriter* writer) override;
+
+    void
+    LoadEntries(storage::IndexEntryReader& reader,
+                const Config& config) override;
+
  private:
     ScalarIndexType
     SelectBuildTypeForPrimitiveType(
@@ -221,7 +228,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
     ScalarIndexType internal_index_type_;
     std::shared_ptr<ScalarIndex<T>> internal_index_{nullptr};
     storage::FileManagerContext file_manager_context_;
-    std::shared_ptr<storage::MemFileManagerImpl> mem_file_manager_{nullptr};
 
     // `tantivy_index_version_` is used to control which kind of tantivy index should be used.
     // There could be the case where milvus version of read node is lower than the version of index builder node(and read node

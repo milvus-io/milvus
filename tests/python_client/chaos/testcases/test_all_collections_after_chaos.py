@@ -142,7 +142,8 @@ class TestAllCollection:
             data=search_vectors,
             anns_field=float_vector_field_name,
             search_params=dense_search_params,
-            limit=1
+            limit=1,
+            consistency_level="Strong"
         )
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
@@ -158,7 +159,8 @@ class TestAllCollection:
                 data=queries,
                 anns_field=bm25_vec_field_name_list[0],
                 search_params=bm25_search_params,
-                limit=1
+                limit=1,
+                consistency_level="Strong"
             )
             tt = time.time() - t0
             log.info(f"assert full text search: {tt}")
@@ -170,7 +172,8 @@ class TestAllCollection:
         res = milvus_client.query(
             collection_name=name,
             filter=term_expr,
-            limit=5
+            limit=5,
+            consistency_level="Strong"
         )
         tt = time.time() - t0
         log.info(f"assert query result {len(res)}: {tt}")
@@ -184,7 +187,8 @@ class TestAllCollection:
             res = milvus_client.query(
                 collection_name=name,
                 filter=expr,
-                limit=5
+                limit=5,
+                consistency_level="Strong"
             )
             tt = time.time() - t0
             log.info(f"assert text match: {tt}")
@@ -211,7 +215,8 @@ class TestAllCollection:
             data=search_vectors,
             anns_field=float_vector_field_name,
             search_params=dense_search_params,
-            limit=topk
+            limit=topk,
+            consistency_level="Strong"
         )
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
@@ -228,7 +233,8 @@ class TestAllCollection:
                 data=queries,
                 anns_field=bm25_vec_field_name_list[0],
                 search_params=bm25_search_params,
-                limit=1
+                limit=1,
+                consistency_level="Strong"
             )
             tt = time.time() - t0
             log.info(f"assert full text search: {tt}")
@@ -240,7 +246,8 @@ class TestAllCollection:
         res = milvus_client.query(
             collection_name=name,
             filter=term_expr,
-            limit=5
+            limit=5,
+            consistency_level="Strong"
         )
         tt = time.time() - t0
         log.info(f"assert query result {len(res)}: {tt}")
@@ -254,7 +261,8 @@ class TestAllCollection:
             res = milvus_client.query(
                 collection_name=name,
                 filter=expr,
-                limit=5
+                limit=5,
+                consistency_level="Strong"
             )
             tt = time.time() - t0
             log.info(f"assert text match: {tt}")

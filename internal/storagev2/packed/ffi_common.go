@@ -272,7 +272,7 @@ func MarshalManifestPath(basePath string, version int64) string {
 	return string(bs)
 }
 
-func UnmarshalManfestPath(manifestPath string) (string, int64, error) {
+func UnmarshalManifestPath(manifestPath string) (string, int64, error) {
 	var manifestJSON ManifestJSON
 	err := json.Unmarshal([]byte(manifestPath), &manifestJSON)
 	if err != nil {

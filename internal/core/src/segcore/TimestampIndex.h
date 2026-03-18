@@ -25,25 +25,12 @@ class TimestampIndex {
 
     void
     build_with(const Timestamp* timestamps, int64_t size);
-    // output bitset
 
     // Return range [beg, end) that is undecided
     // [0, beg) shall be all OK
     // [end, size) shall be all not OK
     std::pair<int64_t, int64_t>
     get_active_range(Timestamp query_timestamp) const;
-
-    static BitsetType
-    GenerateBitset(Timestamp query_timestamp,
-                   std::pair<int64_t, int64_t> active_range,
-                   const Timestamp* timestamps,
-                   int64_t size);
-
-    static BitsetType
-    GenerateTTLBitset(const Timestamp* timestamps,
-                      int64_t size,
-                      Timestamp expire_ts,
-                      std::pair<int64_t, int64_t> active_range);
 
     size_t
     memory_size() const {

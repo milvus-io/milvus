@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "ElementFilterNode.h"
+#include "exec/operator/Utils.h"
 
 #include <algorithm>
 #include <chrono>
@@ -51,7 +52,8 @@ PhyElementFilterNode::PhyElementFilterNode(
                operator_id,
                element_filter_node->id(),
                "PhyElementFilterNode"),
-      struct_name_(element_filter_node->struct_name()) {
+      struct_name_(element_filter_node->struct_name()),
+      has_doc_predicate_(element_filter_node->has_doc_predicate()) {
     ExecContext* exec_context = operator_context_->get_exec_context();
     query_context_ = exec_context->get_query_context();
     std::vector<expr::TypedExprPtr> exprs;
@@ -125,9 +127,19 @@ PhyElementFilterNode::GetOutput() {
 
     // Step 3: Update search result with wrapped iterators
     search_result.vector_iterators_ = std::move(wrapped_iterators);
+    size_t num_iterators = search_result.vector_iterators_.has_value()
+                               ? search_result.vector_iterators_->size()
+                               : 0;
+
+    // Step 4: If no doc-level predicate, collect results directly
+    // (otherwise, downstream FilterNode will do this)
+    if (!has_doc_predicate_) {
+        CollectResults(search_result, array_offsets.get());
+    }
+
     query_context_->set_search_result(std::move(search_result));
 
-    // Step 4: Record metrics
+    // Step 5: Record metrics
     std::chrono::high_resolution_clock::time_point end_time =
         std::chrono::high_resolution_clock::now();
     double cost =
@@ -136,13 +148,90 @@ PhyElementFilterNode::GetOutput() {
 
     tracer::AddEvent(
         fmt::format("PhyElementFilterNode: wrapped {} iterators, struct_name: "
-                    "{}, cost_us: {}",
-                    wrapped_iterators.size(),
+                    "{}, has_doc_predicate: {}, cost_us: {}",
+                    num_iterators,
                     struct_name_,
+                    has_doc_predicate_,
                     cost));
 
     // Pass through input to downstream
     return input_;
+}
+
+void
+PhyElementFilterNode::CollectResults(SearchResult& search_result,
+                                     const IArrayOffsets* array_offsets) {
+    // When there's no doc-level predicate, we need to consume the iterators
+    // and collect the top-K results ourselves.
+    //
+    // Note: knowhere iterator doesn't guarantee strictly ordered output,
+    // so we must use binary insertion to maintain sorted order.
+
+    auto& iterators = search_result.vector_iterators_.value();
+    int64_t nq = search_result.total_nq_;
+    int64_t topk = search_result.unity_topK_;
+
+    knowhere::MetricType metric_type = query_context_->get_metric_type();
+    bool large_is_better = PositivelyRelated(metric_type);
+
+    // Initialize result arrays
+    search_result.seg_offsets_.resize(nq * topk, INVALID_SEG_OFFSET);
+    search_result.distances_.resize(nq * topk, 0.0f);
+    search_result.element_indices_.resize(nq * topk, -1);
+
+    for (int64_t q = 0; q < nq; ++q) {
+        auto& iterator = iterators[q];
+        int64_t count = 0;
+        int64_t base_idx = q * topk;
+
+        while (iterator->HasNext() && count < topk) {
+            auto result = iterator->Next();
+            if (!result.has_value()) {
+                break;
+            }
+
+            auto [element_id, distance] = result.value();
+            auto [doc_id, elem_idx] =
+                array_offsets->ElementIDToRowID(element_id);
+
+            // Find insert position using binary search
+            size_t pos =
+                large_is_better
+                    ? find_binsert_position<true>(search_result.distances_,
+                                                  base_idx,
+                                                  base_idx + count,
+                                                  distance)
+                    : find_binsert_position<false>(search_result.distances_,
+                                                   base_idx,
+                                                   base_idx + count,
+                                                   distance);
+
+            // Shift elements to make room for insertion
+            if (count > 0 && pos < base_idx + count) {
+                std::memmove(&search_result.distances_[pos + 1],
+                             &search_result.distances_[pos],
+                             (base_idx + count - pos) * sizeof(float));
+                std::memmove(&search_result.seg_offsets_[pos + 1],
+                             &search_result.seg_offsets_[pos],
+                             (base_idx + count - pos) * sizeof(int64_t));
+                std::memmove(&search_result.element_indices_[pos + 1],
+                             &search_result.element_indices_[pos],
+                             (base_idx + count - pos) * sizeof(int32_t));
+            }
+
+            // Insert the new result
+            search_result.seg_offsets_[pos] = doc_id;
+            search_result.element_indices_[pos] = elem_idx;
+            search_result.distances_[pos] = distance;
+            ++count;
+        }
+    }
+
+    // Clear iterators to indicate results have been collected
+    search_result.vector_iterators_.reset();
+
+    tracer::AddEvent(fmt::format(
+        "PhyElementFilterNode::CollectResults: nq={}, topk={}", nq, topk));
 }
 
 }  // namespace exec

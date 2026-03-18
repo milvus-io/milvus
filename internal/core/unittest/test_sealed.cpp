@@ -107,7 +107,7 @@ TEST(Sealed, without_predicate) {
     auto metric_type = knowhere::metric::L2;
     auto fake_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
-    auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
+    schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
@@ -211,11 +211,10 @@ TEST(Sealed, without_predicate) {
 TEST(Sealed, without_search_ef_less_than_limit) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
-    auto topK = 5;
     auto metric_type = knowhere::metric::L2;
     auto fake_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
-    auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
+    schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 
@@ -381,7 +380,6 @@ TEST(Sealed, with_predicate) {
 TEST(Sealed, with_predicate_filter_all) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
-    auto topK = 5;
     // auto metric_type = MetricType::METRIC_L2;
     auto metric_type = knowhere::metric::L2;
     auto fake_id = schema->AddDebugField(
@@ -491,7 +489,6 @@ TEST(Sealed, with_predicate_filter_all) {
 
 TEST(Sealed, LoadFieldData) {
     auto dim = 4;
-    auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -499,7 +496,7 @@ TEST(Sealed, LoadFieldData) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("nothing", DataType::INT32);
     auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("int8", DataType::INT8);
     schema->AddDebugField("int16", DataType::INT16);
@@ -520,8 +517,7 @@ TEST(Sealed, LoadFieldData) {
         schema->AddDebugField("double_null", DataType::DOUBLE, true);
     auto str_nullable_id =
         schema->AddDebugField("str_null", DataType::VARCHAR, true);
-    auto float_nullable_id =
-        schema->AddDebugField("float_null", DataType::FLOAT, true);
+    schema->AddDebugField("float_null", DataType::FLOAT, true);
 
     auto dataset = DataGen(schema, N);
 
@@ -656,7 +652,6 @@ TEST(Sealed, ClearData) {
         milvus::exec::expression::FunctionFactory::Instance();
     factory.Initialize();
     auto dim = 4;
-    auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -664,7 +659,7 @@ TEST(Sealed, ClearData) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("nothing", DataType::INT32);
     auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("int8", DataType::INT8);
     schema->AddDebugField("int16", DataType::INT16);
@@ -743,7 +738,6 @@ TEST(Sealed, ClearData) {
 
 TEST(Sealed, LoadFieldDataMmap) {
     auto dim = 4;
-    auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -751,7 +745,7 @@ TEST(Sealed, LoadFieldDataMmap) {
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("nothing", DataType::INT32);
     auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("int8", DataType::INT8);
     schema->AddDebugField("int16", DataType::INT16);
@@ -826,7 +820,7 @@ TEST(Sealed, LoadPkScalarIndex) {
     size_t N = ROW_COUNT;
     auto schema = std::make_shared<Schema>();
     auto pk_id = schema->AddDebugField("counter", DataType::INT64);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("nothing", DataType::INT32);
     schema->set_primary_field_id(pk_id);
 
     auto dataset = DataGen(schema, N);
@@ -934,15 +928,14 @@ TEST(Sealed, LoadScalarIndex) {
 
 TEST(Sealed, Delete) {
     auto dim = 4;
-    auto topK = 5;
     auto N = 10;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
-    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("double", DataType::DOUBLE);
+    schema->AddDebugField("nothing", DataType::INT32);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -997,15 +990,14 @@ TEST(Sealed, Delete) {
 
 TEST(Sealed, OverlapDelete) {
     auto dim = 4;
-    auto topK = 5;
     auto N = 10;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
-    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
-    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->AddDebugField("double", DataType::DOUBLE);
+    schema->AddDebugField("nothing", DataType::INT32);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -1479,7 +1471,6 @@ TEST(Sealed, GetVector) {
 
 TEST(Sealed, LoadArrayFieldData) {
     auto dim = 4;
-    auto topK = 5;
     auto N = 10;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
@@ -1518,15 +1509,13 @@ TEST(Sealed, LoadArrayFieldData) {
 
 TEST(Sealed, LoadArrayFieldDataWithMMap) {
     auto dim = 4;
-    auto topK = 5;
     auto N = ROW_COUNT;
     auto metric_type = knowhere::metric::L2;
     auto schema = std::make_shared<Schema>();
     auto fakevec_id = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
-    auto array_id =
-        schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
+    schema->AddDebugField("array", DataType::ARRAY, DataType::INT64);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -1552,8 +1541,7 @@ TEST(Sealed, SkipIndexSkipUnaryRange) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     auto i32_fid = schema->AddDebugField("int32_field", DataType::INT32);
     auto i16_fid = schema->AddDebugField("int16_field", DataType::INT16);
@@ -1701,8 +1689,7 @@ TEST(Sealed, SkipIndexSkipBinaryRange) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     size_t N = 10;
     auto dataset = DataGen(schema, N);
@@ -1744,8 +1731,7 @@ TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
 
     auto dataset = DataGen(schema, 5);
@@ -1816,8 +1802,7 @@ TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     auto i64_fid = schema->AddDebugField("int64_field", DataType::INT64, true);
     auto dataset = DataGen(schema, 5);
     auto segment = CreateSealedSegment(schema);
@@ -1859,10 +1844,9 @@ TEST(Sealed, SkipIndexSkipStringRange) {
     auto schema = std::make_shared<Schema>();
     auto dim = 4;
     auto metrics_type = "L2";
-    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->AddDebugField("pk", DataType::INT64);
     auto string_fid = schema->AddDebugField("string_field", DataType::VARCHAR);
-    auto fake_vec_fid = schema->AddDebugField(
-        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    schema->AddDebugField("fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
     size_t N = 5;
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
@@ -2378,7 +2362,6 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     int64_t segment_id = 3;
     int64_t index_build_id = 4000;
     int64_t index_version = 4000;
-    int64_t index_id = 5000;
 
     auto schema = std::make_shared<Schema>();
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);

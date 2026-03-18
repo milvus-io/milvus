@@ -40,7 +40,7 @@ IsCompareOp(proto::plan::OpType op) {
            op == proto::plan::OpType::LessThan;
 }
 
-static ColumnVectorPtr
+[[maybe_unused]] static ColumnVectorPtr
 GetColumnVector(const VectorPtr& result) {
     ColumnVectorPtr res;
     if (auto convert_vector = std::dynamic_pointer_cast<ColumnVector>(result)) {

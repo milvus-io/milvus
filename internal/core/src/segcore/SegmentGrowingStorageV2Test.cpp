@@ -60,7 +60,6 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
-namespace pb = milvus::proto;
 
 class TestGrowingStorageV2 : public ::testing::Test {
     void
@@ -172,10 +171,9 @@ TEST_F(TestGrowingStorageV2, LoadFieldData) {
     EXPECT_TRUE(writer->Close().ok());
 
     auto schema = std::make_shared<milvus::Schema>();
-    auto ts_fid = schema->AddDebugField("ts", milvus::DataType::INT64, true);
+    schema->AddDebugField("ts", milvus::DataType::INT64, true);
     auto pk_fid = schema->AddDebugField("pk", milvus::DataType::INT64, false);
-    auto str_fid =
-        schema->AddDebugField("str", milvus::DataType::VARCHAR, true);
+    schema->AddDebugField("str", milvus::DataType::VARCHAR, true);
     schema->set_primary_field_id(pk_fid);
     auto segment =
         milvus::segcore::CreateGrowingSegment(schema, milvus::empty_index_meta);

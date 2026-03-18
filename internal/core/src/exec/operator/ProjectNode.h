@@ -42,9 +42,18 @@ class PhyProjectNode : public Operator {
     RowVectorPtr
     GetOutput() override;
 
+    // ProjectNode is a stateless pass-through operator: it transforms input
+    // rows on the fly and holds no accumulated state across batches.
+    // It is finished when either:
+    //   - is_finished_: it has processed its single input batch and produced
+    //     output (normal completion after GetOutput succeeds).
+    //   - no_more_input_: the upstream operator has no data at all (e.g.,
+    //     empty segment with active_count=0). In this case GetOutput is never
+    //     called with valid input, so is_finished_ is never set. But since
+    //     no future input can arrive, the operator is logically done.
     bool
     IsFinished() override {
-        return is_finished_;
+        return is_finished_ || no_more_input_;
     }
 
     BlockingReason

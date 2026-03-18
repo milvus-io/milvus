@@ -77,11 +77,6 @@ Tokenize(const char* json) {
     return tokens;
 }
 
-static std::string
-Substr(const char* json, const jsmntok_t& tok) {
-    return std::string(json + tok.start, tok.end - tok.start);
-}
-
 }  // namespace
 
 TEST(TraverseJsonForBuildStatsTest,

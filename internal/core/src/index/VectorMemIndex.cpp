@@ -264,8 +264,10 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
     {
         auto read_file_span =
             milvus::tracer::StartSpan("SegCoreReadIndexFile", &ctx);
+        opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
+            read_file_nostd_span(read_file_span);
         auto read_scope =
-            milvus::tracer::GetTracer()->WithActiveSpan(read_file_span);
+            opentelemetry::trace::Tracer::WithActiveSpan(read_file_nostd_span);
         LOG_INFO("load with slice meta: {}", !slice_meta_filepath.empty());
 
         auto load_priority =
@@ -348,8 +350,10 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
     // start engine load index span
     auto span_load_engine =
         milvus::tracer::StartSpan("SegCoreEngineLoadIndex", &ctx);
+    opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
+        nostd_span_load_engine(span_load_engine);
     auto engine_scope =
-        milvus::tracer::GetTracer()->WithActiveSpan(span_load_engine);
+        opentelemetry::trace::Tracer::WithActiveSpan(nostd_span_load_engine);
     LOG_INFO("load index into Knowhere...");
     LoadWithoutAssemble(binary_set, config);
     span_load_engine->End();
@@ -767,7 +771,6 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         for (auto& item : meta_data[META]) {
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
-            auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
             auto HandleBatch = [&](int index) {
                 auto start_load2_mem = std::chrono::system_clock::now();
                 auto batch_data =
@@ -874,7 +877,6 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
             deserialize_duration)
             .count());
 
-    auto dim = index_.Dim();
     this->SetDim(index_.Dim());
 
     // Restore valid_data for nullable vector support

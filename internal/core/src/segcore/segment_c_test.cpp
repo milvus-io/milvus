@@ -566,7 +566,6 @@ TEST(CApiTest, SearchTestWhenNullable) {
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
-    int64_t ts_offset = 1000;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -1309,7 +1308,6 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     CSearchResult search_result;
     auto res = CSearch(
         segment, plan, placeholderGroup, ROW_COUNT + ts_offset, &search_result);
-    std::cout << res.error_msg << std::endl;
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
@@ -1434,8 +1432,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data) {
                      false,
                      std::nullopt);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
-    auto vec_fid = schema->AddDebugField(
-        "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
+    schema->AddDebugField("vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
     schema->set_primary_field_id(str_fid);
 
     auto segment = CreateGrowingSegment(schema, empty_index_meta).release();
@@ -1466,8 +1463,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
                      false,
                      std::nullopt);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
-    auto vec_fid = schema->AddDebugField(
-        "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
+    schema->AddDebugField("vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
     schema->set_primary_field_id(str_fid);
 
     int N = ROW_COUNT;
@@ -1540,8 +1536,7 @@ TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
                      false,
                      std::nullopt);
     auto str_fid = schema->AddDebugField("string", DataType::VARCHAR);
-    auto vec_fid = schema->AddDebugField(
-        "vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
+    schema->AddDebugField("vector_float", DataType::VECTOR_FLOAT, DIM, "L2");
     schema->set_primary_field_id(str_fid);
 
     int N = ROW_COUNT;

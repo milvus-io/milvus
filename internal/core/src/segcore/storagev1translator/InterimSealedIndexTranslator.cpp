@@ -39,7 +39,6 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
     const std::string& warmup_policy)
     : vec_data_(vec_data),
       segment_id_(segment_id),
-      field_id_(field_id),
       index_type_(index_type),
       metric_type_(metric_type),
       build_config_(build_config),
@@ -129,7 +128,7 @@ InterimSealedIndexTranslator::get_cells(
 
             field_raw_data_ptr->BulkValueAt(
                 nullptr,
-                [&data, &data_id](const char* value, size_t i) {
+                [&data](const char* value, size_t i) {
                     data = static_cast<const void*>(value);
                 },
                 &data_id,

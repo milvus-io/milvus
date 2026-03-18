@@ -318,16 +318,6 @@ class QueryContext : public Context {
     }
 
     void
-    set_element_level_query(bool element_level) {
-        element_level_query_ = element_level;
-    }
-
-    bool
-    element_level_query() const {
-        return element_level_query_;
-    }
-
-    void
     set_struct_name(const std::string& field_name) {
         struct_name_ = field_name;
     }
@@ -375,6 +365,16 @@ class QueryContext : public Context {
         return element_level_bitset_.has_value();
     }
 
+    void
+    set_bitset_is_element_level(bool is_element_level) {
+        bitset_is_element_level_ = is_element_level;
+    }
+
+    bool
+    bitset_is_element_level() const {
+        return bitset_is_element_level_;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -407,11 +407,13 @@ class QueryContext : public Context {
 
     query::PlanOptions plan_options_;
 
-    bool element_level_query_{false};
     std::string struct_name_;
     std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
     int64_t active_element_count_{0};  // Total elements in active documents
     std::optional<TargetBitmap> element_level_bitset_;
+    // Whether the current bitset has been converted to element-level
+    // Set by ElementFilterBitsNode after conversion, checked by VectorSearchNode
+    bool bitset_is_element_level_{false};
 };
 
 // Represent the state of one thread of query execution.

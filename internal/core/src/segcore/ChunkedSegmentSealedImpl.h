@@ -338,7 +338,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
            const Timestamp* timestamps) override;
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetTypeView& bitset) const override;
+    find_first_n(int64_t limit, const BitsetTypeView& bitset) const override;
+
+    std::tuple<std::vector<int64_t>, std::vector<std::vector<int32_t>>, bool>
+    find_first_n_element(int64_t limit,
+                         const BitsetTypeView& element_bitset,
+                         const IArrayOffsets* array_offsets) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]]
     // where Vec is determined from field_offset
@@ -442,7 +447,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     const ConcurrentVector<Timestamp>&
     get_timestamps() const override {
-        return insert_record_.timestamps_;
+        // Sealed segments no longer store timestamps in ConcurrentVector.
+        // Only growing segments use this method.
+        ThrowInfo(NotImplemented,
+                  "sealed segment does not support get_timestamps()");
     }
 
     // Load Geometry cache for a field
@@ -456,6 +464,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         FieldId field_id,
         FieldDataInfo& data,
         milvus::proto::common::LoadPriority load_priority);
+
+    // Initialize timestamp index from a column (zero-copy pin mode for single
+    // chunk, owned copy for multi-chunk)
+    void
+    init_timestamp_index_from_column(
+        std::shared_ptr<ChunkedColumnInterface> column, size_t num_rows);
+
+    // Initialize timestamp index with owned data (StorageV1 path)
+    void
+    init_timestamp_index_owned(std::vector<Timestamp> timestamps,
+                               size_t num_rows);
 
     template <typename PK>
     void
@@ -1017,10 +1036,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      */
     void
     FillDefaultValueFields(const std::vector<FieldId>& field_ids);
-
-    void
-    init_timestamp_index(const std::vector<Timestamp>& timestamps,
-                         size_t num_rows);
 
     void
     LoadFieldData(const LoadFieldDataInfo& load_info,

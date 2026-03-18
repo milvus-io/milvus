@@ -107,16 +107,6 @@ MemFileManagerImpl::AddBinarySet(const BinarySet& binary_set,
     return true;
 }
 
-std::shared_ptr<InputStream>
-MemFileManagerImpl::OpenInputStream(const std::string& filename) {
-    return nullptr;
-}
-
-std::shared_ptr<OutputStream>
-MemFileManagerImpl::OpenOutputStream(const std::string& filename) {
-    return nullptr;
-}
-
 bool
 MemFileManagerImpl::AddFileMeta(const FileMeta& file_meta) {
     return true;
@@ -334,7 +324,7 @@ MemFileManagerImpl::CacheOptFieldToMemory(const Config& config) {
     auto storage_version =
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
-    if (storage_version == STORAGE_V2) {
+    if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
         return cache_opt_field_memory_v2(config);
     }
     return cache_opt_field_memory(config);

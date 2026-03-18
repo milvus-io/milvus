@@ -55,10 +55,14 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
                       batch_size,
                       consistency_level),
           expr_(expr) {
+        DetermineExecPath();
     }
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    void
+    DetermineExecPath() override;
 
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
@@ -66,12 +70,12 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
     }
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
     void
-    MoveCursor() {
+    MoveCursor() override {
         if (segment_->type() == SegmentType::Sealed) {
             SegmentExpr::MoveCursor();
         }
@@ -83,9 +87,6 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
 
     VectorPtr
     EvalForDataSegment();
-
-    bool
-    CanUseIndex(proto::plan::GISFunctionFilterExpr_GISOp op) const;
 
  private:
     std::shared_ptr<const milvus::expr::GISFunctionFilterExpr> expr_;

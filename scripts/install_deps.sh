@@ -21,12 +21,12 @@
 # Supported platforms:
 #   - macOS 12, 13, 14, 15 (Intel and Apple Silicon)
 #   - Ubuntu 20.04, 22.04, 24.04
-#   - Rocky Linux 8, 9
+#   - Rocky Linux 9
 #   - Amazon Linux 2023
 #
 # Compiler requirements:
-#   - macOS: LLVM/Clang 14-18
-#   - Linux: GCC 9-14
+#   - macOS: LLVM/Clang 15-17
+#   - Linux: GCC 11-14
 #
 # Usage:
 #   ./scripts/install_deps.sh
@@ -57,7 +57,7 @@ print_error() {
 # Minimum version requirements
 MIN_CMAKE_VERSION="3.26"
 MIN_GO_VERSION="1.21"
-CONAN_VERSION="1.64.1"
+CONAN_VERSION="1.66.0"
 RUST_VERSION="1.89"
 
 #######################################
@@ -198,11 +198,6 @@ install_mac_deps() {
     if [[ "$arch" == "arm64" ]]; then
         print_info "Installing Apple Silicon specific dependencies..."
         brew install --quiet openssl librdkafka
-        # AWS SDK for S3 support on macOS (needed for milvus-storage)
-        brew install --quiet aws-sdk-cpp
-    else
-        # Intel Mac
-        brew install --quiet aws-sdk-cpp
     fi
 
     # Create symlink for LLVM (for scripts that expect /usr/local/opt/llvm)
@@ -328,60 +323,26 @@ install_rocky_deps() {
     local rocky_version=$(detect_rocky_version)
     print_info "Detected Rocky Linux ${rocky_version}"
 
-    # Enable EPEL repository
-    sudo dnf install -y epel-release
+    if [ "$rocky_version" -lt 9 ]; then
+        print_error "Rocky Linux ${rocky_version} is no longer supported. Please upgrade to Rocky Linux 9+."
+        exit 1
+    fi
 
-    # Base packages
-    local base_packages=(
-        wget curl which git make ninja-build
-        automake python3-devel python3-pip
-        openblas-devel libaio libuuid-devel
+    # Enable EPEL and CRB repositories
+    sudo dnf install -y epel-release dnf-plugins-core
+    sudo dnf config-manager --set-enabled crb
+
+    # Rocky 9 ships with GCC 11 by default — no toolset needed
+    print_info "Installing GCC and build dependencies for Rocky ${rocky_version}..."
+    sudo dnf install -y \
+        gcc gcc-c++ gcc-gfortran \
+        wget curl which git make ninja-build \
+        automake python3-devel python3-pip \
+        openblas-devel libaio libuuid-devel \
         zip unzip ccache lcov libtool m4 autoconf
-    )
 
-    # Version-specific packages
-    case "$rocky_version" in
-        8)
-            print_info "Installing GCC toolset for Rocky 8..."
-            sudo dnf install -y gcc-toolset-12 gcc-toolset-12-libatomic-devel gcc-toolset-12-libstdc++-devel
-            sudo dnf install -y "${base_packages[@]}"
-            sudo dnf install -y atlas-devel
-
-            # Enable GCC toolset
-            echo "source /opt/rh/gcc-toolset-12/enable" | sudo tee /etc/profile.d/gcc-toolset-12.sh
-            source /opt/rh/gcc-toolset-12/enable
-
-            # Create libstdc++.a symlink for static linking (needed by conan packages like ninja)
-            local gcc12_libstdcxx="/opt/rh/gcc-toolset-12/root/usr/lib/gcc/x86_64-redhat-linux/12/libstdc++.a"
-            local system_gcc_dir="/usr/lib/gcc/x86_64-redhat-linux/8"
-            if [ -f "$gcc12_libstdcxx" ] && [ -d "$system_gcc_dir" ] && [ ! -f "$system_gcc_dir/libstdc++.a" ]; then
-                print_info "Creating libstdc++.a symlink for static linking..."
-                sudo ln -s "$gcc12_libstdcxx" "$system_gcc_dir/libstdc++.a"
-            fi
-
-            # Install LLVM toolset for clang-format
-            sudo dnf install -y llvm-toolset
-            echo "export CLANG_TOOLS_PATH=/usr/bin" | sudo tee -a /etc/profile.d/llvm-toolset.sh
-            ;;
-        9)
-            print_info "Installing GCC for Rocky 9..."
-            sudo dnf install -y gcc gcc-c++ gcc-gfortran
-            sudo dnf install -y "${base_packages[@]}"
-
-            # Optionally install newer GCC toolset
-            sudo dnf install -y gcc-toolset-13 || true
-            if [ -d /opt/rh/gcc-toolset-13 ]; then
-                echo "source /opt/rh/gcc-toolset-13/enable" | sudo tee /etc/profile.d/gcc-toolset-13.sh
-            fi
-
-            # Install clang-tools
-            sudo dnf install -y clang-tools-extra || sudo dnf install -y clang
-            ;;
-        *)
-            print_warn "Rocky Linux ${rocky_version} not explicitly supported"
-            sudo dnf install -y gcc gcc-c++ gcc-gfortran "${base_packages[@]}"
-            ;;
-    esac
+    # Install clang-tools for formatting
+    sudo dnf install -y clang-tools-extra || sudo dnf install -y clang
 
     # Install CMake if needed
     install_cmake_linux
@@ -397,6 +358,7 @@ install_rocky_deps() {
         conan profile new default --detect --force 2>/dev/null || true
         conan profile update settings.compiler.version="$gcc_ver" default
         conan profile update settings.compiler.libcxx=libstdc++11 default
+        conan profile update settings.compiler.cppstd=17 default
     fi
 
     # Install Rust

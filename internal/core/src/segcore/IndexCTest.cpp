@@ -68,10 +68,10 @@ TestVecIndex() {
     std::string type_params_str, index_params_str;
     bool ok = google::protobuf::TextFormat::PrintToString(type_params,
                                                           &type_params_str);
-    assert(ok);
+    ASSERT_TRUE(ok);
     ok = google::protobuf::TextFormat::PrintToString(index_params,
                                                      &index_params_str);
-    assert(ok);
+    ASSERT_TRUE(ok);
     auto dataset =
         std::is_same_v<TraitType, milvus::BinaryVector>
             ? GenFieldData(NB, metric_type, TraitType::data_type, BINARY_DIM)

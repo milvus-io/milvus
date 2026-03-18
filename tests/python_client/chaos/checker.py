@@ -9,7 +9,7 @@ import threading
 import uuid
 import json
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 from prettytable import PrettyTable
 import functools
 from collections import Counter
@@ -263,6 +263,7 @@ class Op(Enum):
     rename_collection = 'rename_collection'
     snapshot = 'snapshot'
     restore_snapshot = 'restore_snapshot'
+    entity_ttl = 'entity_ttl'
     unknown = 'unknown'
 
 
@@ -461,6 +462,7 @@ class Checker:
                 collection_name=c_name,
                 schema=schema,
                 shards_num=shards_num,
+                consistency_level="Strong",
                 timeout=timeout
             )
         self.scalar_field_names = cf.get_scalar_field_name_list(schema=schema)
@@ -1115,8 +1117,14 @@ class HybridSearchChecker(Checker):
 
     def gen_hybrid_search_request(self):
         res = []
-        dim = self.dim
+        # Get actual dimension for each vector field from schema
+        schema_info = self.get_schema()
+        field_dim_map = {}
+        for f in schema_info.get("fields", []):
+            if f.get("type") in (DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR):
+                field_dim_map[f.get("name")] = f.get("params", {}).get("dim", self.dim)
         for vec_field_name in self.float_vector_field_names:
+            dim = field_dim_map.get(vec_field_name, self.dim)
             search_param = {
                 "data": cf.gen_vectors(1, dim),
                 "anns_field": vec_field_name,
@@ -1603,7 +1611,8 @@ class CollectionCreateChecker(Checker):
             collection_name = cf.gen_unique_str("CreateChecker_")
             schema = cf.gen_default_collection_schema()
             self.milvus_client.create_collection(collection_name=collection_name,
-                                                schema=schema)
+                                                schema=schema,
+                                                consistency_level="Strong")
             return None, True
         except Exception as e:
             return str(e), False
@@ -1637,7 +1646,7 @@ class CollectionDropChecker(Checker):
         for i in range(pool_size):
             collection_name = cf.gen_unique_str("DropChecker_")
             try:
-                self.milvus_client.create_collection(collection_name=collection_name, schema=schema)
+                self.milvus_client.create_collection(collection_name=collection_name, schema=schema, consistency_level="Strong")
                 self.collection_pool.append(collection_name)
             except Exception as e:
                 log.error(f"Failed to create collection {collection_name}: {e}")
@@ -1684,7 +1693,7 @@ class PartitionCreateChecker(Checker):
             collection_name = cf.gen_unique_str("PartitionCreateChecker_")
         super().__init__(collection_name=collection_name, schema=schema, partition_name=partition_name)
         c_name = cf.gen_unique_str("PartitionDropChecker_")
-        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema)
+        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema, consistency_level="Strong")
         self.c_name = c_name
         log.info(f"collection {c_name} created")
         p_name = cf.gen_unique_str("PartitionDropChecker_")
@@ -1721,7 +1730,7 @@ class PartitionDropChecker(Checker):
             collection_name = cf.gen_unique_str("PartitionDropChecker_")
         super().__init__(collection_name=collection_name, schema=schema, partition_name=partition_name)
         c_name = cf.gen_unique_str("PartitionDropChecker_")
-        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema)
+        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema, consistency_level="Strong")
         self.c_name = c_name
         log.info(f"collection {c_name} created")
         p_name = cf.gen_unique_str("PartitionDropChecker_")
@@ -1847,7 +1856,7 @@ class IndexCreateChecker(Checker):
     @exception_handler()
     def run_task(self):
         c_name = cf.gen_unique_str("IndexCreateChecker_")
-        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema)
+        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema, consistency_level="Strong")
         self.c_name = c_name
         res, result = self.create_index()
         if result:
@@ -1887,14 +1896,14 @@ class IndexDropChecker(Checker):
     def run_task(self):
         res, result = self.drop_index()
         if result:
-            self.milvus_client.create_collection(collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema)
+            self.milvus_client.create_collection(collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema, consistency_level="Strong")
             index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
             self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         return res, result
 
     def keep_running(self):
         while self._keep_running:
-            self.milvus_client.create_collection(collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema)
+            self.milvus_client.create_collection(collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema, consistency_level="Strong")
             index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
             self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
             self.run_task()
@@ -2384,7 +2393,7 @@ class BulkInsertChecker(Checker):
                 log.debug(f"check failed task: {self.c_name}")
             else:
                 self.c_name = cf.gen_unique_str("BulkInsertChecker_")
-        self.milvus_client.create_collection(collection_name=self.c_name, schema=self.schema)
+        self.milvus_client.create_collection(collection_name=self.c_name, schema=self.schema, consistency_level="Strong")
         log.info(f"collection schema: {self.milvus_client.describe_collection(self.c_name)}")
         # bulk insert data
         num_entities = self.milvus_client.get_collection_stats(collection_name=self.c_name).get("row_count", 0)
@@ -2933,24 +2942,8 @@ class AddVectorFieldChecker(Checker):
     def add_vector_field(self):
         """Add a nullable FLOAT_VECTOR field, create index, insert data, and query to verify."""
         try:
-            # Check vector field limit before adding
-            schema_info = self.milvus_client.describe_collection(self.c_name)
-            fields = schema_info.get("fields", [])
-            current_vector_fields = sum(
-                1 for f in fields if f.get("type") in (
-                    DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR,
-                    DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
-                    DataType.INT8_VECTOR, DataType.SPARSE_FLOAT_VECTOR
-                )
-            )
-            if current_vector_fields >= 10:
-                log.info(f"[AddVectorFieldChecker] vector field limit reached "
-                         f"({current_vector_fields}), fallback to insert only")
-                _, insert_result = self.insert_data()
-                return None, insert_result
-
             new_vec_field = cf.gen_unique_str("new_vec_")
-            dim = 32
+            dim = self.dim
             self.milvus_client.add_collection_field(
                 collection_name=self.c_name,
                 field_name=new_vec_field,
@@ -2988,6 +2981,15 @@ class AddVectorFieldChecker(Checker):
 
             return None, True
         except Exception as e:
+            # When vector field limit is reached, fallback to insert only
+            if "maximum vector field" in str(e):
+                log.info(f"[AddVectorFieldChecker] vector field limit reached, fallback to insert only")
+                try:
+                    _, insert_result = self.insert_data()
+                    return None, insert_result
+                except Exception as insert_e:
+                    log.error(f"[AddVectorFieldChecker] fallback insert error: {insert_e}")
+                    return str(insert_e), False
             log.error(f"[AddVectorFieldChecker] error: {e}")
             return str(e), False
 
@@ -3000,6 +3002,201 @@ class AddVectorFieldChecker(Checker):
         while self._keep_running:
             self.run_task()
             sleep(constants.WAIT_PER_OP * 6)
+
+
+class EntityTTLChecker(Checker):
+    """Check entity-level TTL correctness in a dependent thread.
+
+    Inserts data into 4 TTL buckets with fixed expiry times.
+    Periodically verifies that expired buckets have count==0
+    and alive buckets have count==total_inserted.
+    """
+
+    BUCKETS = {
+        "30s": 30,
+        "5m": 300,
+        "10m": 600,
+        "never": None,
+    }
+    TTL_GRACE_SECONDS = 5
+    VERIFY_INTERVAL = 25
+    FLUSH_INTERVAL = 15
+    COMPACT_INTERVAL = 30
+    INSERT_NB = 10
+    DIM = 128
+
+    def __init__(self, collection_name=None, **kwargs):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("EntityTTLChecker_")
+
+        # Build TTL-specific schema
+        from pymilvus import CollectionSchema as CS, FieldSchema
+        schema = CS(fields=[
+            FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, auto_id=True),
+            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=self.DIM),
+            FieldSchema(name="bucket", dtype=DataType.VARCHAR, max_length=16),
+            FieldSchema(name="ttl", dtype=DataType.TIMESTAMPTZ, nullable=True),
+        ], enable_dynamic_field=False)
+
+        # Skip default data insertion — we manage our own inserts
+        super().__init__(collection_name=collection_name, schema=schema,
+                         insert_data=False, dim=self.DIM, **kwargs)
+
+        # Set collection TTL properties
+        self.milvus_client.alter_collection_properties(
+            collection_name=self.c_name,
+            properties={"ttl_field": "ttl", "timezone": "UTC"},
+        )
+
+        # Fixed expiry times per bucket (set once at start)
+        self.start_time = time.time()
+        self.bucket_expiry = {}
+        for bucket_name, ttl_seconds in self.BUCKETS.items():
+            if ttl_seconds is not None:
+                self.bucket_expiry[bucket_name] = self.start_time + ttl_seconds
+            else:
+                self.bucket_expiry[bucket_name] = None  # never expires
+
+        # Track total inserted per bucket
+        self.inserted_counts = {b: 0 for b in self.BUCKETS}
+        self._counts_lock = threading.Lock()
+
+        log.info(f"EntityTTLChecker initialized: collection={self.c_name}, "
+                 f"bucket_expiry={self.bucket_expiry}")
+
+    def _get_ttl_value(self, bucket_name):
+        """Get the fixed TTL timestamp string for a bucket."""
+        expiry = self.bucket_expiry[bucket_name]
+        if expiry is None:
+            return None
+        return datetime.fromtimestamp(expiry, tz=timezone.utc).isoformat()
+
+    def _is_expired(self, bucket_name):
+        """Check if a bucket's data should have expired (with grace window)."""
+        expiry = self.bucket_expiry[bucket_name]
+        if expiry is None:
+            return False
+        return time.time() > expiry + self.TTL_GRACE_SECONDS
+
+    def _insert_random_bucket(self):
+        """Insert INSERT_NB rows into a random bucket."""
+        bucket_name = random.choice(list(self.BUCKETS.keys()))
+        ttl_value = self._get_ttl_value(bucket_name)
+        vectors = cf.gen_vectors(self.INSERT_NB, self.DIM)
+        rows = [{"vector": list(vectors[i]), "bucket": bucket_name,
+                 "ttl": ttl_value} for i in range(self.INSERT_NB)]
+        try:
+            self.milvus_client.insert(collection_name=self.c_name, data=rows,
+                                      timeout=timeout)
+            with self._counts_lock:
+                self.inserted_counts[bucket_name] += self.INSERT_NB
+            log.debug(f"EntityTTLChecker inserted {self.INSERT_NB} rows into bucket '{bucket_name}'")
+        except Exception as e:
+            log.warning(f"EntityTTLChecker insert failed: {e}")
+
+    def _do_flush(self):
+        """Best-effort flush."""
+        try:
+            self.milvus_client.flush(collection_name=self.c_name, timeout=timeout)
+            log.debug("EntityTTLChecker flush done")
+        except Exception as e:
+            log.warning(f"EntityTTLChecker flush failed: {e}")
+
+    def _do_compact(self):
+        """Best-effort compact."""
+        try:
+            self.milvus_client.compact(collection_name=self.c_name, timeout=timeout)
+            log.debug("EntityTTLChecker compact done")
+        except Exception as e:
+            log.warning(f"EntityTTLChecker compact failed: {e}")
+
+    @trace()
+    def verify_ttl(self):
+        """Verify TTL correctness for all buckets.
+
+        Returns (result_dict, success_bool).
+        """
+        results = {}
+        all_ok = True
+
+        for bucket_name in self.BUCKETS:
+            try:
+                res = self.milvus_client.query(
+                    collection_name=self.c_name,
+                    filter=f'bucket == "{bucket_name}"',
+                    output_fields=["count(*)"],
+                    consistency_level="Strong",
+                    timeout=query_timeout,
+                )
+                actual_count = res[0].get("count(*)", -1) if res else -1
+            except Exception as e:
+                log.warning(f"EntityTTLChecker query for bucket '{bucket_name}' failed: {e}")
+                results[bucket_name] = {"error": str(e)}
+                all_ok = False
+                continue
+
+            with self._counts_lock:
+                total_inserted = self.inserted_counts[bucket_name]
+
+            expired = self._is_expired(bucket_name)
+
+            if expired:
+                # All data should be gone
+                expected = 0
+                ok = actual_count == 0
+                if not ok:
+                    log.error(f"EntityTTLChecker bucket '{bucket_name}': "
+                              f"expected 0 (expired), got {actual_count}")
+                    all_ok = False
+            else:
+                # All data should be present
+                expected = total_inserted
+                ok = actual_count == expected
+                if not ok:
+                    log.error(f"EntityTTLChecker bucket '{bucket_name}': "
+                              f"expected {expected}, got {actual_count}")
+                    all_ok = False
+
+            results[bucket_name] = {
+                "expected": expected, "actual": actual_count,
+                "expired": expired, "ok": ok,
+            }
+
+        log.info(f"EntityTTLChecker verify: {results}")
+        return results, all_ok
+
+    @exception_handler()
+    def run_task(self):
+        res, result = self.verify_ttl()
+        return res, result
+
+    def keep_running(self):
+        last_flush = time.time()
+        last_compact = time.time()
+        last_verify = time.time()
+
+        while self._keep_running:
+            # Insert into a random bucket on every iteration
+            self._insert_random_bucket()
+
+            now = time.time()
+
+            # Flush every 15s
+            if now - last_flush >= self.FLUSH_INTERVAL:
+                self._do_flush()
+                last_flush = now
+
+            # Compact every 30s
+            if now - last_compact >= self.COMPACT_INTERVAL:
+                self._do_compact()
+                last_compact = now
+
+            # Verify every 25s (traced operation)
+            if now - last_verify >= self.VERIFY_INTERVAL:
+                self.run_task()
+                last_verify = now
+
+            sleep(constants.WAIT_PER_OP / 10)
 
 
 class TestResultAnalyzer(unittest.TestCase):

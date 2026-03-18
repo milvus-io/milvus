@@ -57,6 +57,7 @@ class SumAggregateBase
 
     void
     addSingleGroupRawInput(char* group,
+                           int64_t numRows,
                            const std::vector<VectorPtr>& input) override {
         BaseAggregate::template updateOneGroup<TAccumulator>(
             group, input[0], &updateSingleValue<TAccumulator>);
@@ -93,7 +94,7 @@ class SumAggregateBase
     static void updateSingleValue(TData& result, TData value) {
         if constexpr (std::is_same_v<TData, double> ||
                       std::is_same_v<TData, float> ||
-                      std::is_same_v<TData, int64_t> && Overflow) {
+                      (std::is_same_v<TData, int64_t> && Overflow)) {
             result += value;
         } else {
             result = checkPlus(result, value);

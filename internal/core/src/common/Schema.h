@@ -400,7 +400,7 @@ class Schema {
         for (auto field_id : field_ids_) {
             fields.emplace_back(field_id.get());
         }
-        return std::move(fields);
+        return fields;
     }
 
  public:
@@ -534,7 +534,7 @@ class Schema {
     std::unordered_map<std::string, FieldId> struct_array_field_cache_;
 
     // warmup policy settings
-    // Valid values: "disable", "sync" (empty string means no setting)
+    // Valid values: "disable", "sync", "async" (empty string means no setting)
     // Collection-level warmup policies for different data types
     std::optional<std::string> warmup_vector_index_ = std::nullopt;
     std::optional<std::string> warmup_scalar_index_ = std::nullopt;

@@ -129,7 +129,7 @@ class PhyColumnExpr : public Expr {
     DoEval(OffsetVector* input = nullptr);
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 
@@ -141,6 +141,11 @@ class PhyColumnExpr : public Expr {
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
         return expr_->GetColumn();
+    }
+
+    bool
+    CanExecuteAllAtOnce() const override {
+        return false;
     }
 
  private:

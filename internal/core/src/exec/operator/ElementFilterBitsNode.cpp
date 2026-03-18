@@ -87,7 +87,6 @@ PhyElementFilterBitsNode::GetOutput() {
 
     std::chrono::high_resolution_clock::time_point start_time =
         std::chrono::high_resolution_clock::now();
-    std::chrono::high_resolution_clock::time_point step_time;
 
     // Step 1: Get array offsets
     auto segment = query_context_->get_segment();
@@ -118,8 +117,9 @@ PhyElementFilterBitsNode::GetOutput() {
         doc_bitset, doc_bitset_valid, array_offsets.get());
 
     // Step 4: Set query context
-    query_context_->set_element_level_query(true);
     query_context_->set_struct_name(struct_name_);
+    // Mark that bitset has been converted to element-level
+    query_context_->set_bitset_is_element_level(true);
 
     std::chrono::high_resolution_clock::time_point end_time =
         std::chrono::high_resolution_clock::now();

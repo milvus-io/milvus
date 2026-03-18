@@ -70,8 +70,7 @@ class TaskTest : public testing::TestWithParam<DataType> {
         factory.Initialize();
 
         auto schema = std::make_shared<Schema>();
-        auto vec_fid = schema->AddDebugField(
-            "fakevec", GetParam(), 16, knowhere::metric::L2);
+        schema->AddDebugField("fakevec", GetParam(), 16, knowhere::metric::L2);
         auto bool_fid = schema->AddDebugField("bool", DataType::BOOL);
         field_map_.insert({"bool", bool_fid});
         auto bool_1_fid = schema->AddDebugField("bool1", DataType::BOOL);
@@ -217,7 +216,6 @@ TEST_P(TaskTest, UnaryExpr) {
     auto start = std::chrono::steady_clock::now();
     auto task = Task::Create("task_unary_expr", plan, 0, query_context);
     int64_t num_rows = 0;
-    int i = 0;
     for (;;) {
         auto result = task->Next();
         if (!result) {

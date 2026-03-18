@@ -79,7 +79,7 @@ class StorageV2IndexRawDataTest : public ::testing::Test {
 TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
     GTEST_SKIP() << "TODO: fix ut logic after behavior change";
     auto schema = gen_all_data_types_schema();
-    auto vec = schema->get_field_id(FieldName("embeddings"));
+    schema->get_field_id(FieldName("embeddings"));
 
     int64_t per_batch = 1000;
     int64_t n_batch = 3;
@@ -102,12 +102,10 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         ::parquet::default_writer_properties());
     EXPECT_TRUE(result.ok());
     auto writer = result.ValueOrDie();
-    int64_t total_rows = 0;
     for (int64_t i = 0; i < n_batch; i++) {
         auto dataset = DataGen(schema, per_batch);
         auto record_batch =
             ConvertToArrowRecordBatch(dataset, dim, arrow_schema);
-        total_rows += record_batch->num_rows();
 
         EXPECT_TRUE(writer->Write(record_batch).ok());
     }
@@ -168,7 +166,6 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
                                 "field_name",
                                 milvus::DataType::VECTOR_FLOAT,
                                 1};
-        int64_t slice_size = milvus::FILE_SLICE_SIZE;
         FieldDataMeta field_data_meta = {
             collection_id, partition_id, segment_id, float_field.get()};
         auto file_manager =

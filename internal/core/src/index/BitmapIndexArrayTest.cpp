@@ -57,36 +57,6 @@ using namespace milvus::indexbuilder;
 using namespace milvus;
 using namespace milvus::index;
 
-template <typename T>
-static std::vector<T>
-GenerateData(const size_t size, const size_t cardinality) {
-    std::vector<T> result;
-    for (size_t i = 0; i < size; ++i) {
-        result.push_back(rand() % cardinality);
-    }
-    return result;
-}
-
-template <>
-std::vector<bool>
-GenerateData<bool>(const size_t size, const size_t cardinality) {
-    std::vector<bool> result;
-    for (size_t i = 0; i < size; ++i) {
-        result.push_back(rand() % 2 == 0);
-    }
-    return result;
-}
-
-template <>
-std::vector<std::string>
-GenerateData<std::string>(const size_t size, const size_t cardinality) {
-    std::vector<std::string> result;
-    for (size_t i = 0; i < size; ++i) {
-        result.push_back(std::to_string(rand() % cardinality));
-    }
-    return result;
-}
-
 std::vector<milvus::Array>
 GenerateArrayData(proto::schema::DataType element_type,
                   int cardinality,

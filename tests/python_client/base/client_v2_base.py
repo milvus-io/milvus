@@ -339,6 +339,15 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
+    def describe_replica(self, client, collection_name, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.describe_replica, collection_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       collection_name=collection_name,
+                                       **kwargs).run()
+        return res, check_result
+
+    @trace()
     def get_load_state(self, client, collection_name, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.get_load_state, collection_name], **kwargs)

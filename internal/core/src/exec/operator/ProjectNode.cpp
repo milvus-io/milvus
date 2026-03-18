@@ -17,8 +17,10 @@
 #include "ProjectNode.h"
 
 #include <algorithm>
+#include <cstring>
 #include <utility>
 
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/Utils.h"
@@ -59,15 +61,60 @@ PhyProjectNode::GetOutput() {
     auto col_input = GetColumnVector(input_);
     // raw data view
     TargetBitmapView raw_data_view(col_input->GetRawData(), col_input->size());
-    auto result_pair = segment_->find_first(-1, raw_data_view);
+
+    // When no fields need to be projected (e.g., count(*) only), skip
+    // find_first and count valid rows directly from the bitmap.
+    // find_first deduplicates by PK in growing segments (OffsetOrderedMap),
+    // which would undercount rows with duplicate PKs.
+    if (fields_to_project_.empty()) {
+        auto valid_count =
+            static_cast<int64_t>(col_input->size()) - raw_data_view.count();
+        is_finished_ = true;
+        if (valid_count == 0) {
+            return nullptr;
+        }
+        auto row_vector = std::make_shared<RowVector>(std::vector<VectorPtr>{});
+        row_vector->resize(valid_count);
+        return row_vector;
+    }
+
+    auto result_pair = segment_->find_first_n(-1, raw_data_view);
     auto& selected_offsets = result_pair.first;
     auto selected_count = selected_offsets.size();
+    // When all rows are filtered out, return nullptr.
+    // Driver requires GetOutput to return nullptr or a non-empty vector.
+    if (selected_count == 0) {
+        is_finished_ = true;
+        return nullptr;
+    }
     auto row_type = OutputType();
     std::vector<VectorPtr> column_vectors;
     column_vectors.reserve(fields_to_project_.size());
     for (int i = 0; i < fields_to_project_.size(); i++) {
         auto column_type = row_type->column_type(i);
         auto field_id = fields_to_project_.at(i);
+
+        if (field_id == SegmentOffsetFieldID) {
+            // Two-project mode: output segment offsets as INT64 column
+            // so that late materialization can fetch deferred fields.
+            auto offset_col =
+                std::make_shared<ColumnVector>(DataType::INT64, selected_count);
+            auto raw = static_cast<int64_t*>(offset_col->GetRawData());
+            std::memcpy(
+                raw, selected_offsets.data(), selected_count * sizeof(int64_t));
+            column_vectors.emplace_back(offset_col);
+            continue;
+        }
+
+        if (!segment_->is_field_exist(field_id)) {
+            // Schema evolution: field doesn't exist in this segment.
+            // Fill with all NULLs so SortBuffer handles them via
+            // nulls_first/nulls_last semantics.
+            auto col = std::make_shared<ColumnVector>(
+                column_type, selected_count, selected_count);
+            column_vectors.emplace_back(std::move(col));
+            continue;
+        }
 
         TargetBitmap valid_map(selected_count);
         auto field_data = bulk_script_field_data(op_context_,

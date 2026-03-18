@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // RegisterDDLCallbacks registers the ddl callbacks.
@@ -49,6 +50,21 @@ func (c *DDLCallbacks) registerLoadConfigCallbacks() {
 func (c *DDLCallbacks) registerResourceGroupCallbacks() {
 	registry.RegisterAlterResourceGroupV2AckCallback(c.alterResourceGroupV2AckCallback)
 	registry.RegisterDropResourceGroupV2AckCallback(c.dropResourceGroupV2AckCallback)
+}
+
+// shouldApplyLocallyOnNonPrimary checks if the error from broadcaster indicates a non-primary cluster
+// and the message type is configured to be skipped via streaming.replication.skipMessageTypes.
+// If true, the caller should bypass the broadcaster and apply the operation locally.
+func shouldApplyLocallyOnNonPrimary(err error, msgType message.MessageType) bool {
+	if !errors.Is(err, broadcast.ErrNotPrimary) {
+		return false
+	}
+	for _, t := range paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.GetAsStrings() {
+		if t == msgType.String() {
+			return true
+		}
+	}
+	return false
 }
 
 // startBroadcastWithCollectionIDLock starts a broadcast with collection id lock.
