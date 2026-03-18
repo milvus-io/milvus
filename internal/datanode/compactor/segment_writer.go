@@ -436,6 +436,7 @@ func (w *SegmentWriter) clear() {
 	writer, closers, err := newBinlogWriter(w.collectionID, w.partitionID, w.segmentID, w.sch, w.batchSize)
 	if err != nil {
 		log.Warn("failed to create new binlog writer in clear", zap.Error(err))
+		return
 	}
 	w.writer = writer
 	w.closers = closers
