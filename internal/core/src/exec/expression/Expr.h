@@ -336,6 +336,15 @@ class SegmentExpr : public Expr {
         } else {
             current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
         }
+        // OPT-K: When single index chunk at position 0, return all
+        // remaining rows so ProcessIndexChunks fast path and caller
+        // assertions stay consistent.
+        if (SegmentExpr::CanUseIndex() && use_index_ &&
+            num_index_chunk_ == 1 && current_index_chunk_ == 0 &&
+            current_index_chunk_pos_ == 0) {
+            return active_count_ - current_rows;
+        }
+
         return current_rows + batch_size_ >= active_count_
                    ? active_count_ - current_rows
                    : batch_size_;
@@ -1075,6 +1084,27 @@ class SegmentExpr : public Expr {
         TargetBitmap result;
         TargetBitmap valid_result;
         int processed_rows = 0;
+
+        // OPT-K: Fast path for single-chunk sealed segments.
+        // When there's exactly one index chunk and we're at position 0,
+        // return the full index result directly without batch slicing.
+        // This avoids 1221 iterations of ProcessIndexOneChunk + append.
+        if (num_index_chunk_ == 1 && current_index_chunk_ == 0 &&
+            current_index_chunk_pos_ == 0) {
+            auto index_result = GetIndexPtrForChunk<IndexInnerType>(0);
+            Index* index_ptr = index_result.index_ptr;
+
+            auto index_res = func(index_ptr, values...);
+            auto valid_res = index_ptr->IsNotNull();
+
+            // Advance cursor past entire chunk so subsequent Eval()
+            // calls (if any) see we're done and fall through to
+            // the original batched path.
+            current_index_chunk_pos_ = index_res.size();
+
+            return std::make_shared<ColumnVector>(
+                std::move(index_res), std::move(valid_res));
+        }
 
         for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
             // This cache result help getting result for every batch loop.

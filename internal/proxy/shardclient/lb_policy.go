@@ -308,8 +308,19 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		return merr.WrapErrCollectionNotLoaded(workload.CollectionID)
 	}
 
+	// Single channel fast path: skip errgroup/goroutine overhead
+	if len(channelList) == 1 {
+		return lb.ExecuteWithRetry(ctx, ChannelWorkload{
+			Db:             workload.Db,
+			CollectionName: workload.CollectionName,
+			CollectionID:   workload.CollectionID,
+			Channel:        channelList[0],
+			Nq:             workload.Nq,
+			Exec:           workload.Exec,
+		})
+	}
+
 	wg, _ := errgroup.WithContext(ctx)
-	// Launch a goroutine for each channel
 	for _, channel := range channelList {
 		wg.Go(func() error {
 			return lb.ExecuteWithRetry(ctx, ChannelWorkload{

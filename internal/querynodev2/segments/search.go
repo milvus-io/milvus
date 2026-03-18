@@ -42,70 +42,85 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 		searchLabel = metrics.GrowingSegmentLabel
 	}
 
-	resultCh := make(chan *SearchResult, len(segments))
-	searcher := func(ctx context.Context, s Segment) error {
-		// record search time
+	nodeIDStr := paramtable.GetStringNodeID()
+	searchResults := make([]*SearchResult, len(segments))
+	searcher := func(ctx context.Context, s Segment, idx int) error {
 		tr := timerecord.NewTimeRecorder("searchOnSegments")
 		searchResult, err := s.Search(ctx, searchReq)
 		if err != nil {
 			return err
 		}
-		resultCh <- searchResult
-		// update metrics
+		searchResults[idx] = searchResult
 		elapsed := tr.ElapseSpan().Milliseconds()
-		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryNodeSQSegmentLatency.WithLabelValues(nodeIDStr,
 			metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
-		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(nodeIDStr,
 			metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.GetNumOfQuery()))
 		return nil
 	}
 
-	// calling segment search in goroutines
-	errGroup, ctx := errgroup.WithContext(ctx)
-	segmentsWithoutIndex := make([]int64, 0)
-	for _, segment := range segments {
-		seg := segment
+	executeSegment := func(ctx context.Context, seg Segment, idx int) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		var err error
+		accessRecord := metricsutil.NewSearchSegmentAccessRecord(getSegmentMetricLabel(seg))
+		defer func() {
+			accessRecord.Finish(err)
+		}()
+
+		if seg.IsLazyLoad() {
+			ctx, cancel := withLazyLoadTimeoutContext(ctx)
+			defer cancel()
+
+			var missing bool
+			missing, err = mgr.DiskCache.Do(ctx, seg.ID(), func(ctx context.Context, s Segment) error {
+				return searcher(ctx, s, idx)
+			})
+			if missing {
+				accessRecord.CacheMissing()
+			}
+			if err != nil {
+				log.Warn("failed to do search for disk cache", zap.Int64("segID", seg.ID()), zap.Error(err))
+			}
+			return err
+		}
+		return searcher(ctx, seg, idx)
+	}
+
+	segmentsWithoutIndex := make([]int64, 0, len(segments))
+	for _, seg := range segments {
 		if !seg.ExistIndex(searchReq.SearchFieldID()) {
 			segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
 		}
-		errGroup.Go(func() error {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-
-			var err error
-			accessRecord := metricsutil.NewSearchSegmentAccessRecord(getSegmentMetricLabel(seg))
-			defer func() {
-				accessRecord.Finish(err)
-			}()
-
-			if seg.IsLazyLoad() {
-				ctx, cancel := withLazyLoadTimeoutContext(ctx)
-				defer cancel()
-
-				var missing bool
-				missing, err = mgr.DiskCache.Do(ctx, seg.ID(), searcher)
-				if missing {
-					accessRecord.CacheMissing()
-				}
-				if err != nil {
-					log.Warn("failed to do search for disk cache", zap.Int64("segID", seg.ID()), zap.Error(err))
-				}
-				return err
-			}
-			return searcher(ctx, seg)
-		})
 	}
-	err := errGroup.Wait()
-	close(resultCh)
 
-	searchResults := make([]*SearchResult, 0, len(segments))
-	for result := range resultCh {
-		searchResults = append(searchResults, result)
+	var err error
+	if len(segments) == 1 {
+		// Single segment fast path: skip errgroup/goroutine overhead
+		err = executeSegment(ctx, segments[0], 0)
+	} else {
+		errGroup, groupCtx := errgroup.WithContext(ctx)
+		for i, segment := range segments {
+			segIdx := i
+			seg := segment
+			errGroup.Go(func() error {
+				return executeSegment(groupCtx, seg, segIdx)
+			})
+		}
+		err = errGroup.Wait()
 	}
 
 	if err != nil {
-		DeleteSearchResults(searchResults)
+		// Collect non-nil results for cleanup
+		validResults := make([]*SearchResult, 0, len(segments))
+		for _, r := range searchResults {
+			if r != nil {
+				validResults = append(validResults, r)
+			}
+		}
+		DeleteSearchResults(validResults)
 		return nil, err
 	}
 

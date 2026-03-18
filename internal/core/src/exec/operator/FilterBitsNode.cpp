@@ -16,6 +16,7 @@
 
 #include "FilterBitsNode.h"
 #include "common/Tracer.h"
+#include "expr/ITypeExpr.h"
 #include "fmt/format.h"
 
 #include "monitor/Monitor.h"
@@ -35,6 +36,8 @@ PhyFilterBitsNode::PhyFilterBitsNode(
     query_context_ = exec_context->get_query_context();
     std::vector<expr::TypedExprPtr> filters;
     filters.emplace_back(filter->filter());
+    is_always_true_ = (std::dynamic_pointer_cast<const expr::AlwaysTrueExpr>(
+                            filter->filter()) != nullptr);
     exprs_ = std::make_unique<ExprSet>(filters, exec_context);
     need_process_rows_ = query_context_->get_active_count();
     num_processed_rows_ = 0;
@@ -67,6 +70,18 @@ PhyFilterBitsNode::GetOutput() {
         return nullptr;
     }
 
+    // Fast path: AlwaysTrueExpr means no filtering needed.
+    // Directly produce all-zero bitmap (no rows excluded) + all-one valid bitmap.
+    if (is_always_true_) {
+        num_processed_rows_ = need_process_rows_;
+        TargetBitmap bitset(need_process_rows_, false);
+        TargetBitmap valid_bitset(need_process_rows_, true);
+        std::vector<VectorPtr> col_res;
+        col_res.push_back(std::make_shared<ColumnVector>(
+            std::move(bitset), std::move(valid_bitset)));
+        return std::make_shared<RowVector>(col_res);
+    }
+
     tracer::AutoSpan span(
         "PhyFilterBitsNode::Execute", tracer::GetRootSpan(), true);
     tracer::AddEvent(fmt::format("input_rows: {}", need_process_rows_));
@@ -89,6 +104,20 @@ PhyFilterBitsNode::GetOutput() {
                 std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
             if (col_vec->IsBitmap()) {
                 auto col_vec_size = col_vec->size();
+                // OPT-K: If expression returned full-segment result
+                // (e.g., from index fast path), take it directly and
+                // skip remaining loop iterations.
+                if (col_vec_size == need_process_rows_ &&
+                    bitset.size() == 0) {
+                    TargetBitmapView view(col_vec->GetRawData(),
+                                          col_vec_size);
+                    bitset.append(view);
+                    TargetBitmapView valid_view(
+                        col_vec->GetValidRawData(), col_vec_size);
+                    valid_bitset.append(valid_view);
+                    num_processed_rows_ = need_process_rows_;
+                    break;
+                }
                 TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
                 bitset.append(view);
                 TargetBitmapView valid_view(col_vec->GetValidRawData(),

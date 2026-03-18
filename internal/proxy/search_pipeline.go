@@ -677,7 +677,7 @@ func (p *pipeline) AddNodes(t *searchTask, nodes ...*nodeDef) error {
 }
 
 func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*internalpb.SearchResults, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {
-	log.Ctx(ctx).Debug("SearchPipeline run", zap.String("pipeline", p.String()))
+	log.Ctx(ctx).Debug("SearchPipeline run", zap.String("pipeline", p.name))
 	msg := opMsg{}
 	msg[pipelineInput] = toReduceResults
 	msg[pipelineStorageCost] = storageCost

@@ -403,26 +403,26 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		zap.String("scope", req.GetScope().String()),
 		zap.Int64("nq", req.GetReq().GetNq()),
 	)
-	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
 
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
 		return nil, err
 	}
 	defer node.lifetime.Done()
 
+	nodeIDStr := paramtable.GetStringNodeID()
+	collIDStr := strconv.FormatInt(req.GetReq().GetCollectionID(), 10)
+
 	var err error
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel, metrics.Leader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+	metrics.QueryNodeSQCount.WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.TotalLabel, metrics.Leader, collIDStr).Inc()
 	defer func() {
 		if err != nil {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.FailLabel, metrics.Leader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+			metrics.QueryNodeSQCount.WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.FailLabel, metrics.Leader, collIDStr).Inc()
 		}
 	}()
 
 	log.Debug("start to search channel",
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 	)
-	searchCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	// From Proxy
 	tr := timerecord.NewTimeRecorder("searchDelegator")
@@ -434,38 +434,36 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		return nil, err
 	}
 	// do search
-	results, err := sd.Search(searchCtx, req)
+	results, err := sd.Search(ctx, req)
 	if err != nil {
 		log.Warn("failed to search on delegator", zap.Error(err))
 		return nil, err
 	}
 
-	// reduce result
-	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s,  vChannel = %s, segmentIDs = %v",
-		traceID,
-		channel,
-		req.GetSegmentIDs(),
-	))
+	tr.CtxElapse(ctx, "start reduce query result, ch="+channel)
 
 	resp, err := segments.ReduceSearchOnQueryNode(ctx, results,
 		reduce.NewReduceSearchResultInfo(req.GetReq().GetNq(),
 			req.GetReq().GetTopk()).WithMetricType(req.GetReq().GetMetricType()).WithGroupByField(req.GetReq().GetGroupByFieldId()).
 			WithGroupSize(req.GetReq().GetGroupSize()).WithAdvance(req.GetReq().GetIsAdvanced()))
+
+	reduceLatency := tr.RecordSpan()
+	metrics.QueryNodeReduceLatency.
+		WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.ReduceShards, metrics.BatchReduce).
+		Observe(float64(reduceLatency.Milliseconds()))
+
 	if err != nil {
 		return nil, err
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("do search with channel done , vChannel = %s, segmentIDs = %v",
-		channel,
-		req.GetSegmentIDs(),
-	))
+	tr.CtxElapse(ctx, "search with channel done, ch="+channel)
 
 	// update metric to prometheus
 	latency := tr.ElapseSpan()
-	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel, metrics.Leader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
-	metrics.QueryNodeSearchNQ.WithLabelValues(fmt.Sprint(node.GetNodeID())).Observe(float64(req.Req.GetNq()))
-	metrics.QueryNodeSearchTopK.WithLabelValues(fmt.Sprint(node.GetNodeID())).Observe(float64(req.Req.GetTopk()))
+	metrics.QueryNodeSQReqLatency.WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.SuccessLabel, metrics.Leader, collIDStr).Inc()
+	metrics.QueryNodeSearchNQ.WithLabelValues(nodeIDStr).Observe(float64(req.Req.GetNq()))
+	metrics.QueryNodeSearchTopK.WithLabelValues(nodeIDStr).Observe(float64(req.Req.GetTopk()))
 	return resp, nil
 }
 
