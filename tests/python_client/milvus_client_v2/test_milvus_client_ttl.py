@@ -48,20 +48,25 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         dim = 65
         ttl = 11
         nb = 1000
+        # field name constants
+        pk_field = "id"
+        vec_field = "embeddings"
+        vec_field_2 = "embeddings_2"
+        bool_field = "visible"
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field("embeddings_2", DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field("visible", DataType.BOOL, nullable=True)
+        schema.add_field(pk_field, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(vec_field, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(vec_field_2, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(bool_field, DataType.BOOL, nullable=True)
         self.create_collection(client, collection_name, schema=schema, properties={"collection.ttl.seconds": ttl})
         collection_info = self.describe_collection(client, collection_name)[0]
         assert collection_info['properties']["collection.ttl.seconds"] == str(ttl)
 
         # create index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="embeddings", index_type="IVF_FLAT", metric_type="COSINE", nlist=128)
-        index_params.add_index(field_name="embeddings_2", index_type="IVF_FLAT", metric_type="COSINE", nlist=128)
+        index_params.add_index(field_name=vec_field, index_type="IVF_FLAT", metric_type="COSINE", nlist=128)
+        index_params.add_index(field_name=vec_field_2, index_type="IVF_FLAT", metric_type="COSINE", nlist=128)
         self.create_index(client, collection_name, index_params=index_params)
 
         # load collection
@@ -70,18 +75,10 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         # insert data
         insert_times = 2
         for i in range(insert_times):
-            vectors = cf.gen_vectors(nb, dim=dim)
-            vectors_2 = cf.gen_vectors(nb, dim=dim)
-            rows = []
             start_id = i * nb
-            for j in range(nb):
-                row = {
-                    "id": start_id + j,
-                    "embeddings": list(vectors[j]),
-                    "embeddings_2": list(vectors_2[j]),
-                    "visible": False
-                }
-                rows.append(row)
+            rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=start_id)
+            for row in rows:
+                row[bool_field] = False
             if on_insert is True:
                 self.insert(client, collection_name, rows)
             else:
@@ -95,8 +92,8 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         query_ttl_effective = False
         hybrid_search_ttl_effective = False
         search_vectors = cf.gen_vectors(nq, dim=dim)
-        sub_search1 = AnnSearchRequest(search_vectors, "embeddings", {"level": 1}, 20)
-        sub_search2 = AnnSearchRequest(search_vectors, "embeddings_2", {"level": 1}, 20)
+        sub_search1 = AnnSearchRequest(search_vectors, vec_field, {"level": 1}, 20)
+        sub_search2 = AnnSearchRequest(search_vectors, vec_field_2, {"level": 1}, 20)
         ranker = WeightedRanker(0.2, 0.8)
         # flush collection if flush_enable is True
         if flush_enable:
@@ -105,8 +102,8 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
             log.info(f"flush completed in {time.time() - t1}s")
         while time.time() - start_time < timeout:
             if search_ttl_effective is False:
-                res1 = self.search(client, collection_name, search_vectors, anns_field='embeddings',
-                                   search_params={}, limit=10, consistency_level=CONSISTENCY_STRONG)[0]
+                res1 = self.search(client, collection_name, search_vectors, anns_field=vec_field,
+                                   search_params={"metric_type": "COSINE"}, limit=10, consistency_level=CONSISTENCY_STRONG)[0]
             if query_ttl_effective is False:
                 res2 = self.query(client, collection_name, filter='',
                                   output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
@@ -139,18 +136,10 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
 
         # insert more data
         for i in range(insert_times):
-            vectors = cf.gen_vectors(nb, dim=dim)
-            vectors_2 = cf.gen_vectors(nb, dim=dim)
-            rows = []
             start_id = (insert_times + i) * nb
-            for j in range(nb):
-                row = {
-                    "id": start_id + j,
-                    "embeddings": list(vectors[j]),
-                    "embeddings_2": list(vectors_2[j]),
-                    "visible": True
-                }
-                rows.append(row)
+            rows = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=start_id)
+            for row in rows:
+                row[bool_field] = True
             if on_insert is True:
                 self.insert(client, collection_name, rows)
             else:
@@ -163,50 +152,70 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
             log.info(f"flush completed in {time.time() - t1}s")
 
         # search data again after insert more data
-        for i in range(15):
-            res = self.search(client, collection_name, search_vectors,
-                              search_params={}, anns_field='embeddings',
-                              limit=10, consistency_level=CONSISTENCY_STRONG)[0]
-            if len(res[0]) > 0:
-                break
-            time.sleep(2)
-        assert len(res[0]) > 0, \
-            "Search with Strong consistency returned 0 results after retries"
-        # query count(*)
-        res = self.query(client, collection_name, filter='',
-                         output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
-        assert res[0].get('count(*)', None) == nb * insert_times
-        res = self.query(client, collection_name, filter='visible==False',
-                         output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
-        assert res[0].get('count(*)', None) == 0
-        res = self.query(client, collection_name, filter='visible==True',
-                         output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
-        assert res[0].get('count(*)', None) == nb * insert_times
-        # hybrid search
-        res = self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker,
-                                 limit=10, consistency_level=CONSISTENCY_STRONG)[0]
-        assert len(res[0]) > 0
+        consistency_levels = [CONSISTENCY_EVENTUALLY, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_STRONG]
+        for consistency_level in consistency_levels:
+            log.debug(f"start to search/query with {consistency_level}")
+            # Poll until search returns results (search visibility may lag behind query)
+            for i in range(15):
+                res = self.search(client, collection_name, search_vectors,
+                                  search_params={"metric_type": "COSINE"}, anns_field=vec_field,
+                                  limit=10, consistency_level=consistency_level)[0]
+                if len(res[0]) > 0:
+                    break
+                time.sleep(2)
+            assert len(res[0]) > 0, \
+                f"Search with {consistency_level} returned 0 results after retries"
+
+            if consistency_level != CONSISTENCY_STRONG:
+                pass
+            else:
+                # query count(*)
+                res = self.query(client, collection_name, filter='',
+                                 output_fields=["count(*)"], consistency_level=consistency_level)[0]
+                assert res[0].get('count(*)', None) == nb * insert_times
+                res = self.query(client, collection_name, filter='visible==False',
+                                 output_fields=["count(*)"], consistency_level=consistency_level)[0]
+                assert res[0].get('count(*)', None) == 0
+                # query count(visible)
+                res = self.query(client, collection_name, filter='visible==True',
+                                 output_fields=["count(*)"], consistency_level=consistency_level)[0]
+                assert res[0].get('count(*)', None) == nb * insert_times
+
+            # hybrid search
+            res = self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker,
+                                     limit=10, consistency_level=consistency_level)[0]
+            assert len(res[0]) > 0
 
         # alter ttl to 2000s
         self.alter_collection_properties(client, collection_name, properties={"collection.ttl.seconds": 2000})
-        # search data after alter ttl
-        res = self.search(client, collection_name, search_vectors,
-                          search_params={}, anns_field='embeddings',
-                          filter='visible==False', limit=10, consistency_level=CONSISTENCY_STRONG)[0]
-        assert len(res[0]) > 0
-        # hybrid search data after alter ttl
-        sub_search1 = AnnSearchRequest(search_vectors, "embeddings", {"level": 1}, 20, expr='visible==False')
-        sub_search2 = AnnSearchRequest(search_vectors, "embeddings_2", {"level": 1}, 20, expr='visible==False')
-        res = self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker,
-                                 limit=10, consistency_level=CONSISTENCY_STRONG)[0]
-        assert len(res[0]) > 0
-        # query count(*)
-        res = self.query(client, collection_name, filter='visible==False',
-                         output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
-        assert res[0].get('count(*)', 0) == insert_times * nb
-        res = self.query(client, collection_name, filter='',
-                         output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
-        assert res[0].get('count(*)', 0) == insert_times * nb * 2
+        for consistency_level in consistency_levels:
+            log.debug(f"start to search/query after alter ttl with {consistency_level}")
+            # search data after alter ttl
+            res = self.search(client, collection_name, search_vectors,
+                              search_params={"metric_type": "COSINE"}, anns_field=vec_field,
+                              filter='visible==False', limit=10, consistency_level=consistency_level,
+                              output_fields=[bool_field])[0]
+            assert len(res[0]) > 0
+            for hit in res[0]:
+                assert hit.get(bool_field) == False
+
+            # hybrid search data after alter ttl
+            sub_search1 = AnnSearchRequest(search_vectors, vec_field, {"level": 1}, 20, expr='visible==False')
+            sub_search2 = AnnSearchRequest(search_vectors, vec_field_2, {"level": 1}, 20, expr='visible==False')
+            res = self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker,
+                                     limit=10, consistency_level=consistency_level)[0]
+            assert len(res[0]) > 0
+
+            # query count(*)
+            res = self.query(client, collection_name, filter='visible==False',
+                             output_fields=["count(*)"], consistency_level=consistency_level)[0]
+            assert res[0].get('count(*)', 0) == insert_times * nb
+            res = self.query(client, collection_name, filter='',
+                             output_fields=["count(*)"], consistency_level=consistency_level)[0]
+            if consistency_level != CONSISTENCY_STRONG:
+                assert res[0].get('count(*)', 0) >= insert_times * nb
+            else:
+                assert res[0].get('count(*)', 0) == insert_times * nb * 2
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_ttl_edge(self):
@@ -304,7 +313,7 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
             # after new_ttl_time, the search result should be 0
             search_vectors = cf.gen_vectors(1, dim=default_dim)
             elapsed = time.time() - start_time
-            res = self.search(client, collection_name, search_vectors, anns_field=default_vector_field_name, search_params={}, limit=10)
+            res = self.search(client, collection_name, search_vectors, anns_field=default_vector_field_name, search_params={"metric_type": "COSINE"}, limit=10)
             if elapsed < new_ttl_time - margin:
                 assert len(res[0][0]) == 10
             elif elapsed > new_ttl_time + margin:
@@ -328,7 +337,6 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
-# ==================== Entity TTL Tests ==================== #
 class TestMilvusClientEntityTTLValid(TestMilvusClientV2Base):
 
     def _create_ttl_collection(self, client, collection_name, extra_fields=None,
