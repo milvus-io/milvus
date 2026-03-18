@@ -96,18 +96,20 @@ func (rm *ResourceManager) Recover(ctx context.Context) error {
 
 	// Resource group meta upgrade to latest version.
 	upgrades := make([]*querypb.ResourceGroup, 0)
+	nodeToRG := make(map[int64]string) // local map for duplicate node detection during recovery
 	for _, meta := range rgs {
 		needUpgrade := meta.Config == nil
 
 		rg := NewResourceGroupFromMeta(meta, rm.nodeMgr)
-		rm.setupInMemResourceGroup(rg)
+		// Check for duplicate node assignments before committing to memory.
 		for _, node := range rg.GetNodes() {
-			if _, ok := rm.nodeIDMap[node]; ok {
+			if existingRG, ok := nodeToRG[node]; ok {
 				// unreachable code, should never happen.
-				panic(fmt.Sprintf("dirty meta, node has been assign to multi resource group, %s, %s", rm.nodeIDMap[node], rg.GetName()))
+				panic(fmt.Sprintf("dirty meta, node has been assign to multi resource group, %s, %s", existingRG, rg.GetName()))
 			}
-			rm.nodeIDMap[node] = rg.GetName()
+			nodeToRG[node] = rg.GetName()
 		}
+		rm.setupInMemResourceGroup(rg)
 		log.Info("Recover resource group",
 			zap.String("rgName", rg.GetName()),
 			zap.Int64s("nodes", rm.groups[rg.GetName()].GetNodes()),
@@ -306,7 +308,6 @@ func (rm *ResourceManager) transferNodesOnRGSwap(modifiedRGs []*ResourceGroup) {
 			for _, node := range nodes {
 				donorMut.UnassignNode(node)
 				recipientMut.AssignNode(node)
-				rm.nodeIDMap[node] = candidate.GetName()
 			}
 			modifiedRGs[i] = donorMut.ToResourceGroup()
 			modifiedRGs[j] = recipientMut.ToResourceGroup()
@@ -1056,7 +1057,6 @@ func (rm *ResourceManager) transferNode(ctx context.Context, rgName string, node
 	for _, rg := range modifiedRG {
 		rm.setupInMemResourceGroup(rg)
 	}
-	rm.nodeIDMap[node] = rgName
 	log.Info("transfer node to resource group",
 		zap.String("rgName", rgName),
 		zap.String("originalRG", originalRG),
@@ -1086,8 +1086,7 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 
 		// Commit updates to memory.
 		rm.setupInMemResourceGroup(rg)
-		delete(rm.nodeIDMap, node)
-		log.Info("unassign node to resource group",
+		log.Info("unassign node from resource group",
 			zap.String("rgName", rg.GetName()),
 			zap.Int64("node", node),
 		)
@@ -1168,21 +1167,25 @@ func (rm *ResourceManager) validateResourceGroupIsDeletable(rgName string) error
 
 // setupInMemResourceGroup setup resource group in memory.
 func (rm *ResourceManager) setupInMemResourceGroup(r *ResourceGroup) {
-	// clear old metrics.
+	// clear old metrics and nodeIDMap entries.
+	// Use GetAllNodes (bypasses label filter) to ensure all physical nodes are cleaned up,
+	// even when the RG's label filter has changed.
 	if oldR, ok := rm.groups[r.GetName()]; ok {
-		for _, nodeID := range oldR.GetNodes() {
+		for _, nodeID := range oldR.GetAllNodes() {
 			metrics.QueryCoordResourceGroupInfo.DeletePartialMatch(prometheus.Labels{
 				metrics.ResourceGroupLabelName: r.GetName(),
 				metrics.NodeIDLabelName:        strconv.FormatInt(nodeID, 10),
 			})
+			delete(rm.nodeIDMap, nodeID)
 		}
 	}
-	// add new metrics.
-	for _, nodeID := range r.GetNodes() {
+	// add new metrics and nodeIDMap entries.
+	for _, nodeID := range r.GetAllNodes() {
 		metrics.QueryCoordResourceGroupInfo.WithLabelValues(
 			r.GetName(),
 			strconv.FormatInt(nodeID, 10),
 		).Set(1)
+		rm.nodeIDMap[nodeID] = r.GetName()
 	}
 	rm.groups[r.GetName()] = r
 }
