@@ -74,9 +74,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		dec:           json.NewDecoder(retryableReader),
 		bufferSize:    bufferSize,
 		count:         count,
-		count:         count,
 		isLinesFormat: isLinesFormat,
->>>>>>> 5e525eb3bf (enhance: Retry reads from object storage on rate limit error (#46455))
 	}
 	reader.parser, err = NewRowParser(schema)
 	if err != nil {

@@ -179,13 +179,13 @@ func (AzureObjectStorage *AzureObjectStorage) GetObject(ctx context.Context, buc
 
 func (AzureObjectStorage *AzureObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
 	_, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).UploadStream(ctx, reader, &azblob.UploadStreamOptions{})
-	return mapObjectStorageError(objectName, err)
+	return checkObjectStorageError(objectName, err)
 }
 
 func (AzureObjectStorage *AzureObjectStorage) StatObject(ctx context.Context, bucketName, objectName string) (int64, error) {
 	info, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).GetProperties(ctx, &blob.GetPropertiesOptions{})
 	if err != nil {
-		return 0, mapObjectStorageError(objectName, err)
+		return 0, checkObjectStorageError(objectName, err)
 	}
 	return *info.ContentLength, nil
 }
@@ -233,7 +233,7 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 
 func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
 	_, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).Delete(ctx, &blob.DeleteOptions{})
-	return mapObjectStorageError(objectName, err)
+	return checkObjectStorageError(objectName, err)
 }
 
 func (AzureObjectStorage *AzureObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
@@ -246,5 +246,5 @@ func (AzureObjectStorage *AzureObjectStorage) CopyObject(ctx context.Context, bu
 
 	// Start copy operation
 	_, err := dstBlobClient.StartCopyFromURL(ctx, srcURL, &blob.StartCopyFromURLOptions{})
-	return mapObjectStorageError(dstObjectName, err)
+	return checkObjectStorageError(dstObjectName, err)
 }

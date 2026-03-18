@@ -123,7 +123,6 @@ func checkUnsupportedDataType(dt schemapb.DataType) error {
 	return nil
 }
 
->>>>>>> 5e525eb3bf (enhance: Retry reads from object storage on rate limit error (#46455))
 func stringLen(dtype string) (int, bool, error) {
 	var utf bool
 	switch {

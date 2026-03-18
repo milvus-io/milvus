@@ -552,7 +552,7 @@ func TestMapObjectStorageError_GCP_NewErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gcpErr := &googleapi.Error{Code: tt.statusCode}
-			result := mapObjectStorageError("test/path", gcpErr)
+			result := checkObjectStorageError("test/path", gcpErr)
 			assert.True(t, errors.Is(result, tt.expectedError))
 		})
 	}
