@@ -35,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
+const totalReadBufferSize = int64(64 * 1024 * 1024)
+
 type reader struct {
 	ctx    context.Context
 	cm     storage.ChunkManager

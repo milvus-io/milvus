@@ -65,16 +65,15 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		return nil, err
 	}
 	reader := &reader{
-		ctx:           ctx,
-		cm:            cm,
-		cmr:           retryableReader,
-		schema:        schema,
-		fileSize:      atomic.NewInt64(0),
-		filePath:      path,
-		dec:           json.NewDecoder(retryableReader),
-		bufferSize:    bufferSize,
-		count:         count,
-		isLinesFormat: isLinesFormat,
+		ctx:        ctx,
+		cm:         cm,
+		cmr:        retryableReader,
+		schema:     schema,
+		fileSize:   atomic.NewInt64(0),
+		filePath:   path,
+		dec:        json.NewDecoder(retryableReader),
+		bufferSize: bufferSize,
+		count:      count,
 	}
 	reader.parser, err = NewRowParser(schema)
 	if err != nil {
