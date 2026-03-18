@@ -173,7 +173,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	// 5.1 invalidate shard leader cache on all proxies after removing replicas,
 	// so that proxies stop routing requests to the released replicas' shard leaders
 	// before the async checker releases channels on those nodes.
-	if len(toRelease) > 0 {
+	if len(toRelease) > 0 && job.proxyManager != nil {
 		job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
 			CollectionIDs: []int64{job.collectionID},
 		})
