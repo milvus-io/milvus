@@ -21,12 +21,16 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/api/googleapi"
 
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func TestGcpNativeObjectStorage(t *testing.T) {
@@ -383,4 +387,36 @@ func TestGcpNativeReadFile(t *testing.T) {
 		err = reader.Close()
 		assert.NoError(t, err)
 	})
+}
+
+func TestMapObjectStorageError_GCP_NewErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		statusCode    int
+		expectedError error
+	}{
+		{
+			name:          "Forbidden",
+			statusCode:    http.StatusForbidden,
+			expectedError: merr.ErrIoPermissionDenied,
+		},
+		{
+			name:          "BadRequest",
+			statusCode:    http.StatusBadRequest,
+			expectedError: merr.ErrIoInvalidArgument,
+		},
+		{
+			name:          "RequestEntityTooLarge",
+			statusCode:    http.StatusRequestEntityTooLarge,
+			expectedError: merr.ErrIoEntityTooLarge,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gcpErr := &googleapi.Error{Code: tt.statusCode}
+			result := mapObjectStorageError("test/path", gcpErr)
+			assert.True(t, errors.Is(result, tt.expectedError))
+		})
+	}
 }

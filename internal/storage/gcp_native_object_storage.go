@@ -46,13 +46,13 @@ func (gcs *GcpNativeObjectStorage) GetObject(ctx context.Context, bucketName, ob
 	bucket := gcs.client.Bucket(bucketName)
 	_, err := bucket.Attrs(ctx)
 	if err != nil {
-		return nil, checkObjectStorageError(objectName, err)
+		return nil, mapObjectStorageError(objectName, err)
 	}
 
 	obj := bucket.Object(objectName)
 	_, err = obj.Attrs(ctx)
 	if err != nil {
-		return nil, checkObjectStorageError(objectName, err)
+		return nil, mapObjectStorageError(objectName, err)
 	}
 	var reader *storage.Reader
 	if offset == 0 && size == 0 {
@@ -62,7 +62,7 @@ func (gcs *GcpNativeObjectStorage) GetObject(ctx context.Context, bucketName, ob
 	}
 
 	if err != nil {
-		return nil, checkObjectStorageError(objectName, err)
+		return nil, mapObjectStorageError(objectName, err)
 	}
 
 	return &GcsReader{
@@ -79,11 +79,11 @@ func (gcs *GcpNativeObjectStorage) PutObject(ctx context.Context, bucketName, ob
 	writer := obj.NewWriter(ctx)
 	_, err := io.Copy(writer, reader)
 	if err != nil {
-		return checkObjectStorageError(objectName, err)
+		return mapObjectStorageError(objectName, err)
 	}
 	err = writer.Close()
 	if err != nil {
-		return checkObjectStorageError(objectName, err)
+		return mapObjectStorageError(objectName, err)
 	}
 	return nil
 }
@@ -94,7 +94,7 @@ func (gcs *GcpNativeObjectStorage) StatObject(ctx context.Context, bucketName,
 	obj := gcs.client.Bucket(bucketName).Object(objectName)
 	attrs, err := obj.Attrs(ctx)
 	if err != nil {
-		return 0, checkObjectStorageError(objectName, err)
+		return 0, mapObjectStorageError(objectName, err)
 	}
 	return attrs.Size, nil
 }
@@ -116,7 +116,7 @@ func (gcs *GcpNativeObjectStorage) WalkWithObjects(ctx context.Context,
 			break
 		}
 		if err != nil {
-			return checkObjectStorageError(prefix, err)
+			return mapObjectStorageError(prefix, err)
 		}
 		if objAttrs.Prefix != "" {
 			if !walkFunc(&ChunkObjectInfo{FilePath: objAttrs.Prefix, ModifyTime: objAttrs.Updated}) {
@@ -142,16 +142,26 @@ func (gcs *GcpNativeObjectStorage) RemoveObject(ctx context.Context, bucketName,
 			break
 		}
 		if err != nil {
-			return checkObjectStorageError(prefix, err)
+			return mapObjectStorageError(prefix, err)
 		}
 
 		obj := bucket.Object(objAttrs.Name)
 		if err := obj.Delete(ctx); err != nil {
-			return checkObjectStorageError(objAttrs.Name, err)
+			return mapObjectStorageError(objAttrs.Name, err)
 		}
 	}
 
 	return nil
+}
+
+func (gcs *GcpNativeObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
+	bucket := gcs.client.Bucket(bucketName)
+	srcObj := bucket.Object(srcObjectName)
+	dstObj := bucket.Object(dstObjectName)
+
+	// Use CopierFrom to copy object
+	_, err := dstObj.CopierFrom(srcObj).Run(ctx)
+	return mapObjectStorageError(dstObjectName, err)
 }
 
 func (gcs *GcpNativeObjectStorage) DeleteBucket(ctx context.Context, bucketName string) error {
