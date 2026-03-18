@@ -31,7 +31,7 @@ type InterceptorBuildParam struct {
 	InitialRecoverSnapshot *recovery.RecoverySnapshot  // The initial recover snapshot for the wal, used to recover the wal state.
 	TxnManager             *txn.TxnManager             // The transaction manager for the wal, used to manage the transactions.
 	ShardManager           shards.ShardManager         // The shard manager for the wal, used to manage the shards, segment assignment, partition.
-	ReplicateManager       replicates.ReplicateManager // The replicates manager for the wal, used to manage the replicates.
+	ReplicateManager       replicates.ReplicatesManager // The replicates manager for the wal, used to manage the replicates.
 }
 
 // Clear release the resources in the interceptor build param.

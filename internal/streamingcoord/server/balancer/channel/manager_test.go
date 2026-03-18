@@ -414,7 +414,7 @@ func TestChannelManager(t *testing.T) {
 
 		param, err = m.GetLatestChannelAssignment()
 		assert.NoError(t, err)
-		assert.Equal(t, param.Version.Local, oldLocalVersion+4)
+		assert.Equal(t, param.Version.Local, oldLocalVersion+5)
 		assert.True(t, proto.Equal(param.ReplicateConfiguration, forcePromoteCfg))
 		assert.Equal(t, m.ReplicateRole(), replicateutil.RolePrimary)
 	})

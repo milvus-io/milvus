@@ -30,7 +30,7 @@ type ReplicateManagerRecoverParam struct {
 // RecoverReplicateManager recovers the replicate manager from the initial recover snapshot.
 // It will recover the replicate manager from the initial recover snapshot.
 // If the wal is on replicating mode, it will recover the replicate state.
-func RecoverReplicateManager(param *ReplicateManagerRecoverParam) (ReplicateManager, error) {
+func RecoverReplicateManager(param *ReplicateManagerRecoverParam) (ReplicatesManager, error) {
 	replicateConfigHelper, err := replicateutil.NewConfigHelper(param.CurrentClusterID, param.InitialRecoverSnapshot.Checkpoint.ReplicateConfig)
 	if err != nil {
 		return nil, newReplicateViolationErrorForConfig(param.InitialRecoverSnapshot.Checkpoint.ReplicateConfig, err)
