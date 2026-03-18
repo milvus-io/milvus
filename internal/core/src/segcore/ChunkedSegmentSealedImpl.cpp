@@ -3069,8 +3069,7 @@ ChunkedSegmentSealedImpl::init_timestamp_index_from_column(
     if (all_chunks.size() == 1) {
         // Single chunk: build index directly from chunk data (zero-copy)
         auto data_view = all_chunks[0].get()->GetDataView<int64_t>();
-        auto* ts_ptr =
-            reinterpret_cast<const Timestamp*>(data_view->Data());
+        auto* ts_ptr = reinterpret_cast<const Timestamp*>(data_view->Data());
         AssertInfo(static_cast<size_t>(data_view->RowCount()) == num_rows,
                    "timestamp chunk row count {} != expected {}",
                    data_view->RowCount(),

@@ -354,10 +354,9 @@ TEST(chunk, test_json_field) {
     }
 }
 
-// Test JsonChunk::GetAnyDataView returns ContiguousDataView<Json>
+// Test JsonChunk::GetAnyDataView returns ContiguousDataView<string_view>
 TEST(chunk, test_json_chunk_data_view) {
     auto row_num = 100;
-    // Keep original strings alive so Json views remain valid for comparison
     std::vector<std::string> json_strings;
     json_strings.reserve(row_num);
     FixedVector<Json> data;
@@ -400,7 +399,7 @@ TEST(chunk, test_json_chunk_data_view) {
         return {rb_reader, std::move(arrow_reader)};
     };
 
-    // Test GetAnyDataView() - full chunk
+    // Test GetAnyDataView() - full chunk (JSON stored as string_view)
     {
         auto [rb_reader, arrow_reader] = get_record_batch_reader();
         FieldMeta field_meta(FieldName("json_field"),
@@ -412,16 +411,13 @@ TEST(chunk, test_json_chunk_data_view) {
         auto chunk = create_chunk(field_meta, array_vec);
         auto json_chunk = static_cast<JSONChunk*>(chunk.get());
 
-        // GetAnyDataView should return ContiguousDataView<Json>
         auto any_view = json_chunk->GetAnyDataView();
-        auto json_view = any_view.as<Json>();
-        ASSERT_NE(json_view, nullptr);
-        EXPECT_EQ(json_view->RowCount(), row_num);
+        auto sv_view = any_view.as<std::string_view>();
+        ASSERT_NE(sv_view, nullptr);
+        EXPECT_EQ(sv_view->RowCount(), row_num);
 
-        // Verify data content
-        auto json_data = json_view->Data();
         for (int64_t i = 0; i < row_num; ++i) {
-            EXPECT_EQ(json_data[i].data(), data[i].data());
+            EXPECT_EQ((*sv_view)[i], data[i].data());
         }
     }
 
@@ -440,14 +436,12 @@ TEST(chunk, test_json_chunk_data_view) {
         int64_t start = 10;
         int64_t len = 20;
         auto any_view = json_chunk->GetAnyDataView(start, len);
-        auto json_view = any_view.as<Json>();
-        ASSERT_NE(json_view, nullptr);
-        EXPECT_EQ(json_view->RowCount(), len);
+        auto sv_view = any_view.as<std::string_view>();
+        ASSERT_NE(sv_view, nullptr);
+        EXPECT_EQ(sv_view->RowCount(), len);
 
-        // Verify data content
-        auto json_data = json_view->Data();
         for (int64_t i = 0; i < len; ++i) {
-            EXPECT_EQ(json_data[i].data(), data[start + i].data());
+            EXPECT_EQ((*sv_view)[i], data[start + i].data());
         }
     }
 
@@ -465,14 +459,12 @@ TEST(chunk, test_json_chunk_data_view) {
 
         FixedVector<int32_t> offsets = {0, 5, 10, 50, 99};
         auto any_view = json_chunk->GetAnyDataView(offsets);
-        auto json_view = any_view.as<Json>();
-        ASSERT_NE(json_view, nullptr);
-        EXPECT_EQ(json_view->RowCount(), static_cast<int64_t>(offsets.size()));
+        auto sv_view = any_view.as<std::string_view>();
+        ASSERT_NE(sv_view, nullptr);
+        EXPECT_EQ(sv_view->RowCount(), static_cast<int64_t>(offsets.size()));
 
-        // Verify data content
-        auto json_data = json_view->Data();
         for (size_t i = 0; i < offsets.size(); ++i) {
-            EXPECT_EQ(json_data[i].data(), data[offsets[i]].data());
+            EXPECT_EQ((*sv_view)[i], data[offsets[i]].data());
         }
     }
 
@@ -489,13 +481,12 @@ TEST(chunk, test_json_chunk_data_view) {
         auto json_chunk = static_cast<JSONChunk*>(chunk.get());
 
         auto any_view = json_chunk->GetAnyDataView();
-        auto json_view = any_view.as<Json>();
-        ASSERT_NE(json_view, nullptr);
-        EXPECT_EQ(json_view->RowCount(), row_num);
+        auto sv_view = any_view.as<std::string_view>();
+        ASSERT_NE(sv_view, nullptr);
+        EXPECT_EQ(sv_view->RowCount(), row_num);
 
         // ValidData should be non-null for nullable field
-        // (all values are valid in this test data)
-        auto valid_data = json_view->ValidData();
+        auto valid_data = sv_view->ValidData();
         ASSERT_NE(valid_data, nullptr);
         for (int64_t i = 0; i < row_num; ++i) {
             EXPECT_TRUE(valid_data[i]);

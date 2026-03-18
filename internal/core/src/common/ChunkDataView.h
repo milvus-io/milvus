@@ -25,6 +25,10 @@
 
 namespace milvus {
 
+// Base class for chunk data views.
+// For sealed segments, views typically reference external data without ownership.
+// For growing segments, views may own the data (e.g., converting Array to ArrayView)
+// since the underlying ConcurrentVector data can be relocated during growth.
 class BaseDataView {
  public:
     BaseDataView() = default;
@@ -84,14 +88,11 @@ class ChunkDataView<
 template <typename T, typename Enable = void>
 class ContiguousDataView : public ChunkDataView<T> {
  public:
-    ContiguousDataView(const T* data,
-                       const bool* valid,
-                       int64_t row_nums,
-                       int64_t size)
+    ContiguousDataView(const T* data, const bool* valid, int64_t row_nums)
         : data_(data), valid_(valid), row_nums_(row_nums) {
     }
 
-    ContiguousDataView(const T* data, int64_t row_nums, int64_t size)
+    ContiguousDataView(const T* data, int64_t row_nums)
         : data_(data), row_nums_(row_nums) {
     }
 
@@ -151,34 +152,29 @@ class ContiguousDataView<VectorArrayView>
 
     // Construction from raw VectorArrayView pointer (no copy, caller
     // guarantees lifetime)
-    ContiguousDataView(const VectorArrayView* data,
-                       int64_t row_nums,
-                       size_t element_size)
+    ContiguousDataView(const VectorArrayView* data, int64_t row_nums)
         : data_ptr_(data), row_nums_(row_nums), dim_(0) {
     }
 
-    // Construction from raw VectorArray pointer (growing segment - needs
-    // conversion)
-    ContiguousDataView(const VectorArray* data,
-                       int64_t row_nums,
-                       size_t element_size)
+    // Construction from raw VectorArray pointer (growing segment).
+    // Builds VectorArrayView directly from the source data without copying
+    // VectorArray objects. Caller must ensure the source data outlives this view.
+    ContiguousDataView(const VectorArray* data, int64_t row_nums)
         : row_nums_(row_nums), dim_(0) {
-        arrays_.reserve(row_nums);
         owned_data_.reserve(row_nums);
         for (int64_t i = 0; i < row_nums; ++i) {
-            arrays_.push_back(data[i]);
-        }
-        for (int64_t i = 0; i < row_nums; ++i) {
-            if (arrays_[i].data() == nullptr) {
+            // null rows in nullable fields have default-constructed VectorArray
+            // with nullptr data
+            if (data[i].data() == nullptr) {
                 owned_data_.emplace_back();
             } else {
-                owned_data_.emplace_back(const_cast<char*>(arrays_[i].data()),
-                                         arrays_[i].dim(),
-                                         arrays_[i].length(),
-                                         arrays_[i].byte_size(),
-                                         arrays_[i].get_element_type());
+                owned_data_.emplace_back(const_cast<char*>(data[i].data()),
+                                         data[i].dim(),
+                                         data[i].length(),
+                                         data[i].byte_size(),
+                                         data[i].get_element_type());
                 if (dim_ == 0) {
-                    dim_ = arrays_[i].dim();
+                    dim_ = data[i].dim();
                 }
             }
         }
@@ -216,7 +212,6 @@ class ContiguousDataView<VectorArrayView>
 
  private:
     const VectorArrayView* data_ptr_ = nullptr;
-    std::vector<VectorArray> arrays_;  // Owned data (for growing segment)
     std::vector<VectorArrayView> owned_data_;
     int64_t row_nums_;
     int64_t dim_;
@@ -237,8 +232,7 @@ class ContiguousDataView<
     ContiguousDataView(const ValueType* data,
                        const bool* valid,
                        int64_t row_nums,
-                       int64_t dim,
-                       int64_t element_size)
+                       int64_t dim)
         : data_(data), valid_(valid), row_nums_(row_nums), dim_(dim) {
     }
 
@@ -301,16 +295,12 @@ class ContiguousDataView<std::string_view>
 
     // Construction from raw string_view pointer (no copy, caller guarantees
     // lifetime)
-    ContiguousDataView(const std::string_view* data,
-                       int64_t row_nums,
-                       size_t element_size)
+    ContiguousDataView(const std::string_view* data, int64_t row_nums)
         : data_ptr_(data), row_nums_(row_nums) {
     }
 
     // Construction from raw string pointer (growing segment - needs conversion)
-    ContiguousDataView(const std::string* data,
-                       int64_t row_nums,
-                       size_t element_size)
+    ContiguousDataView(const std::string* data, int64_t row_nums)
         : row_nums_(row_nums) {
         owned_data_.reserve(row_nums);
         for (int64_t i = 0; i < row_nums; ++i) {
@@ -374,17 +364,17 @@ class ContiguousDataView<ArrayView> : public ChunkDataView<ArrayView> {
 
     // Construction from raw ArrayView pointer (no copy, caller guarantees
     // lifetime)
-    ContiguousDataView(const ArrayView* data,
-                       int64_t row_nums,
-                       size_t element_size)
+    ContiguousDataView(const ArrayView* data, int64_t row_nums)
         : data_ptr_(data), row_nums_(row_nums) {
     }
 
     // Construction from raw Array pointer (growing segment - needs conversion)
-    ContiguousDataView(const Array* data, int64_t row_nums, size_t element_size)
+    ContiguousDataView(const Array* data, int64_t row_nums)
         : row_nums_(row_nums) {
         owned_data_.reserve(row_nums);
         for (int64_t i = 0; i < row_nums; ++i) {
+            // null rows in nullable fields have default-constructed Array
+            // with nullptr data
             if (data[i].data() == nullptr) {
                 owned_data_.emplace_back();
             } else {
@@ -435,39 +425,24 @@ class ContiguousDataView<ArrayView> : public ChunkDataView<ArrayView> {
     int64_t row_nums_;
 };
 
-// Specialization for Json
-template <>
-class ContiguousDataView<Json> : public ChunkDataView<Json> {
+// Adapter that wraps ChunkDataView<string_view> as ChunkDataView<Json>.
+// Used when sealed segment stores JSON as strings but caller needs Json objects.
+// Constructs Json objects from string_view on as<Json>() call (same as old
+// chunk_view<Json> behavior). Callers access via Data()/operator[] which
+// returns contiguous Json*.
+class JsonDataView : public ChunkDataView<Json> {
  public:
-    // Construction from raw Json pointer (growing segment case)
-    ContiguousDataView(const Json* data, int64_t row_nums, size_t element_size)
-        : row_nums_(row_nums) {
-        data_.reserve(row_nums);
-        for (int64_t i = 0; i < row_nums; ++i) {
-            data_.push_back(data[i]);
-        }
-    }
-
-    // Construction from string_view vector (sealed segment case - JSON stored as
-    // string)
-    ContiguousDataView(std::vector<std::string_view>&& views,
-                       FixedVector<bool>&& valid,
-                       int64_t row_nums)
-        : valid_data_(std::move(valid)),
-          valid_ptr_(valid_data_.empty() ? nullptr : valid_data_.data()),
-          row_nums_(row_nums) {
-        data_.reserve(row_nums);
-        for (int64_t i = 0; i < row_nums; ++i) {
-            data_.emplace_back(views[i].data(), views[i].size());
+    JsonDataView(std::shared_ptr<ChunkDataView<std::string_view>> sv_view)
+        : sv_view_(std::move(sv_view)) {
+        auto row_count = sv_view_->RowCount();
+        data_.reserve(row_count);
+        for (int64_t i = 0; i < row_count; i++) {
+            data_.emplace_back((*sv_view_)[i]);
         }
     }
 
     const Json&
     operator[](int64_t idx) const override {
-        AssertInfo(idx >= 0 && idx < row_nums_,
-                   "ChunkDataView index out of bounds: idx={}, row_nums={}",
-                   idx,
-                   row_nums_);
         return data_[idx];
     }
 
@@ -478,24 +453,66 @@ class ContiguousDataView<Json> : public ChunkDataView<Json> {
 
     int64_t
     RowCount() const override {
-        return row_nums_;
+        return sv_view_->RowCount();
     }
 
     const bool*
     ValidData() const override {
-        return valid_ptr_;
+        return sv_view_->ValidData();
     }
 
     void
     SetValidData(const bool* valid) override {
-        valid_ptr_ = valid;
+        sv_view_->SetValidData(valid);
     }
 
  private:
+    std::shared_ptr<ChunkDataView<std::string_view>> sv_view_;
     std::vector<Json> data_;
-    FixedVector<bool> valid_data_;
-    const bool* valid_ptr_{nullptr};
-    int64_t row_nums_;
+};
+
+// Adapter that wraps ChunkDataView<string> as ChunkDataView<string_view>.
+// Used when growing non-mmap segment stores strings but caller needs
+// string_view. Constructs string_view vector from string data on demand.
+class StringDataView : public ChunkDataView<std::string_view> {
+ public:
+    StringDataView(std::shared_ptr<ChunkDataView<std::string>> str_view)
+        : str_view_(std::move(str_view)) {
+        auto row_count = str_view_->RowCount();
+        data_.reserve(row_count);
+        for (int64_t i = 0; i < row_count; i++) {
+            data_.emplace_back((*str_view_)[i]);
+        }
+    }
+
+    const std::string_view&
+    operator[](int64_t idx) const override {
+        return data_[idx];
+    }
+
+    const std::string_view*
+    Data() const override {
+        return data_.data();
+    }
+
+    int64_t
+    RowCount() const override {
+        return str_view_->RowCount();
+    }
+
+    const bool*
+    ValidData() const override {
+        return str_view_->ValidData();
+    }
+
+    void
+    SetValidData(const bool* valid) override {
+        str_view_->SetValidData(valid);
+    }
+
+ private:
+    std::shared_ptr<ChunkDataView<std::string>> str_view_;
+    std::vector<std::string_view> data_;
 };
 
 class AnyDataView {
@@ -516,30 +533,29 @@ class AnyDataView {
             return result;
         }
 
+        // Support string -> string_view conversion:
+        // Growing non-mmap segment stores std::string but some callers
+        // request string_view. Wrap with an adapter that builds string_view
+        // vector from the underlying string data.
+        if constexpr (std::is_same_v<T, std::string_view>) {
+            auto str_view =
+                std::dynamic_pointer_cast<ChunkDataView<std::string>>(view_);
+            if (str_view) {
+                return std::make_shared<StringDataView>(std::move(str_view));
+            }
+        }
+
         // Support string_view -> Json conversion:
-        // JSONChunk stores data as strings and returns ContiguousDataView<string_view>.
-        // When callers request Json type, convert on demand.
+        // JSONChunk stores data as strings and returns
+        // ContiguousDataView<string_view>. When callers request Json type,
+        // wrap with an adapter that constructs Json objects from string_view
+        // (same behavior as old chunk_view<Json>).
         if constexpr (std::is_same_v<T, Json>) {
             auto sv_view =
                 std::dynamic_pointer_cast<ChunkDataView<std::string_view>>(
                     view_);
             if (sv_view) {
-                auto row_count = sv_view->RowCount();
-                auto valid = sv_view->ValidData();
-                FixedVector<bool> valid_data;
-                if (valid) {
-                    valid_data.assign(valid, valid + row_count);
-                }
-                // Build Json objects from the underlying string_view data
-                std::vector<std::string_view> views;
-                views.reserve(row_count);
-                for (int64_t i = 0; i < row_count; i++) {
-                    views.push_back((*sv_view)[i]);
-                }
-                auto json_view = std::make_shared<ContiguousDataView<Json>>(
-                    std::move(views), std::move(valid_data), row_count);
-                return std::dynamic_pointer_cast<ChunkDataView<Json>>(
-                    json_view);
+                return std::make_shared<JsonDataView>(std::move(sv_view));
             }
         }
 

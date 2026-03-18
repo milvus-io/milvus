@@ -61,8 +61,8 @@ class TimestampData {
             auto data_view = pin.get()->GetDataView<int64_t>();
             chunk_data_.push_back(
                 reinterpret_cast<const Timestamp*>(data_view->Data()));
-            num_rows_until_chunk_.push_back(
-                num_rows_until_chunk_.back() + data_view->RowCount());
+            num_rows_until_chunk_.push_back(num_rows_until_chunk_.back() +
+                                            data_view->RowCount());
             data_views_.push_back(std::move(data_view));
         }
         total_size_ = num_rows_until_chunk_.back();

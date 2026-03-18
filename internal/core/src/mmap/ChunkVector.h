@@ -205,22 +205,24 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
             return AnyDataView(
                 std::make_shared<ContiguousDataView<ChunkViewType<Type>>>(
                     static_cast<ChunkViewType<Type>*>(get_chunk_data(chunk_id)),
-                    get_chunk_size(chunk_id),
-                    sizeof(ChunkViewType<Type>)));
-        } else if constexpr (std::is_same_v<Type, std::string> ||
-                             std::is_same_v<Type, Array> ||
+                    get_chunk_size(chunk_id)));
+        } else if constexpr (std::is_same_v<Type, std::string>) {
+            // non-mmap string: store string* directly, no conversion
+            return AnyDataView(
+                std::make_shared<ContiguousDataView<std::string>>(
+                    static_cast<std::string*>(get_chunk_data(chunk_id)),
+                    get_chunk_size(chunk_id)));
+        } else if constexpr (std::is_same_v<Type, Array> ||
                              std::is_same_v<Type, VectorArray>) {
-            // string/Array/VectorArray: data is Type*, construct view type
+            // Array/VectorArray: data is Type*, construct view type
             return AnyDataView(
                 std::make_shared<ContiguousDataView<ChunkViewType<Type>>>(
                     static_cast<Type*>(get_chunk_data(chunk_id)),
-                    get_chunk_size(chunk_id),
-                    sizeof(Type)));
+                    get_chunk_size(chunk_id)));
         } else {
             return AnyDataView(std::make_shared<ContiguousDataView<Type>>(
                 static_cast<Type*>(get_chunk_data(chunk_id)),
-                get_chunk_size(chunk_id),
-                sizeof(Type)));
+                get_chunk_size(chunk_id)));
         }
     }
 

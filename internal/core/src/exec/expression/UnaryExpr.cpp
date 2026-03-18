@@ -214,7 +214,14 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VARCHAR: {
-            result = ExecRangeVisitorImpl<std::string_view>(context);
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
+                result = ExecRangeVisitorImpl<std::string>(context);
+            } else {
+                result = ExecRangeVisitorImpl<std::string_view>(context);
+            }
             break;
         }
         case DataType::JSON: {

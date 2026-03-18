@@ -24,19 +24,7 @@ StringChunk::GetAnyDataView() const {
 
 AnyDataView
 StringChunk::GetAnyDataView(int64_t offset, int64_t length) const {
-    AssertInfo(offset >= 0 && offset < row_nums_,
-               "Retrieve string data view with out-of-bound offset:{}, len:{}, "
-               "row_nums:{}",
-               offset,
-               length,
-               row_nums_);
-    AssertInfo(length > 0 && length <= row_nums_,
-               "Retrieve string data view with out-of-bound offset:{}, len:{}, "
-               "row_nums:{}",
-               offset,
-               length,
-               row_nums_);
-    AssertInfo(offset + length <= row_nums_,
+    AssertInfo(offset >= 0 && length >= 0 && offset + length <= row_nums_,
                "Retrieve string data view with out-of-bound offset:{}, len:{}, "
                "row_nums:{}",
                offset,
@@ -65,12 +53,16 @@ StringChunk::GetAnyDataView(const FixedVector<int32_t>& offsets) const {
     FixedVector<bool> valid_data;
     size_t size = offsets.size();
     views.reserve(size);
-    valid_data.reserve(size);
 
     for (size_t i = 0; i < size; ++i) {
         views.emplace_back(data_ + offsets_[offsets[i]],
                            offsets_[offsets[i] + 1] - offsets_[offsets[i]]);
-        valid_data.emplace_back(IsValid(offsets[i]));
+    }
+    if (nullable_) {
+        valid_data.reserve(size);
+        for (size_t i = 0; i < size; ++i) {
+            valid_data.emplace_back(IsValid(offsets[i]));
+        }
     }
 
     return AnyDataView(std::make_shared<ContiguousDataView<std::string_view>>(
@@ -86,19 +78,7 @@ JSONChunk::GetAnyDataView() const {
 
 AnyDataView
 JSONChunk::GetAnyDataView(int64_t offset, int64_t length) const {
-    AssertInfo(offset >= 0 && offset < row_nums_,
-               "Retrieve json data view with out-of-bound offset:{}, len:{}, "
-               "row_nums:{}",
-               offset,
-               length,
-               row_nums_);
-    AssertInfo(length > 0 && length <= row_nums_,
-               "Retrieve json data view with out-of-bound offset:{}, len:{}, "
-               "row_nums:{}",
-               offset,
-               length,
-               row_nums_);
-    AssertInfo(offset + length <= row_nums_,
+    AssertInfo(offset >= 0 && length >= 0 && offset + length <= row_nums_,
                "Retrieve json data view with out-of-bound offset:{}, len:{}, "
                "row_nums:{}",
                offset,
@@ -127,12 +107,16 @@ JSONChunk::GetAnyDataView(const FixedVector<int32_t>& offsets) const {
     FixedVector<bool> valid_data;
     size_t size = offsets.size();
     views.reserve(size);
-    valid_data.reserve(size);
 
     for (size_t i = 0; i < size; ++i) {
         views.emplace_back(data_ + offsets_[offsets[i]],
                            offsets_[offsets[i] + 1] - offsets_[offsets[i]]);
-        valid_data.emplace_back(IsValid(offsets[i]));
+    }
+    if (nullable_) {
+        valid_data.reserve(size);
+        for (size_t i = 0; i < size; ++i) {
+            valid_data.emplace_back(IsValid(offsets[i]));
+        }
     }
 
     return AnyDataView(std::make_shared<ContiguousDataView<std::string_view>>(
@@ -148,19 +132,7 @@ ArrayChunk::GetAnyDataView() const {
 
 AnyDataView
 ArrayChunk::GetAnyDataView(int64_t offset, int64_t length) const {
-    AssertInfo(offset >= 0 && offset < row_nums_,
-               "Retrieve array data view with out-of-bound offset:{}, len:{}, "
-               "row_nums:{}",
-               offset,
-               length,
-               row_nums_);
-    AssertInfo(length > 0 && length <= row_nums_,
-               "Retrieve array data view with out-of-bound offset:{}, len:{}, "
-               "row_nums:{}",
-               offset,
-               length,
-               row_nums_);
-    AssertInfo(offset + length <= row_nums_,
+    AssertInfo(offset >= 0 && length >= 0 && offset + length <= row_nums_,
                "Retrieve array data view with out-of-bound offset:{}, len:{}, "
                "row_nums:{}",
                offset,
@@ -189,11 +161,15 @@ ArrayChunk::GetAnyDataView(const FixedVector<int32_t>& offsets) const {
     FixedVector<bool> valid_data;
     size_t size = offsets.size();
     views.reserve(size);
-    valid_data.reserve(size);
 
     for (size_t i = 0; i < size; ++i) {
         views.emplace_back(View(offsets[i]));
-        valid_data.emplace_back(IsValid(offsets[i]));
+    }
+    if (nullable_) {
+        valid_data.reserve(size);
+        for (size_t i = 0; i < size; ++i) {
+            valid_data.emplace_back(IsValid(offsets[i]));
+        }
     }
 
     return AnyDataView(std::make_shared<ContiguousDataView<ArrayView>>(
@@ -210,21 +186,7 @@ VectorArrayChunk::GetAnyDataView() const {
 AnyDataView
 VectorArrayChunk::GetAnyDataView(int64_t offset, int64_t length) const {
     AssertInfo(
-        offset >= 0 && offset < row_nums_,
-        "Retrieve vector array data view with out-of-bound offset:{}, len:{}, "
-        "row_nums:{}",
-        offset,
-        length,
-        row_nums_);
-    AssertInfo(
-        length > 0 && length <= row_nums_,
-        "Retrieve vector array data view with out-of-bound offset:{}, len:{}, "
-        "row_nums:{}",
-        offset,
-        length,
-        row_nums_);
-    AssertInfo(
-        offset + length <= row_nums_,
+        offset >= 0 && length >= 0 && offset + length <= row_nums_,
         "Retrieve vector array data view with out-of-bound offset:{}, len:{}, "
         "row_nums:{}",
         offset,

@@ -273,7 +273,6 @@ SearchOnSealedColumn(const Schema& schema,
         auto raw_dataset =
             query::dataset::RawDataset{offset, dim, chunk_size, vec_data};
 
-        PinWrapper<const size_t*> offsets_pw;
         if (data_type == DataType::VECTOR_ARRAY) {
             AssertInfo(
                 query_offsets != nullptr,
