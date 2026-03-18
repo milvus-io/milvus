@@ -77,7 +77,6 @@ class EvalCtx {
     ExecContext* exec_ctx_ = nullptr;
     // we may accept offsets array as input and do expr filtering on these data
     OffsetVector* offset_input_ = nullptr;
-    bool input_no_nulls_ = false;
 
     // used for expr pre filter, that avoid unnecessary execution on filtered data
     TargetBitmap bitmap_input_;

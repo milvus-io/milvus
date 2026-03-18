@@ -98,8 +98,8 @@ func (s *L0Segment) LastDeltaTimestamp() uint64 {
 	s.dataGuard.RLock()
 	defer s.dataGuard.RUnlock()
 
-	last, err := lo.Last(s.tss)
-	if err != nil {
+	last, ok := lo.Last(s.tss)
+	if !ok {
 		return 0
 	}
 	return last

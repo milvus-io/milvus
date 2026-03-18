@@ -3528,8 +3528,7 @@ func (_c *DataCoordCatalog_ShouldDropChannel_Call) RunAndReturn(run func(context
 func NewDataCoordCatalog(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *DataCoordCatalog {
+}) *DataCoordCatalog {
 	mock := &DataCoordCatalog{}
 	mock.Mock.Test(t)
 

@@ -308,11 +308,28 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		fieldData.FieldId = fieldSchema.GetFieldID()
 		fieldData.FieldName = fieldName
 
-		// compatible with different nullable data format from sdk
+		// Ensure dynamic field has ValidData before merge logic.
+		// SDK doesn't set ValidData on $meta; without it, AppendFieldDataByColumn
+		// won't propagate ValidData for insert rows, causing length mismatch.
+		if fieldData.GetIsDynamic() && len(fieldData.GetValidData()) == 0 {
+			nRows := int(it.upsertMsg.InsertMsg.NRows())
+			validData := make([]bool, nRows)
+			for i := range validData {
+				validData[i] = true
+			}
+			fieldData.ValidData = validData
+		}
+
+		// compatible with different nullable/default_value data format from sdk
 		if len(fieldData.GetValidData()) != 0 {
-			err := FillWithNullValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+			var err error
+			if fieldSchema.GetDefaultValue() != nil {
+				err = FillWithDefaultValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+			} else {
+				err = FillWithNullValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+			}
 			if err != nil {
-				log.Info("unify null field data format failed", zap.Error(err))
+				log.Info("unify field data format failed", zap.Error(err))
 				return err
 			}
 		}
@@ -1077,6 +1094,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 	it.result.SuccIndex = sliceIndex
 
+	var err error
 	if it.schema.EnableDynamicField {
 		var err error
 		if it.req.GetPartialUpdate() {
@@ -1089,14 +1107,12 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	}
 
-	if Params.CommonCfg.EnableNamespace.GetAsBool() {
-		err := addNamespaceData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
-		if err != nil {
-			return err
-		}
+	err = addNamespaceData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+	if err != nil {
+		return err
 	}
 
-	if err := checkAndFlattenStructFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg); err != nil {
+	if err = checkAndFlattenStructFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg); err != nil {
 		return err
 	}
 
@@ -1104,7 +1120,6 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 
 	// use the passed pk as new pk when autoID == false
 	// automatic generate pk as new pk wehen autoID == true
-	var err error
 	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(allFields, it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.upsertMsg.InsertMsg.CollectionName))
 	if err != nil {

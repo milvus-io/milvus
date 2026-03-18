@@ -33,6 +33,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+)
+
+// Type aliases for metricsinfo types to avoid import cycles
+type (
+	DataCoordTopology  = metricsinfo.DataCoordTopology
+	QueryCoordTopology = metricsinfo.QueryCoordTopology
 )
 
 // Limiter defines the interface to perform request rate limiting.
@@ -292,6 +299,10 @@ type MixCoord interface {
 
 	// GetMetrics notifies MixCoordComponent to collect metrics for specified component
 	GetQcMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
+	GetDataCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*DataCoordTopology, error)
+
+	GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*QueryCoordTopology, error)
 
 	// GetMetrics notifies MixCoordComponent to collect metrics for specified component
 	NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error

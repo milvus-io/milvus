@@ -83,15 +83,8 @@ class PhyConjunctFilterExpr : public Expr {
         return true;
     }
 
-    void
-    SetNamespaceSkipFunc(SkipNamespaceFunc skip_namespace_func) override {
-        for (auto& input : inputs_) {
-            input->SetNamespaceSkipFunc(skip_namespace_func);
-        }
-    }
-
     std::string
-    ToString() const {
+    ToString() const override {
         if (!input_order_.empty()) {
             std::vector<std::string> inputs;
             inputs.reserve(input_order_.size());
@@ -128,6 +121,23 @@ class PhyConjunctFilterExpr : public Expr {
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
         return std::nullopt;
+    }
+
+    bool
+    CanExecuteAllAtOnce() const override {
+        for (const auto& input : inputs_) {
+            if (!input->CanExecuteAllAtOnce()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        for (auto& input : inputs_) {
+            input->SetExecuteAllAtOnce();
+        }
     }
 
     void

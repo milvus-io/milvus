@@ -110,9 +110,10 @@ func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int
 	idx := b.idx.Load()
 	if idx%b.checkWorkloadRequestNum != 0 {
 		for i := 0; i < len(availableNodes); i++ {
-			targetNode = availableNodes[int(idx)%len(availableNodes)]
-			targetMetrics, ok := b.metricsMap.Get(targetNode)
+			node := availableNodes[(int(idx)+i)%len(availableNodes)]
+			targetMetrics, ok := b.metricsMap.Get(node)
 			if !ok || !targetMetrics.unavailable.Load() {
+				targetNode = node
 				break
 			}
 		}
@@ -156,7 +157,7 @@ func (b *LookAsideBalancer) SelectNode(ctx context.Context, availableNodes []int
 		}
 	}
 
-	if float64(maxScore-minScore)/float64(minScore) <= b.workloadToleranceFactor {
+	if minScore <= 0 || float64(maxScore-minScore)/float64(minScore) <= b.workloadToleranceFactor {
 		// if all query node has nearly same workload, just fall back to round_robin
 		b.idx.Inc()
 	}

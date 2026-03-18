@@ -141,6 +141,10 @@ type SnapshotData struct {
 	// IndexIDs is a pre-computed list of index IDs for fast reload.
 	// Similar purpose as SegmentIDs for optimizing startup performance.
 	IndexIDs []int64
+	// BuildIDs is a pre-computed list of index build IDs for precise GC protection.
+	// Each buildID uniquely identifies an index build task, enabling GC to check
+	// if specific index files are referenced by a snapshot without path parsing.
+	BuildIDs []int64
 }
 
 // =============================================================================
@@ -577,6 +581,7 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath str
 		Storagev2ManifestList: storagev2Manifests,
 		SegmentIds:            snapshot.SegmentIDs,
 		IndexIds:              snapshot.IndexIDs,
+		BuildIds:              snapshot.BuildIDs,
 	}
 
 	// Use protojson for serialization to correctly handle protobuf oneof fields
@@ -773,6 +778,7 @@ func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath stri
 		// Pre-computed ID lists available even without full segment loading
 		SegmentIDs: metadata.GetSegmentIds(),
 		IndexIDs:   metadata.GetIndexIds(),
+		BuildIDs:   metadata.GetBuildIds(),
 	}
 
 	return snapshotData, nil

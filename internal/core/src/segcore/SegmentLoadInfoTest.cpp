@@ -907,8 +907,6 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFieldsSkipAlreadyFilled) {
 
     // Verify fields were added to fields_to_fill_default
     EXPECT_FALSE(first_diff.fields_to_fill_default.empty());
-    size_t first_count = first_diff.fields_to_fill_default.size();
-
     // Second diff: first_new_info -> same proto (simulates reopen)
     // first_new_info should now have fields_filled_with_default_ populated
     SegmentLoadInfo second_new_info(proto, schema_);
@@ -1644,6 +1642,61 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffIndexReplaceMixed) {
     // Old index_id=1001 for field 101 should be dropped
     EXPECT_EQ(diff.indexes_to_drop.size(), 1);
     EXPECT_TRUE(diff.indexes_to_drop.count(FieldId(101)) > 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffIndexReplaceDropConflict) {
+    // Verify that when a field has both indexes_to_replace and indexes_to_drop,
+    // the drop should be skipped during ApplyLoadDiff to avoid dropping the
+    // just-loaded replacement index. ComputeDiff correctly produces both entries;
+    // ApplyLoadDiff filters the drop.
+
+    // Current: field 101 has index 1001
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_index = current_proto.add_index_infos();
+    cur_index->set_fieldid(101);
+    cur_index->set_indexid(1001);
+    cur_index->add_index_file_paths("/path/to/old_index");
+    auto* cur_param = cur_index->add_index_params();
+    cur_param->set_key("index_type");
+    cur_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    // New: field 101 has different index 2001 (replacement)
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_index = new_proto.add_index_infos();
+    new_index->set_fieldid(101);
+    new_index->set_indexid(2001);
+    new_index->add_index_file_paths("/path/to/new_index");
+    auto* new_param = new_index->add_index_params();
+    new_param->set_key("index_type");
+    new_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // ComputeDiff should produce BOTH replace and drop for field 101
+    EXPECT_TRUE(diff.indexes_to_replace.count(FieldId(101)) > 0);
+    EXPECT_TRUE(diff.indexes_to_drop.count(FieldId(101)) > 0);
+
+    // Verify the replacement has the correct new index_id
+    EXPECT_EQ(diff.indexes_to_replace[FieldId(101)][0].index_id, 2001);
+
+    // Simulate the ApplyLoadDiff filter: fields with replace should be skipped
+    // in the drop loop
+    std::vector<FieldId> actually_dropped;
+    for (auto field_id : diff.indexes_to_drop) {
+        if (diff.indexes_to_replace.count(field_id) > 0 ||
+            diff.indexes_to_load.count(field_id) > 0) {
+            continue;
+        }
+        actually_dropped.push_back(field_id);
+    }
+    // Field 101 has a replacement, so it should NOT be dropped
+    EXPECT_TRUE(actually_dropped.empty());
 }
 
 TEST_F(SegmentLoadInfoTest, ComputeDiffBinlogReplace) {

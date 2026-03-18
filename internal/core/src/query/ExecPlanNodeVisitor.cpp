@@ -299,7 +299,8 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     // Do task execution
     auto result = ExecuteTask(plan, query_context);
-    setupRetrieveResult(result, op_context, node, retrieve_result, segment);
+    setupRetrieveResult(
+        result, op_context, node, retrieve_result, segment, query_context);
 }
 
 void
@@ -308,8 +309,23 @@ ExecPlanNodeVisitor::setupRetrieveResult(
     const OpContext& op_context,
     const RetrievePlanNode& node,
     RetrieveResult& tmp_retrieve_result,
-    const segcore::SegmentInternalInterface* segment) {
+    const segcore::SegmentInternalInterface* segment,
+    std::shared_ptr<milvus::exec::QueryContext> query_context) {
     if (result == nullptr) {
+        // Return empty field_data arrays with correct schema (0 rows, N columns)
+        // to ensure result structure matches the expected output type.
+        auto output_type = node.plannodes_->output_type();
+        if (output_type && output_type->column_count() > 0) {
+            auto column_count = output_type->column_count();
+            tmp_retrieve_result.field_data_.resize(column_count);
+            for (size_t i = 0; i < column_count; i++) {
+                DataArray data_array;
+                auto col_type = output_type->column_type(i);
+                milvus::segcore::CreateScalarDataArray(
+                    data_array, 0, col_type, col_type, false);
+                tmp_retrieve_result.field_data_[i] = std::move(data_array);
+            }
+        }
         retrieve_result_opt_ = std::move(tmp_retrieve_result);
         return;
     }
@@ -321,11 +337,25 @@ ExecPlanNodeVisitor::setupRetrieveResult(
                "children inside row vector must be of column vector for now");
     tmp_retrieve_result.total_data_cnt_ = first_column->size();
     if (first_column->IsBitmap()) {
-        tracer::AutoSpan _("Find Limit Pk", tracer::GetRootSpan());
         BitsetTypeView view(first_column->GetRawData(), first_column->size());
-        auto results_pair = segment->find_first(node.limit_, view);
-        tmp_retrieve_result.result_offsets_ = std::move(results_pair.first);
-        tmp_retrieve_result.has_more_result = results_pair.second;
+        if (query_context->bitset_is_element_level()) {
+            // Element-level query: bitset is element-level, need to convert to (doc_id, element_index)
+            tmp_retrieve_result.element_level_ = true;
+            tracer::AutoSpan _(
+                "Element Level Find", tracer::GetRootSpan(), true);
+            auto array_offsets = query_context->get_array_offsets();
+            auto [doc_offsets, element_indices, has_more] =
+                segment->find_first_n_element(
+                    node.limit_, view, array_offsets.get());
+            tmp_retrieve_result.result_offsets_ = std::move(doc_offsets);
+            tmp_retrieve_result.element_indices_ = std::move(element_indices);
+            tmp_retrieve_result.has_more_result = has_more;
+        } else {
+            tracer::AutoSpan _("Find Limit Pk", tracer::GetRootSpan());
+            auto results_pair = segment->find_first_n(node.limit_, view);
+            tmp_retrieve_result.result_offsets_ = std::move(results_pair.first);
+            tmp_retrieve_result.has_more_result = results_pair.second;
+        }
         retrieve_result_opt_ = std::move(tmp_retrieve_result);
     } else {
         // load data in the result vector into retrieve_result
@@ -369,8 +399,8 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // PreExecute: skip all calculation
     if (active_count == 0) {
-        search_result_opt_ = std::move(
-            empty_search_result(placeholder_group_->at(0).num_of_queries_));
+        search_result_opt_ =
+            empty_search_result(placeholder_group_->at(0).num_of_queries_);
         return;
     }
 

@@ -186,11 +186,10 @@ TEST(Indexing, BinaryBruteForce) {
     int64_t dim = 8192;
     Config search_params_ = {};
     auto metric_type = knowhere::metric::JACCARD;
-    auto result_count = topk * num_queries;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField(
         "vecbin", DataType::VECTOR_BINARY, dim, metric_type);
-    auto i64_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->AddDebugField("age", DataType::INT64);
     auto dataset = DataGen(schema, N, 10);
     auto bin_vec = dataset.get_col<uint8_t>(vec_fid);
     auto query_data = 1024 * dim / 8 + bin_vec.data();
@@ -428,27 +427,24 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     milvus_storage::ArrowFileSystemPtr fs_;
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    IndexTypeParameters,
-    IndexTest,
-    ::testing::Values(
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_IDMAP, knowhere::metric::L2),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFPQ, knowhere::metric::L2),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                  knowhere::metric::L2),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
-                  knowhere::metric::L2),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-                  knowhere::metric::JACCARD),
-        std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
-                  knowhere::metric::JACCARD),
-        std::pair(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
-                  knowhere::metric::IP),
-        std::pair(knowhere::IndexEnum::INDEX_SPARSE_WAND, knowhere::metric::IP),
+static const auto kIndexTestValues = ::testing::Values(
+    std::pair(knowhere::IndexEnum::INDEX_FAISS_IDMAP, knowhere::metric::L2),
+    std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFPQ, knowhere::metric::L2),
+    std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, knowhere::metric::L2),
+    std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, knowhere::metric::L2),
+    std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+              knowhere::metric::JACCARD),
+    std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
+              knowhere::metric::JACCARD),
+    std::pair(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+              knowhere::metric::IP),
+    std::pair(knowhere::IndexEnum::INDEX_SPARSE_WAND, knowhere::metric::IP),
 #ifdef BUILD_DISK_ANN
-        std::pair(knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2),
+    std::pair(knowhere::IndexEnum::INDEX_DISKANN, knowhere::metric::L2),
 #endif
-        std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)));
+    std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2));
+
+INSTANTIATE_TEST_SUITE_P(IndexTypeParameters, IndexTest, kIndexTestValues);
 
 TEST(Indexing, Iterator) {
     constexpr int N = 10240;

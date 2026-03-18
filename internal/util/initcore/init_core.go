@@ -173,6 +173,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	cRegion := C.CString(params.MinioCfg.Region.GetValue())
 	cSslCACert := C.CString(params.MinioCfg.SslCACert.GetValue())
 	cGcpCredentialJSON := C.CString(params.MinioCfg.GcpCredentialJSON.GetValue())
+	cTLSMinVersion := C.CString(tlsMinVersionForStorage(params.MinioCfg.SslTLSMinVersion.GetValue()))
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -185,6 +186,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cCloudProvider))
 	defer C.free(unsafe.Pointer(cSslCACert))
 	defer C.free(unsafe.Pointer(cGcpCredentialJSON))
+	defer C.free(unsafe.Pointer(cTLSMinVersion))
 	storageConfig := C.CStorageConfig{
 		address:                cAddress,
 		bucket_name:            cBucketName,
@@ -204,6 +206,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		gcp_credential_json:    cGcpCredentialJSON,
 		use_custom_part_upload: true,
 		max_connections:        C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
+		tls_min_version:        cTLSMinVersion,
 	}
 
 	status := C.InitRemoteArrowFileSystemSingleton(storageConfig)
@@ -228,6 +231,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cRegion := C.CString(params.MinioCfg.Region.GetValue())
 	cSslCACert := C.CString(params.MinioCfg.SslCACert.GetValue())
 	cGcpCredentialJSON := C.CString(params.MinioCfg.GcpCredentialJSON.GetValue())
+	cTLSMinVersion := C.CString(tlsMinVersionForStorage(params.MinioCfg.SslTLSMinVersion.GetValue()))
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -240,6 +244,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cCloudProvider))
 	defer C.free(unsafe.Pointer(cSslCACert))
 	defer C.free(unsafe.Pointer(cGcpCredentialJSON))
+	defer C.free(unsafe.Pointer(cTLSMinVersion))
 	storageConfig := C.CStorageConfig{
 		address:             cAddress,
 		bucket_name:         cBucketName,
@@ -258,6 +263,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		requestTimeoutMs:    C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
 		gcp_credential_json: cGcpCredentialJSON,
 		max_connections:     C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
+		tls_min_version:     cTLSMinVersion,
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)
@@ -293,6 +299,8 @@ func ConvertCacheWarmupPolicy(policy string) (C.CacheWarmupPolicy, error) {
 	switch policy {
 	case "sync":
 		return C.CacheWarmupPolicy_Sync, nil
+	case "async":
+		return C.CacheWarmupPolicy_Async, nil
 	case "disable":
 		return C.CacheWarmupPolicy_Disable, nil
 	default:
@@ -378,6 +386,8 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	diskPath := C.CString(params.LocalStorageCfg.Path.GetValue())
 	defer C.free(unsafe.Pointer(diskPath))
 
+	prefetchPoolThreads := C.uint32_t(hardware.GetCPUNum() * params.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt())
+
 	C.ConfigureTieredStorage(scalarFieldCacheWarmupPolicy,
 		vectorFieldCacheWarmupPolicy,
 		scalarIndexCacheWarmupPolicy,
@@ -387,7 +397,8 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 		storageUsageTrackingEnabled,
 		evictionEnabled, cacheTouchWindowMs,
 		backgroundEvictionEnabled, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
-		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath, loadingTimeoutMs)
+		overloadedMemoryThresholdPercentage, loadingResourceFactor, maxDiskUsagePercentage, diskPath, loadingTimeoutMs,
+		prefetchPoolThreads)
 
 	tieredEvictableMemoryCacheRatio := params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
 	tieredEvictableDiskCacheRatio := params.QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
@@ -652,6 +663,17 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, finalMsg)
 	log.Warn(logMsg)
 	return errors.New(finalMsg)
+}
+
+// tlsMinVersionForStorage converts minio config's TLS min version value
+// to the format expected by milvus-storage. "default" and "" map to ""
+// (empty string = system/library default). Other values like "1.0", "1.1",
+// "1.2", "1.3" pass through as-is.
+func tlsMinVersionForStorage(v string) string {
+	if v == "" || v == "default" {
+		return ""
+	}
+	return v
 }
 
 func serializeHeaders(headerstr string) string {

@@ -46,12 +46,12 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
     void
     SetUp() override {
         schema_ = CreateTestSchema();
-        base_path_ = TestLocalPath + "/manifest_translator_test/";
+        base_path_ = "manifest_translator_test";
         mmap_dir_ = TestMmapPath + "/manifest_translator_mmap/";
         std::filesystem::create_directories(mmap_dir_);
 
         test_data_ = std::make_unique<milvus::test::V3SegmentTestData>(
-            schema_, n_batch_, per_batch_, dim_, base_path_);
+            schema_, n_batch_, per_batch_, dim_, TestLocalPath, base_path_);
     }
 
  protected:

@@ -44,7 +44,7 @@ class PhyMvccNode : public Operator {
     }
 
     void
-    AddInput(RowVectorPtr& input);
+    AddInput(RowVectorPtr& input) override;
 
     RowVectorPtr
     GetOutput() override;

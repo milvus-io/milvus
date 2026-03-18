@@ -211,6 +211,10 @@ message RetrieveRequest {
   uint64 entity_ttl_physical_time = 23;
 }
 
+// Element indices for element-level query results
+message ElementIndices {
+  repeated int32 indices = 1;
+}
 
 message RetrieveResults {
   common.MsgBase base = 1;
@@ -228,6 +232,10 @@ message RetrieveResults {
   bool has_more_result = 15;
   int64 scanned_remote_bytes = 16;
   int64 scanned_total_bytes = 17;
+
+   // Element-level query support
+  bool element_level = 18;
+  repeated ElementIndices element_indices = 19;
 }
 
 message LoadIndex {

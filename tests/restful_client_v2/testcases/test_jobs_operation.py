@@ -875,6 +875,7 @@ class TestCreateImportJob(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.skip(reason="default storage is v3, cannot use collection to create v2 import")
     def test_job_import_binlog_file_type(self, nb, dim, insert_round, auto_id,
                                                       is_partition_key, enable_dynamic_schema):
         """

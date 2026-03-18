@@ -42,14 +42,13 @@ type ImportChecker interface {
 }
 
 type importChecker struct {
-	ctx                 context.Context
-	meta                *meta
-	broker              broker.Broker
-	alloc               allocator.Allocator
-	importMeta          ImportMeta
-	ci                  CompactionInspector
-	handler             Handler
-	l0CompactionTrigger TriggerManager
+	ctx        context.Context
+	meta       *meta
+	broker     broker.Broker
+	alloc      allocator.Allocator
+	importMeta ImportMeta
+	ci         CompactionInspector
+	handler    Handler
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -62,18 +61,16 @@ func NewImportChecker(ctx context.Context,
 	importMeta ImportMeta,
 	ci CompactionInspector,
 	handler Handler,
-	l0CompactionTrigger TriggerManager,
 ) ImportChecker {
 	return &importChecker{
-		ctx:                 ctx,
-		meta:                meta,
-		broker:              broker,
-		alloc:               alloc,
-		importMeta:          importMeta,
-		ci:                  ci,
-		l0CompactionTrigger: l0CompactionTrigger,
-		handler:             handler,
-		closeChan:           make(chan struct{}),
+		ctx:        ctx,
+		meta:       meta,
+		broker:     broker,
+		alloc:      alloc,
+		importMeta: importMeta,
+		ci:         ci,
+		handler:    handler,
+		closeChan:  make(chan struct{}),
 	}
 }
 
@@ -430,18 +427,6 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageBuildIndex).Observe(float64(buildIndexDuration.Milliseconds()))
 	log.Info("import job build index done", zap.Duration("jobTimeCost/buildIndex", buildIndexDuration))
 
-	// wait l0 segment import and block l0 compaction
-	log.Info("start to pause l0 segment compacting", zap.Int64("jobID", job.GetJobID()))
-	<-c.l0CompactionTrigger.GetPauseCompactionChan(job.GetJobID(), job.GetCollectionID())
-	log.Info("l0 segment compacting paused", zap.Int64("jobID", job.GetJobID()))
-
-	if c.waitL0ImortTaskDone(job) {
-		return
-	}
-	waitL0ImportDuration := job.GetTR().RecordSpan()
-	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageWaitL0Import).Observe(float64(buildIndexDuration.Milliseconds()))
-	log.Info("import job l0 import done", zap.Duration("jobTimeCost/l0Import", waitL0ImportDuration))
-
 	if c.unsetSegmentImporting(originSegmentIDs, statsSegmentIDs) {
 		return
 	}
@@ -454,25 +439,9 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	}
 	totalDuration := job.GetTR().ElapseSpan()
 	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
-	<-c.l0CompactionTrigger.GetResumeCompactionChan(job.GetJobID(), job.GetCollectionID())
 
 	LogResultSegmentsInfo(job.GetJobID(), c.meta, targetSegmentIDs)
 	log.Info("import job all completed", zap.Duration("jobTimeCost/total", totalDuration))
-}
-
-func (c *importChecker) waitL0ImortTaskDone(job ImportJob) bool {
-	// wait all lo import tasks to be completed
-	l0ImportTasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()), WithL0CompactionSource())
-	for _, t := range l0ImportTasks {
-		if t.GetState() != datapb.ImportTaskStateV2_Completed {
-			log.Info("waiting for l0 import task...",
-				zap.Int64s("taskIDs", lo.Map(l0ImportTasks, func(t ImportTask, _ int) int64 {
-					return t.GetTaskID()
-				})))
-			return true
-		}
-	}
-	return false
 }
 
 // unsetSegmentImporting unsets the isImporting flag for segments.

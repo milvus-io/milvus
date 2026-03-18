@@ -61,7 +61,6 @@
 #include "storage/FileWriter.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
-#include "storage/RemoteInputStream.h"
 #include "storage/RemoteOutputStream.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
@@ -101,7 +100,7 @@ DiskFileManagerImpl::GetRemoteIndexPath(const std::string& file_name,
 
 std::string
 DiskFileManagerImpl::GetRemoteIndexPathV2(const std::string& file_name) const {
-    std::string remote_prefix = GetRemoteIndexFilePrefixV2();
+    std::string remote_prefix = GetRemoteIndexObjectPrefixV2();
     return remote_prefix + "/" + file_name;
 }
 
@@ -196,42 +195,6 @@ DiskFileManagerImpl::AddFileInternal(
 
     return true;
 }  // namespace knowhere
-
-// Opens an input stream with fs_
-// note that `fs_` must not be nullptr.
-std::shared_ptr<InputStream>
-DiskFileManagerImpl::OpenInputStream(const std::string& filename) {
-    auto local_file_name = GetFileName(filename);
-    auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
-
-    auto fs = fs_;
-    AssertInfo(fs, "fs is nullptr");
-
-    auto remote_file = fs->OpenInputFile(remote_file_path);
-    AssertInfo(remote_file.ok(), "failed to open remote file");
-    return std::static_pointer_cast<milvus::InputStream>(
-        std::make_shared<milvus::storage::RemoteInputStream>(
-            std::move(remote_file.ValueOrDie())));
-}
-
-// Opens an output stream with fs_
-// note that `fs_` must not be nullptr.
-std::shared_ptr<OutputStream>
-DiskFileManagerImpl::OpenOutputStream(const std::string& filename) {
-    auto local_file_name = GetFileName(filename);
-    auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
-
-    auto fs = fs_;
-    AssertInfo(fs, "fs is nullptr");
-
-    auto remote_stream = fs->OpenOutputStream(remote_file_path);
-    AssertInfo(remote_stream.ok(),
-               "failed to open remote stream, reason: {}",
-               remote_stream.status().ToString());
-
-    return std::make_shared<milvus::storage::RemoteOutputStream>(
-        std::move(remote_stream.ValueOrDie()));
-}
 
 bool
 DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
@@ -506,7 +469,7 @@ DiskFileManagerImpl::CacheRawDataToDisk(const Config& config) {
     auto storage_version =
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
-    if (storage_version == STORAGE_V2) {
+    if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
         return cache_raw_data_to_disk_storage_v2<DataType>(config);
     }
     return cache_raw_data_to_disk_internal<DataType>(config);
@@ -521,9 +484,6 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
                "insert file paths is empty when build index");
     auto remote_files = insert_files.value();
     SortByPath(remote_files);
-
-    auto segment_id = GetFieldDataMeta().segment_id;
-    auto field_id = GetFieldDataMeta().field_id;
 
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
@@ -1081,7 +1041,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
     }
 
     std::vector<std::vector<std::string>> remote_files_storage_v2;
-    if (storage_version == STORAGE_V2) {
+    if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
         auto segment_insert_files =
             index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
                 config, SEGMENT_INSERT_FILES_KEY);
@@ -1123,7 +1083,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
 
         std::vector<FieldDataPtr> field_datas;
         // fetch scalar data from storage v2
-        if (storage_version == STORAGE_V2) {
+        if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
             field_datas = GetFieldDatasFromStorageV2(remote_files_storage_v2,
                                                      field_id,
                                                      field_type,
@@ -1360,10 +1320,5 @@ template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<sparse_u32_f32>(const Config& config);
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<int8_t>(const Config& config);
-
-std::string
-DiskFileManagerImpl::GetRemoteIndexFilePrefixV2() const {
-    return FileManagerImpl::GetRemoteIndexFilePrefixV2();
-}
 
 }  // namespace milvus::storage

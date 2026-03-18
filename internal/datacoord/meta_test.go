@@ -1572,7 +1572,7 @@ func TestUpdateManifestVersion(t *testing.T) {
 		// Verify the manifest path was updated
 		seg := pack.Get(1)
 		assert.NotNil(t, seg)
-		basePath, version, err := packed.UnmarshalManfestPath(seg.ManifestPath)
+		basePath, version, err := packed.UnmarshalManifestPath(seg.ManifestPath)
 		assert.NoError(t, err)
 		assert.Equal(t, "/data/segments/1", basePath)
 		assert.Equal(t, int64(10), version)
@@ -1599,7 +1599,7 @@ func TestUpdateManifestVersion(t *testing.T) {
 
 		updated := meta.GetHealthySegment(context.TODO(), 1)
 		assert.NotNil(t, updated)
-		basePath, version, err := packed.UnmarshalManfestPath(updated.ManifestPath)
+		basePath, version, err := packed.UnmarshalManifestPath(updated.ManifestPath)
 		assert.NoError(t, err)
 		assert.Equal(t, "/data/segments/1", basePath)
 		assert.Equal(t, int64(5), version)

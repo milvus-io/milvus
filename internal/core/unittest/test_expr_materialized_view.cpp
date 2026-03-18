@@ -265,7 +265,8 @@ std::unique_ptr<milvus::segcore::ScopedSchemaHandle>
 // Test plan without expr
 // Should return default values
 TEST_F(ExprMaterializedViewTest, TestMvNoExpr) {
-    for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
+    for ([[maybe_unused]] const auto& data_type :
+         GetNumericAndVarcharScalarDataTypes()) {
         for (const auto& mv_involved : {true, false}) {
             // Empty expression means no predicate
             auto plan = CreatePlan("", mv_involved);

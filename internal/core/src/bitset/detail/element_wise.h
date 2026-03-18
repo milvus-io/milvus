@@ -93,8 +93,6 @@ struct ElementWiseBitsetPolicy {
 
         if (start_element == end_element) {
             // read from 1 element only
-            const data_type m1 = get_shift_mask_end(start_shift);
-            const data_type m2 = get_shift_mask_begin(end_shift + 1);
             const data_type mask = get_shift_mask_end(start_shift) &
                                    get_shift_mask_begin(end_shift + 1);
 
@@ -136,9 +134,6 @@ struct ElementWiseBitsetPolicy {
 
         if (start_element == end_element) {
             // write into a single element
-
-            const data_type m1 = get_shift_mask_end(start_shift);
-            const data_type m2 = get_shift_mask_begin(end_shift + 1);
             const data_type mask = get_shift_mask_end(start_shift) &
                                    get_shift_mask_begin(end_shift + 1);
 

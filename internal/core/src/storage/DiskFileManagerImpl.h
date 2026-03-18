@@ -52,34 +52,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
     bool
     RemoveFile(const std::string& filename) noexcept override;
 
-    /**
-    * @brief Opens an output stream for provided filename
-    * 
-    *  This function utilizes the arrow file system to open an output stream for the provided filename.
-    * 
-    * @param filename the filename to open
-    * @return std::shared_ptr<OutputStream> a shared pointer to the output stream
-    * @throws milvus::SegcoreError
-    * 
-    * @note the internal `fs_` must be initialized to use this API.
-    */
-    std::shared_ptr<InputStream>
-    OpenInputStream(const std::string& filename) override;
-
-    /**
-    * @brief Opens an output stream for provided filename
-    * 
-    *  This function utilizes the arrow file system to open an output stream for the provided filename.
-    * 
-    * @param filename the filename to open
-    * @return std::shared_ptr<OutputStream> a shared pointer to the output stream
-    * @throws milvus::SegcoreError if fs_ is nullptr
-    * 
-    * @note the internal `fs_` must be initialized to use this API.
-    */
-    std::shared_ptr<OutputStream>
-    OpenOutputStream(const std::string& filename) override;
-
  public:
     bool
     AddTextLog(const std::string& filename) noexcept;
@@ -227,9 +199,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     std::string
     GetFileName(const std::string& localfile);
-
-    std::string
-    GetRemoteIndexFilePrefixV2() const override;
 
  private:
     int64_t

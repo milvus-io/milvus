@@ -1287,7 +1287,7 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
-		basePath, currentVer, err := packed.UnmarshalManfestPath(segment.ManifestPath)
+		basePath, currentVer, err := packed.UnmarshalManifestPath(segment.ManifestPath)
 		if err != nil {
 			log.Ctx(context.TODO()).Warn("meta update: update manifest version failed - unmarshal error",
 				zap.Int64("segmentID", segmentID), zap.Error(err))
@@ -1967,9 +1967,10 @@ func (m *meta) completeMixCompactionMutation(
 				DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 					return info.GetDmlPosition()
 				})),
-				IsSorted:       compactToSegment.GetIsSorted(),
-				ManifestPath:   compactToSegment.GetManifest(),
-				ExpirQuantiles: compactToSegment.GetExpirQuantiles(),
+				IsSorted:            compactToSegment.GetIsSorted(),
+				ManifestPath:        compactToSegment.GetManifest(),
+				IsSortedByNamespace: compactToSegment.GetIsSortedByNamespace(),
+				ExpirQuantiles:      compactToSegment.GetExpirQuantiles(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -2473,9 +2474,10 @@ func (m *meta) completeSortCompactionMutation(
 		Bm25Statslogs:             resultSegment.GetBm25Logs(),
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{compactFromSegID},
-		IsSorted:                  true,
+		IsSorted:                  resultSegment.GetIsSorted(),
 		ManifestPath:              resultSegment.GetManifest(),
 		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
+		IsSortedByNamespace:       resultSegment.GetIsSortedByNamespace(),
 	}
 
 	segment := NewSegmentInfo(segmentInfo)

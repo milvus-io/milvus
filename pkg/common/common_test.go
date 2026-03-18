@@ -341,11 +341,11 @@ func TestWarmupPolicy(t *testing.T) {
 		// Valid values
 		assert.NoError(t, ValidateWarmupPolicy(WarmupSync))
 		assert.NoError(t, ValidateWarmupPolicy(WarmupDisable))
+		assert.NoError(t, ValidateWarmupPolicy(WarmupAsync))
 
 		// Invalid values
 		assert.Error(t, ValidateWarmupPolicy("invalid"))
 		assert.Error(t, ValidateWarmupPolicy(""))
-		assert.Error(t, ValidateWarmupPolicy("async"))
 	})
 
 	t.Run("IsWarmupKey", func(t *testing.T) {
@@ -392,6 +392,50 @@ func TestWarmupPolicy(t *testing.T) {
 		assert.False(t, IsCollectionWarmupKey("warmup.invalid"))
 		assert.False(t, IsCollectionWarmupKey("other_key"))
 		assert.False(t, IsCollectionWarmupKey(""))
+	})
+}
+
+func TestIsBigTopKOptimizationEnabled(t *testing.T) {
+	t.Run("returns true when enabled", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: BigTopKOptimizationEnabledKey, Value: "true"},
+		}
+		enabled, err := IsBigTopKOptimizationEnabled(kvs...)
+		assert.NoError(t, err)
+		assert.True(t, enabled)
+	})
+
+	t.Run("returns false when disabled", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: BigTopKOptimizationEnabledKey, Value: "false"},
+		}
+		enabled, err := IsBigTopKOptimizationEnabled(kvs...)
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+	})
+
+	t.Run("returns false when not present", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: "other.key", Value: "true"},
+		}
+		enabled, err := IsBigTopKOptimizationEnabled(kvs...)
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+	})
+
+	t.Run("returns false for empty kvs", func(t *testing.T) {
+		enabled, err := IsBigTopKOptimizationEnabled()
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+	})
+
+	t.Run("returns false for invalid value", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: BigTopKOptimizationEnabledKey, Value: "invalid"},
+		}
+		enabled, err := IsBigTopKOptimizationEnabled(kvs...)
+		assert.Error(t, err)
+		assert.False(t, enabled)
 	})
 }
 

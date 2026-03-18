@@ -36,29 +36,23 @@ class MemFileManagerImpl : public FileManagerImpl {
     explicit MemFileManagerImpl(const FileManagerContext& fileManagerContext);
 
     virtual bool
-    LoadFile(const std::string& filename) noexcept;
+    LoadFile(const std::string& filename) noexcept override;
 
     virtual bool
-    AddFile(const std::string& filename /* unused */) noexcept;
+    AddFile(const std::string& filename /* unused */) noexcept override;
 
     virtual std::optional<bool>
-    IsExisted(const std::string& filename) noexcept;
+    IsExisted(const std::string& filename) noexcept override;
 
     virtual bool
-    RemoveFile(const std::string& filename) noexcept;
+    RemoveFile(const std::string& filename) noexcept override;
 
     virtual bool
     AddFileMeta(const FileMeta& file_meta) override;
 
-    virtual std::shared_ptr<InputStream>
-    OpenInputStream(const std::string& filename) override;
-
-    virtual std::shared_ptr<OutputStream>
-    OpenOutputStream(const std::string& filename) override;
-
  public:
     virtual std::string
-    GetName() const {
+    GetName() const override {
         return "MemIndexFileManagerImpl";
     }
 

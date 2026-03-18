@@ -117,6 +117,7 @@ class Task : public std::enable_shared_from_this<Task> {
         if (consumer_supplier_) {
             return false;
         }
+        return true;
     }
 
     RowVectorPtr

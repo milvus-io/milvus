@@ -191,17 +191,15 @@ namespace exec {
                real_batch_size);                                             \
     return res_vec;
 
-bool
-PhyGISFunctionFilterExpr::CanUseIndex(
-    proto::plan::GISFunctionFilterExpr_GISOp op) const {
-    if (!SegmentExpr::CanUseIndex()) {
-        return false;
+void
+PhyGISFunctionFilterExpr::DetermineExecPath() {
+    SegmentExpr::DetermineExecPath();
+    if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
     }
-    switch (op) {
-        case proto::plan::GISFunctionFilterExpr_GISOp_STIsValid:
-            return false;
-        default:
-            return true;
+    // STIsValid operation cannot use index
+    if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_STIsValid) {
+        exec_path_ = ExprExecPath::RawData;
     }
 }
 
@@ -210,7 +208,7 @@ PhyGISFunctionFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     AssertInfo(expr_->column_.data_type_ == DataType::GEOMETRY,
                "unsupported data type: {}",
                expr_->column_.data_type_);
-    if (CanUseIndex(expr_->op_)) {
+    if (exec_path_ == ExprExecPath::ScalarIndex) {
         result = EvalForIndexSegment();
     } else {
         result = EvalForDataSegment();
@@ -345,7 +343,7 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
         default: {
             ThrowInfo(NotImplemented,
                       "internal error: unknown GIS op : {}",
-                      expr_->op_);
+                      static_cast<int>(expr_->op_));
         }
     }
     return res_vec;
@@ -455,7 +453,9 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                 // Distance-based operation - no prepared version
                 return left.dwithin(query_geometry, expr_->distance_);
             default:
-                ThrowInfo(NotImplemented, "unknown GIS op : {}", expr_->op_);
+                ThrowInfo(NotImplemented,
+                          "unknown GIS op : {}",
+                          static_cast<int>(expr_->op_));
         }
     };
 
@@ -504,7 +504,6 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
     if (cached_index_chunk_res_ == nullptr) {
         // Reuse segment-level coarse cache directly
         auto& coarse = coarse_global_;
-        auto& chunk_valid = coarse_valid_global_;
         // Exact refinement with lambda functions for code reuse
         TargetBitmap refined(coarse.size());
 

@@ -32,6 +32,12 @@ class ChunkedColumnInterface {
     ManualEvictCache() const {
     }
 
+    // Cancel any pending async warmup for this column's cache slot.
+    // Default implementation does nothing.
+    virtual void
+    CancelWarmup() {
+    }
+
     // Get raw data pointer of a specific chunk
     virtual cachinglayer::PinWrapper<const char*>
     DataOfChunk(milvus::OpContext* op_ctx, int chunk_id) const = 0;

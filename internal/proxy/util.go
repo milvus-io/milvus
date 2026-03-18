@@ -178,7 +178,7 @@ func validateRunAnalyzer(req *milvuspb.RunAnalyzerRequest) error {
 	return nil
 }
 
-func validateMaxQueryResultWindow(offset int64, limit int64) error {
+func validateMaxQueryResultWindow(offset int64, limit int64, bigTopKEnabled bool) error {
 	if offset < 0 {
 		return fmt.Errorf("%s [%d] is invalid, should be gte than 0", OffsetKey, offset)
 	}
@@ -188,14 +188,20 @@ func validateMaxQueryResultWindow(offset int64, limit int64) error {
 
 	depth := offset + limit
 	maxQueryResultWindow := Params.QuotaConfig.MaxQueryResultWindow.GetAsInt64()
+	if bigTopKEnabled {
+		maxQueryResultWindow = Params.QuotaConfig.BigMaxQueryResultWindow.GetAsInt64()
+	}
 	if depth <= 0 || depth > maxQueryResultWindow {
 		return fmt.Errorf("(offset+limit) should be in range [1, %d], but got %d", maxQueryResultWindow, depth)
 	}
 	return nil
 }
 
-func validateLimit(limit int64) error {
+func validateLimit(limit int64, bigTopKEnabled bool) error {
 	topKLimit := Params.QuotaConfig.TopKLimit.GetAsInt64()
+	if bigTopKEnabled {
+		topKLimit = Params.QuotaConfig.BigTopKLimit.GetAsInt64()
+	}
 	if limit <= 0 || limit > topKLimit {
 		return fmt.Errorf("it should be in range [1, %d], but got %d", topKLimit, limit)
 	}
@@ -1184,6 +1190,10 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 }
 
 func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
+	validData := make([]bool, len(data))
+	for i := range validData {
+		validData[i] = true
+	}
 	return &schemapb.FieldData{
 		FieldName: common.MetaFieldName,
 		Type:      schemapb.DataType_JSON,
@@ -1197,6 +1207,7 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 			},
 		},
 		IsDynamic: true,
+		ValidData: validData,
 	}
 }
 
@@ -2487,11 +2498,7 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 	if err != nil {
 		return err
 	}
-	namespaceEnabeld, _, err := common.ParseNamespaceProp(schema.Properties...)
-	if err != nil {
-		return err
-	}
-	if !namespaceEnabeld {
+	if !schema.GetEnableNamespace() {
 		return nil
 	}
 
@@ -2501,10 +2508,28 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 		return fmt.Errorf("namespace field not found")
 	}
 
-	// check namespace field data is already set
+	// If namespace field data is already present, validate it instead of rejecting outright.
 	for _, fieldData := range insertMsg.FieldsData {
 		if fieldData.FieldId == namespaceField.FieldID {
-			return fmt.Errorf("namespace field data is already set by users")
+			ns := ""
+			if insertMsg.InsertRequest.Namespace != nil {
+				ns = *insertMsg.InsertRequest.Namespace
+			}
+			scalars := fieldData.GetScalars()
+			if scalars == nil {
+				return fmt.Errorf("invalid namespace field data layout")
+			}
+			strData := scalars.GetStringData()
+			if strData == nil {
+				return fmt.Errorf("invalid namespace field data layout")
+			}
+			for _, v := range strData.GetData() {
+				if v != ns {
+					return fmt.Errorf("namespace field value %q mismatches namespace %q", v, ns)
+				}
+			}
+			// Values are consistent with the namespace; nothing more to do.
+			return nil
 		}
 	}
 

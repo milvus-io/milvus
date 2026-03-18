@@ -67,16 +67,6 @@ GenerateData(const size_t size, const size_t cardinality) {
 }
 
 template <>
-std::vector<bool>
-GenerateData<bool>(const size_t size, const size_t cardinality) {
-    std::vector<bool> result;
-    for (size_t i = 0; i < size; ++i) {
-        result.push_back(rand() % 2 == 0);
-    }
-    return result;
-}
-
-template <>
 std::vector<std::string>
 GenerateData<std::string>(const size_t size, const size_t cardinality) {
     std::vector<std::string> result;

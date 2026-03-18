@@ -527,7 +527,7 @@ func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
 		// so the released segment won't cause error
 		seg.Release(ctx)
 		loadInfos[i].Deltalogs[0].Binlogs[0].TimestampTo--
-		err := suite.loader.LoadDeltaLogs(ctx, seg, loadInfos[i].GetDeltalogs())
+		err := suite.loader.LoadDeltaLogs(ctx, seg, loadInfos[i])
 		suite.NoError(err)
 	}
 }

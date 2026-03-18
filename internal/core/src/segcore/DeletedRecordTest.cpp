@@ -62,7 +62,6 @@ TEST(DeleteMVCC, common_case) {
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     ASSERT_EQ(c, segment->get_real_count());
     auto& insert_record = segment->get_insert_record();
-    auto segment_ptr = segment.get();
     DeletedRecord<true> delete_record(
         &insert_record,
         [&insert_record](
@@ -182,12 +181,11 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto N = 10;
-    uint64_t seg_id = 101;
     InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
@@ -307,12 +305,11 @@ TEST(DeleteMVCC, snapshot) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto N = 50000;
-    uint64_t seg_id = 101;
     InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
@@ -354,7 +351,7 @@ TEST(DeleteMVCC, snapshot) {
     delete_record.StreamPush(delete_pk, delete_ts.data());
     ASSERT_EQ(DN, delete_record.size());
 
-    auto snapshots = std::move(delete_record.get_snapshots());
+    auto snapshots = delete_record.get_snapshots();
     ASSERT_EQ(3, snapshots.size());
     ASSERT_EQ(snapshots[2].second.count(), 30000);
 }
@@ -365,12 +362,11 @@ TEST(DeleteMVCC, insert_after_snapshot) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto N = 11000;
-    uint64_t seg_id = 101;
     InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
@@ -414,7 +410,7 @@ TEST(DeleteMVCC, insert_after_snapshot) {
     delete_record.StreamPush(delete_pk, delete_ts.data());
     ASSERT_EQ(DN, delete_record.size());
 
-    auto snapshots = std::move(delete_record.get_snapshots());
+    auto snapshots = delete_record.get_snapshots();
     ASSERT_EQ(1, snapshots.size());
     ASSERT_EQ(snapshots[0].second.count(), 10000);
 
@@ -470,12 +466,11 @@ TEST(DeleteMVCC, perform) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto N = 1000000;
-    uint64_t seg_id = 101;
     InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
@@ -544,7 +539,7 @@ TEST(DeleteMVCC, QueryTimestampLowerThanFirstSnapshot) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
@@ -614,7 +609,7 @@ TEST(DeleteMVCC, LatestSnapshotOptimizationBenchmark) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
@@ -785,7 +780,7 @@ TEST(DeleteMVCC, SnapshotDumpProgress) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
+    schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);

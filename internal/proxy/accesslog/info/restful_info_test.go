@@ -50,7 +50,7 @@ func (s *RestfulAccessInfoSuite) SetupTest() {
 	s.info = &RestfulInfo{}
 	s.info.SetParams(
 		&gin.LogFormatterParams{
-			Keys: make(map[string]any),
+			Keys: make(map[any]any),
 		})
 }
 

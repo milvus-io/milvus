@@ -49,13 +49,14 @@ class PhyNullExpr : public SegmentExpr {
                       batch_size,
                       consistency_level),
           expr_(expr) {
+        DetermineExecPath();
     }
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
     std::string
-    ToString() const {
+    ToString() const override {
         return fmt::format("{}", expr_->ToString());
     }
 

@@ -25,6 +25,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 	"golang.org/x/sync/errgroup"
@@ -133,7 +134,7 @@ func TestOnEvent(t *testing.T) {
 
 	client := v3client.New(e.Server)
 
-	dir, _ := os.MkdirTemp("", "milvus")
+	dir := t.TempDir()
 	yamlFile := path.Join(dir, "milvus.yaml")
 	os.WriteFile(yamlFile, []byte("a.b: \"\""), 0o600)
 	mgr, _ := Init(WithEnvSource(formatKey),
@@ -237,7 +238,7 @@ func TestCachedConfig(t *testing.T) {
 	assert.NoError(t, err)
 	defer e.Close()
 
-	dir, _ := os.MkdirTemp("", "milvus")
+	dir := t.TempDir()
 	yamlFile := path.Join(dir, "milvus.yaml")
 	os.WriteFile(yamlFile, []byte("a.b: aaa"), 0o600)
 	mgr, _ := Init(WithEnvSource(formatKey),
@@ -255,9 +256,10 @@ func TestCachedConfig(t *testing.T) {
 		time.Sleep(time.Second)
 		_, exist := mgr.GetCachedValue("a.b")
 		assert.False(t, exist)
-		mgr.CASCachedValue("a.b", "aaa", "aaa")
+		ok := mgr.CASCachedValue("a.b", "aaa", "aaa")
+		require.True(t, ok)
 		val, exist := mgr.GetCachedValue("a.b")
-		assert.True(t, exist)
+		require.True(t, exist)
 		assert.Equal(t, "aaa", val.(string))
 
 		// after refresh, the cached value should be reset
@@ -278,7 +280,8 @@ func TestCachedConfig(t *testing.T) {
 	{
 		_, exist := mgr.GetCachedValue("c.d")
 		assert.False(t, exist)
-		mgr.CASCachedValue("cd", "", "xxx")
+		ok := mgr.CASCachedValue("cd", "", "xxx")
+		require.True(t, ok)
 		_, exist = mgr.GetCachedValue("cd")
 		assert.True(t, exist)
 

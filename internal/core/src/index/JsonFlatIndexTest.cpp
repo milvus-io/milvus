@@ -571,7 +571,7 @@ class JsonFlatIndexExprTest : public ::testing::Test {
         auto json_index_path = "";
 
         auto schema = std::make_shared<Schema>();
-        auto vec_fid = schema->AddDebugField(
+        schema->AddDebugField(
             "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
         auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
         json_fid_ = schema->AddDebugField("json", DataType::JSON, true);
@@ -587,13 +587,12 @@ class JsonFlatIndexExprTest : public ::testing::Test {
             json_fid_.get());
         file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
         file_manager_ctx.fieldDataMeta.field_id = json_fid_.get();
+        index::CreateIndexInfo json_index_info;
+        json_index_info.index_type = index::INVERTED_INDEX_TYPE;
+        json_index_info.json_cast_type = JsonCastType::FromString("JSON");
+        json_index_info.json_path = json_index_path;
         auto index = index::IndexFactory::GetInstance().CreateJsonIndex(
-            index::CreateIndexInfo{
-                .index_type = index::INVERTED_INDEX_TYPE,
-                .json_cast_type = JsonCastType::FromString("JSON"),
-                .json_path = json_index_path,
-            },
-            file_manager_ctx);
+            json_index_info, file_manager_ctx);
 
         json_index_ = std::unique_ptr<index::JsonFlatIndex>(
             static_cast<index::JsonFlatIndex*>(index.release()));

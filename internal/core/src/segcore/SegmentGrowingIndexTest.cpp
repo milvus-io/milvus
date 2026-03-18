@@ -57,7 +57,6 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
-namespace pb = milvus::proto;
 
 using Param = std::tuple<DataType,
                          /*index type*/ std::string,
@@ -192,7 +191,7 @@ TEST_P(GrowingIndexTest, Correctness) {
     auto dim = 4;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto random = schema->AddDebugField("random", DataType::DOUBLE);
+    schema->AddDebugField("random", DataType::DOUBLE);
     auto vec = schema->AddDebugField("embeddings", data_type, dim, metric_type);
     schema->set_primary_field_id(pk);
 
@@ -371,7 +370,6 @@ TEST_P(GrowingIndexTest, Correctness) {
 
 TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
     constexpr int N = 1024;
-    constexpr int TOPK = 100;
     constexpr int dim = 4;
     constexpr int add_cont = 5;
 
@@ -384,7 +382,7 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
 
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto random = schema->AddDebugField("random", DataType::DOUBLE);
+    schema->AddDebugField("random", DataType::DOUBLE);
     auto vec = schema->AddDebugField("embeddings", data_type, dim, metric_type);
     schema->set_primary_field_id(pk);
 
@@ -471,8 +469,8 @@ TEST_P(GrowingIndexTest, MissIndexMeta) {
     auto dim = 4;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto random = schema->AddDebugField("random", DataType::DOUBLE);
-    auto vec = schema->AddDebugField("embeddings", data_type, dim, metric_type);
+    schema->AddDebugField("random", DataType::DOUBLE);
+    schema->AddDebugField("embeddings", data_type, dim, metric_type);
     schema->set_primary_field_id(pk);
 
     auto& config = SegcoreConfig::default_config();
@@ -485,7 +483,7 @@ TEST_P(GrowingIndexTest, GetVector) {
     auto dim = 4;
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
-    auto random = schema->AddDebugField("random", DataType::DOUBLE);
+    schema->AddDebugField("random", DataType::DOUBLE);
     auto vec = schema->AddDebugField("embeddings", data_type, dim, metric_type);
     schema->set_primary_field_id(pk);
 

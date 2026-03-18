@@ -13,12 +13,12 @@
 #include <gtest/gtest.h>
 #include <stddef.h>
 #include <cstdint>
-#include <iostream>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -42,6 +42,7 @@
 #include "pb/schema.pb.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
+#include "query/PlanProto.h"
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -51,6 +52,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
+#include "common/Common.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -63,6 +65,16 @@ using ElementFilterSealedParam =
 class ElementFilterSealed
     : public ::testing::TestWithParam<ElementFilterSealedParam> {
  protected:
+    void
+    SetUp() override {
+        saved_batch_size_ = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+    }
+    void
+    TearDown() override {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size_);
+    }
+
     bool
     use_hints() const {
         return std::get<0>(GetParam());
@@ -106,6 +118,9 @@ class ElementFilterSealed
                 num_queries, dim, seed, true);
         }
     }
+
+ private:
+    int64_t saved_batch_size_;
 };
 
 TEST_P(ElementFilterSealed, RangeExpr) {
@@ -256,8 +271,8 @@ TEST_P(ElementFilterSealed, RangeExpr) {
     int topK = 5;
 
     // Step 5: Test with element-level filter
-    // Query: Search array elements, filter by element_value in (100, 400) and id % 2 == 0
-    {
+    // Query: Search array elements, filter by element_value in (100, 400)
+    for (bool with_predicate : {false, true}) {
         ScopedSchemaHandle handle(*schema);
 
         // Build search params with optional hints
@@ -265,11 +280,10 @@ TEST_P(ElementFilterSealed, RangeExpr) {
             with_hints ? R"({"ef": 50, "hints": "iterative_filter"})"
                        : R"({"ef": 50})";
 
-        // Expression: id % 2 == 0 && element_filter(structA, 400 > $[price_array] > 100)
-        // binary_range with lower_inclusive=false, upper_inclusive=false means: 100 < x < 400
+        std::string base_filter =
+            "element_filter(structA, 400 > $[price_array] > 100)";
         std::string expr =
-            "id % 2 == 0 && element_filter(structA, 400 > $[price_array] > "
-            "100)";
+            with_predicate ? "id % 2 == 0 && " + base_filter : base_filter;
 
         auto plan_bytes = handle.ParseSearch(
             expr, "structA[array_vec]", topK, metric, search_params, 3);
@@ -291,7 +305,8 @@ TEST_P(ElementFilterSealed, RangeExpr) {
         // Verify results
         ASSERT_NE(search_result, nullptr);
 
-        // In element-level mode, results should be element indices, not doc offsets
+        // In element-level mode, results should be element indices, not doc
+        // offsets
         ASSERT_TRUE(search_result->element_level_);
         ASSERT_FALSE(search_result->element_indices_.empty());
         // Also check seg_offsets_ which stores the doc IDs
@@ -306,14 +321,13 @@ TEST_P(ElementFilterSealed, RangeExpr) {
         for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
             int64_t doc_id = search_result->seg_offsets_[i];
             int32_t elem_idx = search_result->element_indices_[i];
-            float distance = search_result->distances_[i];
 
-            std::cout << "doc_id: " << doc_id << ", element_index: " << elem_idx
-                      << ", distance: " << distance << std::endl;
-
-            // Verify the doc_id satisfies the predicate (id % 2 == 0)
-            ASSERT_EQ(doc_id % 2, 0) << "Result doc_id " << doc_id
-                                     << " should satisfy (id % 2 == 0)";
+            // Verify the doc_id satisfies the predicate (id % 2 == 0) only
+            // when predicate is enabled
+            if (with_predicate) {
+                ASSERT_EQ(doc_id % 2, 0) << "Result doc_id " << doc_id
+                                         << " should satisfy (id % 2 == 0)";
+            }
 
             // Verify element value is in range (100, 400)
             // Element value = doc_id * array_len + elem_idx + 1
@@ -324,7 +338,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                 << "Element value " << element_value << " should be < 400";
         }
 
-        // Verify distances are sorted
+        // Verify distances are sorted (ascending for L2)
         for (size_t i = 1; i < search_result->distances_.size(); ++i) {
             ASSERT_LE(search_result->distances_[i - 1],
                       search_result->distances_[i])
@@ -481,8 +495,8 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
     int topK = 5;
 
     // Step 5: Test with element-level filter
-    // Query: Search array elements, filter by element_value > 10 and id % 2 == 0
-    {
+    // Query: Search array elements, filter by element_value > 10
+    for (bool with_predicate : {false, true}) {
         ScopedSchemaHandle handle(*schema);
 
         // Build search params with optional hints
@@ -490,9 +504,10 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
             with_hints ? R"({"ef": 50, "hints": "iterative_filter"})"
                        : R"({"ef": 50})";
 
-        // Expression: id % 2 == 0 && element_filter(structA, $[price_array] > 10)
+        std::string base_filter =
+            "element_filter(structA, $[price_array] > 10)";
         std::string expr =
-            "id % 2 == 0 && element_filter(structA, $[price_array] > 10)";
+            with_predicate ? "id % 2 == 0 && " + base_filter : base_filter;
 
         auto plan_bytes = handle.ParseSearch(
             expr, "structA[array_vec]", topK, metric, search_params, 3);
@@ -514,7 +529,8 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
         // Verify results
         ASSERT_NE(search_result, nullptr);
 
-        // In element-level mode, results should be element indices, not doc offsets
+        // In element-level mode, results should be element indices, not doc
+        // offsets
         ASSERT_TRUE(search_result->element_level_);
         ASSERT_FALSE(search_result->element_indices_.empty());
         ASSERT_FALSE(search_result->seg_offsets_.empty());
@@ -523,16 +539,6 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
 
         ASSERT_LE(search_result->element_indices_.size(),
                   static_cast<size_t>(topK * num_queries));
-
-        std::cout << "Element-level search returned ("
-                  << static_cast<int>(elem_type) << "):" << std::endl;
-        for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
-            std::cout << "doc_id: " << search_result->seg_offsets_[i]
-                      << ", element_index: "
-                      << search_result->element_indices_[i]
-                      << ", distance: " << search_result->distances_[i]
-                      << std::endl;
-        }
 
         // Verify distances are sorted
         for (size_t i = 1; i < search_result->distances_.size(); ++i) {
@@ -596,7 +602,7 @@ INSTANTIATE_TEST_SUITE_P(
         return name;
     });
 
-TEST(ElementFilter, GrowingSegmentArrayOffsetsGrowing) {
+TEST(ElementFilter, GrowingSegmentArrayOffsets) {
     int dim = 4;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
@@ -609,7 +615,7 @@ TEST(ElementFilter, GrowingSegmentArrayOffsetsGrowing) {
     auto int64_fid = schema->AddDebugField("id", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
 
-    size_t N = 500;
+    size_t N = 10000;
     int array_len = 3;
 
     auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
@@ -649,7 +655,7 @@ TEST(ElementFilter, GrowingSegmentArrayOffsetsGrowing) {
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
 
-    // Both fields should share the same ArrayOffsetsGrowing
+    // Both fields should share the same ArrayOffsets
     auto offsets_vec = growing_impl->GetArrayOffsets(vec_fid);
     auto offsets_int = growing_impl->GetArrayOffsets(int_array_fid);
     ASSERT_NE(offsets_vec, nullptr);
@@ -657,7 +663,7 @@ TEST(ElementFilter, GrowingSegmentArrayOffsetsGrowing) {
 
     // Should point to the same object (shared)
     ASSERT_EQ(offsets_vec, offsets_int)
-        << "Fields in same struct should share ArrayOffsetsGrowing";
+        << "Fields in same struct should share ArrayOffsets";
 
     // Verify counts
     ASSERT_EQ(offsets_vec->GetRowCount(), N)
@@ -680,7 +686,7 @@ TEST(ElementFilter, GrowingSegmentArrayOffsetsGrowing) {
 }
 
 TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
-    // Test out-of-order Insert handling in ArrayOffsetsGrowing
+    // Test out-of-order Insert handling in GrowingArrayOffsets
     int dim = 4;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
@@ -750,14 +756,15 @@ TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
     segment->Insert(
         25, 10, batch3.row_ids_.data(), batch3.timestamps_.data(), batch3.raw_);
 
-    // Verify ArrayOffsetsGrowing
+    // Verify ArrayOffsets
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
 
     auto offsets = growing_impl->GetArrayOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
 
-    // After inserting docs [0-19] (batch3 cached due to gap), committed count should be 20
+    // After inserting docs [0-19] (batch3 cached due to gap), committed count
+    // should be 20
     ASSERT_EQ(offsets->GetRowCount(), 20)
         << "Should have committed docs 0-19, batch3 cached";
     ASSERT_EQ(offsets->GetTotalElementCount(), 20 * array_len)
@@ -776,12 +783,278 @@ TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
     }
 }
 
+TEST(ElementFilter, MultiQueryCollectResults) {
+    // Test CollectResults with nq > 1 to cover per-query loop
+    auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    size_t N = 500;
+    int array_len = 3;
+
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Customize int_array data: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+
+            for (size_t row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+            break;
+        }
+    }
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Build and load vector index
+    auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
+    std::vector<float> vector_data(dim * N * array_len);
+    for (size_t i = 0; i < N; i++) {
+        const auto& float_vec = array_vec_values[i].float_vector().data();
+        for (int j = 0; j < array_len * dim; j++) {
+            vector_data[i * array_len * dim + j] = float_vec[j];
+        }
+    }
+    auto indexing = GenVecIndexing(N * array_len,
+                                   dim,
+                                   vector_data.data(),
+                                   knowhere::IndexEnum::INDEX_HNSW);
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.field_type = DataType::VECTOR_ARRAY;
+    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(load_index_info);
+
+    int topK = 5;
+    int num_queries = 3;
+
+    // Test with_predicate=false to exercise CollectResults with nq > 1
+    ScopedSchemaHandle handle(*schema);
+    std::string search_params = R"({"ef": 50, "hints": "iterative_filter"})";
+    std::string expr = "element_filter(structA, 400 > $[price_array] > 100)";
+
+    auto plan_bytes = handle.ParseSearch(
+        expr, "structA[array_vec]", topK, "L2", search_params, 3);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024, true);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+    ASSERT_NE(search_result, nullptr);
+    ASSERT_TRUE(search_result->element_level_);
+
+    // Result arrays should have nq * topK slots
+    ASSERT_EQ(search_result->seg_offsets_.size(), num_queries * topK);
+    ASSERT_EQ(search_result->distances_.size(), num_queries * topK);
+    ASSERT_EQ(search_result->element_indices_.size(), num_queries * topK);
+
+    // Verify each query's results independently
+    for (int q = 0; q < num_queries; q++) {
+        int base_idx = q * topK;
+
+        // Count valid results for this query
+        int valid_count = 0;
+        for (int i = 0; i < topK; i++) {
+            if (search_result->seg_offsets_[base_idx + i] !=
+                INVALID_SEG_OFFSET) {
+                valid_count++;
+            }
+        }
+        ASSERT_GT(valid_count, 0)
+            << "Query " << q << " should have at least one result";
+
+        // Verify distances are sorted within this query's range
+        for (int i = 1; i < valid_count; i++) {
+            ASSERT_LE(search_result->distances_[base_idx + i - 1],
+                      search_result->distances_[base_idx + i])
+                << "Query " << q << ": distances should be sorted";
+        }
+
+        // Verify filter correctness for this query
+        for (int i = 0; i < valid_count; i++) {
+            int64_t doc_id = search_result->seg_offsets_[base_idx + i];
+            int32_t elem_idx = search_result->element_indices_[base_idx + i];
+            int element_value = doc_id * array_len + elem_idx + 1;
+            ASSERT_GT(element_value, 100)
+                << "Query " << q << ": element value should be > 100";
+            ASSERT_LT(element_value, 400)
+                << "Query " << q << ": element value should be < 400";
+        }
+    }
+
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+}
+
+TEST(ElementFilter, CollectResultsWithCosineMetric) {
+    // Test CollectResults with large_is_better=true (COSINE metric)
+    auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::COSINE);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    size_t N = 500;
+    int array_len = 3;
+
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Customize int_array data: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+            for (size_t row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+            break;
+        }
+    }
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Build and load vector index with COSINE metric
+    auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
+    std::vector<float> vector_data(dim * N * array_len);
+    for (size_t i = 0; i < N; i++) {
+        const auto& float_vec = array_vec_values[i].float_vector().data();
+        for (int j = 0; j < array_len * dim; j++) {
+            vector_data[i * array_len * dim + j] = float_vec[j];
+        }
+    }
+    auto indexing = GenVecIndexing(N * array_len,
+                                   dim,
+                                   vector_data.data(),
+                                   knowhere::IndexEnum::INDEX_HNSW,
+                                   knowhere::metric::COSINE);
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::COSINE;
+    load_index_info.field_type = DataType::VECTOR_ARRAY;
+    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(load_index_info);
+
+    int topK = 5;
+
+    // with_predicate=false to exercise CollectResults path
+    ScopedSchemaHandle handle(*schema);
+    std::string search_params = R"({"ef": 50, "hints": "iterative_filter"})";
+    std::string expr = "element_filter(structA, 400 > $[price_array] > 100)";
+
+    auto plan_bytes = handle.ParseSearch(
+        expr, "structA[array_vec]", topK, "COSINE", search_params, 1);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto ph_group_raw = CreatePlaceholderGroup(1, dim, 1024, true);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+    ASSERT_NE(search_result, nullptr);
+    ASSERT_TRUE(search_result->element_level_);
+
+    // Count valid results
+    int valid_count = 0;
+    for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+        if (search_result->seg_offsets_[i] != INVALID_SEG_OFFSET) {
+            valid_count++;
+        }
+    }
+    ASSERT_GT(valid_count, 0);
+
+    // For COSINE (large_is_better), distances should be sorted descending
+    for (int i = 1; i < valid_count; i++) {
+        ASSERT_GE(search_result->distances_[i - 1],
+                  search_result->distances_[i])
+            << "COSINE distances should be sorted descending";
+    }
+
+    // Verify filter correctness
+    for (int i = 0; i < valid_count; i++) {
+        int64_t doc_id = search_result->seg_offsets_[i];
+        int32_t elem_idx = search_result->element_indices_[i];
+        int element_value = doc_id * array_len + elem_idx + 1;
+        ASSERT_GT(element_value, 100);
+        ASSERT_LT(element_value, 400);
+    }
+
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+}
+
 // Test parameter for Growing: <use_hints, element_type, metric_type, dim>
 using ElementFilterGrowingParam = std::tuple<bool, DataType, std::string, int>;
 
 class ElementFilterGrowing
     : public ::testing::TestWithParam<ElementFilterGrowingParam> {
  protected:
+    void
+    SetUp() override {
+        saved_batch_size_ = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+    }
+    void
+    TearDown() override {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size_);
+    }
+
     bool
     use_hints() const {
         return std::get<0>(GetParam());
@@ -821,6 +1094,9 @@ class ElementFilterGrowing
                 num_queries, dim, seed, true);
         }
     }
+
+ private:
+    int64_t saved_batch_size_;
 };
 
 TEST_P(ElementFilterGrowing, RangeExpr) {
@@ -877,7 +1153,7 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
 
-    // Verify ArrayOffsetsGrowing was built
+    // Verify ArrayOffsets was built
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
     auto offsets = growing_impl->GetArrayOffsets(vec_fid);
@@ -888,7 +1164,9 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
     int topK = 5;
 
     // Execute element-level search with iterative filter
-    {
+    // Query: Search array elements where price_array element in range
+    // (100, 400)
+    for (bool with_predicate : {false, true}) {
         ScopedSchemaHandle handle(*schema);
 
         // Build search params with optional hints
@@ -896,11 +1174,10 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
             with_hints ? R"({"ef": 50, "hints": "iterative_filter"})"
                        : R"({"ef": 50})";
 
-        // Expression: id % 2 == 0 && element_filter(structA, 400 > $[price_array] > 100)
-        // binary_range with lower_inclusive=false, upper_inclusive=false means: 100 < x < 400
+        std::string base_filter =
+            "element_filter(structA, 400 > $[price_array] > 100)";
         std::string expr =
-            "id % 2 == 0 && element_filter(structA, 400 > $[price_array] > "
-            "100)";
+            with_predicate ? "id % 2 == 0 && " + base_filter : base_filter;
 
         auto plan_bytes = handle.ParseSearch(
             expr, "structA[array_vec]", topK, metric, search_params, 3);
@@ -936,24 +1213,22 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                   static_cast<size_t>(topK * num_queries))
             << "Should not exceed topK results";
 
-        std::cout << "Growing segment element-level search ("
-                  << static_cast<int>(elem_type) << "):" << std::endl;
         for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
             int64_t doc_id = search_result->seg_offsets_[i];
             int32_t elem_idx = search_result->element_indices_[i];
-            float distance = search_result->distances_[i];
 
-            std::cout << "  [" << i << "] doc_id=" << doc_id
-                      << ", element_index=" << elem_idx
-                      << ", distance=" << distance << std::endl;
-
-            ASSERT_EQ(doc_id % 2, 0) << "Result doc_id " << doc_id
-                                     << " should satisfy (id % 2 == 0)";
+            // Verify the doc_id satisfies the predicate (id % 2 == 0) only
+            // when predicate is enabled
+            if (with_predicate) {
+                ASSERT_EQ(doc_id % 2, 0) << "Result doc_id " << doc_id
+                                         << " should satisfy (id % 2 == 0)";
+            }
 
             ASSERT_GE(elem_idx, 0) << "Element index should be >= 0";
             ASSERT_LT(elem_idx, array_len)
                 << "Element index should be < array_len";
 
+            // Verify element value is in range (100, 400)
             int element_value = doc_id * array_len + elem_idx + 1;
             ASSERT_GT(element_value, 100)
                 << "Element value " << element_value << " should be > 100";
@@ -1019,149 +1294,557 @@ INSTANTIATE_TEST_SUITE_P(
         return name;
     });
 
-// Unit tests for ArrayOffsetsGrowing
-TEST(ArrayOffsetsGrowing, PurePendingThenDrain) {
-    // Test: first insert goes entirely to pending, second insert triggers drain
-    ArrayOffsetsGrowing offsets;
+class ElementFilterRetrieve
+    : public ::testing::TestWithParam<std::tuple<bool, bool>> {
+ protected:
+    void
+    SetUp() override {
+        saved_batch_size_ = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+    }
+    void
+    TearDown() override {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size_);
+    }
 
-    // First insert: rows 2-4, all go to pending (committed_row_count_ = 0)
-    std::vector<int32_t> lens1 = {
-        3, 2, 4};  // row 2: 3 elems, row 3: 2 elems, row 4: 4 elems
-    offsets.Insert(2, lens1.data(), 3);
+    bool
+    is_sealed() const {
+        return std::get<0>(GetParam());
+    }
+    bool
+    use_predicate() const {
+        return std::get<1>(GetParam());
+    }
 
-    ASSERT_EQ(offsets.GetRowCount(), 0) << "No rows should be committed yet";
-    ASSERT_EQ(offsets.GetTotalElementCount(), 0)
-        << "No elements should exist yet";
+ private:
+    int64_t saved_batch_size_;
+};
 
-    // Second insert: rows 0-1, triggers drain of pending rows 2-4
-    std::vector<int32_t> lens2 = {2, 3};  // row 0: 2 elems, row 1: 3 elems
-    offsets.Insert(0, lens2.data(), 2);
+TEST_P(ElementFilterRetrieve, RangeExpr) {
+    bool with_sealed = is_sealed();
+    bool with_predicate = use_predicate();
 
-    ASSERT_EQ(offsets.GetRowCount(), 5) << "All 5 rows should be committed";
-    // Total elements: 2 + 3 + 3 + 2 + 4 = 14
-    ASSERT_EQ(offsets.GetTotalElementCount(), 14);
+    // Step 1: Prepare schema with array field
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
 
-    // Verify ElementIDToRowID mapping
-    // Row 0: elem 0-1, Row 1: elem 2-4, Row 2: elem 5-7, Row 3: elem 8-9, Row 4: elem 10-13
-    std::vector<std::pair<int32_t, int32_t>> expected = {
-        {0, 0},
-        {0, 1},  // row 0
-        {1, 0},
-        {1, 1},
-        {1, 2},  // row 1
-        {2, 0},
-        {2, 1},
-        {2, 2},  // row 2
-        {3, 0},
-        {3, 1},  // row 3
-        {4, 0},
-        {4, 1},
-        {4, 2},
-        {4, 3}  // row 4
-    };
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
 
-    for (int32_t elem_id = 0; elem_id < 14; ++elem_id) {
-        auto [row_id, elem_idx] = offsets.ElementIDToRowID(elem_id);
-        ASSERT_EQ(row_id, expected[elem_id].first)
-            << "elem_id " << elem_id << " should map to row "
-            << expected[elem_id].first;
-        ASSERT_EQ(elem_idx, expected[elem_id].second)
-            << "elem_id " << elem_id << " should have elem_idx "
-            << expected[elem_id].second;
+    size_t N = 10000;
+    int array_len = 3;
+
+    // Step 2: Generate test data
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Customize int_array data: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+
+            for (int row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+            break;
+        }
+    }
+
+    // Step 3: Create segment (sealed or growing)
+    std::shared_ptr<SegmentInterface> segment;
+    if (with_sealed) {
+        segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    } else {
+        auto growing = CreateGrowingSegment(schema, empty_index_meta);
+        growing->PreInsert(N);
+        growing->Insert(0,
+                        N,
+                        raw_data.row_ids_.data(),
+                        raw_data.timestamps_.data(),
+                        raw_data.raw_);
+        segment = std::move(growing);
+    }
+
+    // Step 4: Build retrieve plan with element-level filter
+    // Query: Retrieve docs where price_array element % 3 == 2
+    // Data: element_value = doc_id * 3 + elem_idx + 1
+    // When elem_idx=1: value = doc_id*3 + 2, so value % 3 == 2
+    // This ensures only elem_idx=1 matches for each doc
+    {
+        proto::plan::PlanNode plan_node;
+
+        // Set up query (not predicates at top level!)
+        auto* query = plan_node.mutable_query();
+        query->set_is_count(false);
+        query->set_limit(100);
+
+        // Build element filter expression under query.predicates
+        auto* expr = query->mutable_predicates();
+        auto* element_filter = expr->mutable_element_filter_expr();
+        element_filter->set_struct_name("structA");
+
+        // Element expression: price_array element % 3 == 2
+        auto* element_expr = element_filter->mutable_element_expr();
+        auto* arith_expr =
+            element_expr->mutable_binary_arith_op_eval_range_expr();
+
+        auto* column_info = arith_expr->mutable_column_info();
+        column_info->set_field_id(int_array_fid.get());
+        column_info->set_data_type(proto::schema::DataType::Int32);
+        column_info->set_element_type(proto::schema::DataType::Int32);
+        column_info->set_is_element_level(true);
+
+        arith_expr->set_arith_op(proto::plan::ArithOpType::Mod);
+        arith_expr->mutable_right_operand()->set_int64_val(3);
+        arith_expr->set_op(proto::plan::OpType::Equal);
+        arith_expr->mutable_value()->set_int64_val(2);
+
+        // Add predicate if needed (doc-level filter: id % 2 == 0)
+        if (with_predicate) {
+            auto* predicate = element_filter->mutable_predicate();
+            auto* arith_expr =
+                predicate->mutable_binary_arith_op_eval_range_expr();
+
+            auto* pred_column = arith_expr->mutable_column_info();
+            pred_column->set_field_id(int64_fid.get());
+            pred_column->set_data_type(proto::schema::DataType::Int64);
+
+            arith_expr->set_arith_op(proto::plan::ArithOpType::Mod);
+            arith_expr->mutable_right_operand()->set_int64_val(2);
+            arith_expr->set_op(proto::plan::OpType::Equal);
+            arith_expr->mutable_value()->set_int64_val(0);
+        }
+
+        // Add output fields
+        plan_node.add_output_field_ids(int64_fid.get());
+        plan_node.add_output_field_ids(int_array_fid.get());
+
+        auto parser = ProtoParser(schema);
+        auto plan = parser.CreateRetrievePlan(plan_node);
+
+        // Step 5: Execute Retrieve
+        int64_t limit = 100;  // Retrieve top 100 element matches
+        auto retrieve_results = segment->Retrieve(nullptr,
+                                                  plan.get(),
+                                                  1L << 63,
+                                                  INT64_MAX,
+                                                  false,
+                                                  folly::CancellationToken(),
+                                                  0,
+                                                  0);
+
+        // Step 6: Verify results
+        ASSERT_NE(retrieve_results, nullptr);
+
+        // Verify element-level flag is set
+        ASSERT_TRUE(retrieve_results->element_level())
+            << "Retrieve should be in element-level mode";
+
+        // Verify element_indices are populated
+        ASSERT_GT(retrieve_results->element_indices_size(), 0)
+            << "Should have element indices in element-level retrieve";
+
+        // Verify element_indices match offset size (each doc has its own
+        // indices list)
+        ASSERT_EQ(retrieve_results->element_indices_size(),
+                  retrieve_results->offset_size())
+            << "Element indices and offsets should have same size";
+
+        std::cout << "Element-level Retrieve returned "
+                  << retrieve_results->offset_size() << " unique docs"
+                  << std::endl;
+
+        // Verify each result
+        int total_elements = 0;
+        for (int i = 0; i < retrieve_results->offset_size(); i++) {
+            int64_t doc_id = retrieve_results->offset(i);
+            const auto& elem_indices = retrieve_results->element_indices(i);
+
+            // Verify the doc_id satisfies the predicate (id % 2 == 0) only when
+            // predicate is enabled
+            if (with_predicate) {
+                ASSERT_EQ(doc_id % 2, 0) << "Result doc_id " << doc_id
+                                         << " should satisfy (id % 2 == 0)";
+            }
+
+            // Verify each element_idx in this doc
+            // With filter "value % 3 == 2", only elem_idx=1 should match
+            // because value = doc_id*3 + elem_idx + 1
+            // elem_idx=0: value % 3 = (doc_id*3 + 1) % 3 = 1
+            // elem_idx=1: value % 3 = (doc_id*3 + 2) % 3 = 2  <-- matches
+            // elem_idx=2: value % 3 = (doc_id*3 + 3) % 3 = 0
+            ASSERT_EQ(elem_indices.indices_size(), 1)
+                << "Each doc should have exactly one matching element "
+                   "(elem_idx=1)";
+
+            int32_t elem_idx = elem_indices.indices(0);
+
+            // Verify element_idx is valid
+            ASSERT_EQ(elem_idx, 1)
+                << "Only elem_idx=1 should match the filter (value % 3 == 2)";
+
+            // Verify element value satisfies filter: value % 3 == 2
+            int element_value = doc_id * array_len + elem_idx + 1;
+            ASSERT_EQ(element_value % 3, 2) << "Element value " << element_value
+                                            << " should satisfy value % 3 == 2";
+
+            total_elements += elem_indices.indices_size();
+        }
+        std::cout << "Total matching elements: " << total_elements << std::endl;
+
+        // Verify that total_elements equals number of docs (1 element per doc)
+        ASSERT_EQ(total_elements, retrieve_results->offset_size())
+            << "Each doc should have exactly 1 matching element";
+
+        // Verify element-level limit enforcement:
+        // find_first_n_element counts elements toward limit, not documents.
+        // With limit=100 and 1 element per doc, total_elements <= 100.
+        ASSERT_LE(total_elements, 100)
+            << "Total matching elements should not exceed limit";
+
+        // Verify fields_data contains the output fields
+        ASSERT_EQ(retrieve_results->fields_data_size(), 2)
+            << "Should have 2 output fields (id, price_array)";
     }
 }
 
-TEST(ArrayOffsetsGrowing, ElementIDRangeOfRow) {
-    ArrayOffsetsGrowing offsets;
+TEST_P(ElementFilterRetrieve, UnaryExpr) {
+    bool with_sealed = is_sealed();
+    bool with_predicate = use_predicate();
 
-    // Insert 4 rows with varying element counts
-    std::vector<int32_t> lens = {3, 0, 2, 5};  // includes empty array
-    offsets.Insert(0, lens.data(), 4);
+    // Step 1: Prepare schema with array field
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
 
-    ASSERT_EQ(offsets.GetRowCount(), 4);
-    ASSERT_EQ(offsets.GetTotalElementCount(), 10);  // 3 + 0 + 2 + 5
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
 
-    // Verify ElementIDRangeOfRow
-    auto [start0, end0] = offsets.ElementIDRangeOfRow(0);
-    ASSERT_EQ(start0, 0);
-    ASSERT_EQ(end0, 3);
+    size_t N = 10000;
+    int array_len = 3;
 
-    auto [start1, end1] = offsets.ElementIDRangeOfRow(1);
-    ASSERT_EQ(start1, 3);
-    ASSERT_EQ(end1, 3);  // empty array
+    // Step 2: Generate test data
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
 
-    auto [start2, end2] = offsets.ElementIDRangeOfRow(2);
-    ASSERT_EQ(start2, 3);
-    ASSERT_EQ(end2, 5);
+    // Customize int_array data: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
 
-    auto [start3, end3] = offsets.ElementIDRangeOfRow(3);
-    ASSERT_EQ(start3, 5);
-    ASSERT_EQ(end3, 10);
+            for (int row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
 
-    // Boundary: row_id == row_count returns (total, total)
-    auto [start4, end4] = offsets.ElementIDRangeOfRow(4);
-    ASSERT_EQ(start4, 10);
-    ASSERT_EQ(end4, 10);
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+            break;
+        }
+    }
+
+    // Step 3: Create segment (sealed or growing)
+    std::shared_ptr<SegmentInterface> segment;
+    if (with_sealed) {
+        segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    } else {
+        auto growing = CreateGrowingSegment(schema, empty_index_meta);
+        growing->PreInsert(N);
+        growing->Insert(0,
+                        N,
+                        raw_data.row_ids_.data(),
+                        raw_data.timestamps_.data(),
+                        raw_data.raw_);
+        segment = std::move(growing);
+    }
+
+    // Step 4: Build retrieve plan with element-level filter
+    // Query: Retrieve docs where price_array elements > 100
+    {
+        proto::plan::PlanNode plan_node;
+
+        // Set up query (not predicates at top level!)
+        auto* query = plan_node.mutable_query();
+        query->set_is_count(false);
+        query->set_limit(100);
+
+        // Build element filter expression under query.predicates
+        auto* expr = query->mutable_predicates();
+        auto* element_filter = expr->mutable_element_filter_expr();
+        element_filter->set_struct_name("structA");
+
+        // Element expression: price_array element > 100
+        auto* element_expr = element_filter->mutable_element_expr();
+        auto* unary_range = element_expr->mutable_unary_range_expr();
+
+        auto* column_info = unary_range->mutable_column_info();
+        column_info->set_field_id(int_array_fid.get());
+        column_info->set_data_type(proto::schema::DataType::Int32);
+        column_info->set_element_type(proto::schema::DataType::Int32);
+        column_info->set_is_element_level(true);
+
+        unary_range->set_op(proto::plan::OpType::GreaterThan);
+        unary_range->mutable_value()->set_int64_val(100);
+
+        // Add predicate if needed (doc-level filter: id % 2 == 0)
+        if (with_predicate) {
+            auto* predicate = element_filter->mutable_predicate();
+            auto* arith_expr =
+                predicate->mutable_binary_arith_op_eval_range_expr();
+
+            auto* pred_column = arith_expr->mutable_column_info();
+            pred_column->set_field_id(int64_fid.get());
+            pred_column->set_data_type(proto::schema::DataType::Int64);
+
+            arith_expr->set_arith_op(proto::plan::ArithOpType::Mod);
+            arith_expr->mutable_right_operand()->set_int64_val(2);
+            arith_expr->set_op(proto::plan::OpType::Equal);
+            arith_expr->mutable_value()->set_int64_val(0);
+        }
+
+        // Add output fields
+        plan_node.add_output_field_ids(int64_fid.get());
+        plan_node.add_output_field_ids(int_array_fid.get());
+
+        auto parser = ProtoParser(schema);
+        auto plan = parser.CreateRetrievePlan(plan_node);
+
+        // Step 5: Execute Retrieve
+        int64_t limit = 100;  // Retrieve top 100 element matches
+        auto retrieve_results = segment->Retrieve(nullptr,
+                                                  plan.get(),
+                                                  1L << 63,
+                                                  INT64_MAX,
+                                                  false,
+                                                  folly::CancellationToken(),
+                                                  0,
+                                                  0);
+
+        // Step 6: Verify results
+        ASSERT_NE(retrieve_results, nullptr);
+
+        // Verify element-level flag is set
+        ASSERT_TRUE(retrieve_results->element_level())
+            << "Retrieve should be in element-level mode";
+
+        // Verify element_indices are populated
+        ASSERT_GT(retrieve_results->element_indices_size(), 0)
+            << "Should have element indices in element-level retrieve";
+
+        // Verify element_indices match offset size (each doc has its own
+        // indices list)
+        ASSERT_EQ(retrieve_results->element_indices_size(),
+                  retrieve_results->offset_size())
+            << "Element indices and offsets should have same size";
+
+        std::cout << "Element-level Retrieve (UnaryExpr) returned "
+                  << retrieve_results->offset_size() << " unique docs"
+                  << std::endl;
+
+        // Verify each result
+        int total_elements = 0;
+        for (int i = 0; i < retrieve_results->offset_size(); i++) {
+            int64_t doc_id = retrieve_results->offset(i);
+            const auto& elem_indices = retrieve_results->element_indices(i);
+
+            // Verify the doc_id satisfies the predicate (id % 2 == 0) only when
+            // predicate is enabled
+            if (with_predicate) {
+                ASSERT_EQ(doc_id % 2, 0) << "Result doc_id " << doc_id
+                                         << " should satisfy (id % 2 == 0)";
+            }
+
+            // Verify each element_idx in this doc
+            ASSERT_GT(elem_indices.indices_size(), 0)
+                << "Each doc should have at least one matching element";
+            total_elements += elem_indices.indices_size();
+            for (int j = 0; j < elem_indices.indices_size(); j++) {
+                int32_t elem_idx = elem_indices.indices(j);
+
+                // Verify element_idx is valid
+                ASSERT_GE(elem_idx, 0) << "Element index should be >= 0";
+                ASSERT_LT(elem_idx, array_len)
+                    << "Element index should be < array_len";
+
+                // Verify element value > 100
+                // Element value = doc_id * array_len + elem_idx + 1
+                int element_value = doc_id * array_len + elem_idx + 1;
+                ASSERT_GT(element_value, 100)
+                    << "Element value " << element_value << " should be > 100";
+            }
+        }
+
+        // Verify element-level limit enforcement:
+        // find_first_n_element counts elements toward limit, not documents.
+        // With limit=100, total matching elements should not exceed 100.
+        ASSERT_LE(total_elements, 100)
+            << "Total matching elements should not exceed limit";
+    }
 }
 
-TEST(ArrayOffsetsGrowing, MultiplePendingBatches) {
-    // Test multiple pending batches being drained in order
-    ArrayOffsetsGrowing offsets;
+INSTANTIATE_TEST_SUITE_P(
+    ElementFilter,
+    ElementFilterRetrieve,
+    ::testing::Combine(::testing::Bool(),  // with_sealed: true/false
+                       ::testing::Bool()   // with_predicate: true/false
+                       ),
+    [](const ::testing::TestParamInfo<ElementFilterRetrieve::ParamType>& info) {
+        bool with_sealed = std::get<0>(info.param);
+        bool with_predicate = std::get<1>(info.param);
+        std::string name = "";
+        name += with_sealed ? "Sealed" : "Growing";
+        name += "_";
+        name += with_predicate ? "WithPredicate" : "WithoutPredicate";
+        return name;
+    });
 
-    // Insert row 5 first
-    std::vector<int32_t> lens5 = {2};
-    offsets.Insert(5, lens5.data(), 1);
-    ASSERT_EQ(offsets.GetRowCount(), 0);
+TEST(ElementFilter, RetrieveSortedByPk) {
+    // Test find_first_n_element on the is_sorted_by_pk_=true path
+    auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
 
-    // Insert row 3
-    std::vector<int32_t> lens3 = {3};
-    offsets.Insert(3, lens3.data(), 1);
-    ASSERT_EQ(offsets.GetRowCount(), 0);
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
 
-    // Insert row 1
-    std::vector<int32_t> lens1 = {1};
-    offsets.Insert(1, lens1.data(), 1);
-    ASSERT_EQ(offsets.GetRowCount(), 0);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
 
-    // Insert row 0 - should drain row 1, but not 3 or 5 (gap at 2)
-    std::vector<int32_t> lens0 = {2};
-    offsets.Insert(0, lens0.data(), 1);
-    ASSERT_EQ(offsets.GetRowCount(), 2) << "Should commit rows 0-1";
-    ASSERT_EQ(offsets.GetTotalElementCount(), 3);  // 2 + 1
+    size_t N = 1000;
+    int array_len = 3;
 
-    // Insert row 2 - should drain rows 3, but not 5 (gap at 4)
-    std::vector<int32_t> lens2 = {1};
-    offsets.Insert(2, lens2.data(), 1);
-    ASSERT_EQ(offsets.GetRowCount(), 4) << "Should commit rows 0-3";
-    ASSERT_EQ(offsets.GetTotalElementCount(), 7);  // 2 + 1 + 1 + 3
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
 
-    // Insert row 4 - should drain row 5
-    std::vector<int32_t> lens4 = {2};
-    offsets.Insert(4, lens4.data(), 1);
-    ASSERT_EQ(offsets.GetRowCount(), 6) << "Should commit rows 0-5";
-    ASSERT_EQ(offsets.GetTotalElementCount(), 11);  // 2 + 1 + 1 + 3 + 2 + 2
+    // Customize int_array data: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
 
-    // Verify final mapping
-    // Row 0: elem 0-1, Row 1: elem 2, Row 2: elem 3, Row 3: elem 4-6, Row 4: elem 7-8, Row 5: elem 9-10
-    auto [r0, i0] = offsets.ElementIDToRowID(0);
-    ASSERT_EQ(r0, 0);
-    ASSERT_EQ(i0, 0);
+            for (int row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+            break;
+        }
+    }
 
-    auto [r2, i2] = offsets.ElementIDToRowID(2);
-    ASSERT_EQ(r2, 1);
-    ASSERT_EQ(i2, 0);
+    // Create sealed segment with is_sorted_by_pk=true
+    auto segment = CreateSealedSegment(schema,
+                                       empty_index_meta,
+                                       /*segment_id=*/0,
+                                       SegcoreConfig::default_config(),
+                                       /*is_sorted_by_pk=*/true);
+    LoadGeneratedDataIntoSegment(raw_data, segment.get());
 
-    auto [r4, i4] = offsets.ElementIDToRowID(4);
-    ASSERT_EQ(r4, 3);
-    ASSERT_EQ(i4, 0);
+    // Build retrieve plan: element_filter(structA, $[price_array] % 3 == 2)
+    proto::plan::PlanNode plan_node;
+    auto* query = plan_node.mutable_query();
+    query->set_is_count(false);
+    query->set_limit(50);
 
-    auto [r7, i7] = offsets.ElementIDToRowID(7);
-    ASSERT_EQ(r7, 4);
-    ASSERT_EQ(i7, 0);
+    auto* expr = query->mutable_predicates();
+    auto* element_filter = expr->mutable_element_filter_expr();
+    element_filter->set_struct_name("structA");
 
-    auto [r10, i10] = offsets.ElementIDToRowID(10);
-    ASSERT_EQ(r10, 5);
-    ASSERT_EQ(i10, 1);
+    auto* element_expr = element_filter->mutable_element_expr();
+    auto* arith_expr = element_expr->mutable_binary_arith_op_eval_range_expr();
+    auto* column_info = arith_expr->mutable_column_info();
+    column_info->set_field_id(int_array_fid.get());
+    column_info->set_data_type(proto::schema::DataType::Int32);
+    column_info->set_element_type(proto::schema::DataType::Int32);
+    column_info->set_is_element_level(true);
+    arith_expr->set_arith_op(proto::plan::ArithOpType::Mod);
+    arith_expr->mutable_right_operand()->set_int64_val(3);
+    arith_expr->set_op(proto::plan::OpType::Equal);
+    arith_expr->mutable_value()->set_int64_val(2);
+
+    plan_node.add_output_field_ids(int64_fid.get());
+    plan_node.add_output_field_ids(int_array_fid.get());
+
+    auto parser = ProtoParser(schema);
+    auto plan = parser.CreateRetrievePlan(plan_node);
+
+    auto retrieve_results = segment->Retrieve(nullptr,
+                                              plan.get(),
+                                              1L << 63,
+                                              INT64_MAX,
+                                              false,
+                                              folly::CancellationToken(),
+                                              0,
+                                              0);
+
+    ASSERT_NE(retrieve_results, nullptr);
+    ASSERT_TRUE(retrieve_results->element_level());
+    ASSERT_GT(retrieve_results->element_indices_size(), 0);
+    ASSERT_EQ(retrieve_results->element_indices_size(),
+              retrieve_results->offset_size());
+
+    // Verify results are in PK order (sorted-by-pk path should return ordered)
+    for (int i = 1; i < retrieve_results->offset_size(); i++) {
+        ASSERT_LT(retrieve_results->offset(i - 1), retrieve_results->offset(i))
+            << "Results should be in ascending PK order for sorted segment";
+    }
+
+    // Verify each element satisfies filter (value % 3 == 2 => only elem_idx=1)
+    int total_elements = 0;
+    for (int i = 0; i < retrieve_results->offset_size(); i++) {
+        int64_t doc_id = retrieve_results->offset(i);
+        const auto& elem_indices = retrieve_results->element_indices(i);
+        ASSERT_EQ(elem_indices.indices_size(), 1);
+        ASSERT_EQ(elem_indices.indices(0), 1);
+        int element_value = doc_id * array_len + 1 + 1;
+        ASSERT_EQ(element_value % 3, 2);
+        total_elements += elem_indices.indices_size();
+    }
+
+    // Limit=50 counts elements, 1 element per doc => 50 docs
+    ASSERT_LE(total_elements, 50);
+
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
 }
 
 enum class NestedIndexType { NONE, STL_SORT, INVERTED };
@@ -1185,6 +1868,16 @@ NestedIndexTypeToString(NestedIndexType type) {
 class ElementFilterNestedIndex
     : public ::testing::TestWithParam<std::tuple<NestedIndexType, bool>> {
  protected:
+    void
+    SetUp() override {
+        saved_batch_size_ = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+    }
+    void
+    TearDown() override {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size_);
+    }
+
     NestedIndexType
     nested_index_type() const {
         return std::get<0>(GetParam());
@@ -1194,6 +1887,9 @@ class ElementFilterNestedIndex
     force_offset_mode() const {
         return std::get<1>(GetParam());
     }
+
+ private:
+    int64_t saved_batch_size_;
 };
 
 TEST_P(ElementFilterNestedIndex, ExecutionMode) {
@@ -1414,11 +2110,6 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
             last_distance = search_result->distances_[i];
         }
     }
-
-    std::cout << "Test passed: index_type="
-              << NestedIndexTypeToString(index_type)
-              << ", offset_mode=" << (offset_mode ? "true" : "false")
-              << ", valid_results=" << valid_count << std::endl;
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1437,3 +2128,514 @@ INSTANTIATE_TEST_SUITE_P(
         name += offset_mode ? "_OffsetMode" : "_FullMode";
         return name;
     });
+
+// Test element-level filter combined with group by on sealed segment with index
+TEST(ElementFilterGroupBy, SealedWithIndex) {
+    int dim = 4;
+    size_t N = 500;
+    int array_len = 3;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    // Generate test data
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Customize int_array data: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+
+            for (int row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+            break;
+        }
+    }
+
+    // Create sealed segment and load field data
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Build and load vector index
+    auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
+    std::vector<float> vector_data(dim * N * array_len);
+    for (int i = 0; i < N; i++) {
+        const auto& float_vec = array_vec_values[i].float_vector().data();
+        for (int j = 0; j < array_len * dim; j++) {
+            vector_data[i * array_len * dim + j] = float_vec[j];
+        }
+    }
+
+    auto indexing = GenVecIndexing(N * array_len,
+                                   dim,
+                                   vector_data.data(),
+                                   knowhere::IndexEnum::INDEX_HNSW);
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.field_type = DataType::VECTOR_ARRAY;
+    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(load_index_info);
+
+    int topK = 5;
+    int group_size = 4;
+
+    // Execute element-level search with group by primary key
+    ScopedSchemaHandle handle(*schema);
+    std::string expr =
+        "id % 2 == 0 && element_filter(structA, 400 > $[price_array] > 100)";
+    std::string search_params = R"({"ef": 50})";
+
+    auto plan_bytes = handle.ParseGroupBySearch(expr,
+                                                "structA[array_vec]",
+                                                topK,
+                                                knowhere::metric::L2,
+                                                search_params,
+                                                int64_fid.get(),
+                                                group_size);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto num_queries = 1;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024, true);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+    ASSERT_NE(search_result, nullptr);
+    ASSERT_TRUE(search_result->group_by_values_.has_value())
+        << "Group by values should be present";
+
+    // Group by returns row-level results even for element-level search
+    ASSERT_FALSE(search_result->element_level_)
+        << "Group by should return row-level results";
+
+    auto& group_by_values = search_result->group_by_values_.value();
+
+    ASSERT_LE(search_result->seg_offsets_.size(),
+              static_cast<size_t>(topK * group_size))
+        << "Should not exceed topK * group_size results";
+
+    std::unordered_map<int64_t, int> group_counts;
+    for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+        int64_t doc_id = search_result->seg_offsets_[i];
+
+        if (i < group_by_values.size() && group_by_values[i].has_value()) {
+            if (std::holds_alternative<int64_t>(group_by_values[i].value())) {
+                int64_t group_val =
+                    std::get<int64_t>(group_by_values[i].value());
+
+                ASSERT_EQ(group_val, doc_id)
+                    << "Group by primary key: group value should equal doc_id";
+
+                group_counts[group_val]++;
+                ASSERT_LE(group_counts[group_val], group_size)
+                    << "Each group should have at most group_size results";
+            }
+        }
+
+        ASSERT_EQ(doc_id % 2, 0)
+            << "Result doc_id " << doc_id << " should satisfy (id % 2 == 0)";
+    }
+
+    ASSERT_LE(group_counts.size(), static_cast<size_t>(topK))
+        << "Should have at most topK distinct groups";
+
+    for (size_t i = 1; i < search_result->distances_.size(); ++i) {
+        ASSERT_LE(search_result->distances_[i - 1],
+                  search_result->distances_[i])
+            << "Distances should be sorted in ascending order";
+    }
+}
+
+// Test: element level + group by + growing segment
+TEST(ElementFilterGroupBy, GrowingSegment) {
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField(
+        "structA[array_vec]", DataType::VECTOR_FLOAT, dim, "L2");
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    size_t N = 500;
+    int array_len = 3;
+
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Customize int_array data: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+
+            for (int row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+            break;
+        }
+    }
+
+    // Create growing segment and insert data
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+
+    int topK = 5;
+    int group_size = 4;
+
+    // Execute element-level search with group by primary key
+    ScopedSchemaHandle handle(*schema);
+    std::string expr =
+        "id % 2 == 0 && element_filter(structA, 400 > $[price_array] > 100)";
+    std::string search_params = R"({"nprobe": 10})";
+
+    auto plan_bytes = handle.ParseGroupBySearch(expr,
+                                                "structA[array_vec]",
+                                                topK,
+                                                knowhere::metric::L2,
+                                                search_params,
+                                                int64_fid.get(),
+                                                group_size);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto num_queries = 1;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024, true);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+    ASSERT_NE(search_result, nullptr);
+    ASSERT_TRUE(search_result->group_by_values_.has_value())
+        << "Group by values should be present";
+
+    // Verify element_level_ is false (group by returns row-level results)
+    ASSERT_FALSE(search_result->element_level_)
+        << "Group by should return row-level results";
+
+    auto& group_by_values = search_result->group_by_values_.value();
+
+    ASSERT_FALSE(search_result->seg_offsets_.empty())
+        << "Should have search results";
+    ASSERT_LE(search_result->seg_offsets_.size(),
+              static_cast<size_t>(topK * group_size))
+        << "Should not exceed topK * group_size results";
+
+    for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+        int64_t doc_id = search_result->seg_offsets_[i];
+
+        // Verify row-level filter
+        ASSERT_EQ(doc_id % 2, 0)
+            << "Result doc_id " << doc_id << " should satisfy (id % 2 == 0)";
+
+        // Verify element-level filter: 100 < element_value < 400
+        // element_value = doc_id * array_len + elem + 1, elem in [0, array_len)
+        // For doc to have any matching element: doc_id * 3 + 1 < 400 and doc_id * 3 + 3 > 100
+        // So doc_id should be roughly in range [33, 132]
+        ASSERT_GE(doc_id, 33)
+            << "doc_id " << doc_id << " should be >= 33 (element filter)";
+        ASSERT_LE(doc_id, 133)
+            << "doc_id " << doc_id << " should be <= 133 (element filter)";
+
+        if (i < group_by_values.size() && group_by_values[i].has_value()) {
+            if (std::holds_alternative<int64_t>(group_by_values[i].value())) {
+                int64_t group_val =
+                    std::get<int64_t>(group_by_values[i].value());
+                ASSERT_EQ(group_val, doc_id)
+                    << "Group by primary key: group value should equal doc_id";
+            }
+        }
+    }
+}
+
+// Test: normal group by (without element level)
+TEST(ElementFilterGroupBy, NormalGroupBy) {
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid =
+        schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, "L2");
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto category_fid = schema->AddDebugField("category", DataType::INT32);
+    schema->set_primary_field_id(int64_fid);
+
+    size_t N = 500;
+    auto raw_data = DataGen(schema, N, 42);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Build vector index
+    auto vec_values = raw_data.get_col<float>(vec_fid);
+    auto indexing = GenVecIndexing(
+        N, dim, vec_values.data(), knowhere::IndexEnum::INDEX_HNSW);
+
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.field_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(load_index_info);
+
+    int topK = 5;
+    int group_size = 2;
+
+    // Normal search with group by (no element level)
+    ScopedSchemaHandle handle(*schema);
+    std::string expr = "id % 2 == 0";
+    std::string search_params = R"({"ef": 50})";
+
+    auto plan_bytes = handle.ParseGroupBySearch(expr,
+                                                "vec",
+                                                topK,
+                                                knowhere::metric::L2,
+                                                search_params,
+                                                category_fid.get(),
+                                                group_size);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto num_queries = 1;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+    ASSERT_NE(search_result, nullptr);
+    ASSERT_TRUE(search_result->group_by_values_.has_value())
+        << "Group by values should be present";
+
+    // Verify element_level_ is false
+    ASSERT_FALSE(search_result->element_level_)
+        << "Normal search should not be element-level";
+
+    auto& group_by_values = search_result->group_by_values_.value();
+
+    ASSERT_FALSE(search_result->seg_offsets_.empty())
+        << "Should have search results";
+    ASSERT_LE(search_result->seg_offsets_.size(),
+              static_cast<size_t>(topK * group_size))
+        << "Should not exceed topK * group_size results";
+
+    std::unordered_map<int32_t, int> group_counts;
+    for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+        int64_t doc_id = search_result->seg_offsets_[i];
+
+        ASSERT_EQ(doc_id % 2, 0)
+            << "Result doc_id " << doc_id << " should satisfy (id % 2 == 0)";
+
+        if (i < group_by_values.size() && group_by_values[i].has_value()) {
+            if (std::holds_alternative<int32_t>(group_by_values[i].value())) {
+                int32_t group_val =
+                    std::get<int32_t>(group_by_values[i].value());
+                group_counts[group_val]++;
+                ASSERT_LE(group_counts[group_val], group_size)
+                    << "Each group should have at most group_size results";
+            }
+        }
+    }
+
+    ASSERT_LE(group_counts.size(), static_cast<size_t>(topK))
+        << "Should have at most topK distinct groups";
+}
+
+// Test: element-level + group by non-unique field to verify row deduplication.
+// When multiple elements from the same document are close to the query vector,
+// each document should only appear once in the results (not consume multiple
+// group slots).
+TEST(ElementFilterGroupBy, DeduplicateRowsInGroup) {
+    int dim = 4;
+    size_t N = 500;
+    int array_len = 3;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    // category field: non-unique, used for group by
+    // Assign category = id % 10, so ~50 docs per category
+    auto category_fid = schema->AddDebugField("category", DataType::INT32);
+    schema->set_primary_field_id(int64_fid);
+
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Customize int_array data: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+
+            for (int row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+        }
+        // Set category = id % 10
+        if (field_data->field_id() == category_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_int_data()
+                ->mutable_data()
+                ->Clear();
+            for (int row = 0; row < N; row++) {
+                field_data->mutable_scalars()
+                    ->mutable_int_data()
+                    ->mutable_data()
+                    ->Add(row % 10);
+            }
+        }
+    }
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Build and load vector index
+    auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
+    std::vector<float> vector_data(dim * N * array_len);
+    for (int i = 0; i < N; i++) {
+        const auto& float_vec = array_vec_values[i].float_vector().data();
+        for (int j = 0; j < array_len * dim; j++) {
+            vector_data[i * array_len * dim + j] = float_vec[j];
+        }
+    }
+
+    auto indexing = GenVecIndexing(N * array_len,
+                                   dim,
+                                   vector_data.data(),
+                                   knowhere::IndexEnum::INDEX_HNSW);
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.field_type = DataType::VECTOR_ARRAY;
+    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(load_index_info);
+
+    int topK = 5;
+    int group_size = 3;
+
+    ScopedSchemaHandle handle(*schema);
+    std::string expr = "element_filter(structA, 2000 > $[price_array] > 100)";
+    std::string search_params = R"({"ef": 50})";
+
+    auto plan_bytes = handle.ParseGroupBySearch(expr,
+                                                "structA[array_vec]",
+                                                topK,
+                                                knowhere::metric::L2,
+                                                search_params,
+                                                category_fid.get(),
+                                                group_size);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto num_queries = 1;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024, true);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+
+    ASSERT_NE(search_result, nullptr);
+    ASSERT_TRUE(search_result->group_by_values_.has_value())
+        << "Group by values should be present";
+    ASSERT_FALSE(search_result->element_level_)
+        << "Group by should return row-level results";
+
+    auto& group_by_values = search_result->group_by_values_.value();
+
+    ASSERT_FALSE(search_result->seg_offsets_.empty())
+        << "Should have search results";
+    ASSERT_LE(search_result->seg_offsets_.size(),
+              static_cast<size_t>(topK * group_size))
+        << "Should not exceed topK * group_size results";
+
+    // Verify: no duplicate row_offsets in results.
+    // Without deduplication, the same document could appear multiple times
+    // because different elements from one document may all be close to the
+    // query vector.
+    std::unordered_set<int64_t> seen_docs;
+    std::unordered_map<int32_t, int> group_counts;
+    for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+        int64_t doc_id = search_result->seg_offsets_[i];
+
+        ASSERT_TRUE(seen_docs.insert(doc_id).second)
+            << "Duplicate doc_id " << doc_id
+            << " in results: same document should not appear more than once";
+
+        if (i < group_by_values.size() && group_by_values[i].has_value()) {
+            if (std::holds_alternative<int32_t>(group_by_values[i].value())) {
+                int32_t group_val =
+                    std::get<int32_t>(group_by_values[i].value());
+
+                ASSERT_EQ(group_val, doc_id % 10)
+                    << "Group value should equal category (doc_id % 10)";
+
+                group_counts[group_val]++;
+                ASSERT_LE(group_counts[group_val], group_size)
+                    << "Each group should have at most group_size results";
+            }
+        }
+    }
+
+    ASSERT_LE(group_counts.size(), static_cast<size_t>(topK))
+        << "Should have at most topK distinct groups";
+}
