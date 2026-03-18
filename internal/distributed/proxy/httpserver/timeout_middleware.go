@@ -152,6 +152,17 @@ func (w *Writer) WriteHeaderNow() {
 	w.ResponseWriter.WriteHeaderNow()
 }
 
+// Flush implements the http.Flusher interface. It guards against
+// flushing after timeout to prevent bypassing the mutex.
+func (w *Writer) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.timeout.Load() {
+		return
+	}
+	w.ResponseWriter.Flush()
+}
+
 func checkWriteHeaderCode(code int) {
 	if code < 100 || code > 999 {
 		panic(fmt.Sprintf("invalid http status code: %d", code))
@@ -192,6 +203,9 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			finish <- struct{}{}
 		}()
 
+		t := time.NewTimer(timeout)
+		defer t.Stop()
+
 		select {
 		case p := <-panicChan:
 			tw.FreeBuffer()
@@ -217,7 +231,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			tw.FreeBuffer()
 			bufPool.Put(buffer)
 
-		case <-time.After(timeout):
+		case <-t.C:
 			cancel() // cancel context immediately so handler can detect timeout
 			gCtx.Abort()
 			tw.mu.Lock()
