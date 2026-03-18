@@ -60,12 +60,12 @@ func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, buc
 		err := opts.SetRange(offset, offset+size-1)
 		if err != nil {
 			log.Warn("failed to set range", zap.String("bucket", bucketName), zap.String("path", objectName), zap.Error(err))
-			return nil, checkObjectStorageError(objectName, err)
+			return nil, mapObjectStorageError(objectName, err)
 		}
 	}
 	object, err := minioObjectStorage.Client.GetObject(ctx, bucketName, objectName, opts)
 	if err != nil {
-		return nil, checkObjectStorageError(objectName, err)
+		return nil, mapObjectStorageError(objectName, err)
 	}
 	return &ObjectReader{
 		Object: object,
@@ -74,12 +74,12 @@ func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, buc
 
 func (minioObjectStorage *MinioObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
 	_, err := minioObjectStorage.Client.PutObject(ctx, bucketName, objectName, reader, objectSize, minio.PutObjectOptions{})
-	return checkObjectStorageError(objectName, err)
+	return mapObjectStorageError(objectName, err)
 }
 
 func (minioObjectStorage *MinioObjectStorage) StatObject(ctx context.Context, bucketName, objectName string) (int64, error) {
 	info, err := minioObjectStorage.Client.StatObject(ctx, bucketName, objectName, minio.StatObjectOptions{})
-	return info.Size, checkObjectStorageError(objectName, err)
+	return info.Size, mapObjectStorageError(objectName, err)
 }
 
 func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
@@ -106,7 +106,7 @@ func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Contex
 
 func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
 	err := minioObjectStorage.Client.RemoveObject(ctx, bucketName, objectName, minio.RemoveObjectOptions{})
-	return checkObjectStorageError(objectName, err)
+	return mapObjectStorageError(objectName, err)
 }
 
 func (minioObjectStorage *MinioObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
@@ -119,5 +119,5 @@ func (minioObjectStorage *MinioObjectStorage) CopyObject(ctx context.Context, bu
 		Object: dstObjectName,
 	}
 	_, err := minioObjectStorage.Client.CopyObject(ctx, dstOpts, srcOpts)
-	return checkObjectStorageError(srcObjectName, err)
+	return mapObjectStorageError(srcObjectName, err)
 }
