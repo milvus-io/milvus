@@ -1451,8 +1451,8 @@ func ReadData[T any, E interface {
 	for i, field := range schema.Fields() {
 		// Spawn a new context to ignore cancellation from parental context.
 		newCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
 		columnReader, err := fileReader.GetColumn(newCtx, i)
+		cancel()
 		if err != nil {
 			log.Warn("get column reader failed", zap.String("fieldName", field.Name), zap.Error(err))
 			return -1, err

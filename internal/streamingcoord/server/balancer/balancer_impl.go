@@ -574,8 +574,9 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 			// all history channels should be remove from related nodes.
 			for _, assignment := range channel.AssignHistories() {
 				opCtx, cancel := context.WithTimeout(ctx, opTimeout)
-				defer cancel()
-				if err := resource.Resource().StreamingNodeManagerClient().Remove(opCtx, assignment); err != nil {
+				err := resource.Resource().StreamingNodeManagerClient().Remove(opCtx, assignment)
+				cancel()
+				if err != nil {
 					b.Logger().Warn("fail to remove channel", zap.String("assignment", assignment.String()), zap.Error(err))
 					return err
 				}

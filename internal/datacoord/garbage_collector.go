@@ -880,8 +880,8 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 				return
 			}
 			timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			defer cancel()
 			has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
+			cancel()
 			if err == nil && !has {
 				collectionID2GcStatus[collectionID] = gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
 			} else {
