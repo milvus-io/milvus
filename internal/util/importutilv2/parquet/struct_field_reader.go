@@ -108,9 +108,11 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 	case schemapb.DataType_Bool:
 		boolData := make([]bool, len(data))
 		for i, v := range data {
-			if val, ok := v.(bool); ok {
-				boolData[i] = val
+			val, ok := v.(bool)
+			if !ok {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected bool for field '%s', got %T at index %d", r.field.GetName(), v, i))
 			}
+			boolData[i] = val
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_BoolData{
@@ -120,9 +122,11 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 	case schemapb.DataType_Int8:
 		intData := make([]int32, len(data))
 		for i, v := range data {
-			if val, ok := v.(int8); ok {
-				intData[i] = int32(val)
+			val, ok := v.(int8)
+			if !ok {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int8 for field '%s', got %T at index %d", r.field.GetName(), v, i))
 			}
+			intData[i] = int32(val)
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
@@ -132,9 +136,11 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 	case schemapb.DataType_Int16:
 		intData := make([]int32, len(data))
 		for i, v := range data {
-			if val, ok := v.(int16); ok {
-				intData[i] = int32(val)
+			val, ok := v.(int16)
+			if !ok {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int16 for field '%s', got %T at index %d", r.field.GetName(), v, i))
 			}
+			intData[i] = int32(val)
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
@@ -144,9 +150,11 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 	case schemapb.DataType_Int32:
 		intData := make([]int32, len(data))
 		for i, v := range data {
-			if val, ok := v.(int32); ok {
-				intData[i] = val
+			val, ok := v.(int32)
+			if !ok {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int32 for field '%s', got %T at index %d", r.field.GetName(), v, i))
 			}
+			intData[i] = val
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
@@ -156,9 +164,11 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 	case schemapb.DataType_Int64:
 		intData := make([]int64, len(data))
 		for i, v := range data {
-			if val, ok := v.(int64); ok {
-				intData[i] = val
+			val, ok := v.(int64)
+			if !ok {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected int64 for field '%s', got %T at index %d", r.field.GetName(), v, i))
 			}
+			intData[i] = val
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_LongData{
@@ -168,9 +178,11 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 	case schemapb.DataType_Float:
 		floatData := make([]float32, len(data))
 		for i, v := range data {
-			if val, ok := v.(float32); ok {
-				floatData[i] = val
+			val, ok := v.(float32)
+			if !ok {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected float32 for field '%s', got %T at index %d", r.field.GetName(), v, i))
 			}
+			floatData[i] = val
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_FloatData{
@@ -180,9 +192,11 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 	case schemapb.DataType_Double:
 		floatData := make([]float64, len(data))
 		for i, v := range data {
-			if val, ok := v.(float64); ok {
-				floatData[i] = val
+			val, ok := v.(float64)
+			if !ok {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected float64 for field '%s', got %T at index %d", r.field.GetName(), v, i))
 			}
+			floatData[i] = val
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_DoubleData{
@@ -192,9 +206,11 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		strData := make([]string, len(data))
 		for i, v := range data {
-			if val, ok := v.(string); ok {
-				strData[i] = val
+			val, ok := v.(string)
+			if !ok {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected string for field '%s', got %T at index %d", r.field.GetName(), v, i))
 			}
+			strData[i] = val
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_StringData{
@@ -202,7 +218,7 @@ func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarF
 			},
 		}, nil
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported element type for struct field: %v", r.field.GetDataType()))
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported element type for struct field: %v", r.field.GetElementType()))
 	}
 }
 
@@ -308,100 +324,98 @@ func (r *StructFieldReader) readArrayOfVectorField(chunked *arrow.Chunked) (any,
 			// Extract vectors based on element type
 			switch r.field.GetElementType() {
 			case schemapb.DataType_FloatVector:
+				floatArr, ok := fieldArray.ListValues().(*array.Float32)
+				if !ok {
+					return nil, nil, merr.WrapErrImportFailed(
+						fmt.Sprintf("expected Float32 array for FloatVector field '%s', got %T", r.field.GetName(), fieldArray.ListValues()))
+				}
 				var allVectors []float32
 				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
 					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
-					if floatArr, ok := fieldArray.ListValues().(*array.Float32); ok {
-						for j := vecStart; j < vecEnd; j++ {
-							allVectors = append(allVectors, floatArr.Value(int(j)))
-						}
+					for j := vecStart; j < vecEnd; j++ {
+						allVectors = append(allVectors, floatArr.Value(int(j)))
 					}
 				}
-				// struct list could be empty, len(allVectors) can be zero
-				// build an empty VectorField if len(allVectors) is zero
-				if len(allVectors) >= 0 {
-					vectorField := &schemapb.VectorField{
-						Dim: int64(r.dim),
-						Data: &schemapb.VectorField_FloatVector{
-							FloatVector: &schemapb.FloatArray{Data: allVectors},
-						},
-					}
-					result = append(result, vectorField)
-				}
+				result = append(result, &schemapb.VectorField{
+					Dim: int64(r.dim),
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: allVectors},
+					},
+				})
 
 			case schemapb.DataType_Float16Vector:
+				uint8Arr, ok := fieldArray.ListValues().(*array.Uint8)
+				if !ok {
+					return nil, nil, merr.WrapErrImportFailed(
+						fmt.Sprintf("expected Uint8 array for Float16Vector field '%s', got %T", r.field.GetName(), fieldArray.ListValues()))
+				}
 				var allVectors []byte
 				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
 					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
-					if uint8Arr, ok := fieldArray.ListValues().(*array.Uint8); ok {
-						allVectors = append(allVectors, uint8Arr.Uint8Values()[vecStart:vecEnd]...)
-					}
+					allVectors = append(allVectors, uint8Arr.Uint8Values()[vecStart:vecEnd]...)
 				}
-				if len(allVectors) >= 0 {
-					vectorField := &schemapb.VectorField{
-						Dim: int64(r.dim),
-						Data: &schemapb.VectorField_Float16Vector{
-							Float16Vector: allVectors,
-						},
-					}
-					result = append(result, vectorField)
-				}
+				result = append(result, &schemapb.VectorField{
+					Dim: int64(r.dim),
+					Data: &schemapb.VectorField_Float16Vector{
+						Float16Vector: allVectors,
+					},
+				})
 
 			case schemapb.DataType_BFloat16Vector:
+				uint8Arr, ok := fieldArray.ListValues().(*array.Uint8)
+				if !ok {
+					return nil, nil, merr.WrapErrImportFailed(
+						fmt.Sprintf("expected Uint8 array for BFloat16Vector field '%s', got %T", r.field.GetName(), fieldArray.ListValues()))
+				}
 				var allVectors []byte
 				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
 					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
-					if uint8Arr, ok := fieldArray.ListValues().(*array.Uint8); ok {
-						allVectors = append(allVectors, uint8Arr.Uint8Values()[vecStart:vecEnd]...)
-					}
+					allVectors = append(allVectors, uint8Arr.Uint8Values()[vecStart:vecEnd]...)
 				}
-				if len(allVectors) >= 0 {
-					vectorField := &schemapb.VectorField{
-						Dim: int64(r.dim),
-						Data: &schemapb.VectorField_Bfloat16Vector{
-							Bfloat16Vector: allVectors,
-						},
-					}
-					result = append(result, vectorField)
-				}
+				result = append(result, &schemapb.VectorField{
+					Dim: int64(r.dim),
+					Data: &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: allVectors,
+					},
+				})
 
 			case schemapb.DataType_Int8Vector:
+				int8Arr, ok := fieldArray.ListValues().(*array.Int8)
+				if !ok {
+					return nil, nil, merr.WrapErrImportFailed(
+						fmt.Sprintf("expected Int8 array for Int8Vector field '%s', got %T", r.field.GetName(), fieldArray.ListValues()))
+				}
 				var allVectors []byte
 				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
 					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
-					if int8Arr, ok := fieldArray.ListValues().(*array.Int8); ok {
-						for j := vecStart; j < vecEnd; j++ {
-							allVectors = append(allVectors, byte(int8Arr.Value(int(j))))
-						}
+					for j := vecStart; j < vecEnd; j++ {
+						allVectors = append(allVectors, byte(int8Arr.Value(int(j))))
 					}
 				}
-				if len(allVectors) >= 0 {
-					vectorField := &schemapb.VectorField{
-						Dim: int64(r.dim),
-						Data: &schemapb.VectorField_Int8Vector{
-							Int8Vector: allVectors,
-						},
-					}
-					result = append(result, vectorField)
-				}
+				result = append(result, &schemapb.VectorField{
+					Dim: int64(r.dim),
+					Data: &schemapb.VectorField_Int8Vector{
+						Int8Vector: allVectors,
+					},
+				})
 
 			case schemapb.DataType_BinaryVector:
+				uint8Arr, ok := fieldArray.ListValues().(*array.Uint8)
+				if !ok {
+					return nil, nil, merr.WrapErrImportFailed(
+						fmt.Sprintf("expected Uint8 array for BinaryVector field '%s', got %T", r.field.GetName(), fieldArray.ListValues()))
+				}
 				var allVectors []byte
 				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
 					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
-					if uint8Arr, ok := fieldArray.ListValues().(*array.Uint8); ok {
-						allVectors = append(allVectors, uint8Arr.Uint8Values()[vecStart:vecEnd]...)
-					}
+					allVectors = append(allVectors, uint8Arr.Uint8Values()[vecStart:vecEnd]...)
 				}
-				if len(allVectors) >= 0 {
-					vectorField := &schemapb.VectorField{
-						Dim: int64(r.dim),
-						Data: &schemapb.VectorField_BinaryVector{
-							BinaryVector: allVectors,
-						},
-					}
-					result = append(result, vectorField)
-				}
+				result = append(result, &schemapb.VectorField{
+					Dim: int64(r.dim),
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: allVectors,
+					},
+				})
 
 			case schemapb.DataType_SparseFloatVector:
 				return nil, nil, merr.WrapErrImportFailed("ArrayOfVector with SparseFloatVector element type is not implemented yet")

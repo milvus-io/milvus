@@ -852,3 +852,35 @@ func TestArrayNullElement(t *testing.T) {
 		})
 	}
 }
+
+func TestStructFieldReader_toScalarField_TypeMismatch(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		data        []interface{}
+	}{
+		{"Bool_wrong_type", schemapb.DataType_Bool, []interface{}{"not_a_bool"}},
+		{"Int8_wrong_type", schemapb.DataType_Int8, []interface{}{"not_an_int8"}},
+		{"Int16_wrong_type", schemapb.DataType_Int16, []interface{}{3.14}},
+		{"Int32_wrong_type", schemapb.DataType_Int32, []interface{}{true}},
+		{"Int64_wrong_type", schemapb.DataType_Int64, []interface{}{"not_an_int64"}},
+		{"Float_wrong_type", schemapb.DataType_Float, []interface{}{int32(1)}},
+		{"Double_wrong_type", schemapb.DataType_Double, []interface{}{int64(1)}},
+		{"VarChar_wrong_type", schemapb.DataType_VarChar, []interface{}{123}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &StructFieldReader{
+				field: &schemapb.FieldSchema{
+					Name:        "test_field",
+					DataType:    schemapb.DataType_Array,
+					ElementType: tt.elementType,
+				},
+			}
+			_, err := reader.toScalarField(tt.data)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "expected")
+		})
+	}
+}
