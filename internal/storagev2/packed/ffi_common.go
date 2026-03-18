@@ -38,6 +38,9 @@ const (
 	PropertyFSRequestTimeoutMS    = "fs.request_timeout_ms"
 	PropertyFSGCPCredentialJSON   = "fs.gcp_credential_json"
 	PropertyFSUseCustomPartUpload = "fs.use_custom_part_upload"
+	PropertyFSMaxConnections      = "fs.max_connections"
+	PropertyFSTLSMinVersion       = "fs.tls_min_version"
+	PropertyFSUseCRC32CChecksum   = "fs.use_crc32c_checksum"
 
 	PropertyWriterPolicy             = "writer.policy"
 	PropertyWriterSchemaBasedPattern = "writer.split.schema_based.patterns"
@@ -140,6 +143,20 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	// Add integer field
 	keys = append(keys, PropertyFSRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
+
+	// Add TLS min version
+	if storageConfig.GetSslTlsMinVersion() != "" {
+		keys = append(keys, PropertyFSTLSMinVersion)
+		values = append(values, storageConfig.GetSslTlsMinVersion())
+	}
+
+	// Add CRC32C checksum
+	keys = append(keys, PropertyFSUseCRC32CChecksum)
+	if storageConfig.GetUseCrc32CChecksum() {
+		values = append(values, "true")
+	} else {
+		values = append(values, "false")
+	}
 
 	// Add extra kvs
 	for k, v := range extraKVs {

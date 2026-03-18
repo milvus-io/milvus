@@ -1045,6 +1045,7 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
         conf.use_custom_part_upload = true;
         conf.max_connections = storage_config.max_connections;
         conf.tls_min_version = storage_config.tls_min_version;
+        conf.use_crc32c_checksum = storage_config.use_crc32c_checksum;
     }
     return StorageV2FSCache::Instance().Get(conf);
 }

@@ -1394,6 +1394,7 @@ type MinioConfig struct {
 	RequestTimeoutMs   ParamItem `refreshable:"false"`
 	MaxConnections     ParamItem `refreshable:"false"`
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
+	UseCRC32C          ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -1625,6 +1626,15 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export: true,
 	}
 	p.ListObjectsMaxKeys.Init(base.mgr)
+
+	p.UseCRC32C = ParamItem{
+		Key:          "minio.ssl.useCRC32C",
+		Version:      "2.6.11",
+		DefaultValue: "true",
+		Doc:          "Whether to use CRC32C checksum for data integrity validation on MinIO/S3 PutObject requests.",
+		Export:       true,
+	}
+	p.UseCRC32C.Init(base.mgr)
 }
 
 // profile config

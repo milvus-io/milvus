@@ -60,6 +60,7 @@ message StorageConfig {
   string GcpCredentialJSON = 15;
   uint32 max_connections = 16;
   string ssl_tls_min_version = 17;
+  bool use_crc32c_checksum = 18;
 }
 
 // Synchronously modify OptionalFieldInfo in index_coord.proto file

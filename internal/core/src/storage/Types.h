@@ -106,6 +106,7 @@ struct StorageConfig {
     std::string gcp_credential_json = "";
     uint32_t max_connections = 100;
     std::string tls_min_version = "";
+    bool use_crc32c_checksum = false;
 
     std::string
     ToString() const {
@@ -122,6 +123,7 @@ struct StorageConfig {
            << ", maxConnections=" << max_connections
            << ", gcp_native_without_auth=" << std::boolalpha
            << gcp_native_without_auth << ", tls_min_version=" << tls_min_version
+           << ", use_crc32c_checksum=" << std::boolalpha << use_crc32c_checksum
            << "]";
 
         return ss.str();

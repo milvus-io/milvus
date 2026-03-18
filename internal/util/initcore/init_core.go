@@ -202,6 +202,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		use_custom_part_upload: true,
 		max_connections:        C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
 		tls_min_version:        cTLSMinVersion,
+		use_crc32c_checksum:    C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
 	}
 
 	status := C.InitRemoteArrowFileSystemSingleton(storageConfig)
@@ -257,8 +258,9 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		useVirtualHost:      C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
 		requestTimeoutMs:    C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
 		gcp_credential_json: cGcpCredentialJSON,
-		max_connections:     C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
+		max_connections:      C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
 		tls_min_version:     cTLSMinVersion,
+		use_crc32c_checksum: C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)

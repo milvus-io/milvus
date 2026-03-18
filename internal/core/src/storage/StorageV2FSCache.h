@@ -48,6 +48,7 @@ class StorageV2FSCache {
         bool use_custom_part_upload = true;
         uint32_t max_connections = 100;
         std::string tls_min_version = "";
+        bool use_crc32c_checksum = false;
 
         bool
         operator==(const Key& other) const {
@@ -68,7 +69,8 @@ class StorageV2FSCache {
                    gcp_credential_json == other.gcp_credential_json &&
                    use_custom_part_upload == other.use_custom_part_upload &&
                    max_connections == other.max_connections &&
-                   tls_min_version == other.tls_min_version;
+                   tls_min_version == other.tls_min_version &&
+                   use_crc32c_checksum == other.use_crc32c_checksum;
         }
     };
 
@@ -96,6 +98,7 @@ class StorageV2FSCache {
             hash_combine(hash, k.use_custom_part_upload);
             hash_combine(hash, k.max_connections);
             hash_combine(hash, k.tls_min_version);
+            hash_combine(hash, k.use_crc32c_checksum);
             return hash;
         }
 
