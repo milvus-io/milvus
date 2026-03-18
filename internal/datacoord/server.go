@@ -879,7 +879,7 @@ func (s *Server) stopServiceWatch() {
 		// Force exit so the process can be restarted by the orchestrator (e.g. K8s).
 		log.Ctx(s.ctx).Error("force exit due to unexpected watch service failure")
 		log.Cleanup()
-		os.Exit(1)
+		os.Exit(sessionutil.ExitCodeEtcd)
 	}
 }
 

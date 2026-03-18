@@ -916,8 +916,8 @@ func TestForceKill(t *testing.T) {
 
 	// 子进程退出码
 	if e, ok := err.(*exec.ExitError); ok {
-		if e.ExitCode() != 1 {
-			t.Fatalf("expected exit 1, got %d", e.ExitCode())
+		if e.ExitCode() != ExitCodeEtcd {
+			t.Fatalf("expected exit %d, got %d", ExitCodeEtcd, e.ExitCode())
 		}
 	} else {
 		t.Fatalf("unexpected error: %#v", err)

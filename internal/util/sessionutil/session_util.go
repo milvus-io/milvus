@@ -51,9 +51,12 @@ const (
 	// DefaultServiceRoot default root path used in kv by Session
 	DefaultServiceRoot = "session/"
 	// DefaultIDKey default id key for Session
-	DefaultIDKey                = "id"
-	MilvusNodeIDForTesting      = "MILVUS_NODE_ID_FOR_TESTING"
-	exitCodeSessionLeaseExpired = 1
+	DefaultIDKey           = "id"
+	MilvusNodeIDForTesting = "MILVUS_NODE_ID_FOR_TESTING"
+	// ExitCodeEtcd is the exit code used when the process must terminate due to
+	// an unrecoverable etcd failure (session lease expired, watch channel closed, etc.).
+	// Using a distinctive code (80) so K8s pod status can identify etcd-related crashes.
+	ExitCodeEtcd = 80
 
 	serverVersionKey = "version"
 )
@@ -631,19 +634,19 @@ func (s *Session) checkKeepaliveTTL(nextKeepaliveInstant time.Time) error {
 		if errors.Is(err, v3rpc.ErrLeaseNotFound) {
 			s.Logger().Error("confirm the lease is not found, the session is expired without activing closing", zap.Error(err))
 			log.Cleanup()
-			os.Exit(exitCodeSessionLeaseExpired)
+			os.Exit(ExitCodeEtcd)
 		}
 		if ctx.Err() != nil && errors.Is(context.Cause(ctx), errSessionExpiredAtClientSide) {
 			s.Logger().Error("session expired at client side, the session is expired without activing closing", zap.Error(err))
 			log.Cleanup()
-			os.Exit(exitCodeSessionLeaseExpired)
+			os.Exit(ExitCodeEtcd)
 		}
 		return errors.Wrap(err, "failed to check TTL")
 	}
 	if ttlResp.TTL <= 0 {
 		s.Logger().Error("confirm the lease is expired, the session is expired without activing closing", zap.Error(err))
 		log.Cleanup()
-		os.Exit(exitCodeSessionLeaseExpired)
+		os.Exit(ExitCodeEtcd)
 	}
 	s.Logger().Info("check TTL success, try to keep alive...", zap.Int64("ttl", ttlResp.TTL))
 	return nil
