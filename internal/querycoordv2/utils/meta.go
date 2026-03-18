@@ -19,6 +19,7 @@ package utils
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/samber/lo"
@@ -88,7 +89,7 @@ func RecoverReplicaOfCollection(ctx context.Context, m *meta.Meta, collectionID 
 		logger.Error("no resource group found for collection")
 		return
 	}
-	rgs, err := m.ResourceManager.GetNodesOfMultiRG(ctx, rgNames.Collect())
+	rgs, err := m.ResourceManager.GetResourceGroups(ctx, rgNames.Collect())
 	if err != nil {
 		logger.Error("unreachable code as expected, fail to get resource group for replica", zap.Error(err))
 		return
@@ -209,8 +210,11 @@ func ReassignReplicaToRG(
 	})
 
 	// if rg doesn't exist in newResourceGroups, add all replicas to candidateToRelease
+	// Sort outRg in reverse lexicographic order so that replicas from lexicographically larger RGs
+	// are added first (released first during scale-down), preserving replicas from smaller RGs.
 	candidateToRelease := make([]*meta.Replica, 0)
 	outRg, _ := lo.Difference(lo.Keys(replicasInRG), newResourceGroups)
+	sort.Sort(sort.Reverse(sort.StringSlice(outRg)))
 	if len(outRg) > 0 {
 		for _, rgName := range outRg {
 			candidateToRelease = append(candidateToRelease, replicasInRG[rgName]...)
@@ -219,8 +223,12 @@ func ReassignReplicaToRG(
 
 	// if rg has more replicas than newAssignment's replica number, add the rest replicas to candidateToMove
 	// also set the lacked replica number as rg's replicaToSpawn value
+	// Sort newAssignment keys for deterministic behavior.
 	replicaToSpawn := make(map[string]int, len(newAssignment))
-	for rgName, count := range newAssignment {
+	sortedAssignmentRGs := lo.Keys(newAssignment)
+	sort.Strings(sortedAssignmentRGs)
+	for _, rgName := range sortedAssignmentRGs {
+		count := newAssignment[rgName]
 		if len(replicasInRG[rgName]) > count {
 			candidateToRelease = append(candidateToRelease, replicasInRG[rgName][count:]...)
 		} else {
@@ -243,9 +251,13 @@ func ReassignReplicaToRG(
 
 	// if candidateToMove is not empty, pick replica from candidate add add it to replicaToTransfer
 	// which means if rg has less replicas than expected, we transfer some existed replica to it.
+	// Sort RGs in lexicographic order so that existing replicas are preferentially transferred to
+	// the lexicographically smallest RG, maintaining QN assignment stability during scale-up.
 	replicaToTransfer := make(map[string][]*meta.Replica)
+	sortedSpawnRGs := lo.Keys(replicaToSpawn)
+	sort.Strings(sortedSpawnRGs)
 	if candidateIdx < len(candidateToRelease) {
-		for rg := range replicaToSpawn {
+		for _, rg := range sortedSpawnRGs {
 			for replicaToSpawn[rg] > 0 && candidateIdx < len(candidateToRelease) {
 				if replicaToTransfer[rg] == nil {
 					replicaToTransfer[rg] = make([]*meta.Replica, 0)

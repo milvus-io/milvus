@@ -1094,7 +1094,7 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 	return merr.Success(), nil
 }
 
-func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string) error {
+func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
 	jobs := make([]job.Job, 0, len(collectionIDs))
 	for _, collectionID := range collectionIDs {
 		collection := s.meta.GetCollection(ctx, collectionID)
@@ -1129,6 +1129,7 @@ func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, ne
 			continue
 		}
 
+		waitRG := len(needWaitRGReady) > 0 && needWaitRGReady[0]
 		updateJob := job.NewUpdateLoadConfigJob(
 			ctx,
 			subReq,
@@ -1136,7 +1137,9 @@ func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, ne
 			s.targetMgr,
 			s.targetObserver,
 			s.collectionObserver,
+			s.proxyClientManager,
 			false,
+			waitRG,
 		)
 
 		jobs = append(jobs, updateJob)

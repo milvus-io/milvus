@@ -18,6 +18,7 @@ package observers
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -104,6 +105,10 @@ func (ob *ResourceObserver) checkAndRecoverResourceGroup(ctx context.Context) {
 
 	log.Debug("recover resource groups...")
 	// Recover all resource group into expected configuration.
+	// Sort RG names lexicographically so that nodes from __default_resource_group are
+	// preferentially allocated to the lexicographically smallest RG first, maintaining
+	// QN assignment stability during scale-up.
+	sort.Strings(rgNames)
 	for _, rgName := range rgNames {
 		if err := manager.MeetRequirement(ctx, rgName); err != nil {
 			log.Info("found resource group need to be recovered",
