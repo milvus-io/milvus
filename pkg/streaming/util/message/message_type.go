@@ -21,6 +21,8 @@ type MessageTypeProperties struct {
 	ExclusiveRequired bool
 	// a cipher enabled message type will be encrypted before appending to the wal if cipher is enabled.
 	CipherEnabled bool
+	// A message type belong to some data operation, such as insert, delete, upsert, which may create a huge overhead if not limited.
+	DMLMessageType bool
 }
 
 var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
@@ -30,12 +32,14 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 		SelfControlled: true,
 	},
 	MessageTypeInsert: {
-		LogLevel:      zapcore.DebugLevel,
-		CipherEnabled: true,
+		LogLevel:       zapcore.DebugLevel,
+		CipherEnabled:  true,
+		DMLMessageType: true,
 	},
 	MessageTypeDelete: {
-		LogLevel:      zapcore.DebugLevel,
-		CipherEnabled: true,
+		LogLevel:       zapcore.DebugLevel,
+		CipherEnabled:  true,
+		DMLMessageType: true,
 	},
 	MessageTypeCreateCollection: {
 		ExclusiveRequired: true,
@@ -156,6 +160,11 @@ func (t MessageType) IsSystem() bool {
 // IsSelfControlled checks if the MessageType is self controlled.
 func (t MessageType) IsSelfControlled() bool {
 	return messageTypePropertiesMap[t].SelfControlled
+}
+
+// IsDMLMessageType checks if the MessageType is a data operation message type.
+func (t MessageType) IsDMLMessageType() bool {
+	return messageTypePropertiesMap[t].DMLMessageType
 }
 
 // LogLevel returns the log level of the MessageType.
