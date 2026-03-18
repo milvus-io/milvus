@@ -12,14 +12,10 @@ default_nb = ct.default_nb
 default_nq = ct.default_nq
 default_dim = ct.default_dim
 default_limit = ct.default_limit
-default_search_exp = "int64 >= 0"
+default_search_exp = f"{ct.default_int64_field_name} >= 0"
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
-default_int64_field_name = ct.default_int64_field_name
-default_float_field_name = ct.default_float_field_name
-default_string_field_name = ct.default_string_field_name
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-field_name = ct.default_float_vec_field_name
 
 
 @pytest.mark.xdist_group("TestSearchInvalidShared")
@@ -35,7 +31,7 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
 
     def setup_class(self):
         super().setup_class(self)
-        self.collection_name = "TestSearchInvalidShared" + cf.gen_unique_str("_")
+        self.collection_name = "TestSearchInvalidShared" + cf.gen_unique_str("search_invalid")
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_collection(self, request):
@@ -265,7 +261,8 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                                             % invalid_search_expr})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression", ["int64 like 33", "float LIKE 33"])
+    @pytest.mark.parametrize("expression", [f"{ct.default_int64_field_name} like 33",
+                                               f"{ct.default_float_field_name} LIKE 33"])
     def test_search_with_expression_invalid_like(self, expression):
         """
         target: test search int64 and float with like
@@ -342,21 +339,21 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                                  ct.err_msg: err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("non_exiting_output_fields",
-                             [["non_exiting"], [ct.default_int64_field_name, "non_exiting"]])
-    def test_search_with_output_fields_non_existing(self, non_exiting_output_fields):
+    @pytest.mark.parametrize("non_existing_output_fields",
+                             [["non_existing"], [ct.default_int64_field_name, "non_existing"]])
+    def test_search_with_output_fields_non_existing(self, non_existing_output_fields):
         """
         target: test search with output fields
         method: search with invalid output_field
         expected: raise exception and report the error
         """
         client = self._client(alias=self.shared_alias)
-        err_msg = f"field non_exiting not exist"
+        err_msg = f"field non_existing not exist"
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
                     filter=default_search_exp,
-                    output_fields=non_exiting_output_fields,
+                    output_fields=non_existing_output_fields,
                     check_task=CheckTasks.err_res,
                     check_items={ct.err_code: 999,
                                  ct.err_msg: err_msg})
@@ -377,7 +374,11 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
                     filter=default_search_exp,
-                    output_fields=output_fields)
+                    output_fields=output_fields,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": default_nq, "limit": default_limit,
+                                 "metric": "COSINE", "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
@@ -484,13 +485,13 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expr", [
-        "int64 / 0 > 0",
-        "int64 / 0 == 1",
-        "float / 0 == 1.0",
-        "int64 % 0 == 1",
-        "int64 % 0 != 0",
-        "json_field['number'] / 0 > 0",
-        "json_field['number'] % 0 == 1",
+        f"{ct.default_int64_field_name} / 0 > 0",
+        f"{ct.default_int64_field_name} / 0 == 1",
+        f"{ct.default_float_field_name} / 0 == 1.0",
+        f"{ct.default_int64_field_name} % 0 == 1",
+        f"{ct.default_int64_field_name} % 0 != 0",
+        f"{ct.default_json_field_name}['number'] / 0 > 0",
+        f"{ct.default_json_field_name}['number'] % 0 == 1",
     ])
     def test_search_filter_division_by_zero(self, expr):
         """
@@ -509,8 +510,8 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expr", [
-        "int64 / 0 > 0",
-        "int64 % 0 == 1",
+        f"{ct.default_int64_field_name} / 0 > 0",
+        f"{ct.default_int64_field_name} % 0 == 1",
     ])
     def test_query_filter_division_by_zero(self, expr):
         """
@@ -527,9 +528,9 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expr,expr_params", [
-        ("int64 / {d} > 0", {"d": 0}),
-        ("int64 % {d} == 1", {"d": 0}),
-        ("float / {d} == 1.0", {"d": 0}),
+        (f"{ct.default_int64_field_name} / {{d}} > 0", {"d": 0}),
+        (f"{ct.default_int64_field_name} % {{d}} == 1", {"d": 0}),
+        (f"{ct.default_float_field_name} / {{d}} == 1.0", {"d": 0}),
     ])
     def test_search_filter_division_by_zero_with_expr_params(self, expr, expr_params):
         """
@@ -549,9 +550,9 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr", [
-        "int64 / 2 >= 0",
-        "int64 % 3 == 1",
-        "float / 2.0 < 1000",
+        f"{ct.default_int64_field_name} / 2 >= 0",
+        f"{ct.default_int64_field_name} % 3 == 1",
+        f"{ct.default_float_field_name} / 2.0 < 1000",
     ])
     def test_search_filter_division_by_nonzero(self, expr):
         """
@@ -564,7 +565,11 @@ class TestSearchInvalidShared(TestMilvusClientV2Base):
         self.search(client, self.collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
-                    filter=expr)
+                    filter=expr,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": default_nq, "limit": default_limit,
+                                 "metric": "COSINE", "enable_milvus_client_api": True,
+                                 "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("invalid_range_filter", [[0.1], "str"])
@@ -860,7 +865,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
-        expressions = ["bool", "true", "false"]
+        expressions = [ct.default_bool_field_name, "true", "false"]
         for expression in expressions:
             log.debug(f"search with expression: {expression}")
             self.search(client, collection_name,
@@ -871,7 +876,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                         check_items={"err_code": 1100,
                                      "err_msg": "failed to create query plan: predicate is not a "
                                                 "boolean expression: %s, data type: Bool" % expression})
-        expression = "!bool"
+        expression = f"!{ct.default_bool_field_name}"
         log.debug(f"search with expression: {expression}")
         self.search(client, collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
@@ -879,9 +884,9 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     filter=expression,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1100,
-                                 "err_msg": "cannot parse expression: !bool, "
+                                 "err_msg": f"cannot parse expression: !{ct.default_bool_field_name}, "
                                             "error: not op can only be applied on boolean expression"})
-        expression = "int64 > 0 and bool"
+        expression = f"{ct.default_int64_field_name} > 0 and {ct.default_bool_field_name}"
         log.debug(f"search with expression: {expression}")
         self.search(client, collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
@@ -889,9 +894,9 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     filter=expression,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1100,
-                                 "err_msg": "cannot parse expression: int64 > 0 and bool, "
+                                 "err_msg": f"cannot parse expression: {ct.default_int64_field_name} > 0 and {ct.default_bool_field_name}, "
                                             "error: 'and' can only be used between boolean expressions"})
-        expression = "int64 > 0 or false"
+        expression = f"{ct.default_int64_field_name} > 0 or false"
         log.debug(f"search with expression: {expression}")
         self.search(client, collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
@@ -899,7 +904,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     filter=expression,
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1100,
-                                 "err_msg": "cannot parse expression: int64 > 0 or false, "
+                                 "err_msg": f"cannot parse expression: {ct.default_int64_field_name} > 0 or false, "
                                             "error: 'or' can only be used between boolean expressions"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1372,7 +1377,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
                     data=search_binary_vectors[:default_nq],
                     anns_field=ct.default_binary_vec_field_name,
                     search_params=search_params, limit=default_limit,
-                    filter="int64 >= 0",
+                    filter=f"{ct.default_int64_field_name} >= 0",
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 65535,
                                  "err_msg": "metric type not match: invalid "
@@ -1466,9 +1471,9 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         search_params = cf.get_search_params_params(index)
         self.search(client, collection_name,
-                    data=vectors[:default_nq], anns_field=field_name,
+                    data=vectors[:default_nq], anns_field=default_search_field,
                     search_params={"params": search_params}, limit=default_limit,
-                    output_fields=[field_name],
+                    output_fields=[default_search_field],
                     check_task=CheckTasks.err_res,
                     check_items={"err_code": 1,
                                  "err_msg": "not supported"})
@@ -1613,7 +1618,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         # search with two fields comparison
-        expr = 'float >= int64'
+        expr = f'{ct.default_float_field_name} >= {ct.default_int64_field_name}'
         search_vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         self.search(client, collection_name,
                     data=search_vectors[:default_nq], anns_field=default_search_field,
