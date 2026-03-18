@@ -17,19 +17,28 @@
 package numpy
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
+	"github.com/samber/lo"
 	"github.com/sbinet/npyio"
 	"github.com/sbinet/npyio/npy"
+	"go.uber.org/zap"
 	"golang.org/x/text/encoding/unicode"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
@@ -38,6 +47,87 @@ var (
 	reUniPre  = regexp.MustCompile(`^[<|>]*?(\d.*)U$`)
 	reUniPost = regexp.MustCompile(`^[<|>]*?U(\d.*)$`)
 )
+
+func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (map[int64]storage.FileReader, error) {
+	nameToPath := lo.SliceToMap(paths, func(path string) (string, string) {
+		nameWithExt := filepath.Base(path)
+		name := strings.TrimSuffix(nameWithExt, filepath.Ext(nameWithExt))
+		return name, path
+	})
+	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
+		return field.GetName()
+	})
+
+	// this loop is for "how many fields are provided?"
+	readFields := make(map[string]int64)
+	readers := make(map[int64]storage.FileReader)
+	for name, path := range nameToPath {
+		field, ok := nameToField[name]
+		if !ok {
+			// redundant files, ignore. only accepts a special field "$meta" to store dynamic data
+			continue
+		}
+
+		// auto-id field must not provided
+		if typeutil.IsAutoPKField(field) {
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
+		}
+		// function output field must not provided
+		if field.GetIsFunctionOutput() {
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("the field '%s' is output by function, no need to provide", field.GetName()))
+		}
+
+		// report an error if user provided the files for unsupported fields
+		err := checkUnsupportedDataType(field.GetDataType())
+		if err != nil {
+			return nil, err
+		}
+
+		reader, err := cm.Reader(ctx, path)
+		if err != nil {
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("failed to read the file '%s', error: %s", path, err.Error()))
+		}
+		retryableReader := common.NewRetryableReader(ctx, path, reader)
+		readers[field.GetFieldID()] = retryableReader
+		readFields[field.GetName()] = field.GetFieldID()
+	}
+
+	// this loop is for "are there any fields not provided?"
+	for _, field := range nameToField {
+		// auto-id field, function output field already checked
+		// dynamic field, nullable field, default value field, not provided or provided both ok
+		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() ||
+			field.GetNullable() || field.GetDefaultValue() != nil {
+			continue
+		}
+
+		// report an error if the collection contains an unsupported field even user doesn't provide a numpy file for the field
+		err := checkUnsupportedDataType(field.GetDataType())
+		if err != nil {
+			return nil, err
+		}
+
+		// the other field must be provided
+		if _, ok := readers[field.GetFieldID()]; !ok {
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(nameToPath)))
+		}
+	}
+
+	log.Info("create numpy readers", zap.Any("readFields", readFields))
+	return readers, nil
+}
+
+func checkUnsupportedDataType(dt schemapb.DataType) error {
+	if dt == schemapb.DataType_Array || dt == schemapb.DataType_SparseFloatVector {
+		return merr.WrapErrImportFailed(
+			fmt.Sprintf("unsupported importing numpy files for collection with data type: %s", dt.String()))
+	}
+	return nil
+}
 
 func stringLen(dtype string) (int, bool, error) {
 	var utf bool

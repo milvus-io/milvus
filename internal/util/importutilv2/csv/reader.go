@@ -54,12 +54,13 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("read csv file failed, path=%s, err=%s", path, err.Error()))
 	}
+	retryableReader := common.NewRetryableReader(ctx, path, cmReader)
 	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
 	}
 
-	csvReader := csv.NewReader(cmReader)
+	csvReader := csv.NewReader(retryableReader)
 	csvReader.Comma = sep
 
 	header, err := csvReader.Read()
@@ -75,7 +76,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	return &reader{
 		ctx:        ctx,
 		cm:         cm,
-		cmr:        cmReader,
+		cmr:        retryableReader,
 		schema:     schema,
 		cr:         csvReader,
 		parser:     rowParser,

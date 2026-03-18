@@ -20,8 +20,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
-	"strings"
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
@@ -124,44 +122,4 @@ func (r *reader) Close() {
 	for _, cmr := range r.cmrs {
 		cmr.Close()
 	}
-}
-
-func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (map[int64]storage.FileReader, error) {
-	readers := make(map[int64]storage.FileReader)
-	nameToPath := lo.SliceToMap(paths, func(path string) (string, string) {
-		nameWithExt := filepath.Base(path)
-		name := strings.TrimSuffix(nameWithExt, filepath.Ext(nameWithExt))
-		return name, path
-	})
-	for _, field := range schema.GetFields() {
-		path, hasPath := nameToPath[field.GetName()]
-		if field.GetIsPrimaryKey() && field.GetAutoID() {
-			if hasPath {
-				return nil, merr.WrapErrImportFailed(
-					fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
-			}
-			continue
-		}
-		if field.GetIsFunctionOutput() {
-			if hasPath {
-				return nil, merr.WrapErrImportFailed(
-					fmt.Sprintf("field %s is Function output, should not be provided. Provided files: %v", field.GetName(), lo.Values(nameToPath)))
-			}
-			continue
-		}
-		if !hasPath {
-			if field.GetIsDynamic() {
-				continue
-			}
-			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(nameToPath)))
-		}
-		reader, err := cm.Reader(ctx, path)
-		if err != nil {
-			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("failed to read the file '%s', error: %s", path, err.Error()))
-		}
-		readers[field.GetFieldID()] = reader
-	}
-	return readers, nil
 }

@@ -18,6 +18,7 @@ type config struct {
 	requestTimeoutMs     int64
 	gcpCredentialJSON    string
 	gcpNativeWithoutAuth bool // used for Unit Testing
+	readRetryAttempts    uint
 }
 
 func newDefaultConfig() *config {
@@ -114,5 +115,11 @@ func RequestTimeout(requestTimeoutMs int64) Option {
 func GcpCredentialJSON(gcpCredentialJSON string) Option {
 	return func(c *config) {
 		c.gcpCredentialJSON = gcpCredentialJSON
+	}
+}
+
+func ReadRetryAttempts(readRetryAttempts uint) Option {
+	return func(c *config) {
+		c.readRetryAttempts = readRetryAttempts
 	}
 }

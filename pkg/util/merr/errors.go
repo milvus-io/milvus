@@ -127,9 +127,20 @@ var (
 	ErrNodeStateUnexpected = newMilvusError("node state unexpected", 906, false)
 
 	// IO related
-	ErrIoKeyNotFound = newMilvusError("key not found", 1000, false)
-	ErrIoFailed      = newMilvusError("IO failed", 1001, false)
-	ErrIoUnexpectEOF = newMilvusError("unexpected EOF", 1002, true)
+	ErrIoKeyNotFound     = newMilvusError("key not found", 1000, false)
+	ErrIoFailed          = newMilvusError("IO failed", 1001, false)
+	ErrIoUnexpectEOF     = newMilvusError("unexpected EOF", 1002, true)
+	ErrIoTooManyRequests = newMilvusError("too many requests", 1003, true)
+
+	// Permanent errors - resource doesn't exist or access denied
+	ErrIoPermissionDenied   = newMilvusError("permission denied", 1005, false)
+	ErrIoBucketNotFound     = newMilvusError("bucket not found", 1006, false)
+	ErrIoInvalidCredentials = newMilvusError("invalid credentials", 1007, false)
+
+	// Client validation errors - request is malformed
+	ErrIoInvalidArgument = newMilvusError("invalid argument", 1010, false)
+	ErrIoInvalidRange    = newMilvusError("invalid range", 1011, false)
+	ErrIoEntityTooLarge  = newMilvusError("entity too large", 1012, false)
 
 	// Parameter related
 	ErrParameterInvalid  = newMilvusError("invalid parameter", 1100, false)

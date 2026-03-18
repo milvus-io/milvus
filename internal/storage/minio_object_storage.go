@@ -240,3 +240,16 @@ func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, 
 	}
 	return checkObjectStorageError(objectName, err)
 }
+
+func (minioObjectStorage *MinioObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
+	srcOpts := minio.CopySrcOptions{
+		Bucket: bucketName,
+		Object: srcObjectName,
+	}
+	dstOpts := minio.CopyDestOptions{
+		Bucket: bucketName,
+		Object: dstObjectName,
+	}
+	_, err := minioObjectStorage.Client.CopyObject(ctx, dstOpts, srcOpts)
+	return checkObjectStorageError(srcObjectName, err)
+}

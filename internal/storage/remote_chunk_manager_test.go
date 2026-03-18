@@ -18,12 +18,19 @@ package storage
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"path"
+	"syscall"
 	"testing"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/cockroachdb/errors"
+	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/api/googleapi"
 
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -970,5 +977,89 @@ func TestAzureChunkManager(t *testing.T) {
 		_, err = testCM.ReadAt(ctx, key, 100, 1)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, merr.ErrIoKeyNotFound))
+	})
+}
+
+func TestToMilvusIoError(t *testing.T) {
+	fileName := "test_file"
+
+	t.Run("nil error", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("io.ErrUnexpectedEOF", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, io.ErrUnexpectedEOF)
+		assert.ErrorIs(t, err, merr.ErrIoUnexpectEOF)
+	})
+
+	t.Run("syscall.ECONNRESET", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, syscall.ECONNRESET)
+		assert.ErrorIs(t, err, merr.ErrIoTooManyRequests)
+	})
+
+	t.Run("generic error", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, errors.New("some error"))
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+	})
+
+	t.Run("minio NoSuchKey", func(t *testing.T) {
+		minioErr := minio.ErrorResponse{Code: "NoSuchKey"}
+		err := ToMilvusIoError(fileName, minioErr)
+		assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	})
+
+	t.Run("minio SlowDown", func(t *testing.T) {
+		minioErr := minio.ErrorResponse{Code: "SlowDown"}
+		err := ToMilvusIoError(fileName, minioErr)
+		assert.ErrorIs(t, err, merr.ErrIoTooManyRequests)
+	})
+
+	t.Run("minio TooManyRequestsException", func(t *testing.T) {
+		minioErr := minio.ErrorResponse{Code: "TooManyRequestsException"}
+		err := ToMilvusIoError(fileName, minioErr)
+		assert.ErrorIs(t, err, merr.ErrIoTooManyRequests)
+	})
+
+	t.Run("minio other error", func(t *testing.T) {
+		minioErr := minio.ErrorResponse{Code: "AccessDenied"}
+		err := ToMilvusIoError(fileName, minioErr)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+	})
+
+	t.Run("azure BlobNotFound", func(t *testing.T) {
+		azureErr := &azcore.ResponseError{ErrorCode: string(bloberror.BlobNotFound)}
+		err := ToMilvusIoError(fileName, azureErr)
+		assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	})
+
+	t.Run("azure ServerBusy", func(t *testing.T) {
+		azureErr := &azcore.ResponseError{ErrorCode: string(bloberror.ServerBusy)}
+		err := ToMilvusIoError(fileName, azureErr)
+		assert.ErrorIs(t, err, merr.ErrIoTooManyRequests)
+	})
+
+	t.Run("azure other error", func(t *testing.T) {
+		azureErr := &azcore.ResponseError{ErrorCode: "SomeOtherError"}
+		err := ToMilvusIoError(fileName, azureErr)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
+	})
+
+	t.Run("googleapi NotFound", func(t *testing.T) {
+		googleErr := &googleapi.Error{Code: http.StatusNotFound}
+		err := ToMilvusIoError(fileName, googleErr)
+		assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	})
+
+	t.Run("googleapi TooManyRequests", func(t *testing.T) {
+		googleErr := &googleapi.Error{Code: http.StatusTooManyRequests}
+		err := ToMilvusIoError(fileName, googleErr)
+		assert.ErrorIs(t, err, merr.ErrIoTooManyRequests)
+	})
+
+	t.Run("googleapi other error", func(t *testing.T) {
+		googleErr := &googleapi.Error{Code: http.StatusForbidden}
+		err := ToMilvusIoError(fileName, googleErr)
+		assert.ErrorIs(t, err, merr.ErrIoFailed)
 	})
 }
