@@ -44,6 +44,8 @@ func InitSegcore(nodeID int64) error {
 	C.IndexBuilderInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
 
+	C.LogOpenSSLFIPSStatus()
+
 	// update log level based on current setup
 	initcore.UpdateLogLevel(paramtable.Get().LogCfg.Level.GetValue())
 

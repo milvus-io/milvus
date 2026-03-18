@@ -71,6 +71,10 @@ InitTrace(CTraceConfig* config);
 void
 SetTrace(CTraceConfig* config);
 
+// OpenSSL FIPS status
+void
+LogOpenSSLFIPSStatus();
+
 // Expr result cache
 void
 SetExprResCacheEnable(bool val);
