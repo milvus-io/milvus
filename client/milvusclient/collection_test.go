@@ -261,6 +261,26 @@ func (s *CollectionSuite) TestDropCollection() {
 	})
 }
 
+func (s *CollectionSuite) TestTruncateCollection() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		s.mock.EXPECT().TruncateCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.TruncateCollectionResponse{Status: merr.Success()}, nil).Once()
+
+		err := s.client.TruncateCollection(ctx, NewTruncateCollectionOption("test_collection"))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		s.mock.EXPECT().TruncateCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+
+		err := s.client.TruncateCollection(ctx, NewTruncateCollectionOption("test_collection"))
+		s.Error(err)
+	})
+}
+
 func (s *CollectionSuite) TestRenameCollection() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

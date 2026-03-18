@@ -385,6 +385,25 @@ func NewAlterCollectionFieldPropertiesOption(collectionName string, fieldName st
 	}
 }
 
+// TruncateCollectionOption is the interface builds TruncateCollectionRequest.
+type TruncateCollectionOption interface {
+	Request() *milvuspb.TruncateCollectionRequest
+}
+
+type truncateCollectionOption struct {
+	name string
+}
+
+func (opt *truncateCollectionOption) Request() *milvuspb.TruncateCollectionRequest {
+	return &milvuspb.TruncateCollectionRequest{
+		CollectionName: opt.name,
+	}
+}
+
+func NewTruncateCollectionOption(name string) *truncateCollectionOption {
+	return &truncateCollectionOption{name: name}
+}
+
 type GetCollectionOption interface {
 	Request() *milvuspb.GetCollectionStatisticsRequest
 }
