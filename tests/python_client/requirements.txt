@@ -68,6 +68,9 @@ tantivy==0.22.0
 bm25s==0.2.0
 jieba==0.42.1
 
+# for minhash function test
+xxhash>=3.0.0
+
 
 # for perf test
 locust==2.25.0

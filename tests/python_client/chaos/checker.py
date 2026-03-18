@@ -107,7 +107,6 @@ class RequestRecords(metaclass=Singleton):
                 self._flush_buffer()
 
     def _flush_buffer(self):
-        """将 buffer 写入文件（调用时需持有 request_lock）"""
         if not self.buffer:
             return
         try:
@@ -240,6 +239,7 @@ class Op(Enum):
     search = 'search'
     tensor_search = 'tensor_search'
     full_text_search = 'full_text_search'
+    minhash_search = 'minhash_search'
     hybrid_search = 'hybrid_search'
     query = 'query'
     text_match = 'text_match'
@@ -472,7 +472,10 @@ class Checker:
         self.binary_vector_field_names = cf.get_binary_vec_field_name_list(schema=schema)
         self.int8_vector_field_names = cf.get_int8_vec_field_name_list(schema=schema)
         self.bm25_sparse_field_names = cf.get_bm25_vec_field_name_list(schema=schema)
+        self.minhash_field_names = cf.get_minhash_vec_field_name_list(schema=schema)
         self.emb_list_field_names = cf.get_emb_list_field_name_list(schema=schema)
+        # Exclude minhash output fields from binary vector fields (they need MINHASH_LSH index)
+        self.binary_vector_field_names = [f for f in self.binary_vector_field_names if f not in self.minhash_field_names]
 
         # Get existing indexes and their fields
         indexed_fields = set()
@@ -610,6 +613,23 @@ class Checker:
                     timeout=timeout
                 )
                 log.debug(f"Created index for bm25 sparse field {f}")
+            except Exception as e:
+                log.warning(f"Failed to create index for {f}: {e}")
+
+        # create index for minhash fields
+        for f in self.minhash_field_names:
+            if f in indexed_fields:
+                continue
+            try:
+                index_params = create_index_params_from_dict(f, constants.DEFAULT_MINHASH_INDEX_PARAM)
+                self.milvus_client.create_index(
+                    collection_name=c_name,
+                    index_params=index_params,
+                    timeout=timeout
+                )
+                log.debug(f"Created index for minhash field {f}")
+                indexed_fields.add(f)
+                vector_index_created = True
             except Exception as e:
                 log.warning(f"Failed to create index for {f}: {e}")
 
@@ -1096,6 +1116,43 @@ class FullTextSearchChecker(Checker):
     @exception_handler()
     def run_task(self):
         res, result = self.full_text_search()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
+
+
+class MinHashSearchChecker(Checker):
+    """check minhash search operations in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("MinHashSearchChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        self.insert_data()
+
+    @trace()
+    def minhash_search(self):
+        minhash_anns_field = random.choice(self.minhash_field_names)
+        try:
+            res = self.milvus_client.search(
+                collection_name=self.c_name,
+                data=cf.gen_text_vectors(5),
+                anns_field=minhash_anns_field,
+                search_params=constants.DEFAULT_MINHASH_SEARCH_PARAM,
+                limit=5,
+                partition_names=self.p_names,
+                timeout=search_timeout
+            )
+            return res, True
+        except Exception as e:
+            return str(e), False
+
+    @exception_handler()
+    def run_task(self):
+        res, result = self.minhash_search()
         return res, result
 
     def keep_running(self):

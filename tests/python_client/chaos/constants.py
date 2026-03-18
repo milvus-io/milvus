@@ -30,4 +30,6 @@ DEFAULT_BINARY_INDEX_PARAM = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACC
 DEFAULT_BINARY_SEARCH_PARAM = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
 DEFAULT_BM25_INDEX_PARAM = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "BM25", "params": {"bm25_k1": 1.5, "bm25_b": 0.75}}
 DEFAULT_BM25_SEARCH_PARAM = {"metric_type": "BM25", "params": {}}
+DEFAULT_MINHASH_INDEX_PARAM = {"index_type": "MINHASH_LSH", "metric_type": "MHJACCARD", "params": {"mh_lsh_band": 8}}
+DEFAULT_MINHASH_SEARCH_PARAM = {"metric_type": "MHJACCARD", "params": {}}
 CHAOS_INFO_SAVE_PATH = "/tmp/ci_logs/chaos_info.json"
