@@ -1074,7 +1074,7 @@ func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFie
 					if len(value)%8 != 0 {
 						return nil, -1, nil, errors.New("invalid bytesData length")
 					}
-					fieldData.Contents = append(fieldData.Contents, value)
+					fieldData.Contents = append(fieldData.Contents, append([]byte{}, value...))
 					rowDim := typeutil.SparseFloatRowDim(value)
 					if rowDim > fieldData.Dim {
 						fieldData.Dim = rowDim
