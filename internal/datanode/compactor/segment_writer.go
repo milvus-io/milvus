@@ -433,7 +433,10 @@ func (w *SegmentWriter) GetTotalSize() int64 {
 func (w *SegmentWriter) clear() {
 	w.syncedSize.Add(int64(w.writer.GetWrittenUncompressed()))
 
-	writer, closers, _ := newBinlogWriter(w.collectionID, w.partitionID, w.segmentID, w.sch, w.batchSize)
+	writer, closers, err := newBinlogWriter(w.collectionID, w.partitionID, w.segmentID, w.sch, w.batchSize)
+	if err != nil {
+		log.Warn("failed to create new binlog writer in clear", zap.Error(err))
+	}
 	w.writer = writer
 	w.closers = closers
 	w.tsFrom = math.MaxUint64
