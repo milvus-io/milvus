@@ -250,10 +250,11 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	var flusher *flusherimpl.WALFlusherImpl
 	if !opt.DisableFlusher {
 		flusher = flusherimpl.RecoverWALFlusher(&flusherimpl.RecoverWALFlusherParam{
-			WAL:              param.WAL,
-			RecoveryStorage:  rs,
-			ChannelInfo:      l.Channel(),
-			RecoverySnapshot: snapshot,
+			WAL:                param.WAL,
+			RecoveryStorage:    rs,
+			ChannelInfo:        l.Channel(),
+			RecoverySnapshot:   snapshot,
+			RateLimitComponent: roWAL.WALRateLimitComponent,
 		})
 	}
 	wal := adaptImplsToRWWAL(roWAL, o.interceptorBuilders, param, flusher)
