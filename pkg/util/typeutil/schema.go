@@ -2485,16 +2485,62 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 
 func GetDataIterator(field *schemapb.FieldData) func(int) any {
 	if field.GetValidData() != nil {
+		validData := field.GetValidData()
+		dataLen := getScalarDataLen(field)
+		if dataLen == len(validData) {
+			// Full-size format: data array has the same length as ValidData,
+			// values at invalid positions are zero-filled. Use direct indexing.
+			return func(idx int) any {
+				if !validData[idx] {
+					return nil
+				}
+				return getData(field, idx)
+			}
+		}
+		// Compact format: data array only contains valid entries.
+		// Build a mapping from logical index to physical index.
+		idxs := make([]int, len(validData))
+		cnt := 0
+		for i, valid := range validData {
+			if valid {
+				idxs[i] = cnt
+				cnt++
+			} else {
+				idxs[i] = -1
+			}
+		}
 		return func(idx int) any {
-			if !field.ValidData[idx] {
+			if idxs[idx] == -1 {
 				return nil
 			}
-			return getData(field, idx)
+			return getData(field, idxs[idx])
 		}
 	}
 	return func(idx int) any {
 		return getData(field, idx)
 	}
+}
+
+// getScalarDataLen returns the length of the scalar data array in a FieldData.
+// For vector types or unrecognized types, returns -1.
+func getScalarDataLen(field *schemapb.FieldData) int {
+	switch field.GetType() {
+	case schemapb.DataType_Bool:
+		return len(field.GetScalars().GetBoolData().GetData())
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		return len(field.GetScalars().GetIntData().GetData())
+	case schemapb.DataType_Int64:
+		return len(field.GetScalars().GetLongData().GetData())
+	case schemapb.DataType_Float:
+		return len(field.GetScalars().GetFloatData().GetData())
+	case schemapb.DataType_Double:
+		return len(field.GetScalars().GetDoubleData().GetData())
+	case schemapb.DataType_Timestamptz:
+		return len(field.GetScalars().GetTimestamptzData().GetData())
+	case schemapb.DataType_VarChar, schemapb.DataType_Text:
+		return len(field.GetScalars().GetStringData().GetData())
+	}
+	return -1
 }
 
 func getData(field *schemapb.FieldData, idx int) any {
