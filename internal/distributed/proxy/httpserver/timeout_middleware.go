@@ -28,9 +28,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -221,7 +223,10 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			}
 
 			if _, err := tw.ResponseWriter.Write(buffer.Bytes()); err != nil {
-				panic(err)
+				log.Warn("failed to write response body", zap.Error(err))
+				tw.FreeBuffer()
+				bufPool.Put(buffer)
+				return
 			}
 			tw.FreeBuffer()
 			bufPool.Put(buffer)
