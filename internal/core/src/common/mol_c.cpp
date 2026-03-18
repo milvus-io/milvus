@@ -164,6 +164,37 @@ MolDataResult GenerateRDKitFingerprint(const char* smiles, int min_path, int max
     });
 }
 
+MolDataResult GeneratePatternFingerprint(const char* smiles, int fingerprint_size) {
+    if (fingerprint_size <= 0) {
+        return CreateErrorResult(MOL_ERROR_FINGERPRINT_FAILED, "Invalid fingerprint parameters");
+    }
+    return GenerateFingerprintImpl(smiles, [=](RDKit::ROMol& mol) {
+        return RDKit::PatternFingerprintMol(mol, fingerprint_size);
+    });
+}
+
+MolDataResult GeneratePatternFingerprintFromPickle(const uint8_t* pickle_data, size_t pickle_size, int fingerprint_size) {
+    if (!pickle_data || pickle_size == 0) {
+        return CreateErrorResult(MOL_ERROR_PICKLE_FAILED, "Empty pickle data");
+    }
+    if (fingerprint_size <= 0) {
+        return CreateErrorResult(MOL_ERROR_FINGERPRINT_FAILED, "Invalid fingerprint parameters");
+    }
+    try {
+        std::string pickle_str(reinterpret_cast<const char*>(pickle_data), pickle_size);
+        RDKit::ROMol mol;
+        RDKit::MolPickler::molFromPickle(pickle_str, &mol);
+        std::unique_ptr<ExplicitBitVect> fp(RDKit::PatternFingerprintMol(mol, fingerprint_size));
+        if (!fp) {
+            return CreateErrorResult(MOL_ERROR_FINGERPRINT_FAILED, "Failed to generate pattern fingerprint");
+        }
+        auto binary = BitVectToBinaryVector(*fp);
+        return CreateSuccessResult(binary.data(), binary.size());
+    } catch (const std::exception& e) {
+        return CreateErrorResult(MOL_ERROR_FINGERPRINT_FAILED, e.what());
+    }
+}
+
 }  // extern "C"
 
 extern "C" {

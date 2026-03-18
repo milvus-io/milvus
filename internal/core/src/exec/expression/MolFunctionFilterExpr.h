@@ -21,7 +21,6 @@
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "segcore/SegmentInterface.h"
-#include "segcore/SealedIndexingRecord.h"
 
 namespace milvus {
 namespace exec {
@@ -74,18 +73,24 @@ class PhyMolFunctionFilterExpr : public SegmentExpr {
     VectorPtr
     EvalForDataSegment();
 
-    // Fingerprint pre-filter: compute query fingerprint and search the
-    // BinaryVector index to get candidate rows (superset of true matches).
+    // Fingerprint pre-filter: compute query fingerprint and build a
+    // candidate bitmap from raw fingerprint chunks.
     void
     SearchFingerprintIndex();
 
-    // Generate query molecule fingerprint from SMILES.
+    // Generate the query pattern fingerprint from SMILES.
     void
     EnsureQueryFingerprint();
 
-    // Fallback: read raw BinaryVector data and do inline bit subset check.
+    // Read raw BinaryVector chunk data and run knowhere brute-force
+    // range search as a stateless pre-filter helper.
     void
     FallbackRawDataPreFilter();
+
+    // Try to use MOL_PATTERN index on the mol field for pre-filtering.
+    // Returns true if index was found and used (fp_candidates_ populated).
+    bool
+    TryMolPatternIndex();
 
  private:
     std::shared_ptr<const milvus::expr::MolFunctionFilterExpr> expr_;

@@ -1,0 +1,361 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License
+
+#include "index/MolPatternIndex.h"
+
+#include <cstring>
+#include <fcntl.h>
+#include <filesystem>
+#include <memory>
+#include <sys/mman.h>
+#include <unistd.h>
+
+#include "common/EasyAssert.h"
+#include "common/Slice.h"
+#include "common/FieldDataInterface.h"
+#include "common/mol_c.h"
+#include "index/Meta.h"
+#include "index/Utils.h"
+#include "log/Log.h"
+#include "storage/FileWriter.h"
+#include "storage/ThreadPools.h"
+
+namespace milvus::index {
+
+static constexpr const char* MOL_FP_DATA_KEY = "mol_pattern_fp_data";
+static constexpr const char* MOL_FP_META_KEY = "mol_pattern_fp_meta";
+static constexpr int32_t DEFAULT_MOL_FP_DIM = 2048;
+
+template <typename T>
+MolPatternIndex<T>::MolPatternIndex(
+    const storage::FileManagerContext& ctx)
+    : ScalarIndex<T>(MOL_PATTERN_INDEX_TYPE) {
+    mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
+    dim_ = DEFAULT_MOL_FP_DIM;
+    bytes_per_row_ = (dim_ + 7) / 8;
+}
+
+template <typename T>
+MolPatternIndex<T>::~MolPatternIndex() {
+    if (fp_data_mmap_ != nullptr && fp_data_mmap_size_ > 0) {
+        munmap(const_cast<uint8_t*>(fp_data_mmap_), fp_data_mmap_size_);
+        fp_data_mmap_ = nullptr;
+        fp_data_mmap_size_ = 0;
+    }
+}
+
+template <typename T>
+void
+MolPatternIndex<T>::Build(const Config& config) {
+    // Read dim from config if provided
+    auto dim_opt = GetValueFromConfig<int64_t>(config, "dim");
+    if (dim_opt.has_value()) {
+        dim_ = static_cast<int32_t>(dim_opt.value());
+        bytes_per_row_ = (dim_ + 7) / 8;
+    }
+
+    // Download raw field data from object storage
+    auto field_datas = mem_file_manager_->CacheRawDataToMemory(config);
+    BuildWithFieldData(field_datas);
+    ComputeByteSize();
+}
+
+template <typename T>
+void
+MolPatternIndex<T>::Build(size_t n,
+                          const T* values,
+                          const bool* valid_data) {
+    if constexpr (std::is_same_v<T, std::string>) {
+        bytes_per_row_ = (dim_ + 7) / 8;
+        fp_data_owned_.clear();
+        fp_data_owned_.reserve(n * bytes_per_row_);
+        row_count_ = 0;
+
+        for (size_t i = 0; i < n; ++i) {
+            bool is_valid = (valid_data == nullptr) || valid_data[i];
+            if (!is_valid || values[i].empty()) {
+                // Append zero fingerprint for null/invalid rows
+                fp_data_owned_.resize(fp_data_owned_.size() + bytes_per_row_, 0);
+                row_count_++;
+                continue;
+            }
+
+            const auto& pickle = values[i];
+            auto result = GeneratePatternFingerprintFromPickle(
+                reinterpret_cast<const uint8_t*>(pickle.data()),
+                pickle.size(),
+                dim_);
+
+            if (result.error_code == MOL_SUCCESS && result.data != nullptr &&
+                result.size == static_cast<size_t>(bytes_per_row_)) {
+                fp_data_owned_.insert(fp_data_owned_.end(),
+                                      result.data,
+                                      result.data + bytes_per_row_);
+            } else {
+                // Fingerprint generation failed — use zero fingerprint (conservative)
+                fp_data_owned_.resize(fp_data_owned_.size() + bytes_per_row_, 0);
+                LOG_WARN(
+                    "MolPatternIndex: failed to generate fingerprint for row "
+                    "{}, using zero FP",
+                    i);
+            }
+            FreeMolDataResult(&result);
+            row_count_++;
+        }
+    } else {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "MolPatternIndex only supports string type");
+    }
+}
+
+template <typename T>
+void
+MolPatternIndex<T>::BuildWithRawDataForUT(size_t n,
+                                          const void* values,
+                                          const Config& config) {
+    if constexpr (std::is_same_v<T, std::string>) {
+        Build(n, static_cast<const std::string*>(values), nullptr);
+    } else {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "MolPatternIndex only supports string type");
+    }
+}
+
+template <typename T>
+void
+MolPatternIndex<T>::BuildWithFieldData(
+    const std::vector<FieldDataPtr>& field_datas) {
+    bytes_per_row_ = (dim_ + 7) / 8;
+    fp_data_owned_.clear();
+    row_count_ = 0;
+
+    for (const auto& field_data : field_datas) {
+        auto num_rows = field_data->get_num_rows();
+        fp_data_owned_.reserve(fp_data_owned_.size() +
+                               num_rows * bytes_per_row_);
+
+        for (int64_t i = 0; i < num_rows; ++i) {
+            bool is_valid = field_data->is_valid(i);
+            if (!is_valid) {
+                fp_data_owned_.resize(
+                    fp_data_owned_.size() + bytes_per_row_, 0);
+                row_count_++;
+                continue;
+            }
+
+            // Mol field data is stored as std::string (pickle bytes)
+            const auto* str_data =
+                static_cast<const std::string*>(field_data->RawValue(i));
+            if (!str_data || str_data->empty()) {
+                fp_data_owned_.resize(
+                    fp_data_owned_.size() + bytes_per_row_, 0);
+                row_count_++;
+                continue;
+            }
+
+            auto result = GeneratePatternFingerprintFromPickle(
+                reinterpret_cast<const uint8_t*>(str_data->data()),
+                str_data->size(),
+                dim_);
+
+            if (result.error_code == MOL_SUCCESS && result.data != nullptr &&
+                result.size == static_cast<size_t>(bytes_per_row_)) {
+                fp_data_owned_.insert(fp_data_owned_.end(),
+                                      result.data,
+                                      result.data + bytes_per_row_);
+            } else {
+                fp_data_owned_.resize(
+                    fp_data_owned_.size() + bytes_per_row_, 0);
+                LOG_WARN(
+                    "MolPatternIndex: failed to generate FP for row {}, using "
+                    "zero FP",
+                    row_count_);
+            }
+            FreeMolDataResult(&result);
+            row_count_++;
+        }
+    }
+
+    LOG_INFO("MolPatternIndex: built {} rows, dim={}, total_bytes={}",
+             row_count_,
+             dim_,
+             fp_data_owned_.size());
+}
+
+template <typename T>
+BinarySet
+MolPatternIndex<T>::Serialize(const Config& config) {
+    BinarySet res_set;
+
+    // Serialize meta: dim (4 bytes) + row_count (8 bytes)
+    constexpr size_t meta_size = sizeof(int32_t) + sizeof(int64_t);
+    std::shared_ptr<uint8_t[]> meta_buf(new uint8_t[meta_size]);
+    std::memcpy(meta_buf.get(), &dim_, sizeof(int32_t));
+    std::memcpy(meta_buf.get() + sizeof(int32_t), &row_count_,
+                sizeof(int64_t));
+    res_set.Append(MOL_FP_META_KEY, meta_buf, meta_size);
+
+    // Serialize fingerprint data
+    if (!fp_data_owned_.empty()) {
+        auto data_size = fp_data_owned_.size();
+        std::shared_ptr<uint8_t[]> data_buf(new uint8_t[data_size]);
+        std::memcpy(data_buf.get(), fp_data_owned_.data(), data_size);
+        res_set.Append(MOL_FP_DATA_KEY, data_buf, data_size);
+    }
+
+    return res_set;
+}
+
+template <typename T>
+void
+MolPatternIndex<T>::Load(const BinarySet& binary_set, const Config& config) {
+    milvus::Assemble(const_cast<BinarySet&>(binary_set));
+    LoadWithoutAssemble(binary_set, config);
+}
+
+template <typename T>
+void
+MolPatternIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
+                                        const Config& config) {
+    // Load meta
+    auto meta_buf = binary_set.GetByName(MOL_FP_META_KEY);
+    AssertInfo(meta_buf != nullptr,
+               "MolPatternIndex: missing meta in BinarySet");
+    std::memcpy(&dim_, meta_buf->data.get(), sizeof(int32_t));
+    std::memcpy(&row_count_, meta_buf->data.get() + sizeof(int32_t),
+                sizeof(int64_t));
+    bytes_per_row_ = (dim_ + 7) / 8;
+
+    auto data_buf = binary_set.GetByName(MOL_FP_DATA_KEY);
+
+    if (config.contains(MMAP_FILE_PATH) && data_buf != nullptr &&
+        data_buf->size > 0) {
+        // mmap path: write fp data to file, then mmap it
+        auto mmap_filepath =
+            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
+        AssertInfo(mmap_filepath.has_value(),
+                   "mmap filepath is empty when load MolPatternIndex");
+        auto load_priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
+
+        auto file_name = mmap_filepath.value();
+        std::filesystem::create_directories(
+            std::filesystem::path(file_name).parent_path());
+        {
+            auto file_writer = storage::FileWriter(
+                file_name,
+                storage::io::GetPriorityFromLoadPriority(load_priority));
+            file_writer.Write(data_buf->data.get(), data_buf->size);
+            file_writer.Finish();
+        }
+
+        // mmap the file read-only
+        auto fd = open(file_name.c_str(), O_RDONLY);
+        AssertInfo(fd >= 0, "Failed to open mmap file: {}", file_name);
+        fp_data_mmap_size_ = data_buf->size;
+        auto* ptr = mmap(nullptr, fp_data_mmap_size_, PROT_READ,
+                         MAP_PRIVATE, fd, 0);
+        close(fd);
+        AssertInfo(ptr != MAP_FAILED,
+                   "Failed to mmap MolPatternIndex fp data");
+        fp_data_mmap_ = static_cast<const uint8_t*>(ptr);
+        mmap_file_raii_ = std::make_unique<MmapFileRAII>(file_name);
+
+        LOG_INFO(
+            "MolPatternIndex: mmap loaded {} rows, dim={}, size={}",
+            row_count_, dim_, fp_data_mmap_size_);
+    } else {
+        // Memory path
+        if (data_buf != nullptr && data_buf->size > 0) {
+            fp_data_owned_.assign(data_buf->data.get(),
+                                  data_buf->data.get() + data_buf->size);
+        } else {
+            fp_data_owned_.clear();
+        }
+        LOG_INFO("MolPatternIndex: loaded {} rows, dim={}", row_count_, dim_);
+    }
+
+    ComputeByteSize();
+}
+
+template <typename T>
+void
+MolPatternIndex<T>::Load(tracer::TraceContext ctx, const Config& config) {
+    auto index_files =
+        GetValueFromConfig<std::vector<std::string>>(config, "index_files");
+    AssertInfo(index_files.has_value(),
+               "MolPatternIndex: index_files not found in config");
+
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+
+    auto index_datas = mem_file_manager_->LoadIndexToMemory(
+        index_files.value(), load_priority);
+    BinarySet binary_set;
+    AssembleIndexDatas(index_datas, binary_set);
+    index_datas.clear();
+    LoadWithoutAssemble(binary_set, config);
+}
+
+template <typename T>
+IndexStatsPtr
+MolPatternIndex<T>::Upload(const Config& config) {
+    auto binary_set = Serialize(config);
+    mem_file_manager_->AddFile(binary_set);
+
+    auto remote_paths_to_size =
+        mem_file_manager_->GetRemotePathsToFileSize();
+
+    return IndexStats::NewFromSizeMap(
+        mem_file_manager_->GetAddedTotalMemSize(), remote_paths_to_size);
+}
+
+template <typename T>
+void
+MolPatternIndex<T>::AppendMolRow(const std::string& pickle_data,
+                                 bool is_valid) {
+    // Generate fingerprint outside the lock (CPU-intensive RDKit call)
+    AssertInfo(bytes_per_row_ > 0,
+               "MolPatternIndex: bytes_per_row_ not initialized");
+
+    std::vector<uint8_t> fp_row(bytes_per_row_, 0);
+    bool fp_generated = false;
+
+    if (is_valid && !pickle_data.empty()) {
+        auto result = GeneratePatternFingerprintFromPickle(
+            reinterpret_cast<const uint8_t*>(pickle_data.data()),
+            pickle_data.size(),
+            dim_);
+        if (result.error_code == MOL_SUCCESS && result.data != nullptr &&
+            result.size == static_cast<size_t>(bytes_per_row_)) {
+            std::memcpy(fp_row.data(), result.data, bytes_per_row_);
+            fp_generated = true;
+        }
+        FreeMolDataResult(&result);
+    }
+
+    // Append under exclusive lock
+    {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        fp_data_owned_.insert(fp_data_owned_.end(),
+                              fp_row.begin(), fp_row.end());
+        row_count_++;
+    }
+}
+
+// Explicit template instantiation
+template class MolPatternIndex<std::string>;
+
+}  // namespace milvus::index

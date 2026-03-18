@@ -53,7 +53,7 @@ MolDataResult ConvertPickleToSMILES(const uint8_t* pickle_data, size_t pickle_si
 MolDataResult GenerateMorganFingerprint(const char* smiles, int radius, int fingerprint_size);
 
 // Generate MACCS fingerprint from SMILES
-// Returns MolDataResult with binary fingerprint (167 bits) on success, or error on failure
+// Returns MolDataResult with MACCS bits packed in 21 bytes (167 valid bits) on success, or error on failure
 MolDataResult GenerateMACCSFingerprint(const char* smiles);
 
 // Generate RDKit fingerprint from SMILES
@@ -62,6 +62,18 @@ MolDataResult GenerateMACCSFingerprint(const char* smiles);
 // fingerprint_size: number of bits (e.g., 2048)
 // Returns MolDataResult with binary fingerprint on success, or error on failure
 MolDataResult GenerateRDKitFingerprint(const char* smiles, int min_path, int max_path, int fingerprint_size);
+
+// Generate RDKit pattern fingerprint from SMILES (recommended for substructure screening)
+// fingerprint_size: number of bits (e.g., 2048)
+// Returns MolDataResult with binary fingerprint on success, or error on failure
+MolDataResult GeneratePatternFingerprint(const char* smiles, int fingerprint_size);
+
+// Generate RDKit pattern fingerprint from pickle data (recommended for substructure screening)
+// pickle_data: molecule in pickle format
+// pickle_size: size of pickle data
+// fingerprint_size: number of bits (e.g., 2048)
+// Returns MolDataResult with binary fingerprint on success, or error on failure
+MolDataResult GeneratePatternFingerprintFromPickle(const uint8_t* pickle_data, size_t pickle_size, int fingerprint_size);
 
 // Check substructure match between two molecules in pickle format
 // Returns: 1=match, 0=no match, negative=error
