@@ -22,6 +22,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
 
@@ -91,4 +92,131 @@ func TestRetryableReader_ReadWithNonRetryableError(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrIoFailed)
 	assert.Equal(t, 0, n)
+}
+
+// customMockReader allows custom read behavior with call count tracking
+type customMockReader struct {
+	readFunc  func(p []byte) (int, error)
+	callCount int
+}
+
+func (m *customMockReader) Read(p []byte) (int, error) {
+	m.callCount++
+	return m.readFunc(p)
+}
+
+func (m *customMockReader) Close() error {
+	return nil
+}
+
+func (m *customMockReader) Size() (int64, error) {
+	return 0, nil
+}
+
+func (m *customMockReader) Seek(offset int64, whence int) (int64, error) {
+	return 0, nil
+}
+
+func (m *customMockReader) ReadAt(p []byte, off int64) (int, error) {
+	return 0, nil
+}
+
+func TestRetryableReader_DenylistRetry_NonRetryableErrors(t *testing.T) {
+	ctx := context.Background()
+	nonRetryableErrors := []error{
+		merr.ErrIoKeyNotFound,
+		merr.ErrIoPermissionDenied,
+		merr.ErrIoBucketNotFound,
+		merr.ErrIoInvalidArgument,
+		merr.ErrIoInvalidRange,
+	}
+
+	for _, testErr := range nonRetryableErrors {
+		t.Run(testErr.Error(), func(t *testing.T) {
+			// Mock reader that always returns the non-retryable error
+			mockReader := &customMockReader{
+				readFunc: func(p []byte) (int, error) {
+					return 0, testErr
+				},
+			}
+
+			reader := &retryableReader{
+				FileReader:    mockReader,
+				ctx:           ctx,
+				path:          "test/path",
+				retryAttempts: 10,
+			}
+
+			// Attempt read - should fail immediately without retries
+			buf := make([]byte, 10)
+			n, err := reader.Read(buf)
+
+			// Verify error is returned
+			assert.Error(t, err)
+			assert.True(t, errors.Is(err, testErr))
+			assert.Equal(t, 0, n)
+
+			// Verify only 1 attempt was made (no retries)
+			assert.Equal(t, 1, mockReader.callCount)
+		})
+	}
+}
+
+func TestRetryableReader_DenylistRetry_RetryableErrors(t *testing.T) {
+	ctx := context.Background()
+
+	// Mock reader that fails 3 times then succeeds
+	callCount := 0
+	mockReader := &customMockReader{
+		readFunc: func(p []byte) (int, error) {
+			callCount++
+			if callCount < 4 {
+				return 0, errors.New("network timeout")
+			}
+			copy(p, []byte("success"))
+			return 7, nil
+		},
+	}
+
+	reader := &retryableReader{
+		FileReader:    mockReader,
+		ctx:           ctx,
+		path:          "test/path",
+		retryAttempts: 10,
+	}
+
+	// Attempt read - should retry and succeed on 4th attempt
+	buf := make([]byte, 10)
+	n, err := reader.Read(buf)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 7, n)
+	assert.Equal(t, []byte("success"), buf[:n])
+	assert.Equal(t, 4, callCount, "should retry 3 times then succeed")
+}
+
+func TestRetryableReader_DenylistRetry_EOFHandling(t *testing.T) {
+	ctx := context.Background()
+
+	// Mock reader that returns EOF immediately
+	mockReader := &customMockReader{
+		readFunc: func(p []byte) (int, error) {
+			return 0, io.EOF
+		},
+	}
+
+	reader := &retryableReader{
+		FileReader:    mockReader,
+		ctx:           ctx,
+		path:          "test/path",
+		retryAttempts: 10,
+	}
+
+	// Read should return EOF immediately without retries
+	buf := make([]byte, 10)
+	n, err := reader.Read(buf)
+
+	assert.Equal(t, io.EOF, err)
+	assert.Equal(t, 0, n)
+	assert.Equal(t, 1, mockReader.callCount, "EOF should not be retried")
 }

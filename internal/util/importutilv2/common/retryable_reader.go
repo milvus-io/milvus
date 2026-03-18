@@ -33,6 +33,8 @@ import (
 // RetryableReader is a wrapper around a FileReader that retries reads on errors.
 type RetryableReader interface {
 	storage.FileReader
+	// Read is explicitly declared to help type checkers resolve the method
+	Read(p []byte) (n int, err error)
 }
 
 // retryableReader is the implementation of RetryableReader.
@@ -62,6 +64,7 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 		if err == nil {
 			return false, nil
 		}
+		// EOF is not an error - don't retry
 		if errors.Is(err, io.EOF) {
 			return false, err
 		}
@@ -70,10 +73,12 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 			zap.Error(err),
 		)
 		err = storage.ToMilvusIoError(r.path, err)
-		if merr.IsRetryableErr(err) {
-			return true, err
+		// Denylist check - don't retry permanent/validation errors
+		if merr.IsNonRetryableErr(err) {
+			return false, err
 		}
-		return false, err
+		// Retry everything else (network errors, timeouts, 500s, etc.)
+		return true, err
 	}, retry.Attempts(r.retryAttempts))
 	return n, err
 }
