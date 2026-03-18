@@ -1027,7 +1027,7 @@ func TestToMilvusIoError(t *testing.T) {
 	t.Run("minio other error", func(t *testing.T) {
 		minioErr := minio.ErrorResponse{Code: "AccessDenied"}
 		err := ToMilvusIoError(fileName, minioErr)
-		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.ErrorIs(t, err, merr.ErrIoPermissionDenied)
 	})
 
 	t.Run("azure BlobNotFound", func(t *testing.T) {
