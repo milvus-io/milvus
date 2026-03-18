@@ -536,6 +536,11 @@ class ResponseChecker:
                 return True
         log.debug(f"check: total {len(pk_list)} results, set len: {len(set(pk_list))}, iterate_times: {iterate_times}")
         assert len(pk_list) == len(set(pk_list)) != 0
+        # Verify filter was applied: all PKs must fall within the expected range
+        if check_items.get("pk_range", None):
+            pk_low, pk_high = check_items["pk_range"]
+            for pk in pk_list:
+                assert pk_low <= pk < pk_high, f"PK {pk} doesn't satisfy filter [{pk_low}, {pk_high})"
         return True
 
     @staticmethod
