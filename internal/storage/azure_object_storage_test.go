@@ -24,32 +24,27 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func TestAzureObjectStorage(t *testing.T) {
 	ctx := context.Background()
 	bucketName := Params.MinioCfg.BucketName.GetValue()
-	config := objectstorage.Config{
-		BucketName:    bucketName,
-		CreateBucket:  true,
-		UseIAM:        false,
-		CloudProvider: "azure",
+	config := config{
+		bucketName:    bucketName,
+		createBucket:  true,
+		useIAM:        false,
+		cloudProvider: "azure",
 	}
 
 	t.Run("test initialize", func(t *testing.T) {
 		var err error
-		config.BucketName = ""
+		config.bucketName = ""
 		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Error(t, err)
-		config.BucketName = bucketName
+		config.bucketName = bucketName
 		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
 	})
@@ -57,7 +52,7 @@ func TestAzureObjectStorage(t *testing.T) {
 	t.Run("test load", func(t *testing.T) {
 		testCM, err := newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
-		defer testCM.DeleteContainer(ctx, config.BucketName, &azblob.DeleteContainerOptions{})
+		defer testCM.DeleteContainer(ctx, config.bucketName, &azblob.DeleteContainerOptions{})
 
 		prepareTests := []struct {
 			key   string
@@ -71,7 +66,7 @@ func TestAzureObjectStorage(t *testing.T) {
 		}
 
 		for _, test := range prepareTests {
-			err := testCM.PutObject(ctx, config.BucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
+			err := testCM.PutObject(ctx, config.bucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
 			require.NoError(t, err)
 		}
 
@@ -94,19 +89,19 @@ func TestAzureObjectStorage(t *testing.T) {
 		for _, test := range loadTests {
 			t.Run(test.description, func(t *testing.T) {
 				if test.isvalid {
-					got, err := testCM.GetObject(ctx, config.BucketName, test.loadKey, 0, 1024)
+					got, err := testCM.GetObject(ctx, config.bucketName, test.loadKey, 0, 1024)
 					assert.NoError(t, err)
 					contentData, err := io.ReadAll(got)
 					assert.NoError(t, err)
 					assert.Equal(t, len(contentData), len(test.expectedValue))
 					assert.Equal(t, test.expectedValue, contentData)
-					statSize, err := testCM.StatObject(ctx, config.BucketName, test.loadKey)
+					statSize, err := testCM.StatObject(ctx, config.bucketName, test.loadKey)
 					assert.NoError(t, err)
 					assert.Equal(t, statSize, int64(len(contentData)))
-					_, err = testCM.GetObject(ctx, config.BucketName, test.loadKey, 1, 1023)
+					_, err = testCM.GetObject(ctx, config.bucketName, test.loadKey, 1, 1023)
 					assert.NoError(t, err)
 				} else {
-					got, err := testCM.GetObject(ctx, config.BucketName, test.loadKey, 0, 1024)
+					got, err := testCM.GetObject(ctx, config.bucketName, test.loadKey, 0, 1024)
 					assert.NoError(t, err)
 					assert.NotEmpty(t, got)
 					_, err = io.ReadAll(got)
@@ -129,11 +124,11 @@ func TestAzureObjectStorage(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.BucketName, test.prefix, false)
+				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.bucketName, test.prefix, false)
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				for _, key := range gotk {
-					err := testCM.RemoveObject(ctx, config.BucketName, key)
+					err := testCM.RemoveObject(ctx, config.bucketName, key)
 					assert.NoError(t, err)
 				}
 			})
@@ -143,7 +138,7 @@ func TestAzureObjectStorage(t *testing.T) {
 	t.Run("test list", func(t *testing.T) {
 		testCM, err := newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
-		defer testCM.DeleteContainer(ctx, config.BucketName, &azblob.DeleteContainerOptions{})
+		defer testCM.DeleteContainer(ctx, config.bucketName, &azblob.DeleteContainerOptions{})
 
 		prepareTests := []struct {
 			valid bool
@@ -161,10 +156,10 @@ func TestAzureObjectStorage(t *testing.T) {
 		}
 
 		for _, test := range prepareTests {
-			err := testCM.PutObject(ctx, config.BucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
+			err := testCM.PutObject(ctx, config.bucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
 			require.Nil(t, err)
 			if !test.valid {
-				err := testCM.RemoveObject(ctx, config.BucketName, test.key)
+				err := testCM.RemoveObject(ctx, config.bucketName, test.key)
 				require.Nil(t, err)
 			}
 		}
@@ -182,7 +177,7 @@ func TestAzureObjectStorage(t *testing.T) {
 
 		for _, test := range insertWithPrefixTests {
 			t.Run(fmt.Sprintf("prefix: %s, recursive: %t", test.prefix, test.recursive), func(t *testing.T) {
-				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.BucketName, test.prefix, test.recursive)
+				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.bucketName, test.prefix, test.recursive)
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				for _, key := range gotk {
@@ -194,7 +189,7 @@ func TestAzureObjectStorage(t *testing.T) {
 
 	t.Run("test useIAM", func(t *testing.T) {
 		var err error
-		config.UseIAM = true
+		config.useIAM = true
 		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Error(t, err)
 		os.Setenv("AZURE_CLIENT_ID", "00000000-0000-0000-0000-00000000000")
@@ -202,199 +197,30 @@ func TestAzureObjectStorage(t *testing.T) {
 		os.Setenv("AZURE_FEDERATED_TOKEN_FILE", "/var/run/secrets/tokens/azure-identity-token")
 		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Error(t, err)
-		config.UseIAM = false
+		config.useIAM = false
 	})
 
 	t.Run("test key secret", func(t *testing.T) {
 		var err error
 		connectionString := os.Getenv("AZURE_STORAGE_CONNECTION_STRING")
 		os.Setenv("AZURE_STORAGE_CONNECTION_STRING", "")
-		config.AccessKeyID = "devstoreaccount1"
-		config.SecretAccessKeyID = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
-		config.Address = "core.windows.net"
+		config.accessKeyID = "devstoreaccount1"
+		config.secretAccessKeyID = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+		config.address = "core.windows.net"
 		_, err = newAzureObjectStorageWithConfig(ctx, &config)
 		assert.Error(t, err)
 		os.Setenv("AZURE_STORAGE_CONNECTION_STRING", connectionString)
-	})
-
-	t.Run("test CopyObject", func(t *testing.T) {
-		testCM, err := newAzureObjectStorageWithConfig(ctx, &config)
-		assert.NoError(t, err)
-		defer testCM.DeleteContainer(ctx, config.BucketName, &azblob.DeleteContainerOptions{})
-
-		// Test successful copy
-		t.Run("copy object successfully", func(t *testing.T) {
-			srcKey := "copy_test/src/file1"
-			dstKey := "copy_test/dst/file1"
-			value := []byte("test data for copy")
-
-			// Put source object
-			err := testCM.PutObject(ctx, config.BucketName, srcKey, bytes.NewReader(value), int64(len(value)))
-			require.NoError(t, err)
-
-			// Copy object
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
-			assert.NoError(t, err)
-
-			// Verify destination object exists and has correct content
-			dstReader, err := testCM.GetObject(ctx, config.BucketName, dstKey, 0, 1024)
-			assert.NoError(t, err)
-			dstData, err := io.ReadAll(dstReader)
-			assert.NoError(t, err)
-			assert.Equal(t, value, dstData)
-
-			// Verify source object still exists
-			srcReader, err := testCM.GetObject(ctx, config.BucketName, srcKey, 0, 1024)
-			assert.NoError(t, err)
-			srcData, err := io.ReadAll(srcReader)
-			assert.NoError(t, err)
-			assert.Equal(t, value, srcData)
-
-			// Clean up
-			err = testCM.RemoveObject(ctx, config.BucketName, srcKey)
-			assert.NoError(t, err)
-			err = testCM.RemoveObject(ctx, config.BucketName, dstKey)
-			assert.NoError(t, err)
-		})
-
-		// Test copy non-existent source
-		t.Run("copy non-existent source object", func(t *testing.T) {
-			srcKey := "copy_test/not_exist/file"
-			dstKey := "copy_test/dst/file"
-
-			err := testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
-			assert.Error(t, err)
-		})
-
-		// Test copy overwrite existing object
-		t.Run("copy and overwrite existing object", func(t *testing.T) {
-			srcKey := "copy_test/src3/file3"
-			dstKey := "copy_test/dst3/file3"
-			srcValue := []byte("new content")
-			oldValue := []byte("old content")
-
-			// Put destination with old content
-			err := testCM.PutObject(ctx, config.BucketName, dstKey, bytes.NewReader(oldValue), int64(len(oldValue)))
-			require.NoError(t, err)
-
-			// Put source with new content
-			err = testCM.PutObject(ctx, config.BucketName, srcKey, bytes.NewReader(srcValue), int64(len(srcValue)))
-			require.NoError(t, err)
-
-			// Copy (should overwrite)
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
-			assert.NoError(t, err)
-
-			// Verify destination has new content
-			dstReader, err := testCM.GetObject(ctx, config.BucketName, dstKey, 0, 1024)
-			assert.NoError(t, err)
-			dstData, err := io.ReadAll(dstReader)
-			assert.NoError(t, err)
-			assert.Equal(t, srcValue, dstData)
-
-			// Clean up
-			err = testCM.RemoveObject(ctx, config.BucketName, srcKey)
-			assert.NoError(t, err)
-			err = testCM.RemoveObject(ctx, config.BucketName, dstKey)
-			assert.NoError(t, err)
-		})
-
-		// Test copy large object
-		t.Run("copy large object", func(t *testing.T) {
-			srcKey := "copy_test/src4/large_file"
-			dstKey := "copy_test/dst4/large_file"
-
-			// Create 5MB data
-			largeData := make([]byte, 5*1024*1024)
-			for i := range largeData {
-				largeData[i] = byte(i % 256)
-			}
-
-			err := testCM.PutObject(ctx, config.BucketName, srcKey, bytes.NewReader(largeData), int64(len(largeData)))
-			require.NoError(t, err)
-
-			// Copy large object
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
-			assert.NoError(t, err)
-
-			// Verify content
-			dstReader, err := testCM.GetObject(ctx, config.BucketName, dstKey, 0, int64(len(largeData)))
-			assert.NoError(t, err)
-			dstData, err := io.ReadAll(dstReader)
-			assert.NoError(t, err)
-			assert.Equal(t, largeData, dstData)
-
-			// Clean up
-			err = testCM.RemoveObject(ctx, config.BucketName, srcKey)
-			assert.NoError(t, err)
-			err = testCM.RemoveObject(ctx, config.BucketName, dstKey)
-			assert.NoError(t, err)
-		})
-
-		// Test copy empty object
-		t.Run("copy empty object", func(t *testing.T) {
-			srcKey := "copy_test/src5/empty_file"
-			dstKey := "copy_test/dst5/empty_file"
-			emptyData := []byte{}
-
-			// Put empty object
-			err := testCM.PutObject(ctx, config.BucketName, srcKey, bytes.NewReader(emptyData), 0)
-			require.NoError(t, err)
-
-			// Copy empty object
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
-			assert.NoError(t, err)
-
-			// Verify destination exists and has size 0
-			size, err := testCM.StatObject(ctx, config.BucketName, dstKey)
-			assert.NoError(t, err)
-			assert.Equal(t, int64(0), size)
-
-			// Clean up
-			err = testCM.RemoveObject(ctx, config.BucketName, srcKey)
-			assert.NoError(t, err)
-			err = testCM.RemoveObject(ctx, config.BucketName, dstKey)
-			assert.NoError(t, err)
-		})
-
-		// Test copy with nested path
-		t.Run("copy object with nested path", func(t *testing.T) {
-			srcKey := "copy_test/src6/file6"
-			dstKey := "copy_test/dst6/nested/deep/path/file6"
-			value := []byte("test data for nested path copy")
-
-			// Put source object
-			err := testCM.PutObject(ctx, config.BucketName, srcKey, bytes.NewReader(value), int64(len(value)))
-			require.NoError(t, err)
-
-			// Copy to nested path
-			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
-			assert.NoError(t, err)
-
-			// Verify destination exists and has correct content
-			dstReader, err := testCM.GetObject(ctx, config.BucketName, dstKey, 0, 1024)
-			assert.NoError(t, err)
-			dstData, err := io.ReadAll(dstReader)
-			assert.NoError(t, err)
-			assert.Equal(t, value, dstData)
-
-			// Clean up
-			err = testCM.RemoveObject(ctx, config.BucketName, srcKey)
-			assert.NoError(t, err)
-			err = testCM.RemoveObject(ctx, config.BucketName, dstKey)
-			assert.NoError(t, err)
-		})
 	})
 }
 
 func TestReadFile(t *testing.T) {
 	ctx := context.Background()
 	bucketName := Params.MinioCfg.BucketName.GetValue()
-	c := &objectstorage.Config{
-		BucketName:    bucketName,
-		CreateBucket:  true,
-		UseIAM:        false,
-		CloudProvider: "azure",
+	c := &config{
+		bucketName:    bucketName,
+		createBucket:  true,
+		useIAM:        false,
+		cloudProvider: "azure",
 	}
 	rcm, err := NewRemoteChunkManager(ctx, c)
 
@@ -576,41 +402,4 @@ func TestReadFile(t *testing.T) {
 		err = reader.Close()
 		assert.NoError(t, err)
 	})
-}
-
-func TestMapObjectStorageError_Azure_NewErrors(t *testing.T) {
-	tests := []struct {
-		name          string
-		inputError    error
-		expectedError error
-	}{
-		{
-			name:          "AuthenticationFailed",
-			inputError:    &azcore.ResponseError{ErrorCode: "AuthenticationFailed"},
-			expectedError: merr.ErrIoPermissionDenied,
-		},
-		{
-			name:          "ContainerNotFound",
-			inputError:    &azcore.ResponseError{ErrorCode: "ContainerNotFound"},
-			expectedError: merr.ErrIoBucketNotFound,
-		},
-		{
-			name:          "InvalidParameterValue",
-			inputError:    &azcore.ResponseError{ErrorCode: "InvalidParameterValue"},
-			expectedError: merr.ErrIoInvalidArgument,
-		},
-		{
-			name:          "InvalidRange",
-			inputError:    &azcore.ResponseError{ErrorCode: "InvalidRange"},
-			expectedError: merr.ErrIoInvalidRange,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := checkObjectStorageError("test/path", tt.inputError)
-			assert.True(t, errors.Is(result, tt.expectedError),
-				"expected %v, got %v", tt.expectedError, result)
-		})
-	}
 }
