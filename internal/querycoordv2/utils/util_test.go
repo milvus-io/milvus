@@ -17,6 +17,7 @@
 package utils
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 )
@@ -265,6 +267,71 @@ func (suite *UtilTestSuite) TestFilterOutNodeLessThan260() {
 	}))
 	filteredNodes = filterNodeLessThan260(nodes, nodeManager)
 	suite.ElementsMatch(filteredNodes, []int64{1, 4, 5})
+}
+
+func (suite *UtilTestSuite) TestCheckSegmentDataReady_ManifestComparison() {
+	basePath := "/data/insert_log/col/part/seg"
+	collectionID := int64(100)
+	segmentID := int64(200)
+	nodeID := int64(1)
+
+	newDistManager := func(manifestPath string) *meta.DistributionManager {
+		dm := meta.NewDistributionManager(session.NewNodeManager())
+		dm.SegmentDistManager.Update(nodeID, &meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           segmentID,
+				CollectionID: collectionID,
+			},
+			Node:         nodeID,
+			ManifestPath: manifestPath,
+		})
+		return dm
+	}
+
+	newTargetMgr := func(manifestPath string) meta.TargetManagerInterface {
+		m := meta.NewMockTargetManager(suite.T())
+		m.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, mock.Anything).
+			Return(map[int64]*datapb.SegmentInfo{
+				segmentID: {
+					ID:           segmentID,
+					CollectionID: collectionID,
+					ManifestPath: manifestPath,
+				},
+			}).Maybe()
+		return m
+	}
+
+	suite.Run("same manifest version - ready", func() {
+		manifest := packed.MarshalManifestPath(basePath, 5)
+		err := CheckSegmentDataReady(context.Background(), collectionID, newDistManager(manifest), newTargetMgr(manifest), meta.NextTarget)
+		suite.NoError(err)
+	})
+
+	suite.Run("dist newer than target - ready", func() {
+		distManifest := packed.MarshalManifestPath(basePath, 10)
+		targetManifest := packed.MarshalManifestPath(basePath, 5)
+		err := CheckSegmentDataReady(context.Background(), collectionID, newDistManager(distManifest), newTargetMgr(targetManifest), meta.NextTarget)
+		suite.NoError(err)
+	})
+
+	suite.Run("dist older than target - not ready", func() {
+		distManifest := packed.MarshalManifestPath(basePath, 1)
+		targetManifest := packed.MarshalManifestPath(basePath, 5)
+		err := CheckSegmentDataReady(context.Background(), collectionID, newDistManager(distManifest), newTargetMgr(targetManifest), meta.NextTarget)
+		suite.Error(err)
+	})
+
+	suite.Run("both empty manifest - ready", func() {
+		err := CheckSegmentDataReady(context.Background(), collectionID, newDistManager(""), newTargetMgr(""), meta.NextTarget)
+		suite.NoError(err)
+	})
+
+	suite.Run("segment not in dist - not ready", func() {
+		dm := meta.NewDistributionManager(session.NewNodeManager())
+		targetManifest := packed.MarshalManifestPath(basePath, 5)
+		err := CheckSegmentDataReady(context.Background(), collectionID, dm, newTargetMgr(targetManifest), meta.NextTarget)
+		suite.Error(err)
+	})
 }
 
 func TestUtilSuite(t *testing.T) {
