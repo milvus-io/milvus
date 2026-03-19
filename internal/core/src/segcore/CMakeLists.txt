@@ -11,6 +11,7 @@
 
 
 add_source_at_current_directory_recursively()
+list(APPEND SOURCE_FILES storagev2translator/SystemIndexTranslator.cpp)
 add_library(milvus_segcore OBJECT ${SOURCE_FILES})
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
