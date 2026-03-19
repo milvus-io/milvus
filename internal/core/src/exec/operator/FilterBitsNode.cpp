@@ -118,6 +118,7 @@ PhyFilterBitsNode::GetOutput() {
         ExprResCacheManager::Key key{cache_segment->get_segment_id(),
                                      expr_cache_key_};
         ExprResCacheManager::Value cached;
+        cached.active_count = need_process_rows_;
         if (ExprResCacheManager::Instance().Get(key, cached) &&
             cached.result != nullptr &&
             cached.result->size() == need_process_rows_) {

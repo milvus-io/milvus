@@ -18,6 +18,7 @@ const (
 	BM25Path
 	RootCachePath
 	FileResourcePath
+	ExprCachePath
 )
 
 const (
@@ -26,6 +27,7 @@ const (
 	LocalChunkPathPrefix   = "local_chunk"
 	BM25PathPrefix         = "bm25"
 	FileResourcePathPrefix = "file_resource"
+	ExprCachePathPrefix    = "expr_cache"
 )
 
 func GetPath(pathType PathType, nodeID int64) string {
@@ -41,6 +43,8 @@ func GetPath(pathType PathType, nodeID int64) string {
 		path = filepath.Join(path, fmt.Sprintf("%d", nodeID), BM25PathPrefix)
 	case FileResourcePath:
 		path = filepath.Join(path, fmt.Sprintf("%d", nodeID), FileResourcePathPrefix)
+	case ExprCachePath:
+		path = filepath.Join(path, fmt.Sprintf("%d", nodeID), ExprCachePathPrefix)
 	case RootCachePath:
 	}
 	log.Info("Get path for", zap.Any("pathType", pathType), zap.Int64("nodeID", nodeID), zap.String("path", path))
