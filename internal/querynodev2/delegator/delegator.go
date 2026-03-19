@@ -280,6 +280,7 @@ func (sd *shardDelegator) shallowCopySearchRequest(req *internalpb.SearchRequest
 		IsTopkReduce:            req.IsTopkReduce,
 		IsRecallEvaluation:      req.IsRecallEvaluation,
 		CollectionTtlTimestamps: req.CollectionTtlTimestamps,
+		EntityTtlPhysicalTime:  req.EntityTtlPhysicalTime,
 	}
 
 	return nodeReq
@@ -499,6 +500,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				IsTopkReduce:            req.GetReq().GetIsTopkReduce(),
 				IsIterator:              req.GetReq().GetIsIterator(),
 				CollectionTtlTimestamps: req.GetReq().GetCollectionTtlTimestamps(),
+				EntityTtlPhysicalTime:  req.GetReq().GetEntityTtlPhysicalTime(),
 				AnalyzerName:            subReq.GetAnalyzerName(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
