@@ -79,10 +79,6 @@ func UpdateExprResCacheEnable(enable bool) {
 	C.SetExprResCacheEnable(C.bool(enable))
 }
 
-func UpdateExprResCacheCapacityBytes(capacity int) {
-	C.SetExprResCacheCapacityBytes(C.int64_t(capacity))
-}
-
 func UpdateArrowIOThreadPoolCapacity(threads int) {
 	C.SetArrowIOThreadPoolCapacity(C.int(threads))
 }

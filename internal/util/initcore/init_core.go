@@ -640,15 +640,6 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
-		paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
-			capacity, err := strconv.Atoi(newValue)
-			if err != nil {
-				return err
-			}
-			UpdateExprResCacheCapacityBytes(capacity)
-			return nil
-		})
-
 		updateTieredStorageConfigCallback := func(ctx context.Context, key, oldValue, newValue string) error {
 			return UpdateTieredStorageConfig(paramtable.Get())
 		}

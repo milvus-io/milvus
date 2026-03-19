@@ -3519,8 +3519,14 @@ type queryNodeConfig struct {
 	EnableLatestDeleteSnapshotOptimization ParamItem `refreshable:"true"`
 
 	// expr cache
-	ExprResCacheEnabled       ParamItem `refreshable:"false"`
-	ExprResCacheCapacityBytes ParamItem `refreshable:"false"`
+	ExprResCacheEnabled               ParamItem `refreshable:"false"`
+	ExprResCacheMode                  ParamItem `refreshable:"false"`
+	ExprResCacheMemMaxBytes           ParamItem `refreshable:"false"`
+	ExprResCacheMemCompressionEnabled ParamItem `refreshable:"false"`
+	ExprResCacheMemAdmissionThreshold ParamItem `refreshable:"false"`
+	ExprResCacheMemMinEvalDurationUs  ParamItem `refreshable:"false"`
+	ExprResCacheDiskMaxFileSizeBytes  ParamItem `refreshable:"false"`
+	ExprResCacheDiskMinEvalDurationUs ParamItem `refreshable:"false"`
 
 	// pipeline
 	CleanExcludeSegInterval ParamItem `refreshable:"false"`
@@ -4649,15 +4655,73 @@ user-task-polling:
 	}
 	p.ExprResCacheEnabled.Init(base.mgr)
 
-	p.ExprResCacheCapacityBytes = ParamItem{
-		Key:          "queryNode.exprCache.capacityBytes",
-		FallbackKeys: []string{"max_expr_cache_size"},
+	p.ExprResCacheMode = ParamItem{
+		Key:          "queryNode.exprCache.mode",
 		Version:      "2.6.0",
-		DefaultValue: "268435456", // 256MB
-		Doc:          "max capacity in bytes for expression result cache",
+		DefaultValue: "disk",
+		Doc:          "cache mode: 'disk' (pread/pwrite + fixed slots, recommended) or 'memory' (malloc + Clock + compression)",
 		Export:       true,
 	}
-	p.ExprResCacheCapacityBytes.Init(base.mgr)
+	p.ExprResCacheMode.Init(base.mgr)
+
+	p.ExprResCacheMemMaxBytes = ParamItem{
+		Key:          "queryNode.exprCache.memory.maxBytes",
+		FallbackKeys: []string{"queryNode.exprCache.maxTotalSizeBytes"},
+		Version:      "2.6.0",
+		DefaultValue: "2147483648",
+		Doc:          "max memory for expression cache in memory mode (default 2GB)",
+		Export:       true,
+	}
+	p.ExprResCacheMemMaxBytes.Init(base.mgr)
+
+	p.ExprResCacheMemCompressionEnabled = ParamItem{
+		Key:          "queryNode.exprCache.memory.compressionEnabled",
+		FallbackKeys: []string{"queryNode.exprCache.compressionEnabled"},
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "enable Roaring/Raw adaptive compression in memory mode",
+		Export:       true,
+	}
+	p.ExprResCacheMemCompressionEnabled.Init(base.mgr)
+
+	p.ExprResCacheMemAdmissionThreshold = ParamItem{
+		Key:          "queryNode.exprCache.memory.admissionThreshold",
+		FallbackKeys: []string{"queryNode.exprCache.admissionThreshold"},
+		Version:      "2.6.0",
+		DefaultValue: "2",
+		Doc:          "frequency admission: cache after N+ occurrences (1=no gating)",
+		Export:       true,
+	}
+	p.ExprResCacheMemAdmissionThreshold.Init(base.mgr)
+
+	p.ExprResCacheMemMinEvalDurationUs = ParamItem{
+		Key:          "queryNode.exprCache.memory.minEvalDurationUs",
+		FallbackKeys: []string{"queryNode.exprCache.minEvalDurationUs"},
+		Version:      "2.6.0",
+		DefaultValue: "100",
+		Doc:          "latency filter: skip expressions that eval faster than this (0=disabled)",
+		Export:       true,
+	}
+	p.ExprResCacheMemMinEvalDurationUs.Init(base.mgr)
+
+	p.ExprResCacheDiskMaxFileSizeBytes = ParamItem{
+		Key:          "queryNode.exprCache.disk.maxFileSizeBytes",
+		FallbackKeys: []string{"queryNode.exprCache.maxSegmentFileSizeBytes"},
+		Version:      "2.6.0",
+		DefaultValue: "268435456",
+		Doc:          "max file size per sealed segment in disk mode (default 256MB)",
+		Export:       true,
+	}
+	p.ExprResCacheDiskMaxFileSizeBytes.Init(base.mgr)
+
+	p.ExprResCacheDiskMinEvalDurationUs = ParamItem{
+		Key:          "queryNode.exprCache.disk.minEvalDurationUs",
+		Version:      "2.6.0",
+		DefaultValue: "200",
+		Doc:          "latency filter for disk mode (higher threshold due to disk IO cost)",
+		Export:       true,
+	}
+	p.ExprResCacheDiskMinEvalDurationUs.Init(base.mgr)
 
 	p.CleanExcludeSegInterval = ParamItem{
 		Key:          "queryCoord.cleanExcludeSegmentInterval",

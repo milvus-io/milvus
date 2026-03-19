@@ -152,8 +152,24 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cExprResCacheEnabled := C.bool(paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool())
 	C.SetExprResCacheEnable(cExprResCacheEnabled)
 
-	cExprResCacheCapacityBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.GetAsInt64())
-	C.SetExprResCacheCapacityBytes(cExprResCacheCapacityBytes)
+	if paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
+		diskPath := pathutil.GetPath(pathutil.ExprCachePath, nodeID)
+		cMode := C.CString(paramtable.Get().QueryNodeCfg.ExprResCacheMode.GetValue())
+		cDiskPath := C.CString(diskPath)
+		defer C.free(unsafe.Pointer(cMode))
+		defer C.free(unsafe.Pointer(cDiskPath))
+
+		memMaxBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheMemMaxBytes.GetAsInt64())
+		compressionEnabled := C.bool(paramtable.Get().QueryNodeCfg.ExprResCacheMemCompressionEnabled.GetAsBool())
+		admissionThreshold := C.int32_t(paramtable.Get().QueryNodeCfg.ExprResCacheMemAdmissionThreshold.GetAsInt32())
+		memMinEvalUs := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheMemMinEvalDurationUs.GetAsInt64())
+		diskMaxFileSize := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheDiskMaxFileSizeBytes.GetAsInt64())
+		diskMinEvalUs := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheDiskMinEvalDurationUs.GetAsInt64())
+
+		C.SetExprResCacheConfig(cMode, cDiskPath,
+			memMaxBytes, compressionEnabled, admissionThreshold, memMinEvalUs,
+			diskMaxFileSize, diskMinEvalUs)
+	}
 
 	C.SetArrowIOThreadPoolCapacity(C.int(ResolveArrowIOThreadPoolCapacity()))
 

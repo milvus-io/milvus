@@ -18,6 +18,7 @@
 
 #include <simdjson.h>
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <iterator>
@@ -40,6 +41,7 @@
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "exec/expression/ExprCache.h"
+#include "exec/expression/ExprCacheHelper.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
 #include "glog/logging.h"
@@ -1020,8 +1022,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
         return nullptr;
     }
 
-    if (cached_index_chunk_id_ != 0 &&
-        segment_->type() == SegmentType::Sealed) {
+    if (cached_index_chunk_id_ != 0 && TryCacheGet()) {
+        // Cache hit from a prior Index/Stats path — skip Stats computation.
+    } else if (cached_index_chunk_id_ != 0 &&
+               segment_->type() == SegmentType::Sealed) {
         auto pointerpath = milvus::Json::pointer(expr_->column_.nested_path_);
         auto pointerpair = SplitAtFirstSlashDigit(pointerpath);
         std::string pointer = pointerpair.first;
@@ -1317,6 +1321,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
             cached_index_chunk_res_->flip();
         }
         cached_index_chunk_id_ = 0;
+        CachePut();
     }
 
     auto res = MoveOrSliceBitmap(
@@ -1906,24 +1911,6 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
     }
     auto op_type = expr_->op_type_;
 
-    // Process-level LRU cache lookup by (segment_id, expr signature)
-    if (cached_match_res_ == nullptr &&
-        exec::ExprResCacheManager::IsEnabled() &&
-        segment_->type() == SegmentType::Sealed) {
-        exec::ExprResCacheManager::Key key{segment_->get_segment_id(),
-                                           this->ToString()};
-        exec::ExprResCacheManager::Value v;
-        if (exec::ExprResCacheManager::Instance().Get(key, v)) {
-            cached_match_res_ = v.result;
-            cached_index_chunk_valid_res_ = v.valid_result;
-            AssertInfo(cached_match_res_->size() == active_count_,
-                       "internal error: expr res cache size {} not equal "
-                       "expect active count {}",
-                       cached_match_res_->size(),
-                       active_count_);
-        }
-    }
-
     uint32_t min_should_match = 1;  // default value
     if (op_type == proto::plan::OpType::TextMatch &&
         expr_->extra_values_.size() > 0) {
@@ -1932,56 +1919,48 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
             GetValueFromProto<int64_t>(expr_->extra_values_[0]));
     }
 
-    auto func = [op_type, slop, min_should_match](
-                    Index* index, const std::string& query) -> TargetBitmap {
-        if (op_type == proto::plan::OpType::TextMatch) {
-            return index->MatchQuery(query, min_should_match);
-        } else if (op_type == proto::plan::OpType::PhraseMatch) {
-            return index->PhraseMatchQuery(query, slop);
-        } else {
-            ThrowInfo(OpTypeInvalid,
-                      "unsupported operator type for match query: {}",
-                      op_type);
-        }
-    };
-
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
 
+    // Cache lookup + full-bitset compute via helper
     if (cached_match_res_ == nullptr) {
-        auto pw = segment_->GetTextIndex(op_ctx_, field_id_);
-        auto index = pw.get();
-        auto res = func(index, query);
-        auto valid_res = index->IsNotNull();
-        cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
-        cached_index_chunk_valid_res_ =
-            std::make_shared<TargetBitmap>(std::move(valid_res));
-        if (cached_match_res_->size() < active_count_) {
-            // some entities are not visible in inverted index.
-            // only happend on growing segment.
-            TargetBitmap tail(active_count_ - cached_match_res_->size());
-            cached_match_res_->append(tail);
-            cached_index_chunk_valid_res_->append(tail);
-        } else if (cached_match_res_->size() > active_count_) {
-            // on growing segments, the text index may have indexed rows
-            // beyond the query timestamp. Truncate to active_count_.
-            cached_match_res_->resize(active_count_);
-            cached_index_chunk_valid_res_->resize(active_count_);
-        }
-
-        // Insert into process-level cache
-        if (exec::ExprResCacheManager::IsEnabled() &&
-            segment_->type() == SegmentType::Sealed) {
-            exec::ExprResCacheManager::Key key{segment_->get_segment_id(),
-                                               this->ToString()};
-            exec::ExprResCacheManager::Value v;
-            v.result = cached_match_res_;
-            v.valid_result = cached_index_chunk_valid_res_;
-            v.active_count = active_count_;
-            exec::ExprResCacheManager::Instance().Put(key, v);
-        }
+        auto cached = exec::ExprCacheHelper::GetOrCompute(
+            segment_,
+            this->ToString(),
+            active_count_,
+            [&]() -> exec::ExprCacheHelper::ComputeResult {
+                auto pw = segment_->GetTextIndex(op_ctx_, field_id_);
+                auto index = pw.get();
+                TargetBitmap res;
+                if (op_type == proto::plan::OpType::TextMatch) {
+                    res = index->MatchQuery(query, min_should_match);
+                } else if (op_type == proto::plan::OpType::PhraseMatch) {
+                    res = index->PhraseMatchQuery(query, slop);
+                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "unsupported operator type for match query: {}",
+                              op_type);
+                }
+                auto valid_res = index->IsNotNull();
+                if (res.size() < static_cast<size_t>(active_count_)) {
+                    // some entities are not visible in inverted index.
+                    // only happens on growing segment.
+                    TargetBitmap tail(active_count_ - res.size());
+                    res.append(tail);
+                    valid_res.append(tail);
+                } else if (res.size() > static_cast<size_t>(active_count_)) {
+                    // on growing segments, the text index may have indexed
+                    // rows beyond the query timestamp. Truncate to
+                    // active_count_.
+                    res.resize(active_count_);
+                    valid_res.resize(active_count_);
+                }
+                return {std::move(res), std::move(valid_res)};
+            });
+        cached_match_res_ = cached.result;
+        cached_index_chunk_valid_res_ = cached.valid;
     }
 
     // When execute_all_at_once_ and result is not shared with cache, move to avoid copy
