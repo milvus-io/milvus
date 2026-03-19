@@ -65,7 +65,7 @@ func (b *NodeItem) GetAssignedScore() float64 {
 	return b.AssignedScore
 }
 
-func (b *NodeItem) SetAssignedScore(delta float64) {
+func (b *NodeItem) AddAssignedScore(delta float64) {
 	b.AssignedScore += delta
 	b.priority = b.getPriority()
 }
