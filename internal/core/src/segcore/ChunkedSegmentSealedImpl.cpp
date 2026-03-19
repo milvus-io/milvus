@@ -148,6 +148,98 @@ get_bit(const BitsetType& bitset, FieldId field_id) {
     return bitset[pos];
 }
 
+static inline void
+cancel_warmup(const index::CacheIndexBasePtr& index) {
+    if (index) {
+        index->CancelWarmup();
+    }
+}
+
+static inline void
+cancel_and_erase_scalar_index(
+    std::unordered_map<FieldId, index::CacheIndexBasePtr>& scalar_indexings,
+    FieldId field_id) {
+    if (auto it = scalar_indexings.find(field_id);
+        it != scalar_indexings.end()) {
+        cancel_warmup(it->second);
+        scalar_indexings.erase(it);
+    }
+}
+
+static inline void
+cancel_and_clear_scalar_indexings(
+    std::unordered_map<FieldId, index::CacheIndexBasePtr>& scalar_indexings) {
+    for (auto& [_, index] : scalar_indexings) {
+        cancel_warmup(index);
+    }
+    scalar_indexings.clear();
+}
+
+static inline void
+cancel_and_erase_ngram_index(
+    std::unordered_map<
+        FieldId,
+        std::unordered_map<std::string, index::CacheIndexBasePtr>>&
+        ngram_indexings,
+    FieldId field_id,
+    const std::string& nested_path) {
+    auto field_it = ngram_indexings.find(field_id);
+    if (field_it == ngram_indexings.end()) {
+        return;
+    }
+
+    auto& path_indexings = field_it->second;
+    if (auto path_it = path_indexings.find(nested_path);
+        path_it != path_indexings.end()) {
+        cancel_warmup(path_it->second);
+        path_indexings.erase(path_it);
+    }
+
+    if (path_indexings.empty()) {
+        ngram_indexings.erase(field_it);
+    }
+}
+
+static inline void
+cancel_and_clear_ngram_indexings(
+    std::unordered_map<
+        FieldId,
+        std::unordered_map<std::string, index::CacheIndexBasePtr>>&
+        ngram_indexings) {
+    for (auto& [_, path_indexings] : ngram_indexings) {
+        for (auto& [__, index] : path_indexings) {
+            cancel_warmup(index);
+        }
+    }
+    ngram_indexings.clear();
+}
+
+template <typename JsonIndexT>
+static void
+cancel_and_erase_json_indices(std::vector<JsonIndexT>& json_indices,
+                              FieldId field_id,
+                              std::string_view nested_path) {
+    auto new_end = std::remove_if(
+        json_indices.begin(), json_indices.end(), [&](auto& index) {
+            auto matched =
+                index.field_id == field_id && index.nested_path == nested_path;
+            if (matched) {
+                cancel_warmup(index.index);
+            }
+            return matched;
+        });
+    json_indices.erase(new_end, json_indices.end());
+}
+
+template <typename JsonIndexT>
+static void
+cancel_and_clear_json_indices(std::vector<JsonIndexT>& json_indices) {
+    for (auto& index : json_indices) {
+        cancel_warmup(index.index);
+    }
+    json_indices.clear();
+}
+
 void
 ChunkedSegmentSealedImpl::LoadIndex(LoadIndexInfo& info) {
     LoadIndex(info, false);
@@ -250,7 +342,7 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
         if (get_bit(index_ready_bitset_, field_id)) {
             auto [scalar_indexings, ngram_fields] = lock(
                 folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
-            scalar_indexings->erase(field_id);
+            cancel_and_erase_scalar_index(*scalar_indexings, field_id);
             ngram_fields->erase(field_id);
         }
         LOG_INFO("Replacing scalar index for field {} in segment {}",
@@ -268,11 +360,12 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
             it != info.index_params.end() &&
             it->second == index::NGRAM_INDEX_TYPE) {
             auto ngram_indexings = ngram_indexings_.wlock();
-            if (ngram_indexings->find(field_id) == ngram_indexings->end()) {
-                (*ngram_indexings)[field_id] =
-                    std::unordered_map<std::string, index::CacheIndexBasePtr>();
+            auto& path_indexings = (*ngram_indexings)[field_id];
+            if (auto path_it = path_indexings.find(path);
+                path_it != path_indexings.end()) {
+                cancel_warmup(path_it->second);
             }
-            (*ngram_indexings)[field_id][path] = std::move(info.cache_index);
+            path_indexings[path] = std::move(info.cache_index);
             return;
         } else {
             JsonIndex index;
@@ -281,7 +374,10 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(LoadIndexInfo& info,
             index.index = std::move(info.cache_index);
             index.cast_type =
                 JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
-            json_indices.wlock()->push_back(std::move(index));
+            json_indices.withWLock([&](auto& json_indexings) {
+                cancel_and_erase_json_indices(json_indexings, field_id, path);
+                json_indexings.push_back(std::move(index));
+            });
             return;
         }
     }
@@ -1148,7 +1244,7 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id) {
     std::unique_lock lck(mutex_);
     auto [scalar_indexings, ngram_fields] =
         lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
-    scalar_indexings->erase(field_id);
+    cancel_and_erase_scalar_index(*scalar_indexings, field_id);
     ngram_fields->erase(field_id);
 
     set_bit(index_ready_bitset_, field_id, false);
@@ -1158,24 +1254,12 @@ void
 ChunkedSegmentSealedImpl::DropJSONIndex(const FieldId field_id,
                                         const std::string& nested_path) {
     std::unique_lock lck(mutex_);
-    json_indices.withWLock([&](auto& vec) {
-        vec.erase(std::remove_if(vec.begin(),
-                                 vec.end(),
-                                 [field_id, nested_path](const auto& index) {
-                                     return index.field_id == field_id &&
-                                            index.nested_path == nested_path;
-                                 }),
-                  vec.end());
+    json_indices.withWLock([&](auto& json_indexings) {
+        cancel_and_erase_json_indices(json_indexings, field_id, nested_path);
     });
 
     ngram_indexings_.withWLock([&](auto& ngram_indexings) {
-        auto iter = ngram_indexings.find(field_id);
-        if (iter != ngram_indexings.end()) {
-            iter->second.erase(nested_path);
-            if (iter->second.empty()) {
-                ngram_indexings.erase(iter);
-            }
-        }
+        cancel_and_erase_ngram_index(ngram_indexings, field_id, nested_path);
     });
 }
 
@@ -1903,9 +1987,16 @@ ChunkedSegmentSealedImpl::ClearData() {
         system_ready_count_ = 0;
         num_rows_ = std::nullopt;
         ngram_fields_.wlock()->clear();
-        scalar_indexings_.wlock()->clear();
+        scalar_indexings_.withWLock([&](auto& scalar_indexings) {
+            cancel_and_clear_scalar_indexings(scalar_indexings);
+        });
         vector_indexings_.clear();
-        ngram_indexings_.wlock()->clear();
+        ngram_indexings_.withWLock([&](auto& ngram_indexings) {
+            cancel_and_clear_ngram_indexings(ngram_indexings);
+        });
+        json_indices.withWLock([&](auto& json_indexings) {
+            cancel_and_clear_json_indices(json_indexings);
+        });
         insert_record_.clear();
         fields_.wlock()->clear();
         variable_fields_avg_size_.clear();
