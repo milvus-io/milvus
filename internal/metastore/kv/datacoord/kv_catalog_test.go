@@ -550,12 +550,13 @@ func Test_DropSegment(t *testing.T) {
 		assert.NoError(t, err)
 
 		segKey := buildSegmentPath(segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
-		binlogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentBinlogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
-		deltalogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentDeltalogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
-		statelogPreix := fmt.Sprintf("%s/%d/%d/%d", SegmentStatslogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
+		binlogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentBinlogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
+		deltalogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentDeltalogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
+		statelogPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentStatslogPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
+		bm25logPrefix := fmt.Sprintf("%s/%d/%d/%d/", SegmentBM25logPathPrefix, segment1.GetCollectionID(), segment1.GetPartitionID(), segment1.GetID())
 
 		assert.Equal(t, 5, len(removedKvs))
-		for _, k := range []string{segKey, binlogPreix, deltalogPreix, statelogPreix} {
+		for _, k := range []string{segKey, binlogPrefix, deltalogPrefix, statelogPrefix, bm25logPrefix} {
 			_, ok := removedKvs[k]
 			assert.True(t, ok)
 		}

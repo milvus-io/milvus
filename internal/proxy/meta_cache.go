@@ -23,7 +23,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -67,6 +69,9 @@ type Cache interface {
 	GetPartitionsIndex(ctx context.Context, database, collectionName string) ([]string, error)
 	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, database, collectionName string) (*schemaInfo, error)
+	// ResolveCollectionAlias returns the actual collection name if input is an alias,
+	// or returns the input name if it's already a collection name.
+	ResolveCollectionAlias(ctx context.Context, database, nameOrAlias string) (string, error)
 	// GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]nodeInfo, error)
 	// GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error)
 	// DeprecateShardCache(database, collectionName string)
@@ -85,6 +90,8 @@ type Cache interface {
 	// RefreshPolicyInfo(op typeutil.CacheOp) error
 	// InitPolicyInfo(info []string, userRoles []string)
 
+	// RemoveAlias removes a cached alias entry.
+	RemoveAlias(ctx context.Context, database, alias string)
 	RemoveDatabase(ctx context.Context, database string)
 	HasDatabase(ctx context.Context, database string) bool
 	GetDatabaseInfo(ctx context.Context, database string) (*databaseInfo, error)
@@ -100,6 +107,7 @@ type collectionInfo struct {
 	createdUtcTimestamp   uint64
 	consistencyLevel      commonpb.ConsistencyLevel
 	partitionKeyIsolation bool
+	bigTopKOptimization   bool
 	replicateID           string
 	updateTimestamp       uint64
 	collectionTTL         uint64
@@ -109,6 +117,13 @@ type collectionInfo struct {
 	shardsNum             int32
 	aliases               []string
 	properties            []*commonpb.KeyValuePair
+}
+
+const aliasCacheNegativeTTL = 30 * time.Second
+
+type aliasEntry struct {
+	collectionName string    // real collection name; "" means negative cache (not an alias)
+	cachedAt       time.Time // when this entry was cached; used for TTL on negative entries
 }
 
 type databaseInfo struct {
@@ -338,8 +353,9 @@ var _ Cache = (*MetaCache)(nil)
 type MetaCache struct {
 	mixCoord types.MixCoordClient
 
-	dbInfo   map[string]*databaseInfo              // database -> db_info
-	collInfo map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
+	dbInfo    map[string]*databaseInfo              // database -> db_info
+	collInfo  map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
+	aliasInfo map[string]map[string]*aliasEntry     // database -> alias -> entry
 
 	credMap        map[string]*internalpb.CredentialInfo // cache for credential, lazy load
 	privilegeInfos map[string]struct{}                   // privileges cache
@@ -388,6 +404,7 @@ func NewMetaCache(mixCoord types.MixCoordClient) (*MetaCache, error) {
 		mixCoord:               mixCoord,
 		dbInfo:                 map[string]*databaseInfo{},
 		collInfo:               map[string]map[string]*collectionInfo{},
+		aliasInfo:              map[string]map[string]*aliasEntry{},
 		credMap:                map[string]*internalpb.CredentialInfo{},
 		privilegeInfos:         map[string]struct{}{},
 		userToRoles:            map[string]map[string]struct{}{},
@@ -449,13 +466,20 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		}
 	})
 
-	if collectionName == "" {
-		collectionName = collection.Schema.GetName()
+	realName := collection.Schema.GetName()
+	originalName := collectionName
+	isAlias := collectionName != "" && realName != "" && realName != collectionName
+	if collectionName == "" || isAlias {
+		collectionName = realName
 	}
 	if database == "" {
 		log.Ctx(ctx).Warn("database is empty, use default database name", zap.String("collectionName", collectionName), zap.Stack("stack"))
 	}
 	isolation, err := common.IsPartitionKeyIsolationKvEnabled(collection.Properties...)
+	if err != nil {
+		return nil, err
+	}
+	bigTopKOptimizationEnabled, err := common.IsBigTopKOptimizationEnabled(collection.Properties...)
 	if err != nil {
 		return nil, err
 	}
@@ -478,6 +502,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			createdUtcTimestamp:   collection.CreatedUtcTimestamp,
 			consistencyLevel:      collection.ConsistencyLevel,
 			partitionKeyIsolation: isolation,
+			bigTopKOptimization:   bigTopKOptimizationEnabled,
 			updateTimestamp:       collection.UpdateTimestamp,
 			collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
 			vChannels:             collection.VirtualChannelNames,
@@ -494,6 +519,15 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	}
 
 	replicateID, _ := common.GetReplicateID(collection.Properties)
+
+	if isAlias {
+		// Caller passed an alias; record the alias→realName mapping so
+		// subsequent ResolveCollectionAlias calls hit Level 2 cache.
+		m.setAliasLocked(database, originalName, &aliasEntry{collectionName: realName, cachedAt: time.Now()})
+		// Remove any stale collInfo entry that was previously cached under the alias key.
+		delete(m.collInfo[database], originalName)
+	}
+
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:                collection.CollectionID,
 		schema:                schemaInfo,
@@ -502,6 +536,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		createdUtcTimestamp:   collection.CreatedUtcTimestamp,
 		consistencyLevel:      collection.ConsistencyLevel,
 		partitionKeyIsolation: isolation,
+		bigTopKOptimization:   bigTopKOptimizationEnabled,
 		replicateID:           replicateID,
 		updateTimestamp:       collection.UpdateTimestamp,
 		collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
@@ -642,6 +677,111 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectio
 	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
 
 	return collInfo.schema, nil
+}
+
+func (m *MetaCache) getAlias(database, alias string) (*aliasEntry, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if db, ok := m.aliasInfo[database]; ok {
+		if entry, ok := db[alias]; ok {
+			// Expire negative cache entries after TTL
+			if entry.collectionName == "" && time.Since(entry.cachedAt) > aliasCacheNegativeTTL {
+				return nil, false
+			}
+			return entry, true
+		}
+	}
+	return nil, false
+}
+
+// setAliasLocked sets an alias cache entry. Caller must hold m.mu write lock.
+func (m *MetaCache) setAliasLocked(database, alias string, entry *aliasEntry) {
+	if _, ok := m.aliasInfo[database]; !ok {
+		m.aliasInfo[database] = make(map[string]*aliasEntry)
+	}
+	m.aliasInfo[database][alias] = entry
+}
+
+// removeAliasLocked removes an alias cache entry. Caller must hold m.mu write lock.
+func (m *MetaCache) removeAliasLocked(database, alias string) {
+	if db, ok := m.aliasInfo[database]; ok {
+		delete(db, alias)
+	}
+}
+
+// removeAliasesForCollectionLocked removes all positive alias entries pointing to collectionName.
+// Caller must hold m.mu write lock.
+func (m *MetaCache) removeAliasesForCollectionLocked(database, collectionName string) {
+	if db, ok := m.aliasInfo[database]; ok {
+		for alias, entry := range db {
+			if entry.collectionName == collectionName {
+				delete(db, alias)
+			}
+		}
+	}
+}
+
+func (m *MetaCache) RemoveAlias(ctx context.Context, database, alias string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removeAliasLocked(database, alias)
+	log.Ctx(ctx).Debug("remove alias from cache", zap.String("db", database), zap.String("alias", alias))
+}
+
+func (m *MetaCache) ResolveCollectionAlias(ctx context.Context, database, nameOrAlias string) (string, error) {
+	// Level 1: Found in collection cache — but the key might be an alias because
+	// DescribeCollection accepts aliases and update() caches under the caller's name.
+	// Compare with the schema's real collection name to detect this.
+	if collInfo, ok := m.getCollection(database, nameOrAlias, 0); ok {
+		if collInfo.schema != nil {
+			if realName := collInfo.schema.GetName(); realName != "" && realName != nameOrAlias {
+				return realName, nil
+			}
+		}
+		return nameOrAlias, nil
+	}
+
+	// Level 2: Found in alias cache
+	if entry, ok := m.getAlias(database, nameOrAlias); ok {
+		if entry.collectionName == "" {
+			// Negative cache: not an alias, return as-is
+			return nameOrAlias, nil
+		}
+		return entry.collectionName, nil
+	}
+
+	// Level 3: Cache miss, call DescribeAlias RPC
+	resp, err := m.mixCoord.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{
+		DbName: database,
+		Alias:  nameOrAlias,
+	})
+	if err != nil {
+		return "", err
+	}
+	if err = merr.CheckRPCCall(resp, nil); err != nil {
+		if errors.Is(err, merr.ErrAliasNotFound) || errors.Is(err, merr.ErrCollectionNotFound) {
+			// Negative cache: this name is not an alias
+			m.mu.Lock()
+			m.setAliasLocked(database, nameOrAlias, &aliasEntry{collectionName: "", cachedAt: time.Now()})
+			m.mu.Unlock()
+			return nameOrAlias, nil
+		}
+		return "", err
+	}
+
+	if resp.GetCollection() == "" {
+		// Negative cache
+		m.mu.Lock()
+		m.setAliasLocked(database, nameOrAlias, &aliasEntry{collectionName: "", cachedAt: time.Now()})
+		m.mu.Unlock()
+		return nameOrAlias, nil
+	}
+
+	// Positive cache: alias -> real collection name
+	m.mu.Lock()
+	m.setAliasLocked(database, nameOrAlias, &aliasEntry{collectionName: resp.GetCollection(), cachedAt: time.Now()})
+	m.mu.Unlock()
+	return resp.GetCollection(), nil
 }
 
 func (m *MetaCache) GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error) {
@@ -828,16 +968,27 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionNa
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	found := false
 	if db, dbOk := m.collInfo[database]; dbOk {
 		if coll, ok := db[collectionName]; ok {
 			m.removeCollectionByID(ctx, coll.collID, version, false)
+			found = true
 		}
 	}
 	if database == "" {
 		if db, dbOk := m.collInfo[defaultDB]; dbOk {
 			if coll, ok := db[collectionName]; ok {
 				m.removeCollectionByID(ctx, coll.collID, version, false)
+				found = true
 			}
+		}
+	}
+	// If the collection was not in cache, alias entries pointing to it won't
+	// have been cleaned up by removeCollectionByID. Clean them up here.
+	if !found {
+		m.removeAliasesForCollectionLocked(database, collectionName)
+		if database == "" {
+			m.removeAliasesForCollectionLocked(defaultDB, collectionName)
 		}
 	}
 	log.Ctx(ctx).Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))
@@ -859,6 +1010,13 @@ func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID Uniqu
 				if version == 0 || curVersion <= version {
 					delete(m.collInfo[database], k)
 					collNames = append(collNames, k)
+					m.sfGlobal.Forget(buildSfKeyByName(database, k))
+					m.sfGlobal.Forget(buildSfKeyById(database, v.collID))
+					realName := k
+					if v.schema != nil && v.schema.GetName() != "" {
+						realName = v.schema.GetName()
+					}
+					m.removeAliasesForCollectionLocked(database, realName)
 				}
 			}
 		}
@@ -880,6 +1038,7 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	defer m.mu.Unlock()
 	delete(m.collInfo, database)
 	delete(m.dbInfo, database)
+	delete(m.aliasInfo, database)
 }
 
 func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {

@@ -118,6 +118,11 @@ minio:
   useSSL: false # Switch value to control if to access the MinIO or S3 service through SSL.
   ssl:
     tlsCACert: /path/to/public.crt # path to your CACert file
+    # TLS minimum version for MinIO/S3 SSL connections.
+    # Optional values: "default", "1.0", "1.1", "1.2", "1.3".
+    # When set to "default", the SDK/runtime default is used (typically TLS 1.2).
+    # We recommend using version 1.2 and above.
+    tlsMinVersion: default
   # Name of the bucket where Milvus stores data in MinIO or S3.
   # Milvus 2.0.0 does not support storing data in multiple buckets.
   # Bucket with this name will be created if it does not exist. If the bucket already exists and is accessible, it will be used directly. Otherwise, there will be an error.
@@ -337,6 +342,7 @@ proxy:
   # If the number of result entries exceeds this limit, the search will be rejected.
   # Disabled if the value is less or equal to 0.
   maxResultEntries: -1
+  resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
@@ -1438,6 +1444,10 @@ function:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable dashscope model service
         url:  # Your dashscope embedding url, Default is the official embedding url
+      gemini:
+        credential:  # The name in the credential configuration item
+        enable: true # Whether to enable Gemini model service
+        url:  # Your Gemini embedding url, Default is the official embedding url
       openai:
         credential:  # The name in the crendential configuration item
         enable: true # Whether to enable openai model service

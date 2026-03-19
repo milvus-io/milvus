@@ -660,6 +660,41 @@ func (_c *MockCache_HasDatabase_Call) RunAndReturn(run func(context.Context, str
 	return _c
 }
 
+// RemoveAlias provides a mock function with given fields: ctx, database, alias
+func (_m *MockCache) RemoveAlias(ctx context.Context, database string, alias string) {
+	_m.Called(ctx, database, alias)
+}
+
+// MockCache_RemoveAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveAlias'
+type MockCache_RemoveAlias_Call struct {
+	*mock.Call
+}
+
+// RemoveAlias is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+//   - alias string
+func (_e *MockCache_Expecter) RemoveAlias(ctx interface{}, database interface{}, alias interface{}) *MockCache_RemoveAlias_Call {
+	return &MockCache_RemoveAlias_Call{Call: _e.mock.On("RemoveAlias", ctx, database, alias)}
+}
+
+func (_c *MockCache_RemoveAlias_Call) Run(run func(ctx context.Context, database string, alias string)) *MockCache_RemoveAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockCache_RemoveAlias_Call) Return() *MockCache_RemoveAlias_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCache_RemoveAlias_Call) RunAndReturn(run func(context.Context, string, string)) *MockCache_RemoveAlias_Call {
+	_c.Run(run)
+	return _c
+}
+
 // RemoveCollection provides a mock function with given fields: ctx, database, collectionName, version
 func (_m *MockCache) RemoveCollection(ctx context.Context, database string, collectionName string, version uint64) {
 	_m.Called(ctx, database, collectionName, version)
@@ -778,6 +813,64 @@ func (_c *MockCache_RemoveDatabase_Call) Return() *MockCache_RemoveDatabase_Call
 
 func (_c *MockCache_RemoveDatabase_Call) RunAndReturn(run func(context.Context, string)) *MockCache_RemoveDatabase_Call {
 	_c.Run(run)
+	return _c
+}
+
+// ResolveCollectionAlias provides a mock function with given fields: ctx, database, nameOrAlias
+func (_m *MockCache) ResolveCollectionAlias(ctx context.Context, database string, nameOrAlias string) (string, error) {
+	ret := _m.Called(ctx, database, nameOrAlias)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ResolveCollectionAlias")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (string, error)); ok {
+		return rf(ctx, database, nameOrAlias)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) string); ok {
+		r0 = rf(ctx, database, nameOrAlias)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, database, nameOrAlias)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCache_ResolveCollectionAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResolveCollectionAlias'
+type MockCache_ResolveCollectionAlias_Call struct {
+	*mock.Call
+}
+
+// ResolveCollectionAlias is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+//   - nameOrAlias string
+func (_e *MockCache_Expecter) ResolveCollectionAlias(ctx interface{}, database interface{}, nameOrAlias interface{}) *MockCache_ResolveCollectionAlias_Call {
+	return &MockCache_ResolveCollectionAlias_Call{Call: _e.mock.On("ResolveCollectionAlias", ctx, database, nameOrAlias)}
+}
+
+func (_c *MockCache_ResolveCollectionAlias_Call) Run(run func(ctx context.Context, database string, nameOrAlias string)) *MockCache_ResolveCollectionAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockCache_ResolveCollectionAlias_Call) Return(_a0 string, _a1 error) *MockCache_ResolveCollectionAlias_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCache_ResolveCollectionAlias_Call) RunAndReturn(run func(context.Context, string, string) (string, error)) *MockCache_ResolveCollectionAlias_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

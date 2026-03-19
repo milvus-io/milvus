@@ -42,6 +42,12 @@ import (
 
 const initialTargetVersion = int64(0)
 
+type collectionVersionCache struct {
+	targetVersion      int64
+	segmentDistVersion int64
+	channelDistVersion int64
+}
+
 type SegmentChecker struct {
 	*checkerActivation
 	meta         *meta.Meta
@@ -50,6 +56,9 @@ type SegmentChecker struct {
 	nodeMgr      *session.NodeManager
 	scheduler    task.Scheduler
 	assignPolicy assign.AssignPolicy
+
+	// version cache for fast skip when nothing changed
+	versionCache map[int64]*collectionVersionCache
 }
 
 func NewSegmentChecker(
@@ -71,6 +80,7 @@ func NewSegmentChecker(
 		nodeMgr:           nodeMgr,
 		scheduler:         scheduler,
 		assignPolicy:      assignPolicy,
+		versionCache:      make(map[int64]*collectionVersionCache),
 	}
 }
 
@@ -93,18 +103,49 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	if !c.IsActive() {
 		return nil
 	}
+
 	collectionIDs := c.meta.CollectionManager.GetAll(ctx)
-	results := make([]task.Task, 0)
 	for _, cid := range collectionIDs {
 		if c.readyToCheck(ctx, cid) {
+			// Fast path: skip if target and dist versions unchanged
+			currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, cid, meta.NextTarget)
+			currentSegmentDistVersion := c.dist.SegmentDistManager.GetVersion()
+			currentChannelDistVersion := c.dist.ChannelDistManager.GetVersion()
+			if c.isCollectionSynced(cid, currentTargetVersion, currentSegmentDistVersion, currentChannelDistVersion) {
+				continue
+			}
+
 			replicas := c.meta.ReplicaManager.GetByCollection(ctx, cid)
+			hasTask := false
 			for _, r := range replicas {
-				results = append(results, c.checkReplica(ctx, r)...)
+				tasks := c.checkReplica(ctx, r)
+				if len(tasks) > 0 {
+					hasTask = true
+				}
+				// Add tasks immediately after checking each replica to reduce
+				// the time window between task generation and addition.
+				// This prevents duplicate segment loading when dist updates
+				// and old tasks are removed during the window.
+				for _, t := range tasks {
+					if err := c.scheduler.Add(t); err != nil {
+						t.Cancel(err)
+					}
+				}
+			}
+
+			// Only update version cache if no tasks were generated
+			// If tasks were generated, we need to re-check next time
+			if !hasTask {
+				c.updateVersionCache(cid, currentTargetVersion, currentSegmentDistVersion, currentChannelDistVersion)
 			}
 		}
 	}
 
+	// clean up version cache for released collections
+	c.cleanVersionCache(collectionIDs)
+
 	// find already released segments which are not contained in target
+	results := make([]task.Task, 0)
 	segments := c.dist.SegmentDistManager.GetByFilter()
 	released := utils.FilterReleased(segments, collectionIDs)
 	reduceTasks := c.createSegmentReduceTasks(ctx, released, meta.NilReplica, querypb.DataScope_Historical)
@@ -129,6 +170,43 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	}
 
 	return results
+}
+
+// isCollectionSynced checks if target and dist versions are unchanged since last check
+func (c *SegmentChecker) isCollectionSynced(collectionID int64, targetVersion, segmentDistVersion, channelDistVersion int64) bool {
+	cache, ok := c.versionCache[collectionID]
+	if !ok {
+		return false
+	}
+	return cache.targetVersion == targetVersion &&
+		cache.segmentDistVersion == segmentDistVersion &&
+		cache.channelDistVersion == channelDistVersion
+}
+
+// updateVersionCache updates the version cache for a collection
+func (c *SegmentChecker) updateVersionCache(collectionID int64, targetVersion, segmentDistVersion, channelDistVersion int64) {
+	c.versionCache[collectionID] = &collectionVersionCache{
+		targetVersion:      targetVersion,
+		segmentDistVersion: segmentDistVersion,
+		channelDistVersion: channelDistVersion,
+	}
+}
+
+// cleanVersionCache removes entries for collections that no longer exist.
+// Only runs when cache has more entries than active collections, meaning stale entries exist.
+func (c *SegmentChecker) cleanVersionCache(activeCollections []int64) {
+	if len(c.versionCache) <= len(activeCollections) {
+		return
+	}
+	activeSet := make(map[int64]struct{}, len(activeCollections))
+	for _, cid := range activeCollections {
+		activeSet[cid] = struct{}{}
+	}
+	for cid := range c.versionCache {
+		if _, ok := activeSet[cid]; !ok {
+			delete(c.versionCache, cid)
+		}
+	}
 }
 
 func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica) []task.Task {

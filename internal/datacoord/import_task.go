@@ -69,12 +69,6 @@ func WithRequestSource() ImportTaskFilter {
 	}
 }
 
-func WithL0CompactionSource() ImportTaskFilter {
-	return func(task ImportTask) bool {
-		return task.GetSource() == datapb.ImportTaskSourceV2_L0Compaction
-	}
-}
-
 type UpdateAction func(task ImportTask)
 
 func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {

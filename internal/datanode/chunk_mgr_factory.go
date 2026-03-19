@@ -57,6 +57,7 @@ func (m *chunkMgrFactory) NewChunkManager(ctx context.Context, config *indexpb.S
 		objectstorage.Region(config.GetRegion()),
 		objectstorage.CreateBucket(true),
 		objectstorage.GcpCredentialJSON(config.GetGcpCredentialJSON()),
+		objectstorage.SslTLSMinVersion(config.GetSslTlsMinVersion()),
 	)
 	return chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 }

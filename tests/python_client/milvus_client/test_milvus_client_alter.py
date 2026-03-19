@@ -254,6 +254,8 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
                  ct.err_msg: "can not delete mmap properties if collection loaded"}
         self.drop_collection_properties(client, collection_name, property_keys=["mmap.enabled"],
                                         check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999,
+                 ct.err_msg: "can not delete lazyload.enabled properties if collection loaded"}
         self.drop_collection_properties(client, collection_name, property_keys=["lazyload.enabled"],
                                         check_task=CheckTasks.err_res, check_items=error)
         # TODO                                

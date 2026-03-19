@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/casbin/casbin/v2"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -19,12 +18,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type PrivilegeFunc func(ctx context.Context, req interface{}) (context.Context, error)
 
 var (
-	enforcer                *casbin.SyncedEnforcer
 	initOnce                sync.Once
 	initPrivilegeGroupsOnce sync.Once
 )
@@ -71,6 +70,20 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	objectType := privilegeExt.ObjectType.String()
 	objectNameIndex := privilegeExt.ObjectNameIndex
 	objectName := funcutil.GetObjectName(req, objectNameIndex)
+	dbName := GetCurDBNameFromContextOrDefault(ctx)
+
+	// Resolve alias to actual collection name for RBAC checks
+	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
+		if objectName != util.AnyWord && objectName != "" {
+			if actualCollectionName, resolveErr := resolveCollectionAlias(ctx, dbName, objectName); resolveErr != nil {
+				log.RatedWarn(60, "failed to resolve collection alias for RBAC, using original name",
+					zap.String("objectName", objectName), zap.String("dbName", dbName), zap.Error(resolveErr))
+			} else {
+				objectName = actualCollectionName
+			}
+		}
+	}
+
 	if isCurUserObject(objectType, username, objectName) {
 		return ctx, nil
 	}
@@ -81,8 +94,27 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 
 	objectNameIndexs := privilegeExt.ObjectNameIndexs
 	objectNames := funcutil.GetObjectNames(req, objectNameIndexs)
+
+	// Resolve aliases for operations that refer to multiple resources
+	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndexs != 0 && len(objectNames) > 0 {
+		resolvedNames := make([]string, 0, len(objectNames))
+		for _, name := range objectNames {
+			if name == util.AnyWord || name == "" {
+				resolvedNames = append(resolvedNames, name)
+				continue
+			}
+			if actualName, resolveErr := resolveCollectionAlias(ctx, dbName, name); resolveErr != nil {
+				log.RatedWarn(60, "failed to resolve collection alias for RBAC, using original name",
+					zap.String("objectName", name), zap.String("dbName", dbName), zap.Error(resolveErr))
+				resolvedNames = append(resolvedNames, name)
+			} else {
+				resolvedNames = append(resolvedNames, actualName)
+			}
+		}
+		objectNames = resolvedNames
+	}
+
 	objectPrivilege := privilegeExt.ObjectPrivilege.String()
-	dbName := GetCurDBNameFromContextOrDefault(ctx)
 
 	log = log.With(zap.String("username", username), zap.Strings("role_names", roleNames),
 		zap.String("object_type", objectType), zap.String("object_privilege", objectPrivilege),
@@ -166,4 +198,13 @@ func isSelectMyRoleGrants(req interface{}, roleNames []string) bool {
 	filterGrantEntity := selectGrantReq.GetEntity()
 	roleName := filterGrantEntity.GetRole().GetName()
 	return funcutil.SliceContain(roleNames, roleName)
+}
+
+// resolveCollectionAlias resolves an alias to its actual collection name
+func resolveCollectionAlias(ctx context.Context, dbName, nameOrAlias string) (string, error) {
+	cache := globalMetaCache
+	if cache == nil {
+		return nameOrAlias, merr.WrapErrServiceInternal("meta cache not initialized")
+	}
+	return cache.ResolveCollectionAlias(ctx, dbName, nameOrAlias)
 }

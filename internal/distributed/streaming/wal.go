@@ -70,7 +70,10 @@ func (w *walAccesserImpl) ForwardService() ForwardService {
 }
 
 func (w *walAccesserImpl) Replicate() ReplicateService {
-	return replicateService{w}
+	return replicateService{
+		walAccesserImpl:  w,
+		skipMessageTypes: buildSkipMessageTypes(paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.GetAsStrings()),
+	}
 }
 
 func (w *walAccesserImpl) Balancer() Balancer {

@@ -29,7 +29,6 @@ import (
 	"io"
 	"math"
 	"path"
-	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -160,6 +159,7 @@ type resourceEstimateFactor struct {
 	tempSegmentIndexFactor          float64
 	deltaDataExpansionFactor        float64
 	jsonKeyStatsExpansionFactor     float64
+	textIndexExpansionFactor        float64
 	TieredEvictionEnabled           bool
 	TieredEvictableMemoryCacheRatio float64
 	TieredEvictableDiskCacheRatio   float64
@@ -310,7 +310,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			s.Release(context.Background())
 			return true
 		})
-		debug.FreeOSMemory()
 	}()
 
 	for _, info := range infos {
@@ -1061,10 +1060,6 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	}
 	pkField := GetPkField(collection.Schema())
 
-	// TODO(xige-16): Optimize the data loading process and reduce data copying
-	// for now, there will be multiple copies in the process of data loading into segCore
-	defer debug.FreeOSMemory()
-
 	if segment.Type() == SegmentTypeSealed {
 		if err := loader.loadSealedSegment(ctx, loadInfo, segment); err != nil {
 			return err
@@ -1588,6 +1583,7 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 	// so we need to estimate the final resource usage of the segments
 	finalFactor := resourceEstimateFactor{
 		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		textIndexExpansionFactor:        paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
 		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
 		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
 		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
@@ -1671,6 +1667,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		tempSegmentIndexFactor:      paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
 		deltaDataExpansionFactor:    paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
 		jsonKeyStatsExpansionFactor: paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.GetAsFloat(),
+		textIndexExpansionFactor:    paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
 		TieredEvictionEnabled:       paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
 	}
 	maxSegmentSize := uint64(0)
@@ -1932,6 +1929,18 @@ func estimateLogicalResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		segmentInevictableMemorySize += uint64(float64(memSize) * expansionFactor)
 	}
 
+	// PART 5: calculate logical resource usage of text index stats data
+	// Text match indexes are evictable (support_eviction=true in caching layer).
+	// Text match index mmap is driven by scalar_field_enable_mmap (same as raw scalar data).
+	textIndexMmapEnable := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+	for _, textStats := range loadInfo.GetTextStatsLogs() {
+		if textIndexMmapEnable {
+			segmentEvictableDiskSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+		} else {
+			segmentEvictableMemorySize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+		}
+	}
+
 	log.Debug("estimate logical resoure usage result",
 		zap.Int64("segmentID", loadInfo.GetSegmentID()),
 		zap.Uint64("segmentInevictableMemorySize", segmentInevictableMemorySize),
@@ -2161,6 +2170,25 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		} else {
 			if !multiplyFactor.TieredEvictionEnabled {
 				segMemoryLoadingSize += uint64(float64(jsonKeyStats.GetMemorySize()) * multiplyFactor.jsonKeyStatsExpansionFactor)
+			}
+		}
+	}
+
+	// PART 6: calculate size of text index stats data
+	// text index data is managed by the caching layer when tiered eviction is enabled,
+	// so it only needs to be included when tiered eviction is disabled.
+	// Text match index mmap is driven by scalar_field_enable_mmap (same as raw scalar data).
+	// memory_size = sum of Tantivy index file sizes (same value as C++ ByteSize() after load),
+	// so 1.0x is the baseline; textIndexExpansionFactor allows tuning if needed.
+	textIndexMmapEnable := paramtable.Get().QueryNodeCfg.MmapScalarField.GetAsBool()
+	for _, textStats := range loadInfo.GetTextStatsLogs() {
+		if textIndexMmapEnable {
+			if !multiplyFactor.TieredEvictionEnabled {
+				segDiskLoadingSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
+			}
+		} else {
+			if !multiplyFactor.TieredEvictionEnabled {
+				segMemoryLoadingSize += uint64(float64(textStats.GetMemorySize()) * multiplyFactor.textIndexExpansionFactor)
 			}
 		}
 	}

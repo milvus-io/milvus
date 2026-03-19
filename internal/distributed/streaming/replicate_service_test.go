@@ -223,7 +223,7 @@ func TestReplicateService_GetReplicateConfiguration(t *testing.T) {
 }
 
 func TestReplicateService_SkipMessageTypes(t *testing.T) {
-	newReplicateService := func(t *testing.T) *replicateService {
+	newReplicateService := func(t *testing.T, skipTypes map[string]struct{}) *replicateService {
 		c := mock_client.NewMockClient(t)
 		as := mock_client.NewMockAssignmentService(t)
 		c.EXPECT().Assignment().Return(as).Maybe()
@@ -258,14 +258,14 @@ func TestReplicateService_SkipMessageTypes(t *testing.T) {
 				handlerClient:        h,
 				producers:            make(map[string]*producer.ResumableProducer),
 			},
+			skipMessageTypes: skipTypes,
 		}
 	}
 
-	t.Run("skip_AlterResourceGroup", func(t *testing.T) {
-		old := paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue("AlterResourceGroup,DropResourceGroup")
-		defer paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue(old)
+	skipSet := buildSkipMessageTypes([]string{"AlterResourceGroup", "DropResourceGroup"})
 
-		rs := newReplicateService(t)
+	t.Run("skip_AlterResourceGroup", func(t *testing.T) {
+		rs := newReplicateService(t, skipSet)
 		broadcastMsg := message.NewAlterResourceGroupMessageBuilderV2().
 			WithHeader(&message.AlterResourceGroupMessageHeader{}).
 			WithBody(&message.AlterResourceGroupMessageBody{}).
@@ -282,10 +282,7 @@ func TestReplicateService_SkipMessageTypes(t *testing.T) {
 	})
 
 	t.Run("skip_DropResourceGroup", func(t *testing.T) {
-		old := paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue("AlterResourceGroup,DropResourceGroup")
-		defer paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue(old)
-
-		rs := newReplicateService(t)
+		rs := newReplicateService(t, skipSet)
 		broadcastMsg := message.NewDropResourceGroupMessageBuilderV2().
 			WithHeader(&message.DropResourceGroupMessageHeader{ResourceGroupName: "test_rg"}).
 			WithBody(&message.DropResourceGroupMessageBody{}).
@@ -302,10 +299,7 @@ func TestReplicateService_SkipMessageTypes(t *testing.T) {
 	})
 
 	t.Run("non_skipped_message_passthrough", func(t *testing.T) {
-		old := paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue("AlterResourceGroup,DropResourceGroup")
-		defer paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue(old)
-
-		rs := newReplicateService(t)
+		rs := newReplicateService(t, skipSet)
 		replicateMsgs := createReplicateCreateCollectionMessages()
 		for _, msg := range replicateMsgs {
 			_, err := rs.Append(context.Background(), msg)
@@ -314,10 +308,7 @@ func TestReplicateService_SkipMessageTypes(t *testing.T) {
 	})
 
 	t.Run("empty_skip_list", func(t *testing.T) {
-		old := paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue("")
-		defer paramtable.Get().StreamingCfg.ReplicationSkipMessageTypes.SwapTempValue(old)
-
-		rs := newReplicateService(t)
+		rs := newReplicateService(t, buildSkipMessageTypes(nil))
 		replicateMsgs := createReplicateCreateCollectionMessages()
 		for _, msg := range replicateMsgs {
 			_, err := rs.Append(context.Background(), msg)
@@ -657,6 +648,29 @@ func TestReplicateService_AlterLoadConfigUseLocalReplicaConfig(t *testing.T) {
 			_, err := rs.Append(context.Background(), msg)
 			assert.NoError(t, err)
 		}
+	})
+}
+
+func TestBuildSkipMessageTypes(t *testing.T) {
+	t.Run("normal", func(t *testing.T) {
+		m := buildSkipMessageTypes([]string{"AlterResourceGroup", "DropResourceGroup"})
+		assert.Len(t, m, 2)
+		_, ok := m["AlterResourceGroup"]
+		assert.True(t, ok)
+		_, ok = m["DropResourceGroup"]
+		assert.True(t, ok)
+	})
+
+	t.Run("empty_strings_filtered", func(t *testing.T) {
+		m := buildSkipMessageTypes([]string{"", "AlterResourceGroup", ""})
+		assert.Len(t, m, 1)
+		_, ok := m["AlterResourceGroup"]
+		assert.True(t, ok)
+	})
+
+	t.Run("nil_input", func(t *testing.T) {
+		m := buildSkipMessageTypes(nil)
+		assert.Empty(t, m)
 	})
 }
 

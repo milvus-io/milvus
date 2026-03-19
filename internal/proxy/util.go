@@ -177,7 +177,7 @@ func validateRunAnalyzer(req *milvuspb.RunAnalyzerRequest) error {
 	return nil
 }
 
-func validateMaxQueryResultWindow(offset int64, limit int64) error {
+func validateMaxQueryResultWindow(offset int64, limit int64, bigTopKEnabled bool) error {
 	if offset < 0 {
 		return fmt.Errorf("%s [%d] is invalid, should be gte than 0", OffsetKey, offset)
 	}
@@ -187,14 +187,20 @@ func validateMaxQueryResultWindow(offset int64, limit int64) error {
 
 	depth := offset + limit
 	maxQueryResultWindow := Params.QuotaConfig.MaxQueryResultWindow.GetAsInt64()
+	if bigTopKEnabled {
+		maxQueryResultWindow = Params.QuotaConfig.BigMaxQueryResultWindow.GetAsInt64()
+	}
 	if depth <= 0 || depth > maxQueryResultWindow {
 		return fmt.Errorf("(offset+limit) should be in range [1, %d], but got %d", maxQueryResultWindow, depth)
 	}
 	return nil
 }
 
-func validateLimit(limit int64) error {
+func validateLimit(limit int64, bigTopKEnabled bool) error {
 	topKLimit := Params.QuotaConfig.TopKLimit.GetAsInt64()
+	if bigTopKEnabled {
+		topKLimit = Params.QuotaConfig.BigTopKLimit.GetAsInt64()
+	}
 	if limit <= 0 || limit > topKLimit {
 		return fmt.Errorf("it should be in range [1, %d], but got %d", topKLimit, limit)
 	}
@@ -1168,6 +1174,10 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 }
 
 func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
+	validData := make([]bool, len(data))
+	for i := range validData {
+		validData[i] = true
+	}
 	return &schemapb.FieldData{
 		FieldName: common.MetaFieldName,
 		Type:      schemapb.DataType_JSON,
@@ -1181,6 +1191,7 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 			},
 		},
 		IsDynamic: true,
+		ValidData: validData,
 	}
 }
 

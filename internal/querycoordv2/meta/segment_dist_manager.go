@@ -222,6 +222,13 @@ func (m *SegmentDistManager) Update(nodeID typeutil.UniqueID, segments ...*Segme
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
+	if len(segments) == 0 {
+		// Node offline, remove entry to avoid memory leak
+		delete(m.segments, nodeID)
+		m.version++
+		return
+	}
+
 	for _, segment := range segments {
 		segment.Node = nodeID
 	}

@@ -392,8 +392,8 @@ func (v *validateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeuti
 			return err
 		}
 
-		// adapt all valid data for nullable column
-		if fieldSchema.GetNullable() && len(field.GetValidData()) == 0 {
+		// adapt all valid data for nullable or default value column
+		if (fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil) && len(field.GetValidData()) == 0 {
 			field.ValidData = lo.RepeatBy(numRows, func(i int) bool { return true })
 		}
 

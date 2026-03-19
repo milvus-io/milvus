@@ -216,6 +216,12 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(newSchemaInfo(newTestSchema()), nil)
+	mockCache.On("GetCollectionInfo",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("string"),
+		mock.AnythingOfType("int64"),
+	).Return(&collectionInfo{}, nil)
 
 	globalMetaCache = mockCache
 
@@ -1478,6 +1484,149 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 	})
 }
 
+func Test_parseIndexParams_BigTopKOptimization(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("cloud autoindex with BigTopK enabled selects IVF_FLAT", func(t *testing.T) {
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+		Params.Save(Params.AutoIndexConfig.BigTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+		defer Params.Reset(Params.AutoIndexConfig.BigTopKIndexParams.Key)
+
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			collectionProperties: []*commonpb.KeyValuePair{
+				{Key: common.BigTopKOptimizationEnabledKey, Value: "true"},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
+		// Should use IVF_FLAT from BigTopK config, with user metric type overriding
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+			{Key: common.MetricTypeKey, Value: "L2"},
+			{Key: "nlist", Value: "128"},
+		}, task.newIndexParams)
+	})
+
+	t.Run("cloud autoindex without BigTopK uses default HNSW", func(t *testing.T) {
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+		Params.Save(Params.AutoIndexConfig.BigTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+		defer Params.Reset(Params.AutoIndexConfig.BigTopKIndexParams.Key)
+
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			collectionProperties: []*commonpb.KeyValuePair{},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
+		// Should use default HNSW params
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: common.MetricTypeKey, Value: "L2"},
+			{Key: "M", Value: "30"},
+			{Key: "efConstruction", Value: "360"},
+		}, task.newIndexParams)
+	})
+
+	t.Run("non-cloud autoindex with BigTopK enabled selects IVF_FLAT", func(t *testing.T) {
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "false")
+		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`)
+		Params.Save(Params.AutoIndexConfig.BigTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+		defer Params.Reset(Params.AutoIndexConfig.BigTopKIndexParams.Key)
+
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			collectionProperties: []*commonpb.KeyValuePair{
+				{Key: common.BigTopKOptimizationEnabledKey, Value: "true"},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: make([]*commonpb.KeyValuePair, 0),
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		// Should use IVF_FLAT from BigTopK config
+		found := false
+		for _, kv := range task.newIndexParams {
+			if kv.Key == common.IndexTypeKey {
+				assert.Equal(t, "IVF_FLAT", kv.Value)
+				found = true
+			}
+		}
+		assert.True(t, found, "index_type should be set to IVF_FLAT")
+	})
+
+	t.Run("BigTopK property set to false uses default", func(t *testing.T) {
+		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+		Params.Save(Params.AutoIndexConfig.BigTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+		defer Params.Reset(Params.AutoIndexConfig.BigTopKIndexParams.Key)
+
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			collectionProperties: []*commonpb.KeyValuePair{
+				{Key: common.BigTopKOptimizationEnabledKey, Value: "false"},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		// Should use default HNSW params
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: common.MetricTypeKey, Value: "L2"},
+			{Key: "M", Value: "30"},
+			{Key: "efConstruction", Value: "360"},
+		}, task.newIndexParams)
+	})
+}
+
 func Test_parseIndexParams_AutoIndex(t *testing.T) {
 	paramtable.Init()
 
@@ -1761,4 +1910,150 @@ func TestAdjustAutoIndexParamsByDataType(t *testing.T) {
 		// Result should have replaced refine_type
 		assert.Equal(t, "BF16", result["refine_type"])
 	})
+}
+
+func Test_parseIndexParams_AutoIndex_ArrayOfVector(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
+	Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
+	Params.Save(Params.AutoIndexConfig.SparseIndexParams.Key, `{"drop_ratio_build": 0.2, "index_type": "SPARSE_INVERTED_INDEX"}`)
+	Params.Save(Params.AutoIndexConfig.IntVectorIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT"}`)
+
+	defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
+	defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
+	defer Params.Reset(Params.AutoIndexConfig.SparseIndexParams.Key)
+	defer Params.Reset(Params.AutoIndexConfig.IntVectorIndexParams.Key)
+
+	t.Run("ArrayOfVector with FloatVector element uses dense float autoindex", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "MAX_SIM_L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.True(t, task.userAutoIndexMetricTypeSpecified)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: common.MetricTypeKey, Value: "MAX_SIM_L2"},
+			{Key: "M", Value: "30"},
+			{Key: "efConstruction", Value: "360"},
+		}, task.newIndexParams)
+	})
+
+	t.Run("ArrayOfVector with SparseFloatVector element is not supported", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_SparseFloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "64"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "MAX_SIM_IP"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("ArrayOfVector with Int8Vector element is not supported", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_Int8Vector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: "MAX_SIM_L2"},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("ArrayOfVector without user metric maps config metric to EmbList", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.False(t, task.userAutoIndexMetricTypeSpecified)
+		// Config default metric (COSINE) should be mapped to MAX_SIM_COSINE
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: common.MetricTypeKey, Value: metric.MaxSimCosine},
+			{Key: "M", Value: "30"},
+			{Key: "efConstruction", Value: "360"},
+		}, task.newIndexParams)
+	})
+
+	t.Run("ArrayOfVector sparse without user metric is not supported", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_SparseFloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "64"},
+				},
+			},
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+}
+
+func Test_mapVectorMetricToEmbListMetric(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{metric.COSINE, metric.MaxSimCosine},
+		{metric.L2, metric.MaxSimL2},
+		{metric.IP, metric.MaxSimIP},
+		{metric.HAMMING, metric.MaxSimHamming},
+		{metric.JACCARD, metric.MaxSimJaccard},
+		// case insensitive
+		{"cosine", metric.MaxSimCosine},
+		{"ip", metric.MaxSimIP},
+		{"l2", metric.MaxSimL2},
+		// already EmbList metric - pass through
+		{metric.MaxSimIP, metric.MaxSimIP},
+		{metric.MaxSim, metric.MaxSim},
+		// unknown metric - pass through
+		{"UNKNOWN", "UNKNOWN"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.expected, mapVectorMetricToEmbListMetric(tt.input))
+		})
+	}
 }

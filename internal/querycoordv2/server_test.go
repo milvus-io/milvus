@@ -431,7 +431,7 @@ func TestApplyLoadConfigChanges(t *testing.T) {
 		var capturedCollectionIDs []int64
 		var capturedReplicaNum int32
 		var capturedRGs []string
-		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string) error {
+		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
 			updateLoadConfigCalled = true
 			capturedCollectionIDs = collectionIDs
 			capturedReplicaNum = newReplicaNum

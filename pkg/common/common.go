@@ -264,6 +264,9 @@ const (
 	AllowInsertAutoIDKey    = "allow_insert_auto_id"
 	DisableFuncRuntimeCheck = "disable_func_runtime_check"
 
+	// BigTopK optimization
+	BigTopKOptimizationEnabledKey = "bigtopk_optimization.enabled"
+
 	// warmup related
 	WarmupKey            = "warmup"
 	WarmupScalarFieldKey = "warmup.scalarField"
@@ -467,6 +470,19 @@ func IsPartitionKeyIsolationKvEnabled(kvs ...*commonpb.KeyValuePair) (bool, erro
 			val, err := strconv.ParseBool(strings.ToLower(kv.Value))
 			if err != nil {
 				return false, errors.Wrap(err, "failed to parse partition key isolation")
+			}
+			return val, nil
+		}
+	}
+	return false, nil
+}
+
+func IsBigTopKOptimizationEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range kvs {
+		if kv.Key == BigTopKOptimizationEnabledKey {
+			val, err := strconv.ParseBool(strings.ToLower(kv.Value))
+			if err != nil {
+				return false, errors.Wrap(err, "failed to parse bigTopK Optimization")
 			}
 			return val, nil
 		}

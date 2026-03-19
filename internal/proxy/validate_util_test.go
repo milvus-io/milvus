@@ -6353,6 +6353,147 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
+	t.Run("default_value_field_data_without_validdata", func(t *testing.T) {
+		// non-nullable field with defaultValue, data present, NO ValidData
+		// Should auto-fill ValidData to all-true, then FillWithDefaultValue keeps data as-is
+		stringData := []string{"actual_value"}
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: stringData,
+							},
+						},
+					},
+				},
+				// No ValidData set - this triggers the new auto-fill logic
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "test",
+					DataType: schemapb.DataType_VarChar,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_StringData{
+							StringData: "default_val",
+						},
+					},
+					// Nullable is false (default)
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+
+		err = v.fillWithValue(data, h, 1)
+
+		assert.NoError(t, err)
+		// Data should remain "actual_value" since all ValidData was auto-filled to true
+		assert.Equal(t, []string{"actual_value"}, data[0].GetScalars().GetStringData().GetData())
+		// ValidData should be cleared for non-nullable field
+		assert.Equal(t, 0, len(data[0].GetValidData()))
+	})
+
+	t.Run("default_value_field_no_data_without_validdata", func(t *testing.T) {
+		// non-nullable field with defaultValue, empty data, NO ValidData
+		// Should auto-fill ValidData to all-true, FillWithDefaultValue sees all valid so data stays empty...
+		// BUT: fillWithDefaultValueImpl checks len(array)==getValidNumber(validData), so
+		// data=[] with validData=[true,true] gives n=2 != len(array)=0 → error
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{},
+							},
+						},
+					},
+				},
+				// No ValidData set
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "test",
+					DataType: schemapb.DataType_VarChar,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_StringData{
+							StringData: "default_val",
+						},
+					},
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+
+		err = v.fillWithValue(data, h, 2)
+
+		// Error because data length (0) doesn't match valid count (2)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("default_value_nullable_field_data_without_validdata", func(t *testing.T) {
+		// nullable + defaultValue field, data present, NO ValidData
+		// Should auto-fill ValidData to all-true, FillWithDefaultValue keeps data, ValidData set to all-true
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{"val1", "val2"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "test",
+					DataType: schemapb.DataType_VarChar,
+					Nullable: true,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_StringData{
+							StringData: "default_val",
+						},
+					},
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+
+		err = v.fillWithValue(data, h, 2)
+
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"val1", "val2"}, data[0].GetScalars().GetStringData().GetData())
+		// ValidData should be all-true for nullable field
+		assert.Equal(t, []bool{true, true}, data[0].GetValidData())
+	})
+
 	t.Run("check the length of ValidData when has default value", func(t *testing.T) {
 		stringData := []string{"a"}
 		data := []*schemapb.FieldData{

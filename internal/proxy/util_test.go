@@ -2118,19 +2118,41 @@ func Test_NQLimit(t *testing.T) {
 
 func Test_TopKLimit(t *testing.T) {
 	paramtable.Init()
-	assert.Nil(t, validateLimit(16384))
-	assert.Nil(t, validateLimit(1))
-	assert.Error(t, validateLimit(16385))
-	assert.Error(t, validateLimit(0))
+	assert.Nil(t, validateLimit(16384, false))
+	assert.Nil(t, validateLimit(1, false))
+	assert.Error(t, validateLimit(16385, false))
+	assert.Error(t, validateLimit(0, false))
+}
+
+func Test_BigTopKLimit(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.QuotaConfig.TopKLimit.Key, "100")
+	Params.Save(Params.QuotaConfig.BigTopKLimit.Key, "200")
+	defer Params.Reset(Params.QuotaConfig.TopKLimit.Key)
+	defer Params.Reset(Params.QuotaConfig.BigTopKLimit.Key)
+
+	assert.Nil(t, validateLimit(100, false))
+	assert.Error(t, validateLimit(101, false))
+
+	assert.Nil(t, validateLimit(200, true))
+	assert.Nil(t, validateLimit(150, true))
+	assert.Error(t, validateLimit(201, true))
+	assert.Error(t, validateLimit(0, true))
 }
 
 func Test_MaxQueryResultWindow(t *testing.T) {
 	paramtable.Init()
-	assert.Nil(t, validateMaxQueryResultWindow(0, 16384))
-	assert.Nil(t, validateMaxQueryResultWindow(0, 1))
-	assert.Error(t, validateMaxQueryResultWindow(0, 16385))
-	assert.Error(t, validateMaxQueryResultWindow(0, 0))
-	assert.Error(t, validateMaxQueryResultWindow(1, 0))
+	assert.Nil(t, validateMaxQueryResultWindow(0, 16384, false))
+	assert.Nil(t, validateMaxQueryResultWindow(0, 1, false))
+	assert.Error(t, validateMaxQueryResultWindow(0, 16385, false))
+	assert.Error(t, validateMaxQueryResultWindow(0, 0, false))
+	assert.Error(t, validateMaxQueryResultWindow(1, 0, false))
+
+	Params.Save(Params.QuotaConfig.BigMaxQueryResultWindow.Key, "1000000")
+	defer Params.Reset(Params.QuotaConfig.BigMaxQueryResultWindow.Key)
+	assert.Nil(t, validateMaxQueryResultWindow(0, 16385, true))
+	assert.Nil(t, validateMaxQueryResultWindow(0, 1000000, true))
+	assert.Error(t, validateMaxQueryResultWindow(0, 1000001, true))
 }
 
 func Test_GetPartitionProgressFailed(t *testing.T) {

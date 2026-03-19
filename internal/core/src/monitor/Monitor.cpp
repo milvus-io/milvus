@@ -131,8 +131,6 @@ DEFINE_PROMETHEUS_HISTOGRAM(internal_storage_deserialize_duration,
                             deserializeDurationLabels)
 
 // json stats metrics
-std::map<std::string, std::string> invertedIndexLatencyLabels{
-    {"type", "inverted_index_latency"}};
 std::map<std::string, std::string> shreddingLatencyLabels{
     {"type", "shredding_latency"}};
 std::map<std::string, std::string> sharedLatencyLabels{
@@ -141,9 +139,6 @@ std::map<std::string, std::string> loadLatencyLabels{{"type", "load_latency"}};
 
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_json_stats_latency,
                                    "[cpp]durations of json stats")
-DEFINE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_term_query,
-                            internal_json_stats_latency,
-                            invertedIndexLatencyLabels)
 DEFINE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_shredding,
                             internal_json_stats_latency,
                             shreddingLatencyLabels)
@@ -153,6 +148,20 @@ DEFINE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_shared,
 DEFINE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_load,
                             internal_json_stats_latency,
                             loadLatencyLabels)
+
+// json filter performance metrics
+std::map<std::string, std::string> jsonFilterBruteforceLatencyLabels{
+    {"type", "bruteforce_latency"}};
+std::map<std::string, std::string> jsonFilterJsonStatsLatencyLabels{
+    {"type", "json_stats_latency"}};
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_json_filter_latency,
+                                   "[cpp]latency(ms) of json field filter")
+DEFINE_PROMETHEUS_HISTOGRAM(internal_json_filter_latency_bruteforce,
+                            internal_json_filter_latency,
+                            jsonFilterBruteforceLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_json_filter_latency_json_stats,
+                            internal_json_filter_latency,
+                            jsonFilterJsonStatsLatencyLabels)
 
 // search latency metrics
 std::map<std::string, std::string> scalarLatencyLabels{

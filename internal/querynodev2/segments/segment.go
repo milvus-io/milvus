@@ -1373,6 +1373,11 @@ func (s *LocalSegment) Load(ctx context.Context) error {
 }
 
 func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
+	if !s.ptrLock.PinIfNotReleased() {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during reopen")
+	}
+	defer s.ptrLock.Unpin()
+
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
 		LoadInfo: newLoadInfo,
 	})

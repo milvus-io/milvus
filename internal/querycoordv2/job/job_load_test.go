@@ -81,7 +81,7 @@ func (suite *LoadCollectionJobSuite) TestDescribeCollectionNotFound() {
 		Return(nil, merr.WrapErrCollectionNotFound(collectionID))
 
 	result := suite.buildBroadcastResult(collectionID, []int64{100, 101})
-	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil)
+	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil, nil)
 
 	err := job.Execute()
 	suite.NoError(err)
@@ -98,7 +98,7 @@ func (suite *LoadCollectionJobSuite) TestDescribeCollectionOtherError() {
 		Return(nil, expectedErr)
 
 	result := suite.buildBroadcastResult(collectionID, []int64{200, 201})
-	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil)
+	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil, nil)
 
 	err := job.Execute()
 	suite.Error(err)
@@ -121,7 +121,7 @@ func (suite *LoadCollectionJobSuite) TestDescribeCollectionSuccess() {
 	result := suite.buildBroadcastResult(collectionID, []int64{300, 301})
 	// We pass nil for meta to test that DescribeCollection is called before SpawnReplicasWithReplicaConfig.
 	// SpawnReplicasWithReplicaConfig will panic on nil meta, proving that DescribeCollection was called first.
-	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil)
+	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil, nil)
 
 	// This should panic at SpawnReplicasWithReplicaConfig because meta is nil,
 	// but this proves DescribeCollection was called and returned successfully first.
@@ -191,7 +191,7 @@ func (suite *LoadCollectionJobSuite) TestUseLocalReplicaConfigWithLocalConfigSet
 
 	// Will panic at SpawnReplicasWithReplicaConfig (nil catalog in ReplicaManager.SpawnWithReplicaConfig),
 	// proving that getLocalReplicaConfig was called and produced replicas.
-	job := NewLoadCollectionJob(ctx, result, nil, m, broker, nil, nil, nil, nil, nil)
+	job := NewLoadCollectionJob(ctx, result, nil, m, broker, nil, nil, nil, nil, nil, nil)
 	suite.Panics(func() {
 		job.Execute()
 	})
@@ -229,7 +229,7 @@ func (suite *LoadCollectionJobSuite) TestUseLocalReplicaConfigWithoutLocalConfig
 
 	// Will panic at SpawnReplicasWithReplicaConfig (nil catalog in ReplicaManager.SpawnWithReplicaConfig),
 	// proving that getLocalReplicaConfig was called and produced default replicas (1 replica in default RG).
-	job := NewLoadCollectionJob(ctx, result, nil, m, broker, nil, nil, nil, nil, nil)
+	job := NewLoadCollectionJob(ctx, result, nil, m, broker, nil, nil, nil, nil, nil, nil)
 	suite.Panics(func() {
 		job.Execute()
 	})
@@ -259,7 +259,7 @@ func (suite *LoadCollectionJobSuite) TestUseLocalReplicaConfigFlagFalse() {
 	result := suite.buildBroadcastResultWithLocalReplicaConfig(collectionID, []int64{402}, false)
 
 	// Will panic at SpawnReplicasWithReplicaConfig with nil meta (using primary's replicas)
-	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil)
+	job := NewLoadCollectionJob(ctx, result, nil, nil, broker, nil, nil, nil, nil, nil, nil)
 	suite.Panics(func() {
 		job.Execute()
 	})

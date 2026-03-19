@@ -1381,6 +1381,7 @@ type MinioConfig struct {
 	SecretAccessKey    ParamItem `refreshable:"false"`
 	UseSSL             ParamItem `refreshable:"false"`
 	SslCACert          ParamItem `refreshable:"false"`
+	SslTLSMinVersion   ParamItem `refreshable:"false"`
 	BucketName         ParamItem `refreshable:"false"`
 	RootPath           ParamItem `refreshable:"false"`
 	UseIAM             ParamItem `refreshable:"false"`
@@ -1474,6 +1475,18 @@ The default value applies to MinIO or S3 service that started with the default d
 		Export:  true,
 	}
 	p.SslCACert.Init(base.mgr)
+
+	p.SslTLSMinVersion = ParamItem{
+		Key:          "minio.ssl.tlsMinVersion",
+		DefaultValue: "default",
+		Version:      "2.6.11",
+		Doc: `TLS minimum version for MinIO/S3 SSL connections.
+Optional values: "default", "1.0", "1.1", "1.2", "1.3".
+When set to "default", the SDK/runtime default is used (typically TLS 1.2).
+We recommend using version 1.2 and above.`,
+		Export: true,
+	}
+	p.SslTLSMinVersion.Init(base.mgr)
 
 	p.BucketName = ParamItem{
 		Key:          "minio.bucketName",

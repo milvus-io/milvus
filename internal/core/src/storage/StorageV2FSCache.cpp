@@ -74,6 +74,7 @@ StorageV2FSCache::Get(const Key& key) {
         conf.gcp_credential_json = std::string(key.gcp_credential_json);
         conf.use_custom_part_upload = key.use_custom_part_upload;
         conf.max_connections = key.max_connections;
+        conf.tls_min_version = std::string(key.tls_min_version);
 
         auto result = milvus_storage::CreateArrowFileSystem(conf);
 

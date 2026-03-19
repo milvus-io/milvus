@@ -1948,6 +1948,7 @@ type proxyConfig struct {
 	MaxTextLength                  ParamItem `refreshable:"false"`
 	MaxResultEntries               ParamItem `refreshable:"true"`
 	EnableCachedServiceProvider    ParamItem `refreshable:"true"`
+	ResolveAliasForPrivilege       ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2370,6 +2371,15 @@ please adjust in embedded Milvus: false`,
 	}
 	p.SkipPartitionKeyCheck.Init(base.mgr)
 
+	p.ResolveAliasForPrivilege = ParamItem{
+		Key:          "proxy.resolveAliasForPrivilege",
+		Version:      "2.6.9",
+		DefaultValue: "true",
+		Doc:          "switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks",
+		Export:       true,
+	}
+	p.ResolveAliasForPrivilege.Init(base.mgr)
+
 	p.MaxVarCharLength = ParamItem{
 		Key:          "proxy.maxVarCharLength",
 		Version:      "2.4.19",            // hotfix
@@ -2544,6 +2554,7 @@ type queryCoordConfig struct {
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
 	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
+	ClusterLevelLoadWaitRGReadyTimeout ParamItem `refreshable:"true"`
 
 	// balance batch size in one trigger
 	BalanceSegmentBatchSize            ParamItem `refreshable:"true"`
@@ -3154,6 +3165,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	}
 	p.ClusterLevelLoadResourceGroups.Init(base.mgr)
 
+	p.ClusterLevelLoadWaitRGReadyTimeout = ParamItem{
+		Key:          "queryCoord.clusterLevelLoadWaitRGReadyTimeout",
+		Version:      "2.6.13",
+		DefaultValue: "3m",
+		Doc:          "timeout for waiting resource group to have all requested nodes before assigning nodes to new replicas during cluster-level load config scale-up. 0 means no waiting.",
+		Export:       false,
+	}
+	p.ClusterLevelLoadWaitRGReadyTimeout.Init(base.mgr)
+
 	p.AutoBalanceInterval = ParamItem{
 		Key:          "queryCoord.autoBalanceInterval",
 		Version:      "2.5.3",
@@ -3196,7 +3216,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.QueryNodeTaskParallelismFactor = ParamItem{
 		Key:          "queryCoord.queryNodeTaskParallelismFactor",
 		Version:      "2.5.14",
-		DefaultValue: "1",
+		DefaultValue: "20",
 		Doc:          "the parallelism factor for query node task, which permit query node execute cpuNum * parallelismFactor tasks in parallel",
 		Export:       false,
 	}
@@ -3365,6 +3385,7 @@ type queryNodeConfig struct {
 	IoPoolSize                  ParamItem `refreshable:"false"`
 	DeltaDataExpansionRate      ParamItem `refreshable:"true"`
 	JSONKeyStatsExpansionFactor ParamItem `refreshable:"true"`
+	TextIndexExpansionFactor    ParamItem `refreshable:"true"`
 	DiskSizeFetchInterval       ParamItem `refreshable:"false"`
 
 	// schedule task policy.
@@ -4416,6 +4437,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "the expansion factor for json key stats memory size estimation",
 	}
 	p.JSONKeyStatsExpansionFactor.Init(base.mgr)
+
+	p.TextIndexExpansionFactor = ParamItem{
+		Key:          "querynode.textIndexExpansionFactor",
+		Version:      "2.6.8",
+		DefaultValue: "1.0",
+		Doc:          "the expansion factor for text match index memory size estimation during segment loading",
+	}
+	p.TextIndexExpansionFactor.Init(base.mgr)
 
 	p.DiskSizeFetchInterval = ParamItem{
 		Key:          "querynode.diskSizeFetchInterval",
@@ -6614,7 +6643,7 @@ type streamingConfig struct {
 	FlushEmptyTimeTickMaxFilterInterval     ParamItem `refreshable:"true"`
 
 	// Replication filtering configuration
-	ReplicationSkipMessageTypes ParamItem `refreshable:"true"`
+	ReplicationSkipMessageTypes ParamItem `refreshable:"false"`
 
 	// Replication configuration
 	ReplicationUseLocalReplicaConfig ParamItem `refreshable:"true"`
@@ -7029,11 +7058,12 @@ so we set 1 second here as a threshold.`,
 
 // runtimeConfig is just a private environment value table.
 type runtimeConfig struct {
-	createTime atomic.Time
-	updateTime atomic.Time
-	role       atomic.String
-	nodeID     atomic.Int64
-	components typeutil.ConcurrentSet[string]
+	createTime   atomic.Time
+	updateTime   atomic.Time
+	role         atomic.String
+	nodeID       atomic.Int64
+	isStandalone atomic.Bool // cached flag derived from role, avoids repeated string comparison
+	components   typeutil.ConcurrentSet[string]
 }
 
 type integrationTestConfig struct {

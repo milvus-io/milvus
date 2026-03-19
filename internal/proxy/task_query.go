@@ -167,7 +167,7 @@ func filterSystemFields(outputFieldIDs []UniqueID) []UniqueID {
 }
 
 // parseQueryParams get limit and offset from queryParamsPair, both are optional.
-func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, error) {
+func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, bigTopKEnabled bool) (*queryParams, error) {
 	var (
 		limit             int64
 		offset            int64
@@ -237,7 +237,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 			}
 		}
 		// validate max result window.
-		if err = validateMaxQueryResultWindow(offset, limit); err != nil {
+		if err = validateMaxQueryResultWindow(offset, limit, bigTopKEnabled); err != nil {
 			return nil, fmt.Errorf("invalid max query result window, %w", err)
 		}
 	}
@@ -423,7 +423,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.RetrieveRequest.IgnoreGrowing, err = isIgnoreGrowing(t.request.GetQueryParams()); err != nil {
 		return err
 	}
-	queryParams, err := parseQueryParams(t.request.GetQueryParams())
+	queryParams, err := parseQueryParams(t.request.GetQueryParams(), colInfo.bigTopKOptimization)
 	if err != nil {
 		return err
 	}

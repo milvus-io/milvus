@@ -84,8 +84,9 @@ JsonStatsTranslator::get_cells(
     {
         milvus::ScopedTimer timer(
             "json_stats_load",
-            [](double ms) {
-                milvus::monitor::internal_json_stats_latency_load.Observe(ms);
+            [](double us) {
+                milvus::monitor::internal_json_stats_latency_load.Observe(
+                    us / 1000.0);
             },
             milvus::ScopedTimer::LogLevel::Info);
 

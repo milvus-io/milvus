@@ -3,7 +3,6 @@ package etcdkv
 import (
 	"context"
 	"fmt"
-	"path"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -26,7 +25,7 @@ func parsePredicates(rootPath string, preds ...predicates.Predicate) ([]clientv3
 			if err != nil {
 				return nil, err
 			}
-			cmp := clientv3.Compare(clientv3.Value(path.Join(rootPath, pred.Key())), pt, pred.TargetValue())
+			cmp := clientv3.Compare(clientv3.Value(util.GetPath(rootPath, pred.Key())), pt, pred.TargetValue())
 			result = append(result, cmp)
 		default:
 			return nil, merr.WrapErrParameterInvalid("valid predicate target", fmt.Sprintf("%d", pred.Target()))

@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -120,6 +121,70 @@ func TestReplicateStreamServer_ContextCanceled(t *testing.T) {
 
 	// Cancel context
 	cancel()
+	wg.Wait()
+}
+
+func TestReplicateStreamServer_IgnoredMessageSendsConfirmation(t *testing.T) {
+	ctx := createContextWithClusterID("test-cluster")
+	mockStreamServer := newMockReplicateStreamServer(ctx)
+
+	const msgCount = 5
+
+	// Setup WAL mock to return IgnoredOperation error
+	replicateService := mock_streaming.NewMockReplicateService(t)
+	replicateService.EXPECT().Append(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, msg message.ReplicateMutableMessage) (*types.AppendResult, error) {
+			return nil, status.NewIgnoreOperation("message type is configured to be skipped")
+		})
+	mockWAL := mock_streaming.NewMockWALAccesser(t)
+	mockWAL.EXPECT().Replicate().Return(replicateService)
+	streaming.SetWALForTest(mockWAL)
+
+	server, err := CreateReplicateServer(mockStreamServer)
+	assert.NoError(t, err)
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := server.Execute()
+		assert.NoError(t, err)
+	}()
+
+	// Send messages that will be ignored
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < msgCount; i++ {
+			tt := uint64(i + 1)
+			messageID := pulsar2.NewPulsarID(pulsar.EarliestMessageID())
+			msg := message.NewInsertMessageBuilderV1().
+				WithVChannel("test-vchannel").
+				WithHeader(&messagespb.InsertMessageHeader{}).
+				WithBody(&msgpb.InsertRequest{}).
+				MustBuildMutable().WithTimeTick(tt).
+				WithLastConfirmed(messageID)
+			milvusMsg := message.ImmutableMessageToMilvusMessage(commonpb.WALName_Pulsar.String(), msg.IntoImmutableMessage(messageID))
+			mockStreamServer.SendRequest(&milvuspb.ReplicateRequest{
+				Request: &milvuspb.ReplicateRequest_ReplicateMessage{
+					ReplicateMessage: &milvuspb.ReplicateMessage{
+						Message: milvusMsg,
+					},
+				},
+			})
+		}
+	}()
+
+	// Verify ConfirmedTimeTick is sent even for ignored messages
+	for i := 0; i < msgCount; i++ {
+		tt := uint64(i + 1)
+		sentResp := mockStreamServer.GetSentResponse()
+		assert.NotNil(t, sentResp, "expected ConfirmedTimeTick for ignored message %d", i)
+		assert.Equal(t, tt, sentResp.GetReplicateConfirmedMessageInfo().GetConfirmedTimeTick())
+	}
+
+	// Close the stream to stop execution
+	mockStreamServer.CloseSend()
 	wg.Wait()
 }
 

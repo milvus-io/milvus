@@ -91,7 +91,11 @@ func (c *Client) dialOptions() []grpc.DialOption {
 	var options []grpc.DialOption
 	// Construct dial option.
 	if c.config.EnableTLSAuth {
-		options = append(options, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
+		if c.config.tlsConfig != nil {
+			options = append(options, grpc.WithTransportCredentials(credentials.NewTLS(c.config.tlsConfig)))
+		} else {
+			options = append(options, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
+		}
 	} else {
 		options = append(options, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}

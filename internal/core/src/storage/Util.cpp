@@ -1044,6 +1044,7 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
             std::string(storage_config.gcp_credential_json);
         conf.use_custom_part_upload = true;
         conf.max_connections = storage_config.max_connections;
+        conf.tls_min_version = storage_config.tls_min_version;
     }
     return StorageV2FSCache::Instance().Get(conf);
 }

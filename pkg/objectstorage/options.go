@@ -10,6 +10,7 @@ type Config struct {
 	SecretAccessKeyID    string
 	UseSSL               bool
 	SslCACert            string
+	SslTLSMinVersion     string
 	CreateBucket         bool
 	RootPath             string
 	UseIAM               bool
@@ -65,6 +66,12 @@ func UseSSL(useSSL bool) Option {
 func SslCACert(sslCACert string) Option {
 	return func(c *Config) {
 		c.SslCACert = sslCACert
+	}
+}
+
+func SslTLSMinVersion(v string) Option {
+	return func(c *Config) {
+		c.SslTLSMinVersion = v
 	}
 }
 

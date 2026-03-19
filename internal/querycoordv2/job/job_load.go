@@ -32,10 +32,12 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/eventlog"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -56,6 +58,7 @@ type LoadCollectionJob struct {
 	collectionObserver *observers.CollectionObserver
 	checkerController  *checkers.CheckerController
 	nodeMgr            *session.NodeManager
+	proxyManager       proxyutil.ProxyClientManagerInterface
 }
 
 func NewLoadCollectionJob(
@@ -69,6 +72,7 @@ func NewLoadCollectionJob(
 	collectionObserver *observers.CollectionObserver,
 	checkerController *checkers.CheckerController,
 	nodeMgr *session.NodeManager,
+	proxyManager proxyutil.ProxyClientManagerInterface,
 ) *LoadCollectionJob {
 	return &LoadCollectionJob{
 		BaseJob:            NewBaseJob(ctx, 0, result.Message.Header().GetCollectionId()),
@@ -82,6 +86,7 @@ func NewLoadCollectionJob(
 		collectionObserver: collectionObserver,
 		checkerController:  checkerController,
 		nodeMgr:            nodeMgr,
+		proxyManager:       proxyManager,
 	}
 }
 
@@ -110,13 +115,21 @@ func (job *LoadCollectionJob) Execute() error {
 			zap.Int("localReplicaCount", len(localReplicas)))
 	}
 
-	// 2. create replica if not exist
+	// 2. create replica if not exist (may also remove redundant replicas)
 	if _, err := utils.SpawnReplicasWithReplicaConfig(job.ctx, job.meta, meta.SpawnWithReplicaConfigParams{
 		CollectionID: req.GetCollectionId(),
 		Channels:     collInfo.GetVirtualChannelNames(),
 		Configs:      replicas,
 	}); err != nil {
 		return err
+	}
+
+	// 2.1 invalidate shard leader cache after replica changes, so proxies stop
+	// routing to released replicas' shard leaders before async cleanup happens.
+	if job.proxyManager != nil {
+		job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
+			CollectionIDs: []int64{req.GetCollectionId()},
+		})
 	}
 
 	// 3. put load info meta

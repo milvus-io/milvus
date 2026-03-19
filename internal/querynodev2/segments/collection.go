@@ -163,7 +163,9 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 				zap.Int64("nodeID", paramtable.GetNodeID()), zap.Int64("collectionID", collectionID))
 			delete(m.collections, collectionID)
 			DeleteCollection(collection)
-			metrics.CleanupQueryNodeCollectionMetrics(paramtable.GetNodeID(), collectionID)
+			// Run metrics cleanup in background; DeletePartialMatch is CPU-heavy and should not block Unref.
+			nodeID := paramtable.GetNodeID()
+			go metrics.CleanupQueryNodeCollectionMetrics(nodeID, collectionID)
 			m.updateMetric()
 			return true
 		}

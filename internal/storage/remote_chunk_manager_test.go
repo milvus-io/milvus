@@ -18,8 +18,10 @@ package storage
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"net/http"
+	"os"
 	"path"
 	"syscall"
 	"testing"
@@ -1062,5 +1064,151 @@ func TestToMilvusIoError(t *testing.T) {
 		googleErr := &googleapi.Error{Code: http.StatusForbidden}
 		err := ToMilvusIoError(fileName, googleErr)
 		assert.ErrorIs(t, err, merr.ErrIoFailed)
+	})
+}
+
+func tlsVersionName(v uint16) string {
+	switch v {
+	case tls.VersionTLS10:
+		return "TLS 1.0"
+	case tls.VersionTLS11:
+		return "TLS 1.1"
+	case tls.VersionTLS12:
+		return "TLS 1.2"
+	case tls.VersionTLS13:
+		return "TLS 1.3"
+	default:
+		return "unknown"
+	}
+}
+
+// TestRemoteChunkManagerTLSVersion tests TLS version configuration via NewRemoteChunkManager.
+// Works for any cloud provider. Auth: ACCESS_KEY+SECRET_KEY, or USE_IAM=true.
+//
+// ACCESS_KEY+SECRET_KEY require:
+//   - ADDRESS, BUCKET_NAME, CLOUD_PROVIDER, ACCESS_KEY, SECRET_KEY.
+//
+// USE_IAM require:
+//   - ADDRESS, BUCKET_NAME, CLOUD_PROVIDER, USE_IAM=true.
+//
+// CLOUD_PROVIDER: aws, gcp (S3 compatibility mode), gcpnative, or azure.
+func TestRemoteChunkManagerTLSVersion(t *testing.T) {
+	address := os.Getenv("ADDRESS")
+	accessKey := os.Getenv("ACCESS_KEY")
+	secretKey := os.Getenv("SECRET_KEY")
+	bucketName := os.Getenv("BUCKET_NAME")
+	cloudProvider := os.Getenv("CLOUD_PROVIDER")
+	useIAM := os.Getenv("USE_IAM") == "true"
+
+	if bucketName == "" || cloudProvider == "" {
+		t.Skip("Skipping: set BUCKET_NAME, CLOUD_PROVIDER env vars to run this test")
+	}
+	hasAKSK := accessKey != "" && secretKey != ""
+	if !hasAKSK && !useIAM {
+		t.Skip("Skipping: set ACCESS_KEY+SECRET_KEY or USE_IAM=true to run this test")
+	}
+
+	// Determine the TLS host for probing
+	tlsHost := address
+	if cloudProvider == "azure" {
+		tlsHost = accessKey + ".blob." + address
+	}
+	if cloudProvider == "gcpnative" && tlsHost == "" {
+		tlsHost = "storage.googleapis.com"
+	}
+
+	newConfig := func(tlsMinVersion string) *objectstorage.Config {
+		return &objectstorage.Config{
+			Address:           address,
+			AccessKeyID:       accessKey,
+			SecretAccessKeyID: secretKey,
+			BucketName:        bucketName,
+			UseSSL:            true,
+			SslTLSMinVersion:  tlsMinVersion,
+			CloudProvider:     cloudProvider,
+			UseIAM:            useIAM,
+			CreateBucket:      true,
+		}
+	}
+
+	ctx := context.Background()
+
+	t.Run("check_server_tls_support", func(t *testing.T) {
+		if tlsHost == "" {
+			t.Skip("Skipping: ADDRESS not set, cannot probe TLS")
+		}
+		for _, ver := range []struct {
+			name string
+			ver  uint16
+		}{
+			{"TLS 1.2", tls.VersionTLS12},
+			{"TLS 1.3", tls.VersionTLS13},
+		} {
+			conn, err := tls.Dial("tcp", tlsHost+":443", &tls.Config{
+				MinVersion: ver.ver,
+				MaxVersion: ver.ver,
+			})
+			if err != nil {
+				t.Logf("%s -> %s: NOT supported (%v)", tlsHost, ver.name, err)
+			} else {
+				state := conn.ConnectionState()
+				t.Logf("%s -> %s: supported (negotiated: %s)", tlsHost, ver.name, tlsVersionName(state.Version))
+				conn.Close()
+			}
+		}
+	})
+
+	t.Run("tls12", func(t *testing.T) {
+		cm, err := NewRemoteChunkManager(ctx, newConfig("1.2"))
+		require.NoError(t, err, "NewRemoteChunkManager with TLS 1.2 should succeed")
+		require.NotNil(t, cm)
+
+		// Write and read back to verify the connection works end-to-end
+		key := path.Join("tls-test", "tls12-test-key")
+		value := []byte("tls12-test-value")
+		err = cm.Write(ctx, key, value)
+		require.NoError(t, err, "Write should succeed over TLS 1.2")
+
+		got, err := cm.Read(ctx, key)
+		require.NoError(t, err, "Read should succeed over TLS 1.2")
+		assert.Equal(t, value, got)
+
+		_ = cm.Remove(ctx, key)
+		t.Logf("NewRemoteChunkManager(SslTLSMinVersion=1.2, CloudProvider=%s): Write/Read OK", cloudProvider)
+	})
+
+	t.Run("tls13", func(t *testing.T) {
+		if tlsHost != "" {
+			conn, err := tls.Dial("tcp", tlsHost+":443", &tls.Config{
+				MinVersion: tls.VersionTLS13,
+			})
+			if err != nil {
+				t.Skipf("Skipping: %s does not support TLS 1.3 (%v)", tlsHost, err)
+			}
+			conn.Close()
+		}
+
+		cm, err := NewRemoteChunkManager(ctx, newConfig("1.3"))
+		require.NoError(t, err, "NewRemoteChunkManager with TLS 1.3 should succeed")
+		require.NotNil(t, cm)
+
+		key := path.Join("tls-test", "tls13-test-key")
+		value := []byte("tls13-test-value")
+		err = cm.Write(ctx, key, value)
+		require.NoError(t, err, "Write should succeed over TLS 1.3")
+
+		got, err := cm.Read(ctx, key)
+		require.NoError(t, err, "Read should succeed over TLS 1.3")
+		assert.Equal(t, value, got)
+
+		_ = cm.Remove(ctx, key)
+		t.Logf("NewRemoteChunkManager(SslTLSMinVersion=1.3, CloudProvider=%s): Write/Read OK", cloudProvider)
+	})
+
+	t.Run("no_tls_version_set", func(t *testing.T) {
+		cm, err := NewRemoteChunkManager(ctx, newConfig(""))
+		require.NoError(t, err, "NewRemoteChunkManager without TLS version should succeed")
+		require.NotNil(t, cm)
+		t.Logf("NewRemoteChunkManager(SslTLSMinVersion=<empty>, CloudProvider=%s): OK (default)", cloudProvider)
 	})
 }

@@ -289,6 +289,59 @@ func (suite *LookAsideBalancerSuite) TestSelectNode() {
 	}
 }
 
+func (suite *LookAsideBalancerSuite) TestSelectNodeFastPathSkipsUnavailable() {
+	// Set up 3 nodes, mark node 1 and 2 as unavailable
+	for _, node := range []int64{1, 2, 3} {
+		suite.balancer.UpdateCostMetrics(node, &internalpb.CostAggregation{})
+	}
+	metrics1, _ := suite.balancer.metricsMap.Get(int64(1))
+	metrics1.unavailable.Store(true)
+	metrics2, _ := suite.balancer.metricsMap.Get(int64(2))
+	metrics2.unavailable.Store(true)
+
+	// Force fast path by ensuring idx % checkWorkloadRequestNum != 0
+	suite.balancer.idx.Store(1)
+
+	node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
+	suite.NoError(err)
+	suite.Equal(int64(3), node)
+}
+
+func (suite *LookAsideBalancerSuite) TestSelectNodeFastPathAllUnavailable() {
+	// Set up 3 nodes, mark all as unavailable
+	for _, node := range []int64{1, 2, 3} {
+		suite.balancer.UpdateCostMetrics(node, &internalpb.CostAggregation{})
+		metrics, _ := suite.balancer.metricsMap.Get(node)
+		metrics.unavailable.Store(true)
+	}
+
+	// Force fast path
+	suite.balancer.idx.Store(1)
+
+	node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
+	suite.ErrorIs(err, merr.ErrServiceUnavailable)
+	suite.Equal(int64(-1), node)
+}
+
+func (suite *LookAsideBalancerSuite) TestSelectNodeZeroScoreRoundRobin() {
+	// When all nodes have zero score (no metrics), the tolerance check should
+	// still fall back to round-robin (idx gets incremented).
+	// This tests the minScore <= 0 guard against division by zero.
+	suite.balancer.idx.Store(0) // force slow path (idx % checkWorkloadRequestNum == 0)
+
+	counter := make(map[int64]int64)
+	for i := 0; i < 30; i++ {
+		node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 1)
+		suite.NoError(err)
+		counter[node]++
+	}
+
+	// With round-robin fallback, requests should be distributed across nodes
+	suite.True(counter[1] >= 8, "node 1 should get roughly 1/3 of requests, got %d", counter[1])
+	suite.True(counter[2] >= 8, "node 2 should get roughly 1/3 of requests, got %d", counter[2])
+	suite.True(counter[3] >= 8, "node 3 should get roughly 1/3 of requests, got %d", counter[3])
+}
+
 func (suite *LookAsideBalancerSuite) TestCancelWorkload() {
 	node, err := suite.balancer.SelectNode(context.TODO(), []int64{1, 2, 3}, 10)
 	suite.NoError(err)

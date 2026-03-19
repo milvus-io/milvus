@@ -79,11 +79,6 @@ func (s *ImportCheckerSuite) SetupTest() {
 	s.importMeta = importMeta
 
 	ci := NewMockCompactionInspector(s.T())
-	l0CompactionTrigger := NewMockTriggerManager(s.T())
-	compactionChan := make(chan struct{}, 1)
-	close(compactionChan)
-	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
-	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
 	handler := NewNMockHandler(s.T())
 	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collID int64) (*collectionInfo, error) {
@@ -92,7 +87,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 		}, nil
 	}).Maybe()
 
-	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, ci, handler, l0CompactionTrigger).(*importChecker)
+	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, ci, handler).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -601,13 +596,8 @@ func TestImportCheckerCompaction(t *testing.T) {
 
 	cim := NewMockCompactionInspector(t)
 	handler := NewNMockHandler(t)
-	l0CompactionTrigger := NewMockTriggerManager(t)
-	compactionChan := make(chan struct{}, 1)
-	close(compactionChan)
-	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
-	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
-	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, cim, handler, l0CompactionTrigger).(*importChecker)
+	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, cim, handler).(*importChecker)
 
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -790,22 +780,6 @@ func TestImportCheckerCompaction(t *testing.T) {
 		return job.GetState() == internalpb.ImportJobState_IndexBuilding
 	}, 2*time.Second, 100*time.Millisecond)
 	log.Info("job index building")
-
-	// wait l0 import task
-	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
-	taskProto := &datapb.ImportTaskV2{
-		JobID:  jobID,
-		TaskID: 100000,
-		Source: datapb.ImportTaskSourceV2_L0Compaction,
-		State:  datapb.ImportTaskStateV2_InProgress,
-	}
-	task := &importTask{}
-	task.task.Store(taskProto)
-	importMeta.AddTask(context.TODO(), task)
-	time.Sleep(1200 * time.Millisecond)
-	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
-	importMeta.UpdateTask(context.TODO(), 100000, UpdateState(datapb.ImportTaskStateV2_Completed))
-	log.Info("job l0 compaction")
 
 	// check index building
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()

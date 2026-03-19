@@ -123,7 +123,7 @@ func (s Catalog) GetCollections(ctx context.Context) ([]*querypb.CollectionLoadI
 		return nil
 	}
 
-	err := s.cli.WalkWithPrefix(ctx, CollectionLoadInfoPrefix, s.paginationSize, applyFn)
+	err := s.cli.WalkWithPrefix(ctx, CollectionLoadInfoPrefix+"/", s.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func (s Catalog) GetReplicas(ctx context.Context) ([]*querypb.Replica, error) {
 		return nil
 	}
 
-	err := s.cli.WalkWithPrefix(ctx, ReplicaPrefix, s.paginationSize, applyFn)
+	err := s.cli.WalkWithPrefix(ctx, ReplicaPrefix+"/", s.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +193,7 @@ func (s Catalog) GetReplicas(ctx context.Context) ([]*querypb.Replica, error) {
 }
 
 func (s Catalog) getReplicasFromV1(ctx context.Context) ([]*querypb.Replica, error) {
-	_, replicaValues, err := s.cli.LoadWithPrefix(ctx, ReplicaMetaPrefixV1)
+	_, replicaValues, err := s.cli.LoadWithPrefix(ctx, ReplicaMetaPrefixV1+"/")
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func (s Catalog) getReplicasFromV1(ctx context.Context) ([]*querypb.Replica, err
 }
 
 func (s Catalog) GetResourceGroups(ctx context.Context) ([]*querypb.ResourceGroup, error) {
-	_, rgs, err := s.cli.LoadWithPrefix(ctx, ResourceGroupPrefix)
+	_, rgs, err := s.cli.LoadWithPrefix(ctx, ResourceGroupPrefix+"/")
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func (s Catalog) ReleaseCollection(ctx context.Context, collection int64) error 
 	if err != nil {
 		return err
 	}
-	partitionsPrefix := fmt.Sprintf("%s/%d", PartitionLoadInfoPrefix, collection)
+	partitionsPrefix := fmt.Sprintf("%s/%d/", PartitionLoadInfoPrefix, collection)
 	return s.cli.RemoveWithPrefix(ctx, partitionsPrefix)
 }
 
@@ -268,7 +268,7 @@ func (s Catalog) ReleasePartition(ctx context.Context, collection int64, partiti
 }
 
 func (s Catalog) ReleaseReplicas(ctx context.Context, collectionID int64) error {
-	key := encodeCollectionReplicaKey(collectionID)
+	key := encodeCollectionReplicaPrefix(collectionID)
 	return s.cli.RemoveWithPrefix(ctx, key)
 }
 
@@ -345,7 +345,7 @@ func (s Catalog) GetCollectionTargets(ctx context.Context) (map[int64]*querypb.C
 		return nil
 	}
 
-	err := s.cli.WalkWithPrefix(ctx, CollectionTargetPrefix, s.paginationSize, applyFn)
+	err := s.cli.WalkWithPrefix(ctx, CollectionTargetPrefix+"/", s.paginationSize, applyFn)
 	if err != nil {
 		return nil, err
 	}
@@ -369,8 +369,8 @@ func encodeReplicaKey(collection, replica int64) string {
 	return fmt.Sprintf("%s/%d/%d", ReplicaPrefix, collection, replica)
 }
 
-func encodeCollectionReplicaKey(collection int64) string {
-	return fmt.Sprintf("%s/%d", ReplicaPrefix, collection)
+func encodeCollectionReplicaPrefix(collection int64) string {
+	return fmt.Sprintf("%s/%d/", ReplicaPrefix, collection)
 }
 
 func encodeResourceGroupKey(rgName string) string {

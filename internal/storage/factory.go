@@ -25,6 +25,7 @@ func NewChunkManagerFactoryWithParam(params *paramtable.ComponentParam) *ChunkMa
 		objectstorage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
 		objectstorage.UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
 		objectstorage.SslCACert(params.MinioCfg.SslCACert.GetValue()),
+		objectstorage.SslTLSMinVersion(params.MinioCfg.SslTLSMinVersion.GetValue()),
 		objectstorage.BucketName(params.MinioCfg.BucketName.GetValue()),
 		objectstorage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
 		objectstorage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),

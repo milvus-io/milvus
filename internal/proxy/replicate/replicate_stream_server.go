@@ -133,6 +133,7 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	}
 	if status.AsStreamingError(err).IsIgnoredOperation() {
 		log.Info("append replicate message to wal ignored", log.FieldMessage(msg), zap.Error(err))
+		p.sendReplicateResult(sourceTs, msg)
 		return nil
 	}
 	// unexpected error, will close the stream and wait for client to reconnect.

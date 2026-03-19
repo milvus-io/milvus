@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -169,6 +170,20 @@ func (s *Server) getSystemInfoMetrics(
 	ctx context.Context,
 	req *milvuspb.GetMetricsRequest,
 ) (string, error) {
+	coordTopology := s.getDataCoordTopology(ctx, req)
+	ret, err := metricsinfo.MarshalTopology(coordTopology)
+	if err != nil {
+		return "", err
+	}
+	return ret, nil
+}
+
+// getDataCoordTopology returns DataCoord topology directly without JSON serialization
+// This is optimized for in-process calls in MixCoord mode to avoid marshal/unmarshal overhead
+func (s *Server) getDataCoordTopology(
+	ctx context.Context,
+	req *milvuspb.GetMetricsRequest,
+) metricsinfo.DataCoordTopology {
 	// TODO(dragondriver): add more detail metrics
 
 	// get datacoord info
@@ -188,8 +203,8 @@ func (s *Server) getSystemInfoMetrics(
 		clusterTopology.ConnectedDataNodes = append(clusterTopology.ConnectedDataNodes, infos)
 	}
 
-	// compose topolgoy struct
-	coordTopology := metricsinfo.DataCoordTopology{
+	// compose topology struct
+	return metricsinfo.DataCoordTopology{
 		Cluster: clusterTopology,
 		Connections: metricsinfo.ConnTopology{
 			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),
@@ -197,12 +212,6 @@ func (s *Server) getSystemInfoMetrics(
 			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
 	}
-
-	ret, err := metricsinfo.MarshalTopology(coordTopology)
-	if err != nil {
-		return "", err
-	}
-	return ret, nil
 }
 
 // getDataCoordMetrics composes datacoord infos
@@ -370,4 +379,14 @@ func getMetrics[T any](s *Server, ctx context.Context, req *milvuspb.GetMetricsR
 
 	err := errorGroup.Wait()
 	return metrics, err
+}
+
+// GetDataCoordTopology returns DataCoord topology directly without JSON serialization
+// This is optimized for in-process calls in MixCoord mode to avoid marshal/unmarshal overhead
+func (s *Server) GetDataCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.DataCoordTopology, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return nil, err
+	}
+	topology := s.getDataCoordTopology(ctx, req)
+	return &topology, nil
 }

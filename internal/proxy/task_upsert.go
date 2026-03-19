@@ -306,11 +306,28 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		fieldData.FieldId = fieldSchema.GetFieldID()
 		fieldData.FieldName = fieldName
 
-		// compatible with different nullable data format from sdk
+		// Ensure dynamic field has ValidData before merge logic.
+		// SDK doesn't set ValidData on $meta; without it, AppendFieldDataByColumn
+		// won't propagate ValidData for insert rows, causing length mismatch.
+		if fieldData.GetIsDynamic() && len(fieldData.GetValidData()) == 0 {
+			nRows := int(it.upsertMsg.InsertMsg.NRows())
+			validData := make([]bool, nRows)
+			for i := range validData {
+				validData[i] = true
+			}
+			fieldData.ValidData = validData
+		}
+
+		// compatible with different nullable/default_value data format from sdk
 		if len(fieldData.GetValidData()) != 0 {
-			err := FillWithNullValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+			var err error
+			if fieldSchema.GetDefaultValue() != nil {
+				err = FillWithDefaultValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+			} else {
+				err = FillWithNullValue(fieldData, fieldSchema, int(it.upsertMsg.InsertMsg.NRows()))
+			}
 			if err != nil {
-				log.Info("unify null field data format failed", zap.Error(err))
+				log.Info("unify field data format failed", zap.Error(err))
 				return err
 			}
 		}
