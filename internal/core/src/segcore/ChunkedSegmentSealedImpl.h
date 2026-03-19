@@ -86,6 +86,11 @@ namespace storagev1translator {
 class InsertRecordTranslator;
 }
 
+namespace storagev2translator {
+class TimestampIndexCell;
+class PkIndexCell;
+}
+
 using namespace milvus::cachinglayer;
 
 class ChunkedSegmentSealedImpl : public SegmentSealed {
@@ -144,9 +149,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     bool
-    Contain(const PkType& pk) const override {
-        return insert_record_.contain(pk);
-    }
+    Contain(const PkType& pk) const override;
 
     void
     AddFieldDataInfoForSealed(
@@ -1062,9 +1065,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                      Timestamp timestamp) const override;
 
     bool
-    is_system_field_ready() const {
-        return system_ready_count_ == 1;
-    }
+    is_system_field_ready() const;
 
     void
     search_ids(BitsetType& bitset, const IdArray& id_array) const override;
@@ -1231,6 +1232,23 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return res;
     }
 
+    PinWrapper<const storagev2translator::TimestampIndexCell*>
+    PinTimestampIndex(milvus::OpContext* op_ctx) const;
+
+    PinWrapper<const storagev2translator::PkIndexCell*>
+    PinPkIndex(milvus::OpContext* op_ctx) const;
+
+    void
+    init_storage_v2_timestamp_index(
+        const std::shared_ptr<ChunkedColumnInterface>& column,
+        size_t num_rows);
+
+    void
+    init_storage_v2_pk_index(
+        FieldId field_id,
+        const std::shared_ptr<ChunkedColumnInterface>& column,
+        DataType data_type);
+
 #ifdef MILVUS_UNIT_TEST
  public:
     // Test-only: inject a mock Reader for unit testing take() paths.
@@ -1264,7 +1282,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     BitsetType field_data_ready_bitset_;
     BitsetType index_ready_bitset_;
     BitsetType binlog_index_bitset_;
-    std::atomic<int> system_ready_count_ = 0;
 
     // when index is ready (index_ready_bitset_/binlog_index_bitset_ is set to true), must also set index_has_raw_data_
     // to indicate whether the loaded index has raw data.
@@ -1290,6 +1307,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // inserted fields data and row_ids, timestamps
     InsertRecord<true> insert_record_;
+    folly::Synchronized<
+        std::shared_ptr<CacheSlot<storagev2translator::TimestampIndexCell>>>
+        timestamp_index_slot_;
+    folly::Synchronized<
+        std::shared_ptr<CacheSlot<storagev2translator::PkIndexCell>>>
+        pk_index_slot_;
 
     // deleted pks
     mutable DeletedRecord<true> deleted_record_;

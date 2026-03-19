@@ -153,11 +153,6 @@ class DeletedRecord {
                 if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
                     return;
                 }
-                // if insert record and delete record is same timestamp,
-                // delete not take effect on this record.
-                if (delete_ts == insert_record_->timestamps_[row_id]) {
-                    return;
-                }
                 accessor.insert(std::make_pair(delete_ts, row_id));
                 if constexpr (is_sealed) {
                     Assert(deleted_mask_.size() > 0);
