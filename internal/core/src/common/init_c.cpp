@@ -52,6 +52,11 @@ SetLowPriorityThreadCoreCoefficient(const float value) {
 }
 
 void
+SetThreadPoolMaxThreadsSize(const int value) {
+    milvus::SetThreadPoolMaxThreadsSize(value);
+}
+
+void
 SetDefaultExprEvalBatchSize(int64_t val) {
     milvus::SetDefaultExecEvalExprBatchSize(val);
 }
