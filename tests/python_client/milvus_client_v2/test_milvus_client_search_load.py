@@ -223,6 +223,7 @@ class TestSearchLoadIndependent(TestMilvusClientV2Base):
             100, 50, 50, "both",
             id="load_partition_release_collection_delete"),
     ])
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_after_delete_ops_l2(self, ops, expected_coll, expected_p1, expected_p2,
                                         coll_search_parts):
         """Parametrized L2 tests: delete + load/release operation sequences."""
@@ -374,6 +375,7 @@ class TestSearchLoadIndependent(TestMilvusClientV2Base):
             NOT_LOADED, NOT_LOADED, NOT_LOADED, None,
             id="load_partition_compact_release_collection"),
     ])
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_after_compact_ops_l2(self, ops, expected_coll, expected_p1, expected_p2,
                                           coll_search_parts):
         """Parametrized L2 tests: compact + load/release operation sequences."""
@@ -467,6 +469,7 @@ class TestSearchLoadIndependent(TestMilvusClientV2Base):
             100, 100, NOT_FOUND, None,
             id="load_collection_flush_drop_partition"),
     ])
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_after_flush_ops_l2(self, ops, expected_coll, expected_p1, expected_p2,
                                         coll_search_parts):
         """Parametrized L2 tests: flush + load/release operation sequences."""
