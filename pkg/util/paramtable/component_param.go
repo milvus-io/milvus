@@ -1917,6 +1917,7 @@ type proxyConfig struct {
 	ShardLeaderCacheInterval        ParamItem `refreshable:"false"`
 	ReplicaSelectionPolicy          ParamItem `refreshable:"false"`
 	CheckQueryNodeHealthInterval    ParamItem `refreshable:"false"`
+	ShadowProbeInterval             ParamItem `refreshable:"false"`
 	CostMetricsExpireTime           ParamItem `refreshable:"false"`
 	CheckWorkloadRequestNum         ParamItem `refreshable:"false"`
 	WorkloadToleranceFactor         ParamItem `refreshable:"false"`
@@ -2280,6 +2281,14 @@ please adjust in embedded Milvus: false`,
 		Doc:          "time interval to check health for query node, in ms",
 	}
 	p.CheckQueryNodeHealthInterval.Init(base.mgr)
+
+	p.ShadowProbeInterval = ParamItem{
+		Key:          "proxy.healthCheck.shadowProbeInterval",
+		Version:      "2.6.13",
+		DefaultValue: "10000",
+		Doc:          "time interval to probe unreachable or isolated query nodes, in ms",
+	}
+	p.ShadowProbeInterval.Init(base.mgr)
 
 	p.CostMetricsExpireTime = ParamItem{
 		Key:          "proxy.costMetricsExpireTime",

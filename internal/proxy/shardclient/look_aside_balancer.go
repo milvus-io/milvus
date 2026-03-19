@@ -230,10 +230,13 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 	defer b.wg.Done()
 
 	checkHealthInterval := paramtable.Get().ProxyCfg.CheckQueryNodeHealthInterval.GetAsDuration(time.Millisecond)
+	shadowProbeInterval := paramtable.Get().ProxyCfg.ShadowProbeInterval.GetAsDuration(time.Millisecond)
 	ticker := time.NewTicker(checkHealthInterval)
 	defer ticker.Stop()
 	log.Info("Start check query node health loop")
 	pool := conc.NewDefaultPool[any]()
+
+	var lastShadowProbeTime time.Time
 	for {
 		select {
 		case <-b.closeCh:
@@ -243,6 +246,40 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 		case <-ticker.C:
 			var futures []*conc.Future[any]
 			now := time.Now()
+
+			// Define the interval at the beginning of the loop or get from params
+			runShadowProbe := now.Sub(lastShadowProbeTime) >= shadowProbeInterval
+			if runShadowProbe {
+				lastShadowProbeTime = now
+				// Iterate through metricsMap to find nodes that are NOT in knownNodeInfos
+				b.metricsMap.Range(func(nodeID int64, metrics *CostMetrics) bool {
+					if _, active := b.knownNodeInfos.Get(nodeID); !active {
+						// Found an isolated node! Try to recover it.
+						nodeID := nodeID
+						futures = append(futures, pool.Submit(func() (any, error) {
+							checkTimeout := paramtable.Get().ProxyCfg.HealthCheckTimeout.GetAsDuration(time.Millisecond)
+							ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
+							defer cancel()
+
+							// Use a dummy NodeInfo to trigger the clientMgr's lookup
+							qn, err := b.clientMgr.GetClient(ctx, NodeInfo{NodeID: nodeID})
+							if err != nil {
+								return struct{}{}, nil
+							}
+
+							resp, err := qn.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+							if err == nil && resp.GetState().GetStateCode() == commonpb.StateCode_Healthy {
+								log.Info("Shadow probe detected node recovered, promoting to active", zap.Int64("node", nodeID))
+								// This will move the node from 'unserviceable' to 'active'
+								b.trySetQueryNodeReachable(nodeID)
+							}
+							return struct{}{}, nil
+						}))
+					}
+					return true
+				})
+			}
+
 			b.knownNodeInfos.Range(func(node int64, info NodeInfo) bool {
 				futures = append(futures, pool.Submit(func() (any, error) {
 					metrics, ok := b.metricsMap.Get(node)
@@ -287,6 +324,26 @@ func (b *LookAsideBalancer) checkQueryNodeHealthLoop(ctx context.Context) {
 			})
 			conc.AwaitAll(futures...)
 		}
+	}
+}
+
+func (b *LookAsideBalancer) probeAndRecoverNode(node int64, info NodeInfo, log *log.MLogger) {
+	checkTimeout := paramtable.Get().ProxyCfg.HealthCheckTimeout.GetAsDuration(time.Millisecond)
+	// Use Background context to avoid being affected by the main loop's context
+	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
+	defer cancel()
+
+	qn, err := b.clientMgr.GetClient(ctx, info)
+	if err != nil {
+		return
+	}
+
+	resp, err := qn.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+	if err == nil && resp.GetState().GetStateCode() == commonpb.StateCode_Healthy {
+		log.Info("Shadow probe detected node recovered, promoting to reachable", zap.Int64("node", node))
+		// This is the key: once set to reachable, it will be added to knownNodeInfos
+		// and picked up by the main high-frequency loop in the next tick.
+		b.trySetQueryNodeReachable(node)
 	}
 }
 

@@ -227,6 +227,11 @@ func TestComponentParam(t *testing.T) {
 		params.Save("proxy.replicaBlacklistDuration", "60s")
 		assert.Equal(t, 60*time.Second, Params.ReplicaBlacklistDuration.GetAsDurationByParse())
 
+		// Test ShadowProbeInterval default value and dynamic update
+		assert.Equal(t, 10000*time.Millisecond, Params.ShadowProbeInterval.GetAsDurationByParse())
+		params.Save(Params.ShadowProbeInterval.Key, "5000ms")
+		assert.Equal(t, 5000*time.Millisecond, Params.ShadowProbeInterval.GetAsDurationByParse())
+
 		// Test ReplicaBlacklistCleanupInterval default value
 		assert.Equal(t, 10*time.Second, Params.ReplicaBlacklistCleanupInterval.GetAsDurationByParse())
 		params.Save("proxy.replicaBlacklistCleanupInterval", "30s")

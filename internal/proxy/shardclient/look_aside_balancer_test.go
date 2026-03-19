@@ -565,6 +565,55 @@ func BenchmarkSelectNode_QNWithDifferentWorkload(b *testing.B) {
 	})
 }
 
+func (suite *LookAsideBalancerSuite) TestShadowProbingRecovery() {
+	// 1. Setup params: Set ShadowProbeInterval to a very short time for testing
+	params := paramtable.Get()
+	// Ensure these keys match your ParamTable implementation
+	params.Save(params.ProxyCfg.CheckQueryNodeHealthInterval.Key, "100")
+	params.Save(params.ProxyCfg.ShadowProbeInterval.Key, "200")
+	params.Save(params.ProxyCfg.HealthCheckTimeout.Key, "100")
+
+	nodeID := int64(3)
+
+	// 2. Mock QueryNode 3 to be Healthy
+	qn3 := mocks.NewMockQueryNodeClient(suite.T())
+	qn3.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Healthy,
+		},
+	}, nil).Maybe()
+
+	// 3. Mock ClientManager to return qn3
+	suite.clientMgr.ExpectedCalls = nil
+	suite.clientMgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn3, nil).Maybe()
+
+	// 4. Simulate the "Inconsistent State":
+	// Node 3 is in metricsMap (Proxy remembers it) but NOT in knownNodeInfos (Proxy won't use it)
+	metrics3 := &CostMetrics{}
+	metrics3.ts.Store(time.Now().UnixMilli())
+	metrics3.unavailable.Store(true) // Initially marked as unavailable
+	suite.balancer.metricsMap.Insert(nodeID, metrics3)
+
+	// Ensure knownNodeInfos DOES NOT have node 3
+	suite.balancer.knownNodeInfos.Remove(nodeID)
+	_, isActive := suite.balancer.knownNodeInfos.Get(nodeID)
+	suite.False(isActive, "Node 3 should be isolated from active list initially")
+
+	// 5. Wait for Shadow Probing to detect and promote the node
+	// It should trigger within ~200ms based on our config
+	suite.Eventually(func() bool {
+		_, isActive := suite.balancer.knownNodeInfos.Get(nodeID)
+		metrics, ok := suite.balancer.metricsMap.Get(nodeID)
+		// Success criteria: Node 3 is back in knownNodeInfos and marked as available
+		return isActive && ok && !metrics.unavailable.Load()
+	}, 5*time.Second, 100*time.Millisecond)
+
+	// 6. Final Verification: SelectNode should now work for Node 3
+	targetNode, err := suite.balancer.SelectNode(context.Background(), []int64{nodeID}, 1)
+	suite.NoError(err)
+	suite.Equal(nodeID, targetNode)
+}
+
 func TestLookAsideBalancerSuite(t *testing.T) {
 	suite.Run(t, new(LookAsideBalancerSuite))
 }
