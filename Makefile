@@ -64,7 +64,7 @@ ifeq ($(MILVUS_FIPS_ENABLED),ON)
 	GOEXPERIMENT_FLAG := GOEXPERIMENT=boringcrypto
 endif
 # golangci-lint
-GOLANGCI_LINT_VERSION := 1.64.7
+GOLANGCI_LINT_VERSION := 2.11.3
 GOLANGCI_LINT_OUTPUT := $(shell $(INSTALL_PATH)/golangci-lint --version 2>/dev/null)
 INSTALL_GOLANGCI_LINT := $(findstring $(GOLANGCI_LINT_VERSION), $(GOLANGCI_LINT_OUTPUT))
 # mockery
