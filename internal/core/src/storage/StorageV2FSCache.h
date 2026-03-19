@@ -46,6 +46,7 @@ class StorageV2FSCache {
         bool use_custom_part_upload = true;
         uint32_t max_connections = 100;
         std::string tls_min_version = "";
+        bool use_crc32c_checksum = false;
     };
 
  public:

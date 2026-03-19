@@ -57,6 +57,7 @@ get_storage_config(const milvus::proto::clustering::StorageConfig& config) {
         std::string(config.gcpcredentialjson());
     storage_config.max_connections = config.max_connections();
     storage_config.tls_min_version = std::string(config.ssl_tls_min_version());
+    storage_config.use_crc32c_checksum = config.use_crc32c_checksum();
 
     return storage_config;
 }
@@ -109,6 +110,7 @@ Analyze(CAnalyze* res_analyze,
             false,
             storage_config.max_connections,
             storage_config.tls_min_version,
+            storage_config.use_crc32c_checksum,
         });
 
         milvus::storage::FileManagerContext fileManagerContext(

@@ -92,7 +92,7 @@ func AddDeltaLogsToManifest(
 
 	// Start transaction
 	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), getRetryLimit(), &transactionHandle)
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -149,7 +149,7 @@ func GetDeltaLogPathsFromManifest(
 	defer C.free(unsafe.Pointer(cBasePath))
 
 	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), 1, &cTransactionHandle)
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -221,7 +221,7 @@ func AddStatsToManifest(
 	defer C.free(unsafe.Pointer(cBasePath))
 
 	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), getRetryLimit(), &transactionHandle)
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
