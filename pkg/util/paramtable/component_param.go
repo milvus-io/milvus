@@ -2564,6 +2564,9 @@ type queryCoordConfig struct {
 	// query node task parallelism factor
 	QueryNodeTaskParallelismFactor ParamItem `refreshable:"true"`
 
+	// channel task capacity fraction
+	ChannelTaskCapFraction ParamItem `refreshable:"true"`
+
 	BalanceCheckCollectionMaxCount    ParamItem `refreshable:"true"`
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
@@ -2600,7 +2603,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.TaskExecutionCap = ParamItem{
 		Key:          "queryCoord.taskExecutionCap",
 		Version:      "2.2.0",
-		DefaultValue: "256",
+		DefaultValue: "360",
 		Export:       true,
 	}
 	p.TaskExecutionCap.Init(base.mgr)
@@ -3221,6 +3224,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.QueryNodeTaskParallelismFactor.Init(base.mgr)
+
+	p.ChannelTaskCapFraction = ParamItem{
+		Key:          "queryCoord.channelTaskCapFraction",
+		Version:      "2.6.7",
+		DefaultValue: "0.3",
+		Doc:          "fraction of total task execution capacity reserved for channel tasks per node (0.0-1.0)",
+		Export:       true,
+	}
+	p.ChannelTaskCapFraction.Init(base.mgr)
 
 	p.BalanceCheckCollectionMaxCount = ParamItem{
 		Key:          "queryCoord.balanceCheckCollectionMaxCount",
