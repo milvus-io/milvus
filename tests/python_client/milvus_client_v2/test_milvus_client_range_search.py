@@ -73,7 +73,7 @@ class TestRangeSearchCosineShared(TestMilvusClientV2Base):
             data[i][ct.default_float_field_name] = None if is_null else float(i)
             data[i][self.nullable_float_vec_field] = None if is_null else nullable_float_vectors[i]
             data[i][self.nullable_sparse_vec_field] = None if is_null else nullable_sparse_vectors[i]
-        self.shared_data = data
+        request.cls.shared_data = data
 
         self.insert(client, self.collection_name, data=data)
         self.flush(client, self.collection_name)
