@@ -931,6 +931,7 @@ common:
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority pool
     bm25Load: 1 # This parameter specify how many times the number of threads is the number of cores in BM25 load pool
+    maxThreadsSize: 16 # The maximum number of threads in the thread pool, only effective when greater than 0
   buildIndexThreadPoolRatio: 0.75
   DiskIndex:
     MaxDegree: 56
