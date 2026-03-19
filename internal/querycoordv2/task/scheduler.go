@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/resourcelimit"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -1002,6 +1003,14 @@ func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
 		zap.Error(task.err),
 	)
 	meta.GlobalFailedLoadCache.Put(task.collectionID, task.Err())
+	if errors.IsAny(task.Err(),
+		merr.ErrServiceMemoryLimitExceeded,
+		merr.ErrServiceDiskLimitExceeded,
+		merr.ErrServiceResourceInsufficient,
+		merr.ErrSegmentRequestResourceFailed,
+	) {
+		resourcelimit.Increase(scheduler.ctx, task.CollectionID())
+	}
 }
 
 func (scheduler *taskScheduler) remove(task Task) {
