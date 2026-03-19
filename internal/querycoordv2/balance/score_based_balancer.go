@@ -28,8 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -40,12 +38,11 @@ import (
 // This approach considers both collection-specific and global workload to achieve
 // comprehensive load balancing.
 type ScoreBasedBalancer struct {
+	BalanceReplicaHelper
 	scheduler    task.Scheduler
-	nodeManager  *session.NodeManager
 	dist         *meta.DistributionManager
-	meta         *meta.Meta
 	targetMgr    meta.TargetManagerInterface
-	assignPolicy assign.AssignPolicy
+	assignPolicy assign.ScoreAwareAssignPolicy
 }
 
 // NewScoreBasedBalancer creates a new ScoreBasedBalancer instance.
@@ -56,14 +53,13 @@ func NewScoreBasedBalancer(scheduler task.Scheduler,
 	meta *meta.Meta,
 	targetMgr meta.TargetManagerInterface,
 ) *ScoreBasedBalancer {
-	policy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeScoreBased)
+	policy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeScoreBased).(assign.ScoreAwareAssignPolicy)
 	return &ScoreBasedBalancer{
-		scheduler:    scheduler,
-		nodeManager:  nodeManager,
-		dist:         dist,
-		meta:         meta,
-		targetMgr:    targetMgr,
-		assignPolicy: policy,
+		BalanceReplicaHelper: BalanceReplicaHelper{nodeManager: nodeManager},
+		scheduler:            scheduler,
+		dist:                 dist,
+		targetMgr:            targetMgr,
+		assignPolicy:         policy,
 	}
 }
 
@@ -109,12 +105,7 @@ func (b *ScoreBasedBalancer) BalanceReplica(ctx context.Context, replica *meta.R
 // balanceChannels generates channel balance plans for a replica.
 // It requires at least 2 RW nodes to perform balancing.
 func (b *ScoreBasedBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica) []assign.ChannelAssignPlan {
-	var rwNodes []int64
-	if streamingutil.IsStreamingServiceEnabled() {
-		rwNodes, _ = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
-	} else {
-		rwNodes = replica.GetRWNodes()
-	}
+	rwNodes := b.GetRWNodesForChannels(replica)
 	if len(rwNodes) < 2 {
 		br.AddRecord(StrRecord("no enough rwNodes to balance channels"))
 		return nil
@@ -140,15 +131,7 @@ func (b *ScoreBasedBalancer) balanceSegments(ctx context.Context, br *balanceRep
 // to nodes with lower scores. Redundant segments (appearing multiple times in distribution)
 // are skipped to avoid conflicts.
 func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, onlineNodes []int64) []assign.SegmentAssignPlan {
-	// Delegate to the assign policy's implementation with safe type assertion
-	policy, ok := b.assignPolicy.(*assign.ScoreBasedAssignPolicy)
-	if !ok {
-		log.Error("invalid policy type for ScoreBasedBalancer",
-			zap.String("expected", "*assign.ScoreBasedAssignPolicy"),
-			zap.String("actual", fmt.Sprintf("%T", b.assignPolicy)))
-		return nil
-	}
-	nodeItemsMap := policy.ConvertToNodeItemsBySegment(replica.GetCollectionID(), onlineNodes)
+	nodeItemsMap := b.assignPolicy.ConvertToNodeItemsBySegment(replica.GetCollectionID(), onlineNodes)
 	for _, item := range nodeItemsMap {
 		br.AddNodeItem(item)
 	}
@@ -186,7 +169,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 			return segments[i].GetNumOfRows() < segments[j].GetNumOfRows()
 		})
 		for _, s := range segments {
-			segmentScore := policy.CalculateSegmentScore(s)
+			segmentScore := b.assignPolicy.CalculateSegmentScore(s)
 			br.AddRecord(StrRecordf("pick segment %d with score %f from node %d", s.ID, segmentScore, node))
 			segmentsToMove = append(segmentsToMove, s)
 			currentScore -= segmentScore
@@ -224,15 +207,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 // It identifies channels on nodes with scores above their assigned quota and moves them
 // to nodes with lower scores. Redundant channels are skipped to avoid conflicts.
 func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, onlineNodes []int64) []assign.ChannelAssignPlan {
-	// Delegate to the assign policy's implementation with safe type assertion
-	policy, ok := b.assignPolicy.(*assign.ScoreBasedAssignPolicy)
-	if !ok {
-		log.Error("invalid policy type for ScoreBasedBalancer",
-			zap.String("expected", "*assign.ScoreBasedAssignPolicy"),
-			zap.String("actual", fmt.Sprintf("%T", b.assignPolicy)))
-		return nil
-	}
-	nodeItemsMap := policy.ConvertToNodeItemsByChannel(replica.GetCollectionID(), onlineNodes)
+	nodeItemsMap := b.assignPolicy.ConvertToNodeItemsByChannel(replica.GetCollectionID(), onlineNodes)
 	// Add nodes to balance report for logging
 	for _, item := range nodeItemsMap {
 		br.AddNodeItem(item)
@@ -265,7 +240,7 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 		channels = sortIfChannelAtWALLocated(channels)
 
 		for _, ch := range channels {
-			channelScore := policy.CalculateChannelScore(ch, replica.GetCollectionID())
+			channelScore := b.assignPolicy.CalculateChannelScore(ch, replica.GetCollectionID())
 			br.AddRecord(StrRecordf("pick channel %s with score %f from node %d", ch.GetChannelName(), channelScore, node))
 			channelsToMove = append(channelsToMove, ch)
 

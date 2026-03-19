@@ -198,15 +198,7 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlanForOutboundNodes(ctx context.C
 // It identifies segments on nodes with higher-than-average scores and moves them to nodes
 // with lower scores, using the score-based assign policy.
 func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, channelName string, onlineNodes []int64) []assign.SegmentAssignPlan {
-	// Delegate to the assign policy's implementation with safe type assertion
-	policy, ok := b.assignPolicy.(*assign.ScoreBasedAssignPolicy)
-	if !ok {
-		log.Error("invalid policy type for ScoreBasedBalancer",
-			zap.String("expected", "*assign.ScoreBasedAssignPolicy"),
-			zap.String("actual", fmt.Sprintf("%T", b.assignPolicy)))
-		return nil
-	}
-	nodeItemsMap := policy.ConvertToNodeItemsBySegment(replica.GetCollectionID(), onlineNodes)
+	nodeItemsMap := b.assignPolicy.ConvertToNodeItemsBySegment(replica.GetCollectionID(), onlineNodes)
 	for _, item := range nodeItemsMap {
 		br.AddNodeItem(item)
 	}
@@ -244,7 +236,7 @@ func (b *ChannelLevelScoreBalancer) genSegmentPlan(ctx context.Context, br *bala
 		})
 		for _, s := range segments {
 			segmentsToMove = append(segmentsToMove, s)
-			currentScore -= policy.CalculateSegmentScore(s)
+			currentScore -= b.assignPolicy.CalculateSegmentScore(s)
 			if currentScore <= assignedScore {
 				break
 			}

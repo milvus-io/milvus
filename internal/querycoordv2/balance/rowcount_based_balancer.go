@@ -29,8 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -40,10 +38,9 @@ import (
 // attempting to equalize the row count distribution. This is more accurate than
 // round-robin balancing as it accounts for actual data volume rather than just segment count.
 type RowCountBasedBalancer struct {
+	BalanceReplicaHelper
 	scheduler    task.Scheduler
-	nodeManager  *session.NodeManager
 	dist         *meta.DistributionManager
-	meta         *meta.Meta
 	targetMgr    meta.TargetManagerInterface
 	assignPolicy assign.AssignPolicy
 }
@@ -84,13 +81,7 @@ func (b *RowCountBasedBalancer) BalanceReplica(ctx context.Context, replica *met
 // balanceChannels generates channel balance plans for a replica.
 // It requires at least 2 RW nodes to perform balancing.
 func (b *RowCountBasedBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica) []assign.ChannelAssignPlan {
-	var rwNodes []int64
-	if streamingutil.IsStreamingServiceEnabled() {
-		rwNodes, _ = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
-	} else {
-		rwNodes = replica.GetRWNodes()
-	}
-
+	rwNodes := b.GetRWNodesForChannels(replica)
 	if len(rwNodes) < 2 {
 		br.AddRecord(StrRecord("no enough rwNodes to balance channels"))
 		return nil
@@ -232,11 +223,10 @@ func NewRowCountBasedBalancer(
 ) *RowCountBasedBalancer {
 	policy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeRowCount)
 	return &RowCountBasedBalancer{
-		scheduler:    scheduler,
-		nodeManager:  nodeManager,
-		dist:         dist,
-		meta:         meta,
-		targetMgr:    targetMgr,
-		assignPolicy: policy,
+		BalanceReplicaHelper: BalanceReplicaHelper{nodeManager: nodeManager},
+		scheduler:            scheduler,
+		dist:                 dist,
+		targetMgr:            targetMgr,
+		assignPolicy:         policy,
 	}
 }

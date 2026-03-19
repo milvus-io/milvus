@@ -754,7 +754,7 @@ func (scheduler *taskScheduler) GetChannelTaskNum(filters ...TaskFilter) int {
 
 func (scheduler *taskScheduler) GetSegmentTaskNum(filters ...TaskFilter) int {
 	if len(filters) == 0 {
-		scheduler.segmentTasks.Len()
+		return scheduler.segmentTasks.Len()
 	}
 
 	// rewrite this with for loop
