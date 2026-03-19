@@ -122,8 +122,8 @@ class TestSearchDiskannIndependent(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
-        # 3. search with expr
-        default_expr = f"{ct.default_int64_field_name} in [1, 2, 3, 4]"
+        # 3. search with expr (use varchar PK filter — gen_row_data_by_schema generates "0","1","2",...)
+        default_expr = f'{ct.default_string_field_name} in ["0", "1", "2", "3"]'
         limit = 4
         default_search_params = {"metric_type": "L2", "params": {"search_list": 30}}
         vectors = cf.gen_vectors(default_nq, dim)
