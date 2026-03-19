@@ -40,6 +40,7 @@ const (
 )
 
 type RestfulInfo struct {
+	ctx    *gin.Context
 	params *gin.LogFormatterParams
 	start  time.Time
 	req    interface{}
@@ -48,8 +49,8 @@ type RestfulInfo struct {
 	actualConsistencyLevel *commonpb.ConsistencyLevel
 }
 
-func NewRestfulInfo() *RestfulInfo {
-	return &RestfulInfo{start: time.Now(), params: &gin.LogFormatterParams{}}
+func NewRestfulInfo(ctx *gin.Context) *RestfulInfo {
+	return &RestfulInfo{ctx: ctx, start: time.Now(), params: &gin.LogFormatterParams{}}
 }
 
 func (i *RestfulInfo) SetParams(p *gin.LogFormatterParams) {
@@ -57,7 +58,7 @@ func (i *RestfulInfo) SetParams(p *gin.LogFormatterParams) {
 }
 
 func (i *RestfulInfo) InitReq() {
-	req, ok := i.params.Keys[ContextRequest]
+	req, ok := i.ctx.Get(ContextRequest)
 	if !ok {
 		return
 	}
@@ -92,7 +93,7 @@ func (i *RestfulInfo) Address() string {
 }
 
 func (i *RestfulInfo) TraceID() string {
-	traceID, ok := i.params.Keys["traceID"]
+	traceID, ok := i.ctx.Get("traceID")
 	if !ok {
 		return Unknown
 	}
@@ -104,7 +105,7 @@ func (i *RestfulInfo) MethodStatus() string {
 		return fmt.Sprintf("HttpError%d", i.params.StatusCode)
 	}
 
-	value, ok := i.params.Keys[ContextReturnCode]
+	value, ok := i.ctx.Get(ContextReturnCode)
 	if !ok {
 		return Unknown
 	}
@@ -122,7 +123,7 @@ func (i *RestfulInfo) MethodStatus() string {
 }
 
 func (i *RestfulInfo) UserName() string {
-	username, ok := i.params.Keys[ContextUsername]
+	username, ok := i.ctx.Get(ContextUsername)
 	if !ok || username == "" {
 		return Unknown
 	}
@@ -135,7 +136,7 @@ func (i *RestfulInfo) ResponseSize() string {
 }
 
 func (i *RestfulInfo) ErrorCode() string {
-	code, ok := i.params.Keys[ContextReturnCode]
+	code, ok := i.ctx.Get(ContextReturnCode)
 	if !ok {
 		return Unknown
 	}
@@ -143,7 +144,7 @@ func (i *RestfulInfo) ErrorCode() string {
 }
 
 func (i *RestfulInfo) ErrorMsg() string {
-	message, ok := i.params.Keys[ContextReturnMessage]
+	message, ok := i.ctx.Get(ContextReturnMessage)
 	if !ok {
 		return ""
 	}
