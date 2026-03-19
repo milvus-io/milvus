@@ -135,7 +135,7 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 		w.Logger().Info("no collection to update load config, skip it")
 	}
 
-	if err := w.s.updateLoadConfig(w.notifier.Context(), collectionIDs, newReplicaNum, newRGs); err != nil {
+	if err := w.s.updateLoadConfig(w.notifier.Context(), collectionIDs, newReplicaNum, newRGs, true); err != nil {
 		w.Logger().Warn("failed to update load config", zap.Error(err))
 		return err
 	}
