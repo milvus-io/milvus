@@ -70,12 +70,50 @@ func (s *switchableScannerImpl) HandleMessage(ctx context.Context, msg message.I
 	}
 }
 
+// oldVersionLastConfirmedTracker tracks recent message IDs to provide a delayed
+// lastConfirmedMessageID for old version (v0) messages.
+// Old version messages don't carry lastConfirmedMessageID, so we must synthesize one.
+// Using the first-ever v0 message ID (as before) causes the scanner to restart from
+// a very old WAL position when tailing→catchup fallback occurs, leading to long catchup
+// times and search unavailability.
+// Instead, we keep a sliding window and use the message ID from N messages ago,
+// so that fallback only replays a bounded number of messages.
+type oldVersionLastConfirmedTracker struct {
+	window     []message.MessageID
+	windowSize int
+}
+
+func newOldVersionLastConfirmedTracker(windowSize int) *oldVersionLastConfirmedTracker {
+	if windowSize <= 0 {
+		windowSize = 30
+	}
+	return &oldVersionLastConfirmedTracker{
+		window:     make([]message.MessageID, 0, windowSize+1),
+		windowSize: windowSize,
+	}
+}
+
+// Track records a new message ID and returns the delayed lastConfirmedMessageID.
+// It returns the message ID from windowSize messages ago, or the earliest recorded
+// ID if fewer than windowSize messages have been tracked.
+func (t *oldVersionLastConfirmedTracker) Track(msgID message.MessageID) message.MessageID {
+	t.window = append(t.window, msgID)
+	if len(t.window) > t.windowSize {
+		confirmed := t.window[0]
+		// Trim the oldest entry to prevent unbounded growth.
+		t.window = t.window[1:]
+		return confirmed
+	}
+	// Not enough messages yet, return the first one.
+	return t.window[0]
+}
+
 // catchupScanner is a scanner that make a read at underlying wal, and try to catchup the writeahead buffer then switch to tailing mode.
 type catchupScanner struct {
 	switchableScannerImpl
-	deliverPolicy                       options.DeliverPolicy
-	exclusiveStartTimeTick              uint64 // scanner should filter out the message that less than or equal to this time tick.
-	lastConfirmedMessageIDForOldVersion message.MessageID
+	deliverPolicy                  options.DeliverPolicy
+	exclusiveStartTimeTick         uint64 // scanner should filter out the message that less than or equal to this time tick.
+	oldVersionLastConfirmedTracker *oldVersionLastConfirmedTracker
 }
 
 func (s *catchupScanner) Do(ctx context.Context) (switchableScanner, error) {
@@ -109,22 +147,18 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 			}
 
 			if msg.Version() == message.VersionOld {
-				if s.lastConfirmedMessageIDForOldVersion == nil {
-					s.logger.Info(
-						"scanner find a old version message, set it as the last confirmed message id for all old version message",
-						zap.Stringer("messageID", msg.MessageID()),
-					)
-					s.lastConfirmedMessageIDForOldVersion = msg.MessageID()
+				if s.oldVersionLastConfirmedTracker == nil {
+					windowSize := paramtable.Get().StreamingCfg.OldVersionLastConfirmedWindowSize.GetAsInt()
+					s.oldVersionLastConfirmedTracker = newOldVersionLastConfirmedTracker(windowSize)
 				}
-				// We always use first consumed message as the last confirmed message id for old version message.
-				// After upgrading from old milvus:
-				// The wal will be read at consuming side as following:
-				// msgv0, msgv0 ..., msgv0, msgv1, msgv1, msgv1, ...
-				// the msgv1 will be read after all msgv0 is consumed as soon as possible.
-				// so the last confirm is set to the first msgv0 message for all old version message is ok.
+				// Use a sliding-window tracker to provide a delayed lastConfirmedMessageID.
+				// This ensures that when a tailing scanner falls back to catchup mode,
+				// it only needs to replay a bounded number of recent messages instead of
+				// the entire WAL from the very first v0 message.
+				lastConfirmedMessageID := s.oldVersionLastConfirmedTracker.Track(msg.MessageID())
 				var err error
 				messageID := msg.MessageID()
-				msg, err = newOldVersionImmutableMessage(ctx, s.innerWAL.Channel().Name, s.lastConfirmedMessageIDForOldVersion, msg)
+				msg, err = newOldVersionImmutableMessage(ctx, s.innerWAL.Channel().Name, lastConfirmedMessageID, msg)
 				if errors.Is(err, vchantempstore.ErrNotFound) {
 					// Skip the message's vchannel is not found in the vchannel temp store.
 					s.logger.Info("skip the old version message because vchannel not found", zap.Stringer("messageID", messageID))
