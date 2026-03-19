@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
@@ -1089,6 +1091,127 @@ func TestShouldUpdateCurrentTarget_NoReadyDelegators(t *testing.T) {
 	// channelNames keys = ["channel-1"]
 	// lo.Every([], ["channel-1"]) = false (empty does not contain all)
 	assert.False(t, result, "Expected false when NO ready delegators exist")
+}
+
+// TestUpdateAllReplicasCheckpointMetric tests the all-replicas checkpoint metric behavior
+func TestUpdateAllReplicasCheckpointMetric(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	collectionID := int64(1000)
+	currentVersion := int64(100)
+
+	nodeMgr := session.NewNodeManager()
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1}))
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 2}))
+
+	targetMgr := meta.NewMockTargetManager(t)
+	distMgr := meta.NewDistributionManager(nodeMgr)
+	broker := meta.NewMockBroker(t)
+	cluster := session.NewMockCluster(t)
+
+	// Create two replicas: replica1 on node1, replica2 on node2
+	replica1 := meta.NewReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  collectionID,
+		ResourceGroup: meta.DefaultResourceGroupName,
+		Nodes:         []int64{1},
+	})
+	replica2 := meta.NewReplica(&querypb.Replica{
+		ID:            2,
+		CollectionID:  collectionID,
+		ResourceGroup: meta.DefaultResourceGroupName,
+		Nodes:         []int64{2},
+	})
+
+	mockCatalog := mocks.NewQueryCoordCatalog(t)
+	mockCatalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockCatalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Maybe()
+	replicaMgr := meta.NewReplicaManager(nil, mockCatalog)
+	err := replicaMgr.Put(ctx, replica1, replica2)
+	assert.NoError(t, err)
+
+	metaInstance := &meta.Meta{
+		CollectionManager: meta.NewCollectionManager(nil),
+		ReplicaManager:    replicaMgr,
+	}
+
+	observer := NewTargetObserver(metaInstance, targetMgr, distMgr, broker, cluster, nodeMgr)
+
+	channelName := "channel-1"
+	seekTimestamp := uint64(1000 << 18) // some timestamp
+	channels := map[string]*meta.DmChannel{
+		channelName: {
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: collectionID,
+				ChannelName:  channelName,
+				SeekPosition: &msgpb.MsgPosition{
+					Timestamp: seekTimestamp,
+				},
+			},
+		},
+	}
+
+	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(channels)
+	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.CurrentTarget).Return(currentVersion)
+
+	// Reset metric before test
+	metrics.QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds.Reset()
+
+	// Case 1: Only replica1 ready, replica2 not ready -> metric should NOT update
+	distMgr.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channelName,
+		},
+		Node: 1,
+		View: &meta.LeaderView{
+			ID:            1,
+			CollectionID:  collectionID,
+			Channel:       channelName,
+			TargetVersion: currentVersion,
+			Status:        &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+	// Node 2 has no delegator for channel-1
+
+	observer.updateAllReplicasCheckpointMetric(ctx, collectionID)
+
+	// Metric should not have been set (no gauge value or still 0)
+	gauge, err := metrics.QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds.GetMetricWithLabelValues(
+		paramtable.GetStringNodeID(), channelName,
+	)
+	assert.NoError(t, err)
+	dto := &io_prometheus_client.Metric{}
+	gauge.Write(dto)
+	assert.Equal(t, float64(0), dto.GetGauge().GetValue(),
+		"metric should not update when not all replicas are ready")
+
+	// Case 2: Both replicas ready -> metric should update
+	distMgr.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channelName,
+		},
+		Node: 2,
+		View: &meta.LeaderView{
+			ID:            2,
+			CollectionID:  collectionID,
+			Channel:       channelName,
+			TargetVersion: currentVersion,
+			Status:        &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+
+	observer.updateAllReplicasCheckpointMetric(ctx, collectionID)
+
+	gauge, err = metrics.QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds.GetMetricWithLabelValues(
+		paramtable.GetStringNodeID(), channelName,
+	)
+	assert.NoError(t, err)
+	dto = &io_prometheus_client.Metric{}
+	gauge.Write(dto)
+	assert.Greater(t, dto.GetGauge().GetValue(), float64(0),
+		"metric should update when all replicas are ready")
 }
 
 func TestTargetObserver(t *testing.T) {
