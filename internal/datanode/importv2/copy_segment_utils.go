@@ -602,7 +602,7 @@ func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, tar
 //   - mappings: Pre-calculated source->target path mappings
 //
 // Returns:
-//   - Vector/Scalar index metadata (fieldID -> VectorScalarIndexInfo)
+//   - Vector/Scalar index metadata (buildID -> VectorScalarIndexInfo)
 //   - Text index metadata (fieldID -> TextIndexStats)
 //   - JSON Key index metadata (fieldID -> JsonKeyStats)
 //   - error: Non-nil if any index file path has no mapping (fail-fast on missing mappings)
@@ -635,7 +635,7 @@ func buildIndexInfoFromSource(
 			buildID = newID
 		}
 
-		indexInfos[srcIndex.GetFieldID()] = &datapb.VectorScalarIndexInfo{
+		indexInfos[buildID] = &datapb.VectorScalarIndexInfo{
 			FieldId:                   srcIndex.GetFieldID(),
 			IndexId:                   srcIndex.GetIndexID(),
 			BuildId:                   buildID,
@@ -644,6 +644,7 @@ func buildIndexInfoFromSource(
 			IndexSize:                 int64(srcIndex.GetSerializedSize()),
 			CurrentIndexVersion:       srcIndex.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: srcIndex.GetCurrentScalarIndexVersion(),
+			IndexName:                 srcIndex.GetIndexName(),
 		}
 	}
 

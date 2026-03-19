@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
@@ -1378,4 +1379,196 @@ func TestSnapshotRestoreDropAndRestoreAgain(t *testing.T) {
 		zap.String("collectionA", collNameA),
 		zap.String("snapshot", snapshotName),
 		zap.String("collectionC", collNameC))
+}
+
+// TestSnapshotRestoreWithMultipleJSONPathIndexes tests that snapshot restore correctly
+// handles multiple JSON path indexes on the same JSON field.
+// This covers the bug where CopySegmentResult.index_infos used fieldID as map key,
+// causing only the last index per field to survive (overwriting earlier ones).
+func TestSnapshotRestoreWithMultipleJSONPathIndexes(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	insertBatchSize := 3000
+
+	// Step 1: Create collection with JSON field
+	collName := common.GenRandomString(snapshotPrefix, 6)
+
+	pkField := entity.NewField().
+		WithName("id").
+		WithDataType(entity.FieldTypeInt64).
+		WithIsPrimaryKey(true)
+
+	jsonField := entity.NewField().
+		WithName("metadata").
+		WithDataType(entity.FieldTypeJSON)
+
+	floatVecField := entity.NewField().
+		WithName("embeddings").
+		WithDataType(entity.FieldTypeFloatVector).
+		WithDim(128)
+
+	schema := entity.NewSchema().
+		WithName(collName).
+		WithField(pkField).
+		WithField(jsonField).
+		WithField(floatVecField)
+
+	// Step 2: Prepare indexes - two JSON path indexes on the SAME field
+	vecIdx := index.NewHNSWIndex(entity.L2, 8, 96)
+	vecIndexOpt := client.NewCreateIndexOption(collName, "embeddings", vecIdx)
+
+	// JSON path index 1: metadata["category"] as varchar
+	jsonIdx1 := index.NewInvertedIndex()
+	jsonIndexOpt1 := client.NewCreateIndexOption(collName, "metadata", jsonIdx1).
+		WithIndexName("idx_category")
+	jsonIndexOpt1.WithExtraParam("json_path", `metadata["category"]`)
+	jsonIndexOpt1.WithExtraParam("json_cast_type", "varchar")
+
+	// JSON path index 2: metadata["price"] as double
+	jsonIdx2 := index.NewInvertedIndex()
+	jsonIndexOpt2 := client.NewCreateIndexOption(collName, "metadata", jsonIdx2).
+		WithIndexName("idx_price")
+	jsonIndexOpt2.WithExtraParam("json_path", `metadata["price"]`)
+	jsonIndexOpt2.WithExtraParam("json_cast_type", "double")
+
+	// Create collection with all indexes
+	createOpt := client.NewCreateCollectionOption(collName, schema).
+		WithIndexOptions(vecIndexOpt, jsonIndexOpt1, jsonIndexOpt2)
+	err := mc.CreateCollection(ctx, createOpt)
+	common.CheckErr(t, err, true)
+
+	// Step 3: Insert data with JSON containing both keys
+	// Build insert columns manually to include JSON data
+	idData := make([]int64, insertBatchSize)
+	jsonData := make([][]byte, insertBatchSize)
+	vecData := make([][]float32, insertBatchSize)
+	categories := []string{"electronics", "books", "clothing", "food", "toys"}
+
+	for i := 0; i < insertBatchSize; i++ {
+		idData[i] = int64(i)
+		category := categories[i%len(categories)]
+		price := float64(i) * 1.5
+		jsonBytes := []byte(fmt.Sprintf(`{"category": "%s", "price": %f, "stock": %d}`, category, price, i*10))
+		jsonData[i] = jsonBytes
+
+		vec := make([]float32, 128)
+		for j := range vec {
+			vec[j] = float32(i*128+j) * 0.001
+		}
+		vecData[i] = vec
+	}
+
+	idColumn := column.NewColumnInt64("id", idData)
+	jsonColumn := column.NewColumnJSONBytes("metadata", jsonData)
+	vecColumn := column.NewColumnFloatVector("embeddings", 128, vecData)
+
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, idColumn, jsonColumn, vecColumn))
+	common.CheckErr(t, err, true)
+
+	_, err = mc.Flush(ctx, client.NewFlushOption(collName))
+	common.CheckErr(t, err, true)
+	time.Sleep(10 * time.Second)
+
+	// Step 4: Verify indexes exist on source
+	originalIndexes, err := mc.ListIndexes(ctx, client.NewListIndexOption(collName))
+	common.CheckErr(t, err, true)
+	log.Info("Original indexes", zap.Strings("indexes", originalIndexes))
+	require.GreaterOrEqual(t, len(originalIndexes), 3, "Should have vector + 2 JSON path indexes")
+
+	// Load and verify query works
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+		WithOutputFields(common.QueryCountFieldName).
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	count, _ := queryRes.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(insertBatchSize), count)
+
+	// Step 5: Create snapshot
+	snapshotName := fmt.Sprintf("snapshot_%s", common.GenRandomString(snapshotPrefix, 6))
+	createSnapshotOpt := client.NewCreateSnapshotOption(snapshotName, collName).
+		WithDescription("Snapshot with multiple JSON path indexes")
+	err = mc.CreateSnapshot(ctx, createSnapshotOpt)
+	common.CheckErr(t, err, true)
+	log.Info("Snapshot created", zap.String("snapshot", snapshotName))
+
+	// Step 6: Restore to new collection
+	restoredCollName := fmt.Sprintf("restored_%s", collName)
+	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
+	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
+	common.CheckErr(t, err, true)
+
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 3*time.Minute)
+	common.CheckErr(t, err, true)
+	log.Info("Snapshot restored", zap.String("restoredCollection", restoredCollName))
+
+	// Step 7: Verify ALL indexes are restored (including both JSON path indexes)
+	restoredIndexes, err := mc.ListIndexes(ctx, client.NewListIndexOption(restoredCollName))
+	common.CheckErr(t, err, true)
+	log.Info("Restored indexes", zap.Strings("indexes", restoredIndexes))
+
+	// Both JSON path indexes should be present
+	require.Equal(t, len(originalIndexes), len(restoredIndexes),
+		"Restored collection should have same number of indexes as original")
+
+	// Verify specific index names exist
+	require.Contains(t, restoredIndexes, "idx_category",
+		"idx_category JSON path index should be restored")
+	require.Contains(t, restoredIndexes, "idx_price",
+		"idx_price JSON path index should be restored")
+
+	// Step 8: Load and verify data
+	loadTaskR, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredCollName))
+	common.CheckErr(t, err, true)
+	err = loadTaskR.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	// Query count
+	queryResR, err := mc.Query(ctx, client.NewQueryOption(restoredCollName).
+		WithOutputFields(common.QueryCountFieldName).
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	countR, _ := queryResR.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(insertBatchSize), countR)
+
+	// Search
+	vectors := hp.GenSearchVectors(common.DefaultNq, 128, entity.FieldTypeFloatVector)
+	searchRes, err := mc.Search(ctx, client.NewSearchOption(restoredCollName, common.DefaultLimit, vectors).
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
+
+	// Step 9: Verify JSON path indexes are functional via filter queries
+	// Filter by category (uses idx_category JSON path index)
+	categoryRes, err := mc.Query(ctx, client.NewQueryOption(restoredCollName).
+		WithFilter(`metadata["category"] == "electronics"`).
+		WithOutputFields(common.QueryCountFieldName).
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	categoryCount, _ := categoryRes.Fields[0].GetAsInt64(0)
+	// "electronics" is categories[0], assigned to i%5==0, so count = insertBatchSize/5
+	require.Equal(t, int64(insertBatchSize/5), categoryCount,
+		"Filter by category should return correct count via JSON path index")
+
+	// Filter by price range (uses idx_price JSON path index)
+	priceRes, err := mc.Query(ctx, client.NewQueryOption(restoredCollName).
+		WithFilter(`metadata["price"] < 15`).
+		WithOutputFields(common.QueryCountFieldName).
+		WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	priceCount, _ := priceRes.Fields[0].GetAsInt64(0)
+	// price = i * 1.5, so price < 15 means i < 10
+	require.Equal(t, int64(10), priceCount,
+		"Filter by price should return correct count via JSON path index")
+	log.Info("Restored collection verified: query, search, and JSON path index filters OK")
+
+	// Cleanup
+	err = mc.DropSnapshot(ctx, client.NewDropSnapshotOption(snapshotName))
+	common.CheckErr(t, err, true)
+	log.Info("Test completed: multiple JSON path indexes restored successfully")
 }

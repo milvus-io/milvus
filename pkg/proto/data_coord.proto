@@ -1108,6 +1108,9 @@ message VectorScalarIndexInfo {
   int64 index_size = 6;                    // Total index size in bytes
   int32 current_index_version = 7;         // Index engine version
   int32 current_scalar_index_version = 8;  // Scalar index engine version
+  // Index name from source, used to match source→target index during restore.
+  // Required for JSON path indexes where one field can have multiple indexes.
+  string index_name = 9;
 }
 
 // CopySegmentResult contains the complete result of a copy segment operation
@@ -1122,7 +1125,8 @@ message CopySegmentResult {
   repeated FieldBinlog bm25logs = 6;
 
   // Index metadata
-  // Vector/Scalar indexes - map<fieldID, VectorScalarIndexInfo>
+  // Vector/Scalar indexes - map<buildID, VectorScalarIndexInfo>
+  // Key is buildID (not fieldID) to support multiple indexes per field (e.g., JSON path indexes).
   map<int64, VectorScalarIndexInfo> index_infos = 7;
 
   // Text indexes - map<fieldID, TextIndexStats>
