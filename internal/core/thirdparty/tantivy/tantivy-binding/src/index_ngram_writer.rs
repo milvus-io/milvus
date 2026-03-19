@@ -47,8 +47,8 @@ impl IndexWriterWrapper {
 
         let index = Index::create_in_dir(path, schema)?;
         index.tokenizers().register(NGRAM_TOKENIZER, tokenizer);
-        let index_writer = index
-            .writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
+        let index_writer =
+            index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
 
         Ok(IndexWriterWrapper::V7(IndexWriterWrapperImpl {
             field,
