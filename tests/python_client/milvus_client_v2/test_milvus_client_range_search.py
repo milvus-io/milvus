@@ -2035,18 +2035,19 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
                                  "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("nq", [2, 500])
-    def test_range_search_with_consistency_eventually(self, nq):
+    def test_range_search_with_consistency_eventually(self):
         """
-        target: test range search with different consistency level
-        method: 1. create a collection
-                2. insert data
-                3. range search with consistency_level is "eventually"
-        expected: searched successfully
+        target: test range search with Eventually consistency level
+        method: 1. create a collection and insert data
+                2. baseline: range search with Strong consistency (full range)
+                3. insert new data without flush
+                4. Eventually + wide range: verify search works and flushed data visible
+                5. Eventually + tight range: verify range filter actually filters distances
+        expected: searched successfully with correct distance filtering
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-
+        nq = 10
         limit = 1000
         nb_old = 500
         dim = 128
@@ -2070,14 +2071,14 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params=idx)
         self.load_collection(client, collection_name)
 
-        # 2. search for original data after load
+        # 1. baseline: Strong consistency + full range, verify data integrity
         search_vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        range_search_params = {"metric_type": "COSINE", "params": {
+        range_search_params_wide = {"metric_type": "COSINE", "params": {
             "radius": -1, "range_filter": 1}}
         self.search(client, collection_name,
                     data=search_vectors[:nq],
                     anns_field=default_search_field,
-                    search_params=range_search_params,
+                    search_params=range_search_params_wide,
                     limit=limit,
                     filter=default_search_exp,
                     check_task=CheckTasks.check_search_results,
@@ -2088,18 +2089,41 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
                                  "metric": "COSINE",
                                  "pk_name": ct.default_int64_field_name})
 
+        # 2. insert new data (not flushed)
         nb_new = 400
         data_new = cf.gen_row_data_by_schema(nb=nb_new, schema=schema, start=nb_old)
         self.insert(client, collection_name, data=data_new)
 
+        # 3. Eventually + wide range: verify search works, flushed data should be visible
         search_res, _ = self.search(client, collection_name,
                     data=search_vectors[:nq],
                     anns_field=default_search_field,
-                    search_params=range_search_params,
+                    search_params=range_search_params_wide,
                     limit=limit,
                     filter=default_search_exp,
                     consistency_level="Eventually")
         assert len(search_res) == nq
         for hits in search_res:
-            assert len(hits) >= 0
+            assert len(hits) > 0, "Flushed+loaded data should be visible with Eventually consistency"
+
+        # 4. Eventually + tight range: use vectors from DB to guarantee self-match (distance ≈ 1.0)
+        query_res, _ = self.query(client, collection_name,
+                                  filter=f"{ct.default_int64_field_name} < {nq}",
+                                  output_fields=[default_search_field])
+        search_vectors_from_db = [row[default_search_field] for row in query_res]
+        range_search_params_tight = {"metric_type": "COSINE", "params": {
+            "radius": 0.5, "range_filter": 1.0}}
+        search_res_tight, _ = self.search(client, collection_name,
+                    data=search_vectors_from_db,
+                    anns_field=default_search_field,
+                    search_params=range_search_params_tight,
+                    limit=limit,
+                    filter=default_search_exp,
+                    consistency_level="Eventually")
+        assert len(search_res_tight) == nq
+        for hits in search_res_tight:
+            assert len(hits) > 0, "Self-match with distance≈1.0 should fall in (0.5, 1.0]"
+            for hit in hits:
+                assert 0.5 < hit["distance"] <= 1.0, \
+                    f"distance {hit['distance']} out of expected range (0.5, 1.0]"
 

@@ -185,7 +185,7 @@ class TestMilvusClientV2AliasOperation(TestMilvusClientV2Base):
         self.drop_alias(client, alias_name)
         
         # 7. verify alias is dropped
-        error = {ct.err_code: 0,
+        error = {ct.err_code: 100,
                  ct.err_msg: f"can't find collection[database=default][collection={alias_name}]"}
         self.describe_collection(client, alias_name,
                                  check_task=CheckTasks.err_res,
@@ -320,7 +320,7 @@ class TestMilvusClientV2AliasOperationInvalid(TestMilvusClientV2Base):
         non_exist_collection = cf.gen_unique_str("non_exist_collection")
         alias_name = cf.gen_unique_str(prefix)
 
-        error = {ct.err_code: 0,
+        error = {ct.err_code: 100,
                  ct.err_msg: f"can't find collection[database=default][collection={non_exist_collection}]"}
         self.create_alias(client, non_exist_collection, alias_name,
                           check_task=CheckTasks.err_res,
@@ -342,7 +342,7 @@ class TestMilvusClientV2AliasOperationInvalid(TestMilvusClientV2Base):
         self.create_alias(client, collection_name, alias_name)
 
         non_exist_collection = cf.gen_unique_str("non_exist_collection")
-        error = {ct.err_code: 0,
+        error = {ct.err_code: 100,
                  ct.err_msg: f"can't find collection[database=default][collection={non_exist_collection}]"}
         self.alter_alias(client, non_exist_collection, alias_name,
                          check_task=CheckTasks.err_res,
@@ -471,7 +471,7 @@ class TestMilvusClientV2AliasOperationInvalid(TestMilvusClientV2Base):
         self.create_alias(client, collection_name, alias_name)
         
         # 3. try to create collection with alias name
-        error = {ct.err_code: 0,
+        error = {ct.err_code: 1601,
                  ct.err_msg: f"collection name [{alias_name}] conflicts with an existing alias,"
                              " please choose a unique name"}
         self.create_collection(client, alias_name, default_dim, consistency_level="Bounded",
