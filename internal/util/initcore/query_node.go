@@ -152,8 +152,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cExprResCacheEnabled := C.bool(paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool())
 	C.SetExprResCacheEnable(cExprResCacheEnabled)
 
-	cExprResCacheCapacityBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.GetAsInt64())
-	C.SetExprResCacheCapacityBytes(cExprResCacheCapacityBytes)
+	if paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
+		UpdateExprResCacheConfig()
+	}
 
 	C.SetArrowIOThreadPoolCapacity(C.int(ResolveArrowIOThreadPoolCapacity()))
 

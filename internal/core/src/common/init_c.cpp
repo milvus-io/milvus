@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <mutex>
+#include <string>
 
 #include <arrow/io/interfaces.h>
 #include <openssl/evp.h>
@@ -107,9 +108,53 @@ SetExprResCacheEnable(bool val) {
 }
 
 void
-SetExprResCacheCapacityBytes(int64_t bytes) {
-    milvus::exec::ExprResCacheManager::Instance().SetCapacityBytes(
-        static_cast<size_t>(bytes));
+SetExprResCacheConfig(const char* mode,
+                      const char* disk_base_path,
+                      int64_t mem_max_bytes,
+                      bool compression_enabled,
+                      int32_t admission_threshold,
+                      int64_t mem_min_eval_duration_us,
+                      int64_t disk_max_file_size,
+                      int64_t disk_min_eval_duration_us) {
+    milvus::exec::CacheConfig config;
+    std::string mode_value = mode == nullptr ? "" : std::string(mode);
+    if (mode_value == "disk") {
+        config.mode = milvus::exec::CacheMode::Disk;
+    } else if (mode_value == "memory") {
+        config.mode = milvus::exec::CacheMode::Memory;
+    } else {
+        LOG_WARN("invalid expr result cache mode '{}', disabling cache",
+                 mode_value);
+        milvus::exec::ExprResCacheManager::SetEnabled(false);
+        return;
+    }
+
+    if ((config.mode == milvus::exec::CacheMode::Memory &&
+         mem_max_bytes <= 0) ||
+        (config.mode == milvus::exec::CacheMode::Disk &&
+         disk_max_file_size <= 0)) {
+        LOG_WARN("invalid expr result cache size config, disabling cache");
+        milvus::exec::ExprResCacheManager::SetEnabled(false);
+        return;
+    }
+
+    config.disk_base_path =
+        disk_base_path == nullptr ? std::string() : std::string(disk_base_path);
+    config.mem_max_bytes = static_cast<size_t>(mem_max_bytes);
+    config.compression_enabled = compression_enabled;
+    if (admission_threshold < 1) {
+        admission_threshold = 1;
+    } else if (admission_threshold > 255) {
+        admission_threshold = 255;
+    }
+    config.admission_threshold = static_cast<uint8_t>(admission_threshold);
+    config.mem_min_eval_duration_us =
+        mem_min_eval_duration_us < 0 ? 0 : mem_min_eval_duration_us;
+    config.disk_max_file_size = static_cast<uint64_t>(disk_max_file_size);
+    config.disk_min_eval_duration_us =
+        disk_min_eval_duration_us < 0 ? 0 : disk_min_eval_duration_us;
+
+    milvus::exec::ExprResCacheManager::Instance().SetConfig(config);
 }
 
 void

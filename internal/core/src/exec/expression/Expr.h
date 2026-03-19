@@ -28,6 +28,7 @@
 #include "common/OpContext.h"
 #include "common/Types.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/ExprCacheHelper.h"
 #include "exec/expression/Utils.h"
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
@@ -371,6 +372,55 @@ class SegmentExpr : public Expr {
                 }
             }
         }
+    }
+
+    // Try to load the full bitset from ExprResCache.
+    // Returns true if cache hit (cached_index_chunk_res_ populated).
+    // Call at the top of ByStats / ByIndex methods to skip computation.
+    bool
+    TryCacheGet() {
+        if (!ExprResCacheManager::IsEnabled() || segment_ == nullptr) {
+            return false;
+        }
+        if (ExprResCacheManager::Instance().GetMode() == CacheMode::Disk &&
+            segment_->type() != SegmentType::Sealed) {
+            return false;
+        }
+        ExprResCacheManager::Key key{segment_->get_segment_id(),
+                                     this->ToString()};
+        ExprResCacheManager::Value got;
+        got.active_count = active_count_;
+        if (ExprResCacheManager::Instance().Get(key, got)) {
+            cached_index_chunk_res_ = got.result;
+            cached_index_chunk_valid_res_ = got.valid_result;
+            cached_index_chunk_id_ = 0;
+            return true;
+        }
+        return false;
+    }
+
+    // Put the current cached_index_chunk_res_ into ExprResCache.
+    // Call after full bitset computation completes.
+    void
+    CachePut(int64_t eval_duration_us = 0) {
+        if (!ExprResCacheManager::IsEnabled() || segment_ == nullptr) {
+            return;
+        }
+        if (ExprResCacheManager::Instance().GetMode() == CacheMode::Disk &&
+            segment_->type() != SegmentType::Sealed) {
+            return;
+        }
+        if (!cached_index_chunk_res_ || !cached_index_chunk_valid_res_) {
+            return;
+        }
+        ExprResCacheManager::Key key{segment_->get_segment_id(),
+                                     this->ToString()};
+        ExprResCacheManager::Value v;
+        v.result = cached_index_chunk_res_;
+        v.valid_result = cached_index_chunk_valid_res_;
+        v.active_count = active_count_;
+        v.eval_duration_us = eval_duration_us;
+        ExprResCacheManager::Instance().Put(key, v);
     }
 
     int64_t
@@ -1564,47 +1614,59 @@ class SegmentExpr : public Expr {
         if (cached_index_chunk_id_ != 0) {
             Index* index_ptr = nullptr;
             PinWrapper<const index::IndexBase*> json_pw;
-            // Executor for JsonFlatIndex. Must outlive index_ptr. Only used for JSON type.
             std::shared_ptr<index::JsonFlatIndexQueryExecutor<IndexInnerType>>
                 executor;
-
-            if (field_type_ == DataType::JSON) {
-                auto pointer = milvus::Json::pointer(nested_path_);
-                json_pw = pinned_index_[0];
-                auto json_flat_index =
-                    dynamic_cast<const index::JsonFlatIndex*>(json_pw.get());
-
-                if (json_flat_index) {
-                    auto index_path = json_flat_index->GetNestedPath();
-                    executor = json_flat_index
-                                   ->template create_executor<IndexInnerType>(
-                                       pointer.substr(index_path.size()));
-                    index_ptr = executor.get();
-                } else {
-                    auto json_index =
-                        const_cast<index::IndexBase*>(json_pw.get());
-                    index_ptr = dynamic_cast<Index*>(json_index);
+            auto prepare_index = [&]() {
+                if (index_ptr != nullptr) {
+                    return;
                 }
-            } else {
-                auto scalar_index =
-                    dynamic_cast<const Index*>(pinned_index_[0].get());
-                index_ptr = const_cast<Index*>(scalar_index);
-            }
+                if (field_type_ == DataType::JSON) {
+                    auto pointer = milvus::Json::pointer(nested_path_);
+                    json_pw = pinned_index_[0];
+                    auto json_flat_index =
+                        dynamic_cast<const index::JsonFlatIndex*>(
+                            json_pw.get());
 
-            cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-                std::move(func(index_ptr, values...)));
-            cached_index_chunk_id_ = 0;
+                    if (json_flat_index) {
+                        auto index_path = json_flat_index->GetNestedPath();
+                        executor =
+                            json_flat_index
+                                ->template create_executor<IndexInnerType>(
+                                    pointer.substr(index_path.size()));
+                        index_ptr = executor.get();
+                    } else {
+                        auto json_index =
+                            const_cast<index::IndexBase*>(json_pw.get());
+                        index_ptr = dynamic_cast<Index*>(json_index);
+                    }
+                } else {
+                    auto scalar_index =
+                        dynamic_cast<const Index*>(pinned_index_[0].get());
+                    index_ptr = const_cast<Index*>(scalar_index);
+                }
+            };
+            prepare_index();
             cached_is_nested_index_ = index_ptr->IsNestedIndex();
 
-            if (cached_is_nested_index_ && func_returns_row_level) {
-                // TODO(SpadeA): now, nested index is only supported for Struct which
-                // does not support null now.
-                cached_index_chunk_valid_res_ =
-                    std::make_shared<TargetBitmap>(active_count_, true);
-            } else {
-                cached_index_chunk_valid_res_ =
-                    std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
-            }
+            auto cached = ExprCacheHelper::GetOrCompute(
+                segment_,
+                this->ToString(),
+                active_count_,
+                [&]() -> ExprCacheHelper::ComputeResult {
+                    prepare_index();
+                    TargetBitmap res = func(index_ptr, values...);
+
+                    TargetBitmap valid_res;
+                    if (cached_is_nested_index_ && func_returns_row_level) {
+                        valid_res = TargetBitmap(active_count_, true);
+                    } else {
+                        valid_res = index_ptr->IsNotNull();
+                    }
+                    return {std::move(res), std::move(valid_res)};
+                });
+            cached_index_chunk_res_ = cached.result;
+            cached_index_chunk_valid_res_ = cached.valid;
+            cached_index_chunk_id_ = 0;
         }
 
         TargetBitmap result;

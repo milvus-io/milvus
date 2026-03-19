@@ -30,6 +30,7 @@ import (
 	"strings"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -79,8 +80,21 @@ func UpdateExprResCacheEnable(enable bool) {
 	C.SetExprResCacheEnable(C.bool(enable))
 }
 
-func UpdateExprResCacheCapacityBytes(capacity int) {
-	C.SetExprResCacheCapacityBytes(C.int64_t(capacity))
+func UpdateExprResCacheConfig() {
+	params := paramtable.Get()
+	diskPath := pathutil.GetPath(pathutil.ExprCachePath, paramtable.GetNodeID())
+	cMode := C.CString(params.QueryNodeCfg.ExprResCacheMode.GetValue())
+	cDiskPath := C.CString(diskPath)
+	defer C.free(unsafe.Pointer(cMode))
+	defer C.free(unsafe.Pointer(cDiskPath))
+
+	C.SetExprResCacheConfig(cMode, cDiskPath,
+		C.int64_t(params.QueryNodeCfg.ExprResCacheMemMaxBytes.GetAsInt64()),
+		C.bool(params.QueryNodeCfg.ExprResCacheMemCompressionEnabled.GetAsBool()),
+		C.int32_t(params.QueryNodeCfg.ExprResCacheMemAdmissionThreshold.GetAsInt32()),
+		C.int64_t(params.QueryNodeCfg.ExprResCacheMemMinEvalDurationUs.GetAsInt64()),
+		C.int64_t(params.QueryNodeCfg.ExprResCacheDiskMaxFileSizeBytes.GetAsInt64()),
+		C.int64_t(params.QueryNodeCfg.ExprResCacheDiskMinEvalDurationUs.GetAsInt64()))
 }
 
 func UpdateArrowIOThreadPoolCapacity(threads int) {

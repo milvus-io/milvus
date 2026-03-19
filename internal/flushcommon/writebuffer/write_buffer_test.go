@@ -360,7 +360,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 				},
 			},
 		}
-		err = l0wb.BufferData(nil, firstDeleteMsgs, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+		err = l0wb.BufferData(nil, firstDeleteMsgs, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 0)
 		s.Require().NoError(err)
 
 		evictDone := make(chan struct{})
@@ -387,7 +387,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 
 		bufferDataDone := make(chan error, 1)
 		go func() {
-			bufferDataDone <- l0wb.BufferData(nil, secondDeleteMsgs, &msgpb.MsgPosition{Timestamp: 300}, &msgpb.MsgPosition{Timestamp: 350})
+			bufferDataDone <- l0wb.BufferData(nil, secondDeleteMsgs, &msgpb.MsgPosition{Timestamp: 300}, &msgpb.MsgPosition{Timestamp: 350}, 0)
 		}()
 
 		select {
