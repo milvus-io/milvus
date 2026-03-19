@@ -21,11 +21,9 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"os/signal"
 	"path"
 	"strconv"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -724,14 +722,10 @@ func TestGetSegmentsByStates(t *testing.T) {
 }
 
 func TestService_WatchServices(t *testing.T) {
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT)
-	defer signal.Reset(syscall.SIGINT)
 	factory := dependency.NewDefaultFactory(true)
-	svr := CreateServer(context.TODO(), factory)
-	svr.session = &sessionutil.Session{
-		SessionRaw: sessionutil.SessionRaw{TriggerKill: true},
-	}
+	svrCtx, svrCancel := context.WithCancel(context.Background())
+	svr := CreateServer(svrCtx, factory)
+	svr.session = &sessionutil.Session{}
 	svr.serverLoopWg.Add(1)
 
 	ech := make(chan *sessionutil.SessionEvent)
@@ -743,26 +737,20 @@ func TestService_WatchServices(t *testing.T) {
 	svr.qnSessionWatcher = mockQnWatcher
 
 	flag := false
-	closed := false
-	sigDone := make(chan struct{}, 1)
-	sigQuit := make(chan struct{}, 1)
+	done := make(chan struct{}, 1)
 
 	go func() {
 		svr.watchService(context.Background())
 		flag = true
-		sigDone <- struct{}{}
-	}()
-	go func() {
-		<-sc
-		closed = true
-		sigQuit <- struct{}{}
+		done <- struct{}{}
 	}()
 
+	// Cancel svr.ctx before closing the channel so stopServiceWatch sees ctx.Err() != nil
+	// and skips os.Exit (simulating normal shutdown).
+	svrCancel()
 	close(ech)
-	<-sigDone
-	<-sigQuit
+	<-done
 	assert.True(t, flag)
-	assert.True(t, closed)
 
 	ech = make(chan *sessionutil.SessionEvent)
 
@@ -776,12 +764,12 @@ func TestService_WatchServices(t *testing.T) {
 	go func() {
 		svr.watchService(ctx)
 		flag = true
-		sigDone <- struct{}{}
+		done <- struct{}{}
 	}()
 
 	ech <- nil
 	cancel()
-	<-sigDone
+	<-done
 	assert.True(t, flag)
 }
 

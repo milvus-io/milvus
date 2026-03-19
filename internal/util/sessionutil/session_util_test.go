@@ -84,7 +84,7 @@ func TestInit(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix(ctx, "")
 
 	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
-	s.Init("inittest", "testAddr", false, false)
+	s.Init("inittest", "testAddr", false)
 	assert.NotEqual(t, int64(0), s.LeaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
 	s.Register()
@@ -107,7 +107,7 @@ func TestInitNoArgs(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix(ctx, "")
 
 	s := NewSession(ctx)
-	s.Init("inittest", "testAddr", false, false)
+	s.Init("inittest", "testAddr", false)
 	assert.NotEqual(t, int64(0), s.LeaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
 	s.Register()
@@ -140,7 +140,7 @@ func TestUpdateSessions(t *testing.T) {
 
 	getIDFunc := func() {
 		singleS := NewSessionWithEtcd(ctx, metaRoot, etcdCli, WithResueNodeID(false))
-		singleS.Init("test", "testAddr", false, false)
+		singleS.Init("test", "testAddr", false)
 		singleS.Register()
 		muList.Lock()
 		sList = append(sList, singleS)
@@ -383,7 +383,7 @@ func (suite *SessionWithVersionSuite) SetupTest() {
 
 	s1 := NewSessionWithEtcd(ctx, suite.metaRoot, suite.client, WithResueNodeID(false))
 	s1.Version.Major, s1.Version.Minor, s1.Version.Patch = 0, 0, 0
-	s1.Init(suite.serverName, "s1", false, false)
+	s1.Init(suite.serverName, "s1", false)
 	assert.Panics(suite.T(), func() {
 		s1.GetRegisteredRevision()
 	})
@@ -394,7 +394,7 @@ func (suite *SessionWithVersionSuite) SetupTest() {
 
 	s2 := NewSessionWithEtcd(ctx, suite.metaRoot, suite.client, WithResueNodeID(false))
 	s2.Version.Major, s2.Version.Minor, s2.Version.Patch = 2, 1, 0
-	s2.Init(suite.serverName, "s2", false, false)
+	s2.Init(suite.serverName, "s2", false)
 	s2.Register()
 
 	suite.sessions = append(suite.sessions, s2)
@@ -402,7 +402,7 @@ func (suite *SessionWithVersionSuite) SetupTest() {
 	s3 := NewSessionWithEtcd(ctx, suite.metaRoot, suite.client, WithResueNodeID(false))
 	s3.Version.Major, s3.Version.Minor, s3.Version.Patch = 2, 2, 0
 	s3.Version.Build = []string{"dev"}
-	s3.Init(suite.serverName, "s3", false, false)
+	s3.Init(suite.serverName, "s3", false)
 	s3.Register()
 
 	suite.sessions = append(suite.sessions, s3)
@@ -515,7 +515,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	ctx1 := context.Background()
 	s1 := NewSessionWithEtcd(ctx1, metaRoot, etcdCli, WithResueNodeID(false))
 
-	s1.Init("inittest", "testAddr", true, true)
+	s1.Init("inittest", "testAddr", true)
 	s1.SetEnableActiveStandBy(true)
 	s1.Register()
 	assert.Panics(t, func() {
@@ -534,7 +534,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	// register session 2, will be standby
 	ctx2 := context.Background()
 	s2 := NewSessionWithEtcd(ctx2, metaRoot, etcdCli, WithResueNodeID(false))
-	s2.Init("inittest", "testAddr", true, true)
+	s2.Init("inittest", "testAddr", true)
 	s2.SetEnableActiveStandBy(true)
 	s2.Register()
 	wg.Add(1)
@@ -640,8 +640,8 @@ func TestIntegrationMode(t *testing.T) {
 	assert.Equal(t, false, s1.reuseNodeID)
 	s2 := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
 	assert.Equal(t, false, s2.reuseNodeID)
-	s1.Init("inittest1", "testAddr1", false, false)
-	s1.Init("inittest2", "testAddr2", false, false)
+	s1.Init("inittest1", "testAddr1", false)
+	s1.Init("inittest2", "testAddr2", false)
 	assert.NotEqual(t, s1.ServerID, s2.ServerID)
 }
 
@@ -700,7 +700,7 @@ func (s *SessionSuite) TestGoingStop() {
 	sdisconnect.SetDisconnected(true)
 
 	sess := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
-	sess.Init("test", "normal", false, false)
+	sess.Init("test", "normal", false)
 	sess.Register()
 
 	cases := []struct {
@@ -729,7 +729,7 @@ func (s *SessionSuite) TestGoingStop() {
 func (s *SessionSuite) TestKeepAliveRetryActiveCancel() {
 	ctx := context.Background()
 	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
-	session.Init("test", "normal", false, false)
+	session.Init("test", "normal", false)
 
 	// Register
 	err := session.registerService()
@@ -744,7 +744,7 @@ func (s *SessionSuite) TestKeepAliveRetryActiveCancel() {
 func (s *SessionSuite) TestKeepAliveRetryChannelClose() {
 	ctx := context.Background()
 	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
-	session.Init("test", "normal", false, false)
+	session.Init("test", "normal", false)
 
 	// Register
 	err := session.registerService()
@@ -803,7 +803,7 @@ func (s *SessionSuite) TestGetSessions() {
 func (s *SessionSuite) TestVersionKey() {
 	ctx := context.Background()
 	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
-	session.Init(typeutil.MixCoordRole, "normal", false, false)
+	session.Init(typeutil.MixCoordRole, "normal", false)
 
 	session.Register()
 
@@ -816,7 +816,7 @@ func (s *SessionSuite) TestVersionKey() {
 
 	s.Panics(func() {
 		session2 := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
-		session2.Init(typeutil.MixCoordRole, "normal", false, false)
+		session2.Init(typeutil.MixCoordRole, "normal", false)
 		session2.Register()
 
 		resp, err = s.client.Get(ctx, session2.versionKey)
@@ -829,7 +829,7 @@ func (s *SessionSuite) TestVersionKey() {
 
 	common.Version = semver.MustParse("2.6.4")
 	session = NewSessionWithEtcd(ctx, s.metaRoot, s.client)
-	session.Init(typeutil.MixCoordRole, "normal", false, false)
+	session.Init(typeutil.MixCoordRole, "normal", false)
 	session.Register()
 
 	resp, err = s.client.Get(ctx, session.versionKey)
@@ -841,7 +841,7 @@ func (s *SessionSuite) TestVersionKey() {
 
 	common.Version = semver.MustParse("2.6.7")
 	session = NewSessionWithEtcd(ctx, s.metaRoot, s.client)
-	session.Init(typeutil.MixCoordRole, "normal", false, false)
+	session.Init(typeutil.MixCoordRole, "normal", false)
 	session.Register()
 
 	resp, err = s.client.Get(ctx, session.versionKey)
@@ -852,7 +852,7 @@ func (s *SessionSuite) TestVersionKey() {
 
 	common.Version = semver.MustParse("3.0.0")
 	session = NewSessionWithEtcd(ctx, s.metaRoot, s.client)
-	session.Init(typeutil.MixCoordRole, "normal", false, false)
+	session.Init(typeutil.MixCoordRole, "normal", false)
 	session.Register()
 
 	resp, err = s.client.Get(ctx, session.versionKey)
@@ -864,7 +864,7 @@ func (s *SessionSuite) TestVersionKey() {
 func (s *SessionSuite) TestSessionLifetime() {
 	ctx := context.Background()
 	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
-	session.Init("test", "normal", false, false)
+	session.Init("test", "normal", false)
 	session.Register()
 
 	resp, err := s.client.Get(ctx, session.getCompleteKey())
@@ -916,8 +916,8 @@ func TestForceKill(t *testing.T) {
 
 	// 子进程退出码
 	if e, ok := err.(*exec.ExitError); ok {
-		if e.ExitCode() != 1 {
-			t.Fatalf("expected exit 1, got %d", e.ExitCode())
+		if e.ExitCode() != ExitCodeEtcd {
+			t.Fatalf("expected exit %d, got %d", ExitCodeEtcd, e.ExitCode())
 		}
 	} else {
 		t.Fatalf("unexpected error: %#v", err)
@@ -927,7 +927,7 @@ func TestForceKill(t *testing.T) {
 func testForceKill(serverName string) {
 	etcdCli, _ := kvfactory.GetEtcdAndPath()
 	session := NewSessionWithEtcd(context.Background(), "test", etcdCli)
-	session.Init(serverName, "normal", false, false)
+	session.Init(serverName, "normal", false)
 	session.Register()
 
 	// trigger a force kill
