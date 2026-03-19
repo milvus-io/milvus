@@ -1544,7 +1544,6 @@ class TestHybridSearchIndependent(TestMilvusClientV2Base):
         """
         client = self._client()
         nq = 2
-        offset = 5
         # create db
         db_name = cf.gen_unique_str("db")
         self.create_database(client, db_name)
@@ -1608,8 +1607,9 @@ class TestHybridSearchIndependent(TestMilvusClientV2Base):
             metrics.append("COSINE")
 
         # get the result of search with the same params of the following hybrid search
-        single_search_param = {"metric_type": "COSINE", "params": {}, "offset": offset}
+        single_search_param = {"metric_type": "COSINE", "params": {}}
         for k in range(nq):
+            search_res_dict_array = []
             for i in range(len(vector_name_list)):
                 search_res_dict = {}
                 vectors_search = vectors[k]
@@ -1618,6 +1618,7 @@ class TestHybridSearchIndependent(TestMilvusClientV2Base):
                                          data=[vectors_search],
                                          anns_field=vector_name_list[i],
                                          search_params=single_search_param,
+                                         filter=f"{ct.default_int64_field_name} > 0",
                                          limit=default_limit,
                                          check_task=CheckTasks.check_search_results,
                                          check_items={"nq": 1,
@@ -1629,7 +1630,7 @@ class TestHybridSearchIndependent(TestMilvusClientV2Base):
                 distance_array = [hit["distance"] for hit in search_res[0]]
                 for j in range(len(ids)):
                     search_res_dict[ids[j]] = distance_array[j]
-                search_res_dict_array = [search_res_dict]
+                search_res_dict_array.append(search_res_dict)
             search_res_dict_array_nq.append(search_res_dict_array)
 
         # 6. calculate hybrid search baseline
@@ -1642,7 +1643,6 @@ class TestHybridSearchIndependent(TestMilvusClientV2Base):
                                         reqs=req_list,
                                         ranker=WeightedRanker(*weights),
                                         limit=default_limit,
-                                        offset=offset,
                                         check_task=CheckTasks.check_search_results,
                                         check_items={"nq": nq,
                                                      "ids": insert_ids,
@@ -1952,6 +1952,7 @@ class TestHybridSearchIndependent(TestMilvusClientV2Base):
         # get the result of search with the same params of the following hybrid search
         single_search_param = {"metric_type": "COSINE", "params": {}}
         for k in range(nq):
+            search_res_dict_array = []
             for i in range(len(vector_name_list)):
                 search_res_dict = {}
                 vectors_search = vectors[k]
@@ -1960,6 +1961,7 @@ class TestHybridSearchIndependent(TestMilvusClientV2Base):
                                          data=[vectors_search],
                                          anns_field=vector_name_list[i],
                                          search_params=single_search_param,
+                                         filter=f"{ct.default_int64_field_name} > 0",
                                          limit=default_limit,
                                          check_task=CheckTasks.check_search_results,
                                          check_items={"nq": 1,
@@ -1971,7 +1973,7 @@ class TestHybridSearchIndependent(TestMilvusClientV2Base):
                 distance_array = [hit["distance"] for hit in search_res[0]]
                 for j in range(len(ids)):
                     search_res_dict[ids[j]] = distance_array[j]
-                search_res_dict_array = [search_res_dict]
+                search_res_dict_array.append(search_res_dict)
             search_res_dict_array_nq.append(search_res_dict_array)
 
         # 6. calculate hybrid search baseline
