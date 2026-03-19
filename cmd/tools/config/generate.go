@@ -29,7 +29,7 @@ type DocContent struct {
 
 func collect() []DocContent {
 	params := &paramtable.ComponentParam{}
-	params.Init(paramtable.NewBaseTable())
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true)))
 
 	val := reflect.ValueOf(params).Elem()
 	data := make([]DocContent, 0)
