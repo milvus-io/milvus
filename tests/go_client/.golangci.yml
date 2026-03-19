@@ -57,7 +57,11 @@ linters:
         - ruleguard
       settings:
         ruleguard:
+          failOnError: true
           rules: ruleguard/rules.go
+    govet:
+      disable:
+        - printf
     misspell:
       locale: US
     revive:
