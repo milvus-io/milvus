@@ -14,7 +14,7 @@ default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
 default_string_field_name = ct.default_string_field_name
 
-default_primary_key_field_name = ct.default_int64_field_name
+default_primary_key_field_name = ct.default_primary_key_field_name
 default_vector_field_name = ct.default_float_vec_field_name
 
 
