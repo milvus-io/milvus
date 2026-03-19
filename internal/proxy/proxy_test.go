@@ -1908,10 +1908,10 @@ func TestProxy(t *testing.T) {
 
 		{
 			Params.Save(Params.ProxyCfg.MustUsePartitionKey.Key, "true")
+			defer Params.Reset(Params.ProxyCfg.MustUsePartitionKey.Key)
 			resp, err := proxy.Search(ctx, req)
 			assert.NoError(t, err)
 			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-			Params.Reset(Params.ProxyCfg.MustUsePartitionKey.Key)
 		}
 	})
 
@@ -1931,10 +1931,10 @@ func TestProxy(t *testing.T) {
 
 		{
 			Params.Save(Params.ProxyCfg.MustUsePartitionKey.Key, "true")
+			defer Params.Reset(Params.ProxyCfg.MustUsePartitionKey.Key)
 			resp, err := proxy.Search(ctx, req)
 			assert.NoError(t, err)
 			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-			Params.Reset(Params.ProxyCfg.MustUsePartitionKey.Key)
 		}
 	})
 

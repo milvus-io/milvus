@@ -47,6 +47,7 @@ func (suite *CatalogTestSuite) SetupTest() {
 
 func (suite *CatalogTestSuite) TearDownTest() {
 	if suite.kv != nil {
+		suite.kv.RemoveWithPrefix(context.Background(), "")
 		suite.kv.Close()
 	}
 }
@@ -197,23 +198,28 @@ func (suite *CatalogTestSuite) TestReleaseManyPartitions() {
 
 func (suite *CatalogTestSuite) TestReplica() {
 	ctx := context.Background()
-	suite.catalog.SaveReplica(ctx, &querypb.Replica{
+	err := suite.catalog.SaveReplica(ctx, &querypb.Replica{
 		CollectionID: 1,
 		ID:           1,
 	})
+	suite.NoError(err)
 
-	suite.catalog.SaveReplica(ctx, &querypb.Replica{
+	err = suite.catalog.SaveReplica(ctx, &querypb.Replica{
 		CollectionID: 1,
 		ID:           2,
 	})
+	suite.NoError(err)
 
-	suite.catalog.SaveReplica(ctx, &querypb.Replica{
+	err = suite.catalog.SaveReplica(ctx, &querypb.Replica{
 		CollectionID: 1,
 		ID:           3,
 	})
+	suite.NoError(err)
 
-	suite.catalog.ReleaseReplica(ctx, 1, 1)
-	suite.catalog.ReleaseReplica(ctx, 1, 2)
+	err = suite.catalog.ReleaseReplica(ctx, 1, 1)
+	suite.NoError(err)
+	err = suite.catalog.ReleaseReplica(ctx, 1, 2)
+	suite.NoError(err)
 
 	replicas, err := suite.catalog.GetReplicas(ctx)
 	suite.NoError(err)

@@ -83,9 +83,8 @@ func Test_GetComponentStates(t *testing.T) {
 	assert.Nil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -124,9 +123,8 @@ func Test_GetStatisticsChannel(t *testing.T) {
 	assert.Nil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -162,9 +160,8 @@ func Test_InvalidateCollectionMetaCache(t *testing.T) {
 	assert.Nil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -200,9 +197,8 @@ func Test_InvalidateCredentialCache(t *testing.T) {
 	assert.Nil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.InvalidateCredentialCache(ctx, &proxypb.InvalidateCredCacheRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -238,9 +234,8 @@ func Test_UpdateCredentialCache(t *testing.T) {
 	assert.Nil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.UpdateCredentialCache(ctx, &proxypb.UpdateCredCacheRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -276,9 +271,8 @@ func Test_RefreshPolicyInfoCache(t *testing.T) {
 	assert.Nil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -314,9 +308,8 @@ func Test_GetProxyMetrics(t *testing.T) {
 	assert.Nil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetProxyMetrics(ctx, &milvuspb.GetMetricsRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -352,9 +345,8 @@ func Test_SetRates(t *testing.T) {
 	assert.Nil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.SetRates(ctx, &proxypb.SetRatesRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -390,9 +382,8 @@ func Test_ListClientInfos(t *testing.T) {
 	assert.Nil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.ListClientInfos(ctx, &proxypb.ListClientInfosRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -427,9 +418,8 @@ func Test_GetDdChannel(t *testing.T) {
 	assert.Nil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.GetDdChannel(ctx, &internalpb.GetDdChannelRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -493,9 +483,8 @@ func Test_InvalidateShardLeaderCache(t *testing.T) {
 	assert.Nil(t, err)
 
 	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(20 * time.Millisecond)
 	_, err = client.InvalidateShardLeaderCache(ctx, &proxypb.InvalidateShardLeaderCacheRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
