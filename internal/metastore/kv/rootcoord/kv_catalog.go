@@ -1651,16 +1651,21 @@ func (kc *Catalog) MigrateGrantsToEntityID(ctx context.Context, tenant string,
 		migrateGranteeSubKeys(values[i], newID)
 	}
 
-	// Apply changes: remove stale grants, save new ID-based keys
-	if len(removeIDPrefixes) > 0 {
-		if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, nil, removeIDPrefixes); err != nil {
-			log.Ctx(ctx).Warn("fail to remove stale grantee-id prefixes during migration", zap.Error(err))
-			return err
-		}
-	}
+	// Apply changes in crash-safe order:
+	// Step 1: Save new ID-based keys + remove stale grantee pointer keys (atomic).
+	// Step 2: Remove stale grantee-id sub-keys (orphaned sub-keys are harmless
+	//         since no pointer references them after step 1).
+	// Step 3: Mark migration complete.
+	// Crash between 1→2 leaves orphaned sub-keys (harmless). Crash between 2→3 re-runs idempotently.
 	if len(saves) > 0 || len(removeKeys) > 0 {
 		if err = kc.Txn.MultiSaveAndRemove(ctx, saves, removeKeys); err != nil {
 			log.Ctx(ctx).Warn("fail to save migrated grants", zap.Error(err))
+			return err
+		}
+	}
+	if len(removeIDPrefixes) > 0 {
+		if err = kc.Txn.MultiSaveAndRemoveWithPrefix(ctx, nil, removeIDPrefixes); err != nil {
+			log.Ctx(ctx).Warn("fail to remove stale grantee-id prefixes during migration", zap.Error(err))
 			return err
 		}
 	}

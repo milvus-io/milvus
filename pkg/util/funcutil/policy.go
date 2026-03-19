@@ -3,6 +3,7 @@ package funcutil
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -113,6 +114,9 @@ func GetObjectNames(m interface{}, index int32) []string {
 	return res
 }
 
+// PolicyForPrivilege builds a Casbin policy string for one privilege grant.
+// dbName is the database identifier — it may be a human-readable name (e.g. "default")
+// or an ID-based key (e.g. "dbID:1"). The caller is responsible for formatting.
 func PolicyForPrivilege(roleName string, objectType string, objectName string, privilege string, dbName string) string {
 	return fmt.Sprintf(`{"PType":"p","V0":"%s","V1":"%s","V2":"%s"}`, roleName, PolicyForResource(dbName, objectType, objectName), privilege)
 }
@@ -127,15 +131,19 @@ func PrivilegesForPolicy(policy string) []string {
 	return strings.Split(policy, "|")
 }
 
-func PolicyForResource(dbName string, objectType string, objectName string) string {
-	return fmt.Sprintf("%s-%s", objectType, CombineObjectName(dbName, objectName))
+// PolicyForResource builds the resource part of a Casbin policy string.
+// dbPart is the database identifier — it may be a human-readable name (e.g. "default")
+// or an ID-based key (e.g. "dbID:1"). The caller is responsible for formatting.
+func PolicyForResource(dbPart string, objectType string, objectName string) string {
+	return fmt.Sprintf("%s-%s", objectType, CombineObjectName(dbPart, objectName))
 }
 
-func CombineObjectName(dbName string, objectName string) string {
-	if dbName == "" {
-		dbName = util.DefaultDBName
+// dbPart can be a name ("default") or an ID-based string ("dbID:1").
+func CombineObjectName(dbPart string, objectName string) string {
+	if dbPart == "" {
+		dbPart = util.DefaultDBName
 	}
-	return fmt.Sprintf("%s.%s", dbName, objectName)
+	return fmt.Sprintf("%s.%s", dbPart, objectName)
 }
 
 func SplitObjectName(objectName string) (string, string) {
@@ -167,9 +175,7 @@ func ExtractCollectionID(objectName string) (int64, error) {
 	if !IsIDBasedObjectName(objectName) {
 		return 0, errors.Newf("objectName %q is not ID-based", objectName)
 	}
-	var id int64
-	_, err := fmt.Sscanf(objectName[len(collectionIDPrefix):], "%d", &id)
-	return id, err
+	return strconv.ParseInt(objectName[len(collectionIDPrefix):], 10, 64)
 }
 
 const databaseIDPrefix = "dbID:"
@@ -189,7 +195,5 @@ func ExtractDatabaseID(dbName string) (int64, error) {
 	if !IsIDBasedDBName(dbName) {
 		return 0, errors.Newf("dbName %q is not ID-based", dbName)
 	}
-	var id int64
-	_, err := fmt.Sscanf(dbName[len(databaseIDPrefix):], "%d", &id)
-	return id, err
+	return strconv.ParseInt(dbName[len(databaseIDPrefix):], 10, 64)
 }

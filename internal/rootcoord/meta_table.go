@@ -678,7 +678,7 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 
 	// Delete all grants referencing this collection immediately so they don't
 	// linger until the tombstone sweeper runs (which can take minutes).
-	tenant := Params.CommonCfg.ClusterName.GetValue()
+	tenant := util.DefaultTenant
 	if err := mt.catalog.DeleteGrantByCollectionID(ctx1, tenant, collectionID, db.Name, coll.Name); err != nil {
 		log.Ctx(ctx).Warn("failed to delete grants for dropped collection, skipping",
 			zap.Int64("collectionID", collectionID), zap.Error(err))
@@ -762,7 +762,7 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		return err
 	}
 
-	tenant := Params.CommonCfg.ClusterName.GetValue()
+	tenant := util.DefaultTenant
 	dbName := ""
 	if db, dbErr := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp); dbErr == nil {
 		dbName = db.Name
@@ -2044,7 +2044,7 @@ func (mt *MetaTable) OperatePrivilege(ctx context.Context, tenant string, entity
 // MigrateGrantsToEntityID performs a one-time additive migration of all name-based grants to ID-based grants.
 // New ID-based keys are created alongside existing name-based keys for rollback safety.
 func (mt *MetaTable) MigrateGrantsToEntityID(ctx context.Context) error {
-	tenant := Params.CommonCfg.ClusterName.GetValue()
+	tenant := util.DefaultTenant
 	return mt.catalog.MigrateGrantsToEntityID(ctx, tenant,
 		func(dbName, collName string) (int64, error) {
 			mt.ddLock.RLock()
@@ -2252,7 +2252,9 @@ func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvu
 	// Handle grants at MetaTable level with pre-resolved collectionIDs
 	for _, rg := range resolvedGrants {
 		if err := mt.catalog.AlterGrant(ctx, tenant, rg.grant, milvuspb.OperatePrivilegeType_Grant, rg.dbID, rg.collectionID); err != nil {
-			return errors.Wrap(err, "failed to alter grant during restore")
+			if !common.IsIgnorableError(err) {
+				return errors.Wrap(err, "failed to alter grant during restore")
+			}
 		}
 	}
 	return nil

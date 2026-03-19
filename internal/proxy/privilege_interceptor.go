@@ -95,8 +95,8 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	isCollectionType := objectType == commonpb.ObjectType_Collection.String()
 	idDBStr := "" // pre-resolved ID-based database string, empty if unresolvable
 	if isCollectionType && dbName != "" && dbName != util.AnyWord {
-		if dbID, err := getDBIDFromCache(ctx, dbName); err == nil {
-			idDBStr = funcutil.FormatDatabaseID(dbID)
+		if dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, dbName); err == nil {
+			idDBStr = funcutil.FormatDatabaseID(dbInfo.dbID)
 		}
 	}
 
@@ -109,18 +109,20 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 			if objName == util.AnyWord || objName == "" {
 				return funcutil.PolicyForResource(idDBStr, objectType, objName)
 			}
-			if colID, err := getCollectionIDFromCache(ctx, dbName, objName); err == nil {
+			if colID, err := globalMetaCache.GetCollectionID(ctx, dbName, objName); err == nil {
 				return funcutil.PolicyForResource(idDBStr, objectType, funcutil.FormatCollectionID(colID))
 			}
 			// Collection resolution failed — fall back to name-based with alias resolution
 			resolvedName := objName
-			if actual, resolveErr := resolveCollectionAlias(ctx, dbName, objName); resolveErr == nil {
-				resolvedName = actual
+			if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() {
+				if actual, resolveErr := resolveCollectionAlias(ctx, dbName, objName); resolveErr == nil {
+					resolvedName = actual
+				}
 			}
 			return funcutil.PolicyForResource(dbName, objectType, resolvedName)
 		}
 		resolvedName := objName
-		if isCollectionType {
+		if isCollectionType && Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() {
 			if actual, resolveErr := resolveCollectionAlias(ctx, dbName, objName); resolveErr == nil {
 				resolvedName = actual
 			}
@@ -211,26 +213,4 @@ func resolveCollectionAlias(ctx context.Context, dbName, nameOrAlias string) (st
 		return nameOrAlias, merr.WrapErrServiceInternal("meta cache not initialized")
 	}
 	return cache.ResolveCollectionAlias(ctx, dbName, nameOrAlias)
-}
-
-// getDBIDFromCache gets a database ID from globalMetaCache by name.
-func getDBIDFromCache(ctx context.Context, dbName string) (int64, error) {
-	cache := globalMetaCache
-	if cache == nil {
-		return 0, merr.WrapErrServiceInternal("meta cache not initialized")
-	}
-	dbInfo, err := cache.GetDatabaseInfo(ctx, dbName)
-	if err != nil {
-		return 0, err
-	}
-	return dbInfo.dbID, nil
-}
-
-// getCollectionIDFromCache gets a collection ID from globalMetaCache by name/alias.
-func getCollectionIDFromCache(ctx context.Context, dbName, collName string) (int64, error) {
-	cache := globalMetaCache
-	if cache == nil {
-		return 0, merr.WrapErrServiceInternal("meta cache not initialized")
-	}
-	return cache.GetCollectionID(ctx, dbName, collName)
 }
