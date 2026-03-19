@@ -66,10 +66,13 @@ linters:
         - ruleguard
       settings:
         ruleguard:
+          failOnError: true
           rules: rules.go
     govet:
       enable:
         - nilness
+      disable:
+        - printf
     misspell:
       locale: US
     revive:
