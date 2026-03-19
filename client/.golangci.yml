@@ -1,192 +1,222 @@
+version: "2"
 run:
-  go: "1.22"
-
+  go: "1.25"
 linters:
-  disable-all: true
+  default: none
   enable:
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
     - decorder
     - depguard
-    - gofmt
-    - goimports
-    - gosec
-    - revive
-    - unconvert
-    - misspell
-    - typecheck
     - durationcheck
     - forbidigo
-    - gci
-    - whitespace
-    - gofumpt
     - gocritic
-
-linters-settings:
-  gci:
-    sections:
-      - standard
-      - default
-      - prefix(github.com/milvus-io)
-    custom-order: true
-  gofumpt:
-    module-path: github.com/milvus-io
-  goimports:
-    local-prefixes: github.com/milvus-io
-  revive:
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - revive
+    - staticcheck
+    - unconvert
+    - whitespace
+  settings:
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: errors
+              desc: not allowed, use github.com/cockroachdb/errors
+            - pkg: github.com/pkg/errors
+              desc: not allowed, use github.com/cockroachdb/errors
+            - pkg: github.com/pingcap/errors
+              desc: not allowed, use github.com/cockroachdb/errors
+            - pkg: golang.org/x/xerrors
+              desc: not allowed, use github.com/cockroachdb/errors
+            - pkg: github.com/go-errors/errors
+              desc: not allowed, use github.com/cockroachdb/errors
+            - pkg: io/ioutil
+              desc: ioutil is deprecated after 1.16, 1.17, use os and io package instead
+            - pkg: github.com/tikv/client-go/rawkv
+              desc: not allowed, use github.com/tikv/client-go/v2/txnkv
+            - pkg: github.com/tikv/client-go/v2/rawkv
+              desc: not allowed, use github.com/tikv/client-go/v2/txnkv
+    forbidigo:
+      forbid:
+        - pattern: ^time\.Tick$
+        - pattern: return merr\.Err[a-zA-Z]+
+        - pattern: merr\.Wrap\w+\(\)\.Error\(\)
+        - pattern: '\.(ErrorCode|Reason) = '
+        - pattern: Reason:\s+\w+\.Error\(\)
+        - pattern: errors.New\((.+)\.GetReason\(\)\)
+        - pattern: commonpb\.Status\{[\s\n]*ErrorCode:[\s\n]*.+[\s\S\n]*?\}
+        - pattern: os\.Open\(.+\)
+        - pattern: os\.ReadFile\(.+\)
+        - pattern: os\.WriteFile\(.+\)
+        - pattern: runtime.NumCPU
+        - pattern: runtime.GOMAXPROCS(0)
+    gocritic:
+      enabled-checks:
+        - ruleguard
+      settings:
+        ruleguard:
+          rules: ruleguard/rules.go
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: unused-parameter
+          disabled: true
+        - name: var-naming
+          arguments:
+            - - ID
+          severity: warning
+          disabled: false
+        - name: context-as-argument
+          arguments:
+            - allowTypesBefore: '*testing.T'
+          severity: warning
+          disabled: false
+        - name: datarace
+          severity: warning
+          disabled: false
+        - name: duplicated-imports
+          severity: warning
+          disabled: false
+        - name: waitgroup-by-value
+          severity: warning
+          disabled: false
+        - name: indent-error-flow
+          arguments:
+            - preserveScope
+          severity: warning
+          disabled: false
+        - name: range-val-in-closure
+          severity: warning
+          disabled: false
+        - name: range-val-address
+          severity: warning
+          disabled: false
+        - name: string-of-int
+          severity: warning
+          disabled: false
+  exclusions:
+    generated: lax
     rules:
-      - name: unused-parameter
-        disabled: true
-      - name: var-naming
-        severity: warning
-        disabled: false
-        arguments:
-          - ["ID"] # Allow list
-      - name: context-as-argument
-        severity: warning
-        disabled: false
-        arguments:
-          - allowTypesBefore: "*testing.T"
-      - name: datarace
-        severity: warning
-        disabled: false
-      - name: duplicated-imports
-        severity: warning
-        disabled: false
-      - name: waitgroup-by-value
-        severity: warning
-        disabled: false
-      - name: indent-error-flow
-        severity: warning
-        disabled: false
-        arguments:
-          - "preserveScope"
-      - name: range-val-in-closure
-        severity: warning
-        disabled: false
-      - name: range-val-address
-        severity: warning
-        disabled: false
-      - name: string-of-int
-        severity: warning
-        disabled: false
-  misspell:
-    locale: US
-  gocritic:
-    enabled-checks:
-      - ruleguard
-    settings:
-      ruleguard:
-        failOnError: true
-        rules: "ruleguard/rules.go"
-  depguard:
-    rules:
-      main:
-        deny:
-          - pkg: "errors"
-            desc: not allowed, use github.com/cockroachdb/errors
-          - pkg: "github.com/pkg/errors"
-            desc: not allowed, use github.com/cockroachdb/errors
-          - pkg: "github.com/pingcap/errors"
-            desc: not allowed, use github.com/cockroachdb/errors
-          - pkg: "golang.org/x/xerrors"
-            desc: not allowed, use github.com/cockroachdb/errors
-          - pkg: "github.com/go-errors/errors"
-            desc: not allowed, use github.com/cockroachdb/errors
-          - pkg: "io/ioutil"
-            desc: ioutil is deprecated after 1.16, 1.17, use os and io package instead
-          - pkg: "github.com/tikv/client-go/rawkv"
-            desc: not allowed, use github.com/tikv/client-go/v2/txnkv
-          - pkg: "github.com/tikv/client-go/v2/rawkv"
-            desc: not allowed, use github.com/tikv/client-go/v2/txnkv
-  forbidigo:
-    forbid:
-      - '^time\.Tick$'
-      - 'return merr\.Err[a-zA-Z]+'
-      - 'merr\.Wrap\w+\(\)\.Error\(\)'
-      - '\.(ErrorCode|Reason) = '
-      - 'Reason:\s+\w+\.Error\(\)'
-      - 'errors.New\((.+)\.GetReason\(\)\)'
-      - 'commonpb\.Status\{[\s\n]*ErrorCode:[\s\n]*.+[\s\S\n]*?\}'
-      - 'os\.Open\(.+\)'
-      - 'os\.ReadFile\(.+\)'
-      - 'os\.WriteFile\(.+\)'
-      - "runtime.NumCPU"
-      - "runtime.GOMAXPROCS(0)"
-      #- 'fmt\.Print.*' WIP
-
+      - linters:
+          - forbidigo
+        path: .+_test\.go
+      - path: (.+)\.go$
+        text: should have a package comment
+      - path: (.+)\.go$
+        text: should have comment
+      - path: (.+)\.go$
+        text: should be of the form
+      - path: (.+)\.go$
+        text: should not use dot imports
+      - path: (.+)\.go$
+        text: which can be annoying to use
+      - path: (.+)\.go$
+        text: G102
+      - path: (.+)\.go$
+        text: G103
+      - path: (.+)\.go$
+        text: G104
+      - path: (.+)\.go$
+        text: G301
+      - path: (.+)\.go$
+        text: G302
+      - path: (.+)\.go$
+        text: G304
+      - path: (.+)\.go$
+        text: G307
+      - path: (.+)\.go$
+        text: G402
+      - path: (.+)\.go$
+        text: G404
+      - path: (.+)\.go$
+        text: SA1019
+      - path: (.+)\.go$
+        text: SA5001
+      - path: (.+)\.go$
+        text: sloppyLen
+      - path: (.+)\.go$
+        text: dupSubExpr
+      - path: (.+)\.go$
+        text: assignOp
+      - path: (.+)\.go$
+        text: ifElseChain
+      - path: (.+)\.go$
+        text: elseif
+      - path: (.+)\.go$
+        text: commentFormatting
+      - path: (.+)\.go$
+        text: exitAfterDefer
+      - path: (.+)\.go$
+        text: captLocal
+      - path: (.+)\.go$
+        text: singleCaseSwitch
+      - path: (.+)\.go$
+        text: typeSwitchVar
+      - path: (.+)\.go$
+        text: indent-error-flow
+      - path: (.+)\.go$
+        text: appendAssign
+      - path: (.+)\.go$
+        text: deprecatedComment
+      - path: (.+)\.go$
+        text: SA9009
+      - path: (.+)\.go$
+        text: SA1006
+      - path: (.+)\.go$
+        text: S1009
+      - path: (.+)\.go$
+        text: offBy1
+      - path: (.+)\.go$
+        text: unslice
+      - path: (.+)\.go$
+        text: G115
+    paths:
+      - partial_search_test.go
+      - build
+      - configs
+      - deployments
+      - docs
+      - scripts
+      - internal/core
+      - cmake_build
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-dirs:
-    - build
-    - configs
-    - deployments
-    - docs
-    - scripts
-    - internal/core
-    - cmake_build
-  exclude-files:
-    - partial_search_test.go
-  exclude-use-default: false
-  exclude-rules:
-    - path: .+_test\.go
-      linters:
-        - forbidigo
-  exclude:
-    - should have a package comment
-    - should have comment
-    - should be of the form
-    - should not use dot imports
-    - which can be annoying to use
-    # Binds to all network interfaces
-    - G102
-    # Use of unsafe calls should be audited
-    - G103
-    # Errors unhandled
-    - G104
-    # file/folder Permission
-    - G301
-    - G302
-    # Potential file inclusion via variable
-    - G304
-    # Deferring unsafe method like *os.File Close
-    - G307
-    # TLS MinVersion too low
-    - G402
-    # Use of weak random number generator math/rand
-    - G404
-    # Unused parameters
-    - SA1019
-    # defer return errors
-    - SA5001
-    # TODO: cleanup following exclusions, added on golangci-lint upgrade
-    - sloppyLen
-    - dupSubExpr
-    - assignOp
-    - ifElseChain
-    - elseif
-    - commentFormatting
-    - exitAfterDefer
-    - captLocal
-    - singleCaseSwitch
-    - typeSwitchVar
-    - indent-error-flow
-    - appendAssign
-    - deprecatedComment
-    - SA9009
-    - SA1006
-    - S1009
-    - offBy1
-    - unslice    
-    # Integer overflow conversion
-    - G115
-
-  # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
   max-issues-per-linter: 0
-  # Maximum count of issues with the same text. Set to 0 to disable. Default is 3.
   max-same-issues: 0
-
-service:
-  # use the fixed version to not introduce new linters unexpectedly
-  golangci-lint-version: 1.55.2
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/milvus-io)
+      custom-order: true
+    gofumpt:
+      module-path: github.com/milvus-io
+    goimports:
+      local-prefixes:
+        - github.com/milvus-io
+  exclusions:
+    generated: lax
+    paths:
+      - partial_search_test.go
+      - build
+      - configs
+      - deployments
+      - docs
+      - scripts
+      - internal/core
+      - cmake_build
+      - third_party$
+      - builtin$
+      - examples$
