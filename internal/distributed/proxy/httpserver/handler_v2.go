@@ -376,7 +376,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		ctx = proxy.NewContextWithMetadata(ctx, username.(string), dbName)
 		traceID := span.SpanContext().TraceID().String()
 		ctx = log.WithTraceID(ctx, traceID)
-		gCtx.Keys["traceID"] = traceID
+		gCtx.Set("traceID", traceID)
 		log.Ctx(ctx).Debug("high level restful api, read parameters from request body, then start to handle.",
 			zap.Any("url", gCtx.Request.URL.Path))
 

@@ -49,7 +49,7 @@ func UnaryUpdateAccessInfoInterceptor(ctx context.Context, req any, rpcInfonfo *
 }
 
 func AccessLogMiddleware(ctx *gin.Context) {
-	accessInfo := info.NewRestfulInfo()
+	accessInfo := info.NewRestfulInfo(ctx)
 	ctx.Set(ContextLogKey, accessInfo)
 	ctx.Next()
 	accessInfo.InitReq()
