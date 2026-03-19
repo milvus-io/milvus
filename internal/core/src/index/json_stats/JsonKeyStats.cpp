@@ -107,6 +107,8 @@ JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
 }
 
 JsonKeyStats::~JsonKeyStats() {
+    bson_inverted_index_.reset();
+    bson_index_cache_slot_.reset();
     boost::filesystem::remove_all(path_);
 }
 
