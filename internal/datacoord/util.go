@@ -276,10 +276,22 @@ func getCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMer
 	}
 }
 
+func matchFieldBinlog(fieldBinLog *datapb.FieldBinlog, fieldID int64) bool {
+	if fieldBinLog.GetFieldID() == fieldID {
+		return true
+	}
+	for _, childField := range fieldBinLog.GetChildFields() {
+		if childField == fieldID {
+			return true
+		}
+	}
+	return false
+}
+
 func getBinLogIDs(segment *SegmentInfo, fieldID int64) []int64 {
 	binlogIDs := make([]int64, 0)
 	for _, fieldBinLog := range segment.GetBinlogs() {
-		if fieldBinLog.GetFieldID() == fieldID {
+		if matchFieldBinlog(fieldBinLog, fieldID) {
 			for _, binLog := range fieldBinLog.GetBinlogs() {
 				binlogIDs = append(binlogIDs, binLog.GetLogID())
 			}
@@ -292,7 +304,7 @@ func getBinLogIDs(segment *SegmentInfo, fieldID int64) []int64 {
 func getTotalBinlogRows(segment *SegmentInfo, fieldID int64) int64 {
 	var total int64
 	for _, fieldBinLog := range segment.GetBinlogs() {
-		if fieldBinLog.GetFieldID() == fieldID {
+		if matchFieldBinlog(fieldBinLog, fieldID) {
 			for _, binLog := range fieldBinLog.GetBinlogs() {
 				total += binLog.EntriesNum
 			}

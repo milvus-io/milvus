@@ -176,3 +176,130 @@ func (suite *UtilSuite) TestCalculateL0SegmentSize() {
 
 	suite.Equal(calculateL0SegmentSize(fields), float64(logsize))
 }
+
+func (suite *UtilSuite) TestMatchFieldBinlog() {
+	// Direct field ID match
+	fb := &datapb.FieldBinlog{FieldID: 100}
+	suite.True(matchFieldBinlog(fb, 100))
+	suite.False(matchFieldBinlog(fb, 200))
+
+	// Match via ChildFields (V2/V3 column group)
+	fb = &datapb.FieldBinlog{
+		FieldID:     0, // column group ID
+		ChildFields: []int64{100, 101, 102},
+	}
+	suite.True(matchFieldBinlog(fb, 100))
+	suite.True(matchFieldBinlog(fb, 101))
+	suite.True(matchFieldBinlog(fb, 102))
+	suite.False(matchFieldBinlog(fb, 200))
+}
+
+func (suite *UtilSuite) TestGetBinLogIDs_ColumnGroup() {
+	// V1 storage: FieldID == fieldID
+	seg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{LogID: 1},
+						{LogID: 2},
+					},
+				},
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{LogID: 3},
+					},
+				},
+			},
+		},
+	}
+
+	ids := getBinLogIDs(seg, 100)
+	suite.Equal([]int64{1, 2}, ids)
+
+	ids = getBinLogIDs(seg, 101)
+	suite.Equal([]int64{3}, ids)
+
+	ids = getBinLogIDs(seg, 999)
+	suite.Empty(ids)
+
+	// V2/V3 storage: field in composite column group
+	seg = &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID:     0, // column group ID
+					ChildFields: []int64{100, 101, 106},
+					Binlogs: []*datapb.Binlog{
+						{LogID: 10},
+						{LogID: 11},
+					},
+				},
+				{
+					FieldID: 200, // individual field (e.g. vector)
+					Binlogs: []*datapb.Binlog{
+						{LogID: 20},
+					},
+				},
+			},
+		},
+	}
+
+	// Field 106 is inside column group 0
+	ids = getBinLogIDs(seg, 106)
+	suite.Equal([]int64{10, 11}, ids)
+
+	// Field 100 is also inside column group 0
+	ids = getBinLogIDs(seg, 100)
+	suite.Equal([]int64{10, 11}, ids)
+
+	// Field 200 matches directly
+	ids = getBinLogIDs(seg, 200)
+	suite.Equal([]int64{20}, ids)
+
+	// Field 999 not found
+	ids = getBinLogIDs(seg, 999)
+	suite.Empty(ids)
+}
+
+func (suite *UtilSuite) TestGetTotalBinlogRows_ColumnGroup() {
+	// V1 storage
+	seg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 500},
+						{EntriesNum: 300},
+					},
+				},
+			},
+		},
+	}
+	suite.Equal(int64(800), getTotalBinlogRows(seg, 100))
+	suite.Equal(int64(0), getTotalBinlogRows(seg, 999))
+
+	// V2/V3 storage: field in composite column group
+	seg = &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID:     0,
+					ChildFields: []int64{100, 101, 106},
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 1000},
+						{EntriesNum: 2000},
+					},
+				},
+			},
+		},
+	}
+
+	// Field 106 is inside column group 0
+	suite.Equal(int64(3000), getTotalBinlogRows(seg, 106))
+	suite.Equal(int64(3000), getTotalBinlogRows(seg, 100))
+	suite.Equal(int64(0), getTotalBinlogRows(seg, 999))
+}
