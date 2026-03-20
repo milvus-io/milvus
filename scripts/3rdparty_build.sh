@@ -64,11 +64,11 @@ done
 
 # Validate build type
 case "${BUILD_TYPE}" in
-  Debug|Release)
+  Debug|Release|RelWithDebInfo|MinSizeRel)
     echo "Build type: ${BUILD_TYPE}"
     ;;
   *)
-    echo "Invalid build type: ${BUILD_TYPE}. Valid options are: Debug, Release"
+    echo "Invalid build type: ${BUILD_TYPE}. Valid options are: Debug, Release, RelWithDebInfo, MinSizeRel"
     exit 1
     ;;
 esac
