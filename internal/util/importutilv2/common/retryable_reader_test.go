@@ -222,8 +222,7 @@ func TestRetryableReader_DenylistRetry_EOFHandling(t *testing.T) {
 }
 
 func TestRetryableReader_ContextCanceled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately
+	ctx := context.Background()
 
 	mockReader := &customMockReader{
 		readFunc: func(p []byte) (int, error) {
