@@ -242,7 +242,7 @@ func TestSecondaryReplicateManagerWithTxn(t *testing.T) {
 	}
 }
 
-func testSwitchReplicateMode(t *testing.T, rm ReplicateManager, primaryClusterID, secondaryClusterID string) {
+func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterID, secondaryClusterID string) {
 	ctx := context.Background()
 
 	// switch to primary
@@ -382,7 +382,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicateManager, primaryClusterID
 	assert.Equal(t, cp.TimeTick, uint64(0))
 }
 
-func testMessageOnPrimary(t *testing.T, rm ReplicateManager) {
+func testMessageOnPrimary(t *testing.T, rm ReplicatesManager) {
 	// switch to primary
 	err := rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessage("test1", "test2"))
 	assert.NoError(t, err)
@@ -409,7 +409,7 @@ func testMessageOnPrimary(t *testing.T, rm ReplicateManager) {
 	assert.Nil(t, g)
 }
 
-func testMessageOnSecondary(t *testing.T, rm ReplicateManager) {
+func testMessageOnSecondary(t *testing.T, rm ReplicatesManager) {
 	// switch to secondary
 	err := rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessage("test2", "test1"))
 	assert.NoError(t, err)
