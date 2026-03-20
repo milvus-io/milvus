@@ -3710,22 +3710,21 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			assert.Contains(t, err.Error(), "range search is not supported for vector array (embedding list) fields")
 		})
 
-		t.Run("vector array with group by", func(t *testing.T) {
+		t.Run("vector array with group by passes parseSearchInfo", func(t *testing.T) {
+			// Group by validation for ArrayOfVector is now handled in initSearchRequest(),
+			// so parseSearchInfo should pass regardless of group by field.
 			schema := createSchemaWithVectorArray("embeddings_list")
 			params := createSearchParams("embeddings_list")
 
-			// Add group by parameter
+			// Add group by parameter (non-PK field)
 			params = append(params, &commonpb.KeyValuePair{
 				Key:   GroupByFieldKey,
 				Value: "group_field",
 			})
 
 			searchInfo, err := parseSearchInfo(params, schema, nil, false)
-			assert.Error(t, err)
-			assert.Nil(t, searchInfo)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.Contains(t, err.Error(), "group by search is not supported for vector array (embedding list) fields")
-			assert.Contains(t, err.Error(), "embeddings_list")
+			assert.NoError(t, err)
+			assert.NotNil(t, searchInfo)
 		})
 
 		t.Run("vector array with iterator", func(t *testing.T) {
@@ -5679,5 +5678,142 @@ func TestSearchTask_InitSearchRequestWithHighlighter(t *testing.T) {
 		// When needRequery is true, DynamicFields should NOT be set (the branch is skipped)
 		// The DynamicFields will be handled in requery stage instead
 		assert.Empty(t, plan.DynamicFields)
+	})
+}
+
+func TestIsEmbeddingListPlaceholderType(t *testing.T) {
+	embListTypes := []commonpb.PlaceholderType{
+		commonpb.PlaceholderType_EmbListFloatVector,
+		commonpb.PlaceholderType_EmbListFloat16Vector,
+		commonpb.PlaceholderType_EmbListBFloat16Vector,
+		commonpb.PlaceholderType_EmbListBinaryVector,
+		commonpb.PlaceholderType_EmbListInt8Vector,
+	}
+	for _, pt := range embListTypes {
+		assert.True(t, isEmbeddingListPlaceholderType(pt), "expected true for %s", pt.String())
+	}
+
+	nonEmbListTypes := []commonpb.PlaceholderType{
+		commonpb.PlaceholderType_FloatVector,
+		commonpb.PlaceholderType_BinaryVector,
+		commonpb.PlaceholderType_Float16Vector,
+		commonpb.PlaceholderType_BFloat16Vector,
+		commonpb.PlaceholderType_SparseFloatVector,
+		commonpb.PlaceholderType_Int8Vector,
+		commonpb.PlaceholderType_VarChar,
+		commonpb.PlaceholderType(0),
+	}
+	for _, pt := range nonEmbListTypes {
+		assert.False(t, isEmbeddingListPlaceholderType(pt), "expected false for %s", pt.String())
+	}
+}
+
+func TestSearchTask_ArrayOfVectorGroupBy(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "regular_vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+			{FieldID: 102, Name: "scalar_field", DataType: schemapb.DataType_VarChar},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 103,
+				Name:    "struct_array",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 104, Name: "emb_vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+				},
+			},
+		},
+	}
+	schemaInfo := newSchemaInfo(schema)
+
+	makePlaceholderGroup := func(phType commonpb.PlaceholderType) []byte {
+		phg := &commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{{
+				Tag:    "$0",
+				Type:   phType,
+				Values: [][]byte{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}, // 4 floats
+			}},
+		}
+		bs, _ := proto.Marshal(phg)
+		return bs
+	}
+
+	makeTask := func(annsField string, groupByField string, phType commonpb.PlaceholderType) *searchTask {
+		params := []*commonpb.KeyValuePair{
+			{Key: AnnsFieldKey, Value: annsField},
+			{Key: TopKKey, Value: "10"},
+			{Key: common.MetricTypeKey, Value: metric.L2},
+			{Key: ParamsKey, Value: `{"nprobe": 10}`},
+		}
+		if groupByField != "" {
+			params = append(params, &commonpb.KeyValuePair{Key: GroupByFieldKey, Value: groupByField})
+		}
+
+		phgBytes := makePlaceholderGroup(phType)
+		return &searchTask{
+			ctx:            ctx,
+			collectionName: "test_collection",
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID:     1,
+				PartitionIDs:     []int64{1},
+				OutputFieldsId:   []int64{100},
+				PlaceholderGroup: nil,
+				DslType:          commonpb.DslType_BoolExprV1,
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "test_collection",
+				OutputFields:   []string{"pk"},
+				SearchParams:   params,
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+					PlaceholderGroup: phgBytes,
+				},
+				Nq:               1,
+				ConsistencyLevel: commonpb.ConsistencyLevel_Session,
+			},
+			schema:                 schemaInfo,
+			translatedOutputFields: []string{"pk"},
+			tr:                     timerecord.NewTimeRecorder("test"),
+			queryInfos:             []*planpb.QueryInfo{{}},
+		}
+	}
+
+	t.Run("element-level search with group by PK should succeed", func(t *testing.T) {
+		task := makeTask("emb_vec", "pk", commonpb.PlaceholderType_FloatVector)
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("element-level search with group by non-PK should fail", func(t *testing.T) {
+		task := makeTask("emb_vec", "scalar_field", commonpb.PlaceholderType_FloatVector)
+		err := task.initSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "only group by primary key is supported")
+	})
+
+	t.Run("emblist search with group by should fail", func(t *testing.T) {
+		task := makeTask("emb_vec", "pk", commonpb.PlaceholderType_EmbListFloatVector)
+		err := task.initSearchRequest(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "not supported for multi-search-multi")
+	})
+
+	t.Run("element-level search without group by should succeed", func(t *testing.T) {
+		task := makeTask("emb_vec", "", commonpb.PlaceholderType_FloatVector)
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("regular vector with group by non-PK should succeed", func(t *testing.T) {
+		// Group by on non-ArrayOfVector field has no PK restriction
+		task := makeTask("regular_vec", "scalar_field", commonpb.PlaceholderType_FloatVector)
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
 	})
 }

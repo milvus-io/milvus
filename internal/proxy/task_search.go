@@ -548,7 +548,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.HybridSearchLabel, strconv.FormatInt(internalSubReq.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(internalSubReq.PlaceholderGroup, int(internalSubReq.GetNq()))))
 		}
 		// Convert placeholder group vector type if needed (e.g., fp32 -> fp16/bf16)
-		internalSubReq.PlaceholderGroup, err = t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), internalSubReq.FieldId)
+		internalSubReq.PlaceholderGroup, _, err = t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), internalSubReq.FieldId)
 		if err != nil {
 			return err
 		}
@@ -760,10 +760,30 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.SearchRequest.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.GetPlaceholderGroup(), int(t.request.GetNq()))))
 	}
 	// Convert placeholder group vector type if needed (e.g., fp32 -> fp16/bf16)
-	t.SearchRequest.PlaceholderGroup, err = t.convertPlaceholderIfNeeded(t.request.GetPlaceholderGroup(), t.SearchRequest.FieldId)
+	var placeholderType commonpb.PlaceholderType
+	t.SearchRequest.PlaceholderGroup, placeholderType, err = t.convertPlaceholderIfNeeded(t.request.GetPlaceholderGroup(), t.SearchRequest.FieldId)
 	if err != nil {
 		return err
 	}
+
+	// For ArrayOfVector fields with group by:
+	// 1. Embedding list search does not support group by
+	// 2. Element-level search only supports group by PK (doc-level dedup)
+	if queryInfo.GetGroupByFieldId() > 0 {
+		annsField := typeutil.GetField(t.schema.CollectionSchema, t.SearchRequest.FieldId)
+		if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+			if isEmbeddingListPlaceholderType(placeholderType) {
+				return merr.WrapErrParameterInvalid("", "",
+					"group by is not supported for multi-search-multi on embedding list fields")
+			}
+			pkField, _ := typeutil.GetPrimaryFieldSchema(t.schema.CollectionSchema)
+			if pkField == nil || queryInfo.GetGroupByFieldId() != pkField.GetFieldID() {
+				return merr.WrapErrParameterInvalid("", "",
+					"only group by primary key is supported for element-level search on embedding list fields")
+			}
+		}
+	}
+
 	t.SearchRequest.Topk = queryInfo.GetTopk()
 	t.SearchRequest.MetricType = queryInfo.GetMetricType()
 	t.queryInfos = append(t.queryInfos, queryInfo)
@@ -793,10 +813,11 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 }
 
 // convertPlaceholderIfNeeded converts fp32 vectors to fp16/bf16 if the target field uses lower precision.
-func (t *searchTask) convertPlaceholderIfNeeded(phgBytes []byte, fieldID int64) ([]byte, error) {
+// Returns converted bytes and the original placeholder type (before any conversion).
+func (t *searchTask) convertPlaceholderIfNeeded(phgBytes []byte, fieldID int64) ([]byte, commonpb.PlaceholderType, error) {
 	field := typeutil.GetFieldByID(t.schema.CollectionSchema, fieldID)
 	if field == nil {
-		return phgBytes, nil
+		return phgBytes, 0, nil
 	}
 	return ConvertPlaceholderGroup(phgBytes, field)
 }
@@ -912,6 +933,19 @@ func getLastBound(result *milvuspb.SearchResults, incomingLastBound *float32, me
 		return math.MaxFloat32
 	}
 	return -math.MaxFloat32
+}
+
+func isEmbeddingListPlaceholderType(pt commonpb.PlaceholderType) bool {
+	switch pt {
+	case commonpb.PlaceholderType_EmbListFloatVector,
+		commonpb.PlaceholderType_EmbListFloat16Vector,
+		commonpb.PlaceholderType_EmbListBFloat16Vector,
+		commonpb.PlaceholderType_EmbListBinaryVector,
+		commonpb.PlaceholderType_EmbListInt8Vector:
+		return true
+	default:
+		return false
+	}
 }
 
 func (t *searchTask) PostExecute(ctx context.Context) error {

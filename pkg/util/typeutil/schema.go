@@ -2344,6 +2344,13 @@ func GetFieldByID(schema *schemapb.CollectionSchema, fieldID int64) *schemapb.Fi
 			return field
 		}
 	}
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, field := range structField.GetFields() {
+			if field.GetFieldID() == fieldID {
+				return field
+			}
+		}
+	}
 	return nil
 }
 
