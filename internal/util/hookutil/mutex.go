@@ -18,17 +18,5 @@
 
 package hookutil
 
-import "sync"
-
-// initMutex shall protect the call of plugin.Open(...)
-// there might be concurrent issue for opening go plugin
-// causing empty pluginpath panicking
-var initMutex sync.Mutex
-
-func LockHookInit() {
-	initMutex.Lock()
-}
-
-func UnlockHookInit() {
-	initMutex.Unlock()
-}
+// This file previously held initMutex and LockHookInit/UnlockHookInit.
+// Plugin loading concurrency is now handled internally by LoadPlugin in plugin.go.
