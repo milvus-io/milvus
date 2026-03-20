@@ -73,7 +73,8 @@ ScalarIndexCreator::ScalarIndexCreator(
             .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
 
     index_info.field_type = dtype_;
-    index_info.field_name = file_manager_context.fieldDataMeta.field_schema.name();
+    index_info.field_name =
+        file_manager_context.fieldDataMeta.field_schema.name();
     index_info.index_type = index_type();
     if (dtype == DataType::JSON) {
         index_info.json_cast_type = milvus::JsonCastType::FromString(
