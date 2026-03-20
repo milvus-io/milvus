@@ -160,7 +160,7 @@ while getopts "p:t:s:n:a:y:x:o:f:ulcgbZh" arg; do
 parameter:
 -p: install prefix(default: $(pwd)/milvus)
 -d: db data path(default: /tmp/milvus)
--t: build type(default: Debug)
+-t: build type: Release/RelWithDebInfo/Debug/MinSizeRel (default: Release)
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -c: code coverage(default: OFF)
@@ -175,7 +175,7 @@ parameter:
 -h: help
 
 usage:
-./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f \${TANTIVY_FEATURES} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h] [-b] [-o]
+./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f \${TANTIVY_FEATURES} [-u] [-l] [-c] [-z] [-g] [-m] [-e] [-h] [-b] [-o]
                 "
     exit 0
     ;;
