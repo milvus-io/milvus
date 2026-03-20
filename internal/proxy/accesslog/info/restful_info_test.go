@@ -49,7 +49,7 @@ func (s *RestfulAccessInfoSuite) SetupTest() {
 	s.username = "test-user"
 	s.traceID = "test-trace"
 	s.ctx = &gin.Context{}
-	s.ctx.Keys = make(map[any]any)
+	s.ctx.Keys = make(map[string]any)
 	s.info = &RestfulInfo{ctx: s.ctx}
 	s.info.SetParams(
 		&gin.LogFormatterParams{
