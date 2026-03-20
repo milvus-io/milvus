@@ -140,6 +140,48 @@ class TestSearchIteratorShared(TestMilvusClientV2Base):
                              check_items={"batch_size": batch_size,
                                           "pk_range": (1000, 2000)})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_iterator_cosine(self):
+        """
+        target: verify range search iterator works with COSINE metric on shared collection
+        method: 1. regular search to get distance reference points
+                2. run range search iterator with radius/range_filter derived from step 1
+                3. check range constraints in iterator results
+        expected: range iterator results within [radius, range_filter], batches correct size
+        """
+        client = self._client(alias=self.shared_alias)
+        batch_size = 100
+        limit = 200
+        search_vector = cf.gen_vectors(1, default_dim)
+        search_params = {"metric_type": "COSINE"}
+
+        # get distance reference from regular search
+        res = self.search(client, self.collection_name,
+                          data=search_vector,
+                          anns_field=ct.default_float_vec_field_name,
+                          search_params=search_params,
+                          limit=limit,
+                          check_task=CheckTasks.check_search_results,
+                          check_items={"nq": 1, "limit": limit,
+                                       "metric": "COSINE",
+                                       "enable_milvus_client_api": True,
+                                       "pk_name": ct.default_int64_field_name})[0]
+
+        # COSINE: higher distance = more similar, so radius < range_filter
+        radius = res[0][limit // 2]["distance"] - 0.1
+        range_filter = res[0][0]["distance"] + 0.1
+        range_search_params = {"metric_type": "COSINE",
+                               "params": {"radius": radius, "range_filter": range_filter}}
+        self.search_iterator(client, self.collection_name, data=search_vector,
+                             batch_size=batch_size,
+                             search_params=range_search_params,
+                             anns_field=ct.default_float_vec_field_name,
+                             check_task=CheckTasks.check_search_iterator,
+                             check_items={"metric_type": "COSINE",
+                                          "batch_size": batch_size,
+                                          "radius": radius,
+                                          "range_filter": range_filter})
+
 
 class TestSearchIteratorIndependent(TestMilvusClientV2Base):
     """Independent tests for search iterator scenarios requiring unique schemas
