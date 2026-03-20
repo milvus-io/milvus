@@ -336,7 +336,8 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
         cell_specs.push_back({cid,
                               file_idx,
                               static_cast<int64_t>(local_off),
-                              static_cast<int64_t>(rg_end - rg_start)});
+                              static_cast<int64_t>(rg_end - rg_start),
+                              meta_.chunk_memory_size_[cid]});
     }
 
     // Submit cell-batch loading tasks
