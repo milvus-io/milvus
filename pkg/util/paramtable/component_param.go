@@ -6638,6 +6638,9 @@ type streamingConfig struct {
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
 
+	// Old version message lastConfirmedMessageID window size
+	OldVersionLastConfirmedWindowSize ParamItem `refreshable:"true"`
+
 	// Empty TimeTick Filtering configration
 	DelegatorEmptyTimeTickMaxFilterInterval ParamItem `refreshable:"true"`
 	FlushEmptyTimeTickMaxFilterInterval     ParamItem `refreshable:"true"`
@@ -7013,6 +7016,19 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
+
+	p.OldVersionLastConfirmedWindowSize = ParamItem{
+		Key:     "streaming.walScanner.oldVersionLastConfirmedWindowSize",
+		Version: "2.6.13",
+		Doc: `The sliding window size for synthesizing lastConfirmedMessageID on old version (v0) WAL messages.
+Old version messages lack lastConfirmedMessageID, so the scanner synthesizes one using the message ID
+from N messages ago. This bounds the WAL replay distance when a tailing scanner falls back to catchup
+mode. A larger value means more replay on fallback but better data safety; a smaller value means faster
+recovery but slightly more risk of missing messages.`,
+		DefaultValue: "30",
+		Export:       false,
+	}
+	p.OldVersionLastConfirmedWindowSize.Init(base.mgr)
 
 	p.DelegatorEmptyTimeTickMaxFilterInterval = ParamItem{
 		Key:     "streaming.delegator.emptyTimeTick.maxFilterInterval",
