@@ -651,7 +651,7 @@ func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
 			for _, ni := range g.neqIdxs {
 				used[ni] = true
 			}
-			out = append(out, newBoolConstExpr(true))
+			out = append(out, newAlwaysTrueExpr())
 		} else {
 			// drop the IN; keep != as-is
 			used[g.termIdx] = true

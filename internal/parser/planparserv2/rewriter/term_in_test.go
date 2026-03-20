@@ -258,9 +258,17 @@ func TestRewrite_Or_In_Or_NotEqual_VInSet_ToTrue(t *testing.T) {
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2] or Int64Field != 2`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	val := expr.GetValueExpr()
-	require.NotNil(t, val)
-	require.Equal(t, true, val.GetValue().GetBoolVal())
+	require.True(t, rewriter.IsAlwaysTrueExpr(expr),
+		"OR(IN, !=) tautology should be rewritten to AlwaysTrueExpr")
+}
+
+func TestRewrite_Or_In_Or_NotEqual_VarChar_Tautology(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	expr, err := parser.ParseExpr(helper, `VarCharField in ["", "a", "b"] or VarCharField != ""`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.True(t, rewriter.IsAlwaysTrueExpr(expr),
+		"OR(IN, !=) tautology with VarChar should be rewritten to AlwaysTrueExpr")
 }
 
 func TestRewrite_Or_In_Or_NotEqual_VNotInSet_ToNotEqual(t *testing.T) {
