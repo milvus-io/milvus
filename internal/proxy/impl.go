@@ -2829,7 +2829,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		zap.Uint64("EndTS", it.EndTs()))
 
 	if err := it.WaitToFinish(); err != nil {
-		log.Info("Failed to execute insert task in task scheduler",
+		log.Warn("Failed to execute insert task in task scheduler",
 			zap.Error(err))
 		// Not every error case changes the status internally
 		// change status there to handle it
