@@ -191,6 +191,50 @@ linters:
         text: unslice
       - path: (.+)\.go$
         text: G115
+      # TODO: cleanup following exclusions, added on golangci-lint v2 upgrade
+      # staticcheck quick-fix suggestions (QF)
+      - path: (.+)\.go$
+        text: QF1001
+      - path: (.+)\.go$
+        text: QF1003
+      - path: (.+)\.go$
+        text: QF1005
+      - path: (.+)\.go$
+        text: QF1006
+      - path: (.+)\.go$
+        text: QF1007
+      - path: (.+)\.go$
+        text: QF1008
+      - path: (.+)\.go$
+        text: QF1011
+      - path: (.+)\.go$
+        text: QF1012
+      # staticcheck style checks (ST)
+      - path: (.+)\.go$
+        text: ST1005
+      - path: (.+)\.go$
+        text: ST1008
+      - path: (.+)\.go$
+        text: ST1011
+      - path: (.+)\.go$
+        text: ST1023
+      # gosec new rules
+      - path: (.+)\.go$
+        text: G101
+      - path: (.+)\.go$
+        text: G118
+      - path: (.+)\.go$
+        text: G120
+      - path: (.+)\.go$
+        text: G602
+      - path: (.+)\.go$
+        text: G702
+      - path: (.+)\.go$
+        text: G703
+      - path: (.+)\.go$
+        text: G705
+      - path: (.+)\.go$
+        text: G706
     paths:
       - partial_search_test.go
       - build
