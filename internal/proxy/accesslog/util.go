@@ -56,8 +56,8 @@ func AccessLogMiddleware(ctx *gin.Context) {
 	_globalL.Write(accessInfo)
 }
 
-func SetHTTPParams(p *gin.LogFormatterParams) {
-	value, ok := p.Keys[ContextLogKey]
+func SetHTTPParams(ctx *gin.Context, p *gin.LogFormatterParams) {
+	value, ok := ctx.Get(ContextLogKey)
 	if !ok {
 		return
 	}
