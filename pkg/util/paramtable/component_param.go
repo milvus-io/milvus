@@ -6843,7 +6843,7 @@ type streamingConfig struct {
 	// Old version message lastConfirmedMessageID window size
 	OldVersionLastConfirmedWindowSize ParamItem `refreshable:"true"`
 
-	// Empty TimeTick Filtering configration
+	// Empty TimeTick Filtering configuration
 	DelegatorEmptyTimeTickMaxFilterInterval ParamItem `refreshable:"true"`
 	FlushEmptyTimeTickMaxFilterInterval     ParamItem `refreshable:"true"`
 

@@ -222,6 +222,8 @@ linters:
       - path: (.+)\.go$
         text: G101
       - path: (.+)\.go$
+        text: G117
+      - path: (.+)\.go$
         text: G118
       - path: (.+)\.go$
         text: G120
@@ -233,6 +235,8 @@ linters:
         text: G703
       - path: (.+)\.go$
         text: G705
+      - path: (.+)\.go$
+        text: G704
       - path: (.+)\.go$
         text: G706
     paths:
