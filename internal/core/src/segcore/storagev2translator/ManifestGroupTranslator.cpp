@@ -219,7 +219,8 @@ ManifestGroupTranslator::get_cells(
         cell_specs.push_back({cid,
                               /*file_idx=*/0,
                               static_cast<int64_t>(start),
-                              static_cast<int64_t>(end - start)});
+                              static_cast<int64_t>(end - start),
+                              meta_.chunk_memory_size_[cid]});
     }
 
     // Create factory using ChunkReader — reads a batch of row groups at once
