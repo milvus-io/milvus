@@ -243,7 +243,7 @@ func (s *replicaAssignmentInfo) GetNewRONodesHeuristic(distMgr *DistributionMana
 			scoredNodes = append(scoredNodes, nodeScore{nodeID: node, score: len(channels)*weight + len(segments)})
 			return true
 		})
-		sort.Slice(scoredNodes, func(i, j int) bool {
+		sort.SliceStable(scoredNodes, func(i, j int) bool {
 			return scoredNodes[i].score < scoredNodes[j].score
 		})
 		for i := 0; i < cnt; i++ {
