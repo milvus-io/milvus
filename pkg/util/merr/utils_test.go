@@ -74,3 +74,24 @@ func TestIsNonRetryableErr_WrappedErrors(t *testing.T) {
 	wrappedRetryable := fmt.Errorf("network issue: %w", ErrIoUnexpectEOF)
 	assert.False(t, IsNonRetryableErr(wrappedRetryable))
 }
+
+func TestIsMilvusError_WrappedChain(t *testing.T) {
+	// Direct milvus error
+	assert.True(t, IsMilvusError(ErrCollectionNotFound))
+
+	// Wrapped via errors.Wrap — milvusError is root, both impls handle this
+	assert.True(t, IsMilvusError(errors.Wrap(ErrCollectionNotFound, "context")))
+
+	// Combined: plain error first, milvusError second.
+	// errors.Cause: multiErrors has no Cause() method, returns multiErrors itself — type
+	// assertion to milvusError fails. errors.As: multiErrors.Unwrap() returns errs[1] directly
+	// (ErrCollectionNotFound), so errors.As finds it.
+	// Known limitation: Combine(milvusErr, plain) is NOT covered — Unwrap exposes errs[1:] only,
+	// so milvusError at index 0 would not be found by errors.As either.
+	combined := Combine(errors.New("plain"), ErrCollectionNotFound)
+	assert.True(t, IsMilvusError(combined), "milvusError at tail of Combine chain should be detected")
+
+	// Non-milvus error
+	assert.False(t, IsMilvusError(errors.New("plain error")))
+	assert.False(t, IsMilvusError(nil))
+}

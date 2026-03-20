@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -830,4 +831,45 @@ func (suite *ReaderSuite) TestZeroDeltaRead() {
 
 func TestBinlogReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
+}
+
+func TestMultiReadWithRetry_NonRetryableError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	cm := mocks.NewChunkManager(t)
+	callCount := 0
+	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, paths []string) ([][]byte, error) {
+			callCount++
+			return nil, merr.WrapErrIoPermissionDenied("test/path", fmt.Errorf("access denied"))
+		})
+
+	r := &reader{ctx: ctx, cm: cm, retryAttempts: 3}
+	_, err := r.multiReadWithRetry(ctx, []string{"test/path"})
+	assert.Error(t, err)
+	assert.True(t, merr.IsNonRetryableErr(err))
+	assert.Equal(t, 1, callCount, "non-retryable error should not be retried")
+}
+
+func TestMultiReadWithRetry_RetryableError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	cm := mocks.NewChunkManager(t)
+	callCount := 0
+	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, paths []string) ([][]byte, error) {
+			callCount++
+			if callCount < 3 {
+				return nil, merr.WrapErrIoFailed("test/path", fmt.Errorf("transient error"))
+			}
+			return [][]byte{[]byte("data")}, nil
+		})
+
+	r := &reader{ctx: ctx, cm: cm, retryAttempts: 3}
+	result, err := r.multiReadWithRetry(ctx, []string{"test/path"})
+	assert.NoError(t, err)
+	assert.Equal(t, [][]byte{[]byte("data")}, result)
+	assert.Equal(t, 3, callCount, "retryable error should be retried until success")
 }
