@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -87,7 +88,7 @@ type ReplicateService interface {
 	Append(ctx context.Context, msg message.ReplicateMutableMessage) (*types.AppendResult, error)
 
 	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
-	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
+	UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error
 
 	// GetReplicateConfiguration returns the current replication configuration
 	// with sensitive fields (tokens) sanitized.
