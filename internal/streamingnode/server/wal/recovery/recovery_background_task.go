@@ -27,7 +27,7 @@ func (rs *recoveryStorageImpl) isDirty() bool {
 
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	return rs.dirtyCounter > 0
+	return rs.dirtyCounter > 0 || rs.pendingSalvageCheckpoint != nil
 }
 
 // TODO: !!! all recovery persist operation should be a compare-and-swap operation to
@@ -75,6 +75,16 @@ func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() error {
 
 // persistDirtySnapshot persists the dirty snapshot to the catalog.
 func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl zapcore.Level) (err error) {
+	// Persist salvage checkpoint if one was captured during force promote.
+	// This is independent of the normal snapshot and must not be done under r.mu.
+	if cp := rs.consumePendingSalvageCheckpoint(); cp != nil {
+		if err := rs.retryOperationWithBackoff(ctx, rs.Logger().With(zap.String("op", "persistSalvageCheckpoint")), func(ctx context.Context) error {
+			return resource.Resource().StreamingNodeCatalog().SaveSalvageCheckpoint(ctx, rs.channel.Name, cp.IntoProto())
+		}); err != nil {
+			return err
+		}
+	}
+
 	if rs.pendingPersistSnapshot == nil {
 		// if there's no dirty snapshot, generate a new one.
 		rs.pendingPersistSnapshot = rs.consumeDirtySnapshot()

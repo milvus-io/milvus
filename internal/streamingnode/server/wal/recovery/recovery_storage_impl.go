@@ -99,6 +99,9 @@ type recoveryStorageImpl struct {
 	pendingPersistSnapshot *RecoverySnapshot
 	// used to mark switch MQ msg found
 	alterWALInfo *AlterWALInfo
+	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
+	// Set under r.mu; consumed and persisted by the background task to avoid holding the lock.
+	pendingSalvageCheckpoint *utility.ReplicateCheckpoint
 }
 
 // Metrics gets the metrics of the wal.
@@ -257,9 +260,10 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 			clusterRole := replicateutil.MustNewConfigHelper(r.currentClusterID, header.ReplicateConfiguration).GetCurrentCluster()
 			switch clusterRole.Role() {
 			case replicateutil.RolePrimary:
-				// Persist salvage checkpoint to separate etcd key before clearing on force promote
 				if header.GetForcePromote() && r.checkpoint.ReplicateCheckpoint != nil {
-					r.persistSalvageCheckpoint(context.Background(), r.checkpoint.ReplicateCheckpoint)
+					// Store for background task to persist; never call etcd while holding r.mu.
+					r.pendingSalvageCheckpoint = r.checkpoint.ReplicateCheckpoint
+					r.notifyPersist()
 				}
 				r.checkpoint.ReplicateCheckpoint = nil
 			case replicateutil.RoleSecondary:
@@ -673,15 +677,12 @@ func (r *recoveryStorageImpl) getFlusherCheckpoint() *WALCheckpoint {
 	return minimumCheckpoint
 }
 
-// persistSalvageCheckpoint persists the salvage checkpoint to a separate etcd key.
-// This is called during force promote to preserve the last synced position for data salvage.
-func (r *recoveryStorageImpl) persistSalvageCheckpoint(ctx context.Context, cp *utility.ReplicateCheckpoint) {
-	if cp == nil {
-		return
-	}
-	if err := r.retryOperationWithBackoff(ctx, r.Logger().With(zap.String("op", "persistSalvageCheckpoint")), func(ctx context.Context) error {
-		return resource.Resource().StreamingNodeCatalog().SaveSalvageCheckpoint(ctx, r.channel.Name, cp.IntoProto())
-	}); err != nil {
-		r.Logger().Warn("failed to persist salvage checkpoint", zap.Error(err))
-	}
+// consumePendingSalvageCheckpoint returns and clears the pending salvage checkpoint.
+// Called from the background task (no lock held at call site).
+func (r *recoveryStorageImpl) consumePendingSalvageCheckpoint() *utility.ReplicateCheckpoint {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cp := r.pendingSalvageCheckpoint
+	r.pendingSalvageCheckpoint = nil
+	return cp
 }
