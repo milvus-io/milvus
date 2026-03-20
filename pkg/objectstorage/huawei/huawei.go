@@ -174,9 +174,17 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 	p.refreshMu.Lock()
 	defer p.refreshMu.Unlock()
 
-	if !p.expiration.IsZero() && time.Now().UTC().Before(p.expiration.Add(-expirationGracePeriod)) {
+	now := time.Now().UTC()
+	threshold := p.expiration.Add(-expirationGracePeriod)
+	if !p.expiration.IsZero() && now.Before(threshold) {
 		return p.credentials, nil
 	}
+
+	log.Info("HuaweiCloud credential provider: cache miss, will call STS",
+		zap.Time("now", now),
+		zap.Time("expiration", p.expiration),
+		zap.Time("threshold", threshold),
+		zap.Bool("expiration_is_zero", p.expiration.IsZero()))
 
 	// Throttle retries after STS failures to avoid hammering the service.
 	// Only return cached credentials if they haven't fully expired yet;
@@ -284,9 +292,16 @@ func (p *HuaweiCredentialProvider) Retrieve() (minioCred.Value, error) {
 	return credentials, nil
 }
 
+// IsExpired always returns true to force minio's Credentials.Get() to call
+// Retrieve() on every S3 request. This is necessary because multiple minio
+// clients share this singleton provider — if IsExpired() returned false based
+// on expiration time, a minio client whose Credentials.Get() missed the brief
+// IsExpired()=true window would cache stale credentials in its own c.creds
+// and never refresh them until the next 2-hour expiration cycle.
+//
+// Retrieve() has its own cache-hit fast path (expiration check + mutex),
+// so the overhead of calling it on every request is negligible (one time
+// comparison + lock/unlock).
 func (p *HuaweiCredentialProvider) IsExpired() bool {
-	p.refreshMu.RLock()
-	expiration := p.expiration
-	p.refreshMu.RUnlock()
-	return time.Now().UTC().After(expiration.Add(-expirationGracePeriod))
+	return true
 }
