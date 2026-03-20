@@ -270,7 +270,13 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                   return a.local_rg_offset < b.local_rg_offset;
               });
 
-    // Determine batch size based on parallel degree
+    // Check whether all cells have memory size info for memory-aware batching
+    bool has_memory_info = std::all_of(
+        cell_specs.begin(), cell_specs.end(), [](const CellSpec& s) {
+            return s.memory_size > 0;
+        });
+
+    // Fallback: count-based batching when memory info is unavailable
     auto parallel_degree =
         static_cast<size_t>(memory_limit / FILE_SLICE_SIZE.load());
     size_t cells_per_batch = std::max<size_t>(
@@ -281,6 +287,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
         size_t file_idx;
         int64_t rg_offset;
         int64_t rg_count;
+        int64_t batch_memory = 0;
         std::vector<CellSpec> cells;
     };
 
@@ -290,9 +297,13 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     for (const auto& spec : cell_specs) {
         bool should_split = false;
         if (!current.cells.empty()) {
+            bool batch_full =
+                has_memory_info
+                    ? (current.batch_memory + spec.memory_size > memory_limit)
+                    : (current.cells.size() >= cells_per_batch);
             if (spec.file_idx != current.file_idx ||
                 spec.local_rg_offset != current.rg_offset + current.rg_count ||
-                current.cells.size() >= cells_per_batch) {
+                batch_full) {
                 should_split = true;
             }
         }
@@ -304,13 +315,23 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             current.file_idx = spec.file_idx;
             current.rg_offset = spec.local_rg_offset;
             current.rg_count = 0;
+            current.batch_memory = 0;
         }
         current.rg_count += spec.rg_count;
+        current.batch_memory += spec.memory_size;
         current.cells.push_back(spec);
     }
     if (!current.cells.empty()) {
         batches.push_back(std::move(current));
     }
+
+    LOG_INFO(
+        "[StorageV2] LoadCellBatchAsync: {} cells -> {} batches "
+        "(memory_aware={}, memory_limit={}MB)",
+        cell_specs.size(),
+        batches.size(),
+        has_memory_info,
+        memory_limit >> 20);
 
     if (batches.empty()) {
         channel->close();
