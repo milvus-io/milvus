@@ -22,7 +22,31 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 )
+
+// isRLSExemptUser returns true if the current user should bypass RLS filtering.
+// Root user and users with the admin role are exempt, consistent with PostgreSQL
+// superuser behavior where table owners and superusers bypass RLS by default.
+func isRLSExemptUser(ctx context.Context) bool {
+	username, err := GetCurUserFromContext(ctx)
+	if err != nil || username == "" {
+		return false
+	}
+	if username == util.UserRoot {
+		return true
+	}
+	roles, err := GetRole(username)
+	if err != nil {
+		return false
+	}
+	for _, role := range roles {
+		if role == util.RoleAdmin {
+			return true
+		}
+	}
+	return false
+}
 
 // applyRLSFilter applies RLS filter to a query/delete expression.
 // Returns the original expression if RLS is not enabled or not applicable.
@@ -34,6 +58,10 @@ func applyRLSFilter(ctx context.Context, dbName string, collectionName string, c
 
 	config := GetRLSConfig()
 	if config == nil || !config.IsEnabled() {
+		return originalExpr, nil
+	}
+
+	if isRLSExemptUser(ctx) {
 		return originalExpr, nil
 	}
 
@@ -82,6 +110,10 @@ func applyRLSDeleteFilter(ctx context.Context, dbName string, collectionName str
 		return originalExpr, nil
 	}
 
+	if isRLSExemptUser(ctx) {
+		return originalExpr, nil
+	}
+
 	interceptor := rlsMgr.GetDeleteInterceptor()
 	if interceptor == nil {
 		return originalExpr, nil
@@ -124,6 +156,10 @@ func applyRLSSearchFilter(ctx context.Context, dbName string, collectionName str
 
 	config := GetRLSConfig()
 	if config == nil || !config.IsEnabled() {
+		return originalExpr, nil
+	}
+
+	if isRLSExemptUser(ctx) {
 		return originalExpr, nil
 	}
 
@@ -172,6 +208,10 @@ func applyRLSInsertCheck(ctx context.Context, dbName string, collectionName stri
 		return nil
 	}
 
+	if isRLSExemptUser(ctx) {
+		return nil
+	}
+
 	interceptor := rlsMgr.GetInsertInterceptor()
 	if interceptor == nil {
 		return nil
@@ -213,6 +253,10 @@ func applyRLSUpsertCheck(ctx context.Context, dbName string, collectionName stri
 		return nil
 	}
 
+	if isRLSExemptUser(ctx) {
+		return nil
+	}
+
 	interceptor := rlsMgr.GetUpsertInterceptor()
 	if interceptor == nil {
 		return nil
@@ -239,48 +283,6 @@ func applyRLSUpsertCheck(ctx context.Context, dbName string, collectionName stri
 	}
 
 	return nil
-}
-
-// applyRLSHybridSearchFilters applies RLS to each sub-request DSL in a hybrid search.
-// In permissive mode, on error the original filters are returned (fail-open — intentional).
-// In strict mode, returns error.
-func applyRLSHybridSearchFilters(ctx context.Context, dbName string, collectionName string, collectionID int64, subFilters []string) ([]string, error) {
-	rlsMgr := GetRLSManager()
-	if rlsMgr == nil {
-		return subFilters, nil
-	}
-
-	config := GetRLSConfig()
-	if config == nil || !config.IsEnabled() {
-		return subFilters, nil
-	}
-
-	interceptor := rlsMgr.GetSearchInterceptor()
-	if interceptor == nil {
-		return subFilters, nil
-	}
-
-	dbID := getDBIDForRLS(ctx, dbName)
-	rlsMgr.EnsurePoliciesLoaded(ctx, dbID, collectionID, dbName, collectionName)
-	if username, _ := GetCurUserFromContext(ctx); username != "" {
-		rlsMgr.EnsureUserTagsLoaded(ctx, username)
-	}
-
-	result, err := interceptor.InterceptHybridSearch(ctx, dbID, collectionID, subFilters)
-	if err != nil {
-		log.Warn("RLS hybrid search filter application failed",
-			zap.String("collection", collectionName),
-			zap.Error(err))
-		if config.IsStrictMode() {
-			return nil, err
-		}
-		// Permissive mode: intentionally fail-open. RLS is NOT enforced for this request.
-		log.Warn("RLS hybrid search filter bypassed in permissive mode (fail-open)",
-			zap.String("collection", collectionName))
-		return subFilters, nil
-	}
-
-	return result, nil
 }
 
 // getDBIDForRLS retrieves the database ID from the meta cache for RLS evaluation.

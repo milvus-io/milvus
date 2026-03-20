@@ -94,7 +94,7 @@ func (t *dropRowPolicyTask) Execute(ctx context.Context) error {
 func (t *dropRowPolicyTask) GetLockerKey() LockerKey {
 	// Return a task locker key for collection-level locking
 	return &taskLockerKey{
-		key:   fmt.Sprintf("collection/%s", t.Req.CollectionName),
+		key:   fmt.Sprintf("rls_policy/%s/%s", t.Req.DbName, t.Req.CollectionName),
 		rw:    true,
 		level: CollectionLock,
 		next:  nil,

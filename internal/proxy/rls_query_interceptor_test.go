@@ -151,7 +151,7 @@ func TestRLSQueryInterceptorMergeExpressions(t *testing.T) {
 		rlsExpr    string
 		expected   string
 	}{
-		{"both empty", "", "", "true"},
+		{"both empty", "", "", "false"},
 		{"only user filter", "age > 18", "", "age > 18"},
 		{"only rls expr", "", "owner_id == 'alice'", "owner_id == 'alice'"},
 		{"both set", "age > 18", "owner_id == 'alice'", "(age > 18) AND (owner_id == 'alice')"},

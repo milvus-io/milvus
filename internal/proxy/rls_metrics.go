@@ -80,12 +80,12 @@ func (r *RLSMetricsRecorder) SetActivePolicies(dbName, collectionName string, co
 }
 
 // RecordPolicyLoadFailure records a failure when loading RLS policies
-func (r *RLSMetricsRecorder) RecordPolicyLoadFailure(loadType, dbName, collectionName string) {
+func (r *RLSMetricsRecorder) RecordPolicyLoadFailure(loadType string) {
 	metrics.ProxyRLSLoadFailures.WithLabelValues(nodeID(), "policy_"+loadType).Inc()
 }
 
 // RecordUserTagsLoadFailure records a failure when loading user tags
-func (r *RLSMetricsRecorder) RecordUserTagsLoadFailure(userName string) {
+func (r *RLSMetricsRecorder) RecordUserTagsLoadFailure() {
 	metrics.ProxyRLSLoadFailures.WithLabelValues(nodeID(), "user_tags").Inc()
 }
 

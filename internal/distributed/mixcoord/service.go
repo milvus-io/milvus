@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -1042,4 +1043,38 @@ func (s *Server) PushClientCommand(ctx context.Context, req *milvuspb.PushClient
 // DeleteClientCommand deletes a client command
 func (s *Server) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	return s.mixCoord.DeleteClientCommand(ctx, req)
+}
+
+// RLS (Row Level Security) methods - forwarded to mixCoord
+
+func (s *Server) CreateRowPolicy(ctx context.Context, req *messagespb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CreateRowPolicy(ctx, req)
+}
+
+func (s *Server) DropRowPolicy(ctx context.Context, req *messagespb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	return s.mixCoord.DropRowPolicy(ctx, req)
+}
+
+func (s *Server) ListRowPolicies(ctx context.Context, req *messagespb.ListRowPoliciesRequest) (*messagespb.ListRowPoliciesResponse, error) {
+	return s.mixCoord.ListRowPolicies(ctx, req)
+}
+
+func (s *Server) SetUserTags(ctx context.Context, req *messagespb.SetUserTagsRequest) (*commonpb.Status, error) {
+	return s.mixCoord.SetUserTags(ctx, req)
+}
+
+func (s *Server) GetUserTags(ctx context.Context, req *messagespb.GetUserTagsRequest) (*messagespb.GetUserTagsResponse, error) {
+	return s.mixCoord.GetUserTags(ctx, req)
+}
+
+func (s *Server) DeleteUserTag(ctx context.Context, req *messagespb.DeleteUserTagRequest) (*commonpb.Status, error) {
+	return s.mixCoord.DeleteUserTag(ctx, req)
+}
+
+func (s *Server) ListUsersWithTag(ctx context.Context, req *messagespb.ListUsersWithTagRequest) (*messagespb.ListUsersWithTagResponse, error) {
+	return s.mixCoord.ListUsersWithTag(ctx, req)
+}
+
+func (s *Server) RefreshRLSCache(ctx context.Context, req *messagespb.RefreshRLSCacheRequest) (*commonpb.Status, error) {
+	return s.mixCoord.RefreshRLSCache(ctx, req)
 }

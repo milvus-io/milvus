@@ -935,7 +935,11 @@ func TestProxy(t *testing.T) {
 	params.QueryNodeGrpcServerCfg.IP = "localhost"
 	params.DataNodeGrpcServerCfg.IP = "localhost"
 	params.StreamingNodeGrpcServerCfg.IP = "localhost"
-	params.Save(params.MQCfg.Type.Key, "pulsar")
+	params.Save(params.MQCfg.Type.Key, "woodpecker")
+	params.Save(params.CommonCfg.StorageType.Key, "local")
+	params.Save("localStorage.path", "/tmp/milvus_test")
+	params.Save("woodpecker.storage.type", "local")
+	params.Save("woodpecker.storage.rootPath", "/tmp/milvus_test/woodpecker")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = GetContext(ctx, "root:123456")

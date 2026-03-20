@@ -137,6 +137,12 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// RLS insert validation
+	if err := applyRLSInsertCheck(ctx, it.insertMsg.GetDbName(), collectionName, collID); err != nil {
+		log.Ctx(ctx).Warn("RLS insert check denied", zap.String("collectionName", collectionName), zap.Error(err))
+		return err
+	}
+
 	if it.schemaTimestamp != 0 {
 		if it.schemaTimestamp != colInfo.updateTimestamp {
 			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)

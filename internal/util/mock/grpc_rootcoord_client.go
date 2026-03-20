@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -360,4 +361,36 @@ func (m *GrpcRootCoordClient) GetClientTelemetry(ctx context.Context, in *milvus
 
 func (m *GrpcRootCoordClient) PushClientCommand(ctx context.Context, in *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error) {
 	return &milvuspb.PushClientCommandResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) CreateRowPolicy(ctx context.Context, in *messagespb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) DropRowPolicy(ctx context.Context, in *messagespb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) ListRowPolicies(ctx context.Context, in *messagespb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*messagespb.ListRowPoliciesResponse, error) {
+	return &messagespb.ListRowPoliciesResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) SetUserTags(ctx context.Context, in *messagespb.SetUserTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) GetUserTags(ctx context.Context, in *messagespb.GetUserTagsRequest, opts ...grpc.CallOption) (*messagespb.GetUserTagsResponse, error) {
+	return &messagespb.GetUserTagsResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) DeleteUserTag(ctx context.Context, in *messagespb.DeleteUserTagRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) ListUsersWithTag(ctx context.Context, in *messagespb.ListUsersWithTagRequest, opts ...grpc.CallOption) (*messagespb.ListUsersWithTagResponse, error) {
+	return &messagespb.ListUsersWithTagResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) RefreshRLSCache(ctx context.Context, in *messagespb.RefreshRLSCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
 }

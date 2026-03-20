@@ -7,6 +7,8 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
+	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+
 	grpc "google.golang.org/grpc"
 
 	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -5330,6 +5332,302 @@ func (_c *MockRootCoordClient_UpdateCredential_Call) Return(_a0 *commonpb.Status
 func (_c *MockRootCoordClient_UpdateCredential_Call) RunAndReturn(run func(context.Context, *internalpb.CredentialInfo, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_UpdateCredential_Call {
 	_c.Call.Return(run)
 	return _c
+}
+
+// CreateRowPolicy provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) CreateRowPolicy(ctx context.Context, in *messagespb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.CreateRowPolicyRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.CreateRowPolicyRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.CreateRowPolicyRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DropRowPolicy provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) DropRowPolicy(ctx context.Context, in *messagespb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.DropRowPolicyRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.DropRowPolicyRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.DropRowPolicyRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ListRowPolicies provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) ListRowPolicies(ctx context.Context, in *messagespb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*messagespb.ListRowPoliciesResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRowPolicies")
+	}
+
+	var r0 *messagespb.ListRowPoliciesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.ListRowPoliciesRequest, ...grpc.CallOption) (*messagespb.ListRowPoliciesResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.ListRowPoliciesRequest, ...grpc.CallOption) *messagespb.ListRowPoliciesResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*messagespb.ListRowPoliciesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.ListRowPoliciesRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// SetUserTags provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) SetUserTags(ctx context.Context, in *messagespb.SetUserTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetUserTags")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.SetUserTagsRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.SetUserTagsRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.SetUserTagsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetUserTags provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) GetUserTags(ctx context.Context, in *messagespb.GetUserTagsRequest, opts ...grpc.CallOption) (*messagespb.GetUserTagsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetUserTags")
+	}
+
+	var r0 *messagespb.GetUserTagsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.GetUserTagsRequest, ...grpc.CallOption) (*messagespb.GetUserTagsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.GetUserTagsRequest, ...grpc.CallOption) *messagespb.GetUserTagsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*messagespb.GetUserTagsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.GetUserTagsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DeleteUserTag provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) DeleteUserTag(ctx context.Context, in *messagespb.DeleteUserTagRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteUserTag")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.DeleteUserTagRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.DeleteUserTagRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.DeleteUserTagRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ListUsersWithTag provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) ListUsersWithTag(ctx context.Context, in *messagespb.ListUsersWithTagRequest, opts ...grpc.CallOption) (*messagespb.ListUsersWithTagResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListUsersWithTag")
+	}
+
+	var r0 *messagespb.ListUsersWithTagResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.ListUsersWithTagRequest, ...grpc.CallOption) (*messagespb.ListUsersWithTagResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.ListUsersWithTagRequest, ...grpc.CallOption) *messagespb.ListUsersWithTagResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*messagespb.ListUsersWithTagResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.ListUsersWithTagRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RefreshRLSCache provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) RefreshRLSCache(ctx context.Context, in *messagespb.RefreshRLSCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RefreshRLSCache")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.RefreshRLSCacheRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.RefreshRLSCacheRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.RefreshRLSCacheRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // NewMockRootCoordClient creates a new instance of MockRootCoordClient. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

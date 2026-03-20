@@ -113,8 +113,7 @@ func (i *RLSSearchInterceptor) InterceptSearch(
 	)
 	if err != nil {
 		logger.Error("failed to build RLS expression for search", zap.Error(err))
-		// On error, deny search by returning false
-		return "false", nil
+		return "false", fmt.Errorf("failed to build RLS expression for search: %w", err)
 	}
 
 	logger.Debug("built RLS expression for search",
@@ -241,7 +240,7 @@ func (i *RLSSearchInterceptor) InterceptHybridSearch(
 // mergeExpressions combines search filter and RLS expression
 func (i *RLSSearchInterceptor) mergeExpressions(searchFilter, rlsExpr string) string {
 	if searchFilter == "" && rlsExpr == "" {
-		return "true"
+		return "false" // Deny by default when no constraints exist
 	} else if searchFilter == "" {
 		return rlsExpr
 	} else if rlsExpr == "" {

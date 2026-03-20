@@ -20,13 +20,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestRLSCacheRefreshHandlerCreatePolicy(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	handler := NewRLSCacheRefreshHandler(cache)
 
 	// Setup initial cache state
@@ -50,8 +50,8 @@ func TestRLSCacheRefreshHandlerCreatePolicy(t *testing.T) {
 	assert.Len(t, retrieved, 1)
 
 	// Handle cache refresh for new policy creation
-	req := &milvuspb.RefreshRLSCacheRequest{
-		OpType:         milvuspb.RLSCacheOpType_CreatePolicy,
+	req := &messagespb.RefreshRLSCacheRequest{
+		OpType:         messagespb.RLSCacheOpType_CreatePolicy,
 		CollectionName: "test_collection",
 		PolicyName:     "policy2",
 	}
@@ -65,7 +65,7 @@ func TestRLSCacheRefreshHandlerCreatePolicy(t *testing.T) {
 }
 
 func TestRLSCacheRefreshHandlerDropPolicy(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	handler := NewRLSCacheRefreshHandler(cache)
 
 	// Setup cache
@@ -85,8 +85,8 @@ func TestRLSCacheRefreshHandlerDropPolicy(t *testing.T) {
 	cache.UpdatePolicies(456, 123, policies)
 
 	// Handle cache refresh for policy drop
-	req := &milvuspb.RefreshRLSCacheRequest{
-		OpType:         milvuspb.RLSCacheOpType_DropPolicy,
+	req := &messagespb.RefreshRLSCacheRequest{
+		OpType:         messagespb.RLSCacheOpType_DropPolicy,
 		CollectionName: "test_collection",
 		PolicyName:     "policy1",
 	}
@@ -100,7 +100,7 @@ func TestRLSCacheRefreshHandlerDropPolicy(t *testing.T) {
 }
 
 func TestRLSCacheRefreshHandlerUpdateUserTags(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	handler := NewRLSCacheRefreshHandler(cache)
 
 	// Setup cache
@@ -112,8 +112,8 @@ func TestRLSCacheRefreshHandlerUpdateUserTags(t *testing.T) {
 	assert.Equal(t, "engineering", retrieved["department"])
 
 	// Handle cache refresh for user tags update
-	req := &milvuspb.RefreshRLSCacheRequest{
-		OpType:   milvuspb.RLSCacheOpType_UpdateUserTags,
+	req := &messagespb.RefreshRLSCacheRequest{
+		OpType:   messagespb.RLSCacheOpType_UpdateUserTags,
 		UserName: "alice",
 	}
 
@@ -126,7 +126,7 @@ func TestRLSCacheRefreshHandlerUpdateUserTags(t *testing.T) {
 }
 
 func TestRLSCacheRefreshHandlerDeleteUserTag(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	handler := NewRLSCacheRefreshHandler(cache)
 
 	// Setup cache
@@ -138,8 +138,8 @@ func TestRLSCacheRefreshHandlerDeleteUserTag(t *testing.T) {
 	assert.Len(t, retrieved, 2)
 
 	// Handle cache refresh for user tag deletion
-	req := &milvuspb.RefreshRLSCacheRequest{
-		OpType:   milvuspb.RLSCacheOpType_DeleteUserTag,
+	req := &messagespb.RefreshRLSCacheRequest{
+		OpType:   messagespb.RLSCacheOpType_DeleteUserTag,
 		UserName: "alice",
 	}
 
@@ -152,7 +152,7 @@ func TestRLSCacheRefreshHandlerDeleteUserTag(t *testing.T) {
 }
 
 func TestRLSCacheRefreshHandlerUpdateCollectionConfig(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	handler := NewRLSCacheRefreshHandler(cache)
 
 	// Setup cache
@@ -164,8 +164,8 @@ func TestRLSCacheRefreshHandlerUpdateCollectionConfig(t *testing.T) {
 	assert.True(t, config.Enabled)
 
 	// Handle cache refresh for collection config update
-	req := &milvuspb.RefreshRLSCacheRequest{
-		OpType:         milvuspb.RLSCacheOpType_UpdateCollectionConfig,
+	req := &messagespb.RefreshRLSCacheRequest{
+		OpType:         messagespb.RLSCacheOpType_UpdateCollectionConfig,
 		CollectionName: "test_collection",
 	}
 
@@ -178,7 +178,7 @@ func TestRLSCacheRefreshHandlerUpdateCollectionConfig(t *testing.T) {
 }
 
 func TestRLSCacheRefreshHandlerNilRequest(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	handler := NewRLSCacheRefreshHandler(cache)
 
 	// Handle nil request should not panic
@@ -189,8 +189,8 @@ func TestRLSCacheRefreshHandlerNilRequest(t *testing.T) {
 func TestRLSCacheRefreshHandlerNilCache(t *testing.T) {
 	handler := NewRLSCacheRefreshHandler(nil)
 
-	req := &milvuspb.RefreshRLSCacheRequest{
-		OpType:         milvuspb.RLSCacheOpType_CreatePolicy,
+	req := &messagespb.RefreshRLSCacheRequest{
+		OpType:         messagespb.RLSCacheOpType_CreatePolicy,
 		CollectionName: "test_collection",
 	}
 
@@ -200,7 +200,7 @@ func TestRLSCacheRefreshHandlerNilCache(t *testing.T) {
 }
 
 func TestCacheRefreshInterceptor(t *testing.T) {
-	cache := NewRLSCache(nil)
+	cache := NewRLSCache()
 	handler := NewRLSCacheRefreshHandler(cache)
 	interceptor := NewCacheRefreshInterceptor(handler)
 
@@ -221,8 +221,8 @@ func TestCacheRefreshInterceptor(t *testing.T) {
 	cache.UpdatePolicies(456, 123, policies)
 
 	// Use interceptor to handle refresh
-	req := &milvuspb.RefreshRLSCacheRequest{
-		OpType:         milvuspb.RLSCacheOpType_CreatePolicy,
+	req := &messagespb.RefreshRLSCacheRequest{
+		OpType:         messagespb.RLSCacheOpType_CreatePolicy,
 		CollectionName: "test_collection",
 		PolicyName:     "policy2",
 	}

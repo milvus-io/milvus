@@ -292,6 +292,15 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection info", err)
 	}
+
+	// Apply RLS filter to delete expression
+	if rlsExpr, err := applyRLSDeleteFilter(ctx, dr.req.GetDbName(), collName, dr.collectionID, dr.req.GetExpr()); err != nil {
+		log.Warn("failed to apply RLS filter for delete", zap.Error(err))
+		return err
+	} else if rlsExpr != dr.req.GetExpr() {
+		dr.req.Expr = rlsExpr
+	}
+
 	colTimezone := getColTimezone(colInfo)
 	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone}
 

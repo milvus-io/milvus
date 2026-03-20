@@ -2437,6 +2437,264 @@ func (_c *RootCoordCatalog_SavePrivilegeGroup_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// SaveRLSPolicy provides a mock function with given fields: ctx, policy
+func (_m *RootCoordCatalog) SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error {
+	ret := _m.Called(ctx, policy)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveRLSPolicy")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.RLSPolicy) error); ok {
+		r0 = rf(ctx, policy)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DeleteRLSPolicy provides a mock function with given fields: ctx, dbID, collectionID, policyName
+func (_m *RootCoordCatalog) DeleteRLSPolicy(ctx context.Context, dbID int64, collectionID int64, policyName string) error {
+	ret := _m.Called(ctx, dbID, collectionID, policyName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteRLSPolicy")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, string) error); ok {
+		r0 = rf(ctx, dbID, collectionID, policyName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// ListRLSPolicies provides a mock function with given fields: ctx, dbID, collectionID
+func (_m *RootCoordCatalog) ListRLSPolicies(ctx context.Context, dbID int64, collectionID int64) ([]*model.RLSPolicy, error) {
+	ret := _m.Called(ctx, dbID, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRLSPolicies")
+	}
+
+	var r0 []*model.RLSPolicy
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) ([]*model.RLSPolicy, error)); ok {
+		return rf(ctx, dbID, collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) []*model.RLSPolicy); ok {
+		r0 = rf(ctx, dbID, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*model.RLSPolicy)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, int64) error); ok {
+		r1 = rf(ctx, dbID, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetRLSPolicy provides a mock function with given fields: ctx, dbID, collectionID, policyName
+func (_m *RootCoordCatalog) GetRLSPolicy(ctx context.Context, dbID int64, collectionID int64, policyName string) (*model.RLSPolicy, error) {
+	ret := _m.Called(ctx, dbID, collectionID, policyName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRLSPolicy")
+	}
+
+	var r0 *model.RLSPolicy
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, string) (*model.RLSPolicy, error)); ok {
+		return rf(ctx, dbID, collectionID, policyName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, string) *model.RLSPolicy); ok {
+		r0 = rf(ctx, dbID, collectionID, policyName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.RLSPolicy)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, int64, string) error); ok {
+		r1 = rf(ctx, dbID, collectionID, policyName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// SaveRLSCollectionConfig provides a mock function with given fields: ctx, dbID, collectionID, enabled, force
+func (_m *RootCoordCatalog) SaveRLSCollectionConfig(ctx context.Context, dbID int64, collectionID int64, enabled bool, force bool) error {
+	ret := _m.Called(ctx, dbID, collectionID, enabled, force)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveRLSCollectionConfig")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, bool, bool) error); ok {
+		r0 = rf(ctx, dbID, collectionID, enabled, force)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// GetRLSCollectionConfig provides a mock function with given fields: ctx, dbID, collectionID
+func (_m *RootCoordCatalog) GetRLSCollectionConfig(ctx context.Context, dbID int64, collectionID int64) (*model.RLSCollectionConfig, error) {
+	ret := _m.Called(ctx, dbID, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRLSCollectionConfig")
+	}
+
+	var r0 *model.RLSCollectionConfig
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) (*model.RLSCollectionConfig, error)); ok {
+		return rf(ctx, dbID, collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) *model.RLSCollectionConfig); ok {
+		r0 = rf(ctx, dbID, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.RLSCollectionConfig)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, int64) error); ok {
+		r1 = rf(ctx, dbID, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// SaveUserTags provides a mock function with given fields: ctx, userTags
+func (_m *RootCoordCatalog) SaveUserTags(ctx context.Context, userTags *model.RLSUserTags) error {
+	ret := _m.Called(ctx, userTags)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveUserTags")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.RLSUserTags) error); ok {
+		r0 = rf(ctx, userTags)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// GetUserTags provides a mock function with given fields: ctx, userName
+func (_m *RootCoordCatalog) GetUserTags(ctx context.Context, userName string) (*model.RLSUserTags, error) {
+	ret := _m.Called(ctx, userName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetUserTags")
+	}
+
+	var r0 *model.RLSUserTags
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*model.RLSUserTags, error)); ok {
+		return rf(ctx, userName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *model.RLSUserTags); ok {
+		r0 = rf(ctx, userName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.RLSUserTags)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, userName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DeleteUserTags provides a mock function with given fields: ctx, userName
+func (_m *RootCoordCatalog) DeleteUserTags(ctx context.Context, userName string) error {
+	ret := _m.Called(ctx, userName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteUserTags")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, userName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// ListUsersWithTag provides a mock function with given fields: ctx, tagKey, tagValue
+func (_m *RootCoordCatalog) ListUsersWithTag(ctx context.Context, tagKey string, tagValue string) ([]string, error) {
+	ret := _m.Called(ctx, tagKey, tagValue)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListUsersWithTag")
+	}
+
+	var r0 []string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) ([]string, error)); ok {
+		return rf(ctx, tagKey, tagValue)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) []string); ok {
+		r0 = rf(ctx, tagKey, tagValue)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, tagKey, tagValue)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DeleteAllRLSPoliciesForCollection provides a mock function with given fields: ctx, dbID, collectionID
+func (_m *RootCoordCatalog) DeleteAllRLSPoliciesForCollection(ctx context.Context, dbID int64, collectionID int64) error {
+	ret := _m.Called(ctx, dbID, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteAllRLSPoliciesForCollection")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) error); ok {
+		r0 = rf(ctx, dbID, collectionID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // NewRootCoordCatalog creates a new instance of RootCoordCatalog. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewRootCoordCatalog(t interface {

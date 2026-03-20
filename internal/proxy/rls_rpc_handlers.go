@@ -91,7 +91,7 @@ func (node *Proxy) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowP
 	}
 
 	// Refresh local RLS cache after successful policy creation
-	if resp.GetErrorCode() == commonpb.ErrorCode_Success {
+	if merr.Error(resp) == nil {
 		node.refreshRLSCache(ctx, req.GetDbName(), req.GetCollectionName())
 	}
 
@@ -131,7 +131,7 @@ func (node *Proxy) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolic
 	}
 
 	// Refresh local RLS cache after successful policy removal
-	if resp.GetErrorCode() == commonpb.ErrorCode_Success {
+	if merr.Error(resp) == nil {
 		node.refreshRLSCache(ctx, req.GetDbName(), req.GetCollectionName())
 	}
 
@@ -155,6 +155,12 @@ func (node *Proxy) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPol
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		failResp.Status = merr.Status(err)
 		log.Warn("ListRowPolicies failed, proxy not healthy")
+		return failResp, nil
+	}
+
+	if err := requireAdminForRLS(ctx); err != nil {
+		log.Warn("ListRowPolicies authorization failed", zap.Error(err))
+		failResp.Status = merr.Status(err)
 		return failResp, nil
 	}
 
@@ -210,7 +216,7 @@ func (node *Proxy) AddUserTags(ctx context.Context, req *milvuspb.AddUserTagsReq
 	}
 
 	// Refresh local RLS cache after successful tag update
-	if resp.GetErrorCode() == commonpb.ErrorCode_Success {
+	if merr.Error(resp) == nil {
 		node.refreshRLSUserTags(ctx, req.GetUserName())
 	}
 
@@ -233,6 +239,12 @@ func (node *Proxy) GetUserTags(ctx context.Context, req *milvuspb.GetUserTagsReq
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		failResp.Status = merr.Status(err)
 		log.Warn("GetUserTags failed, proxy not healthy")
+		return failResp, nil
+	}
+
+	if err := requireAdminForRLS(ctx); err != nil {
+		log.Warn("GetUserTags authorization failed", zap.Error(err))
+		failResp.Status = merr.Status(err)
 		return failResp, nil
 	}
 
@@ -281,7 +293,9 @@ func (node *Proxy) DeleteUserTags(ctx context.Context, req *milvuspb.DeleteUserT
 		return merr.Status(err), nil
 	}
 
-	// Delete each tag key one by one through the internal API
+	// Delete each tag key through the internal API.
+	// Attempt all deletions even if some fail, to avoid partial state from short-circuiting.
+	var firstErr error
 	for _, tagKey := range req.GetTagKeys() {
 		internalReq := &messagespb.DeleteUserTagRequest{
 			Base:     req.GetBase(),
@@ -291,12 +305,21 @@ func (node *Proxy) DeleteUserTags(ctx context.Context, req *milvuspb.DeleteUserT
 
 		resp, err := node.mixCoord.DeleteUserTag(ctx, internalReq)
 		if err != nil {
-			log.Warn("DeleteUserTags failed", zap.Error(err), zap.String("tagKey", tagKey))
-			return merr.Status(err), nil
+			log.Warn("DeleteUserTags failed for key", zap.Error(err), zap.String("tagKey", tagKey))
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
-		if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-			return resp, nil
+		if statusErr := merr.Error(resp); statusErr != nil {
+			log.Warn("DeleteUserTags non-success for key", zap.String("tagKey", tagKey), zap.Error(statusErr))
+			if firstErr == nil {
+				firstErr = statusErr
+			}
 		}
+	}
+	if firstErr != nil {
+		return merr.Status(firstErr), nil
 	}
 
 	// Refresh local RLS cache after successful tag deletion
@@ -322,6 +345,12 @@ func (node *Proxy) ListUsersWithTag(ctx context.Context, req *milvuspb.ListUsers
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		failResp.Status = merr.Status(err)
 		log.Warn("ListUsersWithTag failed, proxy not healthy")
+		return failResp, nil
+	}
+
+	if err := requireAdminForRLS(ctx); err != nil {
+		log.Warn("ListUsersWithTag authorization failed", zap.Error(err))
+		failResp.Status = merr.Status(err)
 		return failResp, nil
 	}
 
@@ -415,9 +444,17 @@ func (node *Proxy) refreshRLSCache(ctx context.Context, dbName, collectionName s
 			zap.Error(err))
 		return
 	}
-	if listResp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	if listResp == nil {
+		log.Ctx(ctx).Warn("failed to fetch policies for RLS cache refresh: nil response")
+		return
+	}
+	if listResp.GetStatus() == nil {
+		log.Ctx(ctx).Warn("failed to fetch policies for RLS cache refresh: nil status")
+		return
+	}
+	if statusErr := merr.Error(listResp.GetStatus()); statusErr != nil {
 		log.Ctx(ctx).Warn("failed to fetch policies for RLS cache refresh: non-success status",
-			zap.String("reason", listResp.GetStatus().GetReason()))
+			zap.Error(statusErr))
 		return
 	}
 
@@ -458,10 +495,20 @@ func (node *Proxy) refreshRLSUserTags(ctx context.Context, userName string) {
 			zap.Error(err))
 		return
 	}
-	if getResp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	if getResp == nil {
+		log.Ctx(ctx).Warn("failed to fetch user tags for RLS cache refresh: nil response",
+			zap.String("userName", userName))
+		return
+	}
+	if getResp.GetStatus() == nil {
+		log.Ctx(ctx).Warn("failed to fetch user tags for RLS cache refresh: nil status",
+			zap.String("userName", userName))
+		return
+	}
+	if statusErr := merr.Error(getResp.GetStatus()); statusErr != nil {
 		log.Ctx(ctx).Warn("failed to fetch user tags for RLS cache refresh: non-success status",
 			zap.String("userName", userName),
-			zap.String("reason", getResp.GetStatus().GetReason()))
+			zap.Error(statusErr))
 		return
 	}
 

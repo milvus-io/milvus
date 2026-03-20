@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -160,6 +159,7 @@ func (it *upsertTask) OnEnqueue() error {
 
 func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	log := log.Ctx(ctx).With(zap.String("collectionName", t.req.GetCollectionName()))
+
 	var err error
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{
@@ -175,11 +175,6 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		GuaranteeTimestamp:    t.BeginTs(),
 		Namespace:             t.req.Namespace,
 	}
-	pkField, err := typeutil.GetPrimaryFieldSchema(t.schema.CollectionSchema)
-	if err != nil {
-		return nil, segcore.StorageCost{}, err
-	}
-
 	var partitionIDs []int64
 	if t.partitionKeyMode {
 		// multi entities with same pk and diff partition keys may be hashed to multi physical partitions
@@ -203,8 +198,8 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		queryReq.PartitionNames = []string{partName}
 	}
 
-	plan := planparserv2.CreateRequeryPlan(pkField, ids)
-	plan.Namespace = t.req.Namespace
+	// Populate `ids` instead of pre-building a requery plan so queryTask.PreExecute
+	// can merge row-level RLS filters with the PK expression.
 	qt := &queryTask{
 		ctx:       t.ctx,
 		Condition: NewTaskCondition(t.ctx),
@@ -218,7 +213,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
 		},
 		request:        queryReq,
-		plan:           plan,
+		ids:            ids,
 		mixCoord:       t.node.(*Proxy).mixCoord,
 		lb:             t.node.(*Proxy).lbPolicy,
 		shardclientMgr: t.node.(*Proxy).shardMgr,
@@ -1247,6 +1242,12 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.req.GetDbName(), collectionName, collID)
 	if err != nil {
 		log.Warn("fail to get collection info", zap.Error(err))
+		return err
+	}
+
+	// RLS upsert validation
+	if err := applyRLSUpsertCheck(ctx, it.req.GetDbName(), collectionName, collID); err != nil {
+		log.Warn("RLS upsert check denied", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
 

@@ -119,6 +119,9 @@ type RootCoordCatalog interface {
 	DeleteUserTags(ctx context.Context, userName string) error
 	ListUsersWithTag(ctx context.Context, tagKey string, tagValue string) ([]string, error)
 
+	// RLS cleanup
+	DeleteAllRLSPoliciesForCollection(ctx context.Context, dbID int64, collectionID int64) error
+
 	Close()
 }
 

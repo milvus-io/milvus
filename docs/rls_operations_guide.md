@@ -278,6 +278,7 @@ Expression: archived == false
 1. No matching permissive policy
 2. Restrictive policy denies access
 3. Role mismatch
+4. No policy created (RLS defaults to deny)
 
 **Solution**:
 ```
@@ -300,7 +301,7 @@ Expression: archived == false
 
 **Causes**:
 1. Policy with `true` expression
-2. No policy created
+2. RLS is disabled (`proxy.rls.enabled=false`)
 3. Admin role with unrestricted policy
 
 **Solution**:
@@ -312,7 +313,10 @@ Expression: archived == false
 2. Check policy expressions:
    Ensure expressions are not "true" or empty
 
-3. Verify user role:
+3. Verify RLS config:
+   Ensure `proxy.rls.enabled=true`
+
+4. Verify user role:
    User should not have unrestricted admin role
 ```
 

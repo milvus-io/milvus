@@ -126,8 +126,7 @@ func (i *RLSQueryInterceptor) InterceptQuery(
 	)
 	if err != nil {
 		logger.Error("failed to build RLS expression", zap.Error(err))
-		// On error, deny access by returning false
-		return "false", nil
+		return "false", fmt.Errorf("failed to build RLS expression: %w", err)
 	}
 
 	logger.Debug("built RLS expression",
@@ -149,7 +148,7 @@ func (i *RLSQueryInterceptor) InterceptQuery(
 // Logic: (userFilter) AND (rlsExpr)
 func (i *RLSQueryInterceptor) mergeExpressions(userFilter, rlsExpr string) string {
 	if userFilter == "" && rlsExpr == "" {
-		return "true" // No constraints
+		return "false" // Deny by default when no constraints exist
 	} else if userFilter == "" {
 		return rlsExpr // Only RLS
 	} else if rlsExpr == "" {
@@ -385,7 +384,7 @@ func (i *RLSDeleteInterceptor) InterceptDelete(
 	)
 	if err != nil {
 		logger.Error("failed to build RLS expression for delete", zap.Error(err))
-		return "false", nil
+		return "false", fmt.Errorf("failed to build RLS expression for delete: %w", err)
 	}
 
 	logger.Debug("built RLS expression for delete",
@@ -406,7 +405,7 @@ func (i *RLSDeleteInterceptor) InterceptDelete(
 // mergeExpressions combines filters with RLS expression
 func (i *RLSDeleteInterceptor) mergeExpressions(filter, rlsExpr string) string {
 	if filter == "" && rlsExpr == "" {
-		return "true"
+		return "false" // Deny by default when no constraints exist
 	} else if filter == "" {
 		return rlsExpr
 	} else if rlsExpr == "" {

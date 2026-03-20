@@ -121,19 +121,18 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 			if err := c.meta.DeleteAllRLSPoliciesForCollection(ctx, header.DbId, header.CollectionId); err != nil {
 				log.Warn("failed to clean up RLS policies for dropped collection", zap.Int64("collectionID", header.CollectionId), zap.Error(err))
 				// Don't fail the drop collection operation for RLS cleanup failure
-			} else {
-				// Broadcast RLS cache invalidation to all proxies so they stop enforcing
-				// stale policies for the dropped collection.  Non-fatal: proxies will
-				// expire the cache via TTL even if broadcast fails.
-				if broadcastErr := c.broadcastRLSCacheRefresh(ctx, &messagespb.RefreshRLSCacheRequest{
-					OpType:         messagespb.RLSCacheOpType_DropPolicy,
-					DbName:         body.DbName,
-					CollectionName: body.CollectionName,
-				}); broadcastErr != nil {
-					log.Warn("failed to broadcast RLS cache invalidation after drop collection",
-						zap.String("collection", body.CollectionName),
-						zap.Error(broadcastErr))
-				}
+			}
+			// Always broadcast RLS cache invalidation regardless of cleanup success,
+			// so proxies stop enforcing stale policies for the dropped collection.
+			// Non-fatal: proxies will expire the cache via TTL even if broadcast fails.
+			if broadcastErr := c.broadcastRLSCacheRefresh(ctx, &messagespb.RefreshRLSCacheRequest{
+				OpType:         messagespb.RLSCacheOpType_DropPolicy,
+				DbName:         body.DbName,
+				CollectionName: body.CollectionName,
+			}); broadcastErr != nil {
+				log.Warn("failed to broadcast RLS cache invalidation after drop collection",
+					zap.String("collection", body.CollectionName),
+					zap.Error(broadcastErr))
 			}
 			continue
 		}

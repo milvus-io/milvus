@@ -106,5 +106,5 @@ func BuildRLSUserTagsKey(userName string) string {
 }
 
 func GetRLSUserTagsPrefix() string {
-	return RLSUserTagsMetaPrefix
+	return RLSUserTagsMetaPrefix + "/"
 }

@@ -72,6 +72,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -5938,6 +5939,33 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 		zap.Any("req", req))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
+	}
+	if req == nil {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("refresh policy info request is nil")), nil
+	}
+
+	rlsReq, isRLSOp, err := rlsutil.DecodeRefresh(req.GetOpType(), req.GetOpKey())
+	if err != nil {
+		log.Warn("fail to decode RLS cache refresh request",
+			zap.Int32("opType", req.GetOpType()),
+			zap.Error(err))
+		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid RLS cache refresh request: %v", err)), nil
+	}
+	if isRLSOp {
+		rlsMgr := GetRLSManager()
+		if rlsMgr == nil || rlsMgr.GetCache() == nil {
+			log.Debug("RLS manager/cache is nil, skip RLS cache refresh")
+			return merr.Success(), nil
+		}
+
+		handler := NewRLSCacheRefreshHandler(rlsMgr.GetCache())
+		if err := handler.HandleCacheRefresh(ctx, rlsReq); err != nil {
+			log.Warn("fail to refresh RLS cache", zap.Error(err))
+			return merr.Status(err), nil
+		}
+
+		log.Debug("RefreshRLSCache success")
+		return merr.Success(), nil
 	}
 
 	priCache := privilege.GetPrivilegeCache()

@@ -19,17 +19,20 @@ package rootcoord
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 	"go.uber.org/zap"
 )
 
 // CreateRowPolicy creates a new RLS policy for a collection
-func (c *Core) CreateRowPolicy(ctx context.Context, in *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+func (c *Core) CreateRowPolicy(ctx context.Context, in *messagespb.CreateRowPolicyRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -78,12 +81,21 @@ func (c *Core) CreateRowPolicy(ctx context.Context, in *milvuspb.CreateRowPolicy
 		return merr.Status(err), nil
 	}
 
+	if err := c.broadcastRLSCacheRefresh(ctx, &messagespb.RefreshRLSCacheRequest{
+		OpType:         messagespb.RLSCacheOpType_CreatePolicy,
+		DbName:         in.GetDbName(),
+		CollectionName: policy.GetCollectionName(),
+		PolicyName:     policy.GetPolicyName(),
+	}); err != nil {
+		logger.Warn("failed to broadcast RLS cache refresh after create policy", zap.Error(err))
+	}
+
 	logger.Info("RLS policy created successfully")
 	return merr.Success(), nil
 }
 
 // DropRowPolicy removes an RLS policy from a collection
-func (c *Core) DropRowPolicy(ctx context.Context, in *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+func (c *Core) DropRowPolicy(ctx context.Context, in *messagespb.DropRowPolicyRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -122,14 +134,23 @@ func (c *Core) DropRowPolicy(ctx context.Context, in *milvuspb.DropRowPolicyRequ
 		return merr.Status(err), nil
 	}
 
+	if err := c.broadcastRLSCacheRefresh(ctx, &messagespb.RefreshRLSCacheRequest{
+		OpType:         messagespb.RLSCacheOpType_DropPolicy,
+		DbName:         in.GetDbName(),
+		CollectionName: in.GetCollectionName(),
+		PolicyName:     in.GetPolicyName(),
+	}); err != nil {
+		logger.Warn("failed to broadcast RLS cache refresh after drop policy", zap.Error(err))
+	}
+
 	logger.Info("RLS policy dropped successfully")
 	return merr.Success(), nil
 }
 
 // ListRowPolicies lists all RLS policies for a collection
-func (c *Core) ListRowPolicies(ctx context.Context, in *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+func (c *Core) ListRowPolicies(ctx context.Context, in *messagespb.ListRowPoliciesRequest) (*messagespb.ListRowPoliciesResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &milvuspb.ListRowPoliciesResponse{
+		return &messagespb.ListRowPoliciesResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
@@ -145,7 +166,7 @@ func (c *Core) ListRowPolicies(ctx context.Context, in *milvuspb.ListRowPolicies
 	collMeta, err := c.meta.GetCollectionByName(ctx, in.GetDbName(), in.GetCollectionName(), typeutil.MaxTimestamp)
 	if err != nil {
 		logger.Error("failed to get collection", zap.Error(err))
-		return &milvuspb.ListRowPoliciesResponse{
+		return &messagespb.ListRowPoliciesResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
@@ -154,19 +175,19 @@ func (c *Core) ListRowPolicies(ctx context.Context, in *milvuspb.ListRowPolicies
 	policies, err := c.meta.ListRLSPolicies(ctx, collMeta.DBID, collMeta.CollectionID)
 	if err != nil {
 		logger.Error("failed to list RLS policies", zap.Error(err))
-		return &milvuspb.ListRowPoliciesResponse{
+		return &messagespb.ListRowPoliciesResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
 	// Convert to protobuf
-	pbPolicies := make([]*milvuspb.RLSPolicy, 0, len(policies))
+	pbPolicies := make([]*messagespb.RLSPolicy, 0, len(policies))
 	for _, policy := range policies {
-		pbPolicies = append(pbPolicies, &milvuspb.RLSPolicy{
+		pbPolicies = append(pbPolicies, &messagespb.RLSPolicy{
 			PolicyName:     policy.PolicyName,
 			CollectionName: in.GetCollectionName(),
 			CollectionId:   policy.CollectionID,
-			PolicyType:     milvuspb.RLSPolicyType(policy.PolicyType),
+			PolicyType:     messagespb.RLSPolicyType(policy.PolicyType),
 			Actions:        policy.Actions,
 			Roles:          policy.Roles,
 			UsingExpr:      policy.UsingExpr,
@@ -177,14 +198,14 @@ func (c *Core) ListRowPolicies(ctx context.Context, in *milvuspb.ListRowPolicies
 	}
 
 	logger.Info("listed RLS policies successfully", zap.Int("count", len(pbPolicies)))
-	return &milvuspb.ListRowPoliciesResponse{
+	return &messagespb.ListRowPoliciesResponse{
 		Status:   merr.Success(),
 		Policies: pbPolicies,
 	}, nil
 }
 
 // SetUserTags sets or updates tags for a user
-func (c *Core) SetUserTags(ctx context.Context, in *milvuspb.SetUserTagsRequest) (*commonpb.Status, error) {
+func (c *Core) SetUserTags(ctx context.Context, in *messagespb.SetUserTagsRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -221,14 +242,21 @@ func (c *Core) SetUserTags(ctx context.Context, in *milvuspb.SetUserTagsRequest)
 		return merr.Status(err), nil
 	}
 
+	if err := c.broadcastRLSCacheRefresh(ctx, &messagespb.RefreshRLSCacheRequest{
+		OpType:   messagespb.RLSCacheOpType_UpdateUserTags,
+		UserName: in.GetUserName(),
+	}); err != nil {
+		logger.Warn("failed to broadcast RLS cache refresh after set user tags", zap.Error(err))
+	}
+
 	logger.Info("user tags set successfully")
 	return merr.Success(), nil
 }
 
 // GetUserTags retrieves tags for a user
-func (c *Core) GetUserTags(ctx context.Context, in *milvuspb.GetUserTagsRequest) (*milvuspb.GetUserTagsResponse, error) {
+func (c *Core) GetUserTags(ctx context.Context, in *messagespb.GetUserTagsRequest) (*messagespb.GetUserTagsResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &milvuspb.GetUserTagsResponse{
+		return &messagespb.GetUserTagsResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
@@ -242,23 +270,29 @@ func (c *Core) GetUserTags(ctx context.Context, in *milvuspb.GetUserTagsRequest)
 	// Get user tags from metastore
 	userTags, err := c.meta.GetUserTags(ctx, in.GetUserName())
 	if err != nil {
+		// "Key not found" means user has no tags — return empty tags with success.
+		// Any other error (etcd down, deserialization failure) is a real error.
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return &messagespb.GetUserTagsResponse{
+				Status: merr.Success(),
+				Tags:   make(map[string]string),
+			}, nil
+		}
 		logger.Warn("failed to get user tags", zap.Error(err))
-		// Return empty tags if not found
-		return &milvuspb.GetUserTagsResponse{
-			Status: merr.Success(),
-			Tags:   make(map[string]string),
+		return &messagespb.GetUserTagsResponse{
+			Status: merr.Status(err),
 		}, nil
 	}
 
 	logger.Info("retrieved user tags successfully", zap.Int("numTags", len(userTags.Tags)))
-	return &milvuspb.GetUserTagsResponse{
+	return &messagespb.GetUserTagsResponse{
 		Status: merr.Success(),
 		Tags:   userTags.Tags,
 	}, nil
 }
 
 // DeleteUserTag removes a specific tag from a user
-func (c *Core) DeleteUserTag(ctx context.Context, in *milvuspb.DeleteUserTagRequest) (*commonpb.Status, error) {
+func (c *Core) DeleteUserTag(ctx context.Context, in *messagespb.DeleteUserTagRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -295,14 +329,21 @@ func (c *Core) DeleteUserTag(ctx context.Context, in *milvuspb.DeleteUserTagRequ
 		return merr.Status(err), nil
 	}
 
+	if err := c.broadcastRLSCacheRefresh(ctx, &messagespb.RefreshRLSCacheRequest{
+		OpType:   messagespb.RLSCacheOpType_DeleteUserTag,
+		UserName: in.GetUserName(),
+	}); err != nil {
+		logger.Warn("failed to broadcast RLS cache refresh after delete user tag", zap.Error(err))
+	}
+
 	logger.Info("user tag deleted successfully")
 	return merr.Success(), nil
 }
 
 // ListUsersWithTag lists all users that have a specific tag value
-func (c *Core) ListUsersWithTag(ctx context.Context, in *milvuspb.ListUsersWithTagRequest) (*milvuspb.ListUsersWithTagResponse, error) {
+func (c *Core) ListUsersWithTag(ctx context.Context, in *messagespb.ListUsersWithTagRequest) (*messagespb.ListUsersWithTagResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &milvuspb.ListUsersWithTagResponse{
+		return &messagespb.ListUsersWithTagResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
@@ -318,20 +359,20 @@ func (c *Core) ListUsersWithTag(ctx context.Context, in *milvuspb.ListUsersWithT
 	users, err := c.meta.ListUsersWithTag(ctx, in.GetTagKey(), in.GetTagValue())
 	if err != nil {
 		logger.Error("failed to list users with tag", zap.Error(err))
-		return &milvuspb.ListUsersWithTagResponse{
+		return &messagespb.ListUsersWithTagResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
 	logger.Info("listed users with tag successfully", zap.Int("count", len(users)))
-	return &milvuspb.ListUsersWithTagResponse{
+	return &messagespb.ListUsersWithTagResponse{
 		Status: merr.Success(),
 		Users:  users,
 	}, nil
 }
 
 // RefreshRLSCache broadcasts a cache refresh to all proxies
-func (c *Core) RefreshRLSCache(ctx context.Context, in *milvuspb.RefreshRLSCacheRequest) (*commonpb.Status, error) {
+func (c *Core) RefreshRLSCache(ctx context.Context, in *messagespb.RefreshRLSCacheRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -342,8 +383,6 @@ func (c *Core) RefreshRLSCache(ctx context.Context, in *milvuspb.RefreshRLSCache
 	)
 	logger.Info("received request to refresh RLS cache")
 
-	// In a real implementation, this would broadcast to all proxies
-	// For now, we just log the operation
 	logger.Info("RLS cache refresh requested",
 		zap.String("dbName", in.GetDbName()),
 		zap.String("collectionName", in.GetCollectionName()),
@@ -351,5 +390,26 @@ func (c *Core) RefreshRLSCache(ctx context.Context, in *milvuspb.RefreshRLSCache
 		zap.String("userName", in.GetUserName()),
 	)
 
+	if err := c.broadcastRLSCacheRefresh(ctx, in); err != nil {
+		logger.Error("failed to broadcast RLS cache refresh", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
 	return merr.Success(), nil
+}
+
+func (c *Core) broadcastRLSCacheRefresh(ctx context.Context, req *messagespb.RefreshRLSCacheRequest) error {
+	if c.proxyClientManager == nil || req == nil {
+		return nil
+	}
+
+	opType, opKey, err := rlsutil.EncodeRefresh(req)
+	if err != nil {
+		return err
+	}
+
+	return c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+		OpType: opType,
+		OpKey:  opKey,
+	})
 }

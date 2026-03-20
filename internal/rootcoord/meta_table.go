@@ -152,6 +152,16 @@ type IMetaTable interface {
 	AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error
 	RemoveFileResource(ctx context.Context, name string) (error, bool)
 	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64)
+
+	// RLS Policy operations
+	SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error
+	DeleteRLSPolicy(ctx context.Context, dbID int64, collectionID int64, policyName string) error
+	ListRLSPolicies(ctx context.Context, dbID int64, collectionID int64) ([]*model.RLSPolicy, error)
+	GetUserTags(ctx context.Context, userName string) (*model.RLSUserTags, error)
+	SaveUserTags(ctx context.Context, userTags *model.RLSUserTags) error
+	DeleteUserTags(ctx context.Context, userName string) error
+	ListUsersWithTag(ctx context.Context, tagKey string, tagValue string) ([]string, error)
+	DeleteAllRLSPoliciesForCollection(ctx context.Context, dbID int64, collectionID int64) error
 }
 
 // MetaTable is a persistent meta set of all databases, collections and partitions.
@@ -2312,4 +2322,52 @@ func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileRe
 	defer mt.ddLock.RUnlock()
 
 	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
+}
+
+func (mt *MetaTable) SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	return mt.catalog.SaveRLSPolicy(ctx, policy)
+}
+
+func (mt *MetaTable) DeleteRLSPolicy(ctx context.Context, dbID int64, collectionID int64, policyName string) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	return mt.catalog.DeleteRLSPolicy(ctx, dbID, collectionID, policyName)
+}
+
+func (mt *MetaTable) ListRLSPolicies(ctx context.Context, dbID int64, collectionID int64) ([]*model.RLSPolicy, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	return mt.catalog.ListRLSPolicies(ctx, dbID, collectionID)
+}
+
+func (mt *MetaTable) GetUserTags(ctx context.Context, userName string) (*model.RLSUserTags, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	return mt.catalog.GetUserTags(ctx, userName)
+}
+
+func (mt *MetaTable) SaveUserTags(ctx context.Context, userTags *model.RLSUserTags) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	return mt.catalog.SaveUserTags(ctx, userTags)
+}
+
+func (mt *MetaTable) DeleteUserTags(ctx context.Context, userName string) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	return mt.catalog.DeleteUserTags(ctx, userName)
+}
+
+func (mt *MetaTable) ListUsersWithTag(ctx context.Context, tagKey string, tagValue string) ([]string, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	return mt.catalog.ListUsersWithTag(ctx, tagKey, tagValue)
+}
+
+func (mt *MetaTable) DeleteAllRLSPoliciesForCollection(ctx context.Context, dbID int64, collectionID int64) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	return mt.catalog.DeleteAllRLSPoliciesForCollection(ctx, dbID, collectionID)
 }

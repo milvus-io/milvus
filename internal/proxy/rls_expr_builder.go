@@ -196,7 +196,10 @@ func (b *RLSExpressionBuilder) selectPolicyExpression(policy *model.RLSPolicy, a
 	}
 }
 
-// substituteVariables performs variable substitution in expressions
+// substituteVariables performs variable substitution in expressions.
+// Returns the substituted expression and whether the substitution was complete.
+// If the user is missing a required tag, the expression is replaced with "false"
+// to deny access, preventing data with a matching sentinel value from bypassing RLS.
 func (b *RLSExpressionBuilder) substituteVariables(expr string, rlsContext *RLSContext) string {
 	result := expr
 
@@ -209,16 +212,11 @@ func (b *RLSExpressionBuilder) substituteVariables(expr string, rlsContext *RLSC
 		result = strings.ReplaceAll(result, placeholder, fmt.Sprintf("'%s'", escapeString(value)))
 	}
 
-	// Replace any remaining $current_user_tags[...] placeholders (tags not present on user)
-	// with a sentinel that never matches real data — policy should deny access for missing tags.
-	for strings.Contains(result, "$current_user_tags[") {
-		start := strings.Index(result, "$current_user_tags[")
-		end := strings.Index(result[start:], "]")
-		if end < 0 {
-			break // malformed placeholder, leave as-is (expression parser will reject it)
-		}
-		placeholder := result[start : start+end+1]
-		result = strings.Replace(result, placeholder, "'__rls_no_tag__'", 1)
+	// If any $current_user_tags[...] placeholders remain, the user is missing required tags.
+	// Return "false" to deny access for this policy expression, rather than using a sentinel
+	// string that could theoretically match real data.
+	if strings.Contains(result, "$current_user_tags[") {
+		return "false"
 	}
 
 	return result

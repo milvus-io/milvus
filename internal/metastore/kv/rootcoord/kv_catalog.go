@@ -2047,6 +2047,21 @@ func (kc *Catalog) ListUsersWithTag(ctx context.Context, tagKey string, tagValue
 	return users, nil
 }
 
+func (kc *Catalog) DeleteAllRLSPoliciesForCollection(ctx context.Context, dbID int64, collectionID int64) error {
+	// Delete all policies under this collection
+	prefix := BuildRLSPoliciesPrefix(dbID, collectionID)
+	if err := kc.Txn.RemoveWithPrefix(ctx, prefix); err != nil {
+		return err
+	}
+	// Delete collection config
+	configKey := BuildRLSCollectionConfigKey(dbID, collectionID)
+	if err := kc.Txn.Remove(ctx, configKey); err != nil {
+		// Ignore "key not found" errors
+		log.Warn("failed to delete RLS collection config, may not exist", zap.Error(err))
+	}
+	return nil
+}
+
 func (kc *Catalog) Close() {
 	// do nothing
 }

@@ -119,7 +119,7 @@ func TestRLSSearchInterceptorMergeExpressions(t *testing.T) {
 		rlsExpr      string
 		expected     string
 	}{
-		{"both empty", "", "", "true"},
+		{"both empty", "", "", "false"},
 		{"only search filter", "score > 0.8", "", "score > 0.8"},
 		{"only rls expr", "", "owner_id == 'alice'", "owner_id == 'alice'"},
 		{"both set", "score > 0.8", "owner_id == 'alice'", "(score > 0.8) AND (owner_id == 'alice')"},

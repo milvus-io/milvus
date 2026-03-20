@@ -306,8 +306,8 @@ func TestRLSExpressionBuilderActionFiltering(t *testing.T) {
 			model.RLSPolicyTypePermissive,
 			[]string{"insert"},
 			[]string{"PUBLIC"},
-			"true",
 			"",
+			"true",
 			"insert policy",
 		),
 	}
@@ -327,4 +327,53 @@ func TestRLSExpressionBuilderActionFiltering(t *testing.T) {
 	expr, err = builder.BuildExpression(policies, "insert", rlsContext, []string{"PUBLIC"})
 	assert.NoError(t, err)
 	assert.NotEqual(t, "false", expr)
+}
+
+func TestRLSExpressionBuilderMissingTagDeniesAccess(t *testing.T) {
+	builder := NewRLSExpressionBuilder()
+
+	policies := []*model.RLSPolicy{
+		model.NewRLSPolicy(
+			"tenant_policy",
+			123, 456,
+			model.RLSPolicyTypePermissive,
+			[]string{"query"},
+			[]string{"PUBLIC"},
+			"tenant_id == $current_user_tags['tenant']",
+			"",
+			"tenant isolation",
+		),
+	}
+
+	// User does NOT have the 'tenant' tag
+	rlsContext := &RLSContext{
+		CurrentUserName: "alice",
+		CurrentUserTags: map[string]string{},
+		CurrentRoles:    []string{"PUBLIC"},
+	}
+
+	// Should deny access when required tag is missing
+	expr, err := builder.BuildExpression(policies, "query", rlsContext, []string{"PUBLIC"})
+	assert.NoError(t, err)
+	// The expression should deny all because the policy has an unresolvable tag placeholder.
+	// The builder may wrap in parentheses, so accept both "false" and "(false)".
+	assert.Contains(t, []string{"false", "(false)"}, expr)
+}
+
+func TestRLSExpressionBuilderPartialTagSubstitution(t *testing.T) {
+	builder := NewRLSExpressionBuilder()
+
+	// User has 'dept' but not 'region' — entire expression should be denied
+	rlsContext := &RLSContext{
+		CurrentUserName: "alice",
+		CurrentUserTags: map[string]string{
+			"dept": "engineering",
+		},
+	}
+
+	result := builder.substituteVariables(
+		"dept == $current_user_tags['dept'] AND region == $current_user_tags['region']",
+		rlsContext,
+	)
+	assert.Equal(t, "false", result)
 }

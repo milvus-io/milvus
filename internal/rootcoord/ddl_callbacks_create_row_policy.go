@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -107,7 +108,25 @@ func (t *createRowPolicyTask) Execute(ctx context.Context) error {
 			zap.String("policy_name", t.Req.PolicyName),
 			zap.Error(err),
 		)
-		return errors.Wrapf(err, "invalid policy: %w", err)
+		return errors.Wrap(err, "invalid policy")
+	}
+
+	// Check for duplicate policy and enforce count limit
+	existingPolicies, err := t.core.meta.ListRLSPolicies(ctx, policy.DBID, policy.CollectionID)
+	if err != nil {
+		return errors.Wrap(err, "failed to list existing policies")
+	}
+
+	maxPolicies := paramtable.Get().ProxyCfg.RLSMaxPoliciesPerCollection.GetAsInt()
+	if maxPolicies > 0 && len(existingPolicies) >= maxPolicies {
+		return fmt.Errorf("policy count limit reached for collection %d: %d/%d",
+			policy.CollectionID, len(existingPolicies), maxPolicies)
+	}
+
+	for _, existing := range existingPolicies {
+		if existing.PolicyName == policy.PolicyName {
+			return fmt.Errorf("policy %s already exists for collection %d", policy.PolicyName, policy.CollectionID)
+		}
 	}
 
 	// Save to metastore
@@ -131,7 +150,7 @@ func (t *createRowPolicyTask) Execute(ctx context.Context) error {
 func (t *createRowPolicyTask) GetLockerKey() LockerKey {
 	// Return a task locker key for collection-level locking
 	return &taskLockerKey{
-		key:   fmt.Sprintf("collection/%s", t.Req.CollectionName),
+		key:   fmt.Sprintf("rls_policy/%s/%s", t.Req.DbName, t.Req.CollectionName),
 		rw:    true,
 		level: CollectionLock,
 		next:  nil,

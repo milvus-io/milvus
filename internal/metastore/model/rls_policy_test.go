@@ -1,8 +1,10 @@
 package model
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -165,4 +167,24 @@ func TestIsSupportedAction(t *testing.T) {
 			assert.Equal(t, tt.want, IsSupportedAction(tt.action))
 		})
 	}
+}
+
+func TestRLSPolicyValidateUsesConfiguredExpressionLength(t *testing.T) {
+	params := paramtable.Get()
+	params.Save(params.ProxyCfg.RLSMaxExpressionLength.Key, "8")
+	defer params.Reset(params.ProxyCfg.RLSMaxExpressionLength.Key)
+
+	policy := &RLSPolicy{
+		PolicyName:   "len_policy",
+		CollectionID: 1,
+		DBID:         1,
+		PolicyType:   RLSPolicyTypePermissive,
+		Actions:      []string{"query"},
+		Roles:        []string{"PUBLIC"},
+		UsingExpr:    strings.Repeat("a", 9),
+	}
+
+	err := policy.Validate()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "max 8")
 }

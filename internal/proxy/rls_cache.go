@@ -113,8 +113,20 @@ func (rc *RLSCache) SetMergedExpr(collectionKey, userName, action, expr string) 
 		maxEntries = config.GetMaxCacheEntries()
 	}
 	if len(rc.mergedExprCache) >= maxEntries {
-		// Evict all entries when limit is reached (simple strategy)
-		rc.mergedExprCache = make(map[string]string)
+		// Evict ~25% of entries randomly (Go map iteration is random) to avoid
+		// thundering herd from clearing the entire cache at once.
+		evictCount := maxEntries / 4
+		if evictCount < 1 {
+			evictCount = 1
+		}
+		evicted := 0
+		for k := range rc.mergedExprCache {
+			delete(rc.mergedExprCache, k)
+			evicted++
+			if evicted >= evictCount {
+				break
+			}
+		}
 	}
 
 	l2Key := generateL2Key(collectionKey, userName, action)

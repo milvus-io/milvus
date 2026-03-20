@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -1786,6 +1787,40 @@ func (coord *MixCoordMock) PushClientCommand(ctx context.Context, req *milvuspb.
 }
 
 func (coord *MixCoordMock) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+// RLS (Row-Level Security) stub methods
+
+func (coord *MixCoordMock) CreateRowPolicy(ctx context.Context, req *messagespb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) DropRowPolicy(ctx context.Context, req *messagespb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) ListRowPolicies(ctx context.Context, req *messagespb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*messagespb.ListRowPoliciesResponse, error) {
+	return &messagespb.ListRowPoliciesResponse{Status: merr.Success()}, nil
+}
+
+func (coord *MixCoordMock) SetUserTags(ctx context.Context, req *messagespb.SetUserTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) GetUserTags(ctx context.Context, req *messagespb.GetUserTagsRequest, opts ...grpc.CallOption) (*messagespb.GetUserTagsResponse, error) {
+	return &messagespb.GetUserTagsResponse{Status: merr.Success()}, nil
+}
+
+func (coord *MixCoordMock) DeleteUserTag(ctx context.Context, req *messagespb.DeleteUserTagRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) ListUsersWithTag(ctx context.Context, req *messagespb.ListUsersWithTagRequest, opts ...grpc.CallOption) (*messagespb.ListUsersWithTagResponse, error) {
+	return &messagespb.ListUsersWithTagResponse{Status: merr.Success()}, nil
+}
+
+func (coord *MixCoordMock) RefreshRLSCache(ctx context.Context, req *messagespb.RefreshRLSCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return merr.Success(), nil
 }
 

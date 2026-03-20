@@ -3820,6 +3820,423 @@ func (_c *IMetaTable_TruncateCollection_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// SaveRLSPolicy provides a mock function with given fields: ctx, policy
+func (_m *IMetaTable) SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error {
+	ret := _m.Called(ctx, policy)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveRLSPolicy")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.RLSPolicy) error); ok {
+		r0 = rf(ctx, policy)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_SaveRLSPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveRLSPolicy'
+type IMetaTable_SaveRLSPolicy_Call struct {
+	*mock.Call
+}
+
+// SaveRLSPolicy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - policy *model.RLSPolicy
+func (_e *IMetaTable_Expecter) SaveRLSPolicy(ctx interface{}, policy interface{}) *IMetaTable_SaveRLSPolicy_Call {
+	return &IMetaTable_SaveRLSPolicy_Call{Call: _e.mock.On("SaveRLSPolicy", ctx, policy)}
+}
+
+func (_c *IMetaTable_SaveRLSPolicy_Call) Run(run func(ctx context.Context, policy *model.RLSPolicy)) *IMetaTable_SaveRLSPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.RLSPolicy))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_SaveRLSPolicy_Call) Return(_a0 error) *IMetaTable_SaveRLSPolicy_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_SaveRLSPolicy_Call) RunAndReturn(run func(context.Context, *model.RLSPolicy) error) *IMetaTable_SaveRLSPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteRLSPolicy provides a mock function with given fields: ctx, dbID, collectionID, policyName
+func (_m *IMetaTable) DeleteRLSPolicy(ctx context.Context, dbID int64, collectionID int64, policyName string) error {
+	ret := _m.Called(ctx, dbID, collectionID, policyName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteRLSPolicy")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, string) error); ok {
+		r0 = rf(ctx, dbID, collectionID, policyName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_DeleteRLSPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteRLSPolicy'
+type IMetaTable_DeleteRLSPolicy_Call struct {
+	*mock.Call
+}
+
+// DeleteRLSPolicy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbID int64
+//   - collectionID int64
+//   - policyName string
+func (_e *IMetaTable_Expecter) DeleteRLSPolicy(ctx interface{}, dbID interface{}, collectionID interface{}, policyName interface{}) *IMetaTable_DeleteRLSPolicy_Call {
+	return &IMetaTable_DeleteRLSPolicy_Call{Call: _e.mock.On("DeleteRLSPolicy", ctx, dbID, collectionID, policyName)}
+}
+
+func (_c *IMetaTable_DeleteRLSPolicy_Call) Run(run func(ctx context.Context, dbID int64, collectionID int64, policyName string)) *IMetaTable_DeleteRLSPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_DeleteRLSPolicy_Call) Return(_a0 error) *IMetaTable_DeleteRLSPolicy_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_DeleteRLSPolicy_Call) RunAndReturn(run func(context.Context, int64, int64, string) error) *IMetaTable_DeleteRLSPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListRLSPolicies provides a mock function with given fields: ctx, dbID, collectionID
+func (_m *IMetaTable) ListRLSPolicies(ctx context.Context, dbID int64, collectionID int64) ([]*model.RLSPolicy, error) {
+	ret := _m.Called(ctx, dbID, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRLSPolicies")
+	}
+
+	var r0 []*model.RLSPolicy
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) ([]*model.RLSPolicy, error)); ok {
+		return rf(ctx, dbID, collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) []*model.RLSPolicy); ok {
+		r0 = rf(ctx, dbID, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*model.RLSPolicy)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, int64) error); ok {
+		r1 = rf(ctx, dbID, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_ListRLSPolicies_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRLSPolicies'
+type IMetaTable_ListRLSPolicies_Call struct {
+	*mock.Call
+}
+
+// ListRLSPolicies is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbID int64
+//   - collectionID int64
+func (_e *IMetaTable_Expecter) ListRLSPolicies(ctx interface{}, dbID interface{}, collectionID interface{}) *IMetaTable_ListRLSPolicies_Call {
+	return &IMetaTable_ListRLSPolicies_Call{Call: _e.mock.On("ListRLSPolicies", ctx, dbID, collectionID)}
+}
+
+func (_c *IMetaTable_ListRLSPolicies_Call) Run(run func(ctx context.Context, dbID int64, collectionID int64)) *IMetaTable_ListRLSPolicies_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListRLSPolicies_Call) Return(_a0 []*model.RLSPolicy, _a1 error) *IMetaTable_ListRLSPolicies_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_ListRLSPolicies_Call) RunAndReturn(run func(context.Context, int64, int64) ([]*model.RLSPolicy, error)) *IMetaTable_ListRLSPolicies_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetUserTags provides a mock function with given fields: ctx, userName
+func (_m *IMetaTable) GetUserTags(ctx context.Context, userName string) (*model.RLSUserTags, error) {
+	ret := _m.Called(ctx, userName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetUserTags")
+	}
+
+	var r0 *model.RLSUserTags
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*model.RLSUserTags, error)); ok {
+		return rf(ctx, userName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *model.RLSUserTags); ok {
+		r0 = rf(ctx, userName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.RLSUserTags)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, userName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_GetUserTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetUserTags'
+type IMetaTable_GetUserTags_Call struct {
+	*mock.Call
+}
+
+// GetUserTags is a helper method to define mock.On call
+//   - ctx context.Context
+//   - userName string
+func (_e *IMetaTable_Expecter) GetUserTags(ctx interface{}, userName interface{}) *IMetaTable_GetUserTags_Call {
+	return &IMetaTable_GetUserTags_Call{Call: _e.mock.On("GetUserTags", ctx, userName)}
+}
+
+func (_c *IMetaTable_GetUserTags_Call) Run(run func(ctx context.Context, userName string)) *IMetaTable_GetUserTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetUserTags_Call) Return(_a0 *model.RLSUserTags, _a1 error) *IMetaTable_GetUserTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_GetUserTags_Call) RunAndReturn(run func(context.Context, string) (*model.RLSUserTags, error)) *IMetaTable_GetUserTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveUserTags provides a mock function with given fields: ctx, userTags
+func (_m *IMetaTable) SaveUserTags(ctx context.Context, userTags *model.RLSUserTags) error {
+	ret := _m.Called(ctx, userTags)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveUserTags")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.RLSUserTags) error); ok {
+		r0 = rf(ctx, userTags)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_SaveUserTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveUserTags'
+type IMetaTable_SaveUserTags_Call struct {
+	*mock.Call
+}
+
+// SaveUserTags is a helper method to define mock.On call
+//   - ctx context.Context
+//   - userTags *model.RLSUserTags
+func (_e *IMetaTable_Expecter) SaveUserTags(ctx interface{}, userTags interface{}) *IMetaTable_SaveUserTags_Call {
+	return &IMetaTable_SaveUserTags_Call{Call: _e.mock.On("SaveUserTags", ctx, userTags)}
+}
+
+func (_c *IMetaTable_SaveUserTags_Call) Run(run func(ctx context.Context, userTags *model.RLSUserTags)) *IMetaTable_SaveUserTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.RLSUserTags))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_SaveUserTags_Call) Return(_a0 error) *IMetaTable_SaveUserTags_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_SaveUserTags_Call) RunAndReturn(run func(context.Context, *model.RLSUserTags) error) *IMetaTable_SaveUserTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteUserTags provides a mock function with given fields: ctx, userName
+func (_m *IMetaTable) DeleteUserTags(ctx context.Context, userName string) error {
+	ret := _m.Called(ctx, userName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteUserTags")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, userName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_DeleteUserTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteUserTags'
+type IMetaTable_DeleteUserTags_Call struct {
+	*mock.Call
+}
+
+// DeleteUserTags is a helper method to define mock.On call
+//   - ctx context.Context
+//   - userName string
+func (_e *IMetaTable_Expecter) DeleteUserTags(ctx interface{}, userName interface{}) *IMetaTable_DeleteUserTags_Call {
+	return &IMetaTable_DeleteUserTags_Call{Call: _e.mock.On("DeleteUserTags", ctx, userName)}
+}
+
+func (_c *IMetaTable_DeleteUserTags_Call) Run(run func(ctx context.Context, userName string)) *IMetaTable_DeleteUserTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_DeleteUserTags_Call) Return(_a0 error) *IMetaTable_DeleteUserTags_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_DeleteUserTags_Call) RunAndReturn(run func(context.Context, string) error) *IMetaTable_DeleteUserTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListUsersWithTag provides a mock function with given fields: ctx, tagKey, tagValue
+func (_m *IMetaTable) ListUsersWithTag(ctx context.Context, tagKey string, tagValue string) ([]string, error) {
+	ret := _m.Called(ctx, tagKey, tagValue)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListUsersWithTag")
+	}
+
+	var r0 []string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) ([]string, error)); ok {
+		return rf(ctx, tagKey, tagValue)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) []string); ok {
+		r0 = rf(ctx, tagKey, tagValue)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, tagKey, tagValue)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_ListUsersWithTag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListUsersWithTag'
+type IMetaTable_ListUsersWithTag_Call struct {
+	*mock.Call
+}
+
+// ListUsersWithTag is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tagKey string
+//   - tagValue string
+func (_e *IMetaTable_Expecter) ListUsersWithTag(ctx interface{}, tagKey interface{}, tagValue interface{}) *IMetaTable_ListUsersWithTag_Call {
+	return &IMetaTable_ListUsersWithTag_Call{Call: _e.mock.On("ListUsersWithTag", ctx, tagKey, tagValue)}
+}
+
+func (_c *IMetaTable_ListUsersWithTag_Call) Run(run func(ctx context.Context, tagKey string, tagValue string)) *IMetaTable_ListUsersWithTag_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListUsersWithTag_Call) Return(_a0 []string, _a1 error) *IMetaTable_ListUsersWithTag_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_ListUsersWithTag_Call) RunAndReturn(run func(context.Context, string, string) ([]string, error)) *IMetaTable_ListUsersWithTag_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteAllRLSPoliciesForCollection provides a mock function with given fields: ctx, dbID, collectionID
+func (_m *IMetaTable) DeleteAllRLSPoliciesForCollection(ctx context.Context, dbID int64, collectionID int64) error {
+	ret := _m.Called(ctx, dbID, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteAllRLSPoliciesForCollection")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64) error); ok {
+		r0 = rf(ctx, dbID, collectionID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_DeleteAllRLSPoliciesForCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteAllRLSPoliciesForCollection'
+type IMetaTable_DeleteAllRLSPoliciesForCollection_Call struct {
+	*mock.Call
+}
+
+// DeleteAllRLSPoliciesForCollection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbID int64
+//   - collectionID int64
+func (_e *IMetaTable_Expecter) DeleteAllRLSPoliciesForCollection(ctx interface{}, dbID interface{}, collectionID interface{}) *IMetaTable_DeleteAllRLSPoliciesForCollection_Call {
+	return &IMetaTable_DeleteAllRLSPoliciesForCollection_Call{Call: _e.mock.On("DeleteAllRLSPoliciesForCollection", ctx, dbID, collectionID)}
+}
+
+func (_c *IMetaTable_DeleteAllRLSPoliciesForCollection_Call) Run(run func(ctx context.Context, dbID int64, collectionID int64)) *IMetaTable_DeleteAllRLSPoliciesForCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_DeleteAllRLSPoliciesForCollection_Call) Return(_a0 error) *IMetaTable_DeleteAllRLSPoliciesForCollection_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_DeleteAllRLSPoliciesForCollection_Call) RunAndReturn(run func(context.Context, int64, int64) error) *IMetaTable_DeleteAllRLSPoliciesForCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewIMetaTable creates a new instance of IMetaTable. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewIMetaTable(t interface {

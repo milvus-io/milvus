@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
 

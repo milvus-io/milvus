@@ -23,6 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"go.uber.org/zap"
 )
 
@@ -62,12 +63,17 @@ func (t *deleteUserTagTask) Execute(ctx context.Context) error {
 	// Get existing user tags
 	userTags, err := t.core.meta.GetUserTags(ctx, t.Req.UserName)
 	if err != nil {
-		log.Warn("user tags not found",
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			log.Info("user tags not found, treat as no-op",
+				zap.String("user_name", t.Req.UserName),
+			)
+			return nil
+		}
+		log.Error("failed to load user tags",
 			zap.String("user_name", t.Req.UserName),
 			zap.Error(err),
 		)
-		// If user tags don't exist, treat as success
-		return nil
+		return errors.Wrap(err, "failed to load user tags")
 	}
 
 	// Delete the specific tag

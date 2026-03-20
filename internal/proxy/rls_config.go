@@ -78,27 +78,20 @@ type RLSConfig struct {
 
 	// MaxExpressionLength limits the length of USING/CHECK expressions
 	MaxExpressionLength int
-
-	// FailOnCacheError controls whether to fail if cache is unavailable
-	FailOnCacheError bool
-
-	// FailOnContextError controls whether to fail if user context cannot be obtained
-	FailOnContextError bool
 }
 
-// DefaultRLSConfig returns the default RLS configuration
+// DefaultRLSConfig returns the default RLS configuration.
+// RLS is disabled by default and must be explicitly enabled via configuration.
 func DefaultRLSConfig() *RLSConfig {
 	return &RLSConfig{
 		Mode:                     RLSModePermissive,
-		Enabled:                  true,
+		Enabled:                  false,
 		AuditEnabled:             true,
 		CacheExpirationSeconds:   3600,
 		MaxCacheEntries:          10000,
 		MaxPoliciesPerCollection: 100,
 		MaxUserTags:              50,
 		MaxExpressionLength:      4096,
-		FailOnCacheError:         false,
-		FailOnContextError:       false,
 	}
 }
 
@@ -138,11 +131,12 @@ func (c *RLSConfig) SetMode(mode RLSMode) {
 	c.Mode = mode
 }
 
-// IsEnabled returns whether RLS is enabled
+// IsEnabled returns whether RLS is enabled.
+// RLS requires authorization to be enabled — without user identity, RLS cannot evaluate policies.
 func (c *RLSConfig) IsEnabled() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.Enabled && c.Mode != RLSModeDisabled
+	return c.Enabled && c.Mode != RLSModeDisabled && Params.CommonCfg.AuthorizationEnabled.GetAsBool()
 }
 
 // SetEnabled sets whether RLS is enabled
@@ -164,20 +158,6 @@ func (c *RLSConfig) ShouldFailOnError() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.Mode == RLSModeStrict
-}
-
-// ShouldFailOnCacheError returns whether to fail if cache is unavailable
-func (c *RLSConfig) ShouldFailOnCacheError() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.FailOnCacheError && c.Mode == RLSModeStrict
-}
-
-// ShouldFailOnContextError returns whether to fail if context cannot be obtained
-func (c *RLSConfig) ShouldFailOnContextError() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.FailOnContextError && c.Mode == RLSModeStrict
 }
 
 // IsAuditEnabled returns whether audit logging is enabled
@@ -262,8 +242,6 @@ func InitRLSConfigFromParams() {
 		MaxPoliciesPerCollection: params.ProxyCfg.RLSMaxPoliciesPerCollection.GetAsInt(),
 		MaxUserTags:              params.ProxyCfg.RLSMaxUserTags.GetAsInt(),
 		MaxExpressionLength:      params.ProxyCfg.RLSMaxExpressionLength.GetAsInt(),
-		FailOnCacheError:         params.ProxyCfg.RLSFailOnCacheError.GetAsBool(),
-		FailOnContextError:       params.ProxyCfg.RLSFailOnContextError.GetAsBool(),
 	}
 	SetRLSConfig(config)
 }
