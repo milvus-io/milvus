@@ -212,6 +212,134 @@ func TestWithContext(t *testing.T) {
 	assert.NotNil(t, session)
 }
 
+func TestRollbackAllInFlightTransactions(t *testing.T) {
+	resource.InitForTest(t)
+
+	t.Run("RollbackWithNoSessions", func(t *testing.T) {
+		m := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+		<-m.RecoverDone()
+
+		// Should not panic and handle empty case
+		m.RollbackAllInFlightTransactions()
+	})
+
+	t.Run("RollbackWithActiveSessions", func(t *testing.T) {
+		m := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+		<-m.RecoverDone()
+
+		// Create 3 active sessions
+		cleanupCalled := atomic.NewInt32(0)
+		for i := 0; i < 3; i++ {
+			session, err := m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Second))
+			assert.NoError(t, err)
+			assert.NotNil(t, session)
+
+			session.RegisterCleanup(func() {
+				cleanupCalled.Inc()
+			}, 0)
+		}
+
+		// Verify we have 3 active sessions
+		m.mu.Lock()
+		assert.Equal(t, 3, len(m.sessions))
+		m.mu.Unlock()
+
+		// Rollback all in-flight transactions
+		m.RollbackAllInFlightTransactions()
+
+		// Verify all sessions are cleaned up
+		m.mu.Lock()
+		assert.Equal(t, 0, len(m.sessions))
+		m.mu.Unlock()
+
+		// Verify cleanup was called for all sessions
+		assert.Equal(t, int32(3), cleanupCalled.Load())
+	})
+
+	t.Run("RollbackWithMixedSessionStates", func(t *testing.T) {
+		m := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+		<-m.RecoverDone()
+
+		cleanupCalled := atomic.NewInt32(0)
+
+		// Create 3 sessions with different states
+		// Session 1: in-flight
+		session1, err := m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Second))
+		assert.NoError(t, err)
+		session1.RegisterCleanup(func() {
+			cleanupCalled.Inc()
+		}, 0)
+
+		// Session 2: committed (already done, should be removed from manager)
+		session2, err := m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Second))
+		assert.NoError(t, err)
+		session2.RegisterCleanup(func() {
+			cleanupCalled.Inc()
+		}, 0)
+		err = session2.RequestCommitAndWait(context.Background(), 0)
+		assert.NoError(t, err)
+		session2.CommitDone()
+
+		// Session 3: in-flight with messages added
+		session3, err := m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Second))
+		assert.NoError(t, err)
+		session3.RegisterCleanup(func() {
+			cleanupCalled.Inc()
+		}, 0)
+		err = session3.AddNewMessage(context.Background(), 0)
+		assert.NoError(t, err)
+		session3.AddNewMessageDoneAndKeepalive(0)
+
+		// Rollback all in-flight transactions
+		m.RollbackAllInFlightTransactions()
+
+		// Verify all sessions are cleaned up
+		m.mu.Lock()
+		assert.Equal(t, 0, len(m.sessions))
+		m.mu.Unlock()
+
+		// All 3 sessions should have cleanup called
+		assert.Equal(t, int32(3), cleanupCalled.Load())
+	})
+
+	t.Run("RollbackWithRecoveredSessions", func(t *testing.T) {
+		// Create a manager with recovered sessions
+		now := time.Now()
+		beginMsg1 := newImmutableBeginTxnMessageWithVChannel("v1", 1, tsoutil.ComposeTSByTime(now, 0), 10*time.Minute)
+		beginMsg2 := newImmutableBeginTxnMessageWithVChannel("v2", 2, tsoutil.ComposeTSByTime(now, 1), 10*time.Minute)
+
+		builders := map[message.TxnID]*message.ImmutableTxnMessageBuilder{
+			message.TxnID(1): message.NewImmutableTxnMessageBuilder(beginMsg1),
+			message.TxnID(2): message.NewImmutableTxnMessageBuilder(beginMsg2),
+		}
+
+		m := NewTxnManager(types.PChannelInfo{Name: "test"}, builders)
+
+		// RecoverDone should not be done yet
+		select {
+		case <-m.RecoverDone():
+			t.Errorf("txn manager should not be recovered yet")
+		case <-time.After(1 * time.Millisecond):
+		}
+
+		// Rollback all in-flight transactions
+		m.RollbackAllInFlightTransactions()
+
+		// Verify all sessions are cleaned up
+		m.mu.Lock()
+		assert.Equal(t, 0, len(m.sessions))
+		m.mu.Unlock()
+
+		// RecoverDone should be signaled because all recovered sessions are cleaned
+		select {
+		case <-m.RecoverDone():
+			// expected
+		case <-time.After(100 * time.Millisecond):
+			t.Errorf("txn manager should be recovered after rollback")
+		}
+	})
+}
+
 func TestManagerFromReplcateMessage(t *testing.T) {
 	resource.InitForTest(t)
 	manager := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
@@ -236,6 +364,115 @@ func TestManagerFromReplcateMessage(t *testing.T) {
 	assert.NotNil(t, session)
 	assert.Equal(t, message.TxnID(18), session.TxnContext().TxnID)
 	assert.Equal(t, message.TxnKeepaliveInfinite, session.TxnContext().Keepalive)
+}
+
+func TestBeginNewTxnManagerClosed(t *testing.T) {
+	// Covers BeginNewTxn lines 92-94: manager closed returns error
+	resource.InitForTest(t)
+	m := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+	<-m.RecoverDone()
+
+	// Create an active session so GracefulClose doesn't complete immediately
+	session, err := m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Second))
+	assert.NoError(t, err)
+	assert.NotNil(t, session)
+
+	// Start graceful close in background (won't complete because active session)
+	closeCh := make(chan struct{})
+	go func() {
+		m.GracefulClose(context.Background())
+		close(closeCh)
+	}()
+	time.Sleep(5 * time.Millisecond) // let GracefulClose set m.closed
+
+	// Now BeginNewTxn should fail because manager is closed
+	_, err = m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Millisecond))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "manager closed")
+
+	// Cleanup: expire the session so GracefulClose completes
+	m.CleanupTxnUntil(tsoutil.AddPhysicalDurationOnTs(0, 20*time.Second))
+	<-closeCh
+}
+
+func TestBuildTxnContextKeepaliveErrors(t *testing.T) {
+	resource.InitForTest(t)
+
+	t.Run("keepalive_zero_uses_default", func(t *testing.T) {
+		// Covers buildTxnContext lines 112-115: keepalive == 0 uses default
+		m := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+		<-m.RecoverDone()
+
+		msg := newBeginTxnMessageWithKeepaliveMs("v1", 0, 0)
+		session, err := m.BeginNewTxn(context.Background(), msg)
+		assert.NoError(t, err)
+		assert.NotNil(t, session)
+		// Verify keepalive is set to default (not 0)
+		assert.True(t, session.TxnContext().Keepalive > 0)
+	})
+
+	t.Run("keepalive_negative_returns_error", func(t *testing.T) {
+		// Covers buildTxnContext lines 116-118: keepalive < 1ms returns error
+		m := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+		<-m.RecoverDone()
+
+		// Set keepalive to -1ms (negative value)
+		msg := newBeginTxnMessageWithKeepaliveMs("v1", 0, -1)
+		_, err := m.BeginNewTxn(context.Background(), msg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "keepalive must be greater than 1ms")
+	})
+}
+
+func TestGetSessionOfTxnNotFound(t *testing.T) {
+	// Covers GetSessionOfTxn lines 185-187: txn not found
+	resource.InitForTest(t)
+	m := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+	<-m.RecoverDone()
+
+	_, err := m.GetSessionOfTxn(message.TxnID(99999))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestGracefulCloseNoSessions(t *testing.T) {
+	// Covers GracefulClose lines 225-227: sessions == 0 when closed initialized
+	resource.InitForTest(t)
+	m := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+	<-m.RecoverDone()
+
+	// GracefulClose with no active sessions should return immediately
+	err := m.GracefulClose(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestGracefulCloseContextTimeout(t *testing.T) {
+	// Covers GracefulClose lines 233-234: context done before close
+	resource.InitForTest(t)
+	m := NewTxnManager(types.PChannelInfo{Name: "test"}, nil)
+	<-m.RecoverDone()
+
+	// Create an active session
+	session, err := m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, 10*time.Second))
+	assert.NoError(t, err)
+	assert.NotNil(t, session)
+
+	// GracefulClose with short timeout should return DeadlineExceeded
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	err = m.GracefulClose(ctx)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func newBeginTxnMessageWithKeepaliveMs(vchannel string, timetick uint64, keepaliveMs int64) message.MutableBeginTxnMessageV2 {
+	msg := message.NewBeginTxnMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.BeginTxnMessageHeader{KeepaliveMilliseconds: keepaliveMs}).
+		WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().
+		WithTimeTick(timetick)
+	beginTxnMsg, _ := message.AsMutableBeginTxnMessageV2(msg)
+	return beginTxnMsg
 }
 
 func newBeginTxnMessage(timetick uint64, keepalive time.Duration) message.MutableBeginTxnMessageV2 {
