@@ -272,17 +272,13 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                   return a.local_rg_offset < b.local_rg_offset;
               });
 
-    // Check whether all cells have memory size info for memory-aware batching
-    bool has_memory_info = std::all_of(
-        cell_specs.begin(), cell_specs.end(), [](const CellSpec& s) {
-            return s.memory_size > 0;
-        });
-
-    // Fallback: count-based batching when memory info is unavailable
-    auto parallel_degree =
-        static_cast<size_t>(memory_limit / FILE_SLICE_SIZE.load());
-    size_t cells_per_batch = std::max<size_t>(
-        1, (cell_specs.size() + parallel_degree - 1) / parallel_degree);
+    for (const auto& spec : cell_specs) {
+        AssertInfo(spec.memory_size > 0,
+                   "[StorageV2] CellSpec cid={} has memory_size={}, "
+                   "callers must provide actual memory size",
+                   spec.cid,
+                   spec.memory_size);
+    }
 
     // Group consecutive, same-key cells into batches for IO merging
     struct CellBatch {
@@ -300,9 +296,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
         bool should_split = false;
         if (!current.cells.empty()) {
             bool batch_full =
-                has_memory_info
-                    ? (current.batch_memory + spec.memory_size > memory_limit)
-                    : (current.cells.size() >= cells_per_batch);
+                (current.batch_memory + spec.memory_size > memory_limit);
             if (spec.file_idx != current.file_idx ||
                 spec.local_rg_offset != current.rg_offset + current.rg_count ||
                 batch_full) {
@@ -329,10 +323,9 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
 
     LOG_INFO(
         "[StorageV2] LoadCellBatchAsync: {} cells -> {} batches "
-        "(memory_aware={}, memory_limit={}MB)",
+        "(memory_limit={}MB)",
         cell_specs.size(),
         batches.size(),
-        has_memory_info,
         memory_limit >> 20);
 
     if (batches.empty()) {

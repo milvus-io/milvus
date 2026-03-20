@@ -232,22 +232,32 @@ TEST(LoadCellBatchAsync, MemoryBasedSplit) {
     EXPECT_EQ(batches, 5);
 }
 
-TEST(LoadCellBatchAsync, FallbackCountBased) {
-    // memory_size=0 means fallback to count-based splitting
-    std::vector<CellSpec> specs;
-    for (int i = 0; i < 10; ++i) {
-        specs.push_back({/*cid=*/i,
-                         /*file_idx=*/0,
-                         /*local_rg_offset=*/i,
-                         /*rg_count=*/1,
-                         /*memory_size=*/0});
-    }
-    // With memory_limit=128MB, FILE_SLICE_SIZE=16MB -> parallel_degree=8
-    // cells_per_batch = ceil(10/8) = 2
-    // All contiguous same file -> 5 batches
+TEST(LoadCellBatchAsync, ZeroMemorySizeAsserts) {
+    // memory_size=0 must trigger assertion failure
     constexpr int64_t MB = 1 << 20;
-    auto batches = RunAndCountBatches(specs, 128 * MB);
-    EXPECT_EQ(batches, 5);
+    std::vector<CellSpec> specs = {{/*cid=*/0,
+                                    /*file_idx=*/0,
+                                    /*local_rg_offset=*/0,
+                                    /*rg_count=*/1,
+                                    /*memory_size=*/0}};
+    EXPECT_ANY_THROW(RunAndCountBatches(specs, 128 * MB));
+}
+
+TEST(LoadCellBatchAsync, UnevenCellSizes) {
+    // Cells with different memory sizes are batched by memory limit
+    // 2 small cells (16MB each) fit in one batch, 1 large cell (96MB) alone
+    constexpr int64_t MB = 1 << 20;
+    std::vector<CellSpec> specs = {
+        {0, 0, 0, 1, 16 * MB},
+        {1, 0, 1, 1, 16 * MB},
+        {2, 0, 2, 1, 96 * MB},
+        {3, 0, 3, 1, 16 * MB},
+        {4, 0, 4, 1, 16 * MB},
+    };
+    // limit=48MB: first batch [0,1]=32MB, second [2]=96MB (single cell > limit),
+    // third [3,4]=32MB -> 3 batches
+    auto batches = RunAndCountBatches(specs, 48 * MB);
+    EXPECT_EQ(batches, 3);
 }
 
 TEST(LoadCellBatchAsync, SingleCellExceedsLimit) {
