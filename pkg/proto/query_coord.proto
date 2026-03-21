@@ -405,6 +405,9 @@ message SegmentLoadInfo {
     map<int64, data.JsonKeyStats> jsonKeyStatsLogs = 22;
     common.LoadPriority priority = 23;
     string manifest_path = 24;
+    // commit_timestamp mirrors data_coord.SegmentInfo.commit_timestamp.
+    // QueryNode uses it for delete-buffer pinning and ListAfter calls.
+    uint64 commit_timestamp = 25;
 }
 
 message FieldIndexInfo {

@@ -447,6 +447,12 @@ message SegmentInfo {
   // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
   repeated int64 expirQuantiles = 33;
   int32 schema_version = 34;
+  // commit_timestamp is the transaction timestamp for import segments.
+  // When non-zero, it overrides start_position.Timestamp for all temporal
+  // decisions (delete filtering, snapshot visibility, compaction selection, GC).
+  // Zero means normal segment. Cleared to 0 when segment data is rewritten by
+  // major compaction.
+  uint64 commit_timestamp = 35;
 }
 
 message SegmentStartPosition {
