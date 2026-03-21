@@ -1359,6 +1359,27 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Nil(t, segmentInfo.Binlogs)
 		assert.Nil(t, segmentInfo.StartPosition)
 	})
+
+	t.Run("update commit timestamp", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		meta.AddSegment(context.Background(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Flushed},
+		})
+
+		const testTs uint64 = 1234567890
+
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateCommitTimestamp(1, testTs))
+		assert.NoError(t, err)
+		seg := meta.GetSegment(context.TODO(), 1)
+		assert.Equal(t, testTs, seg.GetCommitTimestamp())
+
+		// verify clearing to zero works
+		err = meta.UpdateSegmentsInfo(context.TODO(), UpdateCommitTimestamp(1, 0))
+		assert.NoError(t, err)
+		seg = meta.GetSegment(context.TODO(), 1)
+		assert.Equal(t, uint64(0), seg.GetCommitTimestamp())
+	})
 }
 
 func TestUpdateManifestVersion(t *testing.T) {
