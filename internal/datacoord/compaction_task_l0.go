@@ -309,7 +309,7 @@ func (t *l0CompactionTask) selectFlushedSegment() ([]*SegmentInfo, []*datapb.Com
 			(info.GetState() == commonpb.SegmentState_Sealed || isFlushState(info.GetState())) &&
 			!info.GetIsImporting() &&
 			info.GetLevel() != datapb.SegmentLevel_L0 &&
-			info.GetStartPosition().GetTimestamp() < taskProto.GetPos().GetTimestamp()
+			segmentEffectiveTs(info.SegmentInfo) < taskProto.GetPos().GetTimestamp()
 	}))
 
 	sealedSegBinlogs := []*datapb.CompactionSegmentBinlogs{}
