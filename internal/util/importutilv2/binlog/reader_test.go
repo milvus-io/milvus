@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -420,6 +421,32 @@ func (suite *ReaderSuite) TestVector() {
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 	suite.vecDataType = schemapb.DataType_SparseFloatVector
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+}
+
+func (suite *ReaderSuite) TestNewBinlogReaderRetryOnTransientError() {
+	ctx := context.Background()
+	cm := mocks.NewChunkManager(suite.T())
+	path := "test/binlog/path"
+	transientErr := fmt.Errorf("connection reset by peer")
+	permErr := merr.WrapErrIoPermissionDenied(path, fmt.Errorf("access denied"))
+
+	// Transient errors should be retried; non-retryable errors should stop immediately.
+	suite.Run("transient_error_exhausts_attempts", func() {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.StorageReadRetryAttempts.Key, "2")
+		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageReadRetryAttempts.Key)
+		cm.EXPECT().Read(mock.Anything, path).Return(nil, transientErr).Times(2)
+		_, err := newBinlogReader(ctx, cm, path)
+		suite.Error(err)
+	})
+
+	suite.Run("non_retryable_error_stops_immediately", func() {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.StorageReadRetryAttempts.Key, "3")
+		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageReadRetryAttempts.Key)
+		cm2 := mocks.NewChunkManager(suite.T())
+		cm2.EXPECT().Read(mock.Anything, path).Return(nil, permErr).Times(1)
+		_, err := newBinlogReader(ctx, cm2, path)
+		suite.Error(err)
+	})
 }
 
 func TestUtil(t *testing.T) {
