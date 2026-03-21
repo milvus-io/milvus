@@ -746,7 +746,13 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 	for _, binlogs := range segment.GetBinlogs() {
 		for _, l := range binlogs.GetBinlogs() {
 			// TODO, we should probably estimate expired log entries by total rows in binlog and the ralationship of timeTo, timeFrom and expire time
-			if l.TimestampTo < compactTime.expireTime {
+			// For import segments, row timestamps predate the commit; use commit_timestamp
+			// as the effective "data age" to prevent premature TTL-triggered compaction.
+			effectiveTsTo := l.TimestampTo
+			if commitTs := segment.GetCommitTimestamp(); commitTs != 0 && commitTs > effectiveTsTo {
+				effectiveTsTo = commitTs
+			}
+			if effectiveTsTo < compactTime.expireTime {
 				log.RatedDebug(10, "mark binlog as expired",
 					zap.Int64("segmentID", segment.ID),
 					zap.Int64("binlogID", l.GetLogID()),
@@ -755,7 +761,11 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 				totalExpiredRows += int(l.GetEntriesNum())
 				totalExpiredSize += l.GetMemorySize()
 			}
-			earliestFromTs = min(earliestFromTs, l.TimestampFrom)
+			effectiveFromTs := l.TimestampFrom
+			if commitTs := segment.GetCommitTimestamp(); commitTs != 0 && commitTs > effectiveFromTs {
+				effectiveFromTs = commitTs
+			}
+			earliestFromTs = min(earliestFromTs, effectiveFromTs)
 		}
 	}
 	if t.ShouldCompactExpiry(earliestFromTs, compactTime, segment) {

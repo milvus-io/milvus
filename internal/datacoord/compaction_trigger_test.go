@@ -1921,6 +1921,47 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	// expire time < Timestamp To, and index engine version is 2 which is larger than CurrentIndexVersion in segmentIndex but indexFileKeys is nil
 	couldDo = trigger.ShouldDoSingleCompaction(info6, &compactTime{expireTime: 300})
 	assert.False(t, couldDo)
+
+	// Test import segment: old row timestamps should not trigger TTL compaction when commit_timestamp is recent
+	t.Run("import segment not TTL-triggered by old row timestamps", func(t *testing.T) {
+		// Row timestamps are very old (ts=1000), but commit_timestamp is in the future (now + 1 day).
+		// expireTime is 5000 which is > row timestamps but < commit_timestamp.
+		// Without the fix, rows appear expired. With the fix, commit_timestamp is used as effective ts.
+		now := time.Now()
+		commitTs := tsoutil.ComposeTSByTime(now.Add(24*time.Hour), 0) // future: definitely not expired
+		expireTime := uint64(5000)                                     // > old row ts (1000) but < commitTs
+
+		var importBinlogs []*datapb.FieldBinlog
+		for i := 0; i < 100; i++ {
+			importBinlogs = append(importBinlogs, &datapb.FieldBinlog{
+				Binlogs: []*datapb.Binlog{
+					// TimestampTo=1000: very old, looks expired compared to expireTime=5000
+					{EntriesNum: 5, LogPath: "log1", LogSize: 100000, TimestampFrom: 500, TimestampTo: 1000, MemorySize: 100000},
+				},
+			})
+		}
+
+		importSegment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:              1,
+				CollectionID:    2,
+				PartitionID:     1,
+				LastExpireTime:  2000,
+				NumOfRows:       500,
+				MaxRowNum:       1000,
+				InsertChannel:   "ch1",
+				State:           commonpb.SegmentState_Flushed,
+				Binlogs:         importBinlogs,
+				CommitTimestamp: commitTs,
+			},
+		}
+
+		// Without commit_timestamp fix, all rows look expired (TimestampTo=1000 < expireTime=5000),
+		// and 100% expired ratio would trigger compaction. With the fix, commit_timestamp is used
+		// as the effective ts, which is far in the future, so no TTL compaction is triggered.
+		couldDo := trigger.ShouldDoSingleCompaction(importSegment, &compactTime{expireTime: expireTime})
+		assert.False(t, couldDo, "import segment with recent commit_timestamp should not be TTL-compacted due to old row timestamps")
+	})
 }
 
 func Test_compactionTrigger_ShouldStrictCompactExpiry(t *testing.T) {
