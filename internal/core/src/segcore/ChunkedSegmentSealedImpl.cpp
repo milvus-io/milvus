@@ -2642,7 +2642,10 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
             ttl_mask.resize(total_size, false);
             scan_timestamp_range(
                 ts, range.first, range.second, [&](int64_t i, Timestamp val) {
-                    ttl_mask[i] = val <= collection_ttl;
+                    Timestamp effective_val =
+                        (commit_ts_ > 0 && commit_ts_ > val) ? commit_ts_
+                                                              : val;
+                    ttl_mask[i] = effective_val <= collection_ttl;
                 });
             bitset_chunk |= ttl_mask;
         }
