@@ -83,3 +83,20 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 		assert.Equal(t, channel.SeekPosition.Timestamp, req.GetDeltaPosition().GetTimestamp())
 	})
 }
+
+func TestPackSegmentLoadInfo_CommitTimestamp(t *testing.T) {
+	const commitTs uint64 = 99999
+
+	seg := &datapb.SegmentInfo{
+		ID:              1,
+		CollectionID:    10,
+		PartitionID:     100,
+		InsertChannel:   "ch1",
+		CommitTimestamp: commitTs,
+		StartPosition:   &msgpb.MsgPosition{Timestamp: 1000},
+	}
+
+	checkpoint := &msgpb.MsgPosition{Timestamp: 2000}
+	loadInfo := PackSegmentLoadInfo(seg, checkpoint, nil)
+	assert.Equal(t, commitTs, loadInfo.GetCommitTimestamp())
+}

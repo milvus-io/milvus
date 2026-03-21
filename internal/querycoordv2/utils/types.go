@@ -91,6 +91,7 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 		TextStatsLogs:    segment.GetTextStatsLogs(),
 		JsonKeyStatsLogs: segment.GetJsonKeyStats(),
 		ManifestPath:     segment.GetManifestPath(),
+		CommitTimestamp:  segment.GetCommitTimestamp(),
 	}
 	return loadInfo
 }
