@@ -29,6 +29,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
@@ -1663,6 +1664,23 @@ func (s *DelegatorDataSuite) TestDelegatorData_ExcludeSegments() {
 	s.delegator.TryCleanExcludedSegments(4)
 	s.True(s.delegator.VerifyExcludedSegments(1, 1))
 	s.True(s.delegator.VerifyExcludedSegments(1, 5))
+}
+
+func TestSegmentEffectiveTs(t *testing.T) {
+	// Import segment: commit_timestamp takes precedence over start_position.Timestamp
+	info := &querypb.SegmentLoadInfo{
+		SegmentID:       1,
+		StartPosition:   &msgpb.MsgPosition{Timestamp: 1000},
+		CommitTimestamp: 5000,
+	}
+	assert.Equal(t, uint64(5000), segmentEffectiveTs(info))
+
+	// Normal segment: falls back to start_position.Timestamp
+	infoNormal := &querypb.SegmentLoadInfo{
+		SegmentID:     2,
+		StartPosition: &msgpb.MsgPosition{Timestamp: 1000},
+	}
+	assert.Equal(t, uint64(1000), segmentEffectiveTs(infoNormal))
 }
 
 func TestDelegatorDataSuite(t *testing.T) {
