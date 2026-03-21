@@ -6,6 +6,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
@@ -193,4 +194,36 @@ func TestIsStatsLogExists(t *testing.T) {
 	assert.True(t, segment.IsStatsLogExists(2))
 	assert.False(t, segment.IsStatsLogExists(3))
 	assert.False(t, segment.IsStatsLogExists(0))
+}
+
+func TestSegmentEffectiveTs(t *testing.T) {
+	t.Run("returns commit_timestamp when non-zero", func(t *testing.T) {
+		seg := &datapb.SegmentInfo{
+			StartPosition:   &msgpb.MsgPosition{Timestamp: 1000},
+			CommitTimestamp: 5000,
+		}
+		assert.Equal(t, uint64(5000), segmentEffectiveTs(seg))
+	})
+	t.Run("returns start_position.Timestamp when commit_timestamp is zero", func(t *testing.T) {
+		seg := &datapb.SegmentInfo{
+			StartPosition: &msgpb.MsgPosition{Timestamp: 1000},
+		}
+		assert.Equal(t, uint64(1000), segmentEffectiveTs(seg))
+	})
+}
+
+func TestSegmentEffectiveDmlTs(t *testing.T) {
+	t.Run("returns commit_timestamp when non-zero", func(t *testing.T) {
+		seg := &datapb.SegmentInfo{
+			DmlPosition:     &msgpb.MsgPosition{Timestamp: 2000},
+			CommitTimestamp: 5000,
+		}
+		assert.Equal(t, uint64(5000), segmentEffectiveDmlTs(seg))
+	})
+	t.Run("returns dml_position.Timestamp when commit_timestamp is zero", func(t *testing.T) {
+		seg := &datapb.SegmentInfo{
+			DmlPosition: &msgpb.MsgPosition{Timestamp: 2000},
+		}
+		assert.Equal(t, uint64(2000), segmentEffectiveDmlTs(seg))
+	})
 }

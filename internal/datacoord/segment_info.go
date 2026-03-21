@@ -572,3 +572,24 @@ func (s *SegmentInfo) getDeltaCount() int64 {
 
 // SegmentInfoSelector is the function type to select SegmentInfo from meta
 type SegmentInfoSelector func(*SegmentInfo) bool
+
+// segmentEffectiveTs returns the start-position timestamp that governs temporal
+// decisions for a segment. For import segments with a non-zero commit_timestamp,
+// commit_timestamp overrides start_position.Timestamp because the data was not
+// "officially present" until the import was committed.
+func segmentEffectiveTs(seg *datapb.SegmentInfo) uint64 {
+	if ts := seg.GetCommitTimestamp(); ts != 0 {
+		return ts
+	}
+	return seg.GetStartPosition().GetTimestamp()
+}
+
+// segmentEffectiveDmlTs returns the DML-position timestamp for temporal decisions.
+// Same override logic as segmentEffectiveTs but for dml_position consumers
+// (GC eligibility, TruncateChannelByTime).
+func segmentEffectiveDmlTs(seg *datapb.SegmentInfo) uint64 {
+	if ts := seg.GetCommitTimestamp(); ts != 0 {
+		return ts
+	}
+	return seg.GetDmlPosition().GetTimestamp()
+}
