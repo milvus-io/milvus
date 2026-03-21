@@ -2670,7 +2670,14 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
     mask.resize(total_size, true);
     scan_timestamp_range(
         ts, range.first, range.second, [&](int64_t i, Timestamp val) {
-            mask[i] = val > timestamp;
+            // For import segments with commit_timestamp, treat the effective row
+            // timestamp as max(row.ts, commit_ts_). This prevents rows with old
+            // historical timestamps from being visible to queries dispatched
+            // before T_commit.
+            Timestamp effective_val = (commit_ts_ > 0 && commit_ts_ > val)
+                                          ? commit_ts_
+                                          : val;
+            mask[i] = effective_val > timestamp;
         });
     bitset_chunk |= mask;
 }
@@ -3311,6 +3318,16 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
                   field_id.get(),
                   e.what());
     }
+}
+
+void
+ChunkedSegmentSealedImpl::SetCommitTimestamp(uint64_t ts) {
+    commit_ts_ = ts;
+}
+
+uint64_t
+ChunkedSegmentSealedImpl::GetCommitTimestamp() const {
+    return commit_ts_;
 }
 
 void

@@ -240,6 +240,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const milvus::proto::segcore::SegmentLoadInfo& load_info) override;
 
     void
+    SetCommitTimestamp(uint64_t ts) override;
+
+    uint64_t
+    GetCommitTimestamp() const override;
+
+    void
     Load(milvus::tracer::TraceContext& trace_ctx,
          milvus::OpContext* op_ctx = nullptr) override;
 
@@ -1208,6 +1214,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     SchemaPtr schema_;
     int64_t id_;
+    // commit_ts_ is set for import segments to prevent rows with old historical
+    // timestamps from being visible to queries before T_commit.
+    uint64_t commit_ts_{0};
     mutable folly::Synchronized<
         std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>>
         fields_;

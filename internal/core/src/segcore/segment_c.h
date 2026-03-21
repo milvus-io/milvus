@@ -256,6 +256,9 @@ RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id);
 CStatus
 ExprResCacheEraseSegment(int64_t segment_id);
 
+CStatus
+SegmentSetCommitTimestamp(CSegmentInterface c_segment, uint64_t commit_ts);
+
 #ifdef __cplusplus
 }
 #endif

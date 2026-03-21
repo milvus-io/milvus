@@ -788,3 +788,13 @@ ExprResCacheEraseSegment(int64_t segment_id) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
+
+CStatus
+SegmentSetCommitTimestamp(CSegmentInterface c_segment, uint64_t commit_ts) {
+    SCOPE_CGO_CALL_METRIC();
+
+    auto segment =
+        static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    segment->SetCommitTimestamp(commit_ts);
+    return milvus::SuccessCStatus();
+}

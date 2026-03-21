@@ -257,6 +257,15 @@ class SegmentInterface {
     SetLoadInfo(const milvus::proto::segcore::SegmentLoadInfo& load_info) = 0;
 
     virtual void
+    SetCommitTimestamp(uint64_t ts) {
+    }
+
+    virtual uint64_t
+    GetCommitTimestamp() const {
+        return 0;
+    }
+
+    virtual void
     Load(milvus::tracer::TraceContext& trace_ctx,
          milvus::OpContext* op_ctx = nullptr) = 0;
 
