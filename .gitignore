@@ -130,5 +130,7 @@ WARP.md
 **/.gocache/
 docs/plans/
 
+.worktrees/
+
 # agent context
 .context/
