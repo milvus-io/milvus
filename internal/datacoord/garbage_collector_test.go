@@ -2973,3 +2973,57 @@ func TestGarbageCollector_recycleUnusedJSONStatsFiles_SnapshotReference(t *testi
 	assert.Empty(t, removedFiles,
 		"JSON stats files should not be removed when segment is referenced by snapshot")
 }
+
+func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
+	t.Run("import segment not GCed when commit_timestamp > cpTimestamp", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.On("ChannelExists", mock.Anything, mock.Anything).Return(true)
+
+		m := &meta{
+			catalog:    catalog,
+			channelCPs: newChannelCps(),
+		}
+
+		gc := newGarbageCollector(m, newMockHandler(), GcOption{})
+
+		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:              200,
+			InsertChannel:   "ch-import",
+			State:           commonpb.SegmentState_Dropped,
+			DroppedAt:       0,
+			DmlPosition:     &msgpb.MsgPosition{ChannelName: "ch-import", Timestamp: 1000},
+			CommitTimestamp: 5000,
+		}}
+
+		// cpTimestamp=3000: effective dml ts is 5000 > 3000 → should NOT GC
+		result := gc.checkDroppedSegmentGC(segment, nil, typeutil.NewUniqueSet(), 3000)
+		assert.False(t, result, "import segment with commit_ts=5000 should NOT be GCed when cpTimestamp=3000")
+	})
+
+	t.Run("import segment GCed when commit_timestamp <= cpTimestamp", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.On("ChannelExists", mock.Anything, mock.Anything).Return(true)
+
+		m := &meta{
+			catalog:    catalog,
+			channelCPs: newChannelCps(),
+		}
+
+		gc := newGarbageCollector(m, newMockHandler(), GcOption{
+			dropTolerance: 0,
+		})
+
+		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:              201,
+			InsertChannel:   "ch-import",
+			State:           commonpb.SegmentState_Dropped,
+			DroppedAt:       0,
+			DmlPosition:     &msgpb.MsgPosition{ChannelName: "ch-import", Timestamp: 1000},
+			CommitTimestamp: 5000,
+		}}
+
+		// cpTimestamp=6000: effective dml ts is 5000 <= 6000 → should GC (drop tolerance met since DroppedAt=0)
+		result := gc.checkDroppedSegmentGC(segment, nil, typeutil.NewUniqueSet(), 6000)
+		assert.True(t, result, "import segment with commit_ts=5000 should be GCed when cpTimestamp=6000")
+	})
+}

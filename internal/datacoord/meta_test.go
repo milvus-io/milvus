@@ -2082,6 +2082,44 @@ func TestMeta_GetSegmentsJSON(t *testing.T) {
 	assert.True(t, segments[1].Compacted)
 }
 
+func TestTruncateChannelByTime(t *testing.T) {
+	t.Run("import segment not dropped when flushTs < commit_timestamp", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		err = meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:              100,
+			InsertChannel:   "ch1",
+			State:           commonpb.SegmentState_Flushed,
+			DmlPosition:     &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 1000},
+			CommitTimestamp: 5000,
+		}})
+		assert.NoError(t, err)
+		err = meta.TruncateChannelByTime(context.Background(), "ch1", 3000)
+		assert.NoError(t, err)
+		seg := meta.GetSegment(context.TODO(), 100)
+		assert.NotEqual(t, commonpb.SegmentState_Dropped, seg.GetState(),
+			"import segment should NOT be dropped when flushTs < commit_timestamp")
+	})
+
+	t.Run("import segment dropped when flushTs >= commit_timestamp", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		err = meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:              101,
+			InsertChannel:   "ch2",
+			State:           commonpb.SegmentState_Flushed,
+			DmlPosition:     &msgpb.MsgPosition{ChannelName: "ch2", Timestamp: 1000},
+			CommitTimestamp: 5000,
+		}})
+		assert.NoError(t, err)
+		err = meta.TruncateChannelByTime(context.Background(), "ch2", 6000)
+		assert.NoError(t, err)
+		seg := meta.GetSegment(context.TODO(), 101)
+		assert.Equal(t, commonpb.SegmentState_Dropped, seg.GetState(),
+			"import segment should be dropped when flushTs >= commit_timestamp")
+	})
+}
+
 func Test_meta_DropSegmentsOfPartition(t *testing.T) {
 	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)
