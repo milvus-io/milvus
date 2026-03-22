@@ -136,6 +136,12 @@ const (
 	GeminiAKEnvStr string = "MILVUS_GEMINI_API_KEY"
 )
 
+// MiniMax
+
+const (
+	MiniMaxAKEnvStr string = "MILVUS_MINIMAX_API_KEY"
+)
+
 // TEI and vllm
 
 const (
