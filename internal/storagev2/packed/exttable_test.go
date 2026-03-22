@@ -369,6 +369,69 @@ func TestMarshalManifestPath_EmptyBasePath(t *testing.T) {
 	assert.Equal(t, int64(0), ver)
 }
 
+func TestCompareManifestPath(t *testing.T) {
+	base := "/base/path/to/segment"
+
+	t.Run("equal paths", func(t *testing.T) {
+		a := MarshalManifestPath(base, 5)
+		cmp, err := CompareManifestPath(a, a)
+		assert.NoError(t, err)
+		assert.Equal(t, 0, cmp)
+	})
+
+	t.Run("both empty", func(t *testing.T) {
+		cmp, err := CompareManifestPath("", "")
+		assert.NoError(t, err)
+		assert.Equal(t, 0, cmp)
+	})
+
+	t.Run("a older than b", func(t *testing.T) {
+		a := MarshalManifestPath(base, 1)
+		b := MarshalManifestPath(base, 5)
+		cmp, err := CompareManifestPath(a, b)
+		assert.NoError(t, err)
+		assert.Equal(t, -1, cmp)
+	})
+
+	t.Run("a newer than b", func(t *testing.T) {
+		a := MarshalManifestPath(base, 10)
+		b := MarshalManifestPath(base, 3)
+		cmp, err := CompareManifestPath(a, b)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, cmp)
+	})
+
+	t.Run("different base paths returns error", func(t *testing.T) {
+		a := MarshalManifestPath("/path/a", 1)
+		b := MarshalManifestPath("/path/b", 1)
+		_, err := CompareManifestPath(a, b)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "different base paths")
+	})
+
+	t.Run("invalid json a returns error", func(t *testing.T) {
+		b := MarshalManifestPath(base, 1)
+		_, err := CompareManifestPath("not-json", b)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse manifest path")
+	})
+
+	t.Run("invalid json b returns error", func(t *testing.T) {
+		a := MarshalManifestPath(base, 1)
+		_, err := CompareManifestPath(a, "not-json")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse manifest path")
+	})
+
+	t.Run("negative version", func(t *testing.T) {
+		a := MarshalManifestPath(base, -1)
+		b := MarshalManifestPath(base, 0)
+		cmp, err := CompareManifestPath(a, b)
+		assert.NoError(t, err)
+		assert.Equal(t, -1, cmp)
+	})
+}
+
 func TestCreateSegmentManifest_CanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
