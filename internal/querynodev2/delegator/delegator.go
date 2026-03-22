@@ -34,7 +34,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -296,13 +295,42 @@ func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope 
 	return nodeReq
 }
 
+func (sd *shardDelegator) shallowCopyRetrieveRequest(req *internalpb.RetrieveRequest, targetID int64) *internalpb.RetrieveRequest {
+	// Create a new RetrieveRequest with the same fields
+	// Base must be a new object since each copy needs different TargetID
+	// Slices are shallow copied (same underlying array) since they are read-only after copy
+	return &internalpb.RetrieveRequest{
+		Base:                         &commonpb.MsgBase{TargetID: targetID},
+		ReqID:                        req.ReqID,
+		DbID:                         req.DbID,
+		CollectionID:                 req.CollectionID,
+		PartitionIDs:                 req.PartitionIDs,       // Shallow copy: Same underlying slice
+		SerializedExprPlan:           req.SerializedExprPlan, // Shallow copy: Same underlying byte slice
+		OutputFieldsId:               req.OutputFieldsId,     // Shallow copy: Same underlying slice
+		MvccTimestamp:                req.MvccTimestamp,
+		GuaranteeTimestamp:           req.GuaranteeTimestamp,
+		TimeoutTimestamp:             req.TimeoutTimestamp,
+		Limit:                        req.Limit,
+		IgnoreGrowing:                req.IgnoreGrowing,
+		IsCount:                      req.IsCount,
+		IterationExtensionReduceRate: req.IterationExtensionReduceRate,
+		Username:                     req.Username,
+		ReduceStopForBest:            req.ReduceStopForBest,
+		ReduceType:                   req.ReduceType,
+		ConsistencyLevel:             req.ConsistencyLevel,
+		IsIterator:                   req.IsIterator,
+		CollectionTtlTimestamps:      req.CollectionTtlTimestamps,
+	}
+}
+
 func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.QueryRequest {
-	nodeReq := proto.Clone(req).(*querypb.QueryRequest)
-	nodeReq.Scope = scope
-	nodeReq.Req.Base.TargetID = targetID
-	nodeReq.SegmentIDs = segmentIDs
-	nodeReq.DmlChannels = []string{sd.vchannelName}
-	return nodeReq
+	return &querypb.QueryRequest{
+		Req:             sd.shallowCopyRetrieveRequest(req.GetReq(), targetID),
+		DmlChannels:     []string{sd.vchannelName},
+		SegmentIDs:      segmentIDs,
+		FromShardLeader: req.FromShardLeader,
+		Scope:           scope,
+	}
 }
 
 // Search preforms search operation on shard.
@@ -723,12 +751,23 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	defer sd.distribution.Unpin(version)
 
 	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, func(req *querypb.GetStatisticsRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.GetStatisticsRequest {
-		nodeReq := proto.Clone(req).(*querypb.GetStatisticsRequest)
-		nodeReq.GetReq().GetBase().TargetID = targetID
-		nodeReq.Scope = scope
-		nodeReq.SegmentIDs = segmentIDs
-		nodeReq.FromShardLeader = true
-		return nodeReq
+		// Shallow copy inner request with new Base (each copy needs different TargetID)
+		innerReq := req.GetReq()
+		return &querypb.GetStatisticsRequest{
+			Req: &internalpb.GetStatisticsRequest{
+				Base:               &commonpb.MsgBase{TargetID: targetID},
+				DbID:               innerReq.GetDbID(),
+				CollectionID:       innerReq.GetCollectionID(),
+				PartitionIDs:       innerReq.GetPartitionIDs(), // Shallow copy: Same underlying slice
+				TravelTimestamp:    innerReq.GetTravelTimestamp(),
+				GuaranteeTimestamp: innerReq.GetGuaranteeTimestamp(),
+				TimeoutTimestamp:   innerReq.GetTimeoutTimestamp(),
+			},
+			DmlChannels:     req.GetDmlChannels(), // Shallow copy: Same underlying slice
+			SegmentIDs:      segmentIDs,
+			FromShardLeader: true,
+			Scope:           scope,
+		}
 	})
 	if err != nil {
 		log.Warn("Get statistics organizeSubTask failed", zap.Error(err))
