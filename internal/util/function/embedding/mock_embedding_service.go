@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models/ali"
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
 	"github.com/milvus-io/milvus/internal/util/function/models/gemini"
+	"github.com/milvus-io/milvus/internal/util/function/models/minimax"
 	"github.com/milvus-io/milvus/internal/util/function/models/openai"
 	"github.com/milvus-io/milvus/internal/util/function/models/siliconflow"
 	"github.com/milvus-io/milvus/internal/util/function/models/tei"
@@ -308,6 +309,28 @@ func (c *MockBedrockClient) InvokeModel(ctx context.Context, params *bedrockrunt
 	resp.InputTextTokenCount = 2
 	body, _ := json.Marshal(resp)
 	return &bedrockruntime.InvokeModelOutput{Body: body}, nil
+}
+
+func CreateMiniMaxEmbeddingServer(dim int) *httptest.Server {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req minimax.EmbeddingRequest
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		json.Unmarshal(body, &req)
+		embs := mockEmbedding[float32](req.Texts, dim)
+		res := minimax.EmbeddingResponse{
+			Vectors:     embs,
+			TotalTokens: 100,
+			BaseResp: minimax.BaseResp{
+				StatusCode: 0,
+				StatusMsg:  "success",
+			},
+		}
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+	return ts
 }
 
 func CreateGeminiEmbeddingServer(dim int) *httptest.Server {

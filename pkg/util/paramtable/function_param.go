@@ -108,6 +108,12 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "Your Gemini embedding url, Default is the official embedding url"
 			case "gemini.enable":
 				return "Whether to enable Gemini model service"
+			case "minimax.credential":
+				return "The name in the credential configuration item"
+			case "minimax.url":
+				return "Your MiniMax embedding url, Default is the official embedding url"
+			case "minimax.enable":
+				return "Whether to enable MiniMax model service"
 			default:
 				return ""
 			}
