@@ -162,8 +162,8 @@ type RenameCollectionReq struct {
 	NewDbName         string `json:"newDbName"`
 }
 
-func (req *RenameCollectionReq) GetDbName() string           { return req.DbName }
-func (req *RenameCollectionReq) GetCollectionName() string   { return req.CollectionName }
+func (req *RenameCollectionReq) GetDbName() string         { return req.DbName }
+func (req *RenameCollectionReq) GetCollectionName() string { return req.CollectionName }
 
 type DropCollectionPropertiesReq struct {
 	DbName         string   `json:"dbName"`
@@ -297,8 +297,8 @@ type QueryReqV2 struct {
 	ConsistencyLevel string                 `json:"consistencyLevel"`
 }
 
-func (req *QueryReqV2) GetDbName() string           { return req.DbName }
-func (req *QueryReqV2) GetCollectionName() string   { return req.CollectionName }
+func (req *QueryReqV2) GetDbName() string         { return req.DbName }
+func (req *QueryReqV2) GetCollectionName() string { return req.CollectionName }
 
 type CollectionIDReq struct {
 	DbName           string      `json:"dbName"`
@@ -310,8 +310,8 @@ type CollectionIDReq struct {
 	ConsistencyLevel string      `json:"consistencyLevel"`
 }
 
-func (req *CollectionIDReq) GetDbName() string           { return req.DbName }
-func (req *CollectionIDReq) GetCollectionName() string   { return req.CollectionName }
+func (req *CollectionIDReq) GetDbName() string         { return req.DbName }
+func (req *CollectionIDReq) GetCollectionName() string { return req.CollectionName }
 
 type CollectionFilterReq struct {
 	DbName         string                 `json:"dbName"`
@@ -321,8 +321,8 @@ type CollectionFilterReq struct {
 	ExprParams     map[string]interface{} `json:"exprParams"`
 }
 
-func (req *CollectionFilterReq) GetDbName() string           { return req.DbName }
-func (req *CollectionFilterReq) GetCollectionName() string   { return req.CollectionName }
+func (req *CollectionFilterReq) GetDbName() string         { return req.DbName }
+func (req *CollectionFilterReq) GetCollectionName() string { return req.CollectionName }
 
 type CollectionDataReq struct {
 	DbName         string                   `json:"dbName"`
@@ -332,8 +332,8 @@ type CollectionDataReq struct {
 	PartialUpdate  bool                     `json:"partialUpdate"`
 }
 
-func (req *CollectionDataReq) GetDbName() string           { return req.DbName }
-func (req *CollectionDataReq) GetCollectionName() string   { return req.CollectionName }
+func (req *CollectionDataReq) GetDbName() string         { return req.DbName }
+func (req *CollectionDataReq) GetCollectionName() string { return req.CollectionName }
 
 type SearchReqV2 struct {
 	DbName           string                 `json:"dbName"`
@@ -357,8 +357,8 @@ type SearchReqV2 struct {
 	Params map[string]float64 `json:"params"`
 }
 
-func (req *SearchReqV2) GetDbName() string           { return req.DbName }
-func (req *SearchReqV2) GetCollectionName() string   { return req.CollectionName }
+func (req *SearchReqV2) GetDbName() string         { return req.DbName }
+func (req *SearchReqV2) GetCollectionName() string { return req.CollectionName }
 
 type Rand struct {
 	Strategy string                 `json:"strategy"`
@@ -393,8 +393,8 @@ type HybridSearchReq struct {
 	FunctionScore    FunctionScore  `json:"functionScore"`
 }
 
-func (req *HybridSearchReq) GetDbName() string           { return req.DbName }
-func (req *HybridSearchReq) GetCollectionName() string   { return req.CollectionName }
+func (req *HybridSearchReq) GetDbName() string         { return req.DbName }
+func (req *HybridSearchReq) GetCollectionName() string { return req.CollectionName }
 
 type ReturnErrMsg struct {
 	Code    int32  `json:"code"`
@@ -408,8 +408,8 @@ type PartitionsReq struct {
 	PartitionNames []string `json:"partitionNames" binding:"required"`
 }
 
-func (req *PartitionsReq) GetDbName() string           { return req.DbName }
-func (req *PartitionsReq) GetCollectionName() string   { return req.CollectionName }
+func (req *PartitionsReq) GetDbName() string         { return req.DbName }
+func (req *PartitionsReq) GetCollectionName() string { return req.CollectionName }
 
 type UserReq struct {
 	UserName string `json:"userName" binding:"required"`
@@ -510,8 +510,8 @@ type IndexParamReq struct {
 	IndexParams    []IndexParam `json:"indexParams" binding:"required"`
 }
 
-func (req *IndexParamReq) GetDbName() string           { return req.DbName }
-func (req *IndexParamReq) GetCollectionName() string   { return req.CollectionName }
+func (req *IndexParamReq) GetDbName() string         { return req.DbName }
+func (req *IndexParamReq) GetCollectionName() string { return req.CollectionName }
 
 type IndexReq struct {
 	DbName         string `json:"dbName"`
@@ -655,8 +655,8 @@ type CollectionReq struct {
 	Description      string                 `json:"description"`
 }
 
-func (req *CollectionReq) GetDbName() string           { return req.DbName }
-func (req *CollectionReq) GetCollectionName() string   { return req.CollectionName }
+func (req *CollectionReq) GetDbName() string         { return req.DbName }
+func (req *CollectionReq) GetCollectionName() string { return req.CollectionName }
 
 type AliasReq struct {
 	DbName    string `json:"dbName"`
