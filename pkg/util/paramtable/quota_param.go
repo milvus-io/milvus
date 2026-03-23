@@ -124,10 +124,10 @@ type quotaConfig struct {
 	MaxCollectionNum               ParamItem `refreshable:"true"`
 	MaxCollectionNumPerDB          ParamItem `refreshable:"true"`
 	TopKLimit                      ParamItem `refreshable:"true"`
-	BigTopKLimit                   ParamItem `refreshable:"true"`
+	LargeTopKLimit                 ParamItem `refreshable:"true"`
 	NQLimit                        ParamItem `refreshable:"true"`
 	MaxQueryResultWindow           ParamItem `refreshable:"true"`
-	BigMaxQueryResultWindow        ParamItem `refreshable:"true"`
+	LargeMaxQueryResultWindow      ParamItem `refreshable:"true"`
 	MaxOutputSize                  ParamItem `refreshable:"true"`
 	MaxInsertSize                  ParamItem `refreshable:"true"`
 	MaxResourceGroupNumOfQueryNode ParamItem `refreshable:"true"`
@@ -1456,14 +1456,14 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 	}
 	p.TopKLimit.Init(base.mgr)
 
-	p.BigTopKLimit = ParamItem{
-		Key:          "quotaAndLimits.limits.bigTopK",
+	p.LargeTopKLimit = ParamItem{
+		Key:          "quotaAndLimits.limits.largeTopK",
 		Version:      "2.6.13",
 		DefaultValue: "1000000",
-		Doc: `Search limit for collections with bigTopK optimization enabled, which applies on:
+		Doc: `Search limit for collections with query_mode=large_topk, which applies on:
 maximum # of results to return (topK).`,
 	}
-	p.BigTopKLimit.Init(base.mgr)
+	p.LargeTopKLimit.Init(base.mgr)
 
 	p.NQLimit = ParamItem{
 		Key:          "quotaAndLimits.limits.nq",
@@ -1485,13 +1485,13 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 	}
 	p.MaxQueryResultWindow.Init(base.mgr)
 
-	p.BigMaxQueryResultWindow = ParamItem{
-		Key:          "quotaAndLimits.limits.bigMaxQueryResultWindow",
+	p.LargeMaxQueryResultWindow = ParamItem{
+		Key:          "quotaAndLimits.limits.LargeMaxQueryResultWindow",
 		Version:      "2.6.13",
 		DefaultValue: "1000000",
-		Doc:          `Query limit for collections with bigTopK optimization enabled, which applies on: maximum of offset + limit`,
+		Doc:          `Query limit for collections with query_mode=large_topk, which applies on: maximum of offset + limit`,
 	}
-	p.BigMaxQueryResultWindow.Init(base.mgr)
+	p.LargeMaxQueryResultWindow.Init(base.mgr)
 
 	p.MaxOutputSize = ParamItem{
 		Key:          "quotaAndLimits.limits.maxOutputSize",

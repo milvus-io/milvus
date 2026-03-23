@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -491,8 +492,8 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// validate bigTopK optimization mode
-	if _, err := common.IsBigTopKOptimizationEnabled(t.GetProperties()...); err != nil {
+	// validate query mode
+	if err := common.ValidateQueryMode(t.GetProperties()...); err != nil {
 		return err
 	}
 
@@ -1420,6 +1421,33 @@ func detectBoolPropChange(
 	return newValue, changed, nil
 }
 
+// detectQueryModeChange detects whether the query_mode collection property is
+// being changed via Properties or DeleteKeys. Returns the new query mode string
+// (empty string means no query mode) and whether it changed.
+func detectQueryModeChange(
+	oldQueryMode string,
+	properties []*commonpb.KeyValuePair,
+	deleteKeys []string,
+) (newQueryMode string, changed bool, err error) {
+	newQueryMode = oldQueryMode
+	if val, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(common.QueryModeKey, properties); ok {
+		mode := strings.ToLower(strings.TrimSpace(val))
+		if mode != common.QueryModeLargeTopK {
+			return "", false, fmt.Errorf("invalid query_mode value %q, valid values: [%s]", val, common.ValidQueryModes)
+		}
+		newQueryMode = mode
+		changed = oldQueryMode != newQueryMode
+	}
+	for _, key := range deleteKeys {
+		if key == common.QueryModeKey {
+			newQueryMode = ""
+			changed = oldQueryMode != newQueryMode
+			break
+		}
+	}
+	return newQueryMode, changed, nil
+}
+
 func validatePartitionKeyIsolation(ctx context.Context, colName string, isPartitionKeyEnabled bool, props ...*commonpb.KeyValuePair) (bool, error) {
 	iso, err := common.IsPartitionKeyIsolationKvEnabled(props...)
 	if err != nil {
@@ -1563,32 +1591,25 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	newBigTopK, bigTopKChanged, err := detectBoolPropChange(
-		collBasicInfo.bigTopKOptimization, common.BigTopKOptimizationEnabledKey,
+	newQueryMode, queryModeChanged, err := detectQueryModeChange(
+		collBasicInfo.queryMode,
 		t.Properties, t.GetDeleteKeys(),
-		func() (bool, error) {
-			return common.IsBigTopKOptimizationEnabled(t.Properties...)
-		},
 	)
 	if err != nil {
 		return err
 	}
 
-	log.Ctx(ctx).Info("alter collection pre check with partition key isolation/big topk optimization",
+	log.Ctx(ctx).Info("alter collection pre check with partition key isolation/query mode",
 		zap.String("collectionName", t.CollectionName),
 		zap.Bool("isPartitionKeyMode", isPartitionKeyMode),
 		zap.Bool("newIsoValue", newIsoValue),
 		zap.Bool("oldIsoValue", collBasicInfo.partitionKeyIsolation),
-		zap.Bool("newBigTopKOptimizationValue", newBigTopK),
-		zap.Bool("oldBigTopKOptimizationValue", collBasicInfo.bigTopKOptimization))
+		zap.String("newQueryMode", newQueryMode),
+		zap.String("oldQueryMode", collBasicInfo.queryMode))
 
-	// if the isolation/bigTopKOptimization flag in properties is not set, meta cache will assign partitionKeyIsolation/bigTopKOptimization in collection info to false
-	//   - None|false -> false, skip
-	//   - None|false -> true, check if the collection has vector index
-	//   - true -> false, check if the collection has vector index
-	//   - false -> true, check if the collection has vector index
-	//   - true -> true, skip
-	if isoChanged || bigTopKChanged {
+	// If partition key isolation or query_mode changed, check for existing vector index.
+	// Changing these properties requires dropping the vector index first.
+	if isoChanged || queryModeChanged {
 		if vecField, err := checkVectorIndexExist(ctx, t.GetDbName(), t.CollectionName, t.CollectionID, t.mixCoord); err != nil {
 			return err
 		} else if vecField != "" {
@@ -1596,9 +1617,9 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				return merr.WrapErrIndexDuplicate(vecField,
 					"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
 			}
-			if bigTopKChanged {
+			if queryModeChanged {
 				return merr.WrapErrIndexDuplicate(vecField,
-					"can not alter "+common.BigTopKOptimizationEnabledKey+" if the collection already has a vector index. Please drop the index first")
+					"can not alter "+common.QueryModeKey+" if the collection already has a vector index. Please drop the index first")
 			}
 		}
 	}

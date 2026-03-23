@@ -178,7 +178,7 @@ func validateRunAnalyzer(req *milvuspb.RunAnalyzerRequest) error {
 	return nil
 }
 
-func validateMaxQueryResultWindow(offset int64, limit int64, bigTopKEnabled bool) error {
+func validateMaxQueryResultWindow(offset int64, limit int64, largeTopKEnabled bool) error {
 	if offset < 0 {
 		return fmt.Errorf("%s [%d] is invalid, should be gte than 0", OffsetKey, offset)
 	}
@@ -188,8 +188,8 @@ func validateMaxQueryResultWindow(offset int64, limit int64, bigTopKEnabled bool
 
 	depth := offset + limit
 	maxQueryResultWindow := Params.QuotaConfig.MaxQueryResultWindow.GetAsInt64()
-	if bigTopKEnabled {
-		maxQueryResultWindow = Params.QuotaConfig.BigMaxQueryResultWindow.GetAsInt64()
+	if largeTopKEnabled {
+		maxQueryResultWindow = Params.QuotaConfig.LargeMaxQueryResultWindow.GetAsInt64()
 	}
 	if depth <= 0 || depth > maxQueryResultWindow {
 		return fmt.Errorf("(offset+limit) should be in range [1, %d], but got %d", maxQueryResultWindow, depth)
@@ -197,10 +197,10 @@ func validateMaxQueryResultWindow(offset int64, limit int64, bigTopKEnabled bool
 	return nil
 }
 
-func validateLimit(limit int64, bigTopKEnabled bool) error {
+func validateLimit(limit int64, largeTopKEnabled bool) error {
 	topKLimit := Params.QuotaConfig.TopKLimit.GetAsInt64()
-	if bigTopKEnabled {
-		topKLimit = Params.QuotaConfig.BigTopKLimit.GetAsInt64()
+	if largeTopKEnabled {
+		topKLimit = Params.QuotaConfig.LargeTopKLimit.GetAsInt64()
 	}
 	if limit <= 0 || limit > topKLimit {
 		return fmt.Errorf("it should be in range [1, %d], but got %d", topKLimit, limit)
