@@ -707,19 +707,21 @@ class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
         request.addfinalizer(teardown)
 
     def _run_expression_check(self, client, expr, test_data, field_names):
-        """Run a single expression and compare against eval ground truth. Returns error msg or None."""
+        """
+        Run a single expression and compare against eval ground truth.
+        Returns (status, msg) where status is 'pass', 'fail', or 'skip'.
+        """
         try:
             res = self.query(client, self.collection_name, filter=expr,
                              output_fields=[default_pk],
                              check_task=CheckTasks.check_nothing)[0]
-            # Check for API error
             if hasattr(res, 'message') and res.message:
-                return None  # Expression not supported — skip, don't fail
+                return ('skip', f"SKIP: {expr} -> {res.message}")
             milvus_ids = sorted([r[default_pk] for r in res])
         except Exception as e:
             if 'cannot parse' in str(e) or 'unsupported' in str(e).lower():
-                return None
-            return f"EXCEPTION: {expr} -> {e}"
+                return ('skip', f"SKIP: {expr} -> {e}")
+            return ('fail', f"EXCEPTION: {expr} -> {e}")
 
         expected_idx = eval_filter(expr, test_data)
         expected_ids = sorted([test_data[i][default_pk] for i in expected_idx])
@@ -727,9 +729,9 @@ class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
         if milvus_ids != expected_ids:
             extra = set(milvus_ids) - set(expected_ids)
             missing = set(expected_ids) - set(milvus_ids)
-            return (f"MISMATCH: {expr} | Milvus={len(milvus_ids)} expected={len(expected_ids)} | "
-                    f"extra(5)={list(extra)[:5]} missing(5)={list(missing)[:5]}")
-        return None
+            return ('fail', f"MISMATCH: {expr} | Milvus={len(milvus_ids)} expected={len(expected_ids)} | "
+                            f"extra(5)={list(extra)[:5]} missing(5)={list(missing)[:5]}")
+        return ('pass', None)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("field_idx", list(range(len(FIELD_DEFS))))
@@ -748,17 +750,31 @@ class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
             fname, dtype, sample_vals, nullable=nullable, is_array=is_array, element_dtype=elem_dtype)
 
         failures = []
+        skipped = []
+        passed = 0
         for expr in expressions:
-            err = self._run_expression_check(client, expr, self.test_data, self.field_names)
-            if err:
-                failures.append(err)
-                log.error(err)
+            status, msg = self._run_expression_check(client, expr, self.test_data, self.field_names)
+            if status == 'fail':
+                failures.append(msg)
+                log.error(msg)
+            elif status == 'skip':
+                skipped.append(msg)
+                log.warning(msg)
             else:
+                passed += 1
                 log.info(f"PASS: {expr}")
 
+        # Report coverage: warn if too many expressions were skipped
+        total = len(expressions)
+        skip_pct = len(skipped) / total * 100 if total > 0 else 0
+        log.info(f"Field {fname}: {passed} passed, {len(failures)} failed, {len(skipped)} skipped "
+                 f"({skip_pct:.0f}% skip rate) out of {total}")
+        if skip_pct > 50:
+            log.warning(f"HIGH SKIP RATE for {fname}: {skip_pct:.0f}% — most expressions not verified!")
+
         assert not failures, (
-            f"Seed={DEFAULT_SEED}, field={fname}, {len(failures)}/{len(expressions)} failed:\n"
-            + "\n".join(failures))
+            f"Seed={DEFAULT_SEED}, field={fname}, {len(failures)}/{total} failed, "
+            f"{len(skipped)} skipped:\n" + "\n".join(failures))
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_compound_expressions(self):
@@ -780,16 +796,25 @@ class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
         expressions = generate_compound_expressions(field_exprs)
 
         failures = []
+        skipped = []
+        passed = 0
         for expr in expressions:
-            err = self._run_expression_check(client, expr, self.test_data, self.field_names)
-            if err:
-                failures.append(err)
-                log.error(err)
+            status, msg = self._run_expression_check(client, expr, self.test_data, self.field_names)
+            if status == 'fail':
+                failures.append(msg)
+                log.error(msg)
+            elif status == 'skip':
+                skipped.append(msg)
+                log.warning(msg)
             else:
+                passed += 1
                 log.info(f"PASS: {expr}")
 
+        total = len(expressions)
+        log.info(f"Compound: {passed} passed, {len(failures)} failed, {len(skipped)} skipped out of {total}")
+
         assert not failures, (
-            f"Seed={DEFAULT_SEED}, {len(failures)}/{len(expressions)} compound expr failed:\n"
+            f"Seed={DEFAULT_SEED}, {len(failures)}/{total} compound failed, {len(skipped)} skipped:\n"
             + "\n".join(failures))
 
 
@@ -908,8 +933,12 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
             self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
         request.addfinalizer(teardown)
 
-    def _check_cross_index_consistency(self, client, group, templates):
-        """Helper: run expression templates across fields in a group, verify identical results."""
+    def _check_cross_index_consistency(self, client, group, templates, test_data=None):
+        """
+        Run expression templates across fields in a group, verify:
+        1. All indexes return identical results (cross-index consistency)
+        2. The no_index field result matches eval ground truth (correctness)
+        """
         failures = []
         for tmpl in templates:
             results = {}
@@ -927,13 +956,35 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
 
             if len(results) < 2:
                 continue
+
+            # Cross-index consistency check
             ref_name, ref_ids = next(iter(results.items()))
             for fname, ids in results.items():
                 if ids != ref_ids:
                     idx_t = dict(group)[fname]
                     ref_idx = dict(group)[ref_name]
                     failures.append(
-                        f"{tmpl}: {fname}({idx_t}) got {len(ids)} vs {ref_name}({ref_idx}) got {len(ref_ids)}")
+                        f"INDEX MISMATCH: {tmpl}: {fname}({idx_t}) got {len(ids)} "
+                        f"vs {ref_name}({ref_idx}) got {len(ref_ids)}")
+
+            # Ground truth check on no_index field (correctness, not just consistency)
+            if test_data is not None:
+                no_idx_field = None
+                for fname, idx_type in group:
+                    if idx_type == "no_index" and fname in results:
+                        no_idx_field = fname
+                        break
+                if no_idx_field:
+                    expr = tmpl.replace("{f}", no_idx_field)
+                    field_names = [fname for fname, _ in group]
+                    expected_idx = eval_filter(expr, test_data)
+                    expected_ids = sorted([test_data[i][default_pk] for i in expected_idx])
+                    actual_ids = results[no_idx_field]
+                    if actual_ids != expected_ids:
+                        failures.append(
+                            f"GROUND TRUTH MISMATCH: {expr} | Milvus={len(actual_ids)} "
+                            f"expected={len(expected_ids)}")
+
         return failures
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -965,7 +1016,7 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
                          f"{{f}} IN [{repr(val)}]", f"{{f}} NOT IN [{repr(val)}]",
                          f"{{f}} + 1 > {repr(val)}"]
 
-        failures = self._check_cross_index_consistency(client, group, templates)
+        failures = self._check_cross_index_consistency(client, group, templates, test_data=self.test_data)
         assert not failures, f"{len(failures)} scalar index inconsistencies for {dtype_name}:\n" + "\n".join(failures)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1000,7 +1051,7 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
                 "array_length({f}) >= 1", "array_length({f}) < 10",
             ]
 
-        failures = self._check_cross_index_consistency(client, group, templates)
+        failures = self._check_cross_index_consistency(client, group, templates, test_data=self.test_data)
         assert not failures, f"{len(failures)} array index inconsistencies for ARRAY({elem_dtype_name}):\n" + "\n".join(failures)
 
 
@@ -1033,7 +1084,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         schema.add_field("int_val", DataType.INT64)
         schema.add_field("float_val", DataType.FLOAT)
         schema.add_field("str_val", DataType.VARCHAR, max_length=256)
-        self.create_collection(client, self.collection_name, schema=schema)
+        self.create_collection(client, self.collection_name, schema=schema, force_teardown=False)
 
         vectors = cf.gen_vectors(10, default_dim)
         data = [
@@ -1090,8 +1141,10 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
                          output_fields=[default_pk],
                          check_task=CheckTasks.check_nothing)[0]
         if hasattr(res, 'message'):
-            log.warning(f"Query failed (parser overflow): {res}")
-            return
+            # Milvus rejects expression at parser level — this is also a bug: overflow
+            # should be handled at execution time, not crash the parser
+            pytest.fail(f"Milvus parser rejects 'c8 - 1 >= 0' with overflow data — "
+                        f"parser should handle gracefully: {res.message}")
         ids = sorted([r[default_pk] for r in res])
         assert 2 not in ids, f"id=2 (INT64_MIN) - 1 underflows, should not be >= 0. Got {ids}"
         assert 0 in ids, f"id=0 (INT64_MAX-1 - 1) should be >= 0. Got {ids}"
@@ -1104,8 +1157,8 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
                          output_fields=[default_pk],
                          check_task=CheckTasks.check_nothing)[0]
         if hasattr(res, 'message'):
-            log.warning(f"Query failed (parser overflow): {res}")
-            return
+            pytest.fail(f"Milvus parser rejects 'c8 * 2 > 0' with overflow data — "
+                        f"parser should handle gracefully: {res.message}")
         ids = sorted([r[default_pk] for r in res])
         assert 0 not in ids, f"id=0 (INT64_MAX-1)*2 overflows. Got {ids}"
         assert 1 in ids, f"id=1 (200>0) should match. Got {ids}"
@@ -1119,8 +1172,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
                          output_fields=[default_pk],
                          check_task=CheckTasks.check_nothing)[0]
         if hasattr(res, 'message'):
-            log.warning(f"Query failed: {res}")
-            return
+            pytest.fail(f"Milvus rejects 3VL NOT+AND+OR expression: {res.message}")
         ids = sorted([r[default_pk] for r in res])
         for eid in [0, 2, 3]:
             assert eid in ids, f"id={eid} (bool=False, NOT(F)=T) should return. Got {ids}"
@@ -1155,43 +1207,79 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_bool_literal_in_logical_expr(self):
-        """Regression #48443: 'true or (field > val)' should be accepted by parser."""
+        """
+        Regression #48443: 'true or (field > val)' should be accepted AND return correct results.
+        Verifies both parser acceptance and result correctness.
+        """
         client = self._client(alias=self.shared_alias)
-        exprs = [
-            "true or (int_val > 100)",
-            "true and (int_val > 100)",
-            "false or (int_val > 100)",
-            "(int_val > 100) or true",
-            'true or (str_val == "hello")',
-            "true or (float_val > 3.0)",
+        # Data: id=0 int_val=MAX-1, id=1 int_val=100, id=2 int_val=MIN, id=3 int_val=200, id=4 int_val=50
+        cases = [
+            ("true or (int_val > 100)", [0, 1, 2, 3, 4]),       # true or X → all rows
+            ("true and (int_val > 100)", [0, 3]),                 # only int_val > 100
+            ("false or (int_val > 100)", [0, 3]),                 # same as int_val > 100
+            ("(int_val > 100) or true", [0, 1, 2, 3, 4]),       # X or true → all rows
+            ('true or (str_val == "hello")', [0, 1, 2, 3, 4]),  # true or X → all rows
+            ("true or (float_val > 3.0)", [0, 1, 2, 3, 4]),     # true or X → all rows
         ]
-        for expr in exprs:
+        parser_rejected = []
+        wrong_results = []
+        for expr, expected_ids in cases:
             try:
                 res = self.query(client, self.collection_name, filter=expr,
                                  output_fields=[default_pk],
                                  check_task=CheckTasks.check_nothing)[0]
-                if hasattr(res, 'message') and 'cannot parse' in str(getattr(res, 'message', '')):
-                    pytest.fail(f"Parser rejected valid bool literal expression: {expr}")
-                log.info(f"PASS: {expr}")
+                if hasattr(res, 'message'):
+                    msg = str(getattr(res, 'message', ''))
+                    if 'cannot parse' in msg or 'boolean' in msg.lower():
+                        parser_rejected.append(f"Parser rejected: {expr} -> {msg}")
+                    else:
+                        parser_rejected.append(f"Query error: {expr} -> {msg}")
+                    continue
+                ids = sorted([r[default_pk] for r in res])
+                if ids != sorted(expected_ids):
+                    wrong_results.append(f"WRONG RESULT: {expr} -> got {ids}, expected {sorted(expected_ids)}")
+                else:
+                    log.info(f"PASS: {expr} -> {ids}")
             except Exception as e:
-                if 'cannot parse' in str(e):
-                    pytest.fail(f"Parser rejected: {expr} -> {e}")
+                parser_rejected.append(f"Exception: {expr} -> {e}")
+
+        # Parser rejections are the primary bug (#48443)
+        if parser_rejected:
+            pytest.fail(
+                f"#48443 BUG: {len(parser_rejected)} expressions rejected by parser:\n"
+                + "\n".join(parser_rejected))
+        # Wrong results are a secondary issue
+        assert not wrong_results, (
+            f"{len(wrong_results)} expressions returned wrong results:\n" + "\n".join(wrong_results))
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_json_mixed_type_in_precision(self):
         """Regression #48442: mixed int/float IN list should not cause INT64 precision loss."""
         client = self._client(alias=self.shared_alias)
-        query_val = INT64_MAX
+        # Also test pure-int IN as control (should NOT match)
+        query_val = INT64_MAX  # different from stored INT64_MAX - 7
+        ctrl_expr = f'json_data["num"] in [{query_val}]'
+        ctrl_res = self.query(client, self.collection_name, filter=ctrl_expr,
+                              output_fields=[default_pk],
+                              check_task=CheckTasks.check_nothing)[0]
+        if not hasattr(ctrl_res, 'message'):
+            ctrl_ids = [r[default_pk] for r in ctrl_res]
+            assert 0 not in ctrl_ids, (
+                f"Control: pure-int IN should not match id=0 (num={INT64_MAX-7} != {query_val}). Got {ctrl_ids}")
+
+        # Now test with mixed int/float — the bug trigger
         expr = f'json_data["num"] in [{query_val}, 1.5]'
         res = self.query(client, self.collection_name, filter=expr,
                          output_fields=[default_pk],
                          check_task=CheckTasks.check_nothing)[0]
         if hasattr(res, 'message'):
-            log.warning(f"Expression returned error (may be expected): {res}")
+            # Milvus rejecting mixed-type IN is a valid (safe) behavior
+            log.info(f"Milvus rejects mixed-type IN (safe): {res.message}")
             return
         ids = [r[default_pk] for r in res]
         assert 0 not in ids, (
-            f"id=0 (json num={INT64_MAX - 7}) should NOT match {query_val} via float coercion. Got {ids}")
+            f"id=0 (json num={INT64_MAX - 7}) should NOT match {query_val} via float coercion. "
+            f"Pure-int control correctly excludes it, but mixed int/float IN causes false match. Got {ids}")
 
 
 # ──────────────────────────────────────────────────────────────
