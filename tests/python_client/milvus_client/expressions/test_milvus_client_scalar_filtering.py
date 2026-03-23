@@ -752,3 +752,214 @@ class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
         assert not failures, (
             f"Seed={DEFAULT_SEED}, {len(failures)}/{len(expressions)} compound expr failed:\n"
             + "\n".join(failures))
+
+
+# ──────────────────────────────────────────────────────────────
+# Test Class 2: Index consistency — cross-index comparison
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.xdist_group("TestScalarIdxConsistency")
+class TestScalarIndexConsistency(TestMilvusClientV2Base):
+    """
+    Index consistency: same data across fields with different indexes.
+    200 rows. Verifies all index types return identical results.
+    """
+    shared_alias = "TestScalarIdxConsistency"
+    NUM_ROWS = 200
+
+    INDEX_MATRIX = {
+        DataType.INT8:   ["no_index", "INVERTED", "BITMAP", "STL_SORT"],
+        DataType.INT16:  ["no_index", "INVERTED", "BITMAP", "STL_SORT"],
+        DataType.INT32:  ["no_index", "INVERTED", "BITMAP", "STL_SORT"],
+        DataType.INT64:  ["no_index", "INVERTED", "BITMAP", "STL_SORT"],
+        DataType.FLOAT:  ["no_index", "INVERTED", "STL_SORT"],
+        DataType.DOUBLE: ["no_index", "INVERTED", "STL_SORT"],
+        DataType.BOOL:   ["no_index", "INVERTED", "BITMAP"],
+        DataType.VARCHAR: ["no_index", "INVERTED", "BITMAP", "TRIE"],
+    }
+
+    ARRAY_INDEX_MATRIX = {
+        DataType.INT32:   ["no_index", "INVERTED", "BITMAP"],
+        DataType.INT64:   ["no_index", "INVERTED", "BITMAP"],
+        DataType.VARCHAR:  ["no_index", "INVERTED", "BITMAP"],
+    }
+
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = "TestScalarIdxConsist" + cf.gen_unique_str("_")
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_collection(self, request):
+        client = self._client(alias=self.shared_alias)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_pk, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vec, DataType.FLOAT_VECTOR, dim=default_dim)
+
+        field_groups = {}
+        for dtype, indexes in self.INDEX_MATRIX.items():
+            group = []
+            for idx_type in indexes:
+                fname = f"{dtype.name.lower()}_{idx_type.lower().replace('-', '_')}"
+                if dtype == DataType.VARCHAR:
+                    schema.add_field(fname, dtype, max_length=256, nullable=True)
+                else:
+                    schema.add_field(fname, dtype, nullable=True)
+                group.append((fname, idx_type))
+            field_groups[dtype] = group
+
+        array_field_groups = {}
+        for elem_dtype, indexes in self.ARRAY_INDEX_MATRIX.items():
+            group = []
+            for idx_type in indexes:
+                fname = f"arr_{elem_dtype.name.lower()}_{idx_type.lower().replace('-', '_')}"
+                if elem_dtype == DataType.VARCHAR:
+                    schema.add_field(fname, DataType.ARRAY, element_type=elem_dtype,
+                                     max_capacity=5, max_length=100, nullable=True)
+                else:
+                    schema.add_field(fname, DataType.ARRAY, element_type=elem_dtype,
+                                     max_capacity=5, nullable=True)
+                group.append((fname, idx_type))
+            array_field_groups[elem_dtype] = group
+
+        self.create_collection(client, self.collection_name, schema=schema)
+
+        rng = random.Random(DEFAULT_SEED)
+        vectors = cf.gen_vectors(self.NUM_ROWS, default_dim)
+        test_data = []
+        for i in range(self.NUM_ROWS):
+            row = {default_pk: i, default_vec: vectors[i]}
+            for dtype, group in field_groups.items():
+                val = make_nullable_value(dtype, rng, null_pct=0.1)
+                for fname, _ in group:
+                    row[fname] = val
+            for elem_dtype, group in array_field_groups.items():
+                arr_val = make_random_array(elem_dtype, rng, max_cap=5, null_pct=0.1)
+                for fname, _ in group:
+                    row[fname] = arr_val
+            test_data.append(row)
+
+        request.cls.test_data = test_data
+        request.cls.field_groups = field_groups
+        request.cls.array_field_groups = array_field_groups
+
+        self.insert(client, self.collection_name, data=test_data)
+        self.flush(client, self.collection_name)
+
+        idx_params = self.prepare_index_params(client)[0]
+        idx_params.add_index(default_vec, index_type="FLAT", metric_type="COSINE")
+        self.create_index(client, self.collection_name, index_params=idx_params)
+
+        for dtype, group in field_groups.items():
+            for fname, idx_type in group:
+                if idx_type != "no_index":
+                    ip = self.prepare_index_params(client)[0]
+                    ip.add_index(fname, index_type=idx_type)
+                    self.create_index(client, self.collection_name, index_params=ip)
+
+        for elem_dtype, group in array_field_groups.items():
+            for fname, idx_type in group:
+                if idx_type != "no_index":
+                    ip = self.prepare_index_params(client)[0]
+                    ip.add_index(fname, index_type=idx_type)
+                    self.create_index(client, self.collection_name, index_params=ip)
+
+        self.load_collection(client, self.collection_name)
+
+        def teardown():
+            self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+        request.addfinalizer(teardown)
+
+    def _check_cross_index_consistency(self, client, group, templates):
+        """Helper: run expression templates across fields in a group, verify identical results."""
+        failures = []
+        for tmpl in templates:
+            results = {}
+            for fname, idx_type in group:
+                expr = tmpl.replace("{f}", fname)
+                try:
+                    res = self.query(client, self.collection_name, filter=expr,
+                                     output_fields=[default_pk],
+                                     check_task=CheckTasks.check_nothing)[0]
+                    if hasattr(res, 'message'):
+                        continue
+                    results[fname] = sorted([r[default_pk] for r in res])
+                except Exception:
+                    continue
+
+            if len(results) < 2:
+                continue
+            ref_name, ref_ids = next(iter(results.items()))
+            for fname, ids in results.items():
+                if ids != ref_ids:
+                    idx_t = dict(group)[fname]
+                    ref_idx = dict(group)[ref_name]
+                    failures.append(
+                        f"{tmpl}: {fname}({idx_t}) got {len(ids)} vs {ref_name}({ref_idx}) got {len(ref_ids)}")
+        return failures
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dtype_name", [
+        "INT8", "INT16", "INT32", "INT64", "FLOAT", "DOUBLE", "BOOL", "VARCHAR"
+    ])
+    def test_scalar_index_consistency(self, dtype_name):
+        """Verify all index types return identical results for identical scalar data and expressions."""
+        dtype = DataType[dtype_name]
+        client = self._client(alias=self.shared_alias)
+        group = self.field_groups[dtype]
+        test_data = self.test_data
+
+        sample_field = group[0][0]
+        non_null = [r[sample_field] for r in test_data if r.get(sample_field) is not None]
+        if not non_null:
+            pytest.skip(f"No non-null values for {dtype_name}")
+        val = non_null[len(non_null) // 2]
+
+        if dtype == DataType.BOOL:
+            templates = ["{f} == true", "{f} == false", "{f} IS NULL", "{f} IS NOT NULL"]
+        elif dtype == DataType.VARCHAR:
+            templates = ['{f} == "' + str(val) + '"', '{f} != "' + str(val) + '"',
+                         "{f} IS NULL", "{f} IS NOT NULL", '{f} LIKE "str%"',
+                         '{f} IN ["str_0", "str_1"]', '{f} NOT IN ["abc"]']
+        else:
+            templates = [f"{{f}} > {repr(val)}", f"{{f}} <= {repr(val)}", f"{{f}} == {repr(val)}",
+                         "{f} IS NULL", "{f} IS NOT NULL",
+                         f"{{f}} IN [{repr(val)}]", f"{{f}} NOT IN [{repr(val)}]",
+                         f"{{f}} + 1 > {repr(val)}"]
+
+        failures = self._check_cross_index_consistency(client, group, templates)
+        assert not failures, f"{len(failures)} scalar index inconsistencies for {dtype_name}:\n" + "\n".join(failures)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("elem_dtype_name", ["INT32", "INT64", "VARCHAR"])
+    def test_array_index_consistency(self, elem_dtype_name):
+        """Verify all index types return identical results for identical array data and expressions."""
+        elem_dtype = DataType[elem_dtype_name]
+        client = self._client(alias=self.shared_alias)
+        group = self.array_field_groups[elem_dtype]
+        test_data = self.test_data
+
+        sample_field = group[0][0]
+        non_null = [r[sample_field] for r in test_data
+                    if r.get(sample_field) is not None and isinstance(r.get(sample_field), list)]
+        if not non_null:
+            pytest.skip(f"No non-null arrays for {elem_dtype_name}")
+        sample_arr = non_null[0]
+        val = sample_arr[0] if sample_arr else 0
+
+        if elem_dtype == DataType.VARCHAR:
+            templates = [
+                '{f}[0] == "' + str(val) + '"',
+                "{f} IS NULL", "{f} IS NOT NULL",
+                f'array_contains({{f}}, "{val}")',
+                "array_length({f}) > 0",
+            ]
+        else:
+            templates = [
+                f"{{f}}[0] == {repr(val)}", f"{{f}}[0] > {repr(val)}",
+                "{f} IS NULL", "{f} IS NOT NULL",
+                f"array_contains({{f}}, {repr(val)})",
+                "array_length({f}) >= 1", "array_length({f}) < 10",
+            ]
+
+        failures = self._check_cross_index_consistency(client, group, templates)
+        assert not failures, f"{len(failures)} array index inconsistencies for ARRAY({elem_dtype_name}):\n" + "\n".join(failures)
