@@ -19,6 +19,8 @@ package syncmgr
 import (
 	"context"
 	"fmt"
+	"path"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -73,6 +75,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	// Update manifestPath after writeInserts
 	bw.manifestPath = manifest
 
+	// writeStats for V3 adds bloom filter stats to manifest
 	if stats, err = bw.writeStats(ctx, pack); err != nil {
 		log.Error("failed to process stats blob", zap.Error(err))
 		return
@@ -82,13 +85,15 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 		log.Error("failed to process delta blob", zap.Error(err))
 		return
 	}
+	// writeBM25Stasts for V3 adds BM25 stats to manifest
 	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
 		log.Error("failed to process bm25 stats blob", zap.Error(err))
 		return
 	}
 
-	// For V3, deltas is always nil since deltalogs are in manifest
+	// For V3, deltas and stats are in manifest
 	deltas = nil
+	manifest = bw.manifestPath
 	size = bw.sizeWritten
 	return
 }
@@ -257,4 +262,213 @@ func (bw *BulkPackWriterV3) writeDelta(ctx context.Context, pack *SyncPack) (str
 	bw.sizeWritten += pack.deltaData.Size()
 
 	return newManifest, nil
+}
+
+// writeStats overrides the base class to write bloom filter stats into the
+// manifest instead of separate binlog files. The stat files are written
+// under _stats/ relative to the manifest base path, then registered in
+// the manifest via a transaction.
+func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
+	if len(pack.insertData) == 0 {
+		return make(map[int64]*datapb.FieldBinlog), nil
+	}
+
+	serializer, err := NewStorageSerializer(bw.metaCache, bw.schema)
+	if err != nil {
+		return nil, err
+	}
+	singlePKStats, batchStatsBlob, err := serializer.serializeStatslog(pack)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update metacache (same as base class)
+	actions := []metacache.SegmentAction{metacache.RollStats(singlePKStats)}
+	bw.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(pack.segmentID))
+
+	pkFieldID := serializer.pkField.GetFieldID()
+	basePath, _, err := packed.UnmarshalManifestPath(bw.manifestPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []string
+	var memorySize int64
+
+	// Preserve existing bloom filter files from previous batches.
+	// loon_transaction_update_stat uses replace semantics, so we must
+	// merge previously written files into the new entry.
+	statKey := fmt.Sprintf("bloom_filter.%d", pkFieldID)
+	existingStats, err := packed.GetManifestStats(bw.manifestPath, bw.storageConfig)
+	if err == nil {
+		if existing, ok := existingStats[statKey]; ok && len(existing.Paths) > 0 {
+			files = append(files, existing.Paths...)
+			if memStr, ok := existing.Metadata["memory_size"]; ok {
+				existingMem, _ := strconv.ParseInt(memStr, 10, 64)
+				memorySize += existingMem
+			}
+		}
+	}
+
+	// Write batch stats blob via filesystem FFI.
+	id, err := bw.allocator.AllocOne()
+	if err != nil {
+		return nil, err
+	}
+	relPath := fmt.Sprintf("_stats/bloom_filter.%d/%d", pkFieldID, id)
+	fullPath := path.Join(basePath, relPath)
+	if err := packed.WriteFile(bw.storageConfig, fullPath, batchStatsBlob.Value); err != nil {
+		return nil, err
+	}
+	bw.sizeWritten += int64(len(batchStatsBlob.Value))
+	memorySize += int64(len(batchStatsBlob.Value))
+	files = append(files, fullPath)
+
+	// Write merged stats on flush
+	if pack.isFlush && pack.level != datapb.SegmentLevel_L0 {
+		mergedStatsBlob, err := serializer.serializeMergedPkStats(pack)
+		if err != nil {
+			return nil, err
+		}
+		mergedRelPath := fmt.Sprintf("_stats/bloom_filter.%d/%d", pkFieldID, int64(storage.CompoundStatsType))
+		mergedFullPath := path.Join(basePath, mergedRelPath)
+		if err := packed.WriteFile(bw.storageConfig, mergedFullPath, mergedStatsBlob.Value); err != nil {
+			return nil, err
+		}
+		bw.sizeWritten += int64(len(mergedStatsBlob.Value))
+		memorySize += int64(len(mergedStatsBlob.Value))
+		files = append(files, mergedFullPath)
+	}
+
+	// Register stats in manifest
+	newManifest, err := packed.AddStatsToManifest(bw.manifestPath, bw.storageConfig, []packed.StatEntry{
+		{
+			Key:      statKey,
+			Files:    files,
+			Metadata: map[string]string{"memory_size": fmt.Sprintf("%d", memorySize)},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to add stats to manifest: %w", err)
+	}
+	bw.manifestPath = newManifest
+
+	// Return empty map - stats are in manifest
+	return make(map[int64]*datapb.FieldBinlog), nil
+}
+
+// writeBM25Stasts overrides the base class to write BM25 stats into the
+// manifest instead of separate binlog files.
+func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
+	if len(pack.bm25Stats) == 0 {
+		return make(map[int64]*datapb.FieldBinlog), nil
+	}
+
+	serializer, err := NewStorageSerializer(bw.metaCache, bw.schema)
+	if err != nil {
+		return nil, err
+	}
+	bm25Blobs, err := serializer.serializeBM25Stats(pack)
+	if err != nil {
+		return nil, err
+	}
+
+	basePath, _, err := packed.UnmarshalManifestPath(bw.manifestPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Track per-field files and memory sizes, then build stat entries at the end
+	type fieldStats struct {
+		files      []string
+		memorySize int64
+	}
+	fieldMap := make(map[int64]*fieldStats)
+
+	// Preserve existing BM25 stat files from previous batches.
+	existingStats, err := packed.GetManifestStats(bw.manifestPath, bw.storageConfig)
+	if err == nil {
+		for key, existing := range existingStats {
+			prefix, fieldID, ok := packed.ParseStatKey(key)
+			if !ok || prefix != "bm25" || len(existing.Paths) == 0 {
+				continue
+			}
+			fs := &fieldStats{files: existing.Paths}
+			if memStr, ok := existing.Metadata["memory_size"]; ok {
+				fs.memorySize, _ = strconv.ParseInt(memStr, 10, 64)
+			}
+			fieldMap[fieldID] = fs
+		}
+	}
+
+	for fieldID, blob := range bm25Blobs {
+		id, err := bw.allocator.AllocOne()
+		if err != nil {
+			return nil, err
+		}
+
+		relPath := fmt.Sprintf("_stats/bm25.%d/%d", fieldID, id)
+		fullPath := path.Join(basePath, relPath)
+		if err := packed.WriteFile(bw.storageConfig, fullPath, blob.Value); err != nil {
+			return nil, err
+		}
+		bw.sizeWritten += int64(len(blob.Value))
+
+		fs := fieldMap[fieldID]
+		if fs == nil {
+			fs = &fieldStats{}
+			fieldMap[fieldID] = fs
+		}
+		fs.files = append(fs.files, fullPath)
+		fs.memorySize += int64(len(blob.Value))
+	}
+
+	// Update metacache (same as base class)
+	actions := []metacache.SegmentAction{metacache.MergeBm25Stats(pack.bm25Stats)}
+	bw.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(pack.segmentID))
+
+	// Write merged BM25 stats on flush
+	if pack.isFlush && pack.level != datapb.SegmentLevel_L0 && hasBM25Function(bw.schema) {
+		mergedBM25Blob, err := serializer.serializeMergedBM25Stats(pack)
+		if err != nil {
+			return nil, err
+		}
+		for fieldID, blob := range mergedBM25Blob {
+			mergedRelPath := fmt.Sprintf("_stats/bm25.%d/%d", fieldID, int64(storage.CompoundStatsType))
+			mergedFullPath := path.Join(basePath, mergedRelPath)
+			if err := packed.WriteFile(bw.storageConfig, mergedFullPath, blob.Value); err != nil {
+				return nil, err
+			}
+			bw.sizeWritten += int64(len(blob.Value))
+
+			fs := fieldMap[fieldID]
+			if fs == nil {
+				fs = &fieldStats{}
+				fieldMap[fieldID] = fs
+			}
+			fs.files = append(fs.files, mergedFullPath)
+			fs.memorySize += int64(len(blob.Value))
+		}
+	}
+
+	// Build stat entries with memory_size metadata
+	var statEntries []packed.StatEntry
+	for fieldID, fs := range fieldMap {
+		statEntries = append(statEntries, packed.StatEntry{
+			Key:      fmt.Sprintf("bm25.%d", fieldID),
+			Files:    fs.files,
+			Metadata: map[string]string{"memory_size": fmt.Sprintf("%d", fs.memorySize)},
+		})
+	}
+
+	if len(statEntries) > 0 {
+		newManifest, err := packed.AddStatsToManifest(bw.manifestPath, bw.storageConfig, statEntries)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add BM25 stats to manifest: %w", err)
+		}
+		bw.manifestPath = newManifest
+	}
+
+	// Return empty map - stats are in manifest
+	return make(map[int64]*datapb.FieldBinlog), nil
 }

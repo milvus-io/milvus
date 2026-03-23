@@ -22,6 +22,7 @@ import (
 	"io"
 	"maps"
 	"math"
+	"path"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -500,7 +501,20 @@ func (m *BM25Stats) GetAvgdl() float64 {
 	return float64(m.numToken) / float64(m.numRow)
 }
 
-// DeserializeStats deserialize @blobs as []*PrimaryKeyStats
+// DeserializeBloomFilterStats auto-detects compound vs default stats format
+// from the paths and deserializes accordingly. Compound format is detected
+// when any path has a basename matching CompoundStatsType.LogIdx().
+func DeserializeBloomFilterStats(paths []string, blobs []*Blob) ([]*PrimaryKeyStats, error) {
+	for i, p := range paths {
+		_, logidx := path.Split(p)
+		if logidx == CompoundStatsType.LogIdx() {
+			return DeserializeStatsList(blobs[i])
+		}
+	}
+	return DeserializeStats(blobs)
+}
+
+// DeserializeStats deserializes @blobs as []*PrimaryKeyStats
 func DeserializeStats(blobs []*Blob) ([]*PrimaryKeyStats, error) {
 	results := make([]*PrimaryKeyStats, 0, len(blobs))
 	for _, blob := range blobs {

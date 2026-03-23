@@ -194,3 +194,86 @@ func TestIsStatsLogExists(t *testing.T) {
 	assert.False(t, segment.IsStatsLogExists(3))
 	assert.False(t, segment.IsStatsLogExists(0))
 }
+
+func TestValidateManifestSegment(t *testing.T) {
+	t.Run("no manifest is always valid", func(t *testing.T) {
+		info := NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 1,
+			Statslogs: []*datapb.FieldBinlog{
+				{FieldID: 100},
+			},
+		})
+		assert.Empty(t, ValidateManifestSegment(info))
+	})
+
+	t.Run("manifest with empty legacy fields is valid", func(t *testing.T) {
+		info := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           2,
+			ManifestPath: "base/path@1",
+		})
+		assert.Empty(t, ValidateManifestSegment(info))
+	})
+
+	t.Run("manifest with statslogs is invalid", func(t *testing.T) {
+		info := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           3,
+			ManifestPath: "base/path@1",
+			Statslogs: []*datapb.FieldBinlog{
+				{FieldID: 100},
+			},
+		})
+		msg := ValidateManifestSegment(info)
+		assert.Contains(t, msg, "statslogs")
+		assert.Contains(t, msg, "segment 3")
+	})
+
+	t.Run("manifest with bm25statslogs is invalid", func(t *testing.T) {
+		info := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           4,
+			ManifestPath: "base/path@1",
+			Bm25Statslogs: []*datapb.FieldBinlog{
+				{FieldID: 200},
+			},
+		})
+		msg := ValidateManifestSegment(info)
+		assert.Contains(t, msg, "bm25statslogs")
+	})
+
+	t.Run("manifest with text stats is invalid", func(t *testing.T) {
+		info := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           5,
+			ManifestPath: "base/path@1",
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				10: {FieldID: 10},
+			},
+		})
+		msg := ValidateManifestSegment(info)
+		assert.Contains(t, msg, "textStatsLogs")
+	})
+
+	t.Run("manifest with json key stats is invalid", func(t *testing.T) {
+		info := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           6,
+			ManifestPath: "base/path@1",
+			JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+				20: {FieldID: 20},
+			},
+		})
+		msg := ValidateManifestSegment(info)
+		assert.Contains(t, msg, "jsonKeyStats")
+	})
+
+	t.Run("manifest with multiple non-empty fields", func(t *testing.T) {
+		info := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           7,
+			ManifestPath: "base/path@1",
+			Statslogs:    []*datapb.FieldBinlog{{FieldID: 100}},
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				10: {FieldID: 10},
+			},
+		})
+		msg := ValidateManifestSegment(info)
+		assert.Contains(t, msg, "statslogs")
+		assert.Contains(t, msg, "textStatsLogs")
+	})
+}

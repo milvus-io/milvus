@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
@@ -423,7 +424,7 @@ func (pw *PackedManifestRecordWriter) initWriters(r Record) error {
 
 		var err error
 		k := metautil.JoinIDPath(pw.collectionID, pw.partitionID, pw.segmentID)
-		basePath := path.Join(pw.storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
+		basePath := path.Join(common.SegmentInsertLogPath, k)
 		pw.writer, err = NewPackedRecordManifestWriter(basePath, -1, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.storagePluginContext)
 		if err != nil {
 			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed record writer %s", err.Error()))
@@ -468,9 +469,86 @@ func (pw *PackedManifestRecordWriter) Close() error {
 		}
 	}
 	pw.finalizeBinlogs()
-	if err := pw.writeStats(); err != nil {
+	// For V3 (manifest-based) segments, stats are stored under basePath/_stats/
+	// and registered in the manifest. If pw.manifest is empty, no data was
+	// written, so there are no stats to write.
+	if pw.manifest != "" {
+		if err := pw.writeStatsV3(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeStatsV3 writes bloom filter and BM25 stats for V3 (manifest-based)
+// segments. Stats blobs are written to basePath/_stats/ and registered in the
+// manifest via a transaction, leaving pw.statsLog and pw.bm25StatsLog nil so
+// callers know stats are embedded in the manifest.
+func (pw *PackedManifestRecordWriter) writeStatsV3() error {
+	basePath, _, err := packed.UnmarshalManifestPath(pw.manifest)
+	if err != nil {
+		return fmt.Errorf("writeStatsV3: failed to parse manifest path: %w", err)
+	}
+
+	// --- Bloom filter (PK) stats ---
+	statsBlob, pkFieldID, err := pw.pkCollector.SerializeBlob(pw.rowNum)
+	if err != nil {
 		return err
 	}
+	if statsBlob != nil {
+		id, err := pw.allocator.AllocOne()
+		if err != nil {
+			return err
+		}
+		fullPath := path.Join(basePath, fmt.Sprintf("_stats/bloom_filter.%d/%d", pkFieldID, id))
+		if err := packed.WriteFile(pw.storageConfig, fullPath, statsBlob.Value); err != nil {
+			return fmt.Errorf("writeStatsV3: failed to write bloom filter stats: %w", err)
+		}
+
+		newManifest, err := packed.AddStatsToManifest(pw.manifest, pw.storageConfig, []packed.StatEntry{
+			{
+				Key:      fmt.Sprintf("bloom_filter.%d", pkFieldID),
+				Files:    []string{fullPath},
+				Metadata: map[string]string{"memory_size": fmt.Sprintf("%d", int64(len(statsBlob.Value)))},
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("writeStatsV3: failed to add bloom filter stats to manifest: %w", err)
+		}
+		pw.manifest = newManifest
+		// Stats are stored in the manifest; leave pw.statsLog nil.
+	}
+
+	// --- BM25 stats ---
+	bm25Blobs, err := pw.bm25Collector.SerializeBlobs()
+	if err != nil {
+		return err
+	}
+	if len(bm25Blobs) > 0 {
+		var statEntries []packed.StatEntry
+		for fieldID, blob := range bm25Blobs {
+			id, err := pw.allocator.AllocOne()
+			if err != nil {
+				return err
+			}
+			fullPath := path.Join(basePath, fmt.Sprintf("_stats/bm25.%d/%d", fieldID, id))
+			if err := packed.WriteFile(pw.storageConfig, fullPath, blob.Value); err != nil {
+				return fmt.Errorf("writeStatsV3: failed to write bm25 stats: %w", err)
+			}
+			statEntries = append(statEntries, packed.StatEntry{
+				Key:      fmt.Sprintf("bm25.%d", fieldID),
+				Files:    []string{fullPath},
+				Metadata: map[string]string{"memory_size": fmt.Sprintf("%d", blob.MemorySize)},
+			})
+		}
+		newManifest, err := packed.AddStatsToManifest(pw.manifest, pw.storageConfig, statEntries)
+		if err != nil {
+			return fmt.Errorf("writeStatsV3: failed to add bm25 stats to manifest: %w", err)
+		}
+		pw.manifest = newManifest
+		// Stats are stored in the manifest; leave pw.bm25StatsLog nil.
+	}
+
 	return nil
 }
 
