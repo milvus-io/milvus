@@ -40,6 +40,21 @@ func buildSchemaHelperForRewriteT(t *testing.T) *typeutil.SchemaHelper {
 	return helper
 }
 
+func buildSchemaHelperForRewriteNullableT(t *testing.T) *typeutil.SchemaHelper {
+	fields := []*schemapb.FieldSchema{
+		{FieldID: 101, Name: "Int64Field", DataType: schemapb.DataType_Int64},
+		{FieldID: 106, Name: "NullableBoolField", DataType: schemapb.DataType_Bool, Nullable: true},
+	}
+	schema := &schemapb.CollectionSchema{
+		Name:   "rewrite_nullable_test",
+		AutoID: false,
+		Fields: fields,
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	return helper
+}
+
 // --- shouldUseInExpr threshold tests ---
 
 func TestRewrite_OREquals_ToIN_VarChar_AboveThreshold(t *testing.T) {
@@ -196,13 +211,70 @@ func TestRewrite_Term_SortAndDedup_Int(t *testing.T) {
 
 func TestRewrite_In_SortAndDedup_Bool(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
+	// BoolField in [true, false] covers all possible bool values → AlwaysTrueExpr
 	expr, err := parser.ParseExpr(helper, `BoolField in [true,false,false,true]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	// bool: 2 unique values < threshold 3 → split to == or
-	be := expr.GetBinaryExpr()
-	require.NotNil(t, be, "bool in [true,false] should split to == or")
-	require.Equal(t, planpb.BinaryExpr_LogicalOr, be.GetOp())
+	require.True(t, rewriter.IsAlwaysTrueExpr(expr),
+		"bool IN [true, false] should be rewritten to AlwaysTrueExpr")
+}
+
+func TestRewrite_Bool_In_SingleTrue_ToEqual(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	expr, err := parser.ParseExpr(helper, `BoolField in [true]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "bool IN [true] should be rewritten to == true")
+	require.Equal(t, planpb.OpType_Equal, ure.GetOp())
+	require.Equal(t, true, ure.GetValue().GetBoolVal())
+}
+
+func TestRewrite_Bool_In_SingleFalse_ToEqual(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	expr, err := parser.ParseExpr(helper, `BoolField in [false]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "bool IN [false] should be rewritten to == false")
+	require.Equal(t, planpb.OpType_Equal, ure.GetOp())
+	require.Equal(t, false, ure.GetValue().GetBoolVal())
+}
+
+func TestRewrite_Bool_In_DedupedSingleTrue_ToEqual(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// After dedup, [true, true] becomes [true] → == true
+	expr, err := parser.ParseExpr(helper, `BoolField in [true, true]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "bool IN [true, true] should dedup then rewrite to == true")
+	require.Equal(t, planpb.OpType_Equal, ure.GetOp())
+	require.Equal(t, true, ure.GetValue().GetBoolVal())
+}
+
+func TestRewrite_Bool_In_TrueFalse_Nullable_ToIsNotNull(t *testing.T) {
+	// For nullable bool, in [true, false] should become IS NOT NULL (not AlwaysTrueExpr)
+	// because null values should not match.
+	helper := buildSchemaHelperForRewriteNullableT(t)
+	expr, err := parser.ParseExpr(helper, `NullableBoolField in [true,false]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	nullExpr := expr.GetNullExpr()
+	require.NotNil(t, nullExpr, "nullable bool IN [true, false] should be rewritten to IS NOT NULL")
+	require.Equal(t, planpb.NullExpr_IsNotNull, nullExpr.GetOp())
+}
+
+func TestRewrite_Bool_In_SingleTrue_Nullable_ToEqual(t *testing.T) {
+	// For nullable bool, in [true] should still become == true
+	helper := buildSchemaHelperForRewriteNullableT(t)
+	expr, err := parser.ParseExpr(helper, `NullableBoolField in [true]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "nullable bool IN [true] should be rewritten to == true")
+	require.Equal(t, planpb.OpType_Equal, ure.GetOp())
+	require.Equal(t, true, ure.GetValue().GetBoolVal())
 }
 
 func TestRewrite_Flatten_Then_OR_ToIN(t *testing.T) {

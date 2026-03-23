@@ -1,6 +1,8 @@
 package rewriter
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -116,12 +118,52 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 func (v *visitor) visitTermExpr(expr *planpb.TermExpr) interface{} {
 	sortTermValues(expr)
 
+	// Optimize bool IN expressions:
+	// - in [true, false] → AlwaysTrueExpr (non-nullable) or IS NOT NULL (nullable)
+	// - in [true] → == true (uses fast SIMD path instead of slow scalar loop)
+	// - in [false] → == false
+	if v.optimizeEnabled && effectiveDataType(expr.GetColumnInfo()) == schemapb.DataType_Bool {
+		values := expr.GetValues()
+		if allBoolVals(values) {
+			hasFalse, hasTrue := false, false
+			for _, val := range values {
+				if val.GetBoolVal() {
+					hasTrue = true
+				} else {
+					hasFalse = true
+				}
+			}
+			if hasTrue && hasFalse {
+				if expr.GetColumnInfo().GetNullable() {
+					return newNullExpr(expr.GetColumnInfo(), planpb.NullExpr_IsNotNull)
+				}
+				return newAlwaysTrueExpr()
+			}
+			if len(values) == 1 {
+				return newUnaryRangeExpr(expr.GetColumnInfo(), planpb.OpType_Equal, values[0])
+			}
+		}
+	}
+
 	// Split in → == or when shouldUseInExpr returns false
 	if !shouldUseInExprWithPK(expr.GetColumnInfo().GetDataType(), len(expr.GetValues()), expr.GetColumnInfo().GetIsPrimaryKey()) {
 		return splitTermToOrEquals(expr)
 	}
 
 	return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: expr}}
+}
+
+// allBoolVals returns true if all values in the slice are BoolVal type.
+func allBoolVals(values []*planpb.GenericValue) bool {
+	if len(values) == 0 {
+		return false
+	}
+	for _, v := range values {
+		if _, ok := v.GetVal().(*planpb.GenericValue_BoolVal); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // visitValueExpr converts constant boolean ValueExpr to AlwaysTrueExpr/AlwaysFalseExpr.
