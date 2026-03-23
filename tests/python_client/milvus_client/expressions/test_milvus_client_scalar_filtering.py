@@ -191,31 +191,35 @@ def _like_match(value: Any, pattern: str) -> bool:
     return bool(re.match(regex, str(value)))
 
 
+def _is_null_or_sentinel(v):
+    return v is None or isinstance(v, cf.NullValue)
+
+
 def _array_contains(arr: Any, element: Any) -> bool:
-    """Check if an array contains the given element."""
-    if arr is None:
+    """Check if an array contains the given element. NULL array → False."""
+    if _is_null_or_sentinel(arr) or not isinstance(arr, list):
         return False
     return element in arr
 
 
 def _array_contains_all(arr: Any, elements: Any) -> bool:
-    """Check if an array contains all of the given elements."""
-    if arr is None:
+    """Check if an array contains all of the given elements. NULL array → False."""
+    if _is_null_or_sentinel(arr) or not isinstance(arr, list):
         return False
     return all(e in arr for e in elements)
 
 
 def _array_contains_any(arr: Any, elements: Any) -> bool:
-    """Check if an array contains any of the given elements."""
-    if arr is None:
+    """Check if an array contains any of the given elements. NULL array → False."""
+    if _is_null_or_sentinel(arr) or not isinstance(arr, list):
         return False
     return any(e in arr for e in elements)
 
 
-def _array_length(arr: Any) -> int:
-    """Return the length of an array, or 0 if None."""
-    if arr is None:
-        return 0
+def _array_length(arr: Any):
+    """Return the length of an array, or TRACKED_NULL if the array is NULL."""
+    if _is_null_or_sentinel(arr) or not isinstance(arr, list):
+        return TRACKED_NULL  # Must use TRACKED_NULL so _sql_not can detect NULL involvement
     return len(arr)
 
 
@@ -224,6 +228,69 @@ def _not_in(val: Any, lst: list) -> bool:
     if isinstance(val, cf.NullValue):
         return False
     return val not in lst
+
+
+class _NullTouched:
+    """Thread-local flag to detect if a NullValue was involved in a comparison."""
+    flag = False
+
+    @classmethod
+    def reset(cls):
+        cls.flag = False
+
+    @classmethod
+    def touch(cls):
+        cls.flag = True
+
+    @classmethod
+    def was_touched(cls):
+        return cls.flag
+
+
+class _TrackedNullValue(cf.NullValue):
+    """NullValue that sets a flag when participating in any comparison."""
+    def __eq__(self, other):
+        _NullTouched.touch()
+        return super().__eq__(other)
+    def __ne__(self, other):
+        _NullTouched.touch()
+        return super().__ne__(other)
+    def __lt__(self, other):
+        _NullTouched.touch()
+        return super().__lt__(other)
+    def __le__(self, other):
+        _NullTouched.touch()
+        return super().__le__(other)
+    def __gt__(self, other):
+        _NullTouched.touch()
+        return super().__gt__(other)
+    def __ge__(self, other):
+        _NullTouched.touch()
+        return super().__ge__(other)
+    def __bool__(self):
+        _NullTouched.touch()
+        return False
+
+TRACKED_NULL = _TrackedNullValue()
+
+
+def _sql_not(inner_fn) -> bool:
+    """
+    SQL NOT with 3VL: NOT(True)→False, NOT(False)→True, NOT(NULL)→NULL(→False).
+
+    inner_fn is a callable (lambda) that evaluates the inner expression.
+    We use _TrackedNullValue to detect if NULL participated in the evaluation.
+    If it did, NOT returns False (NULL propagation) instead of inverting.
+    """
+    _NullTouched.reset()
+    try:
+        result = inner_fn()
+    except Exception:
+        return False
+    if _NullTouched.was_touched() and not result:
+        # NULL was involved and result is False → it's a NULL-False, NOT(NULL) = NULL → exclude
+        return False
+    return not result
 
 
 def _milvus_to_python(expr: str) -> str:
@@ -342,6 +409,7 @@ def _milvus_to_python(expr: str) -> str:
     _HELPER_FUNCS = {
         '_like_match', '_array_contains', '_array_contains_all',
         '_array_contains_any', '_array_length', '_is_null', '_is_not_null', '_not_in',
+        '_sql_not',
     }
 
     def _replace_field_refs(text: str) -> str:
@@ -381,6 +449,38 @@ def _milvus_to_python(expr: str) -> str:
 
     s = _replace_field_refs(s)
 
+    # Replace 'not (...)' with '_sql_not(row, lambda row: ...)' for correct 3VL NOT semantics.
+    # The lambda takes row as a default arg to capture it from the eval local scope.
+    # Must happen after all other transformations so inner expression is already translated.
+    def _rewrite_not(text):
+        result = []
+        i = 0
+        while i < len(text):
+            m = re.match(r'not\s*\(', text[i:])
+            if m:
+                start_paren = i + m.end() - 1
+                depth = 1
+                j = start_paren + 1
+                while j < len(text) and depth > 0:
+                    if text[j] == '(':
+                        depth += 1
+                    elif text[j] == ')':
+                        depth -= 1
+                    j += 1
+                if depth == 0:
+                    inner = text[start_paren + 1:j - 1]
+                    result.append(f'_sql_not(lambda _row=row: {inner.replace("row[", "_row[")})')
+                    i = j
+                else:
+                    result.append(text[i])
+                    i += 1
+            else:
+                result.append(text[i])
+                i += 1
+        return ''.join(result)
+
+    s = _rewrite_not(s)
+
     return s
 
 
@@ -409,17 +509,18 @@ def eval_filter(expr: str, rows: List[Dict[str, Any]]) -> List[int]:
         '_array_contains_all': _array_contains_all,
         '_array_contains_any': _array_contains_any,
         '_array_length': _array_length,
-        '_is_null': lambda v: isinstance(v, cf.NullValue),
+        '_is_null': lambda v: isinstance(v, cf.NullValue),  # catches both NullValue and _TrackedNullValue
         '_is_not_null': lambda v: not isinstance(v, cf.NullValue),
         '_not_in': _not_in,
+        '_sql_not': _sql_not,
         'math': math,
     }
 
     for idx, original_row in enumerate(rows):
         try:
-            # Replace None with SQL_NULL for correct 3VL semantics
-            # (SQL NULL: NULL != X → NULL, not True; NULL == X → NULL, not False)
-            row = {k: (v if v is not None else cf.SQL_NULL) for k, v in original_row.items()}
+            # Replace None with TRACKED_NULL for correct 3VL + NOT detection
+            row = {k: (v if v is not None else TRACKED_NULL) for k, v in original_row.items()}
+            _NullTouched.reset()
             local_ns = {'row': row}
             result = eval(py_expr, eval_ns, local_ns)
             if result is True:
@@ -603,10 +704,34 @@ def generate_compound_expressions(
         op = rng.choice(['&&', '||'])
         compounds.append(f'({e1}) {op} ({e2})')
 
-    # Add a few NOT expressions
+    # Add NOT expressions
     for _ in range(min(5, max_compounds)):
         e = rng.choice(all_exprs)
         compounds.append(f'not ({e})')
+
+    # ── Deterministic complex patterns (not random) ──
+    if len(all_exprs) >= 4:
+        e1, e2, e3, e4 = all_exprs[:4]
+        # NOT + AND
+        compounds.append(f'not (({e1}) and ({e2}))')
+        # NOT + OR
+        compounds.append(f'not (({e1}) or ({e2}))')
+        # Triple nesting: NOT(AND + OR)
+        compounds.append(f'not (({e1}) and (({e2}) or ({e3})))')
+        # (A or B) and (C or D)
+        compounds.append(f'(({e1}) or ({e2})) and (({e3}) or ({e4}))')
+        # NOT((A or B) and C)
+        compounds.append(f'not ((({e1}) or ({e2})) and ({e3}))')
+        # Deep: A and (B or (C and D))
+        compounds.append(f'({e1}) and (({e2}) or (({e3}) and ({e4})))')
+        # Double NOT
+        compounds.append(f'not (not ({e1}))')
+        # Three-way AND
+        compounds.append(f'({e1}) and ({e2}) and ({e3})')
+        # Three-way OR
+        compounds.append(f'({e1}) or ({e2}) or ({e3})')
+        # NOT + DeMorgan pattern
+        compounds.append(f'not (({e1}) and ({e2})) or ({e3})')
 
     return compounds
 
