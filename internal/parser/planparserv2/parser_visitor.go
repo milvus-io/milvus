@@ -1102,6 +1102,9 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 	if isRandomSampleExpr(childExpr) {
 		return errors.New("random sample expression cannot be used in unary expression")
 	}
+	if isElementFilterExpr(childExpr) {
+		return errors.New("element filter expression cannot be used in unary expression")
+	}
 
 	if err := checkDirectComparisonBinaryField(toColumnInfo(childExpr)); err != nil {
 		return err
