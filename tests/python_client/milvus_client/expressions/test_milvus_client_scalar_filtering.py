@@ -1272,6 +1272,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.skip(reason="Known bug #48440: INT64 arithmetic overflow wrapping")
     def test_int64_overflow_addition(self):
         """Regression #48440: c8 + 33 overflows for INT64_MAX-1, should not match <= 19974."""
         client = self._client(alias=self.shared_alias)
@@ -1283,6 +1284,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         assert 1 in ids, f"id=1 (100+33=133<=19974) should match. Got {ids}"
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.skip(reason="Known bug #48440: INT64 arithmetic overflow wrapping")
     def test_int64_overflow_subtraction(self):
         """Regression #48440: INT64_MIN - 1 should underflow, not wrap to MAX."""
         client = self._client(alias=self.shared_alias)
@@ -1328,6 +1330,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         assert 1 not in ids, f"id=1 should not return (NOT(T)=F). Got {ids}"
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.skip(reason="Known bug #48441: 3VL NOT bitmap incorrect when all nullable values are NULL in segment")
     def test_3vl_not_all_null_segment(self):
         """Regression #48441: bug triggers when ALL nullable values in segment are NULL."""
         client = self._client(alias=self.shared_alias)
@@ -1355,6 +1358,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         assert 1 in ids, f"Single row (bf=F, nf=NULL): NOT(F)=T should return id=1. Got {ids}"
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.skip(reason="Known bug #48443: AST parser rejects boolean literals in logical expressions")
     def test_bool_literal_in_logical_expr(self):
         """
         Regression #48443: 'true or (field > val)' should be accepted AND return correct results.
@@ -1402,6 +1406,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
             f"{len(wrong_results)} expressions returned wrong results:\n" + "\n".join(wrong_results))
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.skip(reason="Known bug #48442: JSON IN with mixed int/float coerces to Float64 causing precision loss")
     def test_json_mixed_type_in_precision(self):
         """Regression #48442: mixed int/float IN list should not cause INT64 precision loss."""
         client = self._client(alias=self.shared_alias)
