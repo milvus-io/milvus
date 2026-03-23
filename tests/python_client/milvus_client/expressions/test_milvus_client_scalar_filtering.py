@@ -978,7 +978,7 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
         DataType.FLOAT:  ["no_index", "INVERTED", "STL_SORT"],
         DataType.DOUBLE: ["no_index", "INVERTED", "STL_SORT"],
         DataType.BOOL:   ["no_index", "INVERTED", "BITMAP"],
-        DataType.VARCHAR: ["no_index", "INVERTED", "BITMAP", "TRIE"],
+        DataType.VARCHAR: ["no_index", "INVERTED", "BITMAP", "TRIE", "STL_SORT"],
     }
 
     ARRAY_INDEX_MATRIX = {
