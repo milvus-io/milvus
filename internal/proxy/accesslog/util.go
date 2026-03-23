@@ -49,15 +49,15 @@ func UnaryUpdateAccessInfoInterceptor(ctx context.Context, req any, rpcInfonfo *
 }
 
 func AccessLogMiddleware(ctx *gin.Context) {
-	accessInfo := info.NewRestfulInfo()
+	accessInfo := info.NewRestfulInfo(ctx)
 	ctx.Set(ContextLogKey, accessInfo)
 	ctx.Next()
 	accessInfo.InitReq()
 	_globalL.Write(accessInfo)
 }
 
-func SetHTTPParams(p *gin.LogFormatterParams) {
-	value, ok := p.Keys[ContextLogKey]
+func SetHTTPParams(ctx *gin.Context, p *gin.LogFormatterParams) {
+	value, ok := ctx.Get(ContextLogKey)
 	if !ok {
 		return
 	}
