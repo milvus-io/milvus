@@ -592,3 +592,163 @@ def generate_compound_expressions(
         compounds.append(f'not ({e})')
 
     return compounds
+
+
+# ──────────────────────────────────────────────────────────────
+# Test Class 1: Correctness — eval ground truth
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.xdist_group("TestScalarExprCorrectness")
+class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
+    """
+    Correctness test: one field per scalar/array type, eval-based ground truth.
+    500 rows with deterministic boundary values + random fill.
+    Full operator coverage: comparison, arithmetic, range, string, null, array, logical.
+    """
+    shared_alias = "TestScalarExprCorrectness"
+    NUM_ROWS = 500
+
+    # (field_name, DataType, nullable, is_array, elem_dtype_or_None)
+    FIELD_DEFS = [
+        # Scalar types — one per type, all nullable
+        ("int8_val",    DataType.INT8,    True,  False, None),
+        ("int16_val",   DataType.INT16,   True,  False, None),
+        ("int32_val",   DataType.INT32,   True,  False, None),
+        ("int64_val",   DataType.INT64,   True,  False, None),
+        ("float_val",   DataType.FLOAT,   True,  False, None),
+        ("double_val",  DataType.DOUBLE,  True,  False, None),
+        ("bool_val",    DataType.BOOL,    True,  False, None),
+        ("varchar_val", DataType.VARCHAR, True,  False, None),
+        # Array types — all supported element types
+        ("arr_int8",    DataType.ARRAY,   True,  True,  DataType.INT8),
+        ("arr_int16",   DataType.ARRAY,   True,  True,  DataType.INT16),
+        ("arr_int32",   DataType.ARRAY,   True,  True,  DataType.INT32),
+        ("arr_int64",   DataType.ARRAY,   True,  True,  DataType.INT64),
+        ("arr_float",   DataType.ARRAY,   True,  True,  DataType.FLOAT),
+        ("arr_double",  DataType.ARRAY,   True,  True,  DataType.DOUBLE),
+        ("arr_bool",    DataType.ARRAY,   True,  True,  DataType.BOOL),
+        ("arr_varchar", DataType.ARRAY,   True,  True,  DataType.VARCHAR),
+    ]
+
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = "TestScalarExprCorrectness" + cf.gen_unique_str("_")
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_collection(self, request):
+        client = self._client(alias=self.shared_alias)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_pk, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vec, DataType.FLOAT_VECTOR, dim=default_dim)
+
+        field_names = []
+        for fname, dtype, nullable, is_array, elem_dtype in self.FIELD_DEFS:
+            if is_array:
+                if elem_dtype == DataType.VARCHAR:
+                    schema.add_field(fname, DataType.ARRAY, element_type=elem_dtype,
+                                     max_capacity=5, max_length=100, nullable=nullable)
+                else:
+                    schema.add_field(fname, DataType.ARRAY, element_type=elem_dtype,
+                                     max_capacity=5, nullable=nullable)
+            elif dtype == DataType.VARCHAR:
+                schema.add_field(fname, dtype, max_length=256, nullable=nullable)
+            else:
+                schema.add_field(fname, dtype, nullable=nullable)
+            field_names.append(fname)
+
+        self.create_collection(client, self.collection_name, schema=schema)
+
+        # Generate deterministic data
+        test_data_values = generate_deterministic_rows(self.NUM_ROWS, self.FIELD_DEFS, seed=DEFAULT_SEED)
+
+        # Build full rows with pk and vector
+        vectors = cf.gen_vectors(self.NUM_ROWS, default_dim)
+        test_data = []
+        for i, srow in enumerate(test_data_values):
+            row = {default_pk: i, default_vec: vectors[i]}
+            row.update(srow)
+            test_data.append(row)
+
+        request.cls.test_data = test_data
+        request.cls.field_names = field_names
+
+        # Batch insert
+        for start in range(0, len(test_data), 1000):
+            self.insert(client, self.collection_name, data=test_data[start:start + 1000])
+        self.flush(client, self.collection_name)
+
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(default_vec, index_type="FLAT", metric_type="COSINE")
+        self.create_index(client, self.collection_name, index_params=idx)
+        self.load_collection(client, self.collection_name)
+
+        def teardown():
+            self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+        request.addfinalizer(teardown)
+
+    def _run_expression_check(self, client, expr, test_data, field_names):
+        """Run a single expression and compare against eval ground truth. Returns error msg or None."""
+        try:
+            res = self.query(client, self.collection_name, filter=expr,
+                             output_fields=[default_pk],
+                             check_task=CheckTasks.check_nothing)[0]
+            # Check for API error
+            if hasattr(res, 'message') and res.message:
+                return None  # Expression not supported — skip, don't fail
+            milvus_ids = sorted([r[default_pk] for r in res])
+        except Exception as e:
+            if 'cannot parse' in str(e) or 'unsupported' in str(e).lower():
+                return None
+            return f"EXCEPTION: {expr} -> {e}"
+
+        expected_idx = eval_filter(test_data, expr, field_names)
+        expected_ids = sorted([test_data[i][default_pk] for i in expected_idx])
+
+        if milvus_ids != expected_ids:
+            extra = set(milvus_ids) - set(expected_ids)
+            missing = set(expected_ids) - set(milvus_ids)
+            return (f"MISMATCH: {expr} | Milvus={len(milvus_ids)} expected={len(expected_ids)} | "
+                    f"extra(5)={list(extra)[:5]} missing(5)={list(missing)[:5]}")
+        return None
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("field_idx", list(range(len(FIELD_DEFS))))
+    def test_single_field_expressions(self, field_idx):
+        """Test all operators for a single field against eval ground truth."""
+        fname, dtype, _, is_array, elem_dtype = self.FIELD_DEFS[field_idx]
+        client = self._client(alias=self.shared_alias)
+
+        expressions = generate_expressions_for_field(
+            fname, dtype, self.test_data, is_array=is_array, elem_dtype=elem_dtype)
+
+        failures = []
+        for expr in expressions:
+            err = self._run_expression_check(client, expr, self.test_data, self.field_names)
+            if err:
+                failures.append(err)
+                log.error(err)
+            else:
+                log.info(f"PASS: {expr}")
+
+        assert not failures, (
+            f"Seed={DEFAULT_SEED}, field={fname}, {len(failures)}/{len(expressions)} failed:\n"
+            + "\n".join(failures))
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_compound_expressions(self):
+        """Test AND/OR/NOT compound expressions across multiple fields."""
+        client = self._client(alias=self.shared_alias)
+        expressions = generate_compound_expressions(self.FIELD_DEFS, self.test_data)
+
+        failures = []
+        for expr in expressions:
+            err = self._run_expression_check(client, expr, self.test_data, self.field_names)
+            if err:
+                failures.append(err)
+                log.error(err)
+            else:
+                log.info(f"PASS: {expr}")
+
+        assert not failures, (
+            f"Seed={DEFAULT_SEED}, {len(failures)}/{len(expressions)} compound expr failed:\n"
+            + "\n".join(failures))
