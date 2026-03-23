@@ -98,10 +98,30 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 
 	child := v.visitExpr(expr.GetChild()).(*planpb.Expr)
 
-	// Optimize double negation: NOT (NOT AlwaysTrue) → AlwaysTrue
 	if expr.GetOp() == planpb.UnaryExpr_Not {
+		// NOT (NOT AlwaysTrue) → AlwaysTrue
 		if IsAlwaysFalseExpr(child) {
 			return newAlwaysTrueExpr()
+		}
+		// NOT AlwaysTrueExpr → AlwaysFalseExpr
+		// Handles: non-nullable bool NOT IN [true, false] → AlwaysFalse
+		if IsAlwaysTrueExpr(child) {
+			return newAlwaysFalseExpr()
+		}
+		// NOT (IS NOT NULL) → IS NULL
+		// Handles: nullable bool NOT IN [true, false] → IS NULL
+		if ne := child.GetNullExpr(); ne != nil {
+			if ne.GetOp() == planpb.NullExpr_IsNotNull {
+				return newNullExpr(ne.GetColumnInfo(), planpb.NullExpr_IsNull)
+			}
+			if ne.GetOp() == planpb.NullExpr_IsNull {
+				return newNullExpr(ne.GetColumnInfo(), planpb.NullExpr_IsNotNull)
+			}
+		}
+		// NOT (col == val) → col != val
+		// Handles: bool NOT IN [true] → != true, bool NOT IN [false] → != false
+		if ure := child.GetUnaryRangeExpr(); ure != nil && ure.GetOp() == planpb.OpType_Equal {
+			return newUnaryRangeExpr(ure.GetColumnInfo(), planpb.OpType_NotEqual, ure.GetValue())
 		}
 	}
 

@@ -277,6 +277,51 @@ func TestRewrite_Bool_In_SingleTrue_Nullable_ToEqual(t *testing.T) {
 	require.Equal(t, true, ure.GetValue().GetBoolVal())
 }
 
+func TestRewrite_Bool_NotIn_TrueFalse_ToAlwaysFalse(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// not in [true, false] on non-nullable → nothing can match → AlwaysFalse
+	expr, err := parser.ParseExpr(helper, `BoolField not in [true,false]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.True(t, rewriter.IsAlwaysFalseExpr(expr),
+		"bool NOT IN [true, false] should be rewritten to AlwaysFalseExpr")
+}
+
+func TestRewrite_Bool_NotIn_TrueFalse_Nullable_ToIsNull(t *testing.T) {
+	helper := buildSchemaHelperForRewriteNullableT(t)
+	// not in [true, false] on nullable → only NULL matches → IS NULL
+	expr, err := parser.ParseExpr(helper, `NullableBoolField not in [true,false]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	nullExpr := expr.GetNullExpr()
+	require.NotNil(t, nullExpr, "nullable bool NOT IN [true, false] should be rewritten to IS NULL")
+	require.Equal(t, planpb.NullExpr_IsNull, nullExpr.GetOp())
+}
+
+func TestRewrite_Bool_NotIn_SingleTrue_ToNotEqual(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// not in [true] → != true
+	expr, err := parser.ParseExpr(helper, `BoolField not in [true]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "bool NOT IN [true] should be rewritten to != true")
+	require.Equal(t, planpb.OpType_NotEqual, ure.GetOp())
+	require.Equal(t, true, ure.GetValue().GetBoolVal())
+}
+
+func TestRewrite_Bool_NotIn_SingleFalse_ToNotEqual(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// not in [false] → != false
+	expr, err := parser.ParseExpr(helper, `BoolField not in [false]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "bool NOT IN [false] should be rewritten to != false")
+	require.Equal(t, planpb.OpType_NotEqual, ure.GetOp())
+	require.Equal(t, false, ure.GetValue().GetBoolVal())
+}
+
 func TestRewrite_Flatten_Then_OR_ToIN(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	// varchar threshold is 3, so 4 values should merge
