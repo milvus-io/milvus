@@ -1085,7 +1085,7 @@ StringIndexSortMemoryImpl::FindPrefixRange(const std::string& prefix) const {
 }
 
 bool
-StringIndexSortMemoryImpl::MatchValue(const std::string& value,
+StringIndexSortMemoryImpl::MatchValue(std::string_view value,
                                       const std::string& pattern,
                                       proto::plan::OpType op) const {
     switch (op) {
@@ -1101,7 +1101,7 @@ StringIndexSortMemoryImpl::MatchValue(const std::string& value,
             // Contains match: value contains pattern
             return value.find(pattern) != std::string::npos;
         default:
-            // For Match op, use regex (handled separately)
+            // For Match op, use Pattern matcher (handled separately)
             return false;
     }
 }
@@ -1128,16 +1128,14 @@ StringIndexSortMemoryImpl::PatternMatch(const std::string& pattern,
         return bitset;
     }
 
-    // For Match op, use prefix optimization + regex
+    // For Match op, use prefix optimization + LIKE matcher
     std::string prefix = extract_fixed_prefix_from_pattern(pattern);
 
     // Find the range of unique values to check
     auto [start_idx, end_idx] = FindPrefixRange(prefix);
 
-    // Build regex matcher
-    PatternMatchTranslator translator;
-    auto regex_pattern = translator(pattern);
-    RegexMatcher matcher(regex_pattern);
+    // Build matcher for LIKE pattern
+    LikePatternMatcher matcher(pattern);
 
     // Iterate over unique values in range (each value checked only once)
     for (size_t idx = start_idx; idx < end_idx; ++idx) {
@@ -1516,7 +1514,7 @@ StringIndexSortMmapImpl::FindPrefixRange(const std::string& prefix) const {
 }
 
 bool
-StringIndexSortMmapImpl::MatchValue(const std::string& value,
+StringIndexSortMmapImpl::MatchValue(std::string_view value,
                                     const std::string& pattern,
                                     proto::plan::OpType op) const {
     switch (op) {
@@ -1550,7 +1548,7 @@ StringIndexSortMmapImpl::PatternMatch(const std::string& pattern,
             MmapEntry entry = GetEntry(idx);
             std::string_view sv = entry.get_string_view();
 
-            if (MatchValue(std::string(sv), pattern, op)) {
+            if (MatchValue(sv, pattern, op)) {
                 entry.for_each_row_id(
                     [&bitset](uint32_t row_id) { bitset.set(row_id); });
             }
@@ -1558,16 +1556,14 @@ StringIndexSortMmapImpl::PatternMatch(const std::string& pattern,
         return bitset;
     }
 
-    // For Match op, use prefix optimization + regex
+    // For Match op, use prefix optimization + LIKE matcher
     std::string prefix = extract_fixed_prefix_from_pattern(pattern);
 
     // Find the range of unique values to check
     auto [start_idx, end_idx] = FindPrefixRange(prefix);
 
-    // Build regex matcher
-    PatternMatchTranslator translator;
-    auto regex_pattern = translator(pattern);
-    RegexMatcher matcher(regex_pattern);
+    // Build matcher for LIKE pattern
+    LikePatternMatcher matcher(pattern);
 
     // Iterate over unique values in range (each value checked only once)
     for (size_t idx = start_idx; idx < end_idx; ++idx) {

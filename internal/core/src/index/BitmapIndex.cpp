@@ -1305,52 +1305,6 @@ BitmapIndex<std::string>::Query(const DatasetPtr& dataset) {
 }
 
 template <typename T>
-const TargetBitmap
-BitmapIndex<T>::RegexQuery(const std::string& regex_pattern) {
-    return ScalarIndex<T>::RegexQuery(regex_pattern);
-}
-
-template <>
-const TargetBitmap
-BitmapIndex<std::string>::RegexQuery(const std::string& regex_pattern) {
-    AssertInfo(is_built_, "index has not been built");
-    tracer::AutoSpan span("BitmapIndex::RegexQuery", tracer::GetRootSpan());
-
-    RegexMatcher matcher(regex_pattern);
-    TargetBitmap res(total_num_rows_, false);
-    if (is_mmap_) {
-        for (auto it = bitmap_info_map_.begin(); it != bitmap_info_map_.end();
-             ++it) {
-            const auto& key = it->first;
-            if (matcher(key)) {
-                for (const auto& v : it->second) {
-                    res.set(v);
-                }
-            }
-        }
-        return res;
-    }
-    if (build_mode_ == BitmapIndexBuildMode::ROARING) {
-        for (auto it = data_.begin(); it != data_.end(); ++it) {
-            const auto& key = it->first;
-            if (matcher(key)) {
-                for (const auto& v : it->second) {
-                    res.set(v);
-                }
-            }
-        }
-    } else {
-        for (auto it = bitsets_.begin(); it != bitsets_.end(); ++it) {
-            const auto& key = it->first;
-            if (matcher(key)) {
-                res |= it->second;
-            }
-        }
-    }
-    return res;
-}
-
-template <typename T>
 void
 BitmapIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     AssertInfo(is_built_, "index has not been built yet");
