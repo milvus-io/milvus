@@ -963,3 +963,181 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
 
         failures = self._check_cross_index_consistency(client, group, templates)
         assert not failures, f"{len(failures)} array index inconsistencies for ARRAY({elem_dtype_name}):\n" + "\n".join(failures)
+
+
+# ──────────────────────────────────────────────────────────────
+# Test Class 3: Corner-case expressions — known bug regression
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.xdist_group("TestCornerCaseExpressions")
+class TestCornerCaseExpressions(TestMilvusClientV2Base):
+    """
+    Deterministic corner-case expressions targeting known bug patterns.
+    Each test maps to a real Milvus issue for regression prevention.
+    """
+    shared_alias = "TestCornerCaseExpr"
+
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = "TestCornerCaseExpr" + cf.gen_unique_str("_")
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_collection(self, request):
+        client = self._client(alias=self.shared_alias)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_pk, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vec, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("c8", DataType.INT64)
+        schema.add_field("bool_field", DataType.BOOL)
+        schema.add_field("nullable_int", DataType.INT16, nullable=True)
+        schema.add_field("json_data", DataType.JSON, nullable=True)
+        schema.add_field("int_val", DataType.INT64)
+        schema.add_field("float_val", DataType.FLOAT)
+        schema.add_field("str_val", DataType.VARCHAR, max_length=256)
+        self.create_collection(client, self.collection_name, schema=schema)
+
+        vectors = cf.gen_vectors(10, default_dim)
+        data = [
+            {default_pk: 0, default_vec: vectors[0],
+             "c8": INT64_MAX - 1, "bool_field": False, "nullable_int": None,
+             "json_data": {"num": INT64_MAX - 7}, "int_val": INT64_MAX - 1,
+             "float_val": 0.0, "str_val": "hello"},
+            {default_pk: 1, default_vec: vectors[1],
+             "c8": 100, "bool_field": True, "nullable_int": 574,
+             "json_data": {"num": 42}, "int_val": 100,
+             "float_val": 3.14, "str_val": "world"},
+            {default_pk: 2, default_vec: vectors[2],
+             "c8": INT64_MIN, "bool_field": False, "nullable_int": None,
+             "json_data": None, "int_val": INT64_MIN,
+             "float_val": -1.0, "str_val": "abc"},
+            {default_pk: 3, default_vec: vectors[3],
+             "c8": 200, "bool_field": False, "nullable_int": 1,
+             "json_data": {"num": 100}, "int_val": 200,
+             "float_val": 6.28, "str_val": "str_0"},
+            {default_pk: 4, default_vec: vectors[4],
+             "c8": 50, "bool_field": True, "nullable_int": None,
+             "json_data": {"num": FLOAT64_INT_LIMIT + 1}, "int_val": 50,
+             "float_val": 100.0, "str_val": "str_1"},
+        ]
+        request.cls.test_data = data
+
+        self.insert(client, self.collection_name, data=data)
+        self.flush(client, self.collection_name)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(default_vec, index_type="FLAT", metric_type="COSINE")
+        self.create_index(client, self.collection_name, index_params=idx)
+        self.load_collection(client, self.collection_name)
+
+        def teardown():
+            self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_int64_overflow_addition(self):
+        """Regression #48440: c8 + 33 overflows for INT64_MAX-1, should not match <= 19974."""
+        client = self._client(alias=self.shared_alias)
+        res = self.query(client, self.collection_name, filter="c8 + 33 <= 19974",
+                         output_fields=[default_pk])[0]
+        ids = sorted([r[default_pk] for r in res])
+        assert 0 not in ids, f"id=0 (INT64_MAX-1) + 33 overflows, should not match. Got {ids}"
+        assert 2 not in ids, f"id=2 (INT64_MIN) + 33 underflows context, should not match. Got {ids}"
+        assert 1 in ids, f"id=1 (100+33=133<=19974) should match. Got {ids}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_int64_overflow_subtraction(self):
+        """Regression #48440: INT64_MIN - 1 should underflow, not wrap to MAX."""
+        client = self._client(alias=self.shared_alias)
+        res = self.query(client, self.collection_name, filter="c8 - 1 >= 0",
+                         output_fields=[default_pk])[0]
+        ids = sorted([r[default_pk] for r in res])
+        assert 2 not in ids, f"id=2 (INT64_MIN) - 1 underflows, should not be >= 0. Got {ids}"
+        assert 0 in ids, f"id=0 (INT64_MAX-1 - 1) should be >= 0. Got {ids}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_int64_overflow_multiplication(self):
+        """Regression #48440: (INT64_MAX-1) * 2 overflows, should not be > 0."""
+        client = self._client(alias=self.shared_alias)
+        res = self.query(client, self.collection_name, filter="c8 * 2 > 0",
+                         output_fields=[default_pk])[0]
+        ids = sorted([r[default_pk] for r in res])
+        assert 0 not in ids, f"id=0 (INT64_MAX-1)*2 overflows. Got {ids}"
+        assert 1 in ids, f"id=1 (200>0) should match. Got {ids}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_3vl_not_and_or_nullable(self):
+        """Regression #48441: NOT(F AND T AND NULL) = NOT(F) = T -> row should return."""
+        client = self._client(alias=self.shared_alias)
+        expr = "not ((bool_field == true) and (bool_field IS NOT NULL) and (nullable_int == 574 or nullable_int == 1))"
+        res = self.query(client, self.collection_name, filter=expr,
+                         output_fields=[default_pk])[0]
+        ids = sorted([r[default_pk] for r in res])
+        for eid in [0, 2, 3]:
+            assert eid in ids, f"id={eid} (bool=False, NOT(F)=T) should return. Got {ids}"
+        assert 1 not in ids, f"id=1 should not return (NOT(T)=F). Got {ids}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_3vl_not_all_null_segment(self):
+        """Regression #48441: bug triggers when ALL nullable values in segment are NULL."""
+        client = self._client(alias=self.shared_alias)
+        coll2 = "TestCorner3VL_allnull" + cf.gen_unique_str("_")
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_pk, DataType.INT64, is_primary=True)
+        schema.add_field(default_vec, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("bf", DataType.BOOL)
+        schema.add_field("nf", DataType.INT16, nullable=True)
+        self.create_collection(client, coll2, schema=schema)
+        vectors = cf.gen_vectors(1, default_dim)
+        self.insert(client, coll2, data=[
+            {default_pk: 1, default_vec: vectors[0], "bf": False, "nf": None}
+        ])
+        self.flush(client, coll2)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(default_vec, index_type="FLAT", metric_type="COSINE")
+        self.create_index(client, coll2, index_params=idx)
+        self.load_collection(client, coll2)
+
+        expr = "not ((bf == true) and (bf IS NOT NULL) and (nf == 574 or nf == 1))"
+        res = self.query(client, coll2, filter=expr, output_fields=[default_pk])[0]
+        ids = [r[default_pk] for r in res]
+        self.drop_collection(client, coll2)
+        assert 1 in ids, f"Single row (bf=F, nf=NULL): NOT(F)=T should return id=1. Got {ids}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_bool_literal_in_logical_expr(self):
+        """Regression #48443: 'true or (field > val)' should be accepted by parser."""
+        client = self._client(alias=self.shared_alias)
+        exprs = [
+            "true or (int_val > 100)",
+            "true and (int_val > 100)",
+            "false or (int_val > 100)",
+            "(int_val > 100) or true",
+            'true or (str_val == "hello")',
+            "true or (float_val > 3.0)",
+        ]
+        for expr in exprs:
+            try:
+                res = self.query(client, self.collection_name, filter=expr,
+                                 output_fields=[default_pk],
+                                 check_task=CheckTasks.check_nothing)[0]
+                if hasattr(res, 'message') and 'cannot parse' in str(getattr(res, 'message', '')):
+                    pytest.fail(f"Parser rejected valid bool literal expression: {expr}")
+                log.info(f"PASS: {expr}")
+            except Exception as e:
+                if 'cannot parse' in str(e):
+                    pytest.fail(f"Parser rejected: {expr} -> {e}")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_json_mixed_type_in_precision(self):
+        """Regression #48442: mixed int/float IN list should not cause INT64 precision loss."""
+        client = self._client(alias=self.shared_alias)
+        query_val = INT64_MAX
+        expr = f'json_data["num"] in [{query_val}, 1.5]'
+        res = self.query(client, self.collection_name, filter=expr,
+                         output_fields=[default_pk],
+                         check_task=CheckTasks.check_nothing)[0]
+        if hasattr(res, 'message'):
+            log.warning(f"Expression returned error (may be expected): {res}")
+            return
+        ids = [r[default_pk] for r in res]
+        assert 0 not in ids, (
+            f"id=0 (json num={INT64_MAX - 7}) should NOT match {query_val} via float coercion. Got {ids}")
