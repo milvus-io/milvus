@@ -43,10 +43,9 @@ BOUNDARY_VALUES = {
     DataType.INT32: [0, 1, -1, INT32_MIN, INT32_MAX, INT32_MIN + 1, INT32_MAX - 1, 1000, -1000],
     DataType.INT64: [0, 1, -1, INT64_MIN, INT64_MAX, INT64_MIN + 1, INT64_MAX - 1,
                      FLOAT64_INT_LIMIT, -FLOAT64_INT_LIMIT, FLOAT64_INT_LIMIT + 1],
-    DataType.FLOAT: [0.0, 1.0, -1.0, float('inf'), float('-inf'), float('nan'),
-                     1e-7, -1e-7, 3.14, 1e38, -1e38],
-    DataType.DOUBLE: [0.0, 1.0, -1.0, float('inf'), float('-inf'), float('nan'),
-                      1e-15, -1e-15, 2.718, 1e308, -1e308],
+    # Note: inf/-inf/NaN cannot be inserted into Milvus — test them only in expressions, not as data
+    DataType.FLOAT: [0.0, 1.0, -1.0, 1e-7, -1e-7, 3.14, -3.14, 1e38, -1e38, 999.999],
+    DataType.DOUBLE: [0.0, 1.0, -1.0, 1e-15, -1e-15, 2.718, -2.718, 1e38, -1e38, 12345.6789],
     DataType.BOOL: [True, False],
     DataType.VARCHAR: ["", " ", "a", "abc", "abc%def", "abc_def",
                        "str_0", "str_1", "0_str", "%special%", "_under_"],
@@ -220,6 +219,13 @@ def _array_length(arr: Any) -> int:
     return len(arr)
 
 
+def _not_in(val: Any, lst: list) -> bool:
+    """SQL NOT IN with NULL semantics: NULL NOT IN (...) → False (not True)."""
+    if isinstance(val, cf.NullValue):
+        return False
+    return val not in lst
+
+
 def _milvus_to_python(expr: str) -> str:
     """
     Translate a Milvus filter expression to a Python expression that can be
@@ -250,14 +256,15 @@ def _milvus_to_python(expr: str) -> str:
     s = re.sub(r'\bfalse\b', 'False', s, flags=re.IGNORECASE)
 
     # IS NOT NULL / IS NULL (must come before general field substitution)
+    # Uses _is_null/_is_not_null helpers to handle SQL_NULL sentinel
     s = re.sub(
         r'\b(\w+)\s+IS\s+NOT\s+NULL\b',
-        r"row['\1'] is not None",
+        r"_is_not_null(row['\1'])",
         s, flags=re.IGNORECASE,
     )
     s = re.sub(
         r'\b(\w+)\s+IS\s+NULL\b',
-        r"row['\1'] is None",
+        r"_is_null(row['\1'])",
         s, flags=re.IGNORECASE,
     )
 
@@ -273,17 +280,22 @@ def _milvus_to_python(expr: str) -> str:
         s, flags=re.IGNORECASE,
     )
 
-    # NOT IN (must come before IN)
+    # NOT IN (must come before IN) — use helper to handle SQL NULL correctly
     s = re.sub(
-        r'\b(\w+)\s+NOT\s+IN\s*\[',
-        r"row['\1'] not in [",
+        r'\b(\w+)\s+NOT\s+IN\s*(\[[^\]]*\])',
+        r"_not_in(row['\1'], \2)",
         s, flags=re.IGNORECASE,
     )
 
-    # IN
+    # IN — only match field names that aren't 'not' (to avoid clobbering NOT IN results)
+    def _replace_in(m):
+        field = m.group(1)
+        if field.lower() == 'not':
+            return m.group(0)  # don't replace
+        return f"row['{field}'] in ["
     s = re.sub(
         r'\b(\w+)\s+IN\s*\[',
-        r"row['\1'] in [",
+        _replace_in,
         s, flags=re.IGNORECASE,
     )
 
@@ -329,7 +341,7 @@ def _milvus_to_python(expr: str) -> str:
     }
     _HELPER_FUNCS = {
         '_like_match', '_array_contains', '_array_contains_all',
-        '_array_contains_any', '_array_length',
+        '_array_contains_any', '_array_length', '_is_null', '_is_not_null', '_not_in',
     }
 
     def _replace_field_refs(text: str) -> str:
@@ -397,14 +409,19 @@ def eval_filter(expr: str, rows: List[Dict[str, Any]]) -> List[int]:
         '_array_contains_all': _array_contains_all,
         '_array_contains_any': _array_contains_any,
         '_array_length': _array_length,
+        '_is_null': lambda v: isinstance(v, cf.NullValue),
+        '_is_not_null': lambda v: not isinstance(v, cf.NullValue),
+        '_not_in': _not_in,
         'math': math,
     }
 
-    for idx, row in enumerate(rows):
+    for idx, original_row in enumerate(rows):
         try:
+            # Replace None with SQL_NULL for correct 3VL semantics
+            # (SQL NULL: NULL != X → NULL, not True; NULL == X → NULL, not False)
+            row = {k: (v if v is not None else cf.SQL_NULL) for k, v in original_row.items()}
             local_ns = {'row': row}
             result = eval(py_expr, eval_ns, local_ns)
-            # Handle NaN comparisons: NaN != NaN, so bool(nan > x) etc. are False
             if result is True:
                 matching.append(idx)
         except Exception:
