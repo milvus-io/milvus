@@ -259,7 +259,6 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 		return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
 	}
 
-
 	// Create the AlterReplicateConfigMessage with force promote flag
 	controlChannel := streaming.WAL().ControlChannel()
 	broadcastPChannels := lo.Map(pchannels, func(pchannel string, _ int) string {
@@ -352,7 +351,6 @@ func (s *assignmentServiceImpl) validateForcePromoteConfiguration(ctx context.Co
 
 	return forcePromoteConfig, pchannels, nil
 }
-
 
 // alterReplicateConfiguration puts the replicate configuration into the balancer.
 // It's a callback function of the broadcast service.

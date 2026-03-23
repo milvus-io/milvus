@@ -972,4 +972,3 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 		}
 	})
 }
-

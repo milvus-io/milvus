@@ -29,7 +29,6 @@ func newMockBalancerForTest(t *testing.T) *mock_balancer.MockBalancer {
 	return mb
 }
 
-
 func TestStartBroadcastWithSecondaryClusterResourceKey(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		paramtable.Init()
@@ -96,7 +95,6 @@ func TestStartBroadcastWithSecondaryClusterResourceKey(t *testing.T) {
 		assert.Nil(t, api)
 	})
 }
-
 
 func TestStartBroadcastWithResourceKeys(t *testing.T) {
 	t.Run("success", func(t *testing.T) {

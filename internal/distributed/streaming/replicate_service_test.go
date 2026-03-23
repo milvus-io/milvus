@@ -1230,7 +1230,6 @@ func createSimpleReplicateAlterConfigMessages(newConfig *commonpb.ReplicateConfi
 	return replicateMsgs
 }
 
-
 func createReplicateControlChannelMessages() []message.ReplicateMutableMessage {
 	// Create a non-broadcast message on the control channel (vchannel ends with "_vcchan")
 	msg := message.NewCreateDatabaseMessageBuilderV2().

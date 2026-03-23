@@ -1202,7 +1202,6 @@ func TestHandleForcePromoteValidatorError(t *testing.T) {
 			CrossClusterTopology: []*commonpb.CrossClusterTopology{
 				{SourceClusterId: "primary", TargetClusterId: "by-dev"},
 			},
-
 		},
 	}, nil).Maybe()
 	balance.Register(b)
@@ -1493,121 +1492,6 @@ func TestForcePromoteMultiplePChannels(t *testing.T) {
 	assert.NotNil(t, resp)
 }
 
-func _TestSupplementIncompleteBroadcasts_DISABLED(t *testing.T) {
-	resource.InitForTest()
-
-	t.Run("no_pending_messages", func(t *testing.T) {
-		broadcast.ResetBroadcaster()
-		snmanager.ResetStreamingNodeManager()
-
-		b := mock_balancer.NewMockBalancer(t)
-		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
-		b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
-			<-ctx.Done()
-			return ctx.Err()
-		}).Maybe()
-		b.EXPECT().Close().Return().Maybe()
-		b.EXPECT().UpdateReplicateConfiguration(mock.Anything, mock.Anything).Return(nil).Maybe()
-		balance.Register(b)
-
-		mb := mock_broadcaster.NewMockBroadcaster(t)
-		mb.EXPECT().GetPendingBroadcastMessages().Return(nil)
-		mb.EXPECT().Close().Return().Maybe()
-		broadcast.Register(mb)
-
-		mw := mock_streaming.NewMockWALAccesser(t)
-		mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
-		streaming.SetWALForTest(mw)
-
-		as := &assignmentServiceImpl{}
-		err := as.supplementIncompleteBroadcasts(context.Background())
-		assert.NoError(t, err)
-	})
-
-	t.Run("with_pending_messages_success", func(t *testing.T) {
-		broadcast.ResetBroadcaster()
-		snmanager.ResetStreamingNodeManager()
-
-		b := mock_balancer.NewMockBalancer(t)
-		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
-		b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
-			<-ctx.Done()
-			return ctx.Err()
-		}).Maybe()
-		b.EXPECT().Close().Return().Maybe()
-		balance.Register(b)
-
-		// Create a pending message
-		pendingMsg := message.NewCreateDatabaseMessageBuilderV2().
-			WithHeader(&message.CreateDatabaseMessageHeader{}).
-			WithBody(&message.CreateDatabaseMessageBody{}).
-			WithVChannel("v1").
-			MustBuildMutable()
-
-		mb := mock_broadcaster.NewMockBroadcaster(t)
-		mb.EXPECT().GetPendingBroadcastMessages().Return([]message.MutableMessage{pendingMsg})
-		mb.EXPECT().Close().Return().Maybe()
-		broadcast.Register(mb)
-
-		mw := mock_streaming.NewMockWALAccesser(t)
-		mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
-		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything).Return(streaming.AppendResponses{
-			Responses: []streaming.AppendResponse{
-				{
-					AppendResult: &types.AppendResult{TimeTick: 100},
-				},
-			},
-		}).Maybe()
-		streaming.SetWALForTest(mw)
-
-		as := &assignmentServiceImpl{}
-		err := as.supplementIncompleteBroadcasts(context.Background())
-		assert.NoError(t, err)
-	})
-
-	t.Run("with_pending_messages_failure", func(t *testing.T) {
-		broadcast.ResetBroadcaster()
-		snmanager.ResetStreamingNodeManager()
-
-		b := mock_balancer.NewMockBalancer(t)
-		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
-		b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
-			<-ctx.Done()
-			return ctx.Err()
-		}).Maybe()
-		b.EXPECT().Close().Return().Maybe()
-		balance.Register(b)
-
-		// Create pending messages
-		pendingMsg := message.NewCreateDatabaseMessageBuilderV2().
-			WithHeader(&message.CreateDatabaseMessageHeader{}).
-			WithBody(&message.CreateDatabaseMessageBody{}).
-			WithVChannel("v1").
-			MustBuildMutable()
-
-		mb := mock_broadcaster.NewMockBroadcaster(t)
-		mb.EXPECT().GetPendingBroadcastMessages().Return([]message.MutableMessage{pendingMsg})
-		mb.EXPECT().Close().Return().Maybe()
-		broadcast.Register(mb)
-
-		appendErr := errors.New("append failed")
-		mw := mock_streaming.NewMockWALAccesser(t)
-		mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
-		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything).Return(streaming.AppendResponses{
-			Responses: []streaming.AppendResponse{
-				{
-					Error: appendErr,
-				},
-			},
-		}).Maybe()
-		streaming.SetWALForTest(mw)
-
-		as := &assignmentServiceImpl{}
-		err := as.supplementIncompleteBroadcasts(context.Background())
-		assert.Error(t, err)
-	})
-}
-
 func TestForcePromoteUpdateConfigError(t *testing.T) {
 	resource.InitForTest()
 
@@ -1676,4 +1560,3 @@ func TestForcePromoteUpdateConfigError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "update config failed")
 }
-
