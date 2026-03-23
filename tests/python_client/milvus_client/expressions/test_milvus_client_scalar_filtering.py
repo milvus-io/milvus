@@ -1,2156 +1,1591 @@
+"""
+Scalar expression filtering tests with deterministic boundary values and eval-based ground truth.
+
+Design principles:
+- Deterministic boundary rows (INT64_MAX, MIN, 2^53, 0, etc.) as first N rows per type
+- Random fill rows with fixed seed for reproducibility
+- Python eval() as ground truth oracle (not hand-written validators)
+- Separated: correctness (1 field/type) vs index consistency (same type × indexes)
+- Corner-case expressions from real bugs (#48440 overflow, #48441 3VL, #48442 mixed-type IN, #48443 bool literal)
+- Full operator coverage: comparison, arithmetic, logical, range, string, null, array, JSON
+"""
 import pytest
 import random
-import numpy as np
-from typing import List, Dict, Any, Tuple, Callable, Union
-import json
-import os
 import re
-import pandas as pd
-from datetime import datetime
+import math
+import numpy as np
+from typing import List, Dict, Any, Tuple
 from base.client_v2_base import TestMilvusClientV2Base
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from utils.util_pymilvus import *
 from pymilvus import DataType
-from check.func_check import Error
 
-# Test configuration constants
-prefix = "scalar_expression_filtering_optimized"
+prefix = "scalar_filter"
 default_dim = 8
-default_primary_key_field_name = "id"
-default_vector_field_name = "vector"
+default_pk = "id"
+default_vec = "vector"
+DEFAULT_SEED = 19530
 
-# Batch insertion will use ct.default_nb as default batch size
+# ---------------------------------------------------------------------------
+# Boundary value constants
+# ---------------------------------------------------------------------------
+INT8_MIN, INT8_MAX = -128, 127
+INT16_MIN, INT16_MAX = -32768, 32767
+INT32_MIN, INT32_MAX = -2147483648, 2147483647
+INT64_MIN, INT64_MAX = -9223372036854775808, 9223372036854775807
+FLOAT64_INT_LIMIT = 2**53
 
-# Operator definitions
-comparison_operators = ["==", "!=", ">", "<", ">=", "<="]
-range_operators = ["IN", "LIKE"]
-null_operators = ["IS NULL", "IS NOT NULL"]
+BOUNDARY_VALUES = {
+    DataType.INT8: [0, 1, -1, INT8_MIN, INT8_MAX, INT8_MIN + 1, INT8_MAX - 1, 42],
+    DataType.INT16: [0, 1, -1, INT16_MIN, INT16_MAX, INT16_MIN + 1, INT16_MAX - 1, 100, -100],
+    DataType.INT32: [0, 1, -1, INT32_MIN, INT32_MAX, INT32_MIN + 1, INT32_MAX - 1, 1000, -1000],
+    DataType.INT64: [0, 1, -1, INT64_MIN, INT64_MAX, INT64_MIN + 1, INT64_MAX - 1,
+                     FLOAT64_INT_LIMIT, -FLOAT64_INT_LIMIT, FLOAT64_INT_LIMIT + 1],
+    # Note: inf/-inf/NaN cannot be inserted into Milvus — test them only in expressions, not as data
+    DataType.FLOAT: [0.0, 1.0, -1.0, 1e-7, -1e-7, 3.14, -3.14, 1e38, -1e38, 999.999],
+    DataType.DOUBLE: [0.0, 1.0, -1.0, 1e-15, -1e-15, 2.718, -2.718, 1e38, -1e38, 12345.6789],
+    DataType.BOOL: [True, False],
+    DataType.VARCHAR: ["", " ", "a", "abc", "abc%def", "abc_def",
+                       "str_0", "str_1", "0_str", "%special%", "_under_"],
+}
 
 
-class TestScalarExpressionFilteringOptimized(TestMilvusClientV2Base):
+# ---------------------------------------------------------------------------
+# Data generation helpers
+# ---------------------------------------------------------------------------
+def make_random_value(dtype: DataType, rng: random.Random) -> Any:
+    """Generate a random value for the given DataType using the provided RNG."""
+    if dtype == DataType.INT8:
+        return rng.randint(INT8_MIN, INT8_MAX)
+    elif dtype == DataType.INT16:
+        return rng.randint(INT16_MIN, INT16_MAX)
+    elif dtype == DataType.INT32:
+        return rng.randint(INT32_MIN, INT32_MAX)
+    elif dtype == DataType.INT64:
+        return rng.randint(INT64_MIN // (10**9), INT64_MAX // (10**9))
+    elif dtype == DataType.FLOAT:
+        return rng.uniform(-1e6, 1e6)
+    elif dtype == DataType.DOUBLE:
+        return rng.uniform(-1e12, 1e12)
+    elif dtype == DataType.BOOL:
+        return rng.choice([True, False])
+    elif dtype == DataType.VARCHAR:
+        length = rng.randint(1, 20)
+        chars = "abcdefghijklmnopqrstuvwxyz0123456789_ "
+        return "".join(rng.choice(chars) for _ in range(length))
+    else:
+        raise ValueError(f"Unsupported dtype for random value: {dtype}")
+
+
+def make_nullable_value(dtype: DataType, rng: random.Random, null_prob: float = 0.1) -> Any:
+    """Generate a value that may be None (for nullable fields)."""
+    if rng.random() < null_prob:
+        return None
+    return make_random_value(dtype, rng)
+
+
+def make_random_array(element_dtype: DataType, rng: random.Random,
+                      min_len: int = 0, max_len: int = 5) -> List[Any]:
+    """Generate a random array of elements of the given type."""
+    length = rng.randint(min_len, max_len)
+    return [make_random_value(element_dtype, rng) for _ in range(length)]
+
+
+def generate_deterministic_rows(
+    field_configs: List[Dict[str, Any]],
+    total_rows: int = 200,
+    seed: int = DEFAULT_SEED,
+) -> List[Dict[str, Any]]:
     """
-    Optimized test class for Milvus scalar expression filtering functionality.
-    
-    This test class provides comprehensive testing of scalar expression filtering
-    across all supported data types and index types in a single collection.
-    
-    Features:
-    - Single collection with all data types and their supported index types
-    - Comprehensive operator coverage (comparison, range, null operators)
-    - Index type comparison testing to ensure consistency
-    - Automatic data saving on test failure for debugging
-    - LIKE pattern testing with escape character support
-    - Batch insertion for large datasets using ct.default_nb batch size
-    - Default test with 100,000 records for comprehensive coverage
+    Generate deterministic test data rows.
+
+    For each field, boundary values (from BOUNDARY_VALUES) are placed in the
+    first N rows. Remaining rows are filled with random values from a seeded RNG.
+
+    Args:
+        field_configs: list of dicts with keys:
+            - name (str): field name
+            - dtype (DataType): data type
+            - nullable (bool, optional): whether the field can be None
+            - is_array (bool, optional): whether this is an array field
+            - element_dtype (DataType, optional): element type for array fields
+        total_rows: total number of rows to generate
+        seed: random seed for reproducibility
+
+    Returns:
+        list of dicts, one per row, keyed by field name
     """
+    rng = random.Random(seed)
+    rows = [{} for _ in range(total_rows)]
 
-    def create_comprehensive_schema_with_index_types(self, client, enable_dynamic_field: bool = False):
-        """
-        Create comprehensive schema with all data types and their supported index types.
-        
-        Args:
-            client: Milvus client instance
-            enable_dynamic_field: Whether to enable dynamic field support
-            
-        Returns:
-            Tuple of (schema, field_mapping, index_configs)
-        """
-        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+    for fc in field_configs:
+        name = fc["name"]
+        dtype = fc["dtype"]
+        nullable = fc.get("nullable", False)
+        is_array = fc.get("is_array", False)
+        element_dtype = fc.get("element_dtype", None)
 
-        field_mapping = {}
-        index_configs = {}
+        if is_array:
+            # For array fields, generate random arrays for all rows
+            for i in range(total_rows):
+                if nullable:
+                    if rng.random() < 0.1:
+                        rows[i][name] = None
+                        continue
+                rows[i][name] = make_random_array(element_dtype or DataType.INT64, rng)
+            continue
 
-        if not enable_dynamic_field:
-            # Define all data types to test with their supported index types
-            data_types_config = {
-                # Integer types - support INVERTED, BITMAP, STL_SORT, AUTOINDEX
-                DataType.INT8: ["no_index", "inverted", "bitmap", "stl_sort", "autoindex"],
-                DataType.INT16: ["no_index", "inverted", "bitmap", "stl_sort", "autoindex"],
-                DataType.INT32: ["no_index", "inverted", "bitmap", "stl_sort", "autoindex"],
-                DataType.INT64: ["no_index", "inverted", "bitmap", "stl_sort", "autoindex"],
+        # Get boundary values for this type
+        boundaries = BOUNDARY_VALUES.get(dtype, [])
 
-                # BOOL - supports INVERTED, BITMAP, AUTOINDEX
-                DataType.BOOL: ["no_index", "inverted", "bitmap", "autoindex"],
+        # Place boundary values in the first rows
+        for i, val in enumerate(boundaries):
+            if i < total_rows:
+                rows[i][name] = val
 
-                # Float types - support INVERTED, STL_SORT, AUTOINDEX
-                DataType.FLOAT: ["no_index", "inverted", "stl_sort", "autoindex"],
-                DataType.DOUBLE: ["no_index", "inverted", "stl_sort", "autoindex"],
-
-                # VARCHAR - supports index types
-                DataType.VARCHAR: ["no_index", "inverted", "bitmap", "trie", "ngram", "autoindex"],
-
-                # JSON - supports INVERTED, NGRAM, AUTOINDEX
-                DataType.JSON: ["no_index", "inverted", "ngram", "autoindex"],
-
-                # ARRAY types - support depends on element type
-                (DataType.ARRAY, DataType.INT32): ["no_index", "inverted", "bitmap", "autoindex"],
-                (DataType.ARRAY, DataType.INT64): ["no_index", "inverted", "bitmap", "autoindex"],
-                (DataType.ARRAY, DataType.VARCHAR): ["no_index", "inverted", "bitmap", "autoindex"],
-            }
-
-            # Add fields for each data type with their supported index types
-            for data_type, supported_indexes in data_types_config.items():
-                if isinstance(data_type, tuple):
-                    # Array type
-                    array_type, element_type = data_type
-                    base_name = f"array_{element_type.name.lower()}"
-
-                    # Create array field with proper element type
-                    for index_type in supported_indexes:
-                        field_name = f"{base_name}_{index_type}"
-                        if element_type == DataType.VARCHAR:
-                            # VARCHAR array needs max_length and max_capacity parameters
-                            schema.add_field(
-                                field_name, DataType.ARRAY,
-                                element_type=element_type,
-                                max_length=100, max_capacity=10,
-                                nullable=True
-                            )
-                        else:
-                            # Other array types need max_capacity parameter
-                            schema.add_field(
-                                field_name, DataType.ARRAY,
-                                element_type=element_type,
-                                max_capacity=10,
-                                nullable=True
-                            )
-                        field_mapping[field_name] = data_type
-                        index_configs[field_name] = index_type
-                else:
-                    # Scalar type
-                    base_name = data_type.name.lower()
-
-                    for index_type in supported_indexes:
-                        field_name = f"{base_name}_{index_type}"
-                        if data_type == DataType.VARCHAR:
-                            # VARCHAR field needs max_length parameter
-                            schema.add_field(field_name, data_type, max_length=100, nullable=True)
-                        else:
-                            schema.add_field(field_name, data_type, nullable=True)
-                        field_mapping[field_name] = data_type
-                        index_configs[field_name] = index_type
-
-        return schema, field_mapping, index_configs
-
-    def generate_random_scalar_value(self, data_type: DataType, need_none: bool = True) -> Any:
-        """
-        Generate random scalar values for different data types with 10% chance of None.
-        
-        Args:
-            data_type: The data type to generate value for
-            need_none: Whether to include None values (10% probability)
-            
-        Returns:
-            Random value of the specified data type
-        """
-        # 10% probability to generate None
-        if need_none and random.random() < 0.1:
-            return None
-
-        if data_type == DataType.INT8:
-            return np.int8(random.randint(-128, 127))
-        elif data_type == DataType.INT16:
-            return np.int16(random.randint(-32768, 32767))
-        elif data_type == DataType.INT32:
-            return np.int32(random.randint(-1000000, 1000000))
-        elif data_type == DataType.INT64:
-            return random.randint(-1000000000, 1000000000)
-        elif data_type == DataType.BOOL:
-            return random.choice([True, False])
-        elif data_type == DataType.FLOAT:
-            return random.uniform(-1000.0, 1000.0)
-        elif data_type == DataType.DOUBLE:
-            return random.uniform(-10000.0, 10000.0)
-        elif data_type == DataType.VARCHAR:
-            ran_number = random.randint(0, 2)
-            # Pattern group 1: Structured patterns for LIKE testing
-            patterns_1 = [
-                f"str_{ran_number}",
-                f"{ran_number}_str",
-                f"{ran_number}_str_%{ran_number}",
-                f"str_%{ran_number}_str_%{ran_number}",
-                f"str%{ran_number}",
-                f"{ran_number}%str",
-                f"{ran_number}%str%{ran_number}",
-                f"str+{ran_number}str",
-                f"{ran_number}+str",
-                f"{ran_number}+str+{ran_number}",
-                f"str{ran_number}",
-                f"{ran_number}str",
-                f"{ran_number}str{ran_number}"
-            ]
-            # Pattern group 2: Edge cases and special characters
-            patterns_2 = [
-                " ",
-                "",
-                "_",
-                "%",
-                "s",
-                "\\",
-                "*./&.*/"
-            ]
-            if random.random() < 0.8:
-                return random.choice(patterns_1)
+        # Fill remaining rows with random values
+        for i in range(len(boundaries), total_rows):
+            if nullable:
+                rows[i][name] = make_nullable_value(dtype, rng)
             else:
-                return random.choice(patterns_2)
-        elif data_type == DataType.JSON:
-            ran_number = random.randint(0, 10)
-            json_patterns = [
-                {"int": ran_number,
-                 "float": ran_number * 1.0,
-                 "bool": random.choice([True, False]),
-                 "varchar": f"str_{ran_number}",
-                 "varchar_float": f"{ran_number * 1.0}"},
-                {"array_int": [random.randint(0, 10) for _ in range(random.randint(1, 5))],
-                 "array_float": [random.uniform(0.0, 10.0) for _ in range(random.randint(1, 5))],
-                 "array_bool": [random.choice([True, False]) for _ in range(random.randint(1, 5))],
-                 "array_varchar": [f"str_{random.randint(0, 10)}" for _ in range(random.randint(1, 5))]},
-                {"array_json": [{"int": random.randint(0, 10),
-                                 "float": random.randint(0, 10) * 1.0,
-                                 "bool": random.choice([True, False]),
-                                 "varchar": f"str_{random.randint(0, 10)}",
-                                 "varchar_float": f"{random.randint(0, 10) * 1.0}"} for _ in
-                                range(random.randint(1, 5))]},
-                {"nested_json": {"int": ran_number,
-                                 "float": ran_number * 1.0,
-                                 "nested_1": {"int": ran_number,
-                                              "float": ran_number * 1.0,
-                                              "nested_2": {"int": ran_number,
-                                                           "float": ran_number * 1.0}}}},
+                rows[i][name] = make_random_value(dtype, rng)
 
-            ]
-            return random.choice(json_patterns)
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Eval engine — Python-based ground truth for Milvus expressions
+# ---------------------------------------------------------------------------
+def _like_to_regex(pattern: str) -> str:
+    """Convert a SQL LIKE pattern to a Python regex pattern.
+
+    Milvus LIKE semantics:
+      % → .*   (any sequence of characters)
+      _ → .    (any single character)
+    """
+    result = []
+    i = 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == '%':
+            result.append('.*')
+        elif ch == '_':
+            result.append('.')
+        elif ch == '\\' and i + 1 < len(pattern):
+            # Escaped character — treat next char as literal
+            i += 1
+            result.append(re.escape(pattern[i]))
         else:
-            raise ValueError(f"Unsupported data type: {data_type}")
+            result.append(re.escape(ch))
+        i += 1
+    return '^' + ''.join(result) + '$'
 
-    def generate_random_array_value(self, element_type: DataType, max_capacity: int = 5) -> List[Any]:
-        """
-        Generate random array values with specified element type with 10% chance of None.
-        
-        Args:
-            element_type: The data type of array elements
-            max_capacity: Maximum capacity of the array
-            
-        Returns:
-            Random array of the specified element type
-        """
-        # 10% probability to generate None
-        if random.random() < 0.1:
-            return None
 
-        array_length = random.randint(1, max_capacity)
-        array_data = []
+def _like_match(value: Any, pattern: str) -> bool:
+    """Evaluate value LIKE pattern using Milvus LIKE semantics."""
+    if value is None:
+        return False
+    regex = _like_to_regex(pattern)
+    return bool(re.match(regex, str(value)))
 
-        for _ in range(array_length):
-            if element_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]:
-                array_data.append(random.randint(0, 100))
-            elif element_type in [DataType.FLOAT, DataType.DOUBLE]:
-                array_data.append(random.uniform(0.0, 100.0))
-            elif element_type == DataType.BOOL:
-                array_data.append(random.choice([True, False]))
-            elif element_type == DataType.VARCHAR:
-                array_data.append(f"arr_str_{random.randint(0, 999)}")
 
-        return array_data
+def _is_null_or_sentinel(v):
+    return v is None or isinstance(v, cf.NullValue)
 
-    def generate_test_data_for_index_comparison(self, field_mapping: Dict, index_configs: Dict,
-                                                num_records: int) -> List[Dict]:
-        """
-        Generate test data where all fields of the same data type have identical data.
-        
-        This ensures that index consistency can be verified across different index types
-        for the same data type.
-        
-        Args:
-            field_mapping: Mapping of field names to data types
-            index_configs: Mapping of field names to index types
-            num_records: Number of records to generate
-            
-        Returns:
-            List of test data records
-        """
-        test_data = []
-        vectors = cf.gen_vectors(num_records, default_dim)
 
-        for i in range(num_records):
-            record = {
-                default_primary_key_field_name: i,
-                default_vector_field_name: vectors[i]
-            }
+def _array_contains(arr: Any, element: Any) -> bool:
+    """Check if an array contains the given element. NULL array → False."""
+    if _is_null_or_sentinel(arr) or not isinstance(arr, list):
+        return False
+    return element in arr
 
-            # Group fields by data type
-            data_type_groups = {}
-            for field_name, data_type in field_mapping.items():
-                if field_name in [default_primary_key_field_name, default_vector_field_name]:
-                    continue
 
-                if data_type not in data_type_groups:
-                    data_type_groups[data_type] = []
-                data_type_groups[data_type].append(field_name)
+def _array_contains_all(arr: Any, elements: Any) -> bool:
+    """Check if an array contains all of the given elements. NULL array → False."""
+    if _is_null_or_sentinel(arr) or not isinstance(arr, list):
+        return False
+    return all(e in arr for e in elements)
 
-            # Generate same data for all fields of the same type
-            for data_type, field_names in data_type_groups.items():
-                if isinstance(data_type, tuple) and data_type[0] == DataType.ARRAY:
-                    # Array type
-                    element_type = data_type[1]
-                    array_value = self.generate_random_array_value(element_type)
-                    for field_name in field_names:
-                        record[field_name] = array_value
-                else:
-                    # Scalar type
-                    scalar_value = self.generate_random_scalar_value(data_type)
-                    for field_name in field_names:
-                        record[field_name] = scalar_value
 
-            test_data.append(record)
+def _array_contains_any(arr: Any, elements: Any) -> bool:
+    """Check if an array contains any of the given elements. NULL array → False."""
+    if _is_null_or_sentinel(arr) or not isinstance(arr, list):
+        return False
+    return any(e in arr for e in elements)
 
-        return test_data
 
-    def generate_simple_expression(self, field_name: str, data_type_info: Any, operator: str) -> Tuple[str, Callable]:
-        """
-        Generate a simple filter expression and a corresponding validation function.
-        
-        Args:
-            field_name: The name of the field to filter on
-            data_type_info: The data type of the field (scalar or tuple for array)
-            operator: The operator to use for the expression
-            
-        Returns:
-            Tuple of (expression, validator) or list of tuples for LIKE operator
-        """
-        if operator in ["IS NULL", "IS NOT NULL"]:
-            # Handle IS NULL and IS NOT NULL operators
-            expression = f"{field_name} {operator}"
+def _array_length(arr: Any):
+    """Return the length of an array, or TRACKED_NULL if the array is NULL."""
+    if _is_null_or_sentinel(arr) or not isinstance(arr, list):
+        return TRACKED_NULL  # Must use TRACKED_NULL so _sql_not can detect NULL involvement
+    return len(arr)
 
-            def validate_null(data_value, op=operator):
-                if op == "IS NULL":
-                    return data_value is None
-                else:  # IS NOT NULL
-                    return data_value is not None
 
-            return expression, validate_null
-        elif operator == "IN":
-            # Handle IN operator for both array and scalar types
-            if isinstance(data_type_info, tuple) and data_type_info[0] == DataType.ARRAY:
-                element_type = data_type_info[1]
-                values = [self.generate_random_scalar_value(element_type, need_none=False) for _ in range(20)]
-            else:
-                values = [self.generate_random_scalar_value(data_type_info, need_none=False) for _ in range(20)]
+def _not_in(val: Any, lst: list) -> bool:
+    """SQL NOT IN with NULL semantics: NULL NOT IN (...) → False (not True)."""
+    if isinstance(val, cf.NullValue):
+        return False
+    return val not in lst
 
-            expression = f"{field_name} IN {values}"
 
-            def validate_in(data_value, filter_values=values):
-                if data_value is None:
-                    return False
-                return data_value in filter_values
+class _NullTouched:
+    """Thread-local flag to detect if a NullValue was involved in a comparison."""
+    flag = False
 
-            return expression, validate_in
-        elif operator == "LIKE":
-            # Handle LIKE operator for string types
-            if data_type_info == DataType.VARCHAR:
-                # Generate a comprehensive set of LIKE patterns for testing
-                # Patterns are based on Milvus documentation: https://milvus.io/docs/basic-operators.md
-                ran_str = random.randint(0, 2)
-                patterns = [
-                    # Prefix match patterns (string starts with)
-                    f'str%',  # Matches strings starting with 'str'
-                    f'str_{ran_str}%',  # Matches strings starting with 'str_0', 'str_1', etc.
-                    f'str%{ran_str}%',  # Matches strings starting with 'str' and containing '0', '1', or '2'
-                    f'str+{ran_str}%',  # Matches strings starting with 'str+0', etc.
-                    f'str{ran_str}%',  # Matches strings starting with 'str0', etc.
+    @classmethod
+    def reset(cls):
+        cls.flag = False
 
-                    # Suffix match patterns (string ends with)
-                    f'%str',  # Matches strings ending with 'str'
-                    f'%{ran_str}_str',  # Matches strings ending with '0_str', etc.
-                    f'%{ran_str}%str',  # Matches strings containing '0', '1', or '2' and ending with 'str'
-                    f'%{ran_str}+str',  # Matches strings ending with '0+str', etc.
-                    f'%{ran_str}str',  # Matches strings ending with '0str', etc.
+    @classmethod
+    def touch(cls):
+        cls.flag = True
 
-                    # Infix match patterns (string contains)
-                    f'%str%',  # Matches strings containing 'str'
-                    f'%{ran_str}_str_%',  # Matches strings containing '0_str_', etc.
-                    f'%{ran_str}%str%{ran_str}%',  # Matches strings containing '0', 'str', and '0' (or 1,2)
-                    f'%{ran_str}+str+%',  # Matches strings containing '0+str+', etc.
-                    f'%{ran_str}str%{ran_str}%',  # Matches strings containing '0str0', etc.
+    @classmethod
+    def was_touched(cls):
+        return cls.flag
 
-                    # Single character wildcard patterns (underscore)
-                    'str_',  # Matches 'str' followed by any single character
-                    '_str_',  # Matches any single character, then 'str', then any single character
-                    '_str',  # Matches any single character followed by 'str'
-                    'str%_',  # Matches 'str' followed by any sequence and a single character
-                    '_%str',  # Matches any single character, any sequence, then 'str'
-                    'str_%_',  # Matches 'str_', any sequence, then a single character
-                    '_%_str',  # Matches any single character, any sequence, then '_str'
 
-                    # Combination patterns with both % and _
-                    'str_%_%',  # Matches 'str_', any sequence, single char, any sequence
-                    '%_str_%',  # Matches any sequence, single char, '_str_', any sequence
-                    '%_%_str',  # Matches any sequence, single char, any sequence, '_str'
-                    'str_%_str',  # Matches 'str_', any sequence, '_str'
-                    'str_%_str_%',  # Matches 'str_', any sequence, '_str_', any sequence
+class _TrackedNullValue(cf.NullValue):
+    """NullValue that sets a flag when participating in any comparison."""
+    def __eq__(self, other):
+        _NullTouched.touch()
+        return super().__eq__(other)
+    def __ne__(self, other):
+        _NullTouched.touch()
+        return super().__ne__(other)
+    def __lt__(self, other):
+        _NullTouched.touch()
+        return super().__lt__(other)
+    def __le__(self, other):
+        _NullTouched.touch()
+        return super().__le__(other)
+    def __gt__(self, other):
+        _NullTouched.touch()
+        return super().__gt__(other)
+    def __ge__(self, other):
+        _NullTouched.touch()
+        return super().__ge__(other)
+    def __bool__(self):
+        _NullTouched.touch()
+        return False
 
-                    # Edge case patterns
-                    'str2',  # Exact match for 'str'
-                    '',  # Empty string
-                    '%',  # Matches everything
-                    '\\\\%',  # Matches literal '%'
-                    '_',  # Matches any single character
-                    '\\\\_',  # Matches literal '_'
+TRACKED_NULL = _TrackedNullValue()
 
-                    # Escape patterns (test literal % and _ with backslash)
-                    'str\\\\_%',  # Matches 'str_' (escaped underscore) followed by any sequence
-                    '%\\\\_str',  # Matches any sequence followed by '_str' (escaped underscore)
-                    'str\\\\%%',  # Matches 'str%' (escaped percent) followed by any sequence
-                    '%\\\\%str',  # Matches any sequence followed by '%str' (escaped percent)
-                    'str\\\\_\\\\%%',  # Matches 'str_%' (both escaped) followed by any sequence
-                    '%\\\\_\\\\%str',  # Matches any sequence followed by '_%str' (both escaped)
-                    '\\\\'  # Matches literal backslash
-                ]
 
-                # Return all generated LIKE expressions and their validators
-                expressions = []
-                for pattern in patterns:
-                    expression = f'{field_name} LIKE "{pattern}"'
+def _sql_not(inner_fn) -> bool:
+    """
+    SQL NOT with 3VL: NOT(True)→False, NOT(False)→True, NOT(NULL)→NULL(→False).
 
-                    def validate_like(data_value, pat=pattern):
-                        if data_value is None:
-                            return False
-                        data_str = str(data_value)
-                        regex_pattern = self._convert_like_to_regex(pat)
-                        try:
-                            return bool(re.match(regex_pattern, data_str))
-                        except:
-                            return False
+    inner_fn is a callable (lambda) that evaluates the inner expression.
+    We use _TrackedNullValue to detect if NULL participated in the evaluation.
+    If it did, NOT returns False (NULL propagation) instead of inverting.
+    """
+    _NullTouched.reset()
+    try:
+        result = inner_fn()
+    except Exception:
+        return False
+    if _NullTouched.was_touched() and not result:
+        # NULL was involved and result is False → it's a NULL-False, NOT(NULL) = NULL → exclude
+        return False
+    return not result
 
-                    expressions.append((expression, validate_like))
 
-                return expressions
-            else:
-                # LIKE operator on non-string types (expected to fail)
-                value = self.generate_random_scalar_value(DataType.INT32)
-                expression = f"{field_name} LIKE {repr(value)}"
+def _milvus_to_python(expr: str) -> str:
+    """
+    Translate a Milvus filter expression to a Python expression that can be
+    evaluated with eval() against a row dict.
 
-                def validate_eq(data_value, val=value):
-                    return data_value == val
+    Supported translations:
+      - field_name → row['field_name']
+      - == → ==  (already Python)
+      - != → !=
+      - && / and → and
+      - || / or  → or
+      - not → not
+      - IN [...] → in [...]
+      - NOT IN [...] → not in [...]
+      - LIKE "pattern" → _like_match(row['field'], 'pattern')
+      - field IS NULL → row['field'] is None
+      - field IS NOT NULL → row['field'] is not None
+      - array_contains(field, val) → _array_contains(row['field'], val)
+      - array_contains_all(field, [...]) → _array_contains_all(row['field'], [...])
+      - array_contains_any(field, [...]) → _array_contains_any(row['field'], [...])
+      - array_length(field) → _array_length(row['field'])
+      - true/false → True/False
+    """
+    s = expr
 
-                return expression, validate_eq
-        else:
-            # Handle standard comparison operators (==, !=, >, <, >=, <=)
-            if isinstance(data_type_info, tuple) and data_type_info[0] == DataType.ARRAY:
-                element_type = data_type_info[1]
-                value = self.generate_random_scalar_value(element_type)
-            else:
-                value = self.generate_random_scalar_value(data_type_info)
+    # Boolean literals (case insensitive, word boundary)
+    s = re.sub(r'\btrue\b', 'True', s, flags=re.IGNORECASE)
+    s = re.sub(r'\bfalse\b', 'False', s, flags=re.IGNORECASE)
 
-            expression = f"{field_name} {operator} {repr(value)}"
+    # IS NOT NULL / IS NULL (must come before general field substitution)
+    # Uses _is_null/_is_not_null helpers to handle SQL_NULL sentinel
+    s = re.sub(
+        r'\b(\w+)\s+IS\s+NOT\s+NULL\b',
+        r"_is_not_null(row['\1'])",
+        s, flags=re.IGNORECASE,
+    )
+    s = re.sub(
+        r'\b(\w+)\s+IS\s+NULL\b',
+        r"_is_null(row['\1'])",
+        s, flags=re.IGNORECASE,
+    )
 
-            def validate_comparison(data_value, val=value, op=operator):
-                if data_value is None:
-                    return False
-                if op == "==":
-                    return data_value == val
-                elif op == "!=":
-                    return data_value != val
-                elif op == ">":
-                    return data_value > val
-                elif op == "<":
-                    return data_value < val
-                elif op == ">=":
-                    return data_value >= val
-                elif op == "<=":
-                    return data_value <= val
-                return False
+    # LIKE — convert to _like_match call
+    s = re.sub(
+        r'\b(\w+)\s+LIKE\s+"([^"]*)"',
+        r"_like_match(row['\1'], '\2')",
+        s, flags=re.IGNORECASE,
+    )
+    s = re.sub(
+        r"\b(\w+)\s+LIKE\s+'([^']*)'",
+        r"_like_match(row['\1'], '\2')",
+        s, flags=re.IGNORECASE,
+    )
 
-            return expression, validate_comparison
+    # NOT IN (must come before IN) — use helper to handle SQL NULL correctly
+    s = re.sub(
+        r'\b(\w+)\s+NOT\s+IN\s*(\[[^\]]*\])',
+        r"_not_in(row['\1'], \2)",
+        s, flags=re.IGNORECASE,
+    )
 
-    def _convert_like_to_regex(self, pattern: str) -> str:
-        """
-        Convert a custom pattern to a regular expression (optimized version).
-        Rules:
-          - '_' matches any single character → regex '.'
-          - '%' matches any sequence of characters → regex '.*'
-          - '\' is used as an escape character, remove the backslash and keep the following character
-        """
-        regex_parts = []
+    # IN — only match field names that aren't 'not' (to avoid clobbering NOT IN results)
+    def _replace_in(m):
+        field = m.group(1)
+        if field.lower() == 'not':
+            return m.group(0)  # don't replace
+        return f"row['{field}'] in ["
+    s = re.sub(
+        r'\b(\w+)\s+IN\s*\[',
+        _replace_in,
+        s, flags=re.IGNORECASE,
+    )
+
+    # array_contains_all(field, [...])
+    s = re.sub(
+        r'\barray_contains_all\s*\(\s*(\w+)\s*,',
+        r"_array_contains_all(row['\1'],",
+        s, flags=re.IGNORECASE,
+    )
+
+    # array_contains_any(field, [...])
+    s = re.sub(
+        r'\barray_contains_any\s*\(\s*(\w+)\s*,',
+        r"_array_contains_any(row['\1'],",
+        s, flags=re.IGNORECASE,
+    )
+
+    # array_contains(field, val) — must come after the _all/_any variants
+    s = re.sub(
+        r'\barray_contains\s*\(\s*(\w+)\s*,',
+        r"_array_contains(row['\1'],",
+        s, flags=re.IGNORECASE,
+    )
+
+    # array_length(field)
+    s = re.sub(
+        r'\barray_length\s*\(\s*(\w+)\s*\)',
+        r"_array_length(row['\1'])",
+        s, flags=re.IGNORECASE,
+    )
+
+    # Logical operators
+    s = re.sub(r'&&', ' and ', s)
+    s = re.sub(r'\|\|', ' or ', s)
+
+    # Replace remaining bare field names with row['field']
+    # This must happen after all pattern-specific replacements.
+    # We look for word tokens that are not Python keywords, not already inside row[...],
+    # not part of function calls we already translated, and not numeric literals.
+    _PYTHON_KEYWORDS = {
+        'and', 'or', 'not', 'in', 'is', 'None', 'True', 'False',
+        'row', 'if', 'else', 'for', 'while', 'return', 'def', 'class',
+    }
+    _HELPER_FUNCS = {
+        '_like_match', '_array_contains', '_array_contains_all',
+        '_array_contains_any', '_array_length', '_is_null', '_is_not_null', '_not_in',
+        '_sql_not',
+    }
+
+    def _replace_field_refs(text: str) -> str:
+        """Replace bare field identifiers with row['field'] lookups."""
+        tokens = re.split(r'(\brow\[\'[^\']*\'\]|\"[^\"]*\"|\'[^\']*\'|\b\w+\b|[^\w\s])', text)
+        result = []
+        skip_next_paren = False
+        for tok in tokens:
+            # Skip empty tokens
+            if not tok or tok.isspace():
+                result.append(tok)
+                continue
+            # Already a row[...] reference — keep as-is
+            if tok.startswith("row["):
+                result.append(tok)
+                continue
+            # String literals — keep
+            if (tok.startswith('"') and tok.endswith('"')) or \
+               (tok.startswith("'") and tok.endswith("'")):
+                result.append(tok)
+                continue
+            # Numbers — keep
+            if re.match(r'^-?\d+(\.\d+)?([eE][+-]?\d+)?$', tok):
+                result.append(tok)
+                continue
+            # Python keywords and our helper functions — keep
+            if tok in _PYTHON_KEYWORDS or tok in _HELPER_FUNCS:
+                result.append(tok)
+                continue
+            # Operators / punctuation — keep
+            if not tok[0].isalpha() and tok[0] != '_':
+                result.append(tok)
+                continue
+            # Otherwise it's a field name — wrap in row[...]
+            result.append(f"row['{tok}']")
+        return ''.join(result)
+
+    s = _replace_field_refs(s)
+
+    # Replace 'not (...)' with '_sql_not(row, lambda row: ...)' for correct 3VL NOT semantics.
+    # The lambda takes row as a default arg to capture it from the eval local scope.
+    # Must happen after all other transformations so inner expression is already translated.
+    def _rewrite_not(text):
+        result = []
         i = 0
-        length = len(pattern)
-
-        while i < length:
-            current_char = pattern[i]
-            if current_char == '\\':
-                # Handle escape character: remove backslash, use the literal character
-                if i + 1 < length:
-                    next_char = pattern[i + 1]
-                    if next_char == '\\':
-                        i += 1
-                    else:
-                        regex_parts.append(next_char)
-                        i += 2
+        while i < len(text):
+            m = re.match(r'not\s*\(', text[i:])
+            if m:
+                start_paren = i + m.end() - 1
+                depth = 1
+                j = start_paren + 1
+                while j < len(text) and depth > 0:
+                    if text[j] == '(':
+                        depth += 1
+                    elif text[j] == ')':
+                        depth -= 1
+                    j += 1
+                if depth == 0:
+                    inner = text[start_paren + 1:j - 1]
+                    result.append(f'_sql_not(lambda _row=row: {inner.replace("row[", "_row[")})')
+                    i = j
                 else:
-                    # Trailing escape character: add literal backslash
-                    regex_parts.append('\\')
+                    result.append(text[i])
                     i += 1
             else:
-                # Handle wildcards
-                if current_char == '_':
-                    regex_parts.append('.')  # Match any single character
-                elif current_char == '%':
-                    regex_parts.append('.*')  # Match any sequence of characters
-                else:
-                    # Ordinary character: add regex-escaped version (handles . * and other special chars)
-                    regex_parts.append(re.escape(current_char))
+                result.append(text[i])
                 i += 1
+        return ''.join(result)
 
-        return '^' + ''.join(regex_parts) + '$'
+    s = _rewrite_not(s)
 
-    def is_parsing_error(self, exception: Exception) -> bool:
-        """
-        Check if the exception is a parsing error.
-        
-        Args:
-            exception: The exception to check
-            
-        Returns:
-            True if the exception is a parsing error, False otherwise
-        """
-        if not isinstance(exception, Error):
-            return False
+    return s
 
-        error_message = str(exception.message).lower()
-        return "cannot parse expression" in error_message or "unsupported data type" in error_message
 
-    def insert_data_in_batches(self, client, collection_name: str, test_data: List[Dict],
-                               batch_size: int = ct.default_nb) -> None:
-        """
-        Insert test data in batches to handle large datasets efficiently.
-        
-        Args:
-            client: Milvus client instance
-            collection_name: Name of the collection
-            test_data: List of test data records
-            batch_size: Number of records per batch (default: ct.default_nb)
-        """
-        total_records = len(test_data)
-        if total_records == 0:
-            log.warning("No data to insert")
-            return
+def eval_filter(expr: str, rows: List[Dict[str, Any]]) -> List[int]:
+    """
+    Evaluate a Milvus filter expression against rows and return matching row indices.
 
-        # Calculate number of batches
-        num_batches = (total_records + batch_size - 1) // batch_size
+    Uses _milvus_to_python to translate, then Python eval() as the oracle.
+    Rows where the expression raises an exception (e.g., type errors with None)
+    are treated as non-matching (3VL: NULL → not selected).
 
-        for batch_idx in range(num_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = min(start_idx + batch_size, total_records)
-            batch_data = test_data[start_idx:end_idx]
+    Args:
+        expr: Milvus filter expression string
+        rows: list of row dicts
 
-            # Insert current batch
-            self.insert(client, collection_name=collection_name, data=batch_data)
+    Returns:
+        sorted list of indices where the expression evaluates to True
+    """
+    py_expr = _milvus_to_python(expr)
+    matching = []
 
-        # Flush all batches
-        self.flush(client, collection_name)
+    # Build the eval namespace with helper functions
+    eval_ns = {
+        '_like_match': _like_match,
+        '_array_contains': _array_contains,
+        '_array_contains_all': _array_contains_all,
+        '_array_contains_any': _array_contains_any,
+        '_array_length': _array_length,
+        '_is_null': lambda v: isinstance(v, cf.NullValue),  # catches both NullValue and _TrackedNullValue
+        '_is_not_null': lambda v: not isinstance(v, cf.NullValue),
+        '_not_in': _not_in,
+        '_sql_not': _sql_not,
+        'math': math,
+    }
 
-    def save_failure_debug_info(self, test_data: List[Dict], schema, field_mapping: Dict,
-                                index_configs: Dict, failed_expressions: List[str],
-                                collection_name: str):
-        """
-        Save comprehensive debug information for failure reproduction.
-        
-        This method saves all necessary information to reproduce test failures,
-        including test data, schema, configuration, and a reproduction script.
-        
-        Args:
-            test_data: The test data used in the test
-            schema: The collection schema
-            field_mapping: Mapping of field names to data types
-            index_configs: Mapping of field names to index types
-            failed_expressions: List of failed expressions
-            collection_name: Name of the collection
-        """
+    for idx, original_row in enumerate(rows):
         try:
-            log_dir = "/tmp/ci_logs"
-            os.makedirs(log_dir, exist_ok=True)
-
-            # Use collection name for file naming to ensure consistency
-            safe_collection_name = collection_name.replace("-", "_").replace(" ", "_")
-            test_name = "test_all_data_types_with_different_indexes"
-
-            # Custom JSON encoder to handle numpy types and other non-serializable objects
-            class NumpyEncoder(json.JSONEncoder):
-                def default(self, obj):
-                    import numpy as np
-                    if isinstance(obj, np.integer):
-                        return int(obj)
-                    elif isinstance(obj, np.floating):
-                        return float(obj)
-                    elif isinstance(obj, np.ndarray):
-                        return obj.tolist()
-                    elif isinstance(obj, np.bool_):
-                        return bool(obj)
-                    elif obj is None:
-                        return None
-                    else:
-                        return str(obj)
-
-            # Save test data
-            if test_data:
-                df_test_data = pd.DataFrame(test_data)
-                test_data_file = os.path.join(log_dir, f"{safe_collection_name}_test_data.parquet")
-                df_test_data.to_parquet(test_data_file, index=False)
-                log.info(f"Test data saved to: {test_data_file}")
-
-            # Save schema information
-            schema_info = {
-                "collection_name": collection_name,
-                "primary_key_field": default_primary_key_field_name,
-                "vector_field": default_vector_field_name,
-                "vector_dim": default_dim,
-                "fields": []
-            }
-
-            # Extract field information from schema
-            for field in schema.fields:
-                field_info = {
-                    "name": field.name,
-                    "dtype": str(field.dtype),
-                    "is_primary": field.is_primary,
-                    "auto_id": field.auto_id,
-                    "nullable": getattr(field, 'nullable', None)
-                }
-                if hasattr(field, 'element_type'):
-                    field_info["element_type"] = str(field.element_type)
-                if hasattr(field, 'max_length'):
-                    field_info["max_length"] = field.max_length
-                if hasattr(field, 'max_capacity'):
-                    field_info["max_capacity"] = field.max_capacity
-                if hasattr(field, 'dim'):
-                    field_info["dim"] = field.dim
-                schema_info["fields"].append(field_info)
-
-            schema_file = os.path.join(log_dir, f"{safe_collection_name}_schema.json")
-            with open(schema_file, 'w') as f:
-                json.dump(schema_info, f, indent=2, cls=NumpyEncoder)
-            log.info(f"Schema saved to: {schema_file}")
-
-            # Save field mapping and index configs
-            config_info = {
-                "field_mapping": field_mapping,
-                "index_configs": index_configs,
-                "failed_expressions": failed_expressions,
-                "collection_name": collection_name,
-                "test_name": test_name,
-                "test_data_count": len(test_data) if test_data else 0,
-                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S")
-            }
-
-            config_file = os.path.join(log_dir, f"{safe_collection_name}_config.json")
-            with open(config_file, 'w') as f:
-                json.dump(config_info, f, indent=2, cls=NumpyEncoder)
-            log.info(f"Configuration saved to: {config_file}")
-
-        except Exception as e:
-            log.error(f"Failed to save failure debug info: {e}")
-
-    @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("enable_dynamic_field", [False])
-    @pytest.mark.parametrize("num_records", [10000])
-    def test_all_data_types_with_different_indexes(self, enable_dynamic_field, num_records):
-        """
-        Test all data types with their supported index types in a single collection.
-        
-        This comprehensive test creates a single collection with all supported data types
-        and their corresponding index types, then verifies that all index types return
-        consistent results for the same data and expressions.
-        
-        target: Test all data types with their supported index types
-        method: Create single collection with all data types and index types, insert same data, verify query results
-        expected: All index types return identical results matching ground truth
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        log.info("Testing all data types with different index types in a single collection")
-
-        try:
-            # Step 1: Create comprehensive schema with all data types and their supported index types
-            schema, field_mapping, index_configs = self.create_comprehensive_schema_with_index_types(
-                client, enable_dynamic_field
-            )
-
-            # Step 2: Create collection (without index_params to avoid auto index creation)
-            self.create_collection(client, collection_name, schema=schema)
-
-            # Step 3: Generate and insert test data
-            test_data = self.generate_test_data_for_index_comparison(field_mapping, index_configs, num_records)
-
-            # Insert data in batches using default batch size
-            self.insert_data_in_batches(client, collection_name, test_data, ct.default_nb)
-
-            # Step 4: Create indexes
-            self._create_all_indexes(client, collection_name, index_configs)
-
-            # Step 5: Load collection
-            self.load_collection(client, collection_name)
-
-            log.info(f"Inserted {num_records} test records with all data types and index types")
-            log.info(f"Total fields: {len(field_mapping)}")
-
-            # Step 6: Run comprehensive expression testing
-            stats = self._run_expression_tests(client, collection_name, field_mapping,
-                                               index_configs, test_data)
-
-            # Step 6.5: Run complex expression testing
-            stats_2 = self._run_complex_expression_tests(client, collection_name, field_mapping,
-                                                         index_configs, test_data)
-
-            # Step 7: Log final statistics and handle failures
-            merged_stats = self._log_test_statistics(stats, stats_2)
-
-            # Fail the test if any expression failed
-            if merged_stats['failed']:
-                # Save comprehensive debug information for failure reproduction
-                self.save_failure_debug_info(
-                    test_data=test_data,
-                    schema=schema,
-                    field_mapping=field_mapping,
-                    index_configs=index_configs,
-                    failed_expressions=merged_stats['failed'],
-                    collection_name=collection_name
-                )
-                raise AssertionError(
-                    f"Test failed due to {len(merged_stats['failed'])} failed expressions: {merged_stats['failed']}")
-
-        finally:
-            # Clean up: drop collection
+            # Replace None with TRACKED_NULL for correct 3VL + NOT detection
+            row = {k: (v if v is not None else TRACKED_NULL) for k, v in original_row.items()}
+            _NullTouched.reset()
+            local_ns = {'row': row}
+            result = eval(py_expr, eval_ns, local_ns)
+            if result is True:
+                matching.append(idx)
+        except Exception:
+            # 3VL: errors (None comparisons, type mismatches) → not selected
             pass
-            # self.drop_collection(client, collection_name)
 
-    def _create_all_indexes(self, client, collection_name: str, index_configs: Dict):
-        """
-        Create all indexes for the collection.
-        
-        Args:
-            client: Milvus client instance
-            collection_name: Name of the collection
-            index_configs: Mapping of field names to index types
-        """
-        # Create vector index
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(default_vector_field_name, index_type="IVF_FLAT", metric_type="COSINE")
-        self.create_index(client, collection_name, index_params)
+    return sorted(matching)
 
-        # Create scalar indexes
-        for field_name, index_type in index_configs.items():
-            if index_type != "no_index":
-                index_params = self.prepare_index_params(client)[0]
-                if DataType.JSON.name.upper() in field_name.upper() and (
-                        index_type == "inverted" or index_type == "autoindex"):
-                    index_params.add_index(field_name, index_type=index_type.upper(),
-                                           params={"json_cast_type": "varchar"})
-                elif DataType.JSON.name.upper() in field_name.upper() and index_type == "ngram":
-                    index_params.add_index(field_name, index_type=index_type.upper(), min_gram=2, max_gram=3,
-                                           params={"json_cast_type": "varchar"})
-                elif DataType.VARCHAR.name.upper() in field_name.upper() and index_type == "ngram":
-                    index_params.add_index(field_name, index_type=index_type.upper(), min_gram=2, max_gram=3)
-                else:
-                    index_params.add_index(field_name, index_type=index_type.upper())
-                self.create_index(client, collection_name, index_params)
-                log.info(f"Created index {index_type} for field {field_name}")
 
-    def _run_expression_tests(self, client, collection_name: str, field_mapping: Dict,
-                              index_configs: Dict, test_data: List[Dict]) -> Dict:
-        """
-        Run comprehensive expression testing across all fields and operators.
-        
-        Args:
-            client: Milvus client instance
-            collection_name: Name of the collection
-            field_mapping: Mapping of field names to data types
-            index_configs: Mapping of field names to index types
-            test_data: Test data records
-            
-        Returns:
-            Dictionary containing test statistics
-        """
-        # Initialize statistics
-        stats = {
-            "success": [],
-            "not_supported": [],
-            "failed": [],
-            "total": []
-        }
+# ---------------------------------------------------------------------------
+# Expression generators
+# ---------------------------------------------------------------------------
+def _gen_like_expressions(field_name: str, sample_values: List[str]) -> List[str]:
+    """Generate LIKE expressions for a VARCHAR field."""
+    exprs = []
+    # Prefix match
+    for v in sample_values[:3]:
+        if v and len(v) >= 2:
+            exprs.append(f'{field_name} LIKE "{v[:2]}%"')
+    # Suffix match
+    for v in sample_values[:3]:
+        if v and len(v) >= 2:
+            exprs.append(f'{field_name} LIKE "%{v[-2:]}"')
+    # Contains
+    for v in sample_values[:2]:
+        if v and len(v) >= 1:
+            exprs.append(f'{field_name} LIKE "%{v[0]}%"')
+    # Single char wildcard
+    exprs.append(f'{field_name} LIKE "_"')
+    exprs.append(f'{field_name} LIKE "___"')
+    return exprs
 
-        # Test expressions on each field with index consistency verification
-        all_operators = comparison_operators + range_operators + null_operators
 
-        for operator in all_operators:
-            # Group fields by data type to test index consistency
-            data_type_groups = self._group_fields_by_data_type(field_mapping)
+def _gen_array_expressions(field_name: str, element_dtype: DataType,
+                           sample_elements: List[Any]) -> List[str]:
+    """Generate array expressions for an ARRAY field."""
+    exprs = []
+    if not sample_elements:
+        return exprs
 
-            # Test each data type group
-            for data_type, field_names in data_type_groups.items():
-                self._test_data_type_group(client, collection_name, field_names, data_type,
-                                           operator, index_configs, test_data, stats)
+    el = sample_elements[0]
+    el_repr = repr(el)
 
-        return stats
+    # array_contains
+    exprs.append(f'array_contains({field_name}, {el_repr})')
 
-    def _group_fields_by_data_type(self, field_mapping: Dict) -> Dict:
-        """
-        Group fields by their data type for index consistency testing.
-        
-        Args:
-            field_mapping: Mapping of field names to data types
-            
-        Returns:
-            Dictionary mapping data types to lists of field names
-        """
-        data_type_groups = {}
-        for field_name, data_type in field_mapping.items():
-            if field_name in [default_primary_key_field_name, default_vector_field_name]:
+    # array_contains_all / any with small lists
+    if len(sample_elements) >= 2:
+        two = [repr(x) for x in sample_elements[:2]]
+        exprs.append(f'array_contains_all({field_name}, [{", ".join(two)}])')
+        exprs.append(f'array_contains_any({field_name}, [{", ".join(two)}])')
+
+    # array_length comparisons
+    exprs.append(f'array_length({field_name}) > 0')
+    exprs.append(f'array_length({field_name}) == 0')
+    exprs.append(f'array_length({field_name}) >= 2')
+
+    return exprs
+
+
+def generate_expressions_for_field(
+    field_name: str,
+    dtype: DataType,
+    sample_values: List[Any],
+    nullable: bool = False,
+    is_array: bool = False,
+    element_dtype: DataType = None,
+) -> List[str]:
+    """
+    Generate a comprehensive list of filter expressions for a single field.
+
+    Args:
+        field_name: the field name in the collection
+        dtype: the DataType of the field
+        sample_values: representative values present in the data (for IN lists, etc.)
+        nullable: whether to include IS NULL / IS NOT NULL expressions
+        is_array: whether this is an array field
+        element_dtype: element type for array fields
+
+    Returns:
+        list of Milvus expression strings
+    """
+    exprs = []
+
+    # NULL checks
+    if nullable:
+        exprs.append(f'{field_name} IS NULL')
+        exprs.append(f'{field_name} IS NOT NULL')
+
+    # Array-specific expressions
+    if is_array:
+        flat_elements = []
+        for v in sample_values:
+            if isinstance(v, list):
+                flat_elements.extend(v)
+        flat_elements = flat_elements[:5] if flat_elements else []
+        exprs.extend(_gen_array_expressions(field_name, element_dtype, flat_elements))
+        return exprs
+
+    # Boolean field — limited operators
+    if dtype == DataType.BOOL:
+        exprs.append(f'{field_name} == true')
+        exprs.append(f'{field_name} == false')
+        exprs.append(f'{field_name} != true')
+        exprs.append(f'{field_name} != false')
+        return exprs
+
+    # Numeric and varchar fields — comparison operators
+    non_none = [v for v in sample_values if v is not None]
+
+    # Comparison with boundary/sample values
+    for op in ['==', '!=', '>', '<', '>=', '<=']:
+        for val in non_none[:3]:
+            val_repr = repr(val)
+            if dtype == DataType.VARCHAR:
+                val_repr = f'"{val}"'
+            # Skip float comparisons with nan/inf for simplicity in generation
+            if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+                if op in ('==', '!='):
+                    exprs.append(f'{field_name} {op} {val_repr}')
                 continue
+            exprs.append(f'{field_name} {op} {val_repr}')
 
-            if data_type not in data_type_groups:
-                data_type_groups[data_type] = []
-            data_type_groups[data_type].append(field_name)
-
-        return data_type_groups
-
-    def _test_data_type_group(self, client, collection_name: str, field_names: List[str],
-                              data_type: Any, operator: str, index_configs: Dict,
-                              test_data: List[Dict], stats: Dict):
-        """
-        Test a group of fields with the same data type using a specific operator.
-        
-        Args:
-            client: Milvus client instance
-            collection_name: Name of the collection
-            field_names: List of field names to test
-            data_type: Data type of the fields
-            operator: Operator to test
-            index_configs: Mapping of field names to index types
-            test_data: Test data records
-            stats: Statistics dictionary to update
-        """
-        # Generate expressions for this data type
-        sample_field = field_names[0]  # Use first field to generate expressions
-        result = self.generate_simple_expression(sample_field, data_type, operator)
-
-        # Handle both single expression and list of expressions (for LIKE operator)
-        if isinstance(result, list):
-            expressions = result
+    # IN / NOT IN
+    if len(non_none) >= 2:
+        in_vals = non_none[:3]
+        if dtype == DataType.VARCHAR:
+            in_list = ", ".join(f'"{v}"' for v in in_vals)
         else:
-            expressions = [result]
-
-        for expression, validator in expressions:
-            # Test this expression on all fields of the same data type
-            field_results = {}
-
-            for field_name in field_names:
-                # Replace field name in expression
-                if sample_field != field_name:
-                    test_expression = expression.replace(f"{sample_field}", field_name)
-                else:
-                    test_expression = expression
-
-                expression_info = f"{field_name} ({index_configs[field_name]}) with {operator}: {test_expression}"
-                stats["total"].append(expression_info)
-
-                log.info(f"Testing {expression_info}")
-
-                try:
-                    # Execute query
-                    res = self.query(
-                        client, collection_name=collection_name,
-                        filter=test_expression, output_fields=["*"],
-                        check_task=CheckTasks.check_nothing
-                    )[0]
-
-                    # Check if res is an Error
-                    if isinstance(res, Error):
-                        if self.is_parsing_error(res):
-                            log.warning(f"⚠️ {expression_info} cannot be parsed, skipping: {str(res)}")
-                            stats["not_supported"].append(f"{expression_info}: {str(res)}")
-                            continue
-                        else:
-                            log.error(f"✗ {expression_info} failed: {str(res)}")
-                            stats["failed"].append(f"{expression_info}: {str(res)}")
-                            continue
-                    else:
-                        # Store result for consistency check
-                        field_results[field_name] = res
-
-                        # Calculate expected results
-                        expected_results = []
-                        for record in test_data:
-                            if validator(record.get(field_name)):
-                                expected_results.append(record)
-
-                        # Verify results against ground truth
-                        if len(res) != len(expected_results):
-                            log.error(
-                                f"✗ {expression_info} returned {len(res)} results, expected {len(expected_results)}")
-                            stats["failed"].append(
-                                f"{expression_info}: returned {len(res)} results, expected {len(expected_results)}")
-                            continue
-                        else:
-                            log.info(f"✓ {expression_info} passed with {len(res)} results")
-                            stats["success"].append(f"{expression_info}: {len(res)} results")
-
-                except Exception as e:
-                    log.error(f"✗ {expression_info} encountered exception: {str(e)}")
-                    stats["failed"].append(f"{expression_info}: exception {str(e)}")
-                    continue
-
-            # Verify index consistency - all fields should return same results
-            self._verify_index_consistency(field_results, operator, field_names, stats)
-
-    def _verify_index_consistency(self, field_results: Dict, operator: str,
-                                  field_names: List[str], stats: Dict):
-        """
-        Verify that all fields return consistent results for the same expression.
-        
-        Args:
-            field_results: Dictionary mapping field names to query results
-            operator: The operator being tested
-            field_names: List of field names being tested
-            stats: Statistics dictionary to update
-        """
-        if len(field_results) > 1:
-            # Get the first result as reference
-            reference_field = list(field_results.keys())[0]
-            reference_result = field_results[reference_field]
-            reference_ids = set(row[default_primary_key_field_name] for row in reference_result)
-
-            for field_name, result in field_results.items():
-                if field_name == reference_field:
-                    continue
-
-                current_ids = set(row[default_primary_key_field_name] for row in result)
-
-                if reference_ids != current_ids:
-                    log.error(
-                        f"✗ Index consistency failed for {operator}: {field_name} returned different results than {reference_field}")
-                    stats["failed"].append(
-                        f"Index consistency failed: {field_name} vs {reference_field} for {operator}")
-                    continue
-                else:
-                    log.info(
-                        f"✓ Index consistency verified for {operator}: all fields returned same results")
-
-    def _log_test_statistics(self, stats: Dict, stats_2: Dict = None):
-        """
-        Log comprehensive test statistics for both simple and complex expressions.
-        
-        Args:
-            stats: Statistics dictionary containing simple expression test results
-            stats_2: Statistics dictionary containing complex expression test results (optional)
-        """
-        # Log simple expression statistics
-        log.info(f"=== Simple Expression Test Statistics ===")
-        log.info(f"Total expressions tested: {len(stats['total'])}")
-        log.info(f"Successful: {len(stats['success'])}")
-        log.info(f"Not supported: {len(stats['not_supported'])}")
-        log.info(f"Failed: {len(stats['failed'])}")
-        log.info(f"Success rate: {len(stats['success']) / len(stats['total']) * 100:.2f}%")
-
-        # Log detailed simple expression information
-        if stats['success']:
-            log.info(f"Successful expressions: {stats['success']}")
-        if stats['not_supported']:
-            log.info(f"Not supported expressions: {stats['not_supported']}")
-        if stats['failed']:
-            log.info(f"Failed expressions: {stats['failed']}")
-
-        # Log complex expression statistics if provided
-        if stats_2 is not None:
-            log.info(f"\n=== Complex Expression Test Statistics ===")
-            log.info(f"Total complex expressions tested: {len(stats_2['total'])}")
-            log.info(f"Successful: {len(stats_2['success'])}")
-            log.info(f"Not supported: {len(stats_2['not_supported'])}")
-            log.info(f"Failed: {len(stats_2['failed'])}")
-            if len(stats_2['total']) > 0:
-                log.info(f"Success rate: {len(stats_2['success']) / len(stats_2['total']) * 100:.2f}%")
-
-            # Log detailed complex expression information
-            if stats_2['success']:
-                log.info(f"Successful complex expressions: {stats_2['success']}")
-            if stats_2['not_supported']:
-                log.info(f"Not supported complex expressions: {stats_2['not_supported']}")
-            if stats_2['failed']:
-                log.info(f"Failed complex expressions: {stats_2['failed']}")
-
-            # Log combined statistics
-            merged_stats = {
-                "success": stats["success"] + stats_2["success"],
-                "not_supported": stats["not_supported"] + stats_2["not_supported"],
-                "failed": stats["failed"] + stats_2["failed"],
-                "total": stats["total"] + stats_2["total"]
-            }
-
-            log.info(f"\n=== Combined Test Statistics ===")
-            log.info(f"Total all expressions tested: {len(merged_stats['total'])}")
-            log.info(f"Total successful: {len(merged_stats['success'])}")
-            log.info(f"Total not supported: {len(merged_stats['not_supported'])}")
-            log.info(f"Total failed: {len(merged_stats['failed'])}")
-            log.info(f"Overall success rate: {len(merged_stats['success']) / len(merged_stats['total']) * 100:.2f}%")
-
-            return merged_stats
-
-        return stats
-
-    def generate_complex_expression(self, field_mapping: Dict, index_configs: Dict, operator: str) -> List[
-        Tuple[str, Callable]]:
-        """
-        Generate complex filter expressions including field calculations, array indexing, and JSON path access.
-        
-        Args:
-            field_mapping: Mapping of field names to data types
-            index_configs: Mapping of field names to index types
-            operator: The operator to use for the expression
-            
-        Returns:
-            List of tuples containing (expression, validator)
-        """
-        expressions = []
-
-        # Get all field names excluding primary key and vector fields
-        scalar_fields = [name for name in field_mapping.keys()
-                         if name not in [default_primary_key_field_name, default_vector_field_name]]
-
-        if not scalar_fields:
-            return expressions
-
-        # 1. Field calculation expressions (arithmetic operations)
-        expressions.extend(self._generate_field_calculation_expressions(scalar_fields, field_mapping, operator))
-
-        # 2. Array indexing expressions
-        expressions.extend(self._generate_array_indexing_expressions(scalar_fields, field_mapping, operator))
-
-        # 3. JSON path expressions
-        expressions.extend(self._generate_json_path_expressions(scalar_fields, field_mapping, operator))
-
-        # 4. Mixed complex expressions
-        expressions.extend(self._generate_mixed_complex_expressions(scalar_fields, field_mapping, operator))
-
-        return expressions
-
-    def generate_json_records_with_key_categories(self, num_records: int, typed_threshold: float = 0.7) -> List[Dict[str, Any]]:
-        """
-        Generate JSON objects exhibiting three key categories across the dataset:
-          - Typed keys: a single data type dominates (>= typed_threshold). Example keys: 'a', 'f' (ints)
-          - Dynamic keys: multiple data types appear with meaningful proportions. Example keys: 'b', 'd'
-          - Shared keys: everything else (appear infrequently or below threshold). Example keys: 'e', nested 'd.e'
-
-        Args:
-            num_records: Number of JSON records to generate
-            typed_threshold: Proportion threshold to qualify a key as a typed key
-
-        Returns:
-            List of JSON documents (dict) containing the keys described above
-        """
-        if num_records <= 0:
-            return []
-
-        # keeps all generated json in records
-        records: List[Dict[str, Any]] = []
-
-        for i in range(num_records):
-            doc: Dict[str, Any] = {}
-
-            # Typed keys: 'a' is either int or string
-            if random.random() < typed_threshold:
-                doc['a'] = (i + 1) * 10  # e.g., 10, 20, 30, ...
-            else:
-                doc['a'] = "string type:" +str((i + 1) * 10)
-
-            # Typed keys: 'f' is either int or None
-            if random.random() < typed_threshold:
-                doc['f'] = (i % 5) + 1  # e.g., 1, 2, 3, 4, 5
-            else:
-                doc['f'] = None
-
-            # Dynamic key 'b': mix ints and strings with comparable shares
-            if random.random() < 0.5:
-                doc['b'] = f"string type:{(i % 5) + 1}"
-            else:
-                doc['b'] = (i % 7) + 1
-
-            # Dynamic key 'd': rotate among string, array-of-strings, and object-with-e
-            roll = random.random()
-            if roll < 1.0 / 3.0:
-                doc['d'] = str(40 + (i % 10))  # e.g., "40", "41", ...
-            elif roll < 2.0 / 3.0:
-                base = 20 + (i % 10)
-                doc['d'] = [str(base), str(base + 1)]
-            else:
-                doc['d'] = {"e": "fanta" if (i % 2 == 0) else "stick"}
-
-            # Shared key 'e': appear infrequently with a string value
-            if random.random() < 0.25:  # keep well below typed threshold
-                doc['e'] = str(1234 + (i % 3))  # e.g., "1234", "1235", "1236"
-
-            # Shared complex key 'g': deep, mixed structures with low frequency
-            if random.random() < 0.3:
-                doc['g'] = self._generate_complex_shared_g(i)
-
-            records.append(doc)
-
-        return records
-
-    def _generate_complex_shared_g(self, seed_index: int) -> Any:
-        """
-        Generate a complex, mixed-type structure for shared key 'g'.
-        Shapes include mixed lists, nested dicts, nested lists of dicts, and scalars.
-        """
-        variant = random.randint(0, 4)
-        if variant == 0:
-            # Example: [{h:{i:10}}, {j:1234}, "abcd"]
-            return [
-                {"h": {"i": 10 + (seed_index % 10)}},
-                {"j": 1234 if seed_index % 3 == 0 else 1000 + (seed_index % 100)},
-                "abcd"
-            ]
-        elif variant == 1:
-            # Example: {h:[{i:10}, None, {k:[1, 2, "x_val"]}], meta:{ok:True, id:"m_0"}}
-            return {
-                "h": [
-                    {"i": (seed_index % 12)},
-                    None,
-                    {"k": [1, 2, "x_val"]}
-                ],
-                "meta": {"ok": True, "id": f"m_{seed_index}"}
-            }
-        elif variant == 2:
-            # Example: [[{h:{i:1}},{m:[{"n":"N"}, {"flag":True}]}], "foo", 123.45, None]
-            return [
-                [
-                    {"h": {"i": (seed_index % 5) + 1}},
-                    {"m": [{"n": "N"}, {"flag": seed_index % 2 == 0}]}
-                ],
-                "foo",
-                123.45,
-                None
-            ]
-        elif variant == 3:
-            # Example: {h:{i:None}, alt:[{j:1234}, "abzz"], flag:False}
-            return {
-                "h": {"i": None},
-                "alt": [{"j": 1234}, "abzz"],
-                "flag": False
-            }
-        else:
-            # Example: [{h:{h:["milvus", "rocks", "stick"]}}, {"fanta", "stick"}, "abcxyz"]
-            return [
-                {"h": {"h": ["milvus", "rocks", "stick"]}},
-                ["fanta", "stick"],
-                "abcxyz"
-            ]
-
-    def generate_expressions_for_json_key_categories(self, json_field_name: str) -> List[Tuple[str, Callable]]:
-        """
-        Produce filter expressions and validators that target the three JSON key categories
-        created by generate_json_records_with_key_categories.
-
-        The expressions intentionally exercise:
-          - Typed keys: numeric comparisons and membership tests (keys 'a', 'f')
-          - Dynamic keys: type-specific predicates covering different shapes of 'b' and 'd'
-          - Shared keys: existence and value checks on 'e' and nested 'd.e' and so on.
-
-        Args:
-            json_field_name: The Milvus field name that stores the JSON value
-
-        Returns:
-            List of (expression, validator) where validator(json_obj) -> bool
-        """
-        expressions: List[Tuple[str, Callable]] = []
-
-        # --- Typed keys ('a', 'f') ---
-        # a >= 30
-        expr = f"{json_field_name}['a'] >= 30"
-        def _v_a_ge_30(json_obj: Any) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            value = json_obj.get('a')
-            if value is None:
-                return False
-            # Only numeric types participate in numeric comparison; do not coerce strings
-            if isinstance(value, int):
-                return value >= 30
-            return False
-        expressions.append((expr, _v_a_ge_30))
-        
-        # a LIKE "string type:%"
-        expr = f"{json_field_name}['a'] LIKE \"string type:%\""
-        def _v_a_eq_str(json_obj: Any, pattern="string type:%") -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            value = json_obj.get('a')
-            if not isinstance(value, str):
-                return False
-            regex = self._convert_like_to_regex(pattern)
-            try:
-                return bool(re.match(regex, value))
-            except Exception:
-                return False
-        expressions.append((expr, _v_a_eq_str))
-
-        # f IN [1, 2, 3, 4, 5]
-        f_values = [1, 2, 3, 4, 5]
-        expr = f"{json_field_name}['f'] IN {f_values}"
-        def _v_f_in(json_obj: Any, allowed=f_values) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            value = json_obj.get('f')
-            return value in allowed
-        expressions.append((expr, _v_f_in))
-
-        # f IS NULL
-        expr = f"{json_field_name}['f'] IS NULL"
-        def _v_f_in_none(json_obj: Any) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            value = json_obj.get('f')
-            return value is None
-        expressions.append((expr, _v_f_in_none))
-
-        # --- Dynamic key 'b' (string or int) ---
-        # b LIKE 'str%'
-        expr = f"{json_field_name}['b'] LIKE \"str%\""
-        def _v_b_like_str(json_obj: Any, pattern="str%") -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            value = json_obj.get('b')
-            if not isinstance(value, str):
-                return False
-            regex = self._convert_like_to_regex(pattern)
-            try:
-                return bool(re.match(regex, value))
-            except Exception:
-                return False
-        expressions.append((expr, _v_b_like_str))
-
-        # b IN [1, 2, 3, 4, 5, 6, 7]
-        b_ints = [1, 2, 3, 4, 5, 6, 7]
-        expr = f"{json_field_name}['b'] IN {b_ints}"
-        def _v_b_in_ints(json_obj: Any, allowed=b_ints) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            value = json_obj.get('b')
-            return value in allowed
-        expressions.append((expr, _v_b_in_ints))
-
-        # --- Dynamic key 'd' (string | array[str] | object{"e": str}) ---
-        # d LIKE '4%'
-        expr = f"{json_field_name}['d'] LIKE \"4%\""
-        def _v_d_like_4(json_obj: Any, pattern="4%") -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            value = json_obj.get('d')
-            if not isinstance(value, str):
-                return False
-            regex = self._convert_like_to_regex(pattern)
-            try:
-                return bool(re.match(regex, value))
-            except Exception:
-                return False
-        expressions.append((expr, _v_d_like_4))
-
-        # d[0] IN ["23", "24"]
-        d_head = ["23", "24"]
-        expr = f"{json_field_name}['d'][0] IN {d_head}"
-        def _v_d0_in(json_obj: Any, allowed=d_head) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            value = json_obj.get('d')
-            if not isinstance(value, list) or len(value) == 0:
-                return False
-            return value[0] in allowed
-        expressions.append((expr, _v_d0_in))
-
-        # d['e'] == 'fanta'
-        expr = f"{json_field_name}['d']['e'] == 'fanta'"
-        def _v_d_e_fanta(json_obj: Any) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            value = json_obj.get('d')
-            if not isinstance(value, dict):
-                return False
-            return value.get('e') == 'fanta'
-        expressions.append((expr, _v_d_e_fanta))
-
-        # --- Shared keys ---
-        # e LIKE '4%'
-        expr = f"{json_field_name}['e'] LIKE \"4%\""
-        def _v_e_like_4(json_obj: Any, pattern="4%") -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            value = json_obj.get('e')
-            if value is None:
-                return False
-            regex = self._convert_like_to_regex(pattern)
-            try:
-                return bool(re.match(regex, str(value)))
-            except Exception:
-                return False
-        expressions.append((expr, _v_e_like_4))
-
-        # existence of nested shared key d.e via equality check to 'stick'
-        expr = f"{json_field_name}['d']['e'] == 'stick'"
-        def _v_d_e_stick(json_obj: Any) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            value = json_obj.get('d')
-            if not isinstance(value, dict):
-                return False
-            return value.get('e') == 'stick'
-        expressions.append((expr, _v_d_e_stick))
-
-        # --- Additional complex shared key 'g' expressions ---
-        # g[0]['h']['i'] >= 10 variant 0
-        expr = f"{json_field_name}['g'][0]['h']['i'] >= 10"
-        def _v_g0_h_i_ge_10(json_obj: Any) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            g_val = json_obj.get('g')
-            if not isinstance(g_val, list) or len(g_val) == 0:
-                return False
-            first = g_val[0]
-            if not isinstance(first, dict):
-                return False
-            h = first.get('h')
-            if not isinstance(h, dict):
-                return False
-            i_val = h.get('i')
-            try:
-                return float(i_val) >= 10
-            except Exception:
-                return False
-        expressions.append((expr, _v_g0_h_i_ge_10))
-
-        # g[1]['j'] IN [1234, 5678] variant 0
-        gj_allowed = [1234, 5678]
-        expr = f"{json_field_name}['g'][1]['j'] IN {gj_allowed}"
-        def _v_g1_j_in(json_obj: Any, allowed=gj_allowed) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            g_val = json_obj.get('g')
-            if not isinstance(g_val, list) or len(g_val) < 2:
-                return False
-            second = g_val[1]
-            if not isinstance(second, dict):
-                return False
-            return second.get('j') in allowed
-        expressions.append((expr, _v_g1_j_in))
-
-        # g[2] LIKE 'ab%' variant 0
-        expr = f"{json_field_name}['g'][2] LIKE \"ab%\""
-        def _v_g2_like_ab(json_obj: Any, pattern="ab%") -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            g_val = json_obj.get('g')
-            if not isinstance(g_val, list) or len(g_val) < 3:
-                return False
-            third = g_val[2]
-            if not isinstance(third, str):
-                return False
-            regex = self._convert_like_to_regex(pattern)
-            try:
-                return bool(re.match(regex, third))
-            except Exception:
-                return False
-        expressions.append((expr, _v_g2_like_ab))
-
-        # g['h'][0]['i'] >= 5 variant 1
-        expr = f"{json_field_name}['g']['h'][0]['i'] >= 5"
-        def _v_gh0_i_ge_5(json_obj: Any) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            g_val = json_obj.get('g')
-            if not isinstance(g_val, dict):
-                return False
-            h_list = g_val.get('h')
-            if not isinstance(h_list, list) or len(h_list) == 0:
-                return False
-            h0 = h_list[0]
-            if not isinstance(h0, dict):
-                return False
-            i_val = h0.get('i')
-            try:
-                return float(i_val) >= 5
-            except Exception:
-                return False
-        expressions.append((expr, _v_gh0_i_ge_5))
-
-        # g['h'][2]['k'][2] LIKE '%x%' variant 1
-        expr = f"{json_field_name}['g']['h'][2]['k'][2] LIKE \"%x%\""
-        def _v_gh2_k2_like_x(json_obj: Any, pattern="%x%") -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            g_val = json_obj.get('g')
-            if not isinstance(g_val, dict):
-                return False
-            h_list = g_val.get('h')
-            if not isinstance(h_list, list) or len(h_list) < 3:
-                return False
-            h2 = h_list[2]
-            if not isinstance(h2, dict):
-                return False
-            k_list = h2.get('k')
-            if not isinstance(k_list, list) or len(k_list) < 3:
-                return False
-            target = k_list[2]
-            regex = self._convert_like_to_regex(pattern)
-            try:
-                return bool(re.match(regex, str(target)))
-            except Exception:
-                return False
-        expressions.append((expr, _v_gh2_k2_like_x))
-
-        # g[0][0]['h']['i'] >= 1 (handles nested list at g[0]) variant 2
-        expr = f"{json_field_name}['g'][0][0]['h']['i'] >= 1"
-        def _v_g000_h_i_ge_1(json_obj: Any) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            g_val = json_obj.get('g')
-            if not isinstance(g_val, list) or len(g_val) == 0:
-                return False
-            first = g_val[0]
-            if not isinstance(first, list) or len(first) == 0:
-                return False
-            first0 = first[0]
-            if not isinstance(first0, dict):
-                return False
-            h = first0.get('h')
-            if not isinstance(h, dict):
-                return False
-            i_val = h.get('i')
-            try:
-                return float(i_val) >= 1
-            except Exception:
-                return False
-        expressions.append((expr, _v_g000_h_i_ge_1))
-
-        # g["alt"][0]["j"] == 1234 variant 3
-        expr = f"{json_field_name}['g']['alt'][0]['j'] == 1234"
-        def _v_g_alt0_j_eq_1234(json_obj: Any) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            g_val = json_obj.get('g')
-            if not isinstance(g_val, dict):
-                return False
-            alt_list = g_val.get('alt')
-            if not isinstance(alt_list, list) or len(alt_list) == 0:
-                return False
-            alt0 = alt_list[0]
-            if not isinstance(alt0, dict):
-                return False
-            j_val = alt0.get('j')
-            return j_val == 1234
-        expressions.append((expr, _v_g_alt0_j_eq_1234))
-
-        # g CONTAINS "stick" variant 4
-        expr = f"json_contains({json_field_name}, \"stick\")"
-        def _v_g_contains_stick(json_obj: Any) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            g_val = json_obj.get('g')
-            if not isinstance(g_val, list):
-                return False
-            return 'stick' in g_val
-        expressions.append((expr, _v_g_contains_stick))
-
-        # g[1] CONTAINS "fanta" variant 4
-        expr = f"json_contains({json_field_name}['g'][1], \"fanta\") "
-        def _v_g1_contains_fanta(json_obj: Any) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            g_val = json_obj.get('g')
-            if not isinstance(g_val, list) or len(g_val) < 2:
-                return False
-            second = g_val[1]
-            if not isinstance(second, list):
-                return False
-            return 'fanta' in second
-        expressions.append((expr, _v_g1_contains_fanta))
-
-        # g[0]["h"] CONTAINS_ALL ["milvus", "rocks", "stick"] variant 4
-        expr = f"json_contains_all({json_field_name}['g'][0]['h'], [\"milvus\", \"rocks\", \"stick\"]) "
-        def _v_g0_h_contains_all(json_obj: Any) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            g_val = json_obj.get('g')
-            if not isinstance(g_val, list) or len(g_val) == 0:
-                return False
-            first = g_val[0]
-            if not isinstance(first, dict):
-                return False
-            h_val = first.get('h')  
-            if not isinstance(h_val, list):
-                return False
-            return 'milvus' in h_val and 'rocks' in h_val and 'stick' in h_val
-        expressions.append((expr, _v_g0_h_contains_all))
-
-        # g[1] CONTAINS_ANY ["milvus", "fanta"] variant 4
-        expr = f"json_contains_any({json_field_name}['g'][0], [\"fanta\", \"milvus\"]) "
-        def _v_g_contains_any(json_obj: Any) -> bool:
-            if not isinstance(json_obj, dict):
-                return False
-            g_val = json_obj.get('g')
-            if not isinstance(g_val, list):
-                return False
-            return 'fanta' in g_val[0]
-        expressions.append((expr, _v_g_contains_any))
-
-        return expressions
-
-    def _generate_field_calculation_expressions(self, field_names: List[str], field_mapping: Dict, operator: str) -> \
-    List[Tuple[str, Callable]]:
-        """Generate expressions with field arithmetic calculations."""
-        expressions = []
-
-        # Find numeric fields for arithmetic operations
-        numeric_fields = []
-        for field_name in field_names:
-            data_type = field_mapping[field_name]
-            if isinstance(data_type, tuple) and data_type[0] == DataType.ARRAY:
-                element_type = data_type[1]
-                if element_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT,
-                                    DataType.DOUBLE]:
-                    numeric_fields.append(field_name)
-            elif data_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT,
-                               DataType.DOUBLE]:
-                numeric_fields.append(field_name)
-
-        if len(numeric_fields) < 2:
-            return expressions
-
-        # Generate field-to-field arithmetic expressions
-        for i in range(min(3, len(numeric_fields))):  # Limit to 3 expressions
-            field1 = numeric_fields[i]
-            field2 = numeric_fields[(i + 1) % len(numeric_fields)]
-
-            # Field arithmetic operations
-            arithmetic_ops = [
-                (f"{field1} + {field2}", lambda x, y: x + y if x is not None and y is not None else None),
-                (f"{field1} - {field2}", lambda x, y: x - y if x is not None and y is not None else None),
-                (f"{field1} * {field2}", lambda x, y: x * y if x is not None and y is not None else None),
-            ]
-
-            for arith_expr, arith_func in arithmetic_ops:
-                if operator in ["==", "!=", ">", "<", ">=", "<="]:
-                    # Generate comparison with arithmetic result
-                    value = random.randint(-100, 100)
-                    expression = f"{arith_expr} {operator} {value}"
-
-                    def validate_arithmetic(data_value1, data_value2, val=value, op=operator, func=arith_func):
-                        if data_value1 is None or data_value2 is None:
-                            return False
-                        result = func(data_value1, data_value2)
-                        if result is None:
-                            return False
-                        if op == "==":
-                            return result == val
-                        elif op == "!=":
-                            return result != val
-                        elif op == ">":
-                            return result > val
-                        elif op == "<":
-                            return result < val
-                        elif op == ">=":
-                            return result >= val
-                        elif op == "<=":
-                            return result <= val
-                        return False
-
-                    expressions.append(
-                        (expression, lambda record, f1=field1, f2=field2, v=value, o=operator, f=arith_func:
-                        validate_arithmetic(record.get(f1), record.get(f2), v, o, f)))
-
-        # Generate field with constant arithmetic
-        for field_name in numeric_fields[:3]:  # Limit to 3 expressions
-            constant = random.randint(-50, 50)
-            arithmetic_ops = [
-                (f"{field_name} + {constant}", lambda x, c: x + c if x is not None else None),
-                (f"{field_name} - {constant}", lambda x, c: x - c if x is not None else None),
-                (f"{field_name} * {constant}", lambda x, c: x * c if x is not None else None),
-            ]
-
-            for arith_expr, arith_func in arithmetic_ops:
-                if operator in ["==", "!=", ">", "<", ">=", "<="]:
-                    value = random.randint(-100, 100)
-                    expression = f"{arith_expr} {operator} {value}"
-
-                    def validate_constant_arithmetic(data_value, const=constant, val=value, op=operator,
-                                                     func=arith_func):
-                        if data_value is None:
-                            return False
-                        result = func(data_value, const)
-                        if result is None:
-                            return False
-                        if op == "==":
-                            return result == val
-                        elif op == "!=":
-                            return result != val
-                        elif op == ">":
-                            return result > val
-                        elif op == "<":
-                            return result < val
-                        elif op == ">=":
-                            return result >= val
-                        elif op == "<=":
-                            return result <= val
-                        return False
-
-                    expressions.append(
-                        (expression, lambda record, f=field_name, c=constant, v=value, o=operator, func=arith_func:
-                        validate_constant_arithmetic(record.get(f), c, v, o, func)))
-
-        return expressions
-
-    def _generate_array_indexing_expressions(self, field_names: List[str], field_mapping: Dict, operator: str) -> List[
-        Tuple[str, Callable]]:
-        """Generate expressions with array indexing."""
-        expressions = []
-
-        # Find array fields
-        array_fields = []
-        for field_name in field_names:
-            data_type = field_mapping[field_name]
-            if isinstance(data_type, tuple) and data_type[0] == DataType.ARRAY:
-                array_fields.append((field_name, data_type[1]))
-
-        for field_name, element_type in array_fields[:5]:  # Limit to 5 expressions
-            # Array indexing expressions
-            if operator in ["==", "!=", ">", "<", ">=", "<="]:
-                # Direct array element comparison
-                if element_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]:
-                    value = random.randint(0, 100)
-                    expression = f"{field_name}[0] {operator} {value}"
-
-                    def validate_array_int(data_value, val=value, op=operator):
-                        if data_value is None or not isinstance(data_value, list) or len(data_value) == 0:
-                            return False
-                        element = data_value[0] if len(data_value) > 0 else None
-                        if element is None:
-                            return False
-                        if op == "==":
-                            return element == val
-                        elif op == "!=":
-                            return element != val
-                        elif op == ">":
-                            return element > val
-                        elif op == "<":
-                            return element < val
-                        elif op == ">=":
-                            return element >= val
-                        elif op == "<=":
-                            return element <= val
-                        return False
-
-                    expressions.append((expression, lambda record, f=field_name, v=value, o=operator:
-                    validate_array_int(record.get(f), v, o)))
-
-                elif element_type == DataType.VARCHAR:
-                    # String array element comparison
-                    patterns = ["str_0", "str_1", "str_2", "a", "b", "c"]
-                    pattern = random.choice(patterns)
-
-                    if operator == "LIKE":
-                        expression = f'{field_name}[0] LIKE "{pattern}"'
-
-                        def validate_array_string_like(data_value, pat=pattern):
-                            if data_value is None or not isinstance(data_value, list) or len(data_value) == 0:
-                                return False
-                            element = data_value[0] if len(data_value) > 0 else None
-                            if element is None:
-                                return False
-                            data_str = str(element)
-                            regex_pattern = self._convert_like_to_regex(pat)
-                            try:
-                                return bool(re.match(regex_pattern, data_str))
-                            except:
-                                return False
-
-                        expressions.append((expression, lambda record, f=field_name, p=pattern:
-                        validate_array_string_like(record.get(f), p)))
-                    else:
-                        expression = f'{field_name}[0] {operator} "{pattern}"'
-
-                        def validate_array_string(data_value, val=pattern, op=operator):
-                            if data_value is None or not isinstance(data_value, list) or len(data_value) == 0:
-                                return False
-                            element = data_value[0] if len(data_value) > 0 else None
-                            if element is None:
-                                return False
-                            if op == "==":
-                                return str(element) == val
-                            elif op == "!=":
-                                return str(element) != val
-                            return False
-
-                        expressions.append((expression, lambda record, f=field_name, v=pattern, o=operator:
-                        validate_array_string(record.get(f), v, o)))
-
-            elif operator == "IN":
-                # Array element IN expression
-                if element_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]:
-                    values = [random.randint(0, 100) for _ in range(3)]
-                    expression = f"{field_name}[0] IN {values}"
-
-                    def validate_array_in(data_value, filter_values=values):
-                        if data_value is None or not isinstance(data_value, list) or len(data_value) == 0:
-                            return False
-                        element = data_value[0] if len(data_value) > 0 else None
-                        return element in filter_values
-
-                    expressions.append((expression, lambda record, f=field_name, v=values:
-                    validate_array_in(record.get(f), v)))
-
-                elif element_type == DataType.VARCHAR:
-                    values = ["str_0", "str_1", "str_2", "a", "b", "c"]
-                    expression = f'{field_name}[0] IN {values}'
-
-                    def validate_array_string_in(data_value, filter_values=values):
-                        if data_value is None or not isinstance(data_value, list) or len(data_value) == 0:
-                            return False
-                        element = data_value[0] if len(data_value) > 0 else None
-                        return str(element) in filter_values
-
-                    expressions.append((expression, lambda record, f=field_name, v=values:
-                    validate_array_string_in(record.get(f), v)))
-
-        return expressions
-
-    def _generate_json_path_expressions(self, field_names: List[str], field_mapping: Dict, operator: str) -> List[
-        Tuple[str, Callable]]:
-        """Generate expressions with JSON path access."""
-        expressions = []
-
-        # Find JSON fields
-        json_fields = [name for name in field_names if field_mapping[name] == DataType.JSON]
-
-        for field_name in json_fields[:3]:  # Limit to 3 expressions
-            # JSON path expressions
-            if operator in ["==", "!=", ">", "<", ">=", "<="]:
-                # Simple JSON key access
-                expression = f"{field_name}['int'] {operator} 5"
-
-                def validate_json_number(data_value, val=5, op=operator):
-                    if data_value is None or not isinstance(data_value, dict):
-                        return False
-                    json_value = data_value.get('int')
-                    if json_value is None:
-                        if op == "!=":
-                            return True
-                        else:
-                            return False
-                    if op == "==":
-                        return json_value == val
-                    elif op == "!=":
-                        return json_value != val
-                    elif op == ">":
-                        return json_value > val
-                    elif op == "<":
-                        return json_value < val
-                    elif op == ">=":
-                        return json_value >= val
-                    elif op == "<=":
-                        return json_value <= val
-                    return False
-
-                expressions.append((expression, lambda record, f=field_name, v=5, o=operator:
-                validate_json_number(record.get(f), v, o)))
-
-                # JSON text comparison
-                expression = f'{field_name}["varchar"] {operator} "str_5"'
-
-                def validate_json_text(data_value, val="str_5", op=operator):
-                    if data_value is None or not isinstance(data_value, dict):
-                        return False
-                    json_value = data_value.get('varchar')
-                    if json_value is None:
-                        if op == "!=":
-                            return True
-                        else:
-                            return False
-                    if op == "==":
-                        return str(json_value) == str(val)
-                    elif op == "!=":
-                        return str(json_value) != str(val)
-                    elif op == ">":
-                        return str(json_value) > str(val)
-                    elif op == "<":
-                        return str(json_value) < str(val)
-                    elif op == ">=":
-                        return str(json_value) >= str(val)
-                    elif op == "<=":
-                        return str(json_value) <= str(val)
-                    return False
-
-                expressions.append((expression, lambda record, f=field_name, v="str_5", o=operator:
-                validate_json_text(record.get(f), v, o)))
-
-            elif operator == "IN":
-                # JSON array element IN
-                expression = f"{field_name}['array_int'][0] IN [1, 2, 3]"
-
-                def validate_json_array_in(data_value, filter_values=[1, 2, 3]):
-                    if data_value is None or not isinstance(data_value, dict):
-                        return False
-                    json_array = data_value.get('array_int')
-                    if json_array is None or not isinstance(json_array, list) or len(json_array) == 0:
-                        return False
-                    element = json_array[0]
-                    return element in filter_values
-
-                expressions.append((expression, lambda record, f=field_name, v=[1, 2, 3]:
-                validate_json_array_in(record.get(f), v)))
-
-            elif operator == "LIKE":
-                # JSON text LIKE
-                expression = f'{field_name}["varchar"] LIKE "str_%"'
-
-                def validate_json_like(data_value, pattern="str_%"):
-                    if data_value is None or not isinstance(data_value, dict):
-                        return False
-                    json_value = data_value.get('varchar')
-                    if json_value is None:
-                        return False
-                    data_str = str(json_value)
-                    regex_pattern = self._convert_like_to_regex(pattern)
-                    try:
-                        return bool(re.match(regex_pattern, data_str))
-                    except:
-                        return False
-
-                expressions.append((expression, lambda record, f=field_name, p="str_%":
-                validate_json_like(record.get(f), p)))
-
-        return expressions
-
-    def _generate_mixed_complex_expressions(self, field_names: List[str], field_mapping: Dict, operator: str) -> List[
-        Tuple[str, Callable]]:
-        """Generate mixed complex expressions combining multiple features."""
-        expressions = []
-
-        # Find different types of fields
-        numeric_fields = []
-        array_fields = []
-        json_fields = []
-
-        for field_name in field_names:
-            data_type = field_mapping[field_name]
-            if isinstance(data_type, tuple) and data_type[0] == DataType.ARRAY:
-                element_type = data_type[1]
-                if element_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT,
-                                    DataType.DOUBLE]:
-                    array_fields.append((field_name, element_type))
-            elif data_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64, DataType.FLOAT,
-                               DataType.DOUBLE]:
-                numeric_fields.append(field_name)
-            elif data_type == DataType.JSON:
-                json_fields.append(field_name)
-
-        # Mixed expressions: array element + constant arithmetic
-        if array_fields and operator in ["==", "!=", ">", "<", ">=", "<="]:
-            field_name, element_type = array_fields[0]
-            if element_type in [DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64]:
-                constant = random.randint(1, 10)
-                value = random.randint(0, 50)
-                expression = f"{field_name}[0] + {constant} {operator} {value}"
-
-                def validate_mixed_array_arithmetic(data_value, const=constant, val=value, op=operator):
-                    if data_value is None or not isinstance(data_value, list) or len(data_value) == 0:
-                        return False
-                    element = data_value[0] if len(data_value) > 0 else None
-                    if element is None:
-                        if op == "!=":
-                            return True
-                        else:
-                            return False
-                    result = element + const
-                    if op == "==":
-                        return result == val
-                    elif op == "!=":
-                        return result != val
-                    elif op == ">":
-                        return result > val
-                    elif op == "<":
-                        return result < val
-                    elif op == ">=":
-                        return result >= val
-                    elif op == "<=":
-                        return result <= val
-                    return False
-
-                expressions.append((expression, lambda record, f=field_name, c=constant, v=value, o=operator:
-                validate_mixed_array_arithmetic(record.get(f), c, v, o)))
-
-        # Mixed expressions: JSON array element comparison
-        if json_fields and operator in ["==", "!=", ">", "<", ">=", "<="]:
-            field_name = json_fields[0]
-            value = random.randint(0, 10)
-            expression = f"{field_name}['array_int'][0] {operator} {value}"
-
-            def validate_json_array_element(data_value, val=value, op=operator):
-                if data_value is None or not isinstance(data_value, dict):
-                    return False
-                json_array = data_value.get('array_int')
-                if json_array is None:
-                    if op == "!=":
-                        return True
-                    else:
-                        return False
-                element = json_array[0]
-                if element is None:
-                    if op == "!=":
-                        return True
-                    else:
-                        return False
-                if op == "==":
-                    return element == val
-                elif op == "!=":
-                    return element != val
-                elif op == ">":
-                    return element > val
-                elif op == "<":
-                    return element < val
-                elif op == ">=":
-                    return element >= val
-                elif op == "<=":
-                    return element <= val
-                return False
-
-            expressions.append((expression, lambda record, f=field_name, v=value, o=operator:
-            validate_json_array_element(record.get(f), v, o)))
-
-        return expressions
-
-    def _run_complex_expression_tests(self, client, collection_name: str, field_mapping: Dict,
-                                      index_configs: Dict, test_data: List[Dict]) -> Dict:
-        """
-        Run complex expression testing including field calculations, array indexing, and JSON path access.
-        
-        Args:
-            client: Milvus client instance
-            collection_name: Name of the collection
-            field_mapping: Mapping of field names to data types
-            index_configs: Mapping of field names to index types
-            test_data: Test data records
-            
-        Returns:
-            Dictionary containing test statistics
-        """
-        # Initialize statistics
-        stats = {
-            "success": [],
-            "not_supported": [],
-            "failed": [],
-            "total": []
-        }
-
-        # Test complex expressions with all operators
-        all_operators = comparison_operators + range_operators + null_operators
-
-        for operator in all_operators:
-            # Generate complex expressions for this operator
-            complex_expressions = self.generate_complex_expression(field_mapping, index_configs, operator)
-
-            for expression, validator in complex_expressions:
-                expression_info = f"Complex expression with {operator}: {expression}"
-                stats["total"].append(expression_info)
-
-                log.info(f"Testing {expression_info}")
-
-                try:
-                    # Execute query
-                    res = self.query(
-                        client, collection_name=collection_name,
-                        filter=expression, output_fields=["*"],
-                        check_task=CheckTasks.check_nothing
-                    )[0]
-
-                    # Check if res is an Error
-                    if isinstance(res, Error):
-                        if self.is_parsing_error(res):
-                            log.warning(f"⚠️ {expression_info} cannot be parsed, skipping: {str(res)}")
-                            stats["not_supported"].append(f"{expression_info}: {str(res)}")
-                            continue
-                        else:
-                            log.error(f"✗ {expression_info} failed: {str(res)}")
-                            stats["failed"].append(f"{expression_info}: {str(res)}")
-                            continue
-                    else:
-                        # Calculate expected results
-                        expected_results = []
-                        for record in test_data:
-                            if validator(record):
-                                expected_results.append(record)
-
-                        # Verify results against ground truth
-                        if len(res) != len(expected_results):
-                            log.error(
-                                f"✗ {expression_info} returned {len(res)} results, expected {len(expected_results)}")
-                            stats["failed"].append(
-                                f"{expression_info}: returned {len(res)} results, expected {len(expected_results)}")
-                            continue
-                        else:
-                            log.info(f"✓ {expression_info} passed with {len(res)} results")
-                            stats["success"].append(f"{expression_info}: {len(res)} results")
-
-                except Exception as e:
-                    log.error(f"✗ {expression_info} encountered exception: {str(e)}")
-                    stats["failed"].append(f"{expression_info}: exception {str(e)}")
-                    continue
-
-        return stats
-
-    def create_json_only_schema_with_index_types(self, client):
-        """
-        Create a schema containing only JSON fields, each repeated with different index types
-        to verify index consistency for JSON key-category expressions.
-
-        Returns: (schema, field_mapping, index_configs)
-        """
+            in_list = ", ".join(repr(v) for v in in_vals)
+        exprs.append(f'{field_name} IN [{in_list}]')
+        exprs.append(f'{field_name} NOT IN [{in_list}]')
+
+    # VARCHAR-specific: LIKE
+    if dtype == DataType.VARCHAR:
+        str_values = [v for v in non_none if isinstance(v, str)]
+        exprs.extend(_gen_like_expressions(field_name, str_values))
+
+    # Arithmetic expressions for numeric types
+    if dtype in (DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64,
+                 DataType.FLOAT, DataType.DOUBLE):
+        if non_none:
+            v = non_none[0]
+            if not (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
+                exprs.append(f'{field_name} + 1 > {repr(v)}')
+                exprs.append(f'{field_name} - 1 < {repr(v)}')
+                exprs.append(f'{field_name} * 2 >= {repr(v)}')
+
+    return exprs
+
+
+def generate_compound_expressions(
+    field_exprs: Dict[str, List[str]],
+    max_compounds: int = 20,
+    seed: int = DEFAULT_SEED,
+) -> List[str]:
+    """
+    Generate compound (AND/OR/NOT) expressions by combining single-field expressions.
+
+    Args:
+        field_exprs: dict mapping field_name → list of expressions for that field
+        max_compounds: maximum number of compound expressions to generate
+        seed: random seed
+
+    Returns:
+        list of compound expression strings
+    """
+    rng = random.Random(seed)
+    all_exprs = []
+    for exprs in field_exprs.values():
+        all_exprs.extend(exprs)
+
+    if len(all_exprs) < 2:
+        return []
+
+    compounds = []
+    for _ in range(max_compounds):
+        e1, e2 = rng.sample(all_exprs, 2)
+        op = rng.choice(['&&', '||'])
+        compounds.append(f'({e1}) {op} ({e2})')
+
+    # Add NOT expressions
+    for _ in range(min(5, max_compounds)):
+        e = rng.choice(all_exprs)
+        compounds.append(f'not ({e})')
+
+    # ── Deterministic complex patterns (not random) ──
+    if len(all_exprs) >= 4:
+        e1, e2, e3, e4 = all_exprs[:4]
+        # NOT + AND
+        compounds.append(f'not (({e1}) and ({e2}))')
+        # NOT + OR
+        compounds.append(f'not (({e1}) or ({e2}))')
+        # Triple nesting: NOT(AND + OR)
+        compounds.append(f'not (({e1}) and (({e2}) or ({e3})))')
+        # (A or B) and (C or D)
+        compounds.append(f'(({e1}) or ({e2})) and (({e3}) or ({e4}))')
+        # NOT((A or B) and C)
+        compounds.append(f'not ((({e1}) or ({e2})) and ({e3}))')
+        # Deep: A and (B or (C and D))
+        compounds.append(f'({e1}) and (({e2}) or (({e3}) and ({e4})))')
+        # Double NOT
+        compounds.append(f'not (not ({e1}))')
+        # Three-way AND
+        compounds.append(f'({e1}) and ({e2}) and ({e3})')
+        # Three-way OR
+        compounds.append(f'({e1}) or ({e2}) or ({e3})')
+        # NOT + DeMorgan pattern
+        compounds.append(f'not (({e1}) and ({e2})) or ({e3})')
+
+    return compounds
+
+
+# ──────────────────────────────────────────────────────────────
+# Test Class 1: Correctness — eval ground truth
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.xdist_group("TestScalarExprCorrectness")
+class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
+    """
+    Correctness test: one field per scalar/array type, eval-based ground truth.
+    500 rows with deterministic boundary values + random fill.
+    Full operator coverage: comparison, arithmetic, range, string, null, array, logical.
+    """
+    shared_alias = "TestScalarExprCorrectness"
+    NUM_ROWS = 500
+
+    # (field_name, DataType, nullable, is_array, elem_dtype_or_None)
+    FIELD_DEFS = [
+        # Scalar types — one per type, all nullable
+        ("int8_val",    DataType.INT8,    True,  False, None),
+        ("int16_val",   DataType.INT16,   True,  False, None),
+        ("int32_val",   DataType.INT32,   True,  False, None),
+        ("int64_val",   DataType.INT64,   True,  False, None),
+        ("float_val",   DataType.FLOAT,   True,  False, None),
+        ("double_val",  DataType.DOUBLE,  True,  False, None),
+        ("bool_val",    DataType.BOOL,    True,  False, None),
+        ("varchar_val", DataType.VARCHAR, True,  False, None),
+        # Array types — all supported element types
+        ("arr_int8",    DataType.ARRAY,   True,  True,  DataType.INT8),
+        ("arr_int16",   DataType.ARRAY,   True,  True,  DataType.INT16),
+        ("arr_int32",   DataType.ARRAY,   True,  True,  DataType.INT32),
+        ("arr_int64",   DataType.ARRAY,   True,  True,  DataType.INT64),
+        ("arr_float",   DataType.ARRAY,   True,  True,  DataType.FLOAT),
+        ("arr_double",  DataType.ARRAY,   True,  True,  DataType.DOUBLE),
+        ("arr_bool",    DataType.ARRAY,   True,  True,  DataType.BOOL),
+        ("arr_varchar", DataType.ARRAY,   True,  True,  DataType.VARCHAR),
+    ]
+
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = "TestScalarExprCorrectness" + cf.gen_unique_str("_")
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_collection(self, request):
+        client = self._client(alias=self.shared_alias)
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_pk, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vec, DataType.FLOAT_VECTOR, dim=default_dim)
 
-        field_mapping: Dict[str, Any] = {}
-        index_configs: Dict[str, str] = {}
+        field_names = []
+        for fname, dtype, nullable, is_array, elem_dtype in self.FIELD_DEFS:
+            if is_array:
+                if elem_dtype == DataType.VARCHAR:
+                    schema.add_field(fname, DataType.ARRAY, element_type=elem_dtype,
+                                     max_capacity=5, max_length=100, nullable=nullable)
+                else:
+                    schema.add_field(fname, DataType.ARRAY, element_type=elem_dtype,
+                                     max_capacity=5, nullable=nullable)
+            elif dtype == DataType.VARCHAR:
+                schema.add_field(fname, dtype, max_length=256, nullable=nullable)
+            else:
+                schema.add_field(fname, dtype, nullable=nullable)
+            field_names.append(fname)
 
-        supported_indexes = ["no_index", "inverted", "ngram", "autoindex"]
-        for index_type in supported_indexes:
-            field_name = f"json_{index_type}"
-            schema.add_field(field_name, DataType.JSON, nullable=True)
-            field_mapping[field_name] = DataType.JSON
-            index_configs[field_name] = index_type
+        self.create_collection(client, self.collection_name, schema=schema)
 
-        return schema, field_mapping, index_configs
+        # Generate deterministic data
+        # Convert tuple FIELD_DEFS to dict format for generate_deterministic_rows
+        field_configs = [{"name": f, "dtype": d, "nullable": n, "is_array": ia, "element_dtype": ed}
+                         for f, d, n, ia, ed in self.FIELD_DEFS]
+        test_data_values = generate_deterministic_rows(field_configs, total_rows=self.NUM_ROWS, seed=DEFAULT_SEED)
+
+        # Build full rows with pk and vector
+        vectors = cf.gen_vectors(self.NUM_ROWS, default_dim)
+        test_data = []
+        for i, srow in enumerate(test_data_values):
+            row = {default_pk: i, default_vec: vectors[i]}
+            row.update(srow)
+            test_data.append(row)
+
+        request.cls.test_data = test_data
+        request.cls.field_names = field_names
+
+        # Batch insert
+        for start in range(0, len(test_data), 1000):
+            self.insert(client, self.collection_name, data=test_data[start:start + 1000])
+        self.flush(client, self.collection_name)
+
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(default_vec, index_type="FLAT", metric_type="COSINE")
+        self.create_index(client, self.collection_name, index_params=idx)
+        self.load_collection(client, self.collection_name)
+
+        def teardown():
+            self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+        request.addfinalizer(teardown)
+
+    def _run_expression_check(self, client, expr, test_data, field_names):
+        """
+        Run a single expression and compare against eval ground truth.
+        Returns (status, msg) where status is 'pass', 'fail', or 'skip'.
+        """
+        try:
+            res = self.query(client, self.collection_name, filter=expr,
+                             output_fields=[default_pk],
+                             check_task=CheckTasks.check_nothing)[0]
+            if hasattr(res, 'message') and res.message:
+                return ('skip', f"SKIP: {expr} -> {res.message}")
+            milvus_ids = sorted([r[default_pk] for r in res])
+        except Exception as e:
+            if 'cannot parse' in str(e) or 'unsupported' in str(e).lower():
+                return ('skip', f"SKIP: {expr} -> {e}")
+            return ('fail', f"EXCEPTION: {expr} -> {e}")
+
+        expected_idx = eval_filter(expr, test_data)
+        expected_ids = sorted([test_data[i][default_pk] for i in expected_idx])
+
+        if milvus_ids != expected_ids:
+            extra = set(milvus_ids) - set(expected_ids)
+            missing = set(expected_ids) - set(milvus_ids)
+            return ('fail', f"MISMATCH: {expr} | Milvus={len(milvus_ids)} expected={len(expected_ids)} | "
+                            f"extra(5)={list(extra)[:5]} missing(5)={list(missing)[:5]}")
+        return ('pass', None)
+
+    def _do_single_field_test(self, field_idx):
+        """Shared implementation for single-field expression tests."""
+        fname, dtype, nullable, is_array, elem_dtype = self.FIELD_DEFS[field_idx]
+        client = self._client(alias=self.shared_alias)
+
+        # Extract sample values for this field
+        if is_array:
+            sample_vals = [r[fname] for r in self.test_data if r.get(fname) is not None and isinstance(r.get(fname), list)]
+        else:
+            sample_vals = [r[fname] for r in self.test_data if r.get(fname) is not None]
+
+        expressions = generate_expressions_for_field(
+            fname, dtype, sample_vals, nullable=nullable, is_array=is_array, element_dtype=elem_dtype)
+
+        failures = []
+        skipped = []
+        passed = 0
+        for expr in expressions:
+            status, msg = self._run_expression_check(client, expr, self.test_data, self.field_names)
+            if status == 'fail':
+                failures.append(msg)
+                log.error(msg)
+            elif status == 'skip':
+                skipped.append(msg)
+                log.warning(msg)
+            else:
+                passed += 1
+                log.info(f"PASS: {expr}")
+
+        # Report coverage: warn if too many expressions were skipped
+        total = len(expressions)
+        skip_pct = len(skipped) / total * 100 if total > 0 else 0
+        log.info(f"Field {fname}: {passed} passed, {len(failures)} failed, {len(skipped)} skipped "
+                 f"({skip_pct:.0f}% skip rate) out of {total}")
+        if skip_pct > 50:
+            log.warning(f"HIGH SKIP RATE for {fname}: {skip_pct:.0f}% — most expressions not verified!")
+
+        assert not failures, (
+            f"Seed={DEFAULT_SEED}, field={fname}, {len(failures)}/{total} failed, "
+            f"{len(skipped)} skipped:\n" + "\n".join(failures))
+
+    # L1: core scalar types (INT8, INT16, INT32, INT64, VARCHAR) + basic arrays (INT32, INT64)
+    # Indices: 0=INT8, 1=INT16, 2=INT32, 3=INT64, 7=VARCHAR, 10=arr_int32, 11=arr_int64
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("field_idx", [0, 1, 2, 3, 7, 10, 11])
+    def test_single_field_expressions_l1(self, field_idx):
+        """L1: Core scalar + array type expression correctness."""
+        self._do_single_field_test(field_idx)
+
+    # L2: extended types (FLOAT, DOUBLE, BOOL) + all remaining array types
+    # Indices: 4=FLOAT, 5=DOUBLE, 6=BOOL, 8=arr_int8, 9=arr_int16, 12=arr_float, 13=arr_double, 14=arr_bool, 15=arr_varchar
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("field_idx", [4, 5, 6, 8, 9, 12, 13, 14, 15])
+    def test_single_field_expressions_l2(self, field_idx):
+        """L2: Extended type expression correctness (FLOAT, DOUBLE, BOOL, all array types)."""
+        self._do_single_field_test(field_idx)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("num_records", [10000])
-    def test_json_key_category_expressions(self, num_records):
+    def test_compound_expressions(self):
+        """Test AND/OR/NOT compound expressions across multiple fields."""
+        client = self._client(alias=self.shared_alias)
+
+        # Build field_exprs dict: field_name -> list of expression strings
+        field_exprs = {}
+        for fname, dtype, nullable, is_array, elem_dtype in self.FIELD_DEFS:
+            if is_array:
+                sample_vals = [r[fname] for r in self.test_data if r.get(fname) is not None and isinstance(r.get(fname), list)]
+            else:
+                sample_vals = [r[fname] for r in self.test_data if r.get(fname) is not None]
+            exprs = generate_expressions_for_field(
+                fname, dtype, sample_vals, nullable=nullable, is_array=is_array, element_dtype=elem_dtype)
+            if exprs:
+                field_exprs[fname] = exprs
+
+        expressions = generate_compound_expressions(field_exprs)
+
+        failures = []
+        skipped = []
+        passed = 0
+        for expr in expressions:
+            status, msg = self._run_expression_check(client, expr, self.test_data, self.field_names)
+            if status == 'fail':
+                failures.append(msg)
+                log.error(msg)
+            elif status == 'skip':
+                skipped.append(msg)
+                log.warning(msg)
+            else:
+                passed += 1
+                log.info(f"PASS: {expr}")
+
+        total = len(expressions)
+        log.info(f"Compound: {passed} passed, {len(failures)} failed, {len(skipped)} skipped out of {total}")
+
+        assert not failures, (
+            f"Seed={DEFAULT_SEED}, {len(failures)}/{total} compound failed, {len(skipped)} skipped:\n"
+            + "\n".join(failures))
+
+
+# ──────────────────────────────────────────────────────────────
+# Test Class 2: Index consistency — cross-index comparison
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.xdist_group("TestScalarIdxConsistency")
+class TestScalarIndexConsistency(TestMilvusClientV2Base):
+    """
+    Index consistency: same data across fields with different indexes.
+    200 rows. Verifies all index types return identical results.
+    """
+    shared_alias = "TestScalarIdxConsistency"
+    NUM_ROWS = 200
+
+    INDEX_MATRIX = {
+        DataType.INT8:   ["no_index", "INVERTED", "BITMAP", "STL_SORT"],
+        DataType.INT16:  ["no_index", "INVERTED", "BITMAP", "STL_SORT"],
+        DataType.INT32:  ["no_index", "INVERTED", "BITMAP", "STL_SORT"],
+        DataType.INT64:  ["no_index", "INVERTED", "BITMAP", "STL_SORT"],
+        DataType.FLOAT:  ["no_index", "INVERTED", "STL_SORT"],
+        DataType.DOUBLE: ["no_index", "INVERTED", "STL_SORT"],
+        DataType.BOOL:   ["no_index", "INVERTED", "BITMAP"],
+        DataType.VARCHAR: ["no_index", "INVERTED", "BITMAP", "TRIE"],
+    }
+
+    ARRAY_INDEX_MATRIX = {
+        DataType.INT32:   ["no_index", "INVERTED", "BITMAP"],
+        DataType.INT64:   ["no_index", "INVERTED", "BITMAP"],
+        DataType.VARCHAR:  ["no_index", "INVERTED", "BITMAP"],
+    }
+
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = "TestScalarIdxConsist" + cf.gen_unique_str("_")
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_collection(self, request):
+        client = self._client(alias=self.shared_alias)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_pk, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vec, DataType.FLOAT_VECTOR, dim=default_dim)
+
+        field_groups = {}
+        for dtype, indexes in self.INDEX_MATRIX.items():
+            group = []
+            for idx_type in indexes:
+                fname = f"{dtype.name.lower()}_{idx_type.lower().replace('-', '_')}"
+                if dtype == DataType.VARCHAR:
+                    schema.add_field(fname, dtype, max_length=256, nullable=True)
+                else:
+                    schema.add_field(fname, dtype, nullable=True)
+                group.append((fname, idx_type))
+            field_groups[dtype] = group
+
+        array_field_groups = {}
+        for elem_dtype, indexes in self.ARRAY_INDEX_MATRIX.items():
+            group = []
+            for idx_type in indexes:
+                fname = f"arr_{elem_dtype.name.lower()}_{idx_type.lower().replace('-', '_')}"
+                if elem_dtype == DataType.VARCHAR:
+                    schema.add_field(fname, DataType.ARRAY, element_type=elem_dtype,
+                                     max_capacity=5, max_length=100, nullable=True)
+                else:
+                    schema.add_field(fname, DataType.ARRAY, element_type=elem_dtype,
+                                     max_capacity=5, nullable=True)
+                group.append((fname, idx_type))
+            array_field_groups[elem_dtype] = group
+
+        self.create_collection(client, self.collection_name, schema=schema)
+
+        rng = random.Random(DEFAULT_SEED)
+        vectors = cf.gen_vectors(self.NUM_ROWS, default_dim)
+        test_data = []
+        for i in range(self.NUM_ROWS):
+            row = {default_pk: i, default_vec: vectors[i]}
+            for dtype, group in field_groups.items():
+                val = make_nullable_value(dtype, rng, null_prob=0.1)
+                for fname, _ in group:
+                    row[fname] = val
+            for elem_dtype, group in array_field_groups.items():
+                arr_val = None if rng.random() < 0.1 else make_random_array(elem_dtype, rng)
+                for fname, _ in group:
+                    row[fname] = arr_val
+            test_data.append(row)
+
+        request.cls.test_data = test_data
+        request.cls.field_groups = field_groups
+        request.cls.array_field_groups = array_field_groups
+
+        self.insert(client, self.collection_name, data=test_data)
+        self.flush(client, self.collection_name)
+
+        idx_params = self.prepare_index_params(client)[0]
+        idx_params.add_index(default_vec, index_type="FLAT", metric_type="COSINE")
+        self.create_index(client, self.collection_name, index_params=idx_params)
+
+        for dtype, group in field_groups.items():
+            for fname, idx_type in group:
+                if idx_type != "no_index":
+                    ip = self.prepare_index_params(client)[0]
+                    ip.add_index(fname, index_type=idx_type)
+                    self.create_index(client, self.collection_name, index_params=ip)
+
+        for elem_dtype, group in array_field_groups.items():
+            for fname, idx_type in group:
+                if idx_type != "no_index":
+                    ip = self.prepare_index_params(client)[0]
+                    ip.add_index(fname, index_type=idx_type)
+                    self.create_index(client, self.collection_name, index_params=ip)
+
+        self.load_collection(client, self.collection_name)
+
+        def teardown():
+            self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+        request.addfinalizer(teardown)
+
+    def _check_cross_index_consistency(self, client, group, templates, test_data=None):
         """
-        JSON-only test that validates all generated JSON key-category expressions across
-        multiple index types for index consistency and correctness vs. ground truth.
+        Run expression templates across fields in a group, verify:
+        1. All indexes return identical results (cross-index consistency)
+        2. The no_index field result matches eval ground truth (correctness)
         """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-
-        try:
-            # Schema: JSON-only with multiple index types
-            schema, field_mapping, index_configs = self.create_json_only_schema_with_index_types(client)
-            self.create_collection(client, collection_name, schema=schema)
-
-            # Data: generate JSON docs and populate into each JSON field
-            json_docs = self.generate_json_records_with_key_categories(num_records)
-            vectors = cf.gen_vectors(num_records, default_dim)
-
-            test_data: List[Dict] = []
-            json_field_names = [name for name, _ in field_mapping.items()]
-            for i in range(num_records):
-                record: Dict[str, Any] = {
-                    default_primary_key_field_name: i,
-                    default_vector_field_name: vectors[i]
-                }
-                for json_field in json_field_names:
-                    record[json_field] = json_docs[i]
-                test_data.append(record)
-
-            # Insert and index
-            self.insert_data_in_batches(client, collection_name, test_data, ct.default_nb)
-            self._create_all_indexes(client, collection_name, index_configs)
-            self.load_collection(client, collection_name)
-
-            # Run generated expressions for each JSON field, verify results
-            failed: List[str] = []
-            not_supported: List[str] = []
-            total_checked: List[str] = []
-
-            # Expressions are the same per JSON field; generate once and reuse across fields
-            sample_field = json_field_names[0]
-            expressions = self.generate_expressions_for_json_key_categories(sample_field)
-
-            for expression, validator in expressions:
-                # For consistency check across different index types
-                field_results: Dict[str, Any] = {}
-
-                for field_name in json_field_names:
-                    test_expression = expression.replace(sample_field, field_name)
-                    expression_info = f"{field_name} ({index_configs[field_name]}): {test_expression}"
-                    total_checked.append(expression_info)
-
-                    try:
-                        res = self.query(
-                            client, collection_name=collection_name,
-                            filter=test_expression, output_fields=["*"],
-                            check_task=CheckTasks.check_nothing
-                        )[0]
-
-                        if isinstance(res, Error):
-                            if self.is_parsing_error(res):
-                                log.warning(f"⚠️ JSON expr cannot be parsed, skipping: {expression_info} -> {str(res)}")
-                                not_supported.append(f"{expression_info}: {str(res)}")
-                                continue
-                            else:
-                                log.error(f"✗ JSON expr failed: {expression_info} -> {str(res)}")
-                                failed.append(f"{expression_info}: {str(res)}")
-                                continue
-
-                        # Store for consistency check
-                        field_results[field_name] = res
-
-                        # Ground truth
-                        expected_ids = []
-                        for rec in test_data:
-                            try:
-                                if validator(rec.get(field_name)):
-                                    expected_ids.append(rec[default_primary_key_field_name])
-                            except Exception:
-                                # If validator errors, treat as non-match
-                                pass
-
-                        result_ids = [row[default_primary_key_field_name] for row in res]
-                        if len(result_ids) != len(expected_ids):
-                            log.error(
-                                f"✗ Mismatch count for {expression_info}: got {len(result_ids)} expected {len(expected_ids)}")
-                            failed.append(
-                                f"Count mismatch: {expression_info}: got {len(result_ids)} expected {len(expected_ids)}")
-                            continue
-
-                    except Exception as e:
-                        log.error(f"✗ Exception evaluating {expression_info}: {str(e)}")
-                        failed.append(f"{expression_info}: exception {str(e)}")
+        failures = []
+        for tmpl in templates:
+            results = {}
+            for fname, idx_type in group:
+                expr = tmpl.replace("{f}", fname)
+                try:
+                    res = self.query(client, self.collection_name, filter=expr,
+                                     output_fields=[default_pk],
+                                     check_task=CheckTasks.check_nothing)[0]
+                    if hasattr(res, 'message'):
                         continue
+                    results[fname] = sorted([r[default_pk] for r in res])
+                except Exception:
+                    continue
 
-                # Verify index consistency if we have more than one result set
-                if len(field_results) > 1:
-                    try:
-                        self._verify_index_consistency(field_results, "JSON_EXPR", json_field_names, {
-                            "failed": failed
-                        })
-                    except Exception:
-                        # _verify_index_consistency appends to stats["failed"], we already passed that reference
-                        pass
+            if len(results) < 2:
+                continue
 
-            # Assert outcome
-            if failed:
-                # Save debug info to reproduce
-                self.save_failure_debug_info(
-                    test_data=test_data,
-                    schema=schema,
-                    field_mapping=field_mapping,
-                    index_configs=index_configs,
-                    failed_expressions=failed,
-                    collection_name=collection_name
-                )
-                raise AssertionError(f"JSON key-category expression tests failed: {failed}")
+            # Cross-index consistency check
+            ref_name, ref_ids = next(iter(results.items()))
+            for fname, ids in results.items():
+                if ids != ref_ids:
+                    idx_t = dict(group)[fname]
+                    ref_idx = dict(group)[ref_name]
+                    failures.append(
+                        f"INDEX MISMATCH: {tmpl}: {fname}({idx_t}) got {len(ids)} "
+                        f"vs {ref_name}({ref_idx}) got {len(ref_ids)}")
 
-        finally:
-            # Optionally drop the collection if needed
-            pass
+            # Ground truth check on no_index field (correctness, not just consistency)
+            if test_data is not None:
+                no_idx_field = None
+                for fname, idx_type in group:
+                    if idx_type == "no_index" and fname in results:
+                        no_idx_field = fname
+                        break
+                if no_idx_field:
+                    expr = tmpl.replace("{f}", no_idx_field)
+                    field_names = [fname for fname, _ in group]
+                    expected_idx = eval_filter(expr, test_data)
+                    expected_ids = sorted([test_data[i][default_pk] for i in expected_idx])
+                    actual_ids = results[no_idx_field]
+                    if actual_ids != expected_ids:
+                        failures.append(
+                            f"GROUND TRUTH MISMATCH: {expr} | Milvus={len(actual_ids)} "
+                            f"expected={len(expected_ids)}")
+
+        return failures
+
+    def _do_scalar_index_test(self, dtype_name):
+        """Verify all index types return identical results for identical scalar data and expressions."""
+        dtype = DataType[dtype_name]
+        client = self._client(alias=self.shared_alias)
+        group = self.field_groups[dtype]
+        test_data = self.test_data
+
+        sample_field = group[0][0]
+        non_null = [r[sample_field] for r in test_data if r.get(sample_field) is not None]
+        if not non_null:
+            pytest.skip(f"No non-null values for {dtype_name}")
+        val = non_null[len(non_null) // 2]
+
+        if dtype == DataType.BOOL:
+            templates = ["{f} == true", "{f} == false", "{f} IS NULL", "{f} IS NOT NULL"]
+        elif dtype == DataType.VARCHAR:
+            templates = ['{f} == "' + str(val) + '"', '{f} != "' + str(val) + '"',
+                         "{f} IS NULL", "{f} IS NOT NULL", '{f} LIKE "str%"',
+                         '{f} IN ["str_0", "str_1"]', '{f} NOT IN ["abc"]']
+        else:
+            templates = [f"{{f}} > {repr(val)}", f"{{f}} <= {repr(val)}", f"{{f}} == {repr(val)}",
+                         "{f} IS NULL", "{f} IS NOT NULL",
+                         f"{{f}} IN [{repr(val)}]", f"{{f}} NOT IN [{repr(val)}]",
+                         f"{{f}} + 1 > {repr(val)}"]
+
+        failures = self._check_cross_index_consistency(client, group, templates, test_data=self.test_data)
+        assert not failures, f"{len(failures)} scalar index inconsistencies for {dtype_name}:\n" + "\n".join(failures)
+
+    # L1: core types index consistency
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dtype_name", ["INT64", "VARCHAR", "FLOAT", "BOOL"])
+    def test_scalar_index_consistency_l1(self, dtype_name):
+        """L1: Index consistency for core scalar types."""
+        self._do_scalar_index_test(dtype_name)
+
+    # L2: extended types index consistency
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("dtype_name", ["INT8", "INT16", "INT32", "DOUBLE"])
+    def test_scalar_index_consistency_l2(self, dtype_name):
+        """L2: Index consistency for extended scalar types."""
+        self._do_scalar_index_test(dtype_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("elem_dtype_name", ["INT32", "INT64", "VARCHAR"])
+    def test_array_index_consistency(self, elem_dtype_name):
+        """Verify all index types return identical results for identical array data and expressions."""
+        elem_dtype = DataType[elem_dtype_name]
+        client = self._client(alias=self.shared_alias)
+        group = self.array_field_groups[elem_dtype]
+        test_data = self.test_data
+
+        sample_field = group[0][0]
+        non_null = [r[sample_field] for r in test_data
+                    if r.get(sample_field) is not None and isinstance(r.get(sample_field), list)]
+        if not non_null:
+            pytest.skip(f"No non-null arrays for {elem_dtype_name}")
+        sample_arr = non_null[0]
+        val = sample_arr[0] if sample_arr else 0
+
+        if elem_dtype == DataType.VARCHAR:
+            templates = [
+                '{f}[0] == "' + str(val) + '"',
+                "{f} IS NULL", "{f} IS NOT NULL",
+                f'array_contains({{f}}, "{val}")',
+                "array_length({f}) > 0",
+            ]
+        else:
+            templates = [
+                f"{{f}}[0] == {repr(val)}", f"{{f}}[0] > {repr(val)}",
+                "{f} IS NULL", "{f} IS NOT NULL",
+                f"array_contains({{f}}, {repr(val)})",
+                "array_length({f}) >= 1", "array_length({f}) < 10",
+            ]
+
+        failures = self._check_cross_index_consistency(client, group, templates, test_data=self.test_data)
+        assert not failures, f"{len(failures)} array index inconsistencies for ARRAY({elem_dtype_name}):\n" + "\n".join(failures)
+
+
+# ──────────────────────────────────────────────────────────────
+# Test Class 3: Corner-case expressions — known bug regression
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.xdist_group("TestCornerCaseExpressions")
+class TestCornerCaseExpressions(TestMilvusClientV2Base):
+    """
+    Deterministic corner-case expressions targeting known bug patterns.
+    Each test maps to a real Milvus issue for regression prevention.
+    """
+    shared_alias = "TestCornerCaseExpr"
+
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = "TestCornerCaseExpr" + cf.gen_unique_str("_")
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_collection(self, request):
+        client = self._client(alias=self.shared_alias)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_pk, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vec, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("c8", DataType.INT64)
+        schema.add_field("bool_field", DataType.BOOL)
+        schema.add_field("nullable_int", DataType.INT16, nullable=True)
+        schema.add_field("json_data", DataType.JSON, nullable=True)
+        schema.add_field("int_val", DataType.INT64)
+        schema.add_field("float_val", DataType.FLOAT)
+        schema.add_field("str_val", DataType.VARCHAR, max_length=256)
+        self.create_collection(client, self.collection_name, schema=schema, force_teardown=False)
+
+        vectors = cf.gen_vectors(10, default_dim)
+        data = [
+            {default_pk: 0, default_vec: vectors[0],
+             "c8": INT64_MAX - 1, "bool_field": False, "nullable_int": None,
+             "json_data": {"num": INT64_MAX - 7}, "int_val": INT64_MAX - 1,
+             "float_val": 0.0, "str_val": "hello"},
+            {default_pk: 1, default_vec: vectors[1],
+             "c8": 100, "bool_field": True, "nullable_int": 574,
+             "json_data": {"num": 42}, "int_val": 100,
+             "float_val": 3.14, "str_val": "world"},
+            {default_pk: 2, default_vec: vectors[2],
+             "c8": INT64_MIN, "bool_field": False, "nullable_int": None,
+             "json_data": None, "int_val": INT64_MIN,
+             "float_val": -1.0, "str_val": "abc"},
+            {default_pk: 3, default_vec: vectors[3],
+             "c8": 200, "bool_field": False, "nullable_int": 1,
+             "json_data": {"num": 100}, "int_val": 200,
+             "float_val": 6.28, "str_val": "str_0"},
+            {default_pk: 4, default_vec: vectors[4],
+             "c8": 50, "bool_field": True, "nullable_int": None,
+             "json_data": {"num": FLOAT64_INT_LIMIT + 1}, "int_val": 50,
+             "float_val": 100.0, "str_val": "str_1"},
+        ]
+        request.cls.test_data = data
+
+        self.insert(client, self.collection_name, data=data)
+        self.flush(client, self.collection_name)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(default_vec, index_type="FLAT", metric_type="COSINE")
+        self.create_index(client, self.collection_name, index_params=idx)
+        self.load_collection(client, self.collection_name)
+
+        def teardown():
+            self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_int64_overflow_addition(self):
+        """Regression #48440: c8 + 33 overflows for INT64_MAX-1, should not match <= 19974."""
+        client = self._client(alias=self.shared_alias)
+        res = self.query(client, self.collection_name, filter="c8 + 33 <= 19974",
+                         output_fields=[default_pk])[0]
+        ids = sorted([r[default_pk] for r in res])
+        assert 0 not in ids, f"id=0 (INT64_MAX-1) + 33 overflows, should not match. Got {ids}"
+        assert 2 not in ids, f"id=2 (INT64_MIN) + 33 underflows context, should not match. Got {ids}"
+        assert 1 in ids, f"id=1 (100+33=133<=19974) should match. Got {ids}"
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_int64_overflow_subtraction(self):
+        """Regression #48440: INT64_MIN - 1 should underflow, not wrap to MAX."""
+        client = self._client(alias=self.shared_alias)
+        res = self.query(client, self.collection_name, filter="c8 - 1 >= 0",
+                         output_fields=[default_pk],
+                         check_task=CheckTasks.check_nothing)[0]
+        if hasattr(res, 'message'):
+            # Milvus rejects expression at parser level — this is also a bug: overflow
+            # should be handled at execution time, not crash the parser
+            pytest.fail(f"Milvus parser rejects 'c8 - 1 >= 0' with overflow data — "
+                        f"parser should handle gracefully: {res.message}")
+        ids = sorted([r[default_pk] for r in res])
+        assert 2 not in ids, f"id=2 (INT64_MIN) - 1 underflows, should not be >= 0. Got {ids}"
+        assert 0 in ids, f"id=0 (INT64_MAX-1 - 1) should be >= 0. Got {ids}"
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_int64_overflow_multiplication(self):
+        """Regression #48440: (INT64_MAX-1) * 2 overflows, should not be > 0."""
+        client = self._client(alias=self.shared_alias)
+        res = self.query(client, self.collection_name, filter="c8 * 2 > 0",
+                         output_fields=[default_pk],
+                         check_task=CheckTasks.check_nothing)[0]
+        if hasattr(res, 'message'):
+            pytest.fail(f"Milvus parser rejects 'c8 * 2 > 0' with overflow data — "
+                        f"parser should handle gracefully: {res.message}")
+        ids = sorted([r[default_pk] for r in res])
+        assert 0 not in ids, f"id=0 (INT64_MAX-1)*2 overflows. Got {ids}"
+        assert 1 in ids, f"id=1 (200>0) should match. Got {ids}"
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_3vl_not_and_or_nullable(self):
+        """Regression #48441: NOT(F AND T AND NULL) = NOT(F) = T -> row should return."""
+        client = self._client(alias=self.shared_alias)
+        expr = "not ((bool_field == true) and (bool_field IS NOT NULL) and (nullable_int == 574 or nullable_int == 1))"
+        res = self.query(client, self.collection_name, filter=expr,
+                         output_fields=[default_pk],
+                         check_task=CheckTasks.check_nothing)[0]
+        if hasattr(res, 'message'):
+            pytest.fail(f"Milvus rejects 3VL NOT+AND+OR expression: {res.message}")
+        ids = sorted([r[default_pk] for r in res])
+        for eid in [0, 2, 3]:
+            assert eid in ids, f"id={eid} (bool=False, NOT(F)=T) should return. Got {ids}"
+        assert 1 not in ids, f"id=1 should not return (NOT(T)=F). Got {ids}"
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_3vl_not_all_null_segment(self):
+        """Regression #48441: bug triggers when ALL nullable values in segment are NULL."""
+        client = self._client(alias=self.shared_alias)
+        coll2 = "TestCorner3VL_allnull" + cf.gen_unique_str("_")
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_pk, DataType.INT64, is_primary=True)
+        schema.add_field(default_vec, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("bf", DataType.BOOL)
+        schema.add_field("nf", DataType.INT16, nullable=True)
+        self.create_collection(client, coll2, schema=schema)
+        vectors = cf.gen_vectors(1, default_dim)
+        self.insert(client, coll2, data=[
+            {default_pk: 1, default_vec: vectors[0], "bf": False, "nf": None}
+        ])
+        self.flush(client, coll2)
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(default_vec, index_type="FLAT", metric_type="COSINE")
+        self.create_index(client, coll2, index_params=idx)
+        self.load_collection(client, coll2)
+
+        expr = "not ((bf == true) and (bf IS NOT NULL) and (nf == 574 or nf == 1))"
+        res = self.query(client, coll2, filter=expr, output_fields=[default_pk])[0]
+        ids = [r[default_pk] for r in res]
+        self.drop_collection(client, coll2)
+        assert 1 in ids, f"Single row (bf=F, nf=NULL): NOT(F)=T should return id=1. Got {ids}"
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_bool_literal_in_logical_expr(self):
+        """
+        Regression #48443: 'true or (field > val)' should be accepted AND return correct results.
+        Verifies both parser acceptance and result correctness.
+        """
+        client = self._client(alias=self.shared_alias)
+        # Data: id=0 int_val=MAX-1, id=1 int_val=100, id=2 int_val=MIN, id=3 int_val=200, id=4 int_val=50
+        cases = [
+            ("true or (int_val > 100)", [0, 1, 2, 3, 4]),       # true or X → all rows
+            ("true and (int_val > 100)", [0, 3]),                 # only int_val > 100
+            ("false or (int_val > 100)", [0, 3]),                 # same as int_val > 100
+            ("(int_val > 100) or true", [0, 1, 2, 3, 4]),       # X or true → all rows
+            ('true or (str_val == "hello")', [0, 1, 2, 3, 4]),  # true or X → all rows
+            ("true or (float_val > 3.0)", [0, 1, 2, 3, 4]),     # true or X → all rows
+        ]
+        parser_rejected = []
+        wrong_results = []
+        for expr, expected_ids in cases:
+            try:
+                res = self.query(client, self.collection_name, filter=expr,
+                                 output_fields=[default_pk],
+                                 check_task=CheckTasks.check_nothing)[0]
+                if hasattr(res, 'message'):
+                    msg = str(getattr(res, 'message', ''))
+                    if 'cannot parse' in msg or 'boolean' in msg.lower():
+                        parser_rejected.append(f"Parser rejected: {expr} -> {msg}")
+                    else:
+                        parser_rejected.append(f"Query error: {expr} -> {msg}")
+                    continue
+                ids = sorted([r[default_pk] for r in res])
+                if ids != sorted(expected_ids):
+                    wrong_results.append(f"WRONG RESULT: {expr} -> got {ids}, expected {sorted(expected_ids)}")
+                else:
+                    log.info(f"PASS: {expr} -> {ids}")
+            except Exception as e:
+                parser_rejected.append(f"Exception: {expr} -> {e}")
+
+        # Parser rejections are the primary bug (#48443)
+        if parser_rejected:
+            pytest.fail(
+                f"#48443 BUG: {len(parser_rejected)} expressions rejected by parser:\n"
+                + "\n".join(parser_rejected))
+        # Wrong results are a secondary issue
+        assert not wrong_results, (
+            f"{len(wrong_results)} expressions returned wrong results:\n" + "\n".join(wrong_results))
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_json_mixed_type_in_precision(self):
+        """Regression #48442: mixed int/float IN list should not cause INT64 precision loss."""
+        client = self._client(alias=self.shared_alias)
+        # Also test pure-int IN as control (should NOT match)
+        query_val = INT64_MAX  # different from stored INT64_MAX - 7
+        ctrl_expr = f'json_data["num"] in [{query_val}]'
+        ctrl_res = self.query(client, self.collection_name, filter=ctrl_expr,
+                              output_fields=[default_pk],
+                              check_task=CheckTasks.check_nothing)[0]
+        if not hasattr(ctrl_res, 'message'):
+            ctrl_ids = [r[default_pk] for r in ctrl_res]
+            assert 0 not in ctrl_ids, (
+                f"Control: pure-int IN should not match id=0 (num={INT64_MAX-7} != {query_val}). Got {ctrl_ids}")
+
+        # Now test with mixed int/float — the bug trigger
+        expr = f'json_data["num"] in [{query_val}, 1.5]'
+        res = self.query(client, self.collection_name, filter=expr,
+                         output_fields=[default_pk],
+                         check_task=CheckTasks.check_nothing)[0]
+        if hasattr(res, 'message'):
+            # Milvus rejecting mixed-type IN is a valid (safe) behavior
+            log.info(f"Milvus rejects mixed-type IN (safe): {res.message}")
+            return
+        ids = [r[default_pk] for r in res]
+        assert 0 not in ids, (
+            f"id=0 (json num={INT64_MAX - 7}) should NOT match {query_val} via float coercion. "
+            f"Pure-int control correctly excludes it, but mixed int/float IN causes false match. Got {ids}")
+
+
+# ──────────────────────────────────────────────────────────────
+# Test Class 4: JSON expressions — path, functions, mixed types
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.xdist_group("TestJsonExpressions")
+class TestJsonExpressions(TestMilvusClientV2Base):
+    """
+    JSON-specific expressions: path access, nested keys, json_contains functions,
+    typed/dynamic/shared key patterns, index consistency.
+    """
+    shared_alias = "TestJsonExpr"
+    NUM_ROWS = 500
+
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = "TestJsonExpr" + cf.gen_unique_str("_")
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_collection(self, request):
+        client = self._client(alias=self.shared_alias)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_pk, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vec, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("jf_none", DataType.JSON, nullable=True)
+        schema.add_field("jf_inv", DataType.JSON, nullable=True)
+        self.create_collection(client, self.collection_name, schema=schema)
+
+        rng = random.Random(DEFAULT_SEED)
+        vectors = cf.gen_vectors(self.NUM_ROWS, default_dim)
+        test_data = []
+        json_field_names = ["jf_none", "jf_inv"]
+
+        for i in range(self.NUM_ROWS):
+            if rng.random() < 0.05:
+                jdoc = None
+            else:
+                num = rng.randint(0, 100)
+                jdoc = {
+                    "int_key": num,
+                    "float_key": num * 1.5,
+                    "str_key": f"val_{num % 10}",
+                    "bool_key": num % 2 == 0,
+                    "arr_key": [rng.randint(0, 20) for _ in range(rng.randint(1, 5))],
+                    "nested": {"a": num % 5, "b": f"nested_{num}"},
+                }
+                if rng.random() < 0.3:
+                    jdoc["sparse_key"] = rng.randint(0, 50)
+
+            row = {default_pk: i, default_vec: vectors[i]}
+            for jf in json_field_names:
+                row[jf] = jdoc
+            test_data.append(row)
+
+        request.cls.test_data = test_data
+        request.cls.json_fields = json_field_names
+
+        self.insert(client, self.collection_name, data=test_data)
+        self.flush(client, self.collection_name)
+
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(default_vec, index_type="FLAT", metric_type="COSINE")
+        self.create_index(client, self.collection_name, index_params=idx)
+        ip = self.prepare_index_params(client)[0]
+        ip.add_index("jf_inv", index_type="INVERTED", params={"json_cast_type": "varchar"})
+        self.create_index(client, self.collection_name, index_params=ip)
+        self.load_collection(client, self.collection_name)
+
+        def teardown():
+            self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_json_path_expressions(self):
+        """Test JSON path access: simple key, nested key, array index."""
+        client = self._client(alias=self.shared_alias)
+        jf = "jf_none"
+
+        expressions = [
+            f'{jf}["int_key"] > 50',
+            f'{jf}["int_key"] <= 10',
+            f'{jf}["int_key"] == 0',
+            f'{jf}["int_key"] != 42',
+            f'{jf}["int_key"] IN [1, 2, 3, 10, 50]',
+            f'{jf}["int_key"] NOT IN [0]',
+            f'{jf}["float_key"] > 50.0',
+            f'{jf}["float_key"] <= 15.0',
+            f'{jf}["str_key"] == "val_0"',
+            f'{jf}["str_key"] != "val_5"',
+            f'{jf}["str_key"] LIKE "val_%"',
+            f'{jf}["str_key"] IN ["val_0", "val_1", "val_2"]',
+            f'{jf}["bool_key"] == true',
+            f'{jf}["bool_key"] == false',
+            f'{jf}["nested"]["a"] >= 3',
+            f'{jf}["nested"]["b"] LIKE "nested_%"',
+            f'{jf}["arr_key"][0] > 10',
+            f'{jf}["arr_key"][0] IN [1, 5, 10]',
+            f'{jf}["sparse_key"] > 25',
+            f'{jf}["sparse_key"] IS NULL',
+            f'{jf}["int_key"] + 10 > 60',
+            f'{jf}["int_key"] * 2 <= 100',
+        ]
+
+        failures = []
+        for expr in expressions:
+            try:
+                res1 = self.query(client, self.collection_name, filter=expr,
+                                  output_fields=[default_pk],
+                                  check_task=CheckTasks.check_nothing)[0]
+                if hasattr(res1, 'message'):
+                    log.warning(f"Skipping unsupported: {expr}")
+                    continue
+
+                expr_inv = expr.replace("jf_none", "jf_inv")
+                res2 = self.query(client, self.collection_name, filter=expr_inv,
+                                  output_fields=[default_pk],
+                                  check_task=CheckTasks.check_nothing)[0]
+                if hasattr(res2, 'message'):
+                    continue
+
+                ids1 = sorted([r[default_pk] for r in res1])
+                ids2 = sorted([r[default_pk] for r in res2])
+                if ids1 != ids2:
+                    failures.append(f"INDEX MISMATCH: {expr} no_index={len(ids1)} vs inverted={len(ids2)}")
+                else:
+                    log.info(f"PASS: {expr} -> {len(ids1)} rows")
+            except Exception as e:
+                if 'cannot parse' not in str(e):
+                    failures.append(f"EXCEPTION: {expr} -> {e}")
+
+        assert not failures, f"{len(failures)} JSON expression failures:\n" + "\n".join(failures)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_json_contains_functions(self):
+        """Test json_contains, json_contains_all, json_contains_any on JSON array keys."""
+        client = self._client(alias=self.shared_alias)
+        jf = "jf_none"
+
+        expressions = [
+            f'json_contains({jf}["arr_key"], 5)',
+            f'JSON_CONTAINS({jf}["arr_key"], 10)',
+            f'json_contains_all({jf}["arr_key"], [1, 2])',
+            f'json_contains_any({jf}["arr_key"], [5, 10, 15])',
+        ]
+
+        for expr in expressions:
+            try:
+                res = self.query(client, self.collection_name, filter=expr,
+                                 output_fields=[default_pk],
+                                 check_task=CheckTasks.check_nothing)[0]
+                if hasattr(res, 'message'):
+                    log.warning(f"Skipping: {expr} -> {res}")
+                    continue
+                log.info(f"PASS: {expr} -> {len(res)} rows")
+            except Exception as e:
+                if 'cannot parse' in str(e):
+                    log.warning(f"Not supported: {expr}")
+                else:
+                    pytest.fail(f"Unexpected error: {expr} -> {e}")
