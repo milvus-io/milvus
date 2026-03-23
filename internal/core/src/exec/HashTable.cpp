@@ -22,6 +22,7 @@
 
 #include "common/SimdUtil.h"
 #include "exec/VectorHasher.h"
+#include "fmt/format.h"
 
 namespace milvus {
 namespace exec {
@@ -222,10 +223,20 @@ char*
 HashTable::insertEntry(milvus::exec::HashLookup& lookup,
                        uint64_t index,
                        milvus::vector_size_t row) {
+    if (numDistinct_ >= maxNumGroups_) {
+        ThrowInfo(
+            UnexpectedError,
+            fmt::format("GROUP BY produced too many groups ({}). "
+                        "Add filters or increase common.groupBy.maxGroups "
+                        "(current: {})",
+                        numDistinct_ + 1,
+                        maxNumGroups_));
+    }
     char* group = rows_->newRow();
     lookup.hits_[row] = group;
     storeKeys(lookup, row);
     storeRowPointer(index, lookup.hashes_[row], group);
+    rowHashes_.push_back(lookup.hashes_[row]);
     numDistinct_++;
     lookup.newGroups_.push_back(row);
     return group;
@@ -250,6 +261,9 @@ HashTable::groupProbe(milvus::exec::HashLookup& lookup) {
     checkSizeAndAllocateTable(0);
     ProbeState state;
     for (int32_t idx = 0; idx < lookup.hashes_.size(); idx++) {
+        if (numDistinct_ >= rehashSize()) {
+            rehash();
+        }
         state.preProbe(*this, lookup.hashes_[idx], idx);
         state.firstProbe<ProbeState::Operation::kInsert>(*this);
         fullProbe(lookup, state);
@@ -272,6 +286,40 @@ HashTable::clear(bool freeTable) {
     numBuckets_ = 0;
     sizeMask_ = 0;
     bucketOffsetMask_ = 0;
+    rowHashes_.clear();
+}
+
+void
+HashTable::insertForRehash(char* row, uint64_t hash) {
+    const auto tag = hashTag(hash);
+    const auto kEmptyGroup = TagVector::broadcast(0);
+    int64_t bktOffset = bucketOffset(hash);
+    for (int64_t i = 0; i < numBuckets_; i++) {
+        auto tags = loadTags(bktOffset);
+        uint16_t empty = toBitMask(tags == kEmptyGroup) & 0xffff;
+        if (empty > 0) {
+            auto pos = bits::getAndClearLastSetBit(empty);
+            auto* bucket = bucketAt(bktOffset);
+            bucket->setTag(pos, tag);
+            bucket->setPointer(pos, row);
+            return;
+        }
+        bktOffset = nextBucketOffset(bktOffset);
+    }
+    AssertInfo(false, "Failed to insert during rehash");
+}
+
+void
+HashTable::rehash() {
+    // allRows is safe to reference across allocateTables() because
+    // allocateTables() only rebuilds the hash bucket array (table_),
+    // it does not touch the RowContainer (rows_) that owns the row data.
+    const auto& allRows = rows_->allRows();
+    allocateTables(capacity_ * 2);
+    for (size_t i = 0; i < allRows.size(); i++) {
+        insertForRehash(allRows[i], rowHashes_[i]);
+    }
+    numRehashes_++;
 }
 
 }  // namespace exec
