@@ -231,16 +231,6 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
             diff.indexes_to_drop.insert(FieldId(load_index_info.field_id));
         }
     }
-
-    // When a new/replaced index has raw data, mark the field data for drop.
-    // The actual drop is safe: DropFieldData guards against multi-field column
-    // groups and PK fields.
-    for (const auto& field_id : new_info.field_index_has_raw_data_) {
-        if (diff.indexes_to_load.count(field_id) > 0 ||
-            diff.indexes_to_replace.count(field_id) > 0) {
-            diff.field_data_to_drop.emplace(field_id);
-        }
-    }
 }
 
 void
@@ -349,8 +339,9 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
                 // Field not in current and not default-filled → new load
                 if (field_id < START_USER_FIELDID ||
                     (schema_->ShouldLoadField(FieldId(field_id)) &&
-                     field_index_has_raw_data_.find(FieldId(field_id)) ==
-                         field_index_has_raw_data_.end())) {
+                     new_info.field_index_has_raw_data_.find(
+                         FieldId(field_id)) ==
+                         new_info.field_index_has_raw_data_.end())) {
                     fields.emplace_back(field_id);
                 } else {
                     lazy_fields.emplace_back(field_id);
@@ -359,10 +350,19 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
                 // Field was default-filled or moved between groups → replace
                 if (field_id < START_USER_FIELDID ||
                     (schema_->ShouldLoadField(FieldId(field_id)) &&
-                     field_index_has_raw_data_.find(FieldId(field_id)) ==
-                         field_index_has_raw_data_.end())) {
+                     new_info.field_index_has_raw_data_.find(
+                         FieldId(field_id)) ==
+                         new_info.field_index_has_raw_data_.end())) {
                     replace_fields.emplace_back(field_id);
                 } else {
+                    lazy_replace_fields.emplace_back(field_id);
+                }
+            } else {
+                // Field at same position — check if needs lazification
+                // (transitioning from no-raw-data-index to raw-data-index)
+                if (new_info.field_index_has_raw_data_.count(
+                        FieldId(field_id)) > 0 &&
+                    field_index_has_raw_data_.count(FieldId(field_id)) == 0) {
                     lazy_replace_fields.emplace_back(field_id);
                 }
             }

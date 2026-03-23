@@ -1892,9 +1892,11 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFilledFieldBecomesReplace) {
 // ==================== Raw Data Lifecycle Tests ====================
 // Tests for field_data_to_drop generation and ComputeDiffReloadFields behavior
 
-TEST_F(SegmentLoadInfoTest, ComputeDiffNewIndexWithRawDataDropsFieldData) {
+TEST_F(SegmentLoadInfoTest, ComputeDiffNewIndexWithRawDataNoFieldDrop) {
     // Test 1.1: When a new index has raw data (ASCENDING_SORT for scalar),
-    // field_data_to_drop should include that field.
+    // field_data_to_drop should NOT include that field.
+    // Raw-data indexes no longer trigger field drop; field data is kept
+    // (binlog mode) or lazified (column groups mode).
     // Scenario: current has no index -> new has ASCENDING_SORT index (raw=true)
 
     // Current: only binlog for field 108 (INT64, extra_field1)
@@ -1934,13 +1936,15 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffNewIndexWithRawDataDropsFieldData) {
 
     // Index should be in indexes_to_load
     EXPECT_TRUE(diff.indexes_to_load.count(FieldId(108)) > 0);
-    // field_data_to_drop should include field 108 (index has raw data)
-    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(108)) > 0);
+    // field_data_to_drop should NOT include field 108
+    // (raw-data index no longer triggers drop)
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(108)) == 0);
 }
 
-TEST_F(SegmentLoadInfoTest, ComputeDiffReplaceIndexWithRawDataDropsFieldData) {
+TEST_F(SegmentLoadInfoTest, ComputeDiffReplaceIndexWithRawDataNoFieldDrop) {
     // Test 1.2: When replacing an index and the new one has raw data,
-    // field_data_to_drop should include that field.
+    // field_data_to_drop should NOT include that field.
+    // Raw-data indexes no longer trigger field drop.
     // Scenario: current has INVERTED index -> new has ASCENDING_SORT index
 
     // Current: field 108 has INVERTED index (no raw data)
@@ -1986,8 +1990,9 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffReplaceIndexWithRawDataDropsFieldData) {
 
     // Index should be in indexes_to_replace
     EXPECT_TRUE(diff.indexes_to_replace.count(FieldId(108)) > 0);
-    // field_data_to_drop should include field 108
-    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(108)) > 0);
+    // field_data_to_drop should NOT include field 108
+    // (raw-data index no longer triggers drop)
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(108)) == 0);
 }
 
 TEST_F(SegmentLoadInfoTest, ComputeDiffNewIndexNoRawDataNoFieldDrop) {

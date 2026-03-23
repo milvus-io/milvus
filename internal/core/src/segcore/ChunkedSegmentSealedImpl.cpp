@@ -3213,8 +3213,8 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
         }
     }
 
-    // Drop field data last — only for fields whose new index has raw data.
-    // DropFieldData guards against multi-field column groups and PK fields.
+    // Drop field data — only for schema evolution scenarios where
+    // the field has been removed from the data source (binlogs/column_groups).
     if (!diff.field_data_to_drop.empty()) {
         for (auto field_id : diff.field_data_to_drop) {
             DropFieldData(field_id);
