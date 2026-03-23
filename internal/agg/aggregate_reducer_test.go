@@ -2,6 +2,8 @@ package agg
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,7 +11,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+func init() {
+	paramtable.Init()
+}
 
 func makeTestSchema() *schemapb.CollectionSchema {
 	return &schemapb.CollectionSchema{
@@ -176,4 +183,117 @@ func TestReduceSingleResult(t *testing.T) {
 	out, err := reducer.Reduce(context.Background(), []*AggregationResult{singleResult})
 	require.NoError(t, err)
 	assert.Equal(t, singleResult, out)
+}
+
+// buildTestSchema creates a simple schema with an INT64 groupBy field and an INT64 agg field.
+func buildTestSchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "group_field", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "agg_field", DataType: schemapb.DataType_Int64},
+		},
+	}
+}
+
+// buildAggResult creates an AggregationResult with N distinct groups.
+// Each group has group key = startKey+i and count = 1.
+func buildAggResult(startKey int64, numGroups int) *AggregationResult {
+	groupKeys := make([]int64, numGroups)
+	counts := make([]int64, numGroups)
+	for i := 0; i < numGroups; i++ {
+		groupKeys[i] = startKey + int64(i)
+		counts[i] = 1
+	}
+	return NewAggregationResult([]*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "group_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: groupKeys},
+					},
+				},
+			},
+		},
+		{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "agg_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: counts},
+					},
+				},
+			},
+		},
+	}, int64(numGroups))
+}
+
+func TestGroupAggReducer_MaxGroupByGroupsExceeded(t *testing.T) {
+	maxGroups := int64(10)
+	paramtable.Get().Save(paramtable.Get().CommonCfg.GroupByMaxGroups.Key, fmt.Sprintf("%d", maxGroups))
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.GroupByMaxGroups.Key)
+
+	schema := buildTestSchema()
+	aggregates := []*planpb.Aggregate{
+		{Op: planpb.AggregateOp_count, FieldId: 101},
+	}
+	reducer := NewGroupAggReducer([]int64{100}, aggregates, -1, schema)
+
+	// Two results each with 10 distinct groups (20 total > 10 limit)
+	results := []*AggregationResult{
+		buildAggResult(0, 10),
+		buildAggResult(10, 10),
+	}
+
+	_, err := reducer.Reduce(context.Background(), results)
+	require.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "too many groups"))
+}
+
+func TestGroupAggReducer_MaxGroupByGroupsExactlyAtLimit(t *testing.T) {
+	maxGroups := int64(10)
+	paramtable.Get().Save(paramtable.Get().CommonCfg.GroupByMaxGroups.Key, fmt.Sprintf("%d", maxGroups))
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.GroupByMaxGroups.Key)
+
+	schema := buildTestSchema()
+	aggregates := []*planpb.Aggregate{
+		{Op: planpb.AggregateOp_count, FieldId: 101},
+	}
+	reducer := NewGroupAggReducer([]int64{100}, aggregates, -1, schema)
+
+	// Exactly 10 groups = limit, should succeed
+	// Use 2 results to force cross-segment merge path (single result fast-returns)
+	results := []*AggregationResult{
+		buildAggResult(0, 5),
+		buildAggResult(5, 5),
+	}
+
+	result, err := reducer.Reduce(context.Background(), results)
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+}
+
+func TestGroupAggReducer_MaxGroupByGroupsJustOverLimit(t *testing.T) {
+	maxGroups := int64(10)
+	paramtable.Get().Save(paramtable.Get().CommonCfg.GroupByMaxGroups.Key, fmt.Sprintf("%d", maxGroups))
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.GroupByMaxGroups.Key)
+
+	schema := buildTestSchema()
+	aggregates := []*planpb.Aggregate{
+		{Op: planpb.AggregateOp_count, FieldId: 101},
+	}
+	reducer := NewGroupAggReducer([]int64{100}, aggregates, -1, schema)
+
+	// 6 + 5 = 11 distinct groups > 10 limit, should fail
+	// Need 2 results to trigger cross-segment merge path (single result fast-returns)
+	results := []*AggregationResult{
+		buildAggResult(0, 6),
+		buildAggResult(6, 5),
+	}
+
+	_, err := reducer.Reduce(context.Background(), results)
+	require.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "too many groups"))
 }
