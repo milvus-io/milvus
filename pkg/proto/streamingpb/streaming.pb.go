@@ -5367,14 +5367,6 @@ func (x *ReplicateConfigurationMeta) GetForcePromoted() bool {
 	return false
 }
 
-func (x *ReplicateConfigurationMeta) GetForcePromoteTimestamp() uint64 {
-	if x != nil {
-		return x.ForcePromoteTimestamp
-	}
-	return 0
-}
-
-
 type ReplicatePChannelMeta struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
