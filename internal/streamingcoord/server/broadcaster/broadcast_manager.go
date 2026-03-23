@@ -346,7 +346,6 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 // getIncompleteBroadcastTasks returns all incomplete broadcast tasks that have pending messages.
 // Tasks in PENDING or REPLICATED state with pending messages are considered incomplete.
 func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
-
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 

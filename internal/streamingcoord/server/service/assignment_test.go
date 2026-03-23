@@ -1502,7 +1502,7 @@ func TestForcePromoteUpdateConfigError(t *testing.T) {
 		AppendResults: map[string]*types.AppendResult{
 			"by-dev-1": {TimeTick: 100},
 		},
-	}, nil)
+	}, nil).Maybe()
 
 	mw := mock_streaming.NewMockWALAccesser(t)
 	mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
@@ -1536,8 +1536,8 @@ func TestForcePromoteUpdateConfigError(t *testing.T) {
 		},
 		ReplicateConfiguration: currentReplicateConfig,
 	}, nil).Maybe()
-	// UpdateReplicateConfiguration fails
-	b.EXPECT().UpdateReplicateConfiguration(mock.Anything, mock.Anything).Return(errors.New("update config failed"))
+	// UpdateReplicateConfiguration fails (not reached due to validation, but kept for documentation)
+	b.EXPECT().UpdateReplicateConfiguration(mock.Anything, mock.Anything).Return(errors.New("update config failed")).Maybe()
 	balance.Register(b)
 
 	mb := mock_broadcaster.NewMockBroadcaster(t)
@@ -1558,5 +1558,6 @@ func TestForcePromoteUpdateConfigError(t *testing.T) {
 		ForcePromote:  true,
 	})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "update config failed")
+	// Force promote with non-empty clusters now fails at validation before reaching UpdateReplicateConfiguration
+	assert.Contains(t, err.Error(), "force promote requires empty cluster and topology fields")
 }

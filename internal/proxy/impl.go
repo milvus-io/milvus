@@ -7278,7 +7278,7 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("DumpMessages context cancelled", zap.Int("messageCount", msgCount))
+			logger.Info("DumpMessages context canceled", zap.Int("messageCount", msgCount))
 			return ctx.Err()
 		case <-scanner.Done():
 			// Scanner closed
