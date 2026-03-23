@@ -1534,7 +1534,6 @@ func (x *AlterReplicateConfigMessageHeader) GetIgnore() bool {
 	return false
 }
 
-
 // AlterReplicateConfigMessageBody is the body of alter replicate configuration message.
 type AlterReplicateConfigMessageBody struct {
 	state         protoimpl.MessageState
