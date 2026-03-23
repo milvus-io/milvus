@@ -26,7 +26,9 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -40,7 +42,9 @@ type UpdateLoadConfigJob struct {
 	targetMgr                meta.TargetManagerInterface
 	targetObserver           *observers.TargetObserver
 	collectionObserver       *observers.CollectionObserver
+	proxyManager             proxyutil.ProxyClientManagerInterface
 	userSpecifiedReplicaMode bool
+	needWaitRGReady          bool
 }
 
 func NewUpdateLoadConfigJob(ctx context.Context,
@@ -49,7 +53,9 @@ func NewUpdateLoadConfigJob(ctx context.Context,
 	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	collectionObserver *observers.CollectionObserver,
+	proxyManager proxyutil.ProxyClientManagerInterface,
 	userSpecifiedReplicaMode bool,
+	needWaitRGReady bool,
 ) *UpdateLoadConfigJob {
 	collectionID := req.GetCollectionIDs()[0]
 	return &UpdateLoadConfigJob{
@@ -58,10 +64,12 @@ func NewUpdateLoadConfigJob(ctx context.Context,
 		targetMgr:                targetMgr,
 		targetObserver:           targetObserver,
 		collectionObserver:       collectionObserver,
+		proxyManager:             proxyManager,
 		collectionID:             collectionID,
 		newReplicaNumber:         req.GetReplicaNumber(),
 		newResourceGroups:        req.GetResourceGroups(),
 		userSpecifiedReplicaMode: userSpecifiedReplicaMode,
+		needWaitRGReady:          needWaitRGReady,
 	}
 }
 
@@ -103,7 +111,11 @@ func (job *UpdateLoadConfigJob) Execute() error {
 
 	// 3. try to spawn new replica
 	channels := job.targetMgr.GetDmChannelsByCollection(job.ctx, job.collectionID, meta.CurrentTargetFirst)
-	newReplicas, spawnErr := job.meta.ReplicaManager.Spawn(job.ctx, job.collectionID, toSpawn, lo.Keys(channels), commonpb.LoadPriority_LOW)
+	var spawnOpts []meta.SpawnOption
+	if job.needWaitRGReady {
+		spawnOpts = append(spawnOpts, meta.WithNeedWaitRGReady())
+	}
+	newReplicas, spawnErr := job.meta.ReplicaManager.Spawn(job.ctx, job.collectionID, toSpawn, lo.Keys(channels), commonpb.LoadPriority_LOW, spawnOpts...)
 	if spawnErr != nil {
 		log.Warn("failed to spawn replica", zap.Error(spawnErr))
 		err := spawnErr
@@ -156,6 +168,15 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	if err != nil {
 		log.Warn("failed to remove replicas", zap.Int64s("replicaIDs", toRelease), zap.Error(err))
 		return err
+	}
+
+	// 5.1 invalidate shard leader cache on all proxies after removing replicas,
+	// so that proxies stop routing requests to the released replicas' shard leaders
+	// before the async checker releases channels on those nodes.
+	if len(toRelease) > 0 && job.proxyManager != nil {
+		job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
+			CollectionIDs: []int64{job.collectionID},
+		})
 	}
 
 	// 6. recover node distribution among replicas

@@ -280,3 +280,39 @@ func UnmarshalManifestPath(manifestPath string) (string, int64, error) {
 	}
 	return manifestJSON.BasePath, manifestJSON.ManifestVersion, nil
 }
+
+// CompareManifestPath compares two manifest paths by their version.
+// Returns:
+//
+//	-1 if a < b (a is older)
+//	 0 if a == b (same version or both empty)
+//	 1 if a > b (a is newer)
+//	 error if the paths are not comparable (parse failure or different base paths)
+func CompareManifestPath(a, b string) (int, error) {
+	if a == b {
+		return 0, nil
+	}
+
+	aBase, aVer, aErr := UnmarshalManifestPath(a)
+	bBase, bVer, bErr := UnmarshalManifestPath(b)
+
+	if aErr != nil {
+		return 0, fmt.Errorf("failed to parse manifest path %q: %w", a, aErr)
+	}
+	if bErr != nil {
+		return 0, fmt.Errorf("failed to parse manifest path %q: %w", b, bErr)
+	}
+
+	if aBase != bBase {
+		return 0, fmt.Errorf("manifest paths have different base paths: %q vs %q", aBase, bBase)
+	}
+
+	switch {
+	case aVer < bVer:
+		return -1, nil
+	case aVer > bVer:
+		return 1, nil
+	default:
+		return 0, nil
+	}
+}

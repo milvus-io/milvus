@@ -23,7 +23,6 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/blang/semver/v4"
@@ -674,13 +673,13 @@ func (s *Server) initSegmentManager() error {
 func (s *Server) initSession() error {
 	if s.icSession == nil {
 		s.icSession = sessionutil.NewSession(s.ctx)
-		s.icSession.Init(typeutil.IndexCoordRole, s.address, true, true)
+		s.icSession.Init(typeutil.IndexCoordRole, s.address, true)
 		s.icSession.SetEnableActiveStandBy(s.enableActiveStandBy)
 	}
 	if s.session == nil {
 		s.session = sessionutil.NewSession(s.ctx)
 
-		s.session.Init(typeutil.DataCoordRole, s.address, true, true)
+		s.session.Init(typeutil.DataCoordRole, s.address, true)
 		s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	}
 	return nil
@@ -875,11 +874,12 @@ func (s *Server) startWatchService(ctx context.Context) {
 func (s *Server) stopServiceWatch() {
 	// ErrCompacted is handled inside SessionWatcher, which means there is some other error occurred, closing server.
 	log.Ctx(s.ctx).Error("watch service channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
-	go s.Stop()
-	if s.session.IsTriggerKill() {
-		if p, err := os.FindProcess(os.Getpid()); err == nil {
-			p.Signal(syscall.SIGINT)
-		}
+	if s.ctx.Err() == nil {
+		// ctx is still active, meaning this is not a normal shutdown but a genuine watch failure.
+		// Force exit so the process can be restarted by the orchestrator (e.g. K8s).
+		log.Ctx(s.ctx).Error("force exit due to unexpected watch service failure")
+		log.Cleanup()
+		os.Exit(sessionutil.ExitCodeEtcd)
 	}
 }
 

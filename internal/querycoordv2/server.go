@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/blang/semver/v4"
@@ -256,7 +255,7 @@ func (s *Server) initSession() error {
 	// Init QueryCoord session
 	if s.session == nil {
 		s.session = sessionutil.NewSession(s.ctx)
-		s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
+		s.session.Init(typeutil.QueryCoordRole, s.address, true)
 		s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
 		s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	}
@@ -639,7 +638,6 @@ func (s *Server) SetQueryNodeCreator(f func(ctx context.Context, addr string, no
 }
 
 func (s *Server) watchNodes(revision int64) {
-	log := log.Ctx(s.ctx)
 	defer s.wg.Done()
 
 	s.sessionWatcherMu.Lock()
@@ -654,12 +652,13 @@ func (s *Server) watchNodes(revision int64) {
 		case event, ok := <-s.sessionWatcher.EventChannel():
 			if !ok {
 				// ErrCompacted is handled inside SessionWatcher
-				log.Warn("Session Watcher channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
-				go s.Stop()
-				if s.session.IsTriggerKill() {
-					if p, err := os.FindProcess(os.Getpid()); err == nil {
-						p.Signal(syscall.SIGINT)
-					}
+				log.Ctx(s.ctx).Warn("Session Watcher channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
+				if s.ctx.Err() == nil {
+					// ctx is still active, meaning this is not a normal shutdown but a genuine watch failure.
+					// Force exit so the process can be restarted by the orchestrator (e.g. K8s).
+					log.Ctx(s.ctx).Error("force exit due to unexpected session watcher failure")
+					log.Cleanup()
+					os.Exit(sessionutil.ExitCodeEtcd)
 				}
 				return
 			}

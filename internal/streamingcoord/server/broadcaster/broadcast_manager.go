@@ -87,6 +87,9 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 		ackScheduler:       ackScheduler,
 	}
 
+	// Set the broadcast task manager reference for accessing incomplete tasks.
+	ackScheduler.bm = m
+
 	// add the pending ack callback tasks into the ack scheduler.
 	ackScheduler.Initialize(pendingAckCallbackTasks, tombstoneIDs, m)
 	m.SetLogger(logger)
@@ -108,17 +111,47 @@ type broadcastTaskManager struct {
 
 // WithResourceKeys acquires the resource keys for the broadcast task.
 func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
+	startLockInstant := time.Now()
+	resourceKeys = bm.appendSharedClusterRK(resourceKeys...)
+	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
+
+	id, err := resource.Resource().IDAllocator().Allocate(ctx)
+	if err != nil {
+		guards.Unlock()
+		return nil, errors.Wrapf(err, "allocate new id failed")
+	}
+
+	if err := bm.checkClusterRole(ctx); err != nil {
+		// unlock the guards if the cluster role is not primary.
+		guards.Unlock()
+		return nil, err
+	}
+	bm.metrics.ObserveAcquireLockDuration(startLockInstant, guards.ResourceKeys())
+
+	return &broadcasterWithRK{
+		broadcaster: bm,
+		broadcastID: id,
+		guards:      guards,
+	}, nil
+}
+
+// WithSecondaryClusterResourceKey acquires an exclusive cluster-level resource key
+// and verifies the cluster is secondary. Returns error if the cluster is primary.
+// This is used for force promote operations that should only be executed on secondary clusters.
+func (bm *broadcastTaskManager) WithSecondaryClusterResourceKey(ctx context.Context) (BroadcastAPI, error) {
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "allocate new id failed")
 	}
 
 	startLockInstant := time.Now()
-	resourceKeys = bm.appendSharedClusterRK(resourceKeys...)
+	// Acquire an exclusive cluster resource key to block all other broadcasts
+	resourceKeys := []message.ResourceKey{message.NewExclusiveClusterResourceKey()}
 	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
 
-	if err := bm.checkClusterRole(ctx); err != nil {
-		// unlock the guards if the cluster role is not primary.
+	// Check if the cluster is secondary
+	if err := bm.checkClusterRoleSecondary(ctx); err != nil {
+		// unlock the guards if the cluster role is not secondary.
 		guards.Unlock()
 		return nil, err
 	}
@@ -144,6 +177,24 @@ func (bm *broadcastTaskManager) checkClusterRole(ctx context.Context) error {
 	if b.ReplicateRole() != replicateutil.RolePrimary {
 		// a non-primary cluster cannot do any broadcast operation.
 		return ErrNotPrimary
+	}
+	return nil
+}
+
+// checkClusterRoleSecondary checks if the cluster status is secondary, otherwise return error.
+// This is used for force promote operations that should only be executed on secondary clusters.
+func (bm *broadcastTaskManager) checkClusterRoleSecondary(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	// Check if the cluster status is secondary, otherwise return error.
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	if b.ReplicateRole() != replicateutil.RoleSecondary {
+		// Force promote can only be performed on a secondary cluster.
+		return ErrNotSecondary
 	}
 	return nil
 }
@@ -296,4 +347,26 @@ func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
 	defer bm.mu.Unlock()
 
 	delete(bm.tasks, broadcastID)
+}
+
+// getIncompleteBroadcastTasks returns all incomplete broadcast tasks that have pending messages.
+// Tasks in PENDING or REPLICATED state with pending messages are considered incomplete.
+func (bm *broadcastTaskManager) getIncompleteBroadcastTasks() []*broadcastTask {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	var result []*broadcastTask
+	for _, task := range bm.tasks {
+		state := task.State()
+		if state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING &&
+			state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED {
+			continue
+		}
+		msgs := task.PendingBroadcastMessages()
+		if len(msgs) == 0 {
+			continue
+		}
+		result = append(result, task)
+	}
+	return result
 }

@@ -225,13 +225,11 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		InitialRecoverSnapshot: snapshot,
 		TxnManager:             param.TxnManager,
 	})
-	if param.ReplicateManager, err = replicates.RecoverReplicateManager(
-		&replicates.ReplicateManagerRecoverParam{
-			ChannelInfo:            param.ChannelInfo,
-			CurrentClusterID:       paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
-			InitialRecoverSnapshot: snapshot,
-		},
-	); err != nil {
+	if param.ReplicateManager, err = replicates.RecoverReplicateManager(&replicates.ReplicateManagerRecoverParam{
+		ChannelInfo:            param.ChannelInfo,
+		CurrentClusterID:       paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
+		InitialRecoverSnapshot: snapshot,
+	}); err != nil {
 		return nil, err
 	}
 
@@ -239,10 +237,11 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	var flusher *flusherimpl.WALFlusherImpl
 	if !opt.DisableFlusher {
 		flusher = flusherimpl.RecoverWALFlusher(&flusherimpl.RecoverWALFlusherParam{
-			WAL:              param.WAL,
-			RecoveryStorage:  rs,
-			ChannelInfo:      l.Channel(),
-			RecoverySnapshot: snapshot,
+			WAL:                param.WAL,
+			RecoveryStorage:    rs,
+			ChannelInfo:        l.Channel(),
+			RecoverySnapshot:   snapshot,
+			RateLimitComponent: roWAL.WALRateLimitComponent,
 		})
 	}
 	wal := adaptImplsToRWWAL(roWAL, o.interceptorBuilders, param, flusher)

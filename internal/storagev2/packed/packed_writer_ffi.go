@@ -43,7 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-func createStorageConfig() *indexpb.StorageConfig {
+func CreateStorageConfig() *indexpb.StorageConfig {
 	var storageConfig *indexpb.StorageConfig
 
 	if paramtable.Get().CommonCfg.StorageType.GetValue() == "local" {
@@ -85,7 +85,7 @@ func NewFFIPackedWriter(basePath string, baseVersion int64, schema *arrow.Schema
 	defer cdata.ReleaseCArrowSchema(&cas)
 
 	if storageConfig == nil {
-		storageConfig = createStorageConfig()
+		storageConfig = CreateStorageConfig()
 	}
 
 	pattern := strings.Join(lo.Map(columnGroups, func(columnGroup storagecommon.ColumnGroup, _ int) string {

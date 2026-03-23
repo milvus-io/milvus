@@ -125,6 +125,17 @@ var (
 			channelNameLabelName,
 		})
 
+	QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "current_target_all_replicas_checkpoint_unix_seconds",
+			Help:      "current target checkpoint unix seconds, only advances when all replicas are ready",
+		}, []string{
+			nodeIDLabelName,
+			channelNameLabelName,
+		})
+
 	QueryCoordTaskLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -178,6 +189,7 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordTaskNum)
 	registry.MustRegister(QueryCoordNumQueryNodes)
 	registry.MustRegister(QueryCoordCurrentTargetCheckpointUnixSeconds)
+	registry.MustRegister(QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds)
 	registry.MustRegister(QueryCoordTaskLatency)
 	registry.MustRegister(QueryCoordResourceGroupInfo)
 	registry.MustRegister(QueryCoordResourceGroupReplicaTotal)

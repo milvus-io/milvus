@@ -298,6 +298,9 @@ all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
                    "SPARSE_INVERTED_INDEX", "SPARSE_WAND",
                    "GPU_IVF_FLAT", "GPU_IVF_PQ"]
 
+all_dense_float_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
+                               "IVF_RABITQ", "HNSW", "SCANN", "DISKANN"]
+
 inverted_index_algo = ['TAAT_NAIVE', 'DAAT_WAND', 'DAAT_MAXSCORE']
 
 int8_vector_index = ["HNSW"]

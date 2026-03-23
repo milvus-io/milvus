@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -30,14 +31,11 @@ import (
 	"go.uber.org/zap"
 
 	mhttp "github.com/milvus-io/milvus/internal/http"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
-
-func defaultResponse(c *gin.Context) {
-	c.JSON(http.StatusRequestTimeout, gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
-}
 
 // BufferPool represents a pool of buffers.
 type BufferPool struct {
@@ -61,8 +59,7 @@ func (p *BufferPool) Put(buf *bytes.Buffer) {
 
 // Timeout struct
 type Timeout struct {
-	handler  gin.HandlerFunc
-	response gin.HandlerFunc
+	handler gin.HandlerFunc
 }
 
 // Writer is a writer with memory buffer
@@ -71,7 +68,7 @@ type Writer struct {
 	body         *bytes.Buffer
 	headers      http.Header
 	mu           sync.Mutex
-	timeout      bool
+	timeout      atomic.Bool
 	wroteHeaders bool
 	code         int
 }
@@ -83,13 +80,11 @@ func NewWriter(w gin.ResponseWriter, buf *bytes.Buffer) *Writer {
 
 // Write will write data to response body
 func (w *Writer) Write(data []byte) (int, error) {
-	if w.timeout || w.body == nil {
-		return 0, errors.New("Response writer closed")
-	}
-
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
+	if w.timeout.Load() || w.body == nil {
+		return 0, errors.New("Response writer closed")
+	}
 	return w.body.Write(data)
 }
 
@@ -97,10 +92,6 @@ func (w *Writer) Write(data []byte) (int, error) {
 // If the response writer has already written headers or if a timeout has occurred,
 // this method does nothing.
 func (w *Writer) WriteHeader(code int) {
-	if w.timeout || w.wroteHeaders {
-		return
-	}
-
 	// gin is using -1 to skip writing the status code
 	// see https://github.com/gin-gonic/gin/blob/a0acf1df2814fcd828cb2d7128f2f4e2136d3fac/response_writer.go#L61
 	if code == -1 {
@@ -111,7 +102,9 @@ func (w *Writer) WriteHeader(code int) {
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
+	if w.timeout.Load() || w.wroteHeaders {
+		return
+	}
 	w.writeHeader(code)
 	w.ResponseWriter.WriteHeader(code)
 }
@@ -142,10 +135,32 @@ func (w *Writer) FreeBuffer() {
 // or the http status code returned by gin.Context.Writer.Status()
 // will always be 200 in other custom gin middlewares.
 func (w *Writer) Status() int {
-	if w.code == 0 || w.timeout {
+	if w.code == 0 || w.timeout.Load() {
 		return w.ResponseWriter.Status()
 	}
 	return w.code
+}
+
+// WriteHeaderNow implements gin.ResponseWriter interface to prevent
+// bypassing the mutex when writing headers directly.
+func (w *Writer) WriteHeaderNow() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.timeout.Load() {
+		return
+	}
+	w.ResponseWriter.WriteHeaderNow()
+}
+
+// Flush implements the http.Flusher interface. It guards against
+// flushing after timeout to prevent bypassing the mutex.
+func (w *Writer) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.timeout.Load() {
+		return
+	}
+	w.ResponseWriter.Flush()
 }
 
 func checkWriteHeaderCode(code int) {
@@ -156,8 +171,7 @@ func checkWriteHeaderCode(code int) {
 
 func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	t := &Timeout{
-		handler:  handler,
-		response: defaultResponse,
+		handler: handler,
 	}
 	bufPool := &BufferPool{}
 	return func(gCtx *gin.Context) {
@@ -189,6 +203,9 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			finish <- struct{}{}
 		}()
 
+		t := time.NewTimer(timeout)
+		defer t.Stop()
+
 		select {
 		case p := <-panicChan:
 			tw.FreeBuffer()
@@ -214,17 +231,21 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			tw.FreeBuffer()
 			bufPool.Put(buffer)
 
-		case <-time.After(timeout):
+		case <-t.C:
+			cancel() // cancel context immediately so handler can detect timeout
 			gCtx.Abort()
 			tw.mu.Lock()
 			defer tw.mu.Unlock()
-			tw.timeout = true
+			tw.timeout.Store(true)
 			tw.FreeBuffer()
 			bufPool.Put(buffer)
 
-			gCtx.Writer = w
-			t.response(gCtx)
-			gCtx.Writer = tw
+			// Write timeout response directly to the original writer.
+			// Do NOT swap gCtx.Writer — handler goroutine may still be using it.
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusRequestTimeout)
+			body, _ := json.Marshal(gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
+			w.Write(body)
 		}
 	}
 }

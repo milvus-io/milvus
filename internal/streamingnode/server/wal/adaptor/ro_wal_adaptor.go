@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -21,7 +22,9 @@ import (
 var _ wal.WAL = (*roWALAdaptorImpl)(nil)
 
 type roWALAdaptorImpl struct {
+	*rate.WALRateLimitComponent
 	log.Binder
+
 	lifetime        *typeutil.Lifetime
 	availableCtx    context.Context
 	availableCancel context.CancelFunc
@@ -161,6 +164,9 @@ func (w *roWALAdaptorImpl) Close() {
 
 	// close all metrics.
 	w.scanMetrics.Close()
+
+	// close the rate limit component.
+	w.WALRateLimitComponent.Close()
 }
 
 // forceCancelAfterGracefulTimeout forces to cancel the context after the graceful timeout.

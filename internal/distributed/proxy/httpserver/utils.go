@@ -1912,30 +1912,61 @@ func MetricsHandlerFunc(c *gin.Context) {
 }
 
 func LoggerHandlerFunc() gin.HandlerFunc {
-	return gin.LoggerWithConfig(gin.LoggerConfig{
-		SkipPaths: proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings(),
-		Formatter: func(param gin.LogFormatterParams) string {
-			if param.Latency > time.Minute {
-				param.Latency = param.Latency.Truncate(time.Second)
-			}
-			traceID, ok := param.Keys["traceID"]
-			if !ok {
-				traceID = ""
-			}
+	notlogged := proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings()
+	var skip map[string]struct{}
+	if length := len(notlogged); length > 0 {
+		skip = make(map[string]struct{}, length)
+		for _, p := range notlogged {
+			skip[p] = struct{}{}
+		}
+	}
 
-			accesslog.SetHTTPParams(&param)
-			return fmt.Sprintf("[%v] [GIN] [%s] [traceID=%s] [code=%3d] [latency=%v] [client=%s] [method=%s] [error=%s]\n",
-				param.TimeStamp.Format("2006/01/02 15:04:05.000 Z07:00"),
-				param.Path,
-				traceID,
-				param.StatusCode,
-				param.Latency,
-				param.ClientIP,
-				param.Method,
-				param.ErrorMessage,
-			)
-		},
-	})
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		raw := c.Request.URL.RawQuery
+
+		c.Next()
+
+		if _, ok := skip[path]; ok {
+			return
+		}
+
+		param := gin.LogFormatterParams{
+			Request:      c.Request,
+			TimeStamp:    time.Now(),
+			ClientIP:     c.ClientIP(),
+			Method:       c.Request.Method,
+			StatusCode:   c.Writer.Status(),
+			ErrorMessage: c.Errors.ByType(gin.ErrorTypePrivate).String(),
+			BodySize:     c.Writer.Size(),
+		}
+		param.Latency = param.TimeStamp.Sub(start)
+		if param.Latency > time.Minute {
+			param.Latency = param.Latency.Truncate(time.Second)
+		}
+		if raw != "" {
+			path = path + "?" + raw
+		}
+		param.Path = path
+
+		traceID, _ := c.Get("traceID")
+		if traceID == nil {
+			traceID = ""
+		}
+
+		accesslog.SetHTTPParams(c, &param)
+		fmt.Fprintf(gin.DefaultWriter, "[%v] [GIN] [%s] [traceID=%s] [code=%3d] [latency=%v] [client=%s] [method=%s] [error=%s]\n",
+			param.TimeStamp.Format("2006/01/02 15:04:05.000 Z07:00"),
+			param.Path,
+			traceID,
+			param.StatusCode,
+			param.Latency,
+			param.ClientIP,
+			param.Method,
+			param.ErrorMessage,
+		)
+	}
 }
 
 func RequestHandlerFunc(c *gin.Context) {

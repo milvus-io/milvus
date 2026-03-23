@@ -40,6 +40,16 @@ func (b *TxnBuffer) GetUncommittedMessageBuilder() map[message.TxnID]*message.Im
 func (b *TxnBuffer) HandleImmutableMessages(msgs []message.ImmutableMessage, ts uint64) []message.ImmutableMessage {
 	result := make([]message.ImmutableMessage, 0, len(msgs))
 	for _, msg := range msgs {
+		// Check for force promote AlterReplicateConfig message
+		// If force promote (and not ignored), rollback all uncommitted transactions
+		if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
+			alterMsg := message.MustAsImmutableAlterReplicateConfigMessageV2(msg)
+			header := alterMsg.Header()
+			if header.ForcePromote && !header.Ignore {
+				b.rollbackAllUncommittedTxn()
+			}
+		}
+
 		// Not a txn message, can be consumed right now.
 		if msg.TxnContext() == nil {
 			b.metrics.ObserveAutoCommitTxn()
@@ -191,4 +201,23 @@ func (b *TxnBuffer) clearExpiredTxn(ts uint64) {
 			}
 		}
 	}
+}
+
+// rollbackAllUncommittedTxn rolls back all uncommitted transactions in the buffer.
+// This is used during force promote to ensure no in-flight transactions from the
+// old replication topology are left pending.
+func (b *TxnBuffer) rollbackAllUncommittedTxn() {
+	if len(b.builders) == 0 {
+		return
+	}
+
+	txnIDs := make([]int64, 0, len(b.builders))
+	for txnID := range b.builders {
+		txnIDs = append(txnIDs, int64(txnID))
+		b.rollbackTxn(txnID)
+	}
+
+	b.logger.Info("Rolled back all uncommitted transactions in TxnBuffer due to force promote",
+		zap.Int64s("txnIDs", txnIDs),
+		zap.Int("count", len(txnIDs)))
 }
