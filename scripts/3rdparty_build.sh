@@ -133,7 +133,15 @@ export CMAKE_POLICY_VERSION_MINIMUM=3.5
 CONAN_ARTIFACTORY_URL="${CONAN_ARTIFACTORY_URL:-https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local}"
 
 if [[ ! `conan remote list` == *default-conan-local* ]]; then
-    conan remote add default-conan-local $CONAN_ARTIFACTORY_URL
+    conan remote add default-conan-local $CONAN_ARTIFACTORY_URL --insert 0
+else
+    # Ensure default-conan-local is checked before conancenter.
+    # After conan upgrades (e.g. 1.64->1.66), remotes.json gets reset and
+    # conancenter becomes the first remote. When conancenter is checked first,
+    # packages like libiberty have no pre-built binary and fall back to source
+    # build, which downloads gcc-9.1.0.tar.gz from ftp.gnu.org — unreachable
+    # in some CI environments.
+    conan remote update default-conan-local $CONAN_ARTIFACTORY_URL --insert 0 2>/dev/null || true
 fi
 
 # Install a conan pre_build hook that sets LD_LIBRARY_PATH (Linux) or
