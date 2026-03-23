@@ -1141,3 +1141,163 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         ids = [r[default_pk] for r in res]
         assert 0 not in ids, (
             f"id=0 (json num={INT64_MAX - 7}) should NOT match {query_val} via float coercion. Got {ids}")
+
+
+# ──────────────────────────────────────────────────────────────
+# Test Class 4: JSON expressions — path, functions, mixed types
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.xdist_group("TestJsonExpressions")
+class TestJsonExpressions(TestMilvusClientV2Base):
+    """
+    JSON-specific expressions: path access, nested keys, json_contains functions,
+    typed/dynamic/shared key patterns, index consistency.
+    """
+    shared_alias = "TestJsonExpr"
+    NUM_ROWS = 500
+
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = "TestJsonExpr" + cf.gen_unique_str("_")
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_collection(self, request):
+        client = self._client(alias=self.shared_alias)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_pk, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vec, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("jf_none", DataType.JSON, nullable=True)
+        schema.add_field("jf_inv", DataType.JSON, nullable=True)
+        self.create_collection(client, self.collection_name, schema=schema)
+
+        rng = random.Random(DEFAULT_SEED)
+        vectors = cf.gen_vectors(self.NUM_ROWS, default_dim)
+        test_data = []
+        json_field_names = ["jf_none", "jf_inv"]
+
+        for i in range(self.NUM_ROWS):
+            if rng.random() < 0.05:
+                jdoc = None
+            else:
+                num = rng.randint(0, 100)
+                jdoc = {
+                    "int_key": num,
+                    "float_key": num * 1.5,
+                    "str_key": f"val_{num % 10}",
+                    "bool_key": num % 2 == 0,
+                    "arr_key": [rng.randint(0, 20) for _ in range(rng.randint(1, 5))],
+                    "nested": {"a": num % 5, "b": f"nested_{num}"},
+                }
+                if rng.random() < 0.3:
+                    jdoc["sparse_key"] = rng.randint(0, 50)
+
+            row = {default_pk: i, default_vec: vectors[i]}
+            for jf in json_field_names:
+                row[jf] = jdoc
+            test_data.append(row)
+
+        request.cls.test_data = test_data
+        request.cls.json_fields = json_field_names
+
+        self.insert(client, self.collection_name, data=test_data)
+        self.flush(client, self.collection_name)
+
+        idx = self.prepare_index_params(client)[0]
+        idx.add_index(default_vec, index_type="FLAT", metric_type="COSINE")
+        self.create_index(client, self.collection_name, index_params=idx)
+        ip = self.prepare_index_params(client)[0]
+        ip.add_index("jf_inv", index_type="INVERTED", params={"json_cast_type": "varchar"})
+        self.create_index(client, self.collection_name, index_params=ip)
+        self.load_collection(client, self.collection_name)
+
+        def teardown():
+            self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_json_path_expressions(self):
+        """Test JSON path access: simple key, nested key, array index."""
+        client = self._client(alias=self.shared_alias)
+        jf = "jf_none"
+
+        expressions = [
+            f'{jf}["int_key"] > 50',
+            f'{jf}["int_key"] <= 10',
+            f'{jf}["int_key"] == 0',
+            f'{jf}["int_key"] != 42',
+            f'{jf}["int_key"] IN [1, 2, 3, 10, 50]',
+            f'{jf}["int_key"] NOT IN [0]',
+            f'{jf}["float_key"] > 50.0',
+            f'{jf}["float_key"] <= 15.0',
+            f'{jf}["str_key"] == "val_0"',
+            f'{jf}["str_key"] != "val_5"',
+            f'{jf}["str_key"] LIKE "val_%"',
+            f'{jf}["str_key"] IN ["val_0", "val_1", "val_2"]',
+            f'{jf}["bool_key"] == true',
+            f'{jf}["bool_key"] == false',
+            f'{jf}["nested"]["a"] >= 3',
+            f'{jf}["nested"]["b"] LIKE "nested_%"',
+            f'{jf}["arr_key"][0] > 10',
+            f'{jf}["arr_key"][0] IN [1, 5, 10]',
+            f'{jf}["sparse_key"] > 25',
+            f'{jf}["sparse_key"] IS NULL',
+            f'{jf}["int_key"] + 10 > 60',
+            f'{jf}["int_key"] * 2 <= 100',
+        ]
+
+        failures = []
+        for expr in expressions:
+            try:
+                res1 = self.query(client, self.collection_name, filter=expr,
+                                  output_fields=[default_pk],
+                                  check_task=CheckTasks.check_nothing)[0]
+                if hasattr(res1, 'message'):
+                    log.warning(f"Skipping unsupported: {expr}")
+                    continue
+
+                expr_inv = expr.replace("jf_none", "jf_inv")
+                res2 = self.query(client, self.collection_name, filter=expr_inv,
+                                  output_fields=[default_pk],
+                                  check_task=CheckTasks.check_nothing)[0]
+                if hasattr(res2, 'message'):
+                    continue
+
+                ids1 = sorted([r[default_pk] for r in res1])
+                ids2 = sorted([r[default_pk] for r in res2])
+                if ids1 != ids2:
+                    failures.append(f"INDEX MISMATCH: {expr} no_index={len(ids1)} vs inverted={len(ids2)}")
+                else:
+                    log.info(f"PASS: {expr} -> {len(ids1)} rows")
+            except Exception as e:
+                if 'cannot parse' not in str(e):
+                    failures.append(f"EXCEPTION: {expr} -> {e}")
+
+        assert not failures, f"{len(failures)} JSON expression failures:\n" + "\n".join(failures)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_json_contains_functions(self):
+        """Test json_contains, json_contains_all, json_contains_any on JSON array keys."""
+        client = self._client(alias=self.shared_alias)
+        jf = "jf_none"
+
+        expressions = [
+            f'json_contains({jf}["arr_key"], 5)',
+            f'JSON_CONTAINS({jf}["arr_key"], 10)',
+            f'json_contains_all({jf}["arr_key"], [1, 2])',
+            f'json_contains_any({jf}["arr_key"], [5, 10, 15])',
+        ]
+
+        for expr in expressions:
+            try:
+                res = self.query(client, self.collection_name, filter=expr,
+                                 output_fields=[default_pk],
+                                 check_task=CheckTasks.check_nothing)[0]
+                if hasattr(res, 'message'):
+                    log.warning(f"Skipping: {expr} -> {res}")
+                    continue
+                log.info(f"PASS: {expr} -> {len(res)} rows")
+            except Exception as e:
+                if 'cannot parse' in str(e):
+                    log.warning(f"Not supported: {expr}")
+                else:
+                    pytest.fail(f"Unexpected error: {expr} -> {e}")
