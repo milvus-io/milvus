@@ -236,11 +236,8 @@ class TestRangeSearchCosineShared(TestMilvusClientV2Base):
             filter_ids = []
             for i, row in enumerate(query_res):
                 float_val = row.get(ct.default_float_field_name)
-                # NULL values never match any comparison (SQL NULL semantics)
-                if float_val is None and "float" in expr:
-                    continue
                 local_vars = {"int64": row[ct.default_int64_field_name],
-                              "float": float_val if float_val is not None else 0}
+                              "float": float_val if float_val is not None else cf.SQL_NULL}
                 if not expr or eval(expr, {}, local_vars):
                     filter_ids.append(row[ct.default_int64_field_name])
 

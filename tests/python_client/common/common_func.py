@@ -49,6 +49,45 @@ except ValueError as e:
     RNG = None
 
 
+class NullValue:
+    """Sentinel for SQL NULL semantics in expression evaluation.
+    All comparisons return False (NULL compared to anything is unknown/falsy).
+    Arithmetic propagates NULL. Python's OR short-circuit handles cases like
+    ``int64 == 0 or float == 100`` correctly when float is NULL.
+    """
+    def __eq__(self, other):
+        if isinstance(other, NullValue):
+            return False
+        return False
+
+    def __ne__(self, other): return False
+    def __lt__(self, other): return False
+    def __le__(self, other): return False
+    def __gt__(self, other): return False
+    def __ge__(self, other): return False
+    def __add__(self, other): return self
+    def __radd__(self, other): return self
+    def __sub__(self, other): return self
+    def __rsub__(self, other): return self
+    def __mul__(self, other): return self
+    def __rmul__(self, other): return self
+    def __truediv__(self, other): return self
+    def __rtruediv__(self, other): return self
+    def __mod__(self, other): return self
+    def __rmod__(self, other): return self
+    def __pow__(self, other): return self
+    def __rpow__(self, other): return self
+    def __neg__(self): return self
+    def __pos__(self): return self
+    def __abs__(self): return self
+    def __hash__(self): return id(self)
+    def __bool__(self): return False
+    def __repr__(self): return "NULL"
+
+
+SQL_NULL = NullValue()
+
+
 @singledispatch
 def to_serializable(val):
     """Used by default."""

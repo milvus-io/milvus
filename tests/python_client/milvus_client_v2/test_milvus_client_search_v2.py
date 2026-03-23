@@ -169,14 +169,11 @@ class TestCollectionSearch(TestcaseBase):
                 for i, _id in enumerate(insert_ids):
                     if enable_dynamic_field:
                         int64 = _vectors[i][ct.default_int64_field_name]
-                        float = _vectors[i][ct.default_float_field_name]
+                        float_val = _vectors[i][ct.default_float_field_name]
                     else:
                         int64 = _vectors.int64[i]
-                        float = _vectors.float[i]
-                    if float is None and "float <=" in expr:
-                        continue
-                    if null_data_percent == 1 and "and float" in expr:
-                        continue
+                        float_val = _vectors.float[i]
+                    float = float_val if float_val is not None else cf.SQL_NULL
                     if not expr or eval(expr):
                         filter_ids.append(_id)
 
