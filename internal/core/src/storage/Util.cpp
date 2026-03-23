@@ -1595,8 +1595,61 @@ GetFieldDatasFromManifest(
             continue;
         }
 
-        auto chunked_array = std::make_shared<arrow::ChunkedArray>(
-            batch->GetColumnByName(column_name));
+        auto column = batch->GetColumnByName(column_name);
+
+        // External parquet files store vectors as List<float> or
+        // FixedSizeList<float>, but Milvus expects FixedSizeBinary.
+        // Normalize here so that FillFieldData sees the right Arrow type.
+        if (!field_meta.field_schema.external_field().empty() &&
+            IsVectorDataType(data_type.value()) &&
+            !IsSparseFloatVectorDataType(data_type.value()) &&
+            column->type_id() != arrow::Type::FIXED_SIZE_BINARY) {
+            int byte_width = GetDataTypeSize(data_type.value(), dim);
+            auto fsb_type = arrow::fixed_size_binary(byte_width);
+            int64_t n = column->length();
+
+            auto buf_res = arrow::AllocateBuffer(n * byte_width);
+            AssertInfo(buf_res.ok(),
+                       "Failed to allocate buffer for vector normalization");
+            auto buffer = std::move(*buf_res);
+            auto dst = buffer->mutable_data();
+
+            if (column->type_id() == arrow::Type::LIST) {
+                auto list_arr =
+                    std::static_pointer_cast<arrow::ListArray>(column);
+                auto values = list_arr->values();
+                int elem_bytes = values->type()->bit_width() / 8;
+                auto raw = reinterpret_cast<const uint8_t*>(
+                    values->data()->buffers[1]->data());
+                for (int64_t i = 0; i < n; i++) {
+                    memcpy(dst + i * byte_width,
+                           raw + list_arr->value_offset(i) * elem_bytes,
+                           byte_width);
+                }
+            } else if (column->type_id() == arrow::Type::FIXED_SIZE_LIST) {
+                auto fsl_arr =
+                    std::static_pointer_cast<arrow::FixedSizeListArray>(column);
+                auto values = fsl_arr->values();
+                int elem_bytes = values->type()->bit_width() / 8;
+                auto raw = reinterpret_cast<const uint8_t*>(
+                    values->data()->buffers[1]->data());
+                for (int64_t i = 0; i < n; i++) {
+                    memcpy(dst + i * byte_width,
+                           raw + fsl_arr->value_offset(i) * elem_bytes,
+                           byte_width);
+                }
+            } else {
+                ThrowInfo(Unsupported,
+                          "Unsupported arrow type for external vector "
+                          "normalization: {}",
+                          column->type()->ToString());
+            }
+
+            column = std::make_shared<arrow::FixedSizeBinaryArray>(
+                fsb_type, n, std::move(buffer));
+        }
+
+        auto chunked_array = std::make_shared<arrow::ChunkedArray>(column);
         auto field_data = CreateFieldData(data_type.value(),
                                           element_type.value(),
                                           batch->schema()->field(0)->nullable(),
