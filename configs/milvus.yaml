@@ -370,6 +370,17 @@ proxy:
   slowQuerySpanInSeconds: 1 # threshold for slow query detection in seconds. For Search/HybridSearch requests, the time is divided by nq for more accurate per-query measurement. Triggers slow log, WebUI display, and metrics.
   queryNodePooling:
     size: 10 # the size for shardleader(querynode) client pool
+  rls:
+    enabled: false # Whether Row Level Security is enabled.
+    mode: permissive # RLS enforcement mode for runtime evaluation errors: disabled, permissive (log errors but allow), strict (fail-closed). If RLS is enabled and no policy matches, access is denied by default.
+    auditEnabled: true # Whether RLS audit logging is enabled.
+    cacheExpirationSeconds: 3600 # How long cached RLS policies are valid in seconds.
+    maxCacheEntries: 10000 # Maximum number of entries in the RLS merged expression cache.
+    maxPoliciesPerCollection: 100 # Maximum number of RLS policies per collection.
+    maxUserTags: 50 # Maximum number of tags per user for RLS.
+    maxExpressionLength: 4096 # Maximum length of USING/CHECK expressions in RLS policies.
+    failOnCacheError: false # If true, fail requests when the RLS policy cache cannot be loaded
+    failOnContextError: false # If true, fail requests when user context cannot be obtained for RLS
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     enabled: true # Whether to enable the http server
