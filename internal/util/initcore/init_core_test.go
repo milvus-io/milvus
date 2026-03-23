@@ -46,6 +46,26 @@ func TestOtlpHang(t *testing.T) {
 	})
 }
 
+func TestSetupCoreConfigChangeCallback(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+
+	assert.NotPanics(t, func() { SetupCoreConfigChangelCallback() })
+
+	// verify thread pool callbacks are triggered by saving valid values
+	assert.NoError(t, pt.Save(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key, "8"))
+	assert.Equal(t, "8", pt.CommonCfg.HighPriorityThreadCoreCoefficient.GetValue())
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key, "4"))
+	assert.Equal(t, "4", pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetValue())
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, "2"))
+	assert.Equal(t, "2", pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetValue())
+
+	assert.NoError(t, pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32"))
+	assert.Equal(t, "32", pt.CommonCfg.ThreadPoolMaxThreadsSize.GetValue())
+}
+
 func TestInitStorageV2FileSystem(t *testing.T) {
 	// init local storage
 	paramtable.Init()

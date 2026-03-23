@@ -44,11 +44,14 @@ const int64_t DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = 10;
 const int64_t DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = 5;
 const int64_t DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT = 1;
 
+const int DEFAULT_THREAD_POOL_MAX_THREADS_SIZE = 16;
+
 extern std::atomic<float> HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern std::atomic<float> MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern std::atomic<float> LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 
 extern int CPU_NUM;
+extern std::atomic<int> THREAD_POOL_MAX_THREADS_SIZE;
 
 void
 SetHighPriorityThreadCoreCoefficient(const float coefficient);
@@ -62,6 +65,9 @@ SetLowPriorityThreadCoreCoefficient(const float coefficient);
 void
 InitCpuNum(const int core);
 
+void
+SetThreadPoolMaxThreadsSize(const int size);
+
 class ThreadPool {
  public:
     explicit ThreadPool(const float thread_core_coefficient, std::string name)
@@ -73,11 +79,9 @@ class ThreadPool {
             1,
             static_cast<int>(std::round(CPU_NUM * thread_core_coefficient))));
 
-        // only IO pool will set large limit, but the CPU helps nothing to IO operations,
-        // we need to limit the max thread num, each thread will download 16~64 MiB data,
-        // according to our benchmark, 16 threads is enough to saturate the network bandwidth.
-        if (max_threads_size_.load() > 16) {
-            max_threads_size_.store(16);
+        int max_limit = THREAD_POOL_MAX_THREADS_SIZE.load();
+        if (max_limit > 0 && max_threads_size_.load() > max_limit) {
+            max_threads_size_.store(max_limit);
         }
         LOG_INFO("Init thread pool:{}", name_)
             << " with min worker num:" << min_threads_size_
@@ -151,8 +155,9 @@ class ThreadPool {
         //no need to hold mutex here as we don't require
         //max_threads_size to take effect instantly, just guaranteed atomic
         new_size = std::max(1, new_size);
-        if (new_size > 16) {
-            new_size = 16;
+        int max_limit = THREAD_POOL_MAX_THREADS_SIZE.load();
+        if (max_limit > 0 && new_size > max_limit) {
+            new_size = max_limit;
         }
         max_threads_size_.store(new_size);
     }
