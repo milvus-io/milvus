@@ -40,7 +40,7 @@ type AutoIndexConfig struct {
 	SparseIndexParams      ParamItem  `refreshable:"true"`
 	BinaryIndexParams      ParamItem  `refreshable:"true"`
 	DeduplicateIndexParams ParamItem  `refreshable:"true"`
-	BigTopKIndexParams     ParamItem  `refreshable:"true"`
+	LargeTopKIndexParams   ParamItem  `refreshable:"true"`
 	EnableDeduplicateIndex ParamItem  `refreshable:"true"`
 	PrepareParams          ParamItem  `refreshable:"true"`
 	LoadAdaptParams        ParamItem  `refreshable:"true"`
@@ -140,14 +140,14 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	}
 	p.EnableDeduplicateIndex.Init(base.mgr)
 
-	p.BigTopKIndexParams = ParamItem{
-		Key:          "autoIndex.params.bigTopK.build",
+	p.LargeTopKIndexParams = ParamItem{
+		Key:          "autoIndex.params.largeTopK.build",
 		Version:      "2.6.13",
 		DefaultValue: `{"nlist": 128, "index_type": "IVF_SQ8", "metric_type": "COSINE"}`,
-		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.bigTopK.build"),
+		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.largeTopK.build"),
 		Export:       true,
 	}
-	p.BigTopKIndexParams.Init(base.mgr)
+	p.LargeTopKIndexParams.Init(base.mgr)
 
 	p.PrepareParams = ParamItem{
 		Key:     "autoIndex.params.prepare",

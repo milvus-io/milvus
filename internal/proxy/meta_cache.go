@@ -107,8 +107,7 @@ type collectionInfo struct {
 	createdUtcTimestamp   uint64
 	consistencyLevel      commonpb.ConsistencyLevel
 	partitionKeyIsolation bool
-	bigTopKOptimization   bool
-	replicateID           string
+	queryMode             string
 	updateTimestamp       uint64
 	collectionTTL         uint64
 	numPartitions         int64
@@ -479,10 +478,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	if err != nil {
 		return nil, err
 	}
-	bigTopKOptimizationEnabled, err := common.IsBigTopKOptimizationEnabled(collection.Properties...)
-	if err != nil {
-		return nil, err
-	}
+	queryMode := common.GetQueryMode(collection.Properties...)
 
 	schemaInfo := newSchemaInfo(collection.Schema)
 
@@ -502,7 +498,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			createdUtcTimestamp:   collection.CreatedUtcTimestamp,
 			consistencyLevel:      collection.ConsistencyLevel,
 			partitionKeyIsolation: isolation,
-			bigTopKOptimization:   bigTopKOptimizationEnabled,
+			queryMode:             queryMode,
 			updateTimestamp:       collection.UpdateTimestamp,
 			collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
 			vChannels:             collection.VirtualChannelNames,
@@ -536,13 +532,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		createdUtcTimestamp:   collection.CreatedUtcTimestamp,
 		consistencyLevel:      collection.ConsistencyLevel,
 		partitionKeyIsolation: isolation,
-		bigTopKOptimization:   bigTopKOptimizationEnabled,
-		replicateID:           replicateID,
-		updateTimestamp:       collection.UpdateTimestamp,
-		collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
-		vChannels:             collection.VirtualChannelNames,
+		queryMode:             queryMode,
 		pChannels:             collection.PhysicalChannelNames,
-		numPartitions:         collection.NumPartitions,
 		shardsNum:             collection.ShardsNum,
 		aliases:               collection.Aliases,
 		properties:            collection.Properties,
