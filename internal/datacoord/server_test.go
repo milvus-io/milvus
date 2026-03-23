@@ -2578,22 +2578,8 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	}
 	server.stateCode.Store(commonpb.StateCode_Abnormal)
 
-	// Test initMessageCallback
-	server.initMessageCallback()
-
-	// Test Import message check callback
-	msg, err := message.NewImportMessageBuilderV1().
-		WithHeader(&message.ImportMessageHeader{}).
-		WithBody(&msgpb.ImportMsg{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_Import,
-			},
-			Schema: &schemapb.CollectionSchema{},
-		}).
-		WithBroadcast([]string{"ch-0"}).
-		BuildBroadcast()
-	err = registry.CallMessageCheckCallback(ctx, msg)
-	assert.NoError(t, err)
+	registry.ResetRegistration()
+	RegisterDDLCallbacks(server)
 
 	// Test Import message ack callback
 	importMsg := message.NewImportMessageBuilderV1().
@@ -2606,7 +2592,7 @@ func TestServer_InitMessageCallback(t *testing.T) {
 		}).
 		WithBroadcast([]string{"test_channel"}).
 		MustBuildBroadcast()
-	err = registry.CallMessageAckCallback(ctx, importMsg, map[string]*message.AppendResult{
+	err := registry.CallMessageAckCallback(ctx, importMsg, map[string]*message.AppendResult{
 		"test_channel": {
 			MessageID:              walimplstest.NewTestMessageID(1),
 			LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
