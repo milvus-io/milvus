@@ -91,12 +91,8 @@ func IsNonRetryableErr(err error) bool {
 }
 
 func IsMilvusError(err error) bool {
-	if err == nil {
-		return false
-	}
-	cause := errors.Cause(err)
-	_, ok := cause.(milvusError)
-	return ok
+	var me milvusError
+	return errors.As(err, &me)
 }
 
 func IsCanceledOrTimeout(err error) bool {

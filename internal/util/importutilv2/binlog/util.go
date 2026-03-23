@@ -27,6 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, [][]bool, error) {
@@ -54,15 +56,27 @@ func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, []
 	return rowsSet, validDataRowsSet, nil
 }
 
-func newBinlogReader(ctx context.Context, cm storage.ChunkManager, path string) (*storage.BinlogReader, error) {
-	bytes, err := cm.Read(ctx, path) // TODO: dyh, checks if the error is a retryable error
+func newBinlogReader(ctx context.Context, cm storage.ChunkManager, filePath string) (*storage.BinlogReader, error) {
+	retryAttempts := paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint()
+	var bytes []byte
+	err := retry.Handle(ctx, func() (bool, error) {
+		var e error
+		bytes, e = cm.Read(ctx, filePath)
+		if e == nil {
+			return false, nil
+		}
+		e = storage.ToMilvusIoError(filePath, e)
+		if merr.IsNonRetryableErr(e) {
+			return false, e
+		}
+		return true, e
+	}, retry.Attempts(retryAttempts))
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to open binlog %s", path))
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to open binlog %s", filePath))
 	}
-	var reader *storage.BinlogReader
-	reader, err = storage.NewBinlogReader(bytes)
+	reader, err := storage.NewBinlogReader(bytes)
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to create reader, binlog:%s, error:%v", path, err))
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to create reader, binlog:%s, error:%v", filePath, err))
 	}
 	return reader, nil
 }

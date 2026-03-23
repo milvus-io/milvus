@@ -393,10 +393,14 @@ func (t *SyncTask) appendDeltalog(deltalog *datapb.Binlog) {
 func (t *SyncTask) writeLogs(ctx context.Context) error {
 	return retry.Handle(ctx, func() (bool, error) {
 		err := t.chunkManager.MultiWrite(ctx, t.segmentData)
-		if err != nil {
-			return !merr.IsCanceledOrTimeout(err), err
+		if err == nil {
+			return false, nil
 		}
-		return false, nil
+		err = storage.ToMilvusIoError("", err)
+		if merr.IsNonRetryableErr(err) {
+			return false, err
+		}
+		return true, err
 	}, t.writeRetryOpts...)
 }
 
