@@ -1,5 +1,7 @@
 use crate::error::Result;
+use crate::log::init_log;
 use core::slice;
+use log::info;
 use std::collections::HashSet;
 use std::ffi::CStr;
 use std::ffi::{c_char, c_void};
@@ -15,7 +17,7 @@ pub fn index_exist(path: &str) -> bool {
     let Ok(dir) = MmapDirectory::open(path) else {
         return false;
     };
-    Index::exists(&dir).unwrap()
+    Index::exists(&dir).unwrap_or(false)
 }
 
 pub fn make_bounds<T>(bound: T, inclusive: bool) -> Bound<T> {
