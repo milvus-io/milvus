@@ -623,6 +623,11 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("not support to add partition key field, field name  = %s", t.fieldSchema.Name)
 	}
 	if t.fieldSchema.GetIsClusteringKey() {
+		if !typeutil.IsClusteringKeyType(t.fieldSchema.GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg(
+				fmt.Sprintf("clustering key field %s has unsupported data type %s",
+					t.fieldSchema.GetName(), t.fieldSchema.GetDataType().String()))
+		}
 		for _, f := range t.oldSchema.Fields {
 			if f.GetIsClusteringKey() {
 				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("already has another clutering key field, field name: %s", t.fieldSchema.GetName()))
