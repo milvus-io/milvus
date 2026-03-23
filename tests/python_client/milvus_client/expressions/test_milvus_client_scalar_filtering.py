@@ -858,10 +858,8 @@ class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
                             f"extra(5)={list(extra)[:5]} missing(5)={list(missing)[:5]}")
         return ('pass', None)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("field_idx", list(range(len(FIELD_DEFS))))
-    def test_single_field_expressions(self, field_idx):
-        """Test all operators for a single field against eval ground truth."""
+    def _do_single_field_test(self, field_idx):
+        """Shared implementation for single-field expression tests."""
         fname, dtype, nullable, is_array, elem_dtype = self.FIELD_DEFS[field_idx]
         client = self._client(alias=self.shared_alias)
 
@@ -900,6 +898,22 @@ class TestScalarExpressionCorrectness(TestMilvusClientV2Base):
         assert not failures, (
             f"Seed={DEFAULT_SEED}, field={fname}, {len(failures)}/{total} failed, "
             f"{len(skipped)} skipped:\n" + "\n".join(failures))
+
+    # L1: core scalar types (INT8, INT16, INT32, INT64, VARCHAR) + basic arrays (INT32, INT64)
+    # Indices: 0=INT8, 1=INT16, 2=INT32, 3=INT64, 7=VARCHAR, 10=arr_int32, 11=arr_int64
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("field_idx", [0, 1, 2, 3, 7, 10, 11])
+    def test_single_field_expressions_l1(self, field_idx):
+        """L1: Core scalar + array type expression correctness."""
+        self._do_single_field_test(field_idx)
+
+    # L2: extended types (FLOAT, DOUBLE, BOOL) + all remaining array types
+    # Indices: 4=FLOAT, 5=DOUBLE, 6=BOOL, 8=arr_int8, 9=arr_int16, 12=arr_float, 13=arr_double, 14=arr_bool, 15=arr_varchar
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("field_idx", [4, 5, 6, 8, 9, 12, 13, 14, 15])
+    def test_single_field_expressions_l2(self, field_idx):
+        """L2: Extended type expression correctness (FLOAT, DOUBLE, BOOL, all array types)."""
+        self._do_single_field_test(field_idx)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_compound_expressions(self):
@@ -1112,11 +1126,7 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
 
         return failures
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("dtype_name", [
-        "INT8", "INT16", "INT32", "INT64", "FLOAT", "DOUBLE", "BOOL", "VARCHAR"
-    ])
-    def test_scalar_index_consistency(self, dtype_name):
+    def _do_scalar_index_test(self, dtype_name):
         """Verify all index types return identical results for identical scalar data and expressions."""
         dtype = DataType[dtype_name]
         client = self._client(alias=self.shared_alias)
@@ -1144,7 +1154,21 @@ class TestScalarIndexConsistency(TestMilvusClientV2Base):
         failures = self._check_cross_index_consistency(client, group, templates, test_data=self.test_data)
         assert not failures, f"{len(failures)} scalar index inconsistencies for {dtype_name}:\n" + "\n".join(failures)
 
+    # L1: core types index consistency
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dtype_name", ["INT64", "VARCHAR", "FLOAT", "BOOL"])
+    def test_scalar_index_consistency_l1(self, dtype_name):
+        """L1: Index consistency for core scalar types."""
+        self._do_scalar_index_test(dtype_name)
+
+    # L2: extended types index consistency
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("dtype_name", ["INT8", "INT16", "INT32", "DOUBLE"])
+    def test_scalar_index_consistency_l2(self, dtype_name):
+        """L2: Index consistency for extended scalar types."""
+        self._do_scalar_index_test(dtype_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("elem_dtype_name", ["INT32", "INT64", "VARCHAR"])
     def test_array_index_consistency(self, elem_dtype_name):
         """Verify all index types return identical results for identical array data and expressions."""
@@ -1247,7 +1271,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
             self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
         request.addfinalizer(teardown)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_int64_overflow_addition(self):
         """Regression #48440: c8 + 33 overflows for INT64_MAX-1, should not match <= 19974."""
         client = self._client(alias=self.shared_alias)
@@ -1258,7 +1282,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         assert 2 not in ids, f"id=2 (INT64_MIN) + 33 underflows context, should not match. Got {ids}"
         assert 1 in ids, f"id=1 (100+33=133<=19974) should match. Got {ids}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_int64_overflow_subtraction(self):
         """Regression #48440: INT64_MIN - 1 should underflow, not wrap to MAX."""
         client = self._client(alias=self.shared_alias)
@@ -1274,7 +1298,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         assert 2 not in ids, f"id=2 (INT64_MIN) - 1 underflows, should not be >= 0. Got {ids}"
         assert 0 in ids, f"id=0 (INT64_MAX-1 - 1) should be >= 0. Got {ids}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_int64_overflow_multiplication(self):
         """Regression #48440: (INT64_MAX-1) * 2 overflows, should not be > 0."""
         client = self._client(alias=self.shared_alias)
@@ -1288,7 +1312,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         assert 0 not in ids, f"id=0 (INT64_MAX-1)*2 overflows. Got {ids}"
         assert 1 in ids, f"id=1 (200>0) should match. Got {ids}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_3vl_not_and_or_nullable(self):
         """Regression #48441: NOT(F AND T AND NULL) = NOT(F) = T -> row should return."""
         client = self._client(alias=self.shared_alias)
@@ -1303,7 +1327,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
             assert eid in ids, f"id={eid} (bool=False, NOT(F)=T) should return. Got {ids}"
         assert 1 not in ids, f"id=1 should not return (NOT(T)=F). Got {ids}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_3vl_not_all_null_segment(self):
         """Regression #48441: bug triggers when ALL nullable values in segment are NULL."""
         client = self._client(alias=self.shared_alias)
@@ -1330,7 +1354,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         self.drop_collection(client, coll2)
         assert 1 in ids, f"Single row (bf=F, nf=NULL): NOT(F)=T should return id=1. Got {ids}"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_bool_literal_in_logical_expr(self):
         """
         Regression #48443: 'true or (field > val)' should be accepted AND return correct results.
@@ -1377,7 +1401,7 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         assert not wrong_results, (
             f"{len(wrong_results)} expressions returned wrong results:\n" + "\n".join(wrong_results))
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_json_mixed_type_in_precision(self):
         """Regression #48442: mixed int/float IN list should not cause INT64 precision loss."""
         client = self._client(alias=self.shared_alias)
@@ -1478,7 +1502,7 @@ class TestJsonExpressions(TestMilvusClientV2Base):
             self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
         request.addfinalizer(teardown)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_json_path_expressions(self):
         """Test JSON path access: simple key, nested key, array index."""
         client = self._client(alias=self.shared_alias)
@@ -1538,7 +1562,7 @@ class TestJsonExpressions(TestMilvusClientV2Base):
 
         assert not failures, f"{len(failures)} JSON expression failures:\n" + "\n".join(failures)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_json_contains_functions(self):
         """Test json_contains, json_contains_all, json_contains_any on JSON array keys."""
         client = self._client(alias=self.shared_alias)
