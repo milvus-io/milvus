@@ -381,6 +381,7 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 	b, err := balancer.RecoverBalancer(ctx, newStaticChannelProvider("test-channel-1"))
 	assert.NoError(t, err)
 	assert.NotNil(t, b)
+	defer b.Close()
 
 	b.Trigger(context.Background())
 	ctx2, cancel := context.WithTimeout(ctx, 2*time.Second)
