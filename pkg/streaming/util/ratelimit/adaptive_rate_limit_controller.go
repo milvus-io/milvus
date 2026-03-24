@@ -412,10 +412,13 @@ func (c *AdaptiveRateLimitController) enterRejectMode(state *controllerState) {
 
 // notify notifies the observer with the current state and updates observable fields.
 func (c *AdaptiveRateLimitController) notify(state *controllerState) {
-	// Update observable atomic fields for external callers.
-	c.mode.Store(int32(state.mode))
+	// Update currentRate first (may be read by observer callbacks).
 	c.currentRate.Store(state.currentRate)
 
+	// Notify observers BEFORE updating mode, so that by the time external
+	// callers observe the mode change via getMode(), the observers have
+	// already been notified. This prevents a race where a caller sees the
+	// new mode but the observer notification hasn't completed yet.
 	switch state.mode {
 	case adaptiveRateLimitModeSlowdown, adaptiveRateLimitModeRecovery:
 		c.rateLimitRegistry.NotifySourceRateLimitState(c.sourceName, RateLimitState{
@@ -433,6 +436,9 @@ func (c *AdaptiveRateLimitController) notify(state *controllerState) {
 			Rate:  0,
 		})
 	}
+
+	// Update mode AFTER observer notification to ensure consistency.
+	c.mode.Store(int32(state.mode))
 	c.clearMetrics()
 	metrics.WALRateLimitControllerState.WithLabelValues(
 		paramtable.GetStringNodeID(),
