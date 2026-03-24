@@ -321,7 +321,8 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
-		int64(numValidRows), insertLogs, statsLogs, bm25StatsLogs)
+		int64(numValidRows), insertLogs, statsLogs, bm25StatsLogs,
+		st.manifestPath)
 
 	debug.FreeOSMemory()
 	elapse := st.tr.RecordSpan()
@@ -604,7 +605,8 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
-		textIndexLogs)
+		textIndexLogs,
+		st.manifestPath)
 	totalElapse := st.tr.RecordSpan()
 	log.Info("create text index done",
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
@@ -761,7 +763,8 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
-		jsonKeyIndexStats)
+		jsonKeyIndexStats,
+		st.manifestPath)
 
 	metrics.DataNodeBuildJSONStatsLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(totalElapse.Seconds())
 	log.Info("create json key index done",
