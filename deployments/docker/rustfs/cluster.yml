@@ -1,0 +1,132 @@
+version: '3.5'
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.25
+    container_name: milvus-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
+    command: etcd -advertise-client-urls=http://0.0.0.0:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    networks:
+      - milvus
+
+  rustfs:
+    # RustFS: High-performance S3-compatible object storage system
+    # Visit https://github.com/rustfs/rustfs for more information
+    image: docker.io/rustfs/rustfs:latest
+    container_name: milvus-rustfs
+    environment:
+      # RustFS basic configuration
+      - RUSTFS_ADDRESS=:9000
+      - RUSTFS_CONSOLE_ADDRESS=:9001
+      - RUSTFS_VOLUMES=/data/volume{1..4}
+
+      # S3-compatible access credentials
+      - RUSTFS_ACCESS_KEY=rustfsadmin
+      - RUSTFS_SECRET_KEY=rustfsadmin
+
+      # Logging configuration
+      - RUST_LOG=info,rustfs=debug
+
+      # Performance optimization for cluster mode
+      - RUSTFS_OBJECT_GET_TIMEOUT=30
+      - RUSTFS_OBJECT_MAX_CONCURRENT_DISK_READS=128
+      - RUSTFS_OBJECT_DUPLEX_BUFFER_SIZE=8388608
+      - RUSTFS_OBJECT_LOCK_OPTIMIZATION_ENABLE=true
+      - RUSTFS_OBJECT_PRIORITY_SCHEDULING_ENABLE=true
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # Console
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/rustfs:/data
+    networks:
+      - milvus
+
+  rootCoord:
+    image: milvusdb/milvus:v2.6.13
+    command: ["milvus", "run", "rootcoord"]
+    container_name: milvus-rootcoord
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: rustfs:9000
+    depends_on:
+      - "etcd"
+      - "rustfs"
+    networks:
+      - milvus
+
+  dataCoord:
+    image: milvusdb/milvus:v2.6.13
+    command: ["milvus", "run", "datacoord"]
+    container_name: milvus-datacoord
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: rustfs:9000
+    depends_on:
+      - "etcd"
+      - "rustfs"
+    networks:
+      - milvus
+
+  dataNode:
+    image: milvusdb/milvus:v2.6.13
+    command: ["milvus", "run", "datanode"]
+    container_name: milvus-datanode
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: rustfs:9000
+    depends_on:
+      - "etcd"
+      - "rustfs"
+    networks:
+      - milvus
+
+  queryCoord:
+    image: milvusdb/milvus:v2.6.13
+    command: ["milvus", "run", "querycoord"]
+    container_name: milvus-querycoord
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: rustfs:9000
+    depends_on:
+      - "etcd"
+      - "rustfs"
+    networks:
+      - milvus
+
+  queryNode:
+    image: milvusdb/milvus:v2.6.13
+    command: ["milvus", "run", "querynode"]
+    container_name: milvus-querynode
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: rustfs:9000
+    depends_on:
+      - "etcd"
+      - "rustfs"
+    networks:
+      - milvus
+
+  proxy:
+    image: milvusdb/milvus:v2.6.13
+    command: ["milvus", "run", "proxy"]
+    container_name: milvus-proxy
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: rustfs:9000
+    ports:
+      - "19530:19530"
+    depends_on:
+      - "etcd"
+      - "rustfs"
+    networks:
+      - milvus
+
+networks:
+  milvus:
+    driver: bridge

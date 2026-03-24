@@ -37,6 +37,7 @@ const (
 	CloudProviderGCP       = "gcp"
 	CloudProviderGCPNative = "gcpnative"
 	CloudProviderAWS       = "aws"
+	CloudProviderRustFS    = "rustfs" // RustFS object storage
 	CloudProviderAliyun    = "aliyun"
 	CloudProviderAzure     = "azure"
 	CloudProviderTencent   = "tencent"
