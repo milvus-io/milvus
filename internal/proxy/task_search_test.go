@@ -2554,8 +2554,8 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 		{
 			name: "nullable group_by values",
 			inputs: []*schemapb.SearchResultData{
-				makePartialResult(ids[0], scores[0], []int64{1, 2, 3, 4, 1, 2, 3, 4}, []bool{true, true, true, true, false, true, true, true, true, false}),
-				makePartialResult(ids[1], scores[1], []int64{1, 2, 3, 4, 1, 2, 3, 4}, []bool{true, true, true, true, false, true, true, true, true, false}),
+				makePartialResult(ids[0], scores[0], []int64{1, 2, 3, 4, 0, 1, 2, 3, 4, 0}, []bool{true, true, true, true, false, true, true, true, true, false}),
+				makePartialResult(ids[1], scores[1], []int64{1, 2, 3, 4, 0, 1, 2, 3, 4, 0}, []bool{true, true, true, true, false, true, true, true, true, false}),
 			},
 			expectedIDs:    []int64{1, 3, 5, 7, 9, 1, 3, 5, 7, 9},
 			expectedScores: []float32{-10, -8, -6, -4, -2, -10, -8, -6, -4, -2},
