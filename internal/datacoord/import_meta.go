@@ -353,16 +353,15 @@ func (m *importMeta) HandleCommitVchannel(ctx context.Context, jobID int64, vcha
 			return nil
 		}
 	}
-	// Invoke caller-supplied callback before persisting
-	if err := callback(); err != nil {
-		return err
-	}
-	// Persist: append vchannel to committed_vchannels
+	// Persist first: clone, append vchannel, then save to catalog.
+	// This ensures callback is only called once even on retry — if save fails,
+	// the caller retries and the callback is not invoked until save succeeds.
 	updatedJob := job.Clone()
 	updatedJob.(*importJob).ImportJob.CommittedVchannels = append(updatedJob.GetCommittedVchannels(), vchannel)
 	if err := m.catalog.SaveImportJob(ctx, updatedJob.(*importJob).ImportJob); err != nil {
 		return err
 	}
 	m.jobs[jobID] = updatedJob
-	return nil
+	// Invoke caller-supplied callback after successful persist
+	return callback()
 }
