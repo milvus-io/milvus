@@ -140,8 +140,8 @@ func (w *walAdaptorImpl) GetReplicateCheckpoint() (*utility.ReplicateCheckpoint,
 	return w.param.ReplicateManager.GetReplicateCheckpoint()
 }
 
-// GetSalvageCheckpoint returns the salvage checkpoint captured during force promote.
-func (w *walAdaptorImpl) GetSalvageCheckpoint() *utility.ReplicateCheckpoint {
+// GetSalvageCheckpoint returns all salvage checkpoints captured during force promote.
+func (w *walAdaptorImpl) GetSalvageCheckpoint() []*utility.ReplicateCheckpoint {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil
 	}

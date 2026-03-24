@@ -85,23 +85,23 @@ func (_c *MockStreamingNodeCataLog_GetConsumeCheckpoint_Call) RunAndReturn(run f
 }
 
 // GetSalvageCheckpoint provides a mock function with given fields: ctx, pChannelName
-func (_m *MockStreamingNodeCataLog) GetSalvageCheckpoint(ctx context.Context, pChannelName string) (*commonpb.ReplicateCheckpoint, error) {
+func (_m *MockStreamingNodeCataLog) GetSalvageCheckpoint(ctx context.Context, pChannelName string) ([]*commonpb.ReplicateCheckpoint, error) {
 	ret := _m.Called(ctx, pChannelName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetSalvageCheckpoint")
 	}
 
-	var r0 *commonpb.ReplicateCheckpoint
+	var r0 []*commonpb.ReplicateCheckpoint
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*commonpb.ReplicateCheckpoint, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*commonpb.ReplicateCheckpoint, error)); ok {
 		return rf(ctx, pChannelName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *commonpb.ReplicateCheckpoint); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) []*commonpb.ReplicateCheckpoint); ok {
 		r0 = rf(ctx, pChannelName)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.ReplicateCheckpoint)
+			r0 = ret.Get(0).([]*commonpb.ReplicateCheckpoint)
 		}
 	}
 
@@ -133,12 +133,12 @@ func (_c *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call) Run(run func(ctx c
 	return _c
 }
 
-func (_c *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call) Return(_a0 *commonpb.ReplicateCheckpoint, _a1 error) *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call {
+func (_c *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call) Return(_a0 []*commonpb.ReplicateCheckpoint, _a1 error) *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call) RunAndReturn(run func(context.Context, string) (*commonpb.ReplicateCheckpoint, error)) *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call {
+func (_c *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call) RunAndReturn(run func(context.Context, string) ([]*commonpb.ReplicateCheckpoint, error)) *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }

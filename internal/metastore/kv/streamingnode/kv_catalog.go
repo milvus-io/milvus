@@ -272,9 +272,10 @@ func (c *catalog) SaveConsumeCheckpoint(ctx context.Context, pchannelName string
 	return c.metaKV.Save(ctx, key, string(value))
 }
 
-// SaveSalvageCheckpoint saves the salvage checkpoint.
+// SaveSalvageCheckpoint saves the salvage checkpoint, keyed by the source cluster ID.
+// Multiple salvage checkpoints can exist for a channel (one per source cluster).
 func (c *catalog) SaveSalvageCheckpoint(ctx context.Context, pchannelName string, checkpoint *commonpb.ReplicateCheckpoint) error {
-	key := buildSalvageCheckpointPath(pchannelName)
+	key := buildSalvageCheckpointPath(pchannelName, checkpoint.GetClusterId())
 	value, err := proto.Marshal(checkpoint)
 	if err != nil {
 		return err
@@ -282,21 +283,22 @@ func (c *catalog) SaveSalvageCheckpoint(ctx context.Context, pchannelName string
 	return c.metaKV.Save(ctx, key, string(value))
 }
 
-// GetSalvageCheckpoint gets the salvage checkpoint.
-func (c *catalog) GetSalvageCheckpoint(ctx context.Context, pchannelName string) (*commonpb.ReplicateCheckpoint, error) {
-	key := buildSalvageCheckpointPath(pchannelName)
-	value, err := c.metaKV.Load(ctx, key)
-	if errors.Is(err, merr.ErrIoKeyNotFound) {
-		return nil, nil
-	}
+// GetSalvageCheckpoint gets all salvage checkpoints for a channel (one per source cluster).
+func (c *catalog) GetSalvageCheckpoint(ctx context.Context, pchannelName string) ([]*commonpb.ReplicateCheckpoint, error) {
+	prefix := buildSalvageCheckpointPrefix(pchannelName)
+	_, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
-	val := &commonpb.ReplicateCheckpoint{}
-	if err = proto.Unmarshal([]byte(value), val); err != nil {
-		return nil, err
+	checkpoints := make([]*commonpb.ReplicateCheckpoint, 0, len(values))
+	for _, value := range values {
+		val := &commonpb.ReplicateCheckpoint{}
+		if err = proto.Unmarshal([]byte(value), val); err != nil {
+			return nil, err
+		}
+		checkpoints = append(checkpoints, val)
 	}
-	return val, nil
+	return checkpoints, nil
 }
 
 // Prefix functions: return paths ending with "/" for LoadWithPrefix queries.
@@ -346,7 +348,12 @@ func removePrefix(prefix string, keys []string) []string {
 	return keys
 }
 
-// buildSalvageCheckpointPath builds the path for salvage checkpoint
-func buildSalvageCheckpointPath(pchannelName string) string {
-	return buildWALPrefix(pchannelName) + KeySalvageCheckpoint
+// buildSalvageCheckpointPrefix builds the prefix for all salvage checkpoints under a pchannel.
+func buildSalvageCheckpointPrefix(pchannelName string) string {
+	return buildWALPrefix(pchannelName) + KeySalvageCheckpoint + "/"
+}
+
+// buildSalvageCheckpointPath builds the path for salvage checkpoint for a specific source cluster.
+func buildSalvageCheckpointPath(pchannelName, sourceClusterID string) string {
+	return buildSalvageCheckpointPrefix(pchannelName) + sourceClusterID
 }

@@ -24,7 +24,7 @@ type ReplicateManagerRecoverParam struct {
 	ChannelInfo            types.PChannelInfo
 	CurrentClusterID       string
 	InitialRecoverSnapshot *recovery.RecoverySnapshot   // the initial recover snapshot of the replicate manager.
-	SalvageCheckpoint      *utility.ReplicateCheckpoint // loaded from etcd, captured during force promote
+	SalvageCheckpoints     []*utility.ReplicateCheckpoint // loaded from etcd, one per source cluster
 }
 
 // RecoverReplicateManager recovers the replicate manager from the initial recover snapshot.
@@ -35,12 +35,16 @@ func RecoverReplicateManager(param *ReplicateManagerRecoverParam) (ReplicatesMan
 	if err != nil {
 		return nil, newReplicateViolationErrorForConfig(param.InitialRecoverSnapshot.Checkpoint.ReplicateConfig, err)
 	}
+	salvageCheckpoints := make(map[string]*utility.ReplicateCheckpoint, len(param.SalvageCheckpoints))
+	for _, cp := range param.SalvageCheckpoints {
+		salvageCheckpoints[cp.ClusterID] = cp
+	}
 	rm := &replicatesManagerImpl{
 		mu:                    sync.Mutex{},
 		currentClusterID:      param.CurrentClusterID,
 		pchannel:              param.ChannelInfo,
 		replicateConfigHelper: replicateConfigHelper,
-		salvageCheckpoint:     param.SalvageCheckpoint,
+		salvageCheckpoints:    salvageCheckpoints,
 	}
 	if !rm.isPrimaryRole() {
 		// if current cluster is not the primary role,
@@ -58,8 +62,8 @@ type replicatesManagerImpl struct {
 	pchannel              types.PChannelInfo
 	currentClusterID      string
 	replicateConfigHelper *replicateutil.ConfigHelper
-	secondaryState        *secondaryState              // if the current cluster is not the primary role, it will have secondaryState.
-	salvageCheckpoint     *utility.ReplicateCheckpoint // captured on force promote
+	secondaryState        *secondaryState                         // if the current cluster is not the primary role, it will have secondaryState.
+	salvageCheckpoints    map[string]*utility.ReplicateCheckpoint // captured on force promote, keyed by source clusterID
 }
 
 // SwitchReplicateMode switches the replicates manager between replicating mode and non-replicating mode.
@@ -75,9 +79,11 @@ func (impl *replicatesManagerImpl) SwitchReplicateMode(_ context.Context, msg me
 	incomingCurrentClusterConfig := newGraph.GetCurrentCluster()
 	switch incomingCurrentClusterConfig.Role() {
 	case replicateutil.RolePrimary:
-		// Capture salvage checkpoint before dropping secondary state on force promote
+		// Capture salvage checkpoint before dropping secondary state on force promote.
+		// Store keyed by source clusterID so multiple force promotes don't overwrite each other.
 		if msg.Header().ForcePromote && impl.secondaryState != nil {
-			impl.salvageCheckpoint = impl.secondaryState.GetCheckpoint().Clone()
+			cp := impl.secondaryState.GetCheckpoint().Clone()
+			impl.salvageCheckpoints[cp.ClusterID] = cp
 		}
 		// drop the replicating state if the current cluster is switched to primary.
 		impl.secondaryState = nil
@@ -140,11 +146,15 @@ func (impl *replicatesManagerImpl) GetReplicateCheckpoint() (*utility.ReplicateC
 	return impl.secondaryState.GetCheckpoint(), nil
 }
 
-// GetSalvageCheckpoint returns the salvage checkpoint captured during force promote.
-func (impl *replicatesManagerImpl) GetSalvageCheckpoint() *utility.ReplicateCheckpoint {
+// GetSalvageCheckpoint returns all salvage checkpoints captured during force promote.
+func (impl *replicatesManagerImpl) GetSalvageCheckpoint() []*utility.ReplicateCheckpoint {
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
-	return impl.salvageCheckpoint
+	result := make([]*utility.ReplicateCheckpoint, 0, len(impl.salvageCheckpoints))
+	for _, cp := range impl.salvageCheckpoints {
+		result = append(result, cp)
+	}
+	return result
 }
 
 // beginReplicateMessage begins the replicate message operation.

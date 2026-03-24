@@ -7172,13 +7172,18 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 		return nil, err
 	}
 
-	// Get salvage checkpoint (may be nil if no force promote has occurred)
+	// Get the salvage checkpoint for the specified source cluster.
+	// Returns nil if source_cluster_id is not provided or no checkpoint exists for that cluster.
 	var salvageCheckpointProto *commonpb.ReplicateCheckpoint
-	salvageCheckpoint, err := streaming.WAL().Replicate().GetSalvageCheckpoint(ctx, req.GetTargetPchannel())
+	salvageCheckpoints, err := streaming.WAL().Replicate().GetSalvageCheckpoint(ctx, req.GetTargetPchannel())
 	if err != nil {
-		logger.Warn("failed to get salvage checkpoint", zap.Error(err))
-	} else if salvageCheckpoint != nil {
-		salvageCheckpointProto = salvageCheckpoint.IntoProto()
+		logger.Warn("failed to get salvage checkpoints", zap.Error(err))
+	}
+	for _, cp := range salvageCheckpoints {
+		if cp.ClusterID == req.GetSourceClusterId() {
+			salvageCheckpointProto = cp.IntoProto()
+			break
+		}
 	}
 
 	return &milvuspb.GetReplicateInfoResponse{

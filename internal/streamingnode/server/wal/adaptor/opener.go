@@ -225,12 +225,14 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		InitialRecoverSnapshot: snapshot,
 		TxnManager:             param.TxnManager,
 	})
-	// Load salvage checkpoint from etcd for data salvage support
-	var salvageCheckpoint *utility.ReplicateCheckpoint
-	if salvageCPProto, err := resource.Resource().StreamingNodeCatalog().GetSalvageCheckpoint(ctx, param.ChannelInfo.Name); err != nil {
-		log.Ctx(ctx).Warn("failed to load salvage checkpoint", zap.Error(err))
-	} else if salvageCPProto != nil {
-		salvageCheckpoint = utility.NewReplicateCheckpointFromProto(salvageCPProto)
+	// Load salvage checkpoints from etcd (one per source cluster that was force-promoted from).
+	var salvageCheckpoints []*utility.ReplicateCheckpoint
+	if salvageCPProtos, err := resource.Resource().StreamingNodeCatalog().GetSalvageCheckpoint(ctx, param.ChannelInfo.Name); err != nil {
+		log.Ctx(ctx).Info("failed to load salvage checkpoints", zap.Error(err))
+	} else {
+		for _, proto := range salvageCPProtos {
+			salvageCheckpoints = append(salvageCheckpoints, utility.NewReplicateCheckpointFromProto(proto))
+		}
 	}
 
 	if param.ReplicateManager, err = replicates.RecoverReplicateManager(
@@ -238,7 +240,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 			ChannelInfo:            param.ChannelInfo,
 			CurrentClusterID:       paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 			InitialRecoverSnapshot: snapshot,
-			SalvageCheckpoint:      salvageCheckpoint,
+			SalvageCheckpoints:     salvageCheckpoints,
 		},
 	); err != nil {
 		return nil, err

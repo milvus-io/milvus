@@ -363,7 +363,7 @@ type StreamingNodeCataLog interface {
 	// The checkpoint is captured during force promote.
 	SaveSalvageCheckpoint(ctx context.Context, pChannelName string, checkpoint *commonpb.ReplicateCheckpoint) error
 
-	// GetSalvageCheckpoint gets the salvage checkpoint.
-	// Returns nil, nil if not found (either not set or deleted).
-	GetSalvageCheckpoint(ctx context.Context, pChannelName string) (*commonpb.ReplicateCheckpoint, error)
+	// GetSalvageCheckpoint gets all salvage checkpoints for a channel.
+	// Returns an empty slice if none exist. One checkpoint per source cluster.
+	GetSalvageCheckpoint(ctx context.Context, pChannelName string) ([]*commonpb.ReplicateCheckpoint, error)
 }

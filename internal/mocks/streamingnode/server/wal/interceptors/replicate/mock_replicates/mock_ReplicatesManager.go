@@ -146,19 +146,19 @@ func (_c *MockReplicatesManager_GetReplicateCheckpoint_Call) RunAndReturn(run fu
 }
 
 // GetSalvageCheckpoint provides a mock function with no fields
-func (_m *MockReplicatesManager) GetSalvageCheckpoint() *utility.ReplicateCheckpoint {
+func (_m *MockReplicatesManager) GetSalvageCheckpoint() []*utility.ReplicateCheckpoint {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetSalvageCheckpoint")
 	}
 
-	var r0 *utility.ReplicateCheckpoint
-	if rf, ok := ret.Get(0).(func() *utility.ReplicateCheckpoint); ok {
+	var r0 []*utility.ReplicateCheckpoint
+	if rf, ok := ret.Get(0).(func() []*utility.ReplicateCheckpoint); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*utility.ReplicateCheckpoint)
+			r0 = ret.Get(0).([]*utility.ReplicateCheckpoint)
 		}
 	}
 
@@ -182,12 +182,12 @@ func (_c *MockReplicatesManager_GetSalvageCheckpoint_Call) Run(run func()) *Mock
 	return _c
 }
 
-func (_c *MockReplicatesManager_GetSalvageCheckpoint_Call) Return(_a0 *utility.ReplicateCheckpoint) *MockReplicatesManager_GetSalvageCheckpoint_Call {
+func (_c *MockReplicatesManager_GetSalvageCheckpoint_Call) Return(_a0 []*utility.ReplicateCheckpoint) *MockReplicatesManager_GetSalvageCheckpoint_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockReplicatesManager_GetSalvageCheckpoint_Call) RunAndReturn(run func() *utility.ReplicateCheckpoint) *MockReplicatesManager_GetSalvageCheckpoint_Call {
+func (_c *MockReplicatesManager_GetSalvageCheckpoint_Call) RunAndReturn(run func() []*utility.ReplicateCheckpoint) *MockReplicatesManager_GetSalvageCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }

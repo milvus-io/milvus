@@ -351,23 +351,23 @@ func (_c *MockHandlerClient_GetWALMetricsIfLocal_Call) RunAndReturn(run func(con
 }
 
 // GetSalvageCheckpoint provides a mock function with given fields: ctx, channelName
-func (_m *MockHandlerClient) GetSalvageCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error) {
+func (_m *MockHandlerClient) GetSalvageCheckpoint(ctx context.Context, channelName string) ([]*wal.ReplicateCheckpoint, error) {
 	ret := _m.Called(ctx, channelName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetSalvageCheckpoint")
 	}
 
-	var r0 *wal.ReplicateCheckpoint
+	var r0 []*wal.ReplicateCheckpoint
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*wal.ReplicateCheckpoint, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*wal.ReplicateCheckpoint, error)); ok {
 		return rf(ctx, channelName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *wal.ReplicateCheckpoint); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) []*wal.ReplicateCheckpoint); ok {
 		r0 = rf(ctx, channelName)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*wal.ReplicateCheckpoint)
+			r0 = ret.Get(0).([]*wal.ReplicateCheckpoint)
 		}
 	}
 
@@ -399,12 +399,12 @@ func (_c *MockHandlerClient_GetSalvageCheckpoint_Call) Run(run func(ctx context.
 	return _c
 }
 
-func (_c *MockHandlerClient_GetSalvageCheckpoint_Call) Return(_a0 *wal.ReplicateCheckpoint, _a1 error) *MockHandlerClient_GetSalvageCheckpoint_Call {
+func (_c *MockHandlerClient_GetSalvageCheckpoint_Call) Return(_a0 []*wal.ReplicateCheckpoint, _a1 error) *MockHandlerClient_GetSalvageCheckpoint_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockHandlerClient_GetSalvageCheckpoint_Call) RunAndReturn(run func(context.Context, string) (*wal.ReplicateCheckpoint, error)) *MockHandlerClient_GetSalvageCheckpoint_Call {
+func (_c *MockHandlerClient_GetSalvageCheckpoint_Call) RunAndReturn(run func(context.Context, string) ([]*wal.ReplicateCheckpoint, error)) *MockHandlerClient_GetSalvageCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -105,22 +105,22 @@ func (hc *handlerClientImpl) GetReplicateCheckpoint(ctx context.Context, pchanne
 	return cp.(*wal.ReplicateCheckpoint), nil
 }
 
-// GetSalvageCheckpoint gets the salvage checkpoint of the wal.
+// GetSalvageCheckpoint gets all salvage checkpoints of the wal.
 // Note: Currently only supports local WAL. Remote WAL support requires streaming proto update.
-func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel string) (*wal.ReplicateCheckpoint, error) {
+func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel string) ([]*wal.ReplicateCheckpoint, error) {
 	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, ErrClientClosed
 	}
 	defer hc.lifetime.Done()
 
 	logger := log.With(zap.String("pchannel", pchannel), zap.String("handler", "salvage checkpoint"))
-	cp, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+	cps, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		if assign.Channel.AccessMode != types.AccessModeRW {
 			return nil, errors.New("salvage checkpoint can only be read for RW channel")
 		}
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
-			// Local WAL - get salvage checkpoint directly
+			// Local WAL - get salvage checkpoints directly
 			return localWAL.GetSalvageCheckpoint(), nil
 		}
 		if !shouldUseRemoteWAL(err) {
@@ -128,15 +128,15 @@ func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel 
 		}
 		// TODO: Add streaming proto RPC for remote WAL support
 		// For now, return nil for remote WAL (salvage checkpoint is primarily used locally on the new primary)
-		return nil, nil
+		return ([]*wal.ReplicateCheckpoint)(nil), nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	if cp == nil {
+	if cps == nil {
 		return nil, nil
 	}
-	return cp.(*wal.ReplicateCheckpoint), nil
+	return cps.([]*wal.ReplicateCheckpoint), nil
 }
 
 // GetWALMetricsIfLocal gets the metrics of the local wal.

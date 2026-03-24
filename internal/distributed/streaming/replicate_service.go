@@ -101,18 +101,13 @@ func (s replicateService) shouldSkipReplicateMessageType(msgType message.Message
 	return ok
 }
 
-func (s replicateService) GetSalvageCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error) {
+func (s replicateService) GetSalvageCheckpoint(ctx context.Context, channelName string) ([]*wal.ReplicateCheckpoint, error) {
 	if !s.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, ErrWALAccesserClosed
 	}
 	defer s.lifetime.Done()
 
-	checkpoint, err := s.handlerClient.GetSalvageCheckpoint(ctx, channelName)
-	if err != nil {
-		return nil, err
-	}
-
-	return checkpoint, nil
+	return s.handlerClient.GetSalvageCheckpoint(ctx, channelName)
 }
 
 // overwriteReplicateMessage overwrites the replicate message.

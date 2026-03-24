@@ -73,7 +73,7 @@ func (n *noopReplicateService) GetReplicateCheckpoint(ctx context.Context, chann
 	return nil, nil
 }
 
-func (n *noopReplicateService) GetSalvageCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error) {
+func (n *noopReplicateService) GetSalvageCheckpoint(ctx context.Context, channelName string) ([]*wal.ReplicateCheckpoint, error) {
 	return nil, nil
 }
 

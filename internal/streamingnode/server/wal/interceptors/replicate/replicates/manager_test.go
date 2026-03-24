@@ -121,7 +121,7 @@ func TestSalvageCheckpointCaptureOnForcePromote(t *testing.T) {
 	assert.Equal(t, replicateutil.RoleSecondary, rm.Role())
 
 	// Initially no salvage checkpoint
-	assert.Nil(t, rm.GetSalvageCheckpoint())
+	assert.Empty(t, rm.GetSalvageCheckpoint())
 
 	// Force promote to primary
 	err = rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessageWithForcePromote("test1", true, "test2"))
@@ -129,8 +129,9 @@ func TestSalvageCheckpointCaptureOnForcePromote(t *testing.T) {
 	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
 
 	// Salvage checkpoint should be captured
-	salvageCP := rm.GetSalvageCheckpoint()
-	assert.NotNil(t, salvageCP)
+	salvageCPs := rm.GetSalvageCheckpoint()
+	assert.Len(t, salvageCPs, 1)
+	salvageCP := salvageCPs[0]
 	assert.Equal(t, "test2", salvageCP.ClusterID)
 	assert.Equal(t, "test2-rootcoord-dml_0", salvageCP.PChannel)
 	assert.Equal(t, uint64(1000), salvageCP.TimeTick)
@@ -166,7 +167,7 @@ func TestSalvageCheckpointNotCapturedOnNormalPromote(t *testing.T) {
 	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
 
 	// Salvage checkpoint should NOT be captured
-	assert.Nil(t, rm.GetSalvageCheckpoint())
+	assert.Empty(t, rm.GetSalvageCheckpoint())
 }
 
 func TestSalvageCheckpointNotCapturedWhenAlreadyPrimary(t *testing.T) {
@@ -191,7 +192,7 @@ func TestSalvageCheckpointNotCapturedWhenAlreadyPrimary(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Salvage checkpoint should NOT be captured (no secondary state to capture)
-	assert.Nil(t, rm.GetSalvageCheckpoint())
+	assert.Empty(t, rm.GetSalvageCheckpoint())
 }
 
 func TestSecondaryReplicateManagerWithTxn(t *testing.T) {

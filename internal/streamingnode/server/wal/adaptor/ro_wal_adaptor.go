@@ -61,7 +61,7 @@ func (w *roWALAdaptorImpl) GetReplicateCheckpoint() (*wal.ReplicateCheckpoint, e
 	panic("we cannot get replicate checkpoint from a read only wal")
 }
 
-func (w *roWALAdaptorImpl) GetSalvageCheckpoint() *wal.ReplicateCheckpoint {
+func (w *roWALAdaptorImpl) GetSalvageCheckpoint() []*wal.ReplicateCheckpoint {
 	panic("we cannot get salvage checkpoint from a read only wal")
 }
 

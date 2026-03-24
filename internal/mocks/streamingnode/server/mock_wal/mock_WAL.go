@@ -361,19 +361,19 @@ func (_c *MockWAL_GetReplicateCheckpoint_Call) RunAndReturn(run func() (*wal.Rep
 }
 
 // GetSalvageCheckpoint provides a mock function with no fields
-func (_m *MockWAL) GetSalvageCheckpoint() *wal.ReplicateCheckpoint {
+func (_m *MockWAL) GetSalvageCheckpoint() []*wal.ReplicateCheckpoint {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetSalvageCheckpoint")
 	}
 
-	var r0 *wal.ReplicateCheckpoint
-	if rf, ok := ret.Get(0).(func() *wal.ReplicateCheckpoint); ok {
+	var r0 []*wal.ReplicateCheckpoint
+	if rf, ok := ret.Get(0).(func() []*wal.ReplicateCheckpoint); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*wal.ReplicateCheckpoint)
+			r0 = ret.Get(0).([]*wal.ReplicateCheckpoint)
 		}
 	}
 
@@ -397,12 +397,12 @@ func (_c *MockWAL_GetSalvageCheckpoint_Call) Run(run func()) *MockWAL_GetSalvage
 	return _c
 }
 
-func (_c *MockWAL_GetSalvageCheckpoint_Call) Return(_a0 *wal.ReplicateCheckpoint) *MockWAL_GetSalvageCheckpoint_Call {
+func (_c *MockWAL_GetSalvageCheckpoint_Call) Return(_a0 []*wal.ReplicateCheckpoint) *MockWAL_GetSalvageCheckpoint_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWAL_GetSalvageCheckpoint_Call) RunAndReturn(run func() *wal.ReplicateCheckpoint) *MockWAL_GetSalvageCheckpoint_Call {
+func (_c *MockWAL_GetSalvageCheckpoint_Call) RunAndReturn(run func() []*wal.ReplicateCheckpoint) *MockWAL_GetSalvageCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }
