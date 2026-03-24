@@ -2001,6 +2001,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 			CreateTime:     createTime.Format("2006-01-02T15:04:05Z07:00"),
 			ReadyVchannels: in.GetChannelNames(),
 			DataTs:         in.GetDataTimestamp(),
+			AutoCommit:     importutilv2.IsAutoCommit(in.GetOptions()),
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
@@ -2820,4 +2821,22 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 		Status: merr.Success(),
 		Jobs:   jobs,
 	}, nil
+}
+
+// CommitImport commits a 2PC import job so that the imported data becomes visible.
+// Full implementation is in Task 4; this stub satisfies the DataCoordServer interface.
+func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
+	return merr.Status(merr.ErrServiceUnavailable), nil
+}
+
+// AbortImport aborts a 2PC import job that has not yet been committed.
+// Full implementation is in Task 4; this stub satisfies the DataCoordServer interface.
+func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	return merr.Status(merr.ErrServiceUnavailable), nil
+}
+
+// HandleCommitVchannel records that a vchannel has acknowledged a commit fence for a 2PC import job.
+// Full implementation is in Task 4; this stub satisfies the DataCoordServer interface.
+func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
+	return merr.Status(merr.ErrServiceUnavailable), nil
 }

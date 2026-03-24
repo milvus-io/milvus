@@ -341,6 +341,65 @@ func (_c *MixCoord_AllocID_Call) RunAndReturn(run func(context.Context, *rootcoo
 	return _c
 }
 
+// AbortImport provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) AbortImport(_a0 context.Context, _a1 *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AbortImport")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AbortImportRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AbortImportRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.AbortImportRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_AbortImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AbortImport'
+type MixCoord_AbortImport_Call struct {
+	*mock.Call
+}
+
+// AbortImport is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.AbortImportRequest
+func (_e *MixCoord_Expecter) AbortImport(_a0 interface{}, _a1 interface{}) *MixCoord_AbortImport_Call {
+	return &MixCoord_AbortImport_Call{Call: _e.mock.On("AbortImport", _a0, _a1)}
+}
+
+func (_c *MixCoord_AbortImport_Call) Run(run func(_a0 context.Context, _a1 *datapb.AbortImportRequest)) *MixCoord_AbortImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.AbortImportRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_AbortImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_AbortImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_AbortImport_Call) RunAndReturn(run func(context.Context, *datapb.AbortImportRequest) (*commonpb.Status, error)) *MixCoord_AbortImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AllocSegment provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) AllocSegment(_a0 context.Context, _a1 *datapb.AllocSegmentRequest) (*datapb.AllocSegmentResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1281,6 +1340,65 @@ func (_c *MixCoord_CheckHealth_Call) Return(_a0 *milvuspb.CheckHealthResponse, _
 }
 
 func (_c *MixCoord_CheckHealth_Call) RunAndReturn(run func(context.Context, *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)) *MixCoord_CheckHealth_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CommitImport provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) CommitImport(_a0 context.Context, _a1 *datapb.CommitImportRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CommitImport")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitImportRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitImportRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CommitImportRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_CommitImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CommitImport'
+type MixCoord_CommitImport_Call struct {
+	*mock.Call
+}
+
+// CommitImport is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.CommitImportRequest
+func (_e *MixCoord_Expecter) CommitImport(_a0 interface{}, _a1 interface{}) *MixCoord_CommitImport_Call {
+	return &MixCoord_CommitImport_Call{Call: _e.mock.On("CommitImport", _a0, _a1)}
+}
+
+func (_c *MixCoord_CommitImport_Call) Run(run func(_a0 context.Context, _a1 *datapb.CommitImportRequest)) *MixCoord_CommitImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CommitImportRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_CommitImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_CommitImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_CommitImport_Call) RunAndReturn(run func(context.Context, *datapb.CommitImportRequest) (*commonpb.Status, error)) *MixCoord_CommitImport_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -5813,6 +5931,65 @@ func (_c *MixCoord_GetSegmentsByStates_Call) Return(_a0 *datapb.GetSegmentsBySta
 }
 
 func (_c *MixCoord_GetSegmentsByStates_Call) RunAndReturn(run func(context.Context, *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error)) *MixCoord_GetSegmentsByStates_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// HandleCommitVchannel provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) HandleCommitVchannel(_a0 context.Context, _a1 *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HandleCommitVchannel")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.HandleCommitVchannelRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.HandleCommitVchannelRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_HandleCommitVchannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HandleCommitVchannel'
+type MixCoord_HandleCommitVchannel_Call struct {
+	*mock.Call
+}
+
+// HandleCommitVchannel is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.HandleCommitVchannelRequest
+func (_e *MixCoord_Expecter) HandleCommitVchannel(_a0 interface{}, _a1 interface{}) *MixCoord_HandleCommitVchannel_Call {
+	return &MixCoord_HandleCommitVchannel_Call{Call: _e.mock.On("HandleCommitVchannel", _a0, _a1)}
+}
+
+func (_c *MixCoord_HandleCommitVchannel_Call) Run(run func(_a0 context.Context, _a1 *datapb.HandleCommitVchannelRequest)) *MixCoord_HandleCommitVchannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.HandleCommitVchannelRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_HandleCommitVchannel_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_HandleCommitVchannel_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_HandleCommitVchannel_Call) RunAndReturn(run func(context.Context, *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error)) *MixCoord_HandleCommitVchannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
