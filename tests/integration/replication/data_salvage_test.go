@@ -203,7 +203,7 @@ func (s *DataSalvageSuite) TestDumpMessagesBasic() {
 			// Check if response contains a message (not a status)
 			if msg := resp.GetMessage(); msg != nil {
 				messages = append(messages, resp)
-				log.Info("received message", zap.String("messageId", string(msg.GetId().GetId())))
+				log.Info("received message", zap.String("messageId", msg.GetId().GetId()))
 			} else if status := resp.GetStatus(); status != nil {
 				log.Warn("received status response", zap.Any("status", status))
 				break
