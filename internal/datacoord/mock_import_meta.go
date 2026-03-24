@@ -664,6 +664,55 @@ func (_c *MockImportMeta_UpdateTask_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// HandleCommitVchannel provides a mock function with given fields: ctx, jobID, vchannel, callback
+func (_m *MockImportMeta) HandleCommitVchannel(ctx context.Context, jobID int64, vchannel string, callback func() error) error {
+	ret := _m.Called(ctx, jobID, vchannel, callback)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HandleCommitVchannel")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string, func() error) error); ok {
+		r0 = rf(ctx, jobID, vchannel, callback)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockImportMeta_HandleCommitVchannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HandleCommitVchannel'
+type MockImportMeta_HandleCommitVchannel_Call struct {
+	*mock.Call
+}
+
+// HandleCommitVchannel is a helper method to define mock.On call
+//   - ctx context.Context
+//   - jobID int64
+//   - vchannel string
+//   - callback func() error
+func (_e *MockImportMeta_Expecter) HandleCommitVchannel(ctx interface{}, jobID interface{}, vchannel interface{}, callback interface{}) *MockImportMeta_HandleCommitVchannel_Call {
+	return &MockImportMeta_HandleCommitVchannel_Call{Call: _e.mock.On("HandleCommitVchannel", ctx, jobID, vchannel, callback)}
+}
+
+func (_c *MockImportMeta_HandleCommitVchannel_Call) Run(run func(ctx context.Context, jobID int64, vchannel string, callback func() error)) *MockImportMeta_HandleCommitVchannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(string), args[3].(func() error))
+	})
+	return _c
+}
+
+func (_c *MockImportMeta_HandleCommitVchannel_Call) Return(_a0 error) *MockImportMeta_HandleCommitVchannel_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImportMeta_HandleCommitVchannel_Call) RunAndReturn(run func(context.Context, int64, string, func() error) error) *MockImportMeta_HandleCommitVchannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockImportMeta creates a new instance of MockImportMeta. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockImportMeta(t interface {

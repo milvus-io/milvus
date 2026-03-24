@@ -105,6 +105,7 @@ type ImportJob interface {
 	GetPartitionIDs() []int64
 	GetVchannels() []string
 	GetReadyVchannels() []string
+	GetCommittedVchannels() []string
 	GetSchema() *schemapb.CollectionSchema
 	GetTimeoutTs() uint64
 	GetCleanupTs() uint64
