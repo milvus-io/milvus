@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -186,4 +187,97 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// Broadcast the message
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
+}
+
+func (c *DDLCallbacks) registerImportCallbacks() {
+	registry.RegisterCommitImportV2AckCallback(c.commitImportV2AckCallback)
+	registry.RegisterRollbackImportV2AckCallback(c.rollbackImportV2AckCallback)
+}
+
+// commitImportV2AckCallback handles the ack callback for CommitImport WAL message.
+// It transitions the import job from Uncommitted → Committing state.
+// If the job is already in a terminal or non-Uncommitted state (e.g. abort won the race),
+// this is a no-op.
+func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result message.BroadcastResultCommitImportMessageV2) error {
+	header := result.Message.Header()
+	jobID := header.GetJobId()
+	log.Ctx(ctx).Info("CommitImport broadcast ack received", zap.Int64("jobID", jobID))
+
+	// CAS: Uncommitted → Committing; no-op if job already left Uncommitted (abort won the race)
+	return c.importMeta.UpdateJob(ctx, jobID,
+		UpdateJobStateWithCAS(
+			internalpb.ImportJobState_Uncommitted,
+			internalpb.ImportJobState_Committing,
+		),
+	)
+}
+
+// rollbackImportV2AckCallback handles the ack callback for RollbackImport WAL message.
+// It transitions the import job to Failed state and drops all import segments for the job.
+// If the job is already Committing or Completed (commit won the race), this is a no-op.
+func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result message.BroadcastResultRollbackImportMessageV2) error {
+	header := result.Message.Header()
+	jobID := header.GetJobId()
+	log.Ctx(ctx).Info("RollbackImport broadcast ack received", zap.Int64("jobID", jobID))
+
+	var needDrop bool
+	err := c.importMeta.UpdateJob(ctx, jobID, func(job ImportJob) {
+		if job.GetState() == internalpb.ImportJobState_Committing ||
+			job.GetState() == internalpb.ImportJobState_Completed {
+			log.Ctx(ctx).Info("RollbackImport: commit already won the race, skipping",
+				zap.Int64("jobID", jobID),
+				zap.String("currentState", job.GetState().String()))
+			return
+		}
+		job.(*importJob).ImportJob.State = internalpb.ImportJobState_Failed
+		needDrop = true
+	})
+	if err != nil || !needDrop {
+		return err
+	}
+	// Mark all import segments for this job as Dropped
+	return c.dropImportJobSegments(ctx, jobID)
+}
+
+// dropImportJobSegments marks all segments belonging to the given import job as Dropped.
+func (s *Server) dropImportJobSegments(ctx context.Context, jobID int64) error {
+	tasks := s.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	for _, task := range tasks {
+		it, ok := task.(*importTask)
+		if !ok {
+			continue
+		}
+		candidates := make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
+		candidates = append(candidates, it.GetSegmentIDs()...)
+		candidates = append(candidates, it.GetSortedSegmentIDs()...)
+		for _, segID := range candidates {
+			seg := s.meta.GetSegment(ctx, segID)
+			if seg == nil {
+				continue
+			}
+			if seg.GetState() == commonpb.SegmentState_Dropped {
+				continue
+			}
+			if err := s.meta.SetState(ctx, segID, commonpb.SegmentState_Dropped); err != nil {
+				log.Ctx(ctx).Warn("failed to drop import segment during rollback",
+					zap.Int64("jobID", jobID),
+					zap.Int64("segmentID", segID),
+					zap.Error(err))
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// UpdateJobStateWithCAS returns an UpdateJobAction that transitions from→to only
+// if the current state matches 'from'. If the state has already changed (race:
+// abort won before commit, or commit won before abort), this is a no-op.
+func UpdateJobStateWithCAS(from, to internalpb.ImportJobState) UpdateJobAction {
+	return func(job ImportJob) {
+		if job.GetState() != from {
+			return
+		}
+		job.(*importJob).ImportJob.State = to
+	}
 }
