@@ -822,3 +822,19 @@ func TestImportFlowIntegration(t *testing.T) {
 		t.Log("Import flow documented successfully")
 	})
 }
+
+func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
+	t.Skip("environment: requires full server setup")
+}
+
+func TestRollbackImportCallback_DropSegments(t *testing.T) {
+	t.Skip("environment: requires full server setup")
+}
+
+func TestCommitImportCallback_AfterAbort_NoOp(t *testing.T) {
+	t.Skip("environment: requires full server setup")
+}
+
+func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
+	t.Skip("environment: requires full server setup")
+}
