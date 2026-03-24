@@ -480,7 +480,7 @@ func TestBalancer_DynamicChannelFromProvider(t *testing.T) {
 		}
 		return nil
 	})
-	assert.ErrorIs(t, err, doneErr)
+	assert.ErrorIs(t, err, doneErr, "initial channel assignment did not stabilize within timeout")
 
 	// Send dynamic channels through the provider.
 	provider.ch <- []string{"dynamic-channel-1", "dynamic-channel-2"}
@@ -494,7 +494,7 @@ func TestBalancer_DynamicChannelFromProvider(t *testing.T) {
 		}
 		return nil
 	})
-	assert.ErrorIs(t, err, doneErr)
+	assert.ErrorIs(t, err, doneErr, "dynamic channel assignment did not stabilize within timeout")
 
 	b.Close()
 }
