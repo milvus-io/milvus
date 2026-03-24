@@ -479,6 +479,16 @@ func IsPartitionKeyIsolationKvEnabled(kvs ...*commonpb.KeyValuePair) (bool, erro
 	return false, nil
 }
 
+// IsQueryModeKeyExists checks if the query_mode key exists in the key-value pairs.
+func IsQueryModeKeyExists(kvs ...*commonpb.KeyValuePair) bool {
+	for _, kv := range kvs {
+		if kv.Key == QueryModeKey {
+			return true
+		}
+	}
+	return false
+}
+
 // GetQueryMode extracts the query_mode value from properties.
 // Returns empty string if not set.
 func GetQueryMode(kvs ...*commonpb.KeyValuePair) string {
