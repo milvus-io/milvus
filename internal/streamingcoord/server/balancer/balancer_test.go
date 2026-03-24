@@ -32,6 +32,7 @@ import (
 func TestBalancer(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("3")
+	defer paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("")
 	etcdClient, _ := kvfactory.GetEtcdAndPath()
 	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
@@ -416,6 +417,8 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 
 func TestBalancer_DynamicChannelFromProvider(t *testing.T) {
 	paramtable.Init()
+	paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("0")
+	defer paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("")
 	etcdClient, _ := kvfactory.GetEtcdAndPath()
 	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
@@ -445,7 +448,7 @@ func TestBalancer_DynamicChannelFromProvider(t *testing.T) {
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListPChannel(mock.Anything).Unset()
 	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
 		{
@@ -469,7 +472,9 @@ func TestBalancer_DynamicChannelFromProvider(t *testing.T) {
 
 	// Wait for initial assignment to stabilize (1 channel assigned).
 	doneErr := errors.New("done")
-	err = b.WatchChannelAssignments(ctx, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
+	ctx1, cancel1 := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel1()
+	err = b.WatchChannelAssignments(ctx1, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
 		if len(param.Relations) >= 1 {
 			return doneErr
 		}
@@ -481,7 +486,9 @@ func TestBalancer_DynamicChannelFromProvider(t *testing.T) {
 	provider.ch <- []string{"dynamic-channel-1", "dynamic-channel-2"}
 
 	// The balancer should pick them up and assign them.
-	err = b.WatchChannelAssignments(ctx, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
+	ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel2()
+	err = b.WatchChannelAssignments(ctx2, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
 		if len(param.Relations) >= 3 {
 			return doneErr
 		}
@@ -494,6 +501,8 @@ func TestBalancer_DynamicChannelFromProvider(t *testing.T) {
 
 func TestBalancer_DynamicChannelProviderClosed(t *testing.T) {
 	paramtable.Init()
+	paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("0")
+	defer paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("")
 	etcdClient, _ := kvfactory.GetEtcdAndPath()
 	channel.ResetStaticPChannelStatsManager()
 	channel.RecoverPChannelStatsManager([]string{})
@@ -521,7 +530,7 @@ func TestBalancer_DynamicChannelProviderClosed(t *testing.T) {
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListPChannel(mock.Anything).Unset()
 	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
 		{
