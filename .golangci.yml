@@ -219,17 +219,13 @@ linters:
         text: ST1011
       - path: (.+)\.go$
         text: ST1023
-      # gosec new rules
-      - path: (.+)\.go$
-        text: G101
+      # gosec new rules (introduced in gosec v2.23+, not present in golangci-lint v1)
       - path: (.+)\.go$
         text: G117
       - path: (.+)\.go$
         text: G118
       - path: (.+)\.go$
         text: G120
-      - path: (.+)\.go$
-        text: G602
       - path: (.+)\.go$
         text: G702
       - path: (.+)\.go$
