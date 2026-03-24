@@ -2938,9 +2938,11 @@ func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest
 		return merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("job %d not found", jobID))), nil
 	}
 	state := job.GetState()
-	if state == internalpb.ImportJobState_Committing || state == internalpb.ImportJobState_Completed {
+	if state == internalpb.ImportJobState_Failed ||
+		state == internalpb.ImportJobState_Committing ||
+		state == internalpb.ImportJobState_Completed {
 		return merr.Status(merr.WrapErrImportFailed(
-			fmt.Sprintf("job %d already committed (state: %s), abort not allowed", jobID, state))), nil
+			fmt.Sprintf("job %d is in terminal/committed state %s, abort not allowed", jobID, state))), nil
 	}
 
 	// Acquire per-job mutex to serialize concurrent commit/abort.
@@ -2953,10 +2955,11 @@ func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest
 	if job == nil {
 		return merr.Status(merr.WrapErrImportFailed("job not found after lock")), nil
 	}
-	if job.GetState() == internalpb.ImportJobState_Committing ||
+	if job.GetState() == internalpb.ImportJobState_Failed ||
+		job.GetState() == internalpb.ImportJobState_Committing ||
 		job.GetState() == internalpb.ImportJobState_Completed {
 		return merr.Status(merr.WrapErrImportFailed(
-			fmt.Sprintf("job %d already committed (state: %s), abort not allowed", jobID, job.GetState()))), nil
+			fmt.Sprintf("job %d is in terminal/committed state %s, abort not allowed", jobID, job.GetState()))), nil
 	}
 
 	log.Info("aborting import job via WAL broadcast")
@@ -2973,36 +2976,17 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	err := s.importMeta.HandleCommitVchannel(ctx, req.GetJobId(), req.GetVchannel(), func() error {
-		return s.setImportSegmentsVisible(ctx, req.GetJobId(), req.GetVchannel())
-	})
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	return merr.Success(), nil
-}
+	jobID := req.GetJobId()
+	vchannel := req.GetVchannel()
 
-// setImportSegmentsVisible unsets the is_importing flag for all segments belonging to
-// the given import job that are assigned to the given vchannel.
-func (s *Server) setImportSegmentsVisible(ctx context.Context, jobID int64, vchannel string) error {
-	tasks := s.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
-	for _, t := range tasks {
-		it, ok := t.(*importTask)
-		if !ok {
-			continue
-		}
-		allSegIDs := append(it.GetSegmentIDs(), it.GetSortedSegmentIDs()...)
-		for _, segID := range allSegIDs {
-			seg := s.meta.GetSegment(ctx, segID)
-			if seg == nil {
-				continue
-			}
-			if seg.GetInsertChannel() != vchannel {
-				continue
-			}
-			if !seg.GetIsImporting() {
-				continue
-			}
+	// Pre-fetch segment IDs for this job+vchannel BEFORE calling HandleCommitVchannel.
+	// The callback must not access importMeta because HandleCommitVchannel holds m.mu (write lock);
+	// calling GetTaskBy inside the callback would attempt to re-acquire m.mu (read lock) → deadlock.
+	segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
+
+	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
+		// Only access s.meta (segment meta) here, NOT s.importMeta.
+		for _, segID := range segIDs {
 			op := UpdateIsImporting(segID, false)
 			if err := s.meta.UpdateSegmentsInfo(ctx, op); err != nil {
 				log.Ctx(ctx).Warn("failed to unset is_importing for segment",
@@ -3013,6 +2997,39 @@ func (s *Server) setImportSegmentsVisible(ctx context.Context, jobID int64, vcha
 				return err
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return merr.Status(err), nil
 	}
-	return nil
+	return merr.Success(), nil
+}
+
+// getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to
+// the given import job that are assigned to the given vchannel.
+// This must be called BEFORE acquiring importMeta's mutex (i.e., before HandleCommitVchannel).
+func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) []int64 {
+	tasks := s.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	var segIDs []int64
+	for _, task := range tasks {
+		it, ok := task.(*importTask)
+		if !ok {
+			continue
+		}
+		// Collect all candidate segment IDs from this task (safe copies).
+		candidates := make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
+		candidates = append(candidates, it.GetSegmentIDs()...)
+		candidates = append(candidates, it.GetSortedSegmentIDs()...)
+		for _, segID := range candidates {
+			seg := s.meta.GetSegment(ctx, segID)
+			if seg == nil {
+				continue
+			}
+			if seg.GetInsertChannel() != vchannel {
+				continue
+			}
+			segIDs = append(segIDs, segID)
+		}
+	}
+	return segIDs
 }
