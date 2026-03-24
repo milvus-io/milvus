@@ -1458,7 +1458,7 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 
 	p.LargeTopKLimit = ParamItem{
 		Key:          "quotaAndLimits.limits.largeTopK",
-		Version:      "2.6.13",
+		Version:      "2.6.14",
 		DefaultValue: "1000000",
 		Doc: `Search limit for collections with query_mode=large_topk, which applies on:
 maximum # of results to return (topK).`,
@@ -1487,7 +1487,7 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 
 	p.LargeMaxQueryResultWindow = ParamItem{
 		Key:          "quotaAndLimits.limits.LargeMaxQueryResultWindow",
-		Version:      "2.6.13",
+		Version:      "2.6.14",
 		DefaultValue: "1000000",
 		Doc:          `Query limit for collections with query_mode=large_topk, which applies on: maximum of offset + limit`,
 	}
