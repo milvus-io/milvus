@@ -1486,7 +1486,7 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 	p.MaxQueryResultWindow.Init(base.mgr)
 
 	p.LargeMaxQueryResultWindow = ParamItem{
-		Key:          "quotaAndLimits.limits.LargeMaxQueryResultWindow",
+		Key:          "quotaAndLimits.limits.largeMaxQueryResultWindow",
 		Version:      "2.6.14",
 		DefaultValue: "1000000",
 		Doc:          `Query limit for collections with query_mode=large_topk, which applies on: maximum of offset + limit`,

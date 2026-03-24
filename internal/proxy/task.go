@@ -1429,13 +1429,16 @@ func detectQueryModeChange(
 	properties []*commonpb.KeyValuePair,
 	deleteKeys []string,
 ) (newQueryMode string, changed bool, err error) {
+	// this is duplicated with the check in alterCollectionTask PreExecute
+	if len(properties) > 0 && len(deleteKeys) > 0 {
+		return "", false, merr.WrapErrParameterInvalidMsg("cannot provide both DeleteKeys and ExtraParams")
+	}
 	newQueryMode = oldQueryMode
-	if val, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(common.QueryModeKey, properties); ok {
-		mode := strings.ToLower(strings.TrimSpace(val))
-		if mode != common.QueryModeLargeTopK {
-			return "", false, fmt.Errorf("invalid query_mode value %q, valid values: [%s]", val, common.ValidQueryModes)
+	if common.IsQueryModeKeyExists(properties...) {
+		if err := common.ValidateQueryMode(properties...); err != nil {
+			return "", false, err
 		}
-		newQueryMode = mode
+		newQueryMode = common.GetQueryMode(properties...)
 		changed = oldQueryMode != newQueryMode
 	}
 	for _, key := range deleteKeys {
