@@ -125,6 +125,11 @@ service DataCoord {
   rpc RefreshExternalCollection(RefreshExternalCollectionRequest) returns(RefreshExternalCollectionResponse){}
   rpc GetRefreshExternalCollectionProgress(GetRefreshExternalCollectionProgressRequest) returns(GetRefreshExternalCollectionProgressResponse){}
   rpc ListRefreshExternalCollectionJobs(ListRefreshExternalCollectionJobsRequest) returns(ListRefreshExternalCollectionJobsResponse){}
+
+  // Import 2PC RPCs — internal only, not exposed in public MilvusService
+  rpc CommitImport(CommitImportRequest)                 returns (common.Status) {}
+  rpc AbortImport(AbortImportRequest)                   returns (common.Status) {}
+  rpc HandleCommitVchannel(HandleCommitVchannelRequest) returns (common.Status) {}
 }
 
 service DataNode {
@@ -162,11 +167,6 @@ service DataNode {
 
   // file resource
   rpc SyncFileResource(internal.SyncFileResourceRequest) returns(common.Status) {}
-
-  // Import 2PC RPCs — internal only, not exposed in public MilvusService
-  rpc CommitImport(CommitImportRequest)                 returns (common.Status) {}
-  rpc AbortImport(AbortImportRequest)                   returns (common.Status) {}
-  rpc HandleCommitVchannel(HandleCommitVchannelRequest) returns (common.Status) {}
 }
 
 message FlushRequest {
