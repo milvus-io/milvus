@@ -222,3 +222,4 @@ int HasSubstructMatch(const uint8_t* mol_pickle, size_t mol_size,
 }
 
 }  // extern "C"
+

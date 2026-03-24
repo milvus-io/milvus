@@ -559,6 +559,7 @@ ScalarFieldIndexing<T>::ScalarFieldIndexing(
     : FieldIndexing(field_meta, segcore_config),
       built_(false),
       sync_with_index_(false),
+      segment_max_row_count_(segment_max_row_count),
       config_(std::make_unique<FieldIndexMeta>(field_index_meta)) {
     recreate_index(field_meta, field_raw_data);
 }
@@ -615,7 +616,8 @@ ScalarFieldIndexing<T>::recreate_index(const FieldMeta& field_meta,
         }
         if (field_meta.get_data_type() == DataType::MOL) {
             index_ =
-                std::make_unique<index::MolPatternIndex<std::string>>();
+                std::make_unique<index::MolPatternIndex<std::string>>(
+                    segment_max_row_count_);
             built_ = false;
             sync_with_index_ = false;
             index_cur_ = 0;
@@ -691,7 +693,8 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
                     if (is_valid && i < mol_array.data_size()) {
                         pickle_data = mol_array.data(i);
                     }
-                    mol_index->AppendMolRow(pickle_data, is_valid);
+                    mol_index->AppendMolRow(
+                        reserved_offset + i, pickle_data, is_valid);
                 }
                 index_cur_.fetch_add(size);
                 sync_with_index_.store(true);
@@ -756,7 +759,9 @@ ScalarFieldIndexing<T>::AppendSegmentIndex(int64_t reserved_offset,
                 for (int64_t i = 0; i < size; ++i) {
                     bool is_valid = field_data->is_valid(i);
                     mol_index->AppendMolRow(
-                        is_valid ? string_array[i] : std::string{}, is_valid);
+                        reserved_offset + i,
+                        is_valid ? string_array[i] : std::string{},
+                        is_valid);
                 }
                 index_cur_.fetch_add(size);
                 sync_with_index_.store(true);

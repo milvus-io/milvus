@@ -1134,13 +1134,7 @@ ProtoParser::ParseMolFunctionFilterExprs(
     auto expr = std::make_shared<expr::MolFunctionFilterExpr>(
         columnInfo,
         expr_pb.op(),
-        expr_pb.smiles_string(),
-        expr_pb.fingerprint_field_id(),
-        expr_pb.fingerprint_type(),
-        expr_pb.fingerprint_dim(),
-        expr_pb.morgan_radius(),
-        expr_pb.rdkit_min_path(),
-        expr_pb.rdkit_max_path());
+        expr_pb.smiles_string());
     return expr;
 }
 

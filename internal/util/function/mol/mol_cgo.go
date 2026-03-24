@@ -97,6 +97,28 @@ func cgoGenerateRDKitFingerprint(smiles string, minPath int, maxPath int, finger
 	return C.GoBytes(unsafe.Pointer(result.data), C.int(result.size)), nil
 }
 
+// cgoGeneratePatternFingerprint calls the C++ RDKit implementation
+func cgoGeneratePatternFingerprint(smiles string, fingerprintSize int) ([]byte, error) {
+	cSmiles := C.CString(smiles)
+	defer C.free(unsafe.Pointer(cSmiles))
+
+	result := C.GeneratePatternFingerprint(cSmiles, C.int(fingerprintSize))
+	defer C.FreeMolDataResult(&result)
+
+	if result.error_code != C.MOL_SUCCESS {
+		if result.error_msg != nil {
+			return nil, fmt.Errorf("Pattern fingerprint generation failed: %s", C.GoString(result.error_msg))
+		}
+		return nil, fmt.Errorf("Pattern fingerprint generation failed with error code: %d", result.error_code)
+	}
+
+	if result.data == nil || result.size == 0 {
+		return nil, fmt.Errorf("Pattern fingerprint generation returned empty result")
+	}
+
+	return C.GoBytes(unsafe.Pointer(result.data), C.int(result.size)), nil
+}
+
 // cgoConvertSMILESToPickle converts SMILES to RDKit pickle format
 func cgoConvertSMILESToPickle(smiles string) ([]byte, error) {
 	cSmiles := C.CString(smiles)

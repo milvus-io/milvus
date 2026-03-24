@@ -73,19 +73,10 @@ class PhyMolFunctionFilterExpr : public SegmentExpr {
     VectorPtr
     EvalForDataSegment();
 
-    // Fingerprint pre-filter: compute query fingerprint and build a
-    // candidate bitmap from raw fingerprint chunks.
+    // Fingerprint pre-filter: use MOL_PATTERN index to build a
+    // candidate bitmap for conservative pre-filtering.
     void
     SearchFingerprintIndex();
-
-    // Generate the query pattern fingerprint from SMILES.
-    void
-    EnsureQueryFingerprint();
-
-    // Read raw BinaryVector chunk data and run knowhere brute-force
-    // range search as a stateless pre-filter helper.
-    void
-    FallbackRawDataPreFilter();
 
     // Try to use MOL_PATTERN index on the mol field for pre-filtering.
     // Returns true if index was found and used (fp_candidates_ populated).

@@ -11,9 +11,9 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <shared_mutex>
 #include <string>
 #include <vector>
 
@@ -30,18 +30,27 @@ namespace milvus::index {
 // Inherits ScalarIndex<string> for compatibility with the Growing segment's
 // ScalarFieldIndexing<string> infrastructure.
 //
-// Thread safety: AppendMolRow (writer) and GetFPData/RowCount (readers) are
-// protected by a shared_mutex. Readers hold a shared lock, the writer holds
-// an exclusive lock.
+// Thread safety (Growing segment): The fp buffer is pre-allocated to
+// max_row_count_ * bytes_per_row_ at construction (zero-filled), so the
+// data pointer is stable.  Writers write fp data at disjoint reserved
+// offsets (from PreInsert), then CAS-advance published_row_count_ to
+// max(current, offset+1).  published_row_count_ is a high-water mark,
+// NOT a continuous-prefix guarantee; gaps may transiently contain zero
+// FPs (conservative).  Query visibility is bounded by AckResponder,
+// which only advances when all rows in [0, ack) are committed.
 template <typename T>
 class MolPatternIndex : public ScalarIndex<T> {
  public:
     using MemFileManager = storage::MemFileManagerImpl;
     using MemFileManagerPtr = std::shared_ptr<MemFileManager>;
 
-    MolPatternIndex()
+    explicit MolPatternIndex(int64_t max_row_count = 0)
         : ScalarIndex<T>(MOL_PATTERN_INDEX_TYPE),
-          bytes_per_row_((dim_ + 7) / 8) {
+          bytes_per_row_((dim_ + 7) / 8),
+          max_row_count_(max_row_count) {
+        if (max_row_count_ > 0) {
+            fp_data_owned_.resize(max_row_count_ * bytes_per_row_, 0);
+        }
     }
 
     explicit MolPatternIndex(
@@ -87,7 +96,7 @@ class MolPatternIndex : public ScalarIndex<T> {
 
     int64_t
     Count() override {
-        return row_count_;
+        return published_row_count_.load(std::memory_order_acquire);
     }
 
     IndexStatsPtr
@@ -106,7 +115,7 @@ class MolPatternIndex : public ScalarIndex<T> {
     void
     ComputeByteSize() override {
         ScalarIndex<T>::ComputeByteSize();
-        this->cached_byte_size_ = fp_data_owned_.capacity() +
+        this->cached_byte_size_ = fp_data_owned_.size() +
                                   sizeof(dim_) + sizeof(row_count_) +
                                   sizeof(bytes_per_row_);
     }
@@ -164,54 +173,55 @@ class MolPatternIndex : public ScalarIndex<T> {
 
     int64_t
     Size() override {
-        return row_count_;
+        return published_row_count_.load(std::memory_order_acquire);
     }
 
-    // MOL-specific access for query executor (thread-safe)
+    // MOL-specific access for query executor (lock-free)
     int32_t
     Dim() const {
         return dim_;
     }
 
-    // Snapshot current row count and fp data pointer.
-    // The shared_lock is held for the lifetime of FPSnapshot, so the
-    // data pointer remains valid until the snapshot is destroyed.
-    struct FPSnapshot {
-        int64_t row_count;
-        const uint8_t* data;
-        std::shared_lock<std::shared_mutex> lock;
-    };
-
-    FPSnapshot
-    SnapshotFPData() const {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        auto rc = row_count_;
-        auto ptr = fp_data_mmap_ ? fp_data_mmap_ : fp_data_owned_.data();
-        return {rc, ptr, std::move(lock)};
-    }
-
+    // Return the high-water mark of written offsets (max offset + 1).
+    // Under concurrent inserts, gaps may exist where fp data is still
+    // zero-initialized (conservative, matches everything).  Query
+    // visibility is ultimately bounded by AckResponder::GetAck(), which
+    // only advances when all rows in [0, ack) are fully committed.
     int64_t
     RowCount() const {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
-        return row_count_;
+        return published_row_count_.load(std::memory_order_acquire);
     }
 
     const uint8_t*
     GetFPData() const {
-        std::shared_lock<std::shared_mutex> lock(mutex_);
         return fp_data_mmap_ ? fp_data_mmap_ : fp_data_owned_.data();
     }
 
-    // Growing segment: append fingerprint for one mol row (exclusive lock)
+    // Growing segment: write fingerprint for one mol row at a specific offset.
+    // row_offset is the segment-level row offset (from PreInsert reserved_offset).
+    // Lock-free, safe for concurrent callers with disjoint offsets.
     void
-    AppendMolRow(const std::string& pickle_data, bool is_valid);
+    AppendMolRow(int64_t row_offset,
+                 const std::string& pickle_data,
+                 bool is_valid);
 
  private:
     int32_t dim_ = 2048;       // bits
     int32_t bytes_per_row_ = 0;
-    int64_t row_count_ = 0;
+    int64_t row_count_ = 0;        // total rows written (writer-only)
+    int64_t max_row_count_ = 0;    // pre-allocated capacity
+
+    // High-water mark of written offsets (max row_offset + 1, lock-free).
+    // NOT a "continuous prefix" guarantee — under concurrent/out-of-order
+    // inserts, some rows in [0, published_row_count_) may still be zero.
+    // This is safe because: (a) zero FP is conservative, and (b) query
+    // visibility is bounded by AckResponder which IS a continuous prefix.
+    std::atomic<int64_t> published_row_count_{0};
 
     // Fingerprint data — owned (Build / non-mmap Load / Growing)
+    // For Growing segment: pre-allocated to max_row_count_ * bytes_per_row_
+    // at construction. DO NOT resize/insert/push_back after construction —
+    // concurrent readers depend on a stable data pointer.
     std::vector<uint8_t> fp_data_owned_;
 
     // Fingerprint data — mmap pointer (mmap Load)
@@ -220,10 +230,6 @@ class MolPatternIndex : public ScalarIndex<T> {
     std::unique_ptr<MmapFileRAII> mmap_file_raii_;
 
     MemFileManagerPtr mem_file_manager_;
-
-    // Protects fp_data_owned_, fp_data_mmap_, row_count_ for concurrent
-    // read (query) / write (growing append).
-    mutable std::shared_mutex mutex_;
 };
 
 }  // namespace milvus::index

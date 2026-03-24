@@ -19,8 +19,12 @@
 package mol
 
 const (
-	// MACCSNumBits is the fixed size of MACCS fingerprint
+	// MACCSNumBits is the count of meaningful MACCS bits.
 	MACCSNumBits = 167
+	// MACCSStorageBits is the aligned binary-vector dim used by Milvus.
+	MACCSStorageBits = 168
+	// MACCSNumBytes is the serialized fingerprint size.
+	MACCSNumBytes = MACCSStorageBits / 8
 )
 
 // GenerateMACCSFingerprint generates a MACCS fingerprint for a SMILES string
@@ -28,10 +32,22 @@ const (
 // Returns binary fingerprint as []byte
 func GenerateMACCSFingerprint(smiles string) ([]byte, error) {
 	if len(smiles) == 0 {
-		return make([]byte, MACCSNumBits/8+1), nil
+		return make([]byte, MACCSNumBytes), nil
 	}
 
-	return cgoGenerateMACCSFingerprint(smiles)
+	fp, err := cgoGenerateMACCSFingerprint(smiles)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeMACCSFingerprint(fp), nil
+}
+
+func normalizeMACCSFingerprint(fp []byte) []byte {
+	normalized := make([]byte, MACCSNumBytes)
+	copy(normalized, fp)
+	// MACCS has 167 valid bits; keep the aligned padding bit clear.
+	normalized[MACCSNumBytes-1] &= 0x7F
+	return normalized
 }
 
 // MACCSFingerprintToFloatVector converts binary MACCS fingerprint to float32 vector

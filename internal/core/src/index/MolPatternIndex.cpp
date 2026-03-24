@@ -110,6 +110,7 @@ MolPatternIndex<T>::Build(size_t n,
             FreeMolDataResult(&result);
             row_count_++;
         }
+        published_row_count_.store(row_count_, std::memory_order_release);
     } else {
         ThrowInfo(ErrorCode::Unsupported,
                   "MolPatternIndex only supports string type");
@@ -184,6 +185,8 @@ MolPatternIndex<T>::BuildWithFieldData(
         }
     }
 
+    published_row_count_.store(row_count_, std::memory_order_release);
+
     LOG_INFO("MolPatternIndex: built {} rows, dim={}, total_bytes={}",
              row_count_,
              dim_,
@@ -195,19 +198,24 @@ BinarySet
 MolPatternIndex<T>::Serialize(const Config& config) {
     BinarySet res_set;
 
+    // Use published row count — only serialize rows that are fully written.
+    auto pub_count = published_row_count_.load(std::memory_order_acquire);
+
     // Serialize meta: dim (4 bytes) + row_count (8 bytes)
     constexpr size_t meta_size = sizeof(int32_t) + sizeof(int64_t);
     std::shared_ptr<uint8_t[]> meta_buf(new uint8_t[meta_size]);
     std::memcpy(meta_buf.get(), &dim_, sizeof(int32_t));
-    std::memcpy(meta_buf.get() + sizeof(int32_t), &row_count_,
+    std::memcpy(meta_buf.get() + sizeof(int32_t), &pub_count,
                 sizeof(int64_t));
     res_set.Append(MOL_FP_META_KEY, meta_buf, meta_size);
 
-    // Serialize fingerprint data
-    if (!fp_data_owned_.empty()) {
-        auto data_size = fp_data_owned_.size();
+    // Serialize only the published portion of fingerprint data
+    auto data_size = static_cast<size_t>(pub_count) * bytes_per_row_;
+    if (data_size > 0) {
+        const uint8_t* src =
+            fp_data_mmap_ ? fp_data_mmap_ : fp_data_owned_.data();
         std::shared_ptr<uint8_t[]> data_buf(new uint8_t[data_size]);
-        std::memcpy(data_buf.get(), fp_data_owned_.data(), data_size);
+        std::memcpy(data_buf.get(), src, data_size);
         res_set.Append(MOL_FP_DATA_KEY, data_buf, data_size);
     }
 
@@ -285,6 +293,7 @@ MolPatternIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
         LOG_INFO("MolPatternIndex: loaded {} rows, dim={}", row_count_, dim_);
     }
 
+    published_row_count_.store(row_count_, std::memory_order_release);
     ComputeByteSize();
 }
 
@@ -324,34 +333,44 @@ MolPatternIndex<T>::Upload(const Config& config) {
 
 template <typename T>
 void
-MolPatternIndex<T>::AppendMolRow(const std::string& pickle_data,
+MolPatternIndex<T>::AppendMolRow(int64_t row_offset,
+                                 const std::string& pickle_data,
                                  bool is_valid) {
-    // Generate fingerprint outside the lock (CPU-intensive RDKit call)
     AssertInfo(bytes_per_row_ > 0,
                "MolPatternIndex: bytes_per_row_ not initialized");
+    AssertInfo(row_offset >= 0 && row_offset < max_row_count_,
+               "MolPatternIndex: row_offset {} out of range [0, {})",
+               row_offset, max_row_count_);
 
-    std::vector<uint8_t> fp_row(bytes_per_row_, 0);
-    bool fp_generated = false;
-
+    // Write fp data at the exact offset (buffer is pre-allocated, no realloc).
+    // Zero-initialized at construction, so unwritten/failed rows are conservative.
     if (is_valid && !pickle_data.empty()) {
+        auto byte_offset = row_offset * bytes_per_row_;
         auto result = GeneratePatternFingerprintFromPickle(
             reinterpret_cast<const uint8_t*>(pickle_data.data()),
             pickle_data.size(),
             dim_);
         if (result.error_code == MOL_SUCCESS && result.data != nullptr &&
             result.size == static_cast<size_t>(bytes_per_row_)) {
-            std::memcpy(fp_row.data(), result.data, bytes_per_row_);
-            fp_generated = true;
+            std::memcpy(fp_data_owned_.data() + byte_offset,
+                        result.data, bytes_per_row_);
         }
         FreeMolDataResult(&result);
     }
 
-    // Append under exclusive lock
-    {
-        std::unique_lock<std::shared_mutex> lock(mutex_);
-        fp_data_owned_.insert(fp_data_owned_.end(),
-                              fp_row.begin(), fp_row.end());
-        row_count_++;
+    // Advance published_row_count_ to max(current, row_offset + 1).
+    // Concurrent callers with disjoint offsets race here; the highest
+    // offset wins.  Gaps contain zero FPs (conservative), and query
+    // visibility is ultimately bounded by AckResponder::GetAck().
+    auto desired = row_offset + 1;
+    auto cur = published_row_count_.load(std::memory_order_relaxed);
+    while (desired > cur) {
+        if (published_row_count_.compare_exchange_weak(
+                cur, desired,
+                std::memory_order_release,
+                std::memory_order_relaxed)) {
+            break;
+        }
     }
 }
 

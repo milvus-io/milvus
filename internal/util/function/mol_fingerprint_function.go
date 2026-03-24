@@ -63,9 +63,10 @@ const (
 )
 
 const (
-	fingerprintTypeMorgan = "morgan"
-	fingerprintTypeMACCS  = "maccs"
-	fingerprintTypeRDKit  = "rdkit"
+	fingerprintTypeMorgan  = "morgan"
+	fingerprintTypeMACCS   = "maccs"
+	fingerprintTypeRDKit   = "rdkit"
+	fingerprintTypePattern = "pattern"
 )
 
 // MolFingerprintFunctionRunner implements FunctionRunner for MOL fingerprint generation
@@ -181,10 +182,10 @@ func NewMolFingerprintFunctionRunner(coll *schemapb.CollectionSchema, schema *sc
 		case paramFingerprintType:
 			fingerprintType = param.GetValue()
 			switch fingerprintType {
-			case fingerprintTypeMorgan, fingerprintTypeMACCS, fingerprintTypeRDKit:
+			case fingerprintTypeMorgan, fingerprintTypeMACCS, fingerprintTypeRDKit, fingerprintTypePattern:
 				// Valid types
 			default:
-				return nil, fmt.Errorf("unsupported fingerprint type: %s, supported types: morgan, maccs, rdkit", fingerprintType)
+				return nil, fmt.Errorf("unsupported fingerprint type: %s, supported types: morgan, maccs, rdkit, pattern", fingerprintType)
 			}
 		case paramFingerprintSize:
 			size, err := strconv.Atoi(param.GetValue())
@@ -264,49 +265,77 @@ func (v *MolFingerprintFunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 		return nil, errors.New("mol fingerprint function received more than one input column")
 	}
 
-	// Extract input data and generate fingerprints
-	// Input can be []string (SMILES strings from search) or [][]byte (pickle data from insert pipeline)
-	var fingerprints [][]byte
-
+	// Extract SMILES strings from input
+	// Input can be []string (SMILES strings) or [][]byte (pickle data from MOL field)
+	var smilesData []string
 	switch input := inputs[0].(type) {
 	case []string:
-		fingerprints = make([][]byte, len(input))
-		for i, smiles := range input {
-			fp, err := v.generateFingerprintFromSMILES(smiles)
-			if err != nil {
-				log.Warn("failed to generate fingerprint for SMILES",
-					zap.String("smiles", smiles),
-					zap.String("fingerprint_type", v.fingerprintType),
-					zap.Int("index", i),
-					zap.Error(err))
-				return nil, merr.WrapErrParameterInvalidMsg("failed to generate %s fingerprint for SMILES %s: %v", v.fingerprintType, smiles, err)
-			}
-			fingerprints[i] = fp
-		}
+		smilesData = input
 	case [][]byte:
-		// Pickle data from QueryNode pipeline — generate fingerprint directly, no SMILES round-trip
-		fingerprints = make([][]byte, len(input))
+		// MOL field stores data in pickle format, need to convert to SMILES first
+		smilesData = make([]string, len(input))
 		for i, pickleBytes := range input {
-			fp, err := v.generateFingerprintFromPickle(pickleBytes)
-			if err != nil {
-				log.Warn("failed to generate fingerprint from pickle",
-					zap.String("fingerprint_type", v.fingerprintType),
-					zap.Int("index", i),
-					zap.Error(err))
-				return nil, merr.WrapErrParameterInvalidMsg("failed to generate %s fingerprint from pickle at index %d: %v", v.fingerprintType, i, err)
+			if len(pickleBytes) == 0 {
+				smilesData[i] = ""
+				continue
 			}
-			fingerprints[i] = fp
+			// Convert pickle to SMILES
+			smiles, err := mol.ConvertPickleToSMILES(pickleBytes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert pickle to SMILES at index %d: %w", i, err)
+			}
+			smilesData[i] = smiles
 		}
 	default:
 		return nil, fmt.Errorf("mol fingerprint function batch input must be []string or [][]byte, got %T", inputs[0])
 	}
 
-	rowNum := len(fingerprints)
+	rowNum := len(smilesData)
 	if rowNum == 0 {
 		return []any{&storage.BinaryVectorFieldData{
 			Data: []byte{},
 			Dim:  v.fingerprintSize,
 		}}, nil
+	}
+
+	// Generate fingerprints based on fingerprint type
+	fingerprints := make([][]byte, rowNum)
+	for i, smiles := range smilesData {
+		if len(smiles) == 0 {
+			// Empty SMILES -> zero fingerprint
+			byteSize := v.fingerprintSize / 8
+			if v.fingerprintSize%8 != 0 {
+				byteSize++
+			}
+			fingerprints[i] = make([]byte, byteSize)
+			continue
+		}
+
+		var fp []byte
+		var err error
+
+		switch v.fingerprintType {
+		case fingerprintTypeMorgan:
+			fp, err = mol.GenerateMorganFingerprint(smiles, v.radius, v.fingerprintSize)
+		case fingerprintTypeMACCS:
+			fp, err = mol.GenerateMACCSFingerprint(smiles)
+		case fingerprintTypeRDKit:
+			fp, err = mol.GenerateRDKitFingerprint(smiles, v.minPath, v.maxPath, v.fingerprintSize)
+		case fingerprintTypePattern:
+			fp, err = mol.GeneratePatternFingerprint(smiles, v.fingerprintSize)
+		default:
+			return nil, fmt.Errorf("unsupported fingerprint type: %s", v.fingerprintType)
+		}
+
+		if err != nil {
+			log.Warn("failed to generate fingerprint for SMILES",
+				zap.String("smiles", smiles),
+				zap.String("fingerprint_type", v.fingerprintType),
+				zap.Int("index", i),
+				zap.Error(err))
+			return nil, merr.WrapErrParameterInvalidMsg("failed to generate %s fingerprint for SMILES %s: %v", v.fingerprintType, smiles, err)
+		}
+		fingerprints[i] = fp
 	}
 
 	// Convert fingerprints to BINARY_VECTOR format
@@ -327,46 +356,6 @@ func (v *MolFingerprintFunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 	}
 
 	return []any{outputData}, nil
-}
-
-func (v *MolFingerprintFunctionRunner) zeroFingerprint() []byte {
-	byteSize := v.fingerprintSize / 8
-	if v.fingerprintSize%8 != 0 {
-		byteSize++
-	}
-	return make([]byte, byteSize)
-}
-
-func (v *MolFingerprintFunctionRunner) generateFingerprintFromSMILES(smiles string) ([]byte, error) {
-	if len(smiles) == 0 {
-		return v.zeroFingerprint(), nil
-	}
-	switch v.fingerprintType {
-	case fingerprintTypeMorgan:
-		return mol.GenerateMorganFingerprint(smiles, v.radius, v.fingerprintSize)
-	case fingerprintTypeMACCS:
-		return mol.GenerateMACCSFingerprint(smiles)
-	case fingerprintTypeRDKit:
-		return mol.GenerateRDKitFingerprint(smiles, v.minPath, v.maxPath, v.fingerprintSize)
-	default:
-		return nil, fmt.Errorf("unsupported fingerprint type: %s", v.fingerprintType)
-	}
-}
-
-func (v *MolFingerprintFunctionRunner) generateFingerprintFromPickle(pickle []byte) ([]byte, error) {
-	if len(pickle) == 0 {
-		return v.zeroFingerprint(), nil
-	}
-	switch v.fingerprintType {
-	case fingerprintTypeMorgan:
-		return mol.GenerateMorganFingerprintFromPickle(pickle, v.radius, v.fingerprintSize)
-	case fingerprintTypeMACCS:
-		return mol.GenerateMACCSFingerprintFromPickle(pickle)
-	case fingerprintTypeRDKit:
-		return mol.GenerateRDKitFingerprintFromPickle(pickle, v.minPath, v.maxPath, v.fingerprintSize)
-	default:
-		return nil, fmt.Errorf("unsupported fingerprint type: %s", v.fingerprintType)
-	}
 }
 
 // GetSchema returns the function schema

@@ -879,48 +879,24 @@ class MolFunctionFilterExpr : public ITypeFilterExpr {
  public:
     MolFunctionFilterExpr(ColumnInfo column,
                           MolFunctionType op,
-                          const std::string& smiles,
-                          int64_t fingerprint_field_id = 0,
-                          const std::string& fingerprint_type = "",
-                          int32_t fingerprint_dim = 0,
-                          int32_t morgan_radius = 2,
-                          int32_t rdkit_min_path = 1,
-                          int32_t rdkit_max_path = 7)
+                          const std::string& smiles)
         : column_(column),
           op_(op),
-          smiles_(smiles),
-          fingerprint_field_id_(fingerprint_field_id),
-          fingerprint_type_(fingerprint_type),
-          fingerprint_dim_(fingerprint_dim),
-          morgan_radius_(morgan_radius),
-          rdkit_min_path_(rdkit_min_path),
-          rdkit_max_path_(rdkit_max_path){};
+          smiles_(smiles){};
     std::string
     ToString() const override {
         return fmt::format(
             "MolFunctionFilterExpr:[Column: {}, Operator: {} "
-            "SMILES: {}, FpFieldId: {}]",
+            "SMILES: {}]",
             column_.ToString(),
             MolFunctionFilterExpr_MolOp_Name(op_),
-            smiles_,
-            fingerprint_field_id_);
-    }
-
-    bool
-    HasFingerprintPreFilter() const {
-        return fingerprint_field_id_ > 0 && fingerprint_dim_ > 0;
+            smiles_);
     }
 
  public:
     const ColumnInfo column_;
     const MolFunctionType op_;
     const std::string smiles_;
-    const int64_t fingerprint_field_id_;
-    const std::string fingerprint_type_;
-    const int32_t fingerprint_dim_;
-    const int32_t morgan_radius_;
-    const int32_t rdkit_min_path_;
-    const int32_t rdkit_max_path_;
 };
 
 class JsonContainsExpr : public ITypeFilterExpr {

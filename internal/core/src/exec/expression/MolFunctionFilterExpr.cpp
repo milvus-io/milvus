@@ -34,96 +34,6 @@ PhyMolFunctionFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     result = EvalForDataSegment();
 }
 
-void
-PhyMolFunctionFilterExpr::EnsureQueryFingerprint() {
-    if (query_fp_cached_) {
-        return;
-    }
-    if (expr_->fingerprint_type_ != "pattern") {
-        return;
-    }
-
-    int32_t dim = expr_->fingerprint_dim_;
-    int32_t byte_size = (dim + 7) / 8;
-
-    auto result = GeneratePatternFingerprint(expr_->smiles_.c_str(), dim);
-
-    if (result.error_code != MOL_SUCCESS || result.data == nullptr ||
-        result.size != static_cast<size_t>(byte_size)) {
-        FreeMolDataResult(&result);
-        return;  // fingerprint generation failed, skip pre-filter
-    }
-
-    query_fingerprint_.assign(result.data, result.data + byte_size);
-    FreeMolDataResult(&result);
-    query_fp_cached_ = true;
-}
-
-void
-PhyMolFunctionFilterExpr::FallbackRawDataPreFilter() {
-    auto fp_field_id = FieldId(expr_->fingerprint_field_id_);
-    int32_t dim = expr_->fingerprint_dim_;
-    if (dim <= 0 || dim % 8 != 0) {
-        LOG_WARN("Skip fingerprint pre-filter because pattern dim is not byte-aligned: {}",
-                 dim);
-        fp_candidates_.set();
-        return;
-    }
-
-    knowhere::Json search_cfg;
-    search_cfg[knowhere::meta::METRIC_TYPE] =
-        (expr_->op_ ==
-         proto::plan::MolFunctionFilterExpr_MolOp_Substructure)
-            ? knowhere::metric::SUBSTRUCTURE
-            : knowhere::metric::SUPERSTRUCTURE;
-    search_cfg[knowhere::meta::RADIUS] = 1.0f;
-    search_cfg[knowhere::meta::RANGE_SEARCH_K] = -1;
-
-    auto query_ds =
-        knowhere::GenDataSet(1, dim, query_fingerprint_.data());
-    BitsetView empty_bitset;
-
-    int64_t num_chunks = segment_->num_chunk(fp_field_id);
-    int64_t row_begin = 0;
-    for (int64_t chunk_id = 0;
-         chunk_id < num_chunks && row_begin < active_count_;
-         ++chunk_id) {
-        auto chunk_size = segment_->chunk_size(fp_field_id, chunk_id);
-        auto rows = std::min<int64_t>(chunk_size, active_count_ - row_begin);
-        if (rows <= 0) {
-            break;
-        }
-
-        auto pw = segment_->chunk_data<uint8_t>(
-            op_ctx_, fp_field_id, chunk_id);
-        auto span = pw.get();
-        auto base_ds = knowhere::GenDataSet(rows, dim, span.data());
-        base_ds->SetTensorBeginId(row_begin);
-
-        auto result = knowhere::BruteForce::RangeSearch<knowhere::bin1>(
-            base_ds, query_ds, search_cfg, empty_bitset, op_ctx_);
-        if (!result.has_value()) {
-            LOG_WARN("Fingerprint brute-force pre-filter failed, disable pre-filter for this segment: {}, {}",
-                     knowhere::Status2String(result.error()),
-                     result.what());
-            fp_candidates_.set();
-            return;
-        }
-
-        auto lims = result.value()->GetLims();
-        auto ids = result.value()->GetIds();
-        int64_t hit_count = lims != nullptr ? static_cast<int64_t>(lims[1]) : 0;
-        for (int64_t i = 0; i < hit_count; ++i) {
-            auto offset = ids[i];
-            if (offset >= 0 && offset < active_count_) {
-                fp_candidates_[offset] = true;
-            }
-        }
-
-        row_begin += rows;
-    }
-}
-
 bool
 PhyMolFunctionFilterExpr::TryMolPatternIndex() {
     // Try to pin the mol field's own index (MOL_PATTERN)
@@ -168,14 +78,16 @@ PhyMolFunctionFilterExpr::TryMolPatternIndex() {
 
     auto query_ds =
         knowhere::GenDataSet(1, dim, query_fingerprint_.data());
-    // Snapshot fp data and row count atomically
-    auto fp_snap = mol_index->SnapshotFPData();
-    if (fp_snap.row_count <= 0 || fp_snap.data == nullptr) {
+    // Read published row count (acquire) then access fp data.
+    // The buffer is pre-allocated, so the pointer is stable.
+    auto fp_row_count = mol_index->RowCount();
+    auto fp_data = mol_index->GetFPData();
+    if (fp_row_count <= 0 || fp_data == nullptr) {
         fp_candidates_.set();
         return true;
     }
     auto base_ds = knowhere::GenDataSet(
-        fp_snap.row_count, dim, fp_snap.data);
+        fp_row_count, dim, fp_data);
     BitsetView empty_bitset;
 
     auto result = knowhere::BruteForce::RangeSearch<knowhere::bin1>(
@@ -203,7 +115,7 @@ PhyMolFunctionFilterExpr::TryMolPatternIndex() {
 
     // Rows beyond index coverage (e.g. nullable/default rows not in binlog)
     // must be conservatively marked as candidates to avoid false negatives.
-    for (int64_t i = fp_snap.row_count; i < active_count_; ++i) {
+    for (int64_t i = fp_row_count; i < active_count_; ++i) {
         fp_candidates_[i] = true;
     }
 
@@ -212,7 +124,7 @@ PhyMolFunctionFilterExpr::TryMolPatternIndex() {
         "(index covers {}/{})",
         hit_count,
         active_count_,
-        fp_snap.row_count,
+        fp_row_count,
         active_count_);
     return true;
 }
@@ -226,26 +138,7 @@ PhyMolFunctionFilterExpr::SearchFingerprintIndex() {
     fp_candidates_.resize(active_count_);
     fp_candidates_.reset();
 
-    // Priority 1: try MOL_PATTERN index on the mol field itself
-    if (TryMolPatternIndex()) {
-        fp_candidates_cached_ = true;
-        return;
-    }
-
-    // Priority 2: fallback to separate fingerprint field (legacy path)
-    if (!expr_->HasFingerprintPreFilter()) {
-        return;
-    }
-
-    EnsureQueryFingerprint();
-    if (!query_fp_cached_) {
-        // Could not generate fingerprint, mark all as candidates
-        fp_candidates_.set();
-        fp_candidates_cached_ = true;
-        return;
-    }
-
-    FallbackRawDataPreFilter();
+    TryMolPatternIndex();
     fp_candidates_cached_ = true;
 }
 
