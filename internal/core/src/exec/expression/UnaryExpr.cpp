@@ -1955,6 +1955,11 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
             TargetBitmap tail(active_count_ - cached_match_res_->size());
             cached_match_res_->append(tail);
             cached_index_chunk_valid_res_->append(tail);
+        } else if (cached_match_res_->size() > active_count_) {
+            // on growing segments, the text index may have indexed rows
+            // beyond the query timestamp. Truncate to active_count_.
+            cached_match_res_->resize(active_count_);
+            cached_index_chunk_valid_res_->resize(active_count_);
         }
 
         // Insert into process-level cache
