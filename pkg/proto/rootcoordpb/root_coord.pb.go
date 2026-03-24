@@ -7,8 +7,8 @@
 package rootcoordpb
 
 import (
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	etcdpb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	proxypb "github.com/milvus-io/milvus/pkg/v3/proto/proxypb"

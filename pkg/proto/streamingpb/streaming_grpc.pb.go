@@ -8,7 +8,7 @@ package streamingpb
 
 import (
 	context "context"
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"

@@ -8,8 +8,8 @@ package datapb
 
 import (
 	context "context"
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	grpc "google.golang.org/grpc"
@@ -2382,6 +2382,9 @@ const (
 	DataNode_QuerySlot_FullMethodName                     = "/milvus.proto.data.DataNode/QuerySlot"
 	DataNode_DropCompactionPlan_FullMethodName            = "/milvus.proto.data.DataNode/DropCompactionPlan"
 	DataNode_SyncFileResource_FullMethodName              = "/milvus.proto.data.DataNode/SyncFileResource"
+	DataNode_CommitImport_FullMethodName                  = "/milvus.proto.data.DataNode/CommitImport"
+	DataNode_AbortImport_FullMethodName                   = "/milvus.proto.data.DataNode/AbortImport"
+	DataNode_HandleCommitVchannel_FullMethodName          = "/milvus.proto.data.DataNode/HandleCommitVchannel"
 )
 
 // DataNodeClient is the client API for DataNode service.
@@ -2413,6 +2416,10 @@ type DataNodeClient interface {
 	DropCompactionPlan(ctx context.Context, in *DropCompactionPlanRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	// file resource
 	SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// Import 2PC RPCs — internal only, not exposed in public MilvusService
+	CommitImport(ctx context.Context, in *CommitImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	AbortImport(ctx context.Context, in *AbortImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	HandleCommitVchannel(ctx context.Context, in *HandleCommitVchannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type dataNodeClient struct {
@@ -2612,6 +2619,33 @@ func (c *dataNodeClient) SyncFileResource(ctx context.Context, in *internalpb.Sy
 	return out, nil
 }
 
+func (c *dataNodeClient) CommitImport(ctx context.Context, in *CommitImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataNode_CommitImport_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataNodeClient) AbortImport(ctx context.Context, in *AbortImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataNode_AbortImport_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataNodeClient) HandleCommitVchannel(ctx context.Context, in *HandleCommitVchannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataNode_HandleCommitVchannel_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DataNodeServer is the server API for DataNode service.
 // All implementations should embed UnimplementedDataNodeServer
 // for forward compatibility
@@ -2641,6 +2675,10 @@ type DataNodeServer interface {
 	DropCompactionPlan(context.Context, *DropCompactionPlanRequest) (*commonpb.Status, error)
 	// file resource
 	SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
+	// Import 2PC RPCs — internal only, not exposed in public MilvusService
+	CommitImport(context.Context, *CommitImportRequest) (*commonpb.Status, error)
+	AbortImport(context.Context, *AbortImportRequest) (*commonpb.Status, error)
+	HandleCommitVchannel(context.Context, *HandleCommitVchannelRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedDataNodeServer should be embedded to have forward compatible implementations.
@@ -2709,6 +2747,15 @@ func (UnimplementedDataNodeServer) DropCompactionPlan(context.Context, *DropComp
 }
 func (UnimplementedDataNodeServer) SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SyncFileResource not implemented")
+}
+func (UnimplementedDataNodeServer) CommitImport(context.Context, *CommitImportRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CommitImport not implemented")
+}
+func (UnimplementedDataNodeServer) AbortImport(context.Context, *AbortImportRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AbortImport not implemented")
+}
+func (UnimplementedDataNodeServer) HandleCommitVchannel(context.Context, *HandleCommitVchannelRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HandleCommitVchannel not implemented")
 }
 
 // UnsafeDataNodeServer may be embedded to opt out of forward compatibility for this service.
@@ -3100,6 +3147,60 @@ func _DataNode_SyncFileResource_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataNode_CommitImport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommitImportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataNodeServer).CommitImport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataNode_CommitImport_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataNodeServer).CommitImport(ctx, req.(*CommitImportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataNode_AbortImport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AbortImportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataNodeServer).AbortImport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataNode_AbortImport_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataNodeServer).AbortImport(ctx, req.(*AbortImportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataNode_HandleCommitVchannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HandleCommitVchannelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataNodeServer).HandleCommitVchannel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataNode_HandleCommitVchannel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataNodeServer).HandleCommitVchannel(ctx, req.(*HandleCommitVchannelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DataNode_ServiceDesc is the grpc.ServiceDesc for DataNode service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3190,6 +3291,18 @@ var DataNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SyncFileResource",
 			Handler:    _DataNode_SyncFileResource_Handler,
+		},
+		{
+			MethodName: "CommitImport",
+			Handler:    _DataNode_CommitImport_Handler,
+		},
+		{
+			MethodName: "AbortImport",
+			Handler:    _DataNode_AbortImport_Handler,
+		},
+		{
+			MethodName: "HandleCommitVchannel",
+			Handler:    _DataNode_HandleCommitVchannel_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

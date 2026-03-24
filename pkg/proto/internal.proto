@@ -368,6 +368,8 @@ enum ImportJobState {
   Completed = 5;
   IndexBuilding = 6;
   Sorting = 7;
+  Uncommitted = 8;
+  Committing  = 9;
 }
 
 message ImportFile {

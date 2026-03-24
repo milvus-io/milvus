@@ -117,6 +117,26 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.CommitImportMessageHeader",
+                "BodyType": "messagespb.CommitImportMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeCommitImport",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.RollbackImportMessageHeader",
+                "BodyType": "messagespb.RollbackImportMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRollbackImport",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.CreateSegmentMessageHeader",
                 "BodyType": "messagespb.CreateSegmentMessageBody"
             },
