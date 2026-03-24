@@ -144,3 +144,15 @@ Collections:
           index: fail
           search: fail
           query: fail
+  -
+    testcase:
+      name: test_woodpecker_network_partition
+      chaos: chaos_woodpecker_network_partition.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail

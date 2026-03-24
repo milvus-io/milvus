@@ -1,0 +1,22 @@
+kind: StressChaos
+apiVersion: chaos-mesh.org/v1alpha1
+metadata:
+  name: test-woodpecker-memory-stress
+  namespace: chaos-testing
+spec:
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      app.kubernetes.io/instance: milvus-chaos
+      app.kubernetes.io/name: milvus
+      component: woodpecker
+  mode: one
+  stressors:
+    cpu:
+      workers: 4
+      load: 80
+    memory:
+      workers: 4
+      size: 2048Mi
+  duration: 5m
