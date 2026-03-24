@@ -65,8 +65,10 @@ func ParseSchema(r interface{}) (*entity.Schema, error) {
 			Name: f.Name,
 		}
 		ft := f.Type
-		if f.Type.Kind() == reflect.Ptr {
+		isPtr := f.Type.Kind() == reflect.Ptr
+		if isPtr {
 			ft = ft.Elem()
+			field.Nullable = true
 		}
 		fv := reflect.New(ft)
 		tag := f.Tag.Get(MilvusTag)
@@ -76,6 +78,7 @@ func ParseSchema(r interface{}) (*entity.Schema, error) {
 		tagSettings := ParseTagSetting(tag, MilvusTagSep)
 		if _, has := tagSettings[MilvusPrimaryKey]; has {
 			field.PrimaryKey = true
+			field.Nullable = false
 		}
 		if _, has := tagSettings[MilvusAutoID]; has {
 			field.AutoID = true
