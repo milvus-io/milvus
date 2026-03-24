@@ -226,17 +226,17 @@ linters:
       - path: (.+)\.go$
         text: G706
     paths:
-      - partial_search_test.go
-      - build
-      - configs
-      - deployments
-      - docs
-      - scripts
-      - internal/core
-      - cmake_build
-      - third_party$
-      - builtin$
-      - examples$
+      - (^|/)partial_search_test\.go$
+      - ^build/
+      - ^configs/
+      - ^deployments/
+      - ^docs/
+      - ^scripts/
+      - ^internal/core/
+      - ^cmake_build/
+      - ^third_party/
+      - ^builtin/
+      - ^examples/
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
@@ -261,14 +261,14 @@ formatters:
   exclusions:
     generated: lax
     paths:
-      - partial_search_test.go
-      - build
-      - configs
-      - deployments
-      - docs
-      - scripts
-      - internal/core
-      - cmake_build
-      - third_party$
-      - builtin$
-      - examples$
+      - (^|/)partial_search_test\.go$
+      - ^build/
+      - ^configs/
+      - ^deployments/
+      - ^docs/
+      - ^scripts/
+      - ^internal/core/
+      - ^cmake_build/
+      - ^third_party/
+      - ^builtin/
+      - ^examples/
