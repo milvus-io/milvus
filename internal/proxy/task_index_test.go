@@ -1556,7 +1556,7 @@ func Test_parseIndexParams_LargeTopKQueryMode(t *testing.T) {
 		}, task.newIndexParams)
 	})
 
-	t.Run("non-cloud autoindex with large_topk query mode selects IVF_FLAT", func(t *testing.T) {
+	t.Run("non-cloud autoindex with large_topk query mode uses default HNSW", func(t *testing.T) {
 		Params.Save(Params.AutoIndexConfig.Enable.Key, "false")
 		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`)
 		Params.Save(Params.AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
@@ -1580,15 +1580,15 @@ func Test_parseIndexParams_LargeTopKQueryMode(t *testing.T) {
 		}
 		err := task.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
-		// Should use IVF_FLAT from LargeTopK config
+		// non-cloud mode does not support LargeTopK override, should use default HNSW
 		found := false
 		for _, kv := range task.newIndexParams {
 			if kv.Key == common.IndexTypeKey {
-				assert.Equal(t, "IVF_FLAT", kv.Value)
+				assert.Equal(t, "HNSW", kv.Value)
 				found = true
 			}
 		}
-		assert.True(t, found, "index_type should be set to IVF_FLAT")
+		assert.True(t, found, "index_type should be set to HNSW")
 	})
 
 	t.Run("no query_mode property uses default", func(t *testing.T) {
