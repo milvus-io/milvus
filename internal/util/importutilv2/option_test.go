@@ -220,10 +220,10 @@ func TestIsAutoCommit(t *testing.T) {
 	assert.True(t, IsAutoCommit([]*commonpb.KeyValuePair{}))
 
 	// explicit true
-	opts := []*commonpb.KeyValuePair{{Key: "auto_commit", Value: "true"}}
+	opts := []*commonpb.KeyValuePair{{Key: AutoCommitKey, Value: "true"}}
 	assert.True(t, IsAutoCommit(opts))
 
 	// explicit false
-	opts = []*commonpb.KeyValuePair{{Key: "auto_commit", Value: "false"}}
+	opts = []*commonpb.KeyValuePair{{Key: AutoCommitKey, Value: "false"}}
 	assert.False(t, IsAutoCommit(opts))
 }

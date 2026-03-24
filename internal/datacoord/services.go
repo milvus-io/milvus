@@ -2826,17 +2826,17 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 // CommitImport commits a 2PC import job so that the imported data becomes visible.
 // Full implementation is in Task 4; this stub satisfies the DataCoordServer interface.
 func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
-	return merr.Status(merr.ErrServiceUnavailable), nil
+	return merr.Status(merr.ErrServiceUnimplemented), nil
 }
 
 // AbortImport aborts a 2PC import job that has not yet been committed.
 // Full implementation is in Task 4; this stub satisfies the DataCoordServer interface.
 func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
-	return merr.Status(merr.ErrServiceUnavailable), nil
+	return merr.Status(merr.ErrServiceUnimplemented), nil
 }
 
 // HandleCommitVchannel records that a vchannel has acknowledged a commit fence for a 2PC import job.
 // Full implementation is in Task 4; this stub satisfies the DataCoordServer interface.
 func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
-	return merr.Status(merr.ErrServiceUnavailable), nil
+	return merr.Status(merr.ErrServiceUnimplemented), nil
 }
