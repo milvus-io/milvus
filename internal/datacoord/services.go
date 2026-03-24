@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -2823,20 +2824,195 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 	}, nil
 }
 
+// getOrCreateImportJobMu returns a per-job mutex for serializing concurrent commit/abort on the same job.
+func (s *Server) getOrCreateImportJobMu(jobID int64) *sync.Mutex {
+	actual, _ := s.importJobMu.LoadOrStore(jobID, &sync.Mutex{})
+	return actual.(*sync.Mutex)
+}
+
+// broadcastCommitImportMessage broadcasts a CommitImport WAL message for the given import job.
+// The message is sent to the control channel so that all vchannels receive the commit fence.
+func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob) error {
+	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
+	if err != nil {
+		return err
+	}
+	defer broadcaster.Close()
+
+	msg := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{
+			CollectionId: job.GetCollectionID(),
+			JobId:        job.GetJobID(),
+		}).
+		WithBody(&messagespb.CommitImportMessageBody{}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast()
+
+	_, err = broadcaster.Broadcast(ctx, msg)
+	return err
+}
+
+// broadcastRollbackImportMessage broadcasts a RollbackImport WAL message for the given import job.
+func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
+	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
+	if err != nil {
+		return err
+	}
+	defer broadcaster.Close()
+
+	msg := message.NewRollbackImportMessageBuilderV2().
+		WithHeader(&message.RollbackImportMessageHeader{
+			CollectionId: job.GetCollectionID(),
+			JobId:        job.GetJobID(),
+		}).
+		WithBody(&messagespb.RollbackImportMessageBody{}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast()
+
+	_, err = broadcaster.Broadcast(ctx, msg)
+	return err
+}
+
 // CommitImport commits a 2PC import job so that the imported data becomes visible.
-// Full implementation is in Task 4; this stub satisfies the DataCoordServer interface.
+// It transitions the job from Uncommitted → Committing by broadcasting a CommitImport WAL message.
+// The call is idempotent: if the job is already Committing or Completed it returns success.
 func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
-	return merr.Status(merr.ErrServiceUnimplemented), nil
+	log := log.Ctx(ctx).With(zap.Int64("jobID", req.GetJobId()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	jobID := req.GetJobId()
+	job := s.importMeta.GetJob(ctx, jobID)
+	if job == nil {
+		return merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("job %d not found", jobID))), nil
+	}
+	state := job.GetState()
+	// Idempotent: already committing or completed is fine.
+	if state == internalpb.ImportJobState_Committing || state == internalpb.ImportJobState_Completed {
+		return merr.Success(), nil
+	}
+	if state != internalpb.ImportJobState_Uncommitted {
+		return merr.Status(merr.WrapErrImportFailed(
+			fmt.Sprintf("job %d is in state %s, expected Uncommitted", jobID, state))), nil
+	}
+
+	// Acquire per-job mutex to serialize concurrent commit/abort.
+	mu := s.getOrCreateImportJobMu(jobID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Re-check state after acquiring mutex (another goroutine may have changed it).
+	job = s.importMeta.GetJob(ctx, jobID)
+	if job == nil {
+		return merr.Status(merr.WrapErrImportFailed("job not found after lock")), nil
+	}
+	switch job.GetState() {
+	case internalpb.ImportJobState_Committing, internalpb.ImportJobState_Completed:
+		return merr.Success(), nil
+	case internalpb.ImportJobState_Uncommitted:
+		// proceed
+	default:
+		return merr.Status(merr.WrapErrImportFailed(
+			fmt.Sprintf("job %d state changed to %s before broadcast", jobID, job.GetState()))), nil
+	}
+
+	log.Info("committing import job via WAL broadcast")
+	if err := s.broadcastCommitImportMessage(ctx, job); err != nil {
+		log.Warn("failed to broadcast commit import message", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	return merr.Success(), nil
 }
 
 // AbortImport aborts a 2PC import job that has not yet been committed.
-// Full implementation is in Task 4; this stub satisfies the DataCoordServer interface.
+// It broadcasts a RollbackImport WAL message to cancel the job.
+// Returns an error if the job is already committed or committing.
 func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
-	return merr.Status(merr.ErrServiceUnimplemented), nil
+	log := log.Ctx(ctx).With(zap.Int64("jobID", req.GetJobId()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	jobID := req.GetJobId()
+	job := s.importMeta.GetJob(ctx, jobID)
+	if job == nil {
+		return merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("job %d not found", jobID))), nil
+	}
+	state := job.GetState()
+	if state == internalpb.ImportJobState_Committing || state == internalpb.ImportJobState_Completed {
+		return merr.Status(merr.WrapErrImportFailed(
+			fmt.Sprintf("job %d already committed (state: %s), abort not allowed", jobID, state))), nil
+	}
+
+	// Acquire per-job mutex to serialize concurrent commit/abort.
+	mu := s.getOrCreateImportJobMu(jobID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Re-check state after acquiring mutex.
+	job = s.importMeta.GetJob(ctx, jobID)
+	if job == nil {
+		return merr.Status(merr.WrapErrImportFailed("job not found after lock")), nil
+	}
+	if job.GetState() == internalpb.ImportJobState_Committing ||
+		job.GetState() == internalpb.ImportJobState_Completed {
+		return merr.Status(merr.WrapErrImportFailed(
+			fmt.Sprintf("job %d already committed (state: %s), abort not allowed", jobID, job.GetState()))), nil
+	}
+
+	log.Info("aborting import job via WAL broadcast")
+	if err := s.broadcastRollbackImportMessage(ctx, job); err != nil {
+		log.Warn("failed to broadcast rollback import message", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	return merr.Success(), nil
 }
 
-// HandleCommitVchannel records that a vchannel has acknowledged a commit fence for a 2PC import job.
-// Full implementation is in Task 4; this stub satisfies the DataCoordServer interface.
+// HandleCommitVchannel records that a vchannel has processed the commit fence for a 2PC import job.
+// When all vchannels have acknowledged, the import job transitions to Completed and segments become visible.
 func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
-	return merr.Status(merr.ErrServiceUnimplemented), nil
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	err := s.importMeta.HandleCommitVchannel(ctx, req.GetJobId(), req.GetVchannel(), func() error {
+		return s.setImportSegmentsVisible(ctx, req.GetJobId(), req.GetVchannel())
+	})
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	return merr.Success(), nil
+}
+
+// setImportSegmentsVisible unsets the is_importing flag for all segments belonging to
+// the given import job that are assigned to the given vchannel.
+func (s *Server) setImportSegmentsVisible(ctx context.Context, jobID int64, vchannel string) error {
+	tasks := s.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+	for _, t := range tasks {
+		it, ok := t.(*importTask)
+		if !ok {
+			continue
+		}
+		allSegIDs := append(it.GetSegmentIDs(), it.GetSortedSegmentIDs()...)
+		for _, segID := range allSegIDs {
+			seg := s.meta.GetSegment(ctx, segID)
+			if seg == nil {
+				continue
+			}
+			if seg.GetInsertChannel() != vchannel {
+				continue
+			}
+			if !seg.GetIsImporting() {
+				continue
+			}
+			op := UpdateIsImporting(segID, false)
+			if err := s.meta.UpdateSegmentsInfo(ctx, op); err != nil {
+				log.Ctx(ctx).Warn("failed to unset is_importing for segment",
+					zap.Int64("jobID", jobID),
+					zap.String("vchannel", vchannel),
+					zap.Int64("segmentID", segID),
+					zap.Error(err))
+				return err
+			}
+		}
+	}
+	return nil
 }

@@ -1524,6 +1524,24 @@ func (c *Client) ListImports(ctx context.Context, in *internalpb.ListImportsRequ
 	})
 }
 
+func (c *Client) CommitImport(ctx context.Context, req *datapb.CommitImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.CommitImport(ctx, req)
+	})
+}
+
+func (c *Client) AbortImport(ctx context.Context, req *datapb.AbortImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.AbortImport(ctx, req)
+	})
+}
+
+func (c *Client) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.HandleCommitVchannel(ctx, req)
+	})
+}
+
 func (c *Client) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest, opts ...grpc.CallOption) (*indexpb.ListIndexesResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.ListIndexesResponse, error) {
 		return client.ListIndexes(ctx, in)

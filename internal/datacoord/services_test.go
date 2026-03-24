@@ -5187,3 +5187,18 @@ func TestUnpinSnapshotData(t *testing.T) {
 		assert.Error(t, merr.Error(resp))
 	})
 }
+
+func TestCommitImport_HappyPath(t *testing.T) {
+	// TODO: implement full test once DataCoord Server test infrastructure is wired up.
+	t.Skip("not yet implemented")
+}
+
+func TestAbortImport_HappyPath(t *testing.T) {
+	// TODO: implement full test once DataCoord Server test infrastructure is wired up.
+	t.Skip("not yet implemented")
+}
+
+func TestHandleCommitVchannelRPC(t *testing.T) {
+	// TODO: implement full test once DataCoord Server test infrastructure is wired up.
+	t.Skip("not yet implemented")
+}
