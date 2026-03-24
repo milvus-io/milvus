@@ -57,6 +57,13 @@ func TestMessageType(t *testing.T) {
 	assert.False(t, MessageTypeDropCollection.IsSelfControlled())
 	assert.False(t, MessageTypeCreatePartition.IsSelfControlled())
 	assert.False(t, MessageTypeDropPartition.IsSelfControlled())
+
+	assert.True(t, MessageTypeInsert.IsDMLMessageType())
+	assert.True(t, MessageTypeDelete.IsDMLMessageType())
+	assert.False(t, MessageTypeBeginTxn.IsDMLMessageType())
+	assert.False(t, MessageTypeCommitTxn.IsDMLMessageType())
+	assert.False(t, MessageTypeRollbackTxn.IsDMLMessageType())
+	assert.False(t, MessageTypeTimeTick.IsDMLMessageType())
 }
 
 func TestVersion(t *testing.T) {

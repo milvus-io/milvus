@@ -502,8 +502,6 @@ func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 			continue
 		}
 
-		defer runner.Close()
-
 		inputFieldIDs := lo.Map(runner.GetInputFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
 		inputDatas := make([]any, 0, len(inputFieldIDs))
 		for _, inputFieldID := range inputFieldIDs {
@@ -511,6 +509,7 @@ func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 		}
 
 		outputFieldData, err := runner.BatchRun(inputDatas...)
+		runner.Close()
 		if err != nil {
 			return err
 		}
@@ -557,8 +556,6 @@ func RunMinHashFunction(task *ImportTask, data *storage.InsertData) error {
 			continue
 		}
 
-		defer runner.Close()
-
 		inputFieldIDs := lo.Map(runner.GetInputFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
 		inputDatas := make([]any, 0, len(inputFieldIDs))
 		for _, inputFieldID := range inputFieldIDs {
@@ -566,6 +563,7 @@ func RunMinHashFunction(task *ImportTask, data *storage.InsertData) error {
 		}
 
 		output, err := runner.BatchRun(inputDatas...)
+		runner.Close()
 		if err != nil {
 			return err
 		}

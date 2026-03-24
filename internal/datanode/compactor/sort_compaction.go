@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
@@ -283,19 +284,35 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 
 	phaseStart = time.Now()
 	binlogs, stats, bm25stats, manifest, expirQuantiles := srw.GetLogs()
+
+	// For V3 segments, bloom filter and BM25 stats are already written to
+	// basePath/_stats/ and registered in the manifest by writeStatsV3()
+	// during PackedManifestRecordWriter.Close(). stats and bm25stats will
+	// be nil; only the manifest carries stats information.
+	if manifest != "" {
+		stats = nil
+		bm25stats = nil
+	}
+
 	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err
 	}
 
-	statsLogs := []*datapb.FieldBinlog{stats}
-	if err := binlog.CompressFieldBinlogs(statsLogs); err != nil {
-		return nil, err
+	var statsLogs []*datapb.FieldBinlog
+	if stats != nil {
+		statsLogs = []*datapb.FieldBinlog{stats}
+		if err := binlog.CompressFieldBinlogs(statsLogs); err != nil {
+			return nil, err
+		}
 	}
 
-	bm25StatsLogs := lo.Values(bm25stats)
-	if err := binlog.CompressFieldBinlogs(bm25StatsLogs); err != nil {
-		return nil, err
+	var bm25StatsLogs []*datapb.FieldBinlog
+	if len(bm25stats) > 0 {
+		bm25StatsLogs = lo.Values(bm25stats)
+		if err := binlog.CompressFieldBinlogs(bm25StatsLogs); err != nil {
+			return nil, err
+		}
 	}
 	compressCost := time.Since(phaseStart)
 
@@ -427,6 +444,22 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 				PlanID: t.GetPlanID(),
 				State:  datapb.CompactionTaskState_failed,
 			}, nil
+		}
+		// For V3 segments, register text index stats in manifest
+		if resultSegment.GetManifest() != "" && len(textStatsLogs) > 0 {
+			statEntries := packed.TextIndexStatEntries(textStatsLogs, t.plan.GetCurrentScalarIndexVersion())
+			newManifest, mErr := packed.AddStatsToManifest(
+				resultSegment.GetManifest(), t.compactionParams.StorageConfig, statEntries)
+			if mErr != nil {
+				log.Warn("failed to add text index stats to manifest",
+					zap.Int64("targetSegmentID", targetSegemntID), zap.Error(mErr))
+				return &datapb.CompactionPlanResult{
+					PlanID: t.GetPlanID(),
+					State:  datapb.CompactionTaskState_failed,
+				}, nil
+			}
+			resultSegment.Manifest = newManifest
+			textStatsLogs = nil
 		}
 		resultSegment.TextStatsLogs = textStatsLogs
 	}

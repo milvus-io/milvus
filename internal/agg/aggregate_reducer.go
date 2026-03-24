@@ -9,6 +9,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -303,7 +305,7 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 	numAggs := len(reducer.aggregates)
 	hashers := make([]FieldAccessor, numGroupingKeys)
 	accumulators := make([]FieldAccessor, numAggs)
-	firstFieldData := results[0].GetFieldDatas()
+	firstFieldData := results[0].GetFieldDatas() //nolint:gosec // results[0] is safe: empty/single-result cases already returned above
 	outputColumnCount := len(firstFieldData)
 	for idx, fieldData := range firstFieldData {
 		accessor, err := NewFieldAccessor(fieldData.GetType())
@@ -345,18 +347,19 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 	}
 
 	// 2. compute hash values for all rows in the result retrieved
-	var totalRowCount int64 = 0
+	var totalGroupCount int64 = 0
+	maxGroupByGroups := paramtable.Get().CommonCfg.GroupByMaxGroups.GetAsInt64()
 processResults:
 	for _, result := range results {
 		// Check limit before processing each shard to avoid unnecessary work
-		if reducer.groupLimit != -1 && totalRowCount >= reducer.groupLimit {
+		if reducer.groupLimit != -1 && totalGroupCount >= reducer.groupLimit {
 			break processResults
 		}
 
-		reducedResult.allRetrieveCount += result.GetAllRetrieveCount()
 		if result == nil {
 			return nil, fmt.Errorf("input result from any sources cannot be nil")
 		}
+		reducedResult.allRetrieveCount += result.GetAllRetrieveCount()
 		fieldDatas := result.GetFieldDatas()
 		if outputColumnCount != len(fieldDatas) {
 			return nil, fmt.Errorf("retrieved results from different segments have different size of columns")
@@ -387,7 +390,7 @@ processResults:
 
 		for row := 0; row < rowCount; row++ {
 			// Check limit before processing each row to avoid unnecessary hashing and copying
-			if reducer.groupLimit != -1 && totalRowCount >= reducer.groupLimit {
+			if reducer.groupLimit != -1 && totalGroupCount >= reducer.groupLimit {
 				break processResults
 			}
 			rowFieldValues := make([]*FieldValue, outputColumnCount)
@@ -416,22 +419,29 @@ processResults:
 			if bucket := reducer.hashValsMap[hashVal]; bucket == nil {
 				newBucket := NewBucket()
 				newBucket.AddRow(newRow)
-				totalRowCount++
+				totalGroupCount++
 				reducer.hashValsMap[hashVal] = newBucket
 			} else {
 				if rowIdx := bucket.Find(newRow, numGroupingKeys); rowIdx == NONE {
 					bucket.AddRow(newRow)
-					totalRowCount++
+					totalGroupCount++
 				} else {
-					bucket.Accumulate(newRow, rowIdx, numGroupingKeys, aggs)
+					if err := bucket.Accumulate(newRow, rowIdx, numGroupingKeys, aggs); err != nil {
+						return nil, err
+					}
 				}
+			}
+			if totalGroupCount > maxGroupByGroups {
+				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("GROUP BY produced too many groups (%d). "+
+					"Add filters or increase common.groupBy.maxGroups (current: %d)",
+					totalGroupCount, maxGroupByGroups))
 			}
 			// Don't guarantee specific groups to be returned before milvus support order by
 		}
 	}
 
 	// 3. assemble reduced buckets into retrievedResult
-	reducedResult.fieldDatas = typeutil.PrepareResultFieldData(firstFieldData, totalRowCount)
+	reducedResult.fieldDatas = typeutil.PrepareResultFieldData(firstFieldData, totalGroupCount)
 	for _, bucket := range reducer.hashValsMap {
 		err := AssembleBucket(bucket, reducedResult.GetFieldDatas())
 		if err != nil {

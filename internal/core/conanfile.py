@@ -38,7 +38,7 @@ class MilvusConan(ConanFile):
         "librdkafka/1.9.1#e24dcbb0a1684dcf5a56d8d0692ceef3",
         "abseil/20250127.0#e6c46096070cc3fd060e95a837cd3fb2",
         "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
-        "grpc/1.67.1@milvus/dev#5aa62c51bced448b83d7db9e5b3a13c7",
+        "grpc/1.67.1@milvus/dev#00eeae5b14c7313dbc91f1a57c0a2554",
         "rapidjson/cci.20230929#624c0094d741e6a3749d2e44d834b96c",
         "crc32c/1.1.1",
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
@@ -51,7 +51,7 @@ class MilvusConan(ConanFile):
 
     generators = ("cmake", "cmake_find_package")
     default_options = {
-        "openssl:shared": False,
+        "openssl:shared": True,
         "openssl:no_apps": True,
         "libevent:shared": True,
         "double-conversion:shared": True,
@@ -111,6 +111,9 @@ class MilvusConan(ConanFile):
         if self.settings.os != "Macos":
             self.requires("libunwind/1.8.1#97965ef7da98cf1662e14219b14134f7")
         self.requires("aws-sdk-cpp/1.11.692@milvus/dev#1e17deac19383217d291a01c23147b33")
+        # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection
+        if self.settings.os in ["Linux", "FreeBSD"]:
+            self.requires("s2n/1.6.0")
 
     def imports(self):
         self.copy("*.dylib", "../lib", "lib")

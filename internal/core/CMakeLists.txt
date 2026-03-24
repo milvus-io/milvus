@@ -62,6 +62,10 @@ if (CMAKE_COMPILER_IS_GNUCC)
         # TODO: this workaround may removed when protobuf upgraded
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
     endif ()
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 12.99)
+        # gcc>=13 removed implicit includes for <cstdint>, <cstdlib>, <algorithm> etc.
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -include cstdint -include cstdlib -include algorithm")
+    endif ()
 endif ()
 
 set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
@@ -138,7 +142,7 @@ if (LINUX OR MSYS)
                   "-Wno-error"
                   "-Wno-all"
                   )
-    if (USE_ASAN STREQUAL "ON") 
+    if (USE_ASAN STREQUAL "ON")
         message( STATUS "Building Milvus Core Using AddressSanitizer")
         add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
         add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)

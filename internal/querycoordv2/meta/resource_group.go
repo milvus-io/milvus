@@ -97,6 +97,11 @@ func (rg *ResourceGroup) GetConfigCloned() *rgpb.ResourceGroupConfig {
 	return proto.Clone(rg.cfg).(*rgpb.ResourceGroupConfig)
 }
 
+// GetAllNodes return all physical nodes of resource group, bypassing node label filter.
+func (rg *ResourceGroup) GetAllNodes() []int64 {
+	return rg.nodes.Collect()
+}
+
 // GetNodes return nodes of resource group which match required node labels
 func (rg *ResourceGroup) GetNodes() []int64 {
 	requiredNodeLabels := rg.GetConfig().GetNodeFilter().GetNodeLabels()

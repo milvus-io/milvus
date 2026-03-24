@@ -18,6 +18,8 @@
 #include "test_utils/storage_test_utils.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "exec/operator/query-agg/CountAggregateBase.h"
+#include "exec/HashTable.h"
+#include "exec/VectorHasher.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 
@@ -1209,4 +1211,159 @@ TEST_P(QueryAggTest, GroupByEmptyResultMultipleAggs) {
     EXPECT_EQ(
         retrieve_results->fields_data(3).scalars().double_data().data_size(),
         0);
+}
+
+// ============================================================
+// HashTable rehash and group limit tests
+// ============================================================
+
+namespace {
+// Helper to create a HashTable with a single INT64 key column, no accumulators.
+// Inserts 'numGroups' distinct INT64 values via groupProbe in batches.
+// Returns the HashTable.
+std::unique_ptr<milvus::exec::HashTable>
+createAndInsertGroups(int64_t numGroups,
+                      int64_t maxNumGroups,
+                      int batchSize = 1024) {
+    std::vector<milvus::exec::Accumulator> accumulators;
+    std::vector<std::unique_ptr<milvus::exec::VectorHasher>> hashers;
+    hashers.push_back(
+        milvus::exec::VectorHasher::create(milvus::DataType::INT64, 0));
+    auto table = std::make_unique<milvus::exec::HashTable>(
+        std::move(hashers), accumulators, maxNumGroups);
+
+    int64_t inserted = 0;
+    while (inserted < numGroups) {
+        int64_t thisCount = std::min((int64_t)batchSize, numGroups - inserted);
+        auto col = std::make_shared<milvus::ColumnVector>(
+            milvus::DataType::INT64, thisCount);
+        auto* data = reinterpret_cast<int64_t*>(col->GetRawData());
+        for (int64_t i = 0; i < thisCount; i++) {
+            data[i] = inserted + i;
+        }
+
+        std::vector<milvus::DataType> dtypes = {milvus::DataType::INT64};
+        std::vector<milvus::VectorPtr> children = {col};
+        auto input = std::make_shared<milvus::RowVector>(children);
+
+        milvus::exec::HashLookup lookup(table->hashers());
+        table->prepareForGroupProbe(lookup, input);
+        table->groupProbe(lookup);
+
+        inserted += thisCount;
+    }
+    return table;
+}
+}  // namespace
+
+TEST(HashTableRehashTest, TestHashTableRehashBasic) {
+    // Insert 5000 distinct groups (exceeds initial 2048 capacity),
+    // verify no crash and numDistinct == 5000
+    const int64_t numGroups = 5000;
+    auto table = createAndInsertGroups(numGroups, 1000000);
+    ASSERT_NE(table->rows(), nullptr);
+    EXPECT_EQ(table->rows()->allRows().size(), numGroups);
+}
+
+TEST(HashTableRehashTest, TestHashTableRehashCorrectness) {
+    // Insert N groups, record row pointers.
+    // Then re-probe the same keys and verify we get back the same row pointers.
+    const int64_t numGroups = 3000;
+    std::vector<milvus::exec::Accumulator> accumulators;
+    std::vector<std::unique_ptr<milvus::exec::VectorHasher>> hashers;
+    hashers.push_back(
+        milvus::exec::VectorHasher::create(milvus::DataType::INT64, 0));
+    auto table = std::make_unique<milvus::exec::HashTable>(
+        std::move(hashers), accumulators, 1000000);
+
+    // Insert numGroups distinct values
+    auto col = std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64,
+                                                      numGroups);
+    auto* data = reinterpret_cast<int64_t*>(col->GetRawData());
+    for (int64_t i = 0; i < numGroups; i++) {
+        data[i] = i;
+    }
+    std::vector<milvus::VectorPtr> children = {col};
+    auto input = std::make_shared<milvus::RowVector>(children);
+
+    milvus::exec::HashLookup lookup1(table->hashers());
+    table->prepareForGroupProbe(lookup1, input);
+    table->groupProbe(lookup1);
+
+    // Record row pointers
+    std::vector<char*> firstHits(lookup1.hits_.begin(), lookup1.hits_.end());
+
+    // Re-probe with the same keys — should get the same row pointers
+    auto col2 = std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64,
+                                                       numGroups);
+    auto* data2 = reinterpret_cast<int64_t*>(col2->GetRawData());
+    for (int64_t i = 0; i < numGroups; i++) {
+        data2[i] = i;
+    }
+    std::vector<milvus::VectorPtr> children2 = {col2};
+    auto input2 = std::make_shared<milvus::RowVector>(children2);
+
+    milvus::exec::HashLookup lookup2(table->hashers());
+    table->prepareForGroupProbe(lookup2, input2);
+    table->groupProbe(lookup2);
+
+    ASSERT_EQ(lookup2.hits_.size(), numGroups);
+    for (int64_t i = 0; i < numGroups; i++) {
+        EXPECT_EQ(lookup2.hits_[i], firstHits[i])
+            << "Row pointer mismatch for group " << i;
+    }
+    // No new groups should have been created on re-probe
+    EXPECT_TRUE(lookup2.newGroups_.empty());
+}
+
+TEST(HashTableRehashTest, TestHashTableMaxGroupsLimit) {
+    // Set maxNumGroups=100, insert >100 groups, verify exception
+    const int64_t maxGroups = 100;
+    EXPECT_THROW(
+        {
+            try {
+                createAndInsertGroups(200, maxGroups);
+            } catch (const std::exception& e) {
+                // Verify the error message mentions the limit
+                std::string msg = e.what();
+                EXPECT_NE(msg.find("too many groups"), std::string::npos)
+                    << "Expected 'too many groups' in: " << msg;
+                EXPECT_NE(msg.find("common.groupBy.maxGroups"),
+                          std::string::npos)
+                    << "Expected 'common.groupBy.maxGroups' in: " << msg;
+                throw;
+            }
+        },
+        std::exception);
+}
+
+TEST(HashTableRehashTest, TestHashTableRehashMultipleRounds) {
+    // Insert 50K groups forcing ~5 rehash rounds (2048->4096->...->65536)
+    // Verify all groups found correctly
+    const int64_t numGroups = 50000;
+    auto table = createAndInsertGroups(numGroups, 1000000, 2048);
+    ASSERT_NE(table->rows(), nullptr);
+    EXPECT_EQ(table->rows()->allRows().size(), numGroups);
+
+    // Verify we can look up all groups
+    auto col = std::make_shared<milvus::ColumnVector>(milvus::DataType::INT64,
+                                                      numGroups);
+    auto* data = reinterpret_cast<int64_t*>(col->GetRawData());
+    for (int64_t i = 0; i < numGroups; i++) {
+        data[i] = i;
+    }
+    std::vector<milvus::VectorPtr> children = {col};
+    auto input = std::make_shared<milvus::RowVector>(children);
+
+    milvus::exec::HashLookup lookup(table->hashers());
+    table->prepareForGroupProbe(lookup, input);
+    table->groupProbe(lookup);
+
+    // All should be existing groups, no new groups created
+    EXPECT_TRUE(lookup.newGroups_.empty());
+    // All hits should be non-null
+    for (int64_t i = 0; i < numGroups; i++) {
+        EXPECT_NE(lookup.hits_[i], nullptr)
+            << "Group " << i << " not found after multiple rehashes";
+    }
 }

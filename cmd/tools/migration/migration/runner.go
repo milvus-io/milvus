@@ -97,7 +97,7 @@ func (r *Runner) init() {
 	// address not important here.
 	address := time.Now().String()
 	r.address = address
-	r.session.Init(Role, address, true, true)
+	r.session.Init(Role, address, true)
 	r.WatchSessions()
 }
 

@@ -2,6 +2,7 @@ import time
 import numpy as np
 
 import pytest
+from pymilvus import DataType
 
 from base.client_v2_base import TestMilvusClientV2Base
 from utils.util_log import test_log as log
@@ -1452,13 +1453,343 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
 
 
 
+@pytest.mark.tags(CaseLabel.RBAC)
+class TestMilvusClientRbacPrefixIsolation(TestMilvusClientV2Base):
+    """PR #48053 / Issue #47998: RBAC prefix isolation tests.
 
+    Bug: When two usernames have a prefix relationship (e.g. user1 / user11),
+    getRolesByUsername returns empty-string roles due to path.Join stripping
+    trailing slash in etcd LoadWithPrefix.
+    """
 
+    DIM = 128
 
+    def teardown_method(self, method):
+        """Clean up entities created by this test, then call super() for connection cleanup."""
+        if not hasattr(self, '_p'):
+            super().teardown_method(method)
+            return
+        log.info(f"[pr48053 teardown] cleaning up {method.__name__}, prefix={self._p}")
+        client = self._client()
 
+        # Use force_drop to skip manual revoke of privileges.
+        # Order: drop roles (force) → drop users → drop privilege groups
+        #        → drop aliases → drop collections → drop databases
 
+        for role in [self._role1, self._role10, self._role1_read]:
+            try:
+                client.drop_role(role, force_drop=True)
+            except Exception:
+                pass
 
+        for user in [self._user1, self._user11, self._user1_ro]:
+            try:
+                client.drop_user(user)
+            except Exception:
+                pass
 
+        for pg in [self._pg1, self._pg10, self._pg1_ext]:
+            try:
+                client.drop_privilege_group(pg)
+            except Exception:
+                pass
 
+        for alias in [self._alias1, self._alias10, self._alias1_bak]:
+            try:
+                client.drop_alias(alias)
+            except Exception:
+                pass
 
+        for col in [self._col, self._col_v2, self._collection]:
+            try:
+                client.drop_collection(col)
+            except Exception:
+                pass
 
+        for db in [self._db1, self._db10]:
+            try:
+                client.using_database(db)
+                client.drop_collection("inner_col")
+            except Exception:
+                pass
+            try:
+                client.using_database("default")
+                client.drop_database(db)
+            except Exception:
+                pass
+
+        super().teardown_method(method)
+
+    def test_prefix_isolation_all(self, host, port):
+        """All UpgradeCheck cases (#01~#26) in a single test method.
+
+        Before upgrade (bug present):
+          - #03 DescribeUser(user1): FAIL (empty-string role)
+          - #23 ListDatabases as user1: FAIL (role entity invalid)
+        After upgrade (bug fixed): all pass.
+        """
+        client = self._client()
+        uri = f"http://{host}:{port}"
+
+        # ============================================================
+        # Setup: create all test data with random prefix
+        # ============================================================
+        p = cf.gen_unique_str("pr48053")
+        self._p = p
+
+        # Names with prefix collision
+        self._user1 = f"{p}_user1"
+        self._user11 = f"{p}_user11"
+        self._user1_ro = f"{p}_user1_ro"
+        self._pw1 = cf.gen_str_by_length(contain_numbers=True)
+        self._pw11 = cf.gen_str_by_length(contain_numbers=True)
+        self._pw1_ro = cf.gen_str_by_length(contain_numbers=True)
+
+        self._role1 = f"{p}_role1"
+        self._role10 = f"{p}_role10"
+        self._role1_read = f"{p}_role1_read"
+
+        self._col = f"{p}_col"
+        self._col_v2 = f"{p}_col_v2"
+        self._collection = f"{p}_collection"
+
+        self._alias1 = f"{p}_alias1"
+        self._alias10 = f"{p}_alias10"
+        self._alias1_bak = f"{p}_alias1_bak"
+
+        self._db1 = f"{p}_db1"
+        self._db10 = f"{p}_db10"
+
+        self._pg1 = f"{p}_pg1"
+        self._pg10 = f"{p}_pg10"
+        self._pg1_ext = f"{p}_pg1_extended"
+
+        dim = self.DIM
+
+        # Collections
+        for col_name in [self._col, self._col_v2, self._collection]:
+            schema, _ = self.create_schema(client)
+            schema.add_field("id", DataType.INT64, is_primary=True)
+            schema.add_field("vec", DataType.FLOAT_VECTOR, dim=dim)
+            self.create_collection(client, col_name, schema=schema, force_teardown=False)
+            self.insert(client, col_name, [{"id": i, "vec": np.random.random(dim).tolist()} for i in range(10)])
+            idx = client.prepare_index_params()
+            idx.add_index(field_name="vec", index_type="FLAT", metric_type="COSINE")
+            self.create_index(client, col_name, idx)
+            self.load_collection(client, col_name)
+
+        # Aliases
+        self.create_alias(client, self._col, self._alias1)
+        self.create_alias(client, self._col_v2, self._alias10)
+        self.create_alias(client, self._collection, self._alias1_bak)
+
+        # Databases + inner collections
+        for db_name in [self._db1, self._db10]:
+            self.create_database(client, db_name)
+            self.using_database(client, db_name)
+            schema, _ = self.create_schema(client)
+            schema.add_field("id", DataType.INT64, is_primary=True)
+            schema.add_field("vec", DataType.FLOAT_VECTOR, dim=dim)
+            self.create_collection(client, "inner_col", schema=schema, force_teardown=False)
+            self.insert(client, "inner_col", [{"id": i, "vec": np.random.random(dim).tolist()} for i in range(10)])
+            idx = client.prepare_index_params()
+            idx.add_index(field_name="vec", index_type="FLAT", metric_type="COSINE")
+            self.create_index(client, "inner_col", idx)
+            self.load_collection(client, "inner_col")
+            self.using_database(client, "default")
+
+        # Roles
+        for role in [self._role1, self._role10, self._role1_read]:
+            self.create_role(client, role)
+
+        # Users + bindings
+        self.create_user(client, self._user1, self._pw1)
+        self.create_user(client, self._user11, self._pw11)
+        self.create_user(client, self._user1_ro, self._pw1_ro)
+        self.grant_role(client, self._user1, self._role1)
+        self.grant_role(client, self._user11, self._role10)
+        self.grant_role(client, self._user1_ro, self._role1_read)
+
+        # Privilege groups
+        self.create_privilege_group(client, self._pg1)
+        self.add_privileges_to_group(client, self._pg1, ["Search", "Query"])
+        self.create_privilege_group(client, self._pg10)
+        self.add_privileges_to_group(client, self._pg10, ["Insert", "Delete", "Upsert"])
+        self.create_privilege_group(client, self._pg1_ext)
+        self.add_privileges_to_group(client, self._pg1_ext, ["Search", "Query", "Load", "Release"])
+
+        # Grants (CreateCollection db must be "default" not "*" for #23 to reproduce)
+        grants = [
+            (self._role1,      "Search",           self._col,        "default"),
+            (self._role1,      "Query",            self._col,        "default"),
+            (self._role10,     "Insert",           self._col_v2,     "default"),
+            (self._role10,     "Search",           self._col_v2,     "default"),
+            (self._role1_read, "Search",           self._collection, "default"),
+            (self._role1,      "CreateCollection", "*",              "default"),
+            (self._role1,      "Search",           "inner_col",      self._db1),
+            (self._role10,     "Search",           "inner_col",      self._db10),
+            (self._role1_read, self._pg1,          self._col_v2,     "default"),
+        ]
+        for role, priv, col, db in grants:
+            self.grant_privilege_v2(client, role, priv, col, db)
+
+        time.sleep(2)
+        log.info(f"[pr48053] setup complete, prefix={p}")
+
+        # ============================================================
+        # #01~#10: RBAC metadata integrity
+        # ============================================================
+
+        # #01: ListUsers
+        users, _ = self.list_users(client)
+        for u in [self._user1, self._user11, self._user1_ro]:
+            assert u in users, f"#01: {u} not in {users}"
+
+        # #02: ListRoles
+        roles, _ = self.list_roles(client)
+        for r in [self._role1, self._role10, self._role1_read]:
+            assert r in roles, f"#02: {r} not in {roles}"
+
+        # #03: DescribeUser(user1) - BUG POINT
+        # Bug #47998: user1 is prefix of user11/user1_ro, returns ['role1', '', '']
+        result, _ = self.describe_user(client, self._user1)
+        roles_u1 = list(result.get("roles", []))
+        assert "" not in roles_u1, f"#03 Bug #47998: empty-string role, roles={roles_u1}"
+        assert self._role1 in roles_u1, f"#03: should contain {self._role1}, roles={roles_u1}"
+
+        # #04: DescribeUser(user11)
+        result, _ = self.describe_user(client, self._user11)
+        roles_u11 = list(result.get("roles", []))
+        assert self._role10 in roles_u11 and self._role1 not in roles_u11 and "" not in roles_u11, \
+            f"#04: roles={roles_u11}"
+
+        # #05: DescribeUser(user1_ro)
+        result, _ = self.describe_user(client, self._user1_ro)
+        roles_uro = list(result.get("roles", []))
+        assert self._role1_read in roles_uro and self._role1 not in roles_uro and "" not in roles_uro, \
+            f"#05: roles={roles_uro}"
+
+        # #06: DescribeRole(role1) no col_v2
+        result, _ = self.describe_role(client, self._role1)
+        privs = result.get("privileges", [])
+        col_v2_privs = [p for p in privs if self._col_v2 in str(p.get("object_name", ""))]
+        assert len(col_v2_privs) == 0, f"#06: role1 should not have col_v2: {col_v2_privs}"
+        assert len(privs) > 0, "#06: role1 should have privileges"
+
+        # #07: DescribeRole(role10) no col
+        result, _ = self.describe_role(client, self._role10)
+        privs = result.get("privileges", [])
+        col_only = [p for p in privs if p.get("object_name") == self._col]
+        assert len(col_only) == 0, f"#07: role10 should not have col: {col_only}"
+
+        # #08: DescribeRole(role1_read) no role1's Query/CreateCollection
+        result, _ = self.describe_role(client, self._role1_read)
+        privs = result.get("privileges", [])
+        has_query = any(p.get("privilege") == "Query" and p.get("object_name") == self._col for p in privs)
+        has_create = any(p.get("privilege") == "CreateCollection" for p in privs)
+        assert not has_query and not has_create, f"#08: Query={has_query}, CreateCollection={has_create}"
+
+        # #09: ListPrivilegeGroups
+        groups, _ = self.list_privilege_groups(client)
+        names = [g.get("privilege_group", g.get("group_name", "")) for g in groups]
+        for pg in [self._pg1, self._pg10, self._pg1_ext]:
+            assert pg in names, f"#09: {pg} not in {names}"
+
+        # #10: DescribeRole(role1_read) has pg1 on col_v2
+        result, _ = self.describe_role(client, self._role1_read)
+        privs = result.get("privileges", [])
+        has_pg1 = any(
+            self._pg1 in str(p.get("privilege", "")) and self._col_v2 in str(p.get("object_name", ""))
+            for p in privs
+        )
+        assert has_pg1, f"#10: should have {self._pg1} on {self._col_v2}, privs={privs}"
+
+        # ============================================================
+        # #11~#20: Permission isolation
+        # Uses init_milvus_client per user + check_task for permission checks
+        # ============================================================
+
+        # #11: user1 Search col -> success
+        uc1, _ = self.init_milvus_client(uri=uri, user=self._user1, password=self._pw1)
+        self.search(uc1, self._col, data=[np.random.random(dim).tolist()])
+
+        # #12: user1 Insert col_v2 -> denied
+        self.insert(uc1, self._col_v2, [{"id": 9999, "vec": np.random.random(dim).tolist()}],
+                    check_task=CheckTasks.check_permission_deny)
+
+        # #13: user1 Search col_v2 -> denied
+        self.search(uc1, self._col_v2, data=[np.random.random(dim).tolist()],
+                    check_task=CheckTasks.check_permission_deny)
+
+        # #14: user11 Search col -> denied
+        uc11, _ = self.init_milvus_client(uri=uri, user=self._user11, password=self._pw11)
+        self.search(uc11, self._col, data=[np.random.random(dim).tolist()],
+                    check_task=CheckTasks.check_permission_deny)
+
+        # #15: user11 Query col -> denied
+        self.query(uc11, self._col, filter="id >= 0",
+                   check_task=CheckTasks.check_permission_deny)
+
+        # #16: user1_ro Insert col -> denied
+        uc_ro, _ = self.init_milvus_client(uri=uri, user=self._user1_ro, password=self._pw1_ro)
+        self.insert(uc_ro, self._col, [{"id": 9999, "vec": np.random.random(dim).tolist()}],
+                    check_task=CheckTasks.check_permission_deny)
+
+        # #17: user1_ro Search col_v2 -> success via pg1
+        self.search(uc_ro, self._col_v2, data=[np.random.random(dim).tolist()])
+
+        # #18: user1_ro Insert col_v2 -> denied (pg1 has no Insert)
+        self.insert(uc_ro, self._col_v2, [{"id": 9999, "vec": np.random.random(dim).tolist()}],
+                    check_task=CheckTasks.check_permission_deny)
+
+        # #19: DescribeRole(role1) grants no col_v2
+        result, _ = self.describe_role(client, self._role1)
+        col_v2 = [p for p in result.get("privileges", []) if self._col_v2 in str(p)]
+        assert len(col_v2) == 0, f"#19: role1 should not have col_v2: {col_v2}"
+
+        # #20: DescribeRole(role10) grants no col
+        result, _ = self.describe_role(client, self._role10)
+        col_only = [p for p in result.get("privileges", []) if p.get("object_name") == self._col]
+        assert len(col_only) == 0, f"#20: role10 should not have col: {col_only}"
+
+        # ============================================================
+        # #21~#22: Alias
+        # ============================================================
+
+        # #21: ListAliases
+        all_aliases = []
+        for col_name in [self._col, self._col_v2, self._collection]:
+            result, _ = self.list_aliases(client, col_name)
+            if isinstance(result, dict):
+                all_aliases.extend(result.get("aliases", []))
+            elif isinstance(result, list):
+                all_aliases.extend(result)
+        for alias in [self._alias1, self._alias10, self._alias1_bak]:
+            assert alias in all_aliases, f"#21: {alias} not in {all_aliases}"
+
+        # #22: Search via alias1
+        result, _ = self.search(client, self._alias1, data=[np.random.random(dim).tolist()])
+        assert len(result) > 0, "#22: search via alias1 returned no results"
+
+        # ============================================================
+        # #23~#26: Multi-DB
+        # ============================================================
+
+        # #23: user1 ListDatabases - BUG POINT
+        # Bug #47998: getCurrentUserVisibleDatabases -> getRolesByUsername
+        # -> empty role -> SelectGrant error
+        user_client, _ = self.init_milvus_client(uri=uri, user=self._user1, password=self._pw1)
+        self.list_databases(user_client)
+
+        # #25: user1 Search db1.inner_col -> success
+        uc1_db1, _ = self.init_milvus_client(uri=uri, user=self._user1, password=self._pw1,
+                                              db_name=self._db1)
+        self.search(uc1_db1, "inner_col", data=[np.random.random(dim).tolist()])
+
+        # #26: user1 Search db10.inner_col -> denied
+        uc1_db10, _ = self.init_milvus_client(uri=uri, user=self._user1, password=self._pw1,
+                                               db_name=self._db10)
+        self.search(uc1_db10, "inner_col", data=[np.random.random(dim).tolist()],
+                    check_task=CheckTasks.check_permission_deny)
+
+        log.info(f"[pr48053] all checks passed, prefix={p}")

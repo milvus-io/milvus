@@ -37,6 +37,7 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 	runtimeDir := createRuntimeDir(serverType)
 	filename := getPidFileName(serverType, roles.Alias)
 
+	maybeEnableOpenSSLFIPS()
 	c.printBanner(flags.Output())
 	c.injectVariablesToEnv()
 	c.printHardwareInfo(flags.Output())
@@ -60,6 +61,7 @@ func (c *run) printBanner(w io.Writer) {
 	fmt.Fprintln(w, "Built:     "+BuildTime)
 	fmt.Fprintln(w, "GitCommit: "+GitCommit)
 	fmt.Fprintln(w, "GoVersion: "+GoVersion)
+	fmt.Fprintf(w, "Milvus FIPS in Go: BoringCrypto %v\n", boringEnabled())
 	fmt.Fprintln(w)
 	metrics.BuildInfo.WithLabelValues(getEffectiveVersion(), BuildTime, GitCommit).Set(1)
 }

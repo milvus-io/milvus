@@ -393,7 +393,7 @@ proxy:
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:
   taskMergeCap: 1
-  taskExecutionCap: 256
+  taskExecutionCap: 360
   # Switch value to control if to automatically replace a growing segment with the corresponding indexed sealed segment when the growing segment reaches the sealing threshold.
   # If this parameter is set false, Milvus simply searches the growing segments with brute force.
   autoHandoff: true
@@ -447,6 +447,7 @@ queryCoord:
   collectionObserverInterval: 200 # the interval of collection observer
   checkExecutedFlagInterval: 100 # the interval of check executed flag to force to pull dist
   updateCollectionLoadStatusInterval: 5 # 5m, max interval of updating collection loaded status for check health
+  channelTaskCapFraction: 0.3 # fraction of total task execution capacity reserved for channel tasks per node (0.0-1.0)
   # Duration (in seconds) that a query node remains marked as resource exhausted after reaching resource limits.
   # During this period, the node won't receive new tasks to loading resource.
   # Set to 0 to disable the penalty period.
@@ -928,6 +929,7 @@ common:
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority pool
     bm25Load: 1 # This parameter specify how many times the number of threads is the number of cores in BM25 load pool
+    maxThreadsSize: 16 # The maximum number of threads in the thread pool, only effective when greater than 0
   buildIndexThreadPoolRatio: 0.75
   DiskIndex:
     MaxDegree: 56
@@ -1054,6 +1056,8 @@ common:
     mode:
       queryNode: sync # File resource mode for query node, options: [sync, close]. Default is sync.
       dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
+  groupBy:
+    maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

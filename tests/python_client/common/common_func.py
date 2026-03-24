@@ -888,7 +888,6 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
     schema.add_field("array_varchar", DataType.ARRAY, element_type=DataType.VARCHAR, max_length=200, max_capacity=ct.default_max_capacity)
     schema.add_field("array_bool", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=ct.default_max_capacity)
     schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim, nullable=True)
-    schema.add_field("image_emb", DataType.INT8_VECTOR, dim=dim, nullable=True)
     schema.add_field("text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR, nullable=False)  # function output field cannot be nullable
     # schema.add_field("voice_emb", DataType.FLOAT_VECTOR, dim=dim)
 
@@ -910,6 +909,19 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         params={},
     )
     schema.add_function(bm25_function)
+
+    # Add MinHash function (input: document field, output: minhash_emb binary vector)
+    minhash_num_hashes = 16
+    minhash_dim = minhash_num_hashes * 32  # 512
+    schema.add_field("minhash_emb", DataType.BINARY_VECTOR, dim=minhash_dim)
+    minhash_function = Function(
+        name="document_minhash",
+        function_type=FunctionType.MINHASH,
+        input_field_names=["document"],
+        output_field_names=["minhash_emb"],
+        params={"num_hashes": minhash_num_hashes, "shingle_size": 3},
+    )
+    schema.add_function(minhash_function)
 
     return schema
 
@@ -2151,6 +2163,17 @@ def get_bm25_vec_field_name_list(schema=None):
 
     return bm25_outputs
 
+def get_minhash_vec_field_name_list(schema=None):
+    if not hasattr(schema, "functions"):
+        return []
+    functions = schema.functions
+    minhash_func = [func for func in functions if func.type == FunctionType.MINHASH]
+    minhash_outputs = []
+    for func in minhash_func:
+        minhash_outputs.extend(func.output_field_names)
+    minhash_outputs = list(set(minhash_outputs))
+    return minhash_outputs
+
 def get_dim_by_schema(schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
@@ -2164,9 +2187,16 @@ def get_dim_by_schema(schema=None):
 def get_dense_anns_field_name_list(schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
+    # Collect function output fields to exclude (e.g. BM25, MinHash outputs)
+    func_output_fields = set()
+    if hasattr(schema, "functions"):
+        for func in schema.functions:
+            func_output_fields.update(func.output_field_names)
     fields = schema.fields
     anns_fields = []
     for field in fields:
+        if field.name in func_output_fields:
+            continue
         if field.dtype in [DataType.FLOAT_VECTOR,DataType.FLOAT16_VECTOR,DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR, DataType.BINARY_VECTOR]:
             item = {
                 "name": field.name,

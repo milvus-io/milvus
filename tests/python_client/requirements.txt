@@ -23,8 +23,8 @@ pytest-sugar==0.9.5
 pytest-random-order
 
 # pymilvus
-pymilvus==2.7.0rc141
-pymilvus[bulk_writer]==2.7.0rc141
+pymilvus==2.7.0rc162
+pymilvus[bulk_writer]==2.7.0rc162
 # for protobuf
 protobuf>=5.29.5
 
@@ -67,6 +67,9 @@ Unidecode==1.3.8
 tantivy==0.22.0
 bm25s==0.2.0
 jieba==0.42.1
+
+# for minhash function test
+xxhash>=3.0.0
 
 
 # for perf test

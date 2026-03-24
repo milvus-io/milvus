@@ -8,7 +8,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast"
@@ -39,7 +39,7 @@ type AssignmentService interface {
 	GetLatestStreamingVersion(ctx context.Context) (*streamingpb.StreamingVersion, error)
 
 	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
-	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
+	UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error
 
 	// GetReplicateConfiguration returns the replicate configuration of the milvus cluster.
 	// Pass assignment.WithFreshRead() to force reading the latest state from the coord.

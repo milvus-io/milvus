@@ -148,13 +148,14 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
                              DataType.BFLOAT16_VECTOR,
                              DataType.INT8_VECTOR,
                              DataType.FLOAT_VECTOR]
-        # fields to be updated
+        # fields to be updated (exclude function output fields like BM25 and MinHash)
+        function_output_fields = [text_sparse_emb_field_name] + cf.get_minhash_vec_field_name_list(schema)
         update_fields_name = []
         scalar_update_name = []
         vector_update = []  # this stores field object
         for field in schema.fields:
             field_name = field.name
-            if field_name != text_sparse_emb_field_name:
+            if field_name not in function_output_fields:
                 update_fields_name.append(field_name)
                 if field.dtype not in vector_field_type:
                     scalar_update_name.append(field_name)
@@ -237,9 +238,11 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         log.info(f"Inserted {nb} initial records")
 
         primary_key_field_name = schema.primary_field.name
+        # Skip function output fields (BM25 and MinHash) as they are auto-generated
+        function_output_fields = ["text_sparse_emb"] + cf.get_minhash_vec_field_name_list(schema)
         i = 0
         for field in schema.fields:
-            if field.name in [primary_key_field_name, "text_sparse_emb"]:
+            if field.name in [primary_key_field_name] + function_output_fields:
                 continue
             log.info(f"try to partial update field: {field.name}")
             new_rows = cf.gen_row_data_by_schema(nb=nb, schema=schema,

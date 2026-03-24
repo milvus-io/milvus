@@ -130,21 +130,19 @@ func (s *sealedBm25Stats) writeFile(localDir string) (error, bool) {
 	// RUnlock when stats serialize and write to file
 	// to avoid block remove stats too long when sync distribution
 	for fieldID, stats := range stats {
-		file, err := os.Create(path.Join(localDir, fmt.Sprintf("%d.data", fieldID)))
-		if err != nil {
-			return err, false
-		}
+		if err := func() error {
+			file, err := os.Create(path.Join(localDir, fmt.Sprintf("%d.data", fieldID)))
+			if err != nil {
+				return err
+			}
+			defer file.Close()
 
-		defer file.Close()
-		writer := bufio.NewWriter(file)
-
-		err = stats.SerializeToWriter(writer)
-		if err != nil {
-			return err, false
-		}
-
-		err = writer.Flush()
-		if err != nil {
+			writer := bufio.NewWriter(file)
+			if err = stats.SerializeToWriter(writer); err != nil {
+				return err
+			}
+			return writer.Flush()
+		}(); err != nil {
 			return err, false
 		}
 	}

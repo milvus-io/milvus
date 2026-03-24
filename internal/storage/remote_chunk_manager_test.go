@@ -19,6 +19,7 @@ package storage
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -1293,7 +1294,7 @@ func TestToMilvusIoError(t *testing.T) {
 	t.Run("minio other error", func(t *testing.T) {
 		minioErr := minio.ErrorResponse{Code: "AccessDenied"}
 		err := ToMilvusIoError(fileName, minioErr)
-		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.ErrorIs(t, err, merr.ErrIoPermissionDenied)
 	})
 
 	t.Run("azure BlobNotFound", func(t *testing.T) {
@@ -1326,10 +1327,42 @@ func TestToMilvusIoError(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrIoTooManyRequests)
 	})
 
-	t.Run("googleapi other error", func(t *testing.T) {
+	t.Run("googleapi permission denied", func(t *testing.T) {
 		googleErr := &googleapi.Error{Code: http.StatusForbidden}
 		err := ToMilvusIoError(fileName, googleErr)
-		assert.ErrorIs(t, err, merr.ErrIoFailed)
+		assert.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+	})
+
+	// Test cases for passing merr.ErrIo* errors directly
+	// These should be returned as-is without re-wrapping
+	t.Run("direct merr.ErrIoKeyNotFound", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, merr.ErrIoKeyNotFound)
+		assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+		// assert.Same() removed: merr errors are struct values, not pointers
+		// ErrorIs() is sufficient to verify no unwanted wrapping occurred
+	})
+
+	t.Run("direct merr.ErrIoPermissionDenied", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, merr.ErrIoPermissionDenied)
+		assert.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+	})
+
+	t.Run("direct merr.ErrIoBucketNotFound", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, merr.ErrIoBucketNotFound)
+		assert.ErrorIs(t, err, merr.ErrIoBucketNotFound)
+	})
+
+	t.Run("direct merr.ErrIoInvalidArgument", func(t *testing.T) {
+		err := ToMilvusIoError(fileName, merr.ErrIoInvalidArgument)
+		assert.ErrorIs(t, err, merr.ErrIoInvalidArgument)
+	})
+
+	t.Run("wrapped merr.ErrIoKeyNotFound", func(t *testing.T) {
+		wrappedErr := fmt.Errorf("failed to read: %w", merr.ErrIoKeyNotFound)
+		err := ToMilvusIoError(fileName, wrappedErr)
+		assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+		// Verify the error is returned without additional wrapping
+		assert.Equal(t, wrappedErr, err, "should return wrapped error as-is")
 	})
 }
 
