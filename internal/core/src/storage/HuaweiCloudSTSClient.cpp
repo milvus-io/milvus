@@ -152,6 +152,60 @@ HuaweiCloudSTSCredentialsClient::GetAssumeRoleWithWebIdentityCredentials(
 }
 
 HuaweiCloudSTSCredentialsClient::STSCallResult
+HuaweiCloudSTSCredentialsClient::parseSTSResponse(
+    Aws::Http::HttpResponseCode httpResponseCode,
+    const Aws::String& responseBody) {
+    STSCallResult result;
+    if (httpResponseCode != Aws::Http::HttpResponseCode::OK &&
+        httpResponseCode != Aws::Http::HttpResponseCode::CREATED) {
+        result.errorMessage =
+            "Huawei Cloud STS security token request failed with HTTP code: " +
+            std::to_string(static_cast<int>(httpResponseCode)) +
+            ", body: " + responseBody.substr(0, 200);
+        return result;
+    }
+    if (responseBody.empty()) {
+        result.errorMessage = "Get an empty credential from Huawei Cloud STS";
+        return result;
+    }
+    Aws::Utils::Json::JsonValue jsonValue(responseBody);
+    if (!jsonValue.WasParseSuccessful()) {
+        result.errorMessage = "Failed to parse STS response as JSON: " +
+                              std::string(responseBody.substr(0, 200).c_str());
+        return result;
+    }
+    auto json = jsonValue.View();
+    auto rootNode = json.GetObject("credential");
+
+    if (rootNode.IsNull()) {
+        result.errorMessage = "Get credential from STS result failed";
+        return result;
+    }
+    result.credentials.SetAWSAccessKeyId(rootNode.GetString("access"));
+    result.credentials.SetAWSSecretKey(rootNode.GetString("secret"));
+    result.credentials.SetSessionToken(rootNode.GetString("securitytoken"));
+
+    auto expiresAt = rootNode.GetString("expires_at");
+    if (expiresAt.empty()) {
+        result.errorMessage =
+            "STS response missing 'expires_at' field, rejecting credentials";
+        return result;
+    }
+    auto parsedExpiration = Aws::Utils::DateTime(
+        Aws::Utils::StringUtils::Trim(expiresAt.c_str()).c_str(),
+        Aws::Utils::DateFormat::ISO_8601);
+    if (!parsedExpiration.WasParseSuccessful()) {
+        result.errorMessage =
+            "STS response 'expires_at' field has invalid format: " +
+            std::string(expiresAt.c_str());
+        return result;
+    }
+    result.credentials.SetExpiration(parsedExpiration);
+    result.success = true;
+    return result;
+}
+
+HuaweiCloudSTSCredentialsClient::STSCallResult
 HuaweiCloudSTSCredentialsClient::callHuaweiCloudSTS(
     const Aws::String& userToken,
     const STSAssumeRoleWithWebIdentityRequest& request) {
@@ -187,47 +241,16 @@ HuaweiCloudSTSCredentialsClient::callHuaweiCloudSTS(
     req->AddContentBody(body);
 
     auto resp = m_httpClient->MakeRequest(req);
-    STSCallResult result;
     if (!resp) {
+        STSCallResult result;
         result.errorMessage =
             "Null response from Huawei Cloud STS HTTP request";
         return result;
     }
     auto httpResponseCode = resp->GetResponseCode();
-    if (httpResponseCode != Aws::Http::HttpResponseCode::OK &&
-        httpResponseCode != Aws::Http::HttpResponseCode::CREATED) {
-        result.errorMessage =
-            "Huawei Cloud STS security token request failed with HTTP code: " +
-            std::to_string(static_cast<int>(httpResponseCode));
-        return result;
-    }
     std::ostringstream oss;
     oss << resp->GetResponseBody().rdbuf();
-    Aws::String credentialsStr = oss.str();
-    if (credentialsStr.empty()) {
-        result.errorMessage = "Get an empty credential from Huawei Cloud STS";
-        return result;
-    }
-    Aws::Utils::Json::JsonValue jsonValue(credentialsStr);
-    auto json = jsonValue.View();
-    auto rootNode = json.GetObject("credential");
-
-    if (rootNode.IsNull()) {
-        result.errorMessage = "Get credential from STS result failed";
-        return result;
-    }
-    result.credentials.SetAWSAccessKeyId(rootNode.GetString("access"));
-    result.credentials.SetAWSSecretKey(rootNode.GetString("secret"));
-    result.credentials.SetSessionToken(rootNode.GetString("securitytoken"));
-
-    auto expiresAt = rootNode.GetString("expires_at");
-    if (!expiresAt.empty()) {
-        result.credentials.SetExpiration(Aws::Utils::DateTime(
-            Aws::Utils::StringUtils::Trim(expiresAt.c_str()).c_str(),
-            Aws::Utils::DateFormat::ISO_8601));
-    }
-    result.success = true;
-    return result;
+    return parseSTSResponse(httpResponseCode, oss.str());
 }
 
 }  // namespace Internal

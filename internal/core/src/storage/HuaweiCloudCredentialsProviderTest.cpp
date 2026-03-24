@@ -118,6 +118,16 @@ class HuaweiCloudCredentialsProviderTestHelper {
     lastReloadFailed(const Provider& p) {
         return p.m_lastReloadFailed;
     }
+
+    static uint64_t
+    stsSuccessCount(const Provider& p) {
+        return p.m_stsSuccessCount.load();
+    }
+
+    static uint64_t
+    stsFailureCount(const Provider& p) {
+        return p.m_stsFailureCount.load();
+    }
 };
 
 using Helper = HuaweiCloudCredentialsProviderTestHelper;
@@ -384,6 +394,34 @@ TEST_F(HuaweiCloudCredentialsProviderTest, ReloadRetainsCredsOnEmptyKeys) {
               oldCreds.GetAWSAccessKeyId());
 }
 
+TEST_F(HuaweiCloudCredentialsProviderTest,
+       ReloadRetainsCredsOnEmptySessionToken) {
+    CreateProviderWithMock();
+    auto oldCreds = MakeFreshCredentials();
+    Helper::setCredentials(*provider_, oldCreds);
+    Helper::setTokenFile(*provider_, tokenFilePath_);
+
+    // STS returns success=true with valid ak/sk but empty session token
+    STSResult partialResult;
+    partialResult.success = true;
+    partialResult.creds.SetAWSAccessKeyId("VALID_AKID");
+    partialResult.creds.SetAWSSecretKey("VALID_SECRET");
+    partialResult.creds.SetSessionToken("");
+    EXPECT_CALL(*mock_, GetAssumeRoleWithWebIdentityCredentials(testing::_))
+        .WillOnce(testing::Return(partialResult));
+
+    Helper::callReload(*provider_);
+
+    EXPECT_TRUE(Helper::lastReloadFailed(*provider_));
+    // Old credentials should be retained
+    EXPECT_EQ(Helper::getCredentials(*provider_).GetAWSAccessKeyId(),
+              oldCreds.GetAWSAccessKeyId());
+    EXPECT_EQ(Helper::getCredentials(*provider_).GetSessionToken(),
+              oldCreds.GetSessionToken());
+    EXPECT_EQ(Helper::stsSuccessCount(*provider_), 0);
+    EXPECT_EQ(Helper::stsFailureCount(*provider_), 1);
+}
+
 // ============================================================================
 // Group 4: RefreshIfExpired + cooldown integration tests
 // ============================================================================
@@ -453,4 +491,88 @@ TEST_F(HuaweiCloudCredentialsProviderTest,
     EXPECT_FALSE(Helper::lastReloadFailed(*provider_));
     EXPECT_EQ(Helper::getCredentials(*provider_).GetAWSAccessKeyId(),
               "NEW_AKID");
+}
+
+// ============================================================================
+// Group 5: GetAWSCredentials returns empty when cached creds fully expired
+// ============================================================================
+
+TEST_F(HuaweiCloudCredentialsProviderTest,
+       GetAWSCredentialsReturnsEmptyWhenCredsExpired) {
+    CreateProviderWithMock();
+    // Set expired credentials and put provider in cooldown so RefreshIfExpired
+    // will skip reload.  GetAWSCredentials should return empty credentials
+    // rather than the expired ones to avoid silent auth failures.
+    Helper::setCredentials(*provider_, MakeExpiredCredentials());
+    Helper::setLastReloadFailed(
+        *provider_, true, std::chrono::steady_clock::now());
+    Helper::setTokenFile(*provider_, tokenFilePath_);
+
+    // Should NOT call STS because we're in cooldown
+    EXPECT_CALL(*mock_, GetAssumeRoleWithWebIdentityCredentials(testing::_))
+        .Times(0);
+
+    auto creds = provider_->GetAWSCredentials();
+    // Expired credentials should be replaced with empty credentials
+    EXPECT_TRUE(creds.IsEmpty());
+}
+
+TEST_F(HuaweiCloudCredentialsProviderTest,
+       GetAWSCredentialsReturnsValidCredsWhenNotExpired) {
+    CreateProviderWithMock();
+    auto freshCreds = MakeFreshCredentials(7200);
+    Helper::setCredentials(*provider_, freshCreds);
+    Helper::setTokenFile(*provider_, tokenFilePath_);
+
+    // Should NOT call STS because credentials are still valid
+    EXPECT_CALL(*mock_, GetAssumeRoleWithWebIdentityCredentials(testing::_))
+        .Times(0);
+
+    auto creds = provider_->GetAWSCredentials();
+    EXPECT_FALSE(creds.IsEmpty());
+    EXPECT_EQ(creds.GetAWSAccessKeyId(), "AKID_TEST");
+}
+
+TEST_F(HuaweiCloudCredentialsProviderTest,
+       RefreshIfExpiredRetriesAfterNormalCooldownWhenCredsStillValid) {
+    CreateProviderWithMock();
+    Helper::setCredentials(*provider_, MakeExpiringSoonCredentials(60));
+    Helper::setLastReloadFailed(
+        *provider_,
+        true,
+        std::chrono::steady_clock::now() - std::chrono::seconds(31));
+    Helper::setTokenFile(*provider_, tokenFilePath_);
+
+    auto stsResult =
+        MakeSuccessfulSTSResult("REFRESHED_AKID", "REFRESHED_SECRET");
+    EXPECT_CALL(*mock_, GetAssumeRoleWithWebIdentityCredentials(testing::_))
+        .WillOnce(testing::Return(stsResult));
+
+    Helper::callRefreshIfExpired(*provider_);
+
+    EXPECT_FALSE(Helper::lastReloadFailed(*provider_));
+    EXPECT_EQ(Helper::getCredentials(*provider_).GetAWSAccessKeyId(),
+              "REFRESHED_AKID");
+    EXPECT_EQ(Helper::stsSuccessCount(*provider_), 1);
+    EXPECT_EQ(Helper::stsFailureCount(*provider_), 0);
+}
+
+TEST_F(HuaweiCloudCredentialsProviderTest,
+       RefreshIfExpiredMarksFailureWhenReloadGetsIncompleteResult) {
+    CreateProviderWithMock();
+    Helper::setLastReloadFailed(*provider_, false);
+    Helper::setTokenFile(*provider_, tokenFilePath_);
+
+    auto incompleteResult =
+        MakeSuccessfulSTSResult("PARTIAL_AKID", "PARTIAL_SECRET");
+    incompleteResult.creds.SetSessionToken("");
+    EXPECT_CALL(*mock_, GetAssumeRoleWithWebIdentityCredentials(testing::_))
+        .WillOnce(testing::Return(incompleteResult));
+
+    Helper::callRefreshIfExpired(*provider_);
+
+    EXPECT_TRUE(Helper::lastReloadFailed(*provider_));
+    EXPECT_TRUE(Helper::getCredentials(*provider_).IsEmpty());
+    EXPECT_EQ(Helper::stsSuccessCount(*provider_), 0);
+    EXPECT_EQ(Helper::stsFailureCount(*provider_), 1);
 }

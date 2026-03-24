@@ -1,10 +1,10 @@
 package huawei
 
 import (
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
@@ -31,18 +31,89 @@ func TestNewMinioClient(t *testing.T) {
 	})
 }
 
-func TestHuaweiCredentialProvider_Retrieve(t *testing.T) {
-	// Skip detailed mocking tests for now, as they require complex setup
-	// This test focuses on the basic functionality
-	t.Run("init error", func(t *testing.T) {
-		c := &HuaweiCredentialProvider{
-			initErr: errors.New("init failed"),
-		}
-		c.initOnce.Do(func() {}) // Mark as initialized
+func TestNewCredentialProvider_Singleton(t *testing.T) {
+	// Reset the global singleton for this test
+	globalCredProviderMu.Lock()
+	globalCredProvider = nil
+	globalCredProviderMu.Unlock()
 
+	p1 := NewCredentialProvider()
+	p2 := NewCredentialProvider()
+	// Both calls should return the same singleton instance
+	assert.Same(t, p1, p2)
+
+	// Clean up
+	globalCredProviderMu.Lock()
+	globalCredProvider = nil
+	globalCredProviderMu.Unlock()
+}
+
+func TestNewCredentialProvider_ConcurrentAccess(t *testing.T) {
+	globalCredProviderMu.Lock()
+	globalCredProvider = nil
+	globalCredProviderMu.Unlock()
+
+	var wg sync.WaitGroup
+	results := make([]credentials.Provider, 10)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx] = NewCredentialProvider()
+		}(i)
+	}
+	wg.Wait()
+
+	// All goroutines should get the same instance
+	for i := 1; i < 10; i++ {
+		assert.Same(t, results[0], results[i])
+	}
+
+	globalCredProviderMu.Lock()
+	globalCredProvider = nil
+	globalCredProviderMu.Unlock()
+}
+
+func TestHuaweiCredentialProvider_Retrieve(t *testing.T) {
+	t.Run("not initialized", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{}
+		// Without proper env vars, initClients will fail and Retrieve returns error
 		_, err := c.Retrieve()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "init failed")
+	})
+
+	t.Run("returns cached credentials when not expired", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			inited: true,
+			credentials: credentials.Value{
+				AccessKeyID:     "CACHED_AK",
+				SecretAccessKey: "CACHED_SK",
+				SessionToken:    "CACHED_TOKEN",
+				SignerType:      credentials.SignatureV4,
+			},
+			expiration: time.Now().UTC().Add(1 * time.Hour),
+		}
+
+		val, err := c.Retrieve()
+		assert.NoError(t, err)
+		assert.Equal(t, "CACHED_AK", val.AccessKeyID)
+		assert.Equal(t, "CACHED_SK", val.SecretAccessKey)
+		assert.Equal(t, "CACHED_TOKEN", val.SessionToken)
+	})
+
+	t.Run("re-init allowed after previous init failure", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			inited: false,
+		}
+		// First call fails (no env vars)
+		_, err := c.Retrieve()
+		assert.Error(t, err)
+		// inited should still be false, allowing retry
+		assert.False(t, c.inited)
+
+		// Second call also fails but demonstrates retryability
+		_, err = c.Retrieve()
+		assert.Error(t, err)
 	})
 }
 
@@ -54,17 +125,175 @@ func TestHuaweiCredentialProvider_IsExpired(t *testing.T) {
 	})
 
 	t.Run("expired - past time", func(t *testing.T) {
+		c.refreshMu.Lock()
 		c.expiration = time.Now().UTC().Add(-10 * time.Minute)
+		c.refreshMu.Unlock()
 		assert.True(t, c.IsExpired())
 	})
 
 	t.Run("expired - within refresh window", func(t *testing.T) {
-		c.expiration = time.Now().UTC().Add(3 * time.Minute)
+		c.refreshMu.Lock()
+		c.expiration = time.Now().UTC().Add(2 * time.Minute) // within 3min grace period
+		c.refreshMu.Unlock()
 		assert.True(t, c.IsExpired())
 	})
 
-	t.Run("not expired", func(t *testing.T) {
+	t.Run("always expired - forces minio to call Retrieve", func(t *testing.T) {
+		c.refreshMu.Lock()
 		c.expiration = time.Now().UTC().Add(10 * time.Minute)
-		assert.False(t, c.IsExpired())
+		c.refreshMu.Unlock()
+		// IsExpired() always returns true so minio always calls Retrieve(),
+		// which has its own cache-hit fast path.
+		assert.True(t, c.IsExpired())
+	})
+}
+
+func TestHuaweiCredentialProvider_InitClientsIdempotent(t *testing.T) {
+	c := &HuaweiCredentialProvider{}
+	// First call fails (no env vars)
+	err1 := c.initClients()
+	assert.Error(t, err1)
+	assert.False(t, c.inited)
+
+	// Second call also runs (not blocked by sync.Once), allowing retry
+	err2 := c.initClients()
+	assert.Error(t, err2)
+	assert.False(t, c.inited)
+}
+
+func TestHuaweiCredentialProvider_IsInCooldown(t *testing.T) {
+	t.Run("not in cooldown when no failure", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			lastReloadFailed: false,
+		}
+		assert.False(t, c.isInCooldown())
+	})
+
+	t.Run("urgent cooldown with empty credentials", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			lastReloadFailed:     true,
+			lastFailedReloadTime: time.Now(),
+			// expiration is zero → urgent cooldown (5s)
+		}
+		assert.True(t, c.isInCooldown())
+	})
+
+	t.Run("urgent cooldown expires after 5s", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			lastReloadFailed:     true,
+			lastFailedReloadTime: time.Now().Add(-6 * time.Second),
+			// expiration is zero → urgent cooldown (5s), 6s elapsed → expired
+		}
+		assert.False(t, c.isInCooldown())
+	})
+
+	t.Run("normal cooldown with valid credentials", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			lastReloadFailed:     true,
+			lastFailedReloadTime: time.Now(),
+			expiration:           time.Now().UTC().Add(1 * time.Hour), // valid creds → normal cooldown (30s)
+		}
+		assert.True(t, c.isInCooldown())
+	})
+
+	t.Run("normal cooldown expires after 30s", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			lastReloadFailed:     true,
+			lastFailedReloadTime: time.Now().Add(-31 * time.Second),
+			expiration:           time.Now().UTC().Add(1 * time.Hour), // valid creds → normal cooldown (30s)
+		}
+		assert.False(t, c.isInCooldown())
+	})
+
+	t.Run("urgent cooldown when credentials expired", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			lastReloadFailed:     true,
+			lastFailedReloadTime: time.Now(),
+			expiration:           time.Now().UTC().Add(-10 * time.Minute), // expired → urgent cooldown
+		}
+		assert.True(t, c.isInCooldown())
+	})
+}
+
+func TestHuaweiCredentialProvider_HasValidCachedCredentials(t *testing.T) {
+	t.Run("no credentials", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{}
+		assert.False(t, c.hasValidCachedCredentials())
+	})
+
+	t.Run("has credentials but zero expiration", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			credentials: credentials.Value{AccessKeyID: "AK"},
+		}
+		assert.False(t, c.hasValidCachedCredentials())
+	})
+
+	t.Run("has credentials but expired", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			credentials: credentials.Value{AccessKeyID: "AK"},
+			expiration:  time.Now().UTC().Add(-10 * time.Minute),
+		}
+		assert.False(t, c.hasValidCachedCredentials())
+	})
+
+	t.Run("has valid credentials", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			credentials: credentials.Value{AccessKeyID: "AK"},
+			expiration:  time.Now().UTC().Add(1 * time.Hour),
+		}
+		assert.True(t, c.hasValidCachedCredentials())
+	})
+}
+
+func TestHuaweiCredentialProvider_RetrieveCooldown(t *testing.T) {
+	t.Run("returns valid cached creds during cooldown", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			inited:               true,
+			lastReloadFailed:     true,
+			lastFailedReloadTime: time.Now(),
+			credentials: credentials.Value{
+				AccessKeyID:     "OLD_AK",
+				SecretAccessKey: "OLD_SK",
+				SessionToken:    "OLD_TOKEN",
+				SignerType:      credentials.SignatureV4,
+			},
+			expiration: time.Now().UTC().Add(1 * time.Minute), // within 3min grace period but not yet fully expired
+		}
+
+		val, err := c.Retrieve()
+		assert.NoError(t, err)
+		assert.Equal(t, "OLD_AK", val.AccessKeyID)
+	})
+
+	t.Run("returns error during cooldown with no cached creds", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			inited:               true,
+			lastReloadFailed:     true,
+			lastFailedReloadTime: time.Now(),
+			// no cached credentials, expiration is zero
+		}
+
+		_, err := c.Retrieve()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cooldown")
+	})
+
+	t.Run("returns error during cooldown when cached creds already expired", func(t *testing.T) {
+		c := &HuaweiCredentialProvider{
+			inited:               true,
+			lastReloadFailed:     true,
+			lastFailedReloadTime: time.Now(),
+			credentials: credentials.Value{
+				AccessKeyID:     "EXPIRED_AK",
+				SecretAccessKey: "EXPIRED_SK",
+				SessionToken:    "EXPIRED_TOKEN",
+				SignerType:      credentials.SignatureV4,
+			},
+			expiration: time.Now().UTC().Add(-10 * time.Minute), // fully expired
+		}
+
+		_, err := c.Retrieve()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cooldown")
 	})
 }

@@ -25,8 +25,11 @@ enum class HttpResponseCode;
 }  // namespace Http
 
 namespace Internal {
+class HuaweiCloudSTSClientTestHelper;
 class AWS_CORE_API HuaweiCloudSTSCredentialsClient
     : public AWSHttpResourceClient {
+    friend class ::Aws::Internal::HuaweiCloudSTSClientTestHelper;
+
  public:
     explicit HuaweiCloudSTSCredentialsClient(
         const Aws::Client::ClientConfiguration& clientConfiguration);
@@ -72,6 +75,10 @@ class AWS_CORE_API HuaweiCloudSTSCredentialsClient
     STSCallResult
     callHuaweiCloudSTS(const Aws::String& userToken,
                        const STSAssumeRoleWithWebIdentityRequest& request);
+
+    static STSCallResult
+    parseSTSResponse(Aws::Http::HttpResponseCode httpResponseCode,
+                     const Aws::String& responseBody);
 };
 }  // namespace Internal
 }  // namespace Aws
