@@ -211,6 +211,25 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	if err = i.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err
 	}
+
+	// For no-train indexes (FLAT, BIN_FLAT), mark as finished directly without
+	// scheduling a build task. These indexes don't need a worker node, but the
+	// scheduler requires available worker slots before dispatching any task.
+	// When all worker slots are occupied, no-train index tasks would be stuck
+	// in the pending queue indefinitely, causing index build to appear hung.
+	if isNoTrainIndex(indexType) {
+		if err := i.meta.indexMeta.UpdateIndexState(segIndex.BuildID, commonpb.IndexState_Finished, "fake finished index success"); err != nil {
+			log.Warn("indexInspector: failed to fake finish no-train index", zap.Int64("segmentID", segment.ID),
+				zap.Int64("indexID", indexID), zap.Int64("buildID", segIndex.BuildID), zap.Error(err))
+			return err
+		}
+		log.Info("indexInspector: no-train index fake finished directly",
+			zap.Int64("segmentID", segment.ID),
+			zap.Int64("indexID", indexID),
+			zap.String("indexType", indexType))
+		return nil
+	}
+
 	i.scheduler.Enqueue(newIndexBuildTask(model.CloneSegmentIndex(segIndex),
 		taskSlot,
 		i.meta,
