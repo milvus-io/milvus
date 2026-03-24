@@ -121,6 +121,7 @@ type Server struct {
 	importMeta       ImportMeta
 	importInspector  ImportInspector
 	importChecker    ImportChecker
+	importJobMu      sync.Map // map[int64]*sync.Mutex — per-job mutex for serializing commit/abort
 
 	copySegmentMeta      CopySegmentMeta
 	copySegmentInspector CopySegmentInspector
