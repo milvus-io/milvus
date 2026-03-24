@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestValidateWALType(t *testing.T) {
@@ -33,4 +34,54 @@ func TestSelectWALType(t *testing.T) {
 	assert.Equal(t, mustSelectWALName(false, message.WALNamePulsar.String(), walEnable{true, true, true, true}), message.WALNamePulsar)
 	assert.Equal(t, mustSelectWALName(false, message.WALNameKafka.String(), walEnable{true, true, true, true}), message.WALNameKafka)
 	assert.Equal(t, mustSelectWALName(false, message.WALNameWoodpecker.String(), walEnable{true, true, true, true}), message.WALNameWoodpecker)
+}
+
+func TestWoodpeckerLocalStorageInClusterMode(t *testing.T) {
+	paramtable.Init()
+	storageTypeKey := paramtable.Get().WoodpeckerCfg.StorageType.Key
+	forceLocalKey := paramtable.Get().WoodpeckerCfg.ForceLocalStorage.Key
+
+	// save original values and restore after test
+	originalStorageType := paramtable.Get().WoodpeckerCfg.StorageType.GetValue()
+	originalForceLocal := paramtable.Get().WoodpeckerCfg.ForceLocalStorage.GetValue()
+	defer func() {
+		paramtable.Get().Save(storageTypeKey, originalStorageType)
+		paramtable.Get().Save(forceLocalKey, originalForceLocal)
+	}()
+
+	t.Run("cluster_woodpecker_local_should_panic", func(t *testing.T) {
+		paramtable.Get().Save(storageTypeKey, "local")
+		paramtable.Get().Save(forceLocalKey, "false")
+		// auto-select path
+		assert.Panics(t, func() {
+			mustSelectWALName(false, walTypeDefault, walEnable{false, false, false, true})
+		})
+		// explicit path
+		assert.Panics(t, func() {
+			mustSelectWALName(false, message.WALNameWoodpecker.String(), walEnable{true, true, true, true})
+		})
+	})
+
+	t.Run("cluster_woodpecker_local_force_should_pass", func(t *testing.T) {
+		paramtable.Get().Save(storageTypeKey, "local")
+		paramtable.Get().Save(forceLocalKey, "true")
+		// auto-select path
+		assert.Equal(t, message.WALNameWoodpecker, mustSelectWALName(false, walTypeDefault, walEnable{false, false, false, true}))
+		// explicit path
+		assert.Equal(t, message.WALNameWoodpecker, mustSelectWALName(false, message.WALNameWoodpecker.String(), walEnable{true, true, true, true}))
+	})
+
+	t.Run("cluster_woodpecker_minio_should_pass", func(t *testing.T) {
+		paramtable.Get().Save(storageTypeKey, "minio")
+		paramtable.Get().Save(forceLocalKey, "false")
+		assert.Equal(t, message.WALNameWoodpecker, mustSelectWALName(false, walTypeDefault, walEnable{false, false, false, true}))
+		assert.Equal(t, message.WALNameWoodpecker, mustSelectWALName(false, message.WALNameWoodpecker.String(), walEnable{true, true, true, true}))
+	})
+
+	t.Run("standalone_woodpecker_local_should_pass", func(t *testing.T) {
+		paramtable.Get().Save(storageTypeKey, "local")
+		paramtable.Get().Save(forceLocalKey, "false")
+		assert.Equal(t, message.WALNameWoodpecker, mustSelectWALName(true, walTypeDefault, walEnable{false, false, false, true}))
+		assert.Equal(t, message.WALNameWoodpecker, mustSelectWALName(true, message.WALNameWoodpecker.String(), walEnable{true, true, true, true}))
+	})
 }
