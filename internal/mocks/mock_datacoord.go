@@ -18,6 +18,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+
 	txnkv "github.com/tikv/client-go/v2/txnkv"
 
 	types "github.com/milvus-io/milvus/internal/types"
@@ -34,6 +36,65 @@ type MockDataCoord_Expecter struct {
 
 func (_m *MockDataCoord) EXPECT() *MockDataCoord_Expecter {
 	return &MockDataCoord_Expecter{mock: &_m.Mock}
+}
+
+// AbortImport provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) AbortImport(_a0 context.Context, _a1 *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AbortImport")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AbortImportRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AbortImportRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.AbortImportRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_AbortImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AbortImport'
+type MockDataCoord_AbortImport_Call struct {
+	*mock.Call
+}
+
+// AbortImport is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.AbortImportRequest
+func (_e *MockDataCoord_Expecter) AbortImport(_a0 interface{}, _a1 interface{}) *MockDataCoord_AbortImport_Call {
+	return &MockDataCoord_AbortImport_Call{Call: _e.mock.On("AbortImport", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_AbortImport_Call) Run(run func(_a0 context.Context, _a1 *datapb.AbortImportRequest)) *MockDataCoord_AbortImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.AbortImportRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_AbortImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_AbortImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_AbortImport_Call) RunAndReturn(run func(context.Context, *datapb.AbortImportRequest) (*commonpb.Status, error)) *MockDataCoord_AbortImport_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // AllocSegment provides a mock function with given fields: _a0, _a1
@@ -390,28 +451,28 @@ func (_c *MockDataCoord_CheckHealth_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// CommitBackfillResult provides a mock function with given fields: _a0, _a1
-func (_m *MockDataCoord) CommitBackfillResult(_a0 context.Context, _a1 *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error) {
+// CommitImport provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) CommitImport(_a0 context.Context, _a1 *datapb.CommitImportRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
-		panic("no return value specified for CommitBackfillResult")
+		panic("no return value specified for CommitImport")
 	}
 
-	var r0 *datapb.CommitBackfillResultResponse
+	var r0 *commonpb.Status
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitImportRequest) (*commonpb.Status, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitBackfillResultRequest) *datapb.CommitBackfillResultResponse); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitImportRequest) *commonpb.Status); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*datapb.CommitBackfillResultResponse)
+			r0 = ret.Get(0).(*commonpb.Status)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CommitBackfillResultRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CommitImportRequest) error); ok {
 		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
@@ -420,31 +481,90 @@ func (_m *MockDataCoord) CommitBackfillResult(_a0 context.Context, _a1 *datapb.C
 	return r0, r1
 }
 
-// MockDataCoord_CommitBackfillResult_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CommitBackfillResult'
-type MockDataCoord_CommitBackfillResult_Call struct {
+// MockDataCoord_CommitImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CommitImport'
+type MockDataCoord_CommitImport_Call struct {
 	*mock.Call
 }
 
-// CommitBackfillResult is a helper method to define mock.On call
+// CommitImport is a helper method to define mock.On call
 //   - _a0 context.Context
-//   - _a1 *datapb.CommitBackfillResultRequest
-func (_e *MockDataCoord_Expecter) CommitBackfillResult(_a0 interface{}, _a1 interface{}) *MockDataCoord_CommitBackfillResult_Call {
-	return &MockDataCoord_CommitBackfillResult_Call{Call: _e.mock.On("CommitBackfillResult", _a0, _a1)}
+//   - _a1 *datapb.CommitImportRequest
+func (_e *MockDataCoord_Expecter) CommitImport(_a0 interface{}, _a1 interface{}) *MockDataCoord_CommitImport_Call {
+	return &MockDataCoord_CommitImport_Call{Call: _e.mock.On("CommitImport", _a0, _a1)}
 }
 
-func (_c *MockDataCoord_CommitBackfillResult_Call) Run(run func(_a0 context.Context, _a1 *datapb.CommitBackfillResultRequest)) *MockDataCoord_CommitBackfillResult_Call {
+func (_c *MockDataCoord_CommitImport_Call) Run(run func(_a0 context.Context, _a1 *datapb.CommitImportRequest)) *MockDataCoord_CommitImport_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.CommitBackfillResultRequest))
+		run(args[0].(context.Context), args[1].(*datapb.CommitImportRequest))
 	})
 	return _c
 }
 
-func (_c *MockDataCoord_CommitBackfillResult_Call) Return(_a0 *datapb.CommitBackfillResultResponse, _a1 error) *MockDataCoord_CommitBackfillResult_Call {
+func (_c *MockDataCoord_CommitImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_CommitImport_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockDataCoord_CommitBackfillResult_Call) RunAndReturn(run func(context.Context, *datapb.CommitBackfillResultRequest) (*datapb.CommitBackfillResultResponse, error)) *MockDataCoord_CommitBackfillResult_Call {
+func (_c *MockDataCoord_CommitImport_Call) RunAndReturn(run func(context.Context, *datapb.CommitImportRequest) (*commonpb.Status, error)) *MockDataCoord_CommitImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateExternalCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) CreateExternalCollection(_a0 context.Context, _a1 *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateExternalCollection")
+	}
+
+	var r0 *datapb.CreateExternalCollectionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *msgpb.CreateCollectionRequest) *datapb.CreateExternalCollectionResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.CreateExternalCollectionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *msgpb.CreateCollectionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_CreateExternalCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateExternalCollection'
+type MockDataCoord_CreateExternalCollection_Call struct {
+	*mock.Call
+}
+
+// CreateExternalCollection is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *msgpb.CreateCollectionRequest
+func (_e *MockDataCoord_Expecter) CreateExternalCollection(_a0 interface{}, _a1 interface{}) *MockDataCoord_CreateExternalCollection_Call {
+	return &MockDataCoord_CreateExternalCollection_Call{Call: _e.mock.On("CreateExternalCollection", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_CreateExternalCollection_Call) Run(run func(_a0 context.Context, _a1 *msgpb.CreateCollectionRequest)) *MockDataCoord_CreateExternalCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*msgpb.CreateCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_CreateExternalCollection_Call) Return(_a0 *datapb.CreateExternalCollectionResponse, _a1 error) *MockDataCoord_CreateExternalCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_CreateExternalCollection_Call) RunAndReturn(run func(context.Context, *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error)) *MockDataCoord_CreateExternalCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2510,6 +2630,65 @@ func (_c *MockDataCoord_GetSegmentsByStates_Call) Return(_a0 *datapb.GetSegments
 }
 
 func (_c *MockDataCoord_GetSegmentsByStates_Call) RunAndReturn(run func(context.Context, *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error)) *MockDataCoord_GetSegmentsByStates_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// HandleCommitVchannel provides a mock function with given fields: _a0, _a1
+func (_m *MockDataCoord) HandleCommitVchannel(_a0 context.Context, _a1 *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HandleCommitVchannel")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.HandleCommitVchannelRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.HandleCommitVchannelRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoord_HandleCommitVchannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HandleCommitVchannel'
+type MockDataCoord_HandleCommitVchannel_Call struct {
+	*mock.Call
+}
+
+// HandleCommitVchannel is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.HandleCommitVchannelRequest
+func (_e *MockDataCoord_Expecter) HandleCommitVchannel(_a0 interface{}, _a1 interface{}) *MockDataCoord_HandleCommitVchannel_Call {
+	return &MockDataCoord_HandleCommitVchannel_Call{Call: _e.mock.On("HandleCommitVchannel", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_HandleCommitVchannel_Call) Run(run func(_a0 context.Context, _a1 *datapb.HandleCommitVchannelRequest)) *MockDataCoord_HandleCommitVchannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.HandleCommitVchannelRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_HandleCommitVchannel_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_HandleCommitVchannel_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_HandleCommitVchannel_Call) RunAndReturn(run func(context.Context, *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error)) *MockDataCoord_HandleCommitVchannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
