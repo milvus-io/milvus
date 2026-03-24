@@ -39,11 +39,24 @@ services:
       - RUSTFS_OBJECT_DUPLEX_BUFFER_SIZE=8388608
       - RUSTFS_OBJECT_LOCK_OPTIMIZATION_ENABLE=true
       - RUSTFS_OBJECT_PRIORITY_SCHEDULING_ENABLE=true
+
+      # Runtime configuration
+      - RUSTFS_RUNTIME_WORKER_THREADS=16
+      - RUSTFS_RUNTIME_MAX_BLOCKING_THREADS=1024
+
+      # Capacity statistics configuration
+      - RUSTFS_CAPACITY_SCHEDULED_INTERVAL=300
+      - RUSTFS_CAPACITY_WRITE_TRIGGER_DELAY=10
     ports:
       - "9000:9000"  # S3 API
       - "9001:9001"  # Console
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/rustfs:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
     networks:
       - milvus
 
@@ -54,6 +67,8 @@ services:
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: rustfs:9000
+      MINIO_ACCESS_KEY_ID: rustfsadmin
+      MINIO_SECRET_ACCESS_KEY: rustfsadmin
     depends_on:
       - "etcd"
       - "rustfs"
@@ -67,6 +82,8 @@ services:
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: rustfs:9000
+      MINIO_ACCESS_KEY_ID: rustfsadmin
+      MINIO_SECRET_ACCESS_KEY: rustfsadmin
     depends_on:
       - "etcd"
       - "rustfs"
@@ -80,6 +97,8 @@ services:
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: rustfs:9000
+      MINIO_ACCESS_KEY_ID: rustfsadmin
+      MINIO_SECRET_ACCESS_KEY: rustfsadmin
     depends_on:
       - "etcd"
       - "rustfs"
@@ -93,6 +112,8 @@ services:
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: rustfs:9000
+      MINIO_ACCESS_KEY_ID: rustfsadmin
+      MINIO_SECRET_ACCESS_KEY: rustfsadmin
     depends_on:
       - "etcd"
       - "rustfs"
@@ -106,6 +127,8 @@ services:
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: rustfs:9000
+      MINIO_ACCESS_KEY_ID: rustfsadmin
+      MINIO_SECRET_ACCESS_KEY: rustfsadmin
     depends_on:
       - "etcd"
       - "rustfs"
@@ -119,6 +142,8 @@ services:
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: rustfs:9000
+      MINIO_ACCESS_KEY_ID: rustfsadmin
+      MINIO_SECRET_ACCESS_KEY: rustfsadmin
     ports:
       - "19530:19530"
     depends_on:
