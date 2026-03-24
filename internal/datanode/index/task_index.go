@@ -269,6 +269,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		SslCACert:         it.req.GetStorageConfig().GetSslCACert(),
 		GcpCredentialJSON: it.req.GetStorageConfig().GetGcpCredentialJSON(),
 		SslTlsMinVersion:  it.req.GetStorageConfig().GetSslTlsMinVersion(),
+		UseCrc32CChecksum: it.req.GetStorageConfig().GetUseCrc32CChecksum(),
 	}
 
 	optFields := make([]*indexcgopb.OptionalFieldInfo, 0, len(it.req.GetOptionalScalarFields()))

@@ -75,6 +75,7 @@ StorageV2FSCache::Get(const Key& key) {
         conf.use_custom_part_upload = key.use_custom_part_upload;
         conf.max_connections = key.max_connections;
         conf.tls_min_version = std::string(key.tls_min_version);
+        conf.use_crc32c_checksum = key.use_crc32c_checksum;
 
         auto result = milvus_storage::CreateArrowFileSystem(conf);
 

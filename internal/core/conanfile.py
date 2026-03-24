@@ -100,6 +100,9 @@ class MilvusConan(ConanFile):
     def requirements(self):
         if self.settings.os != "Macos":
             self.requires("libunwind/1.7.2")
+        # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection
+        if self.settings.os in ["Linux", "FreeBSD"]:
+            self.requires("s2n/1.6.0")
 
     def imports(self):
         self.copy("*.dylib", "../lib", "lib")
