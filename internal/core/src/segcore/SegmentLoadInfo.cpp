@@ -398,14 +398,22 @@ SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
     // These fields need their raw data restored since the index no longer
     // provides it. We put them into load paths (binlogs/column_groups) so
     // that ApplyLoadDiff can rebuild the data from storage.
+    // Collect fields that need reload (index no longer has raw data)
+    std::set<FieldId> fields_to_reload;
     for (const auto& field_id : field_index_has_raw_data_) {
-        if (new_info.field_index_has_raw_data_.find(field_id) !=
+        if (new_info.field_index_has_raw_data_.find(field_id) ==
             new_info.field_index_has_raw_data_.end()) {
-            continue;  // Still has raw data in index, no action needed
+            fields_to_reload.emplace(field_id);
         }
+    }
 
-        if (!new_info.HasManifestPath()) {
-            // Binlog mode: find the field's binlog and add to binlogs_to_load
+    if (fields_to_reload.empty()) {
+        return;
+    }
+
+    if (!new_info.HasManifestPath()) {
+        // Binlog mode: find each field's binlog and add to binlogs_to_replace
+        for (const auto& field_id : fields_to_reload) {
             for (int i = 0; i < new_info.GetBinlogPathCount(); i++) {
                 auto& binlog = new_info.GetBinlogPath(i);
                 std::vector<int64_t> child_fields(binlog.child_fields().begin(),
@@ -413,36 +421,42 @@ SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
                 if (child_fields.empty()) {
                     child_fields.emplace_back(binlog.fieldid());
                 }
+                bool found = false;
                 for (auto child_id : child_fields) {
                     if (FieldId(child_id) == field_id) {
-                        // Use replace since the field may still exist
-                        // (e.g. multi-field group where drop was skipped)
-                        diff.binlogs_to_replace.emplace_back(
-                            std::vector<FieldId>{field_id}, binlog);
-                        goto next_field;
+                        found = true;
+                        break;
                     }
                 }
-            }
-        } else {
-            // Manifest mode: find the field's column group
-            auto column_groups = new_info.GetColumnGroups();
-            if (column_groups) {
-                for (size_t i = 0; i < column_groups->size(); i++) {
-                    auto cg = column_groups->at(i);
-                    for (const auto& column : cg->columns) {
-                        if (FieldId(std::stoll(column)) == field_id) {
-                            // Use replace since the field may still exist
-                            diff.column_groups_to_replace.emplace_back(
-                                static_cast<int>(i),
-                                std::vector<FieldId>{field_id});
-                            goto next_field;
-                        }
-                    }
+                if (found) {
+                    // Use replace since the field may still exist
+                    // (e.g. multi-field group where drop was skipped)
+                    diff.binlogs_to_replace.emplace_back(
+                        std::vector<FieldId>{field_id}, binlog);
+                    break;
                 }
             }
         }
-
-    next_field:;
+    } else {
+        // Manifest mode: collect fields per column group, emplace each
+        // group index only once
+        auto column_groups = new_info.GetColumnGroups();
+        if (column_groups) {
+            std::map<int, std::vector<FieldId>> cg_fields;
+            for (size_t i = 0; i < column_groups->size(); i++) {
+                auto cg = column_groups->at(i);
+                for (const auto& column : cg->columns) {
+                    FieldId fid(std::stoll(column));
+                    if (fields_to_reload.count(fid) > 0) {
+                        cg_fields[static_cast<int>(i)].emplace_back(fid);
+                    }
+                }
+            }
+            for (auto& [cg_idx, fids] : cg_fields) {
+                diff.column_groups_to_replace.emplace_back(cg_idx,
+                                                           std::move(fids));
+            }
+        }
     }
 }
 

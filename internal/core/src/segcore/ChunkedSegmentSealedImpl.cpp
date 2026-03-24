@@ -2951,7 +2951,6 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             auto column = get_column(field_id);
             if (column) {
                 column->CancelWarmup();
-                column->ManualEvictCache();
             }
         }
         if (data_type == DataType::GEOMETRY &&
