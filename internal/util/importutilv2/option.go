@@ -206,10 +206,9 @@ func GetEZK(options Options) (string, error) {
 
 // IsAutoCommit parses the auto_commit option. Defaults to true if absent.
 func IsAutoCommit(options Options) bool {
-	for _, opt := range options {
-		if opt.GetKey() == AutoCommitKey {
-			return opt.GetValue() != "false"
-		}
+	val, err := funcutil.GetAttrByKeyFromRepeatedKV(AutoCommitKey, options)
+	if err != nil || strings.ToLower(val) != "false" {
+		return true
 	}
-	return true
+	return false
 }
