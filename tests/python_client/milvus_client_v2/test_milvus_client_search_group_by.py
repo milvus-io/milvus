@@ -402,7 +402,7 @@ class TestGroupSearch(TestMilvusClientV2Base):
                     output_fields=[DataType.VARCHAR.name],
                     check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("support_field", [DataType.INT8.name, DataType.INT64.name,
                                                DataType.BOOL.name, DataType.VARCHAR.name,
                                                DataType.TIMESTAMPTZ.name])
