@@ -321,7 +321,7 @@ class TestMilvusClientV2AliasOperationInvalid(TestMilvusClientV2Base):
         alias_name = cf.gen_unique_str(prefix)
 
         error = {ct.err_code: 100,
-                 ct.err_msg: f"can't find collection[database=default][collection={non_exist_collection}]"}
+                 ct.err_msg: f"collection not found[database=default][collection={non_exist_collection}]"}
         self.create_alias(client, non_exist_collection, alias_name,
                           check_task=CheckTasks.err_res,
                           check_items=error)
@@ -343,7 +343,7 @@ class TestMilvusClientV2AliasOperationInvalid(TestMilvusClientV2Base):
 
         non_exist_collection = cf.gen_unique_str("non_exist_collection")
         error = {ct.err_code: 100,
-                 ct.err_msg: f"can't find collection[database=default][collection={non_exist_collection}]"}
+                 ct.err_msg: f"collection not found[collection={non_exist_collection}]"}
         self.alter_alias(client, non_exist_collection, alias_name,
                          check_task=CheckTasks.err_res,
                          check_items=error)
