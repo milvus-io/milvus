@@ -268,11 +268,12 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		return nil, err
 	}
 
-	binlogs, stats, bm25stats, _, _ := srw.GetLogs()
+	binlogs, stats, bm25stats, manifestPath, _ := srw.GetLogs()
 	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err
 	}
+	st.manifestPath = manifestPath
 
 	// For V3 segments, register bloom filter and BM25 stats in manifest.
 	// After registration, stats/bm25stats are set to nil so the legacy
@@ -546,6 +547,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 			req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
 			req.InsertLogs = insertBinlogs
+			req.ManifestPath = st.manifestPath
 			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil)
 
 			// set analyzer extra info
@@ -694,6 +696,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 
 			req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
 			req.InsertLogs = insertBinlogs
+			req.ManifestPath = st.manifestPath
 			options := &BuildIndexOptions{
 				JsonStatsMaxShreddingColumns: jsonStatsMaxShreddingColumns,
 				JsonStatsShreddingRatio:      jsonStatsShreddingRatioThreshold,
