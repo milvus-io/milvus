@@ -1269,6 +1269,21 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	return resp, nil
 }
 
+// getValidatedCompactionInfo retrieves compaction info and validates that the compaction job exists.
+// Returns the compaction info or an error if the job is not found.
+func (s *Server) getValidatedCompactionInfo(ctx context.Context, compactionID int64) (*compactionInfo, error) {
+	info := s.compactionInspector.getCompactionInfo(ctx, compactionID)
+
+	// No tasks means it was never created or already cleaned up
+	if len(info.mergeInfos) == 0 && info.executingCnt == 0 && info.completedCnt == 0 &&
+		info.failedCnt == 0 && info.timeoutCnt == 0 {
+		log.Ctx(ctx).Warn("compaction task not found", zap.Int64("compactionID", compactionID))
+		return nil, merr.WrapErrCompactionResultNotFound(fmt.Sprintf("compaction job not found: %d", compactionID))
+	}
+
+	return info, nil
+}
+
 // GetCompactionState gets the state of a compaction
 func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
 	log := log.Ctx(ctx).With(zap.Int64("compactionID", req.GetCompactionID()))
@@ -1286,22 +1301,10 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 		}, nil
 	}
 
-	compactionID := req.GetCompactionID()
-	if compactionID <= 0 {
-		log.Warn("invalid compaction ID in request")
+	info, err := s.getValidatedCompactionInfo(ctx, req.GetCompactionID())
+	if err != nil {
 		return &milvuspb.GetCompactionStateResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("compaction job not found: %d", compactionID)),
-		}, nil
-	}
-
-	info := s.compactionInspector.getCompactionInfo(ctx, compactionID)
-
-	// Check if compaction exists (no tasks means it was never created or already cleaned up)
-	if len(info.mergeInfos) == 0 && info.executingCnt == 0 && info.completedCnt == 0 &&
-		info.failedCnt == 0 && info.timeoutCnt == 0 {
-		log.Warn("compaction task not found", zap.Int64("compactionID", compactionID))
-		return &milvuspb.GetCompactionStateResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("compaction job not found: %d", compactionID)),
+			Status: merr.Status(err),
 		}, nil
 	}
 
@@ -1337,34 +1340,23 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 		}, nil
 	}
 
+	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+		return &milvuspb.GetCompactionPlansResponse{
+			Status: merr.Status(merr.WrapErrServiceUnavailable("compaction disabled")),
+		}, nil
+	}
+
+	info, err := s.getValidatedCompactionInfo(ctx, req.GetCompactionID())
+	if err != nil {
+		return &milvuspb.GetCompactionPlansResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	resp := &milvuspb.GetCompactionPlansResponse{
 		Status: merr.Success(),
+		State:  info.state,
 	}
-	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-		resp.Status = merr.Status(merr.WrapErrServiceUnavailable("compaction disabled"))
-		return resp, nil
-	}
-
-	compactionID := req.GetCompactionID()
-	if compactionID <= 0 {
-		log.Warn("invalid compaction ID in request", zap.Int64("compactionID", compactionID))
-		return &milvuspb.GetCompactionPlansResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("compaction job not found: %d", compactionID)),
-		}, nil
-	}
-
-	info := s.compactionInspector.getCompactionInfo(ctx, compactionID)
-
-	// Check if compaction exists (no tasks means it was never created or already cleaned up)
-	if len(info.mergeInfos) == 0 && info.executingCnt == 0 && info.completedCnt == 0 &&
-		info.failedCnt == 0 && info.timeoutCnt == 0 {
-		log.Warn("compaction task not found", zap.Int64("compactionID", compactionID))
-		return &milvuspb.GetCompactionPlansResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("compaction job not found: %d", compactionID)),
-		}, nil
-	}
-
-	resp.State = info.state
 	resp.MergeInfos = lo.MapToSlice[int64, *milvuspb.CompactionMergeInfo](info.mergeInfos, func(_ int64, merge *milvuspb.CompactionMergeInfo) *milvuspb.CompactionMergeInfo {
 		return merge
 	})

@@ -1666,19 +1666,23 @@ func TestGetCompactionState(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
+		mockHandler := NewMockCompactionInspector(t)
+		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{})
+		svr.compactionInspector = mockHandler
+
 		// Test with compactionID = -1
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{
 			CompactionID: -1,
 		})
 		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCompactionResultNotFound)
 
 		// Test with compactionID = 0
 		resp, err = svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{
 			CompactionID: 0,
 		})
 		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCompactionResultNotFound)
 	})
 
 	t.Run("test get compaction state with non-existent compactionID", func(t *testing.T) {
@@ -1686,21 +1690,14 @@ func TestGetCompactionState(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
 		mockHandler := NewMockCompactionInspector(t)
-		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{
-			state:        commonpb.CompactionState_Completed,
-			executingCnt: 0,
-			completedCnt: 0,
-			failedCnt:    0,
-			timeoutCnt:   0,
-			mergeInfos:   nil,
-		})
+		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{})
 		svr.compactionInspector = mockHandler
 
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{
 			CompactionID: 999999,
 		})
 		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCompactionResultNotFound)
 	})
 }
 
@@ -1824,19 +1821,23 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
+		mockHandler := NewMockCompactionInspector(t)
+		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{})
+		svr.compactionInspector = mockHandler
+
 		// Test with compactionID = -1
 		resp, err := svr.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
 			CompactionID: -1,
 		})
 		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCompactionResultNotFound)
 
 		// Test with compactionID = 0
 		resp, err = svr.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
 			CompactionID: 0,
 		})
 		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCompactionResultNotFound)
 	})
 
 	t.Run("test get compaction state with plans with non-existent compactionID", func(t *testing.T) {
@@ -1844,21 +1845,14 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
 		mockHandler := NewMockCompactionInspector(t)
-		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{
-			state:        commonpb.CompactionState_Completed,
-			executingCnt: 0,
-			completedCnt: 0,
-			failedCnt:    0,
-			timeoutCnt:   0,
-			mergeInfos:   nil,
-		})
+		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{})
 		svr.compactionInspector = mockHandler
 
 		resp, err := svr.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
 			CompactionID: 999999,
 		})
 		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCompactionResultNotFound)
 	})
 }
 
