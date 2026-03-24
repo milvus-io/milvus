@@ -19,9 +19,14 @@ type IndexEngineVersionManager interface {
 
 	GetCurrentIndexEngineVersion() int32
 	GetMinimalIndexEngineVersion() int32
+	GetMaximumIndexEngineVersion() int32
 
 	GetCurrentScalarIndexEngineVersion() int32
 	GetMinimalScalarIndexEngineVersion() int32
+
+	// ResolveVecIndexVersion computes the final build version considering target override and max clamp
+	ResolveVecIndexVersion() int32
+
 	GetIndexNonEncoding() bool
 }
 
@@ -89,7 +94,11 @@ func (m *versionManagerImpl) Update(session *sessionutil.Session) {
 }
 
 func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {
-	log.Info("addOrUpdate version", zap.Int64("nodeId", session.ServerID), zap.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion), zap.Int32("current", session.IndexEngineVersion.CurrentIndexVersion))
+	log.Info("addOrUpdate version",
+		zap.Int64("nodeId", session.ServerID),
+		zap.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion),
+		zap.Int32("current", session.IndexEngineVersion.CurrentIndexVersion),
+		zap.Int32("maximum", session.IndexEngineVersion.MaximumIndexVersion))
 	m.versions[session.ServerID] = session.IndexEngineVersion
 	m.scalarIndexVersions[session.ServerID] = session.ScalarIndexEngineVersion
 	m.indexNonEncoding[session.ServerID] = session.IndexNonEncoding
@@ -99,8 +108,11 @@ func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.getCurrentVersion()
+}
+
+func (m *versionManagerImpl) getCurrentVersion() int32 {
 	if len(m.versions) == 0 {
-		log.Info("index versions is empty")
 		return 0
 	}
 
@@ -110,7 +122,6 @@ func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {
 			current = version.CurrentIndexVersion
 		}
 	}
-	log.Info("Merged current version", zap.Int32("current", current))
 	return current
 }
 
@@ -118,8 +129,11 @@ func (m *versionManagerImpl) GetMinimalIndexEngineVersion() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.getMinimalVersion()
+}
+
+func (m *versionManagerImpl) getMinimalVersion() int32 {
 	if len(m.versions) == 0 {
-		log.Info("index versions is empty")
 		return 0
 	}
 
@@ -129,7 +143,6 @@ func (m *versionManagerImpl) GetMinimalIndexEngineVersion() int32 {
 			minimal = version.MinimalIndexVersion
 		}
 	}
-	log.Info("Merged minimal version", zap.Int32("minimal", minimal))
 	return minimal
 }
 
@@ -169,6 +182,64 @@ func (m *versionManagerImpl) GetMinimalScalarIndexEngineVersion() int32 {
 	}
 	log.Info("Merged minimal scalar index version", zap.Int32("minimal", minimal))
 	return minimal
+}
+
+func (m *versionManagerImpl) GetMaximumIndexEngineVersion() int32 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.getMaximumVersion()
+}
+
+func (m *versionManagerImpl) getMaximumVersion() int32 {
+	if len(m.versions) == 0 {
+		return math.MaxInt32
+	}
+
+	maximum := int32(math.MaxInt32)
+	for _, version := range m.versions {
+		if version.MaximumIndexVersion == 0 {
+			continue
+		}
+		if version.MaximumIndexVersion < maximum {
+			maximum = version.MaximumIndexVersion
+		}
+	}
+	return maximum
+}
+
+// clampVersion clamps v into [minV, maxV], logging a rate-limited warning on each adjustment.
+func clampVersion(v, minV, maxV int32, name string) int32 {
+	if v < minV {
+		log.RatedWarn(60, name+" below cluster minimum, clamping",
+			zap.Int32("target", v), zap.Int32("minimum", minV))
+		v = minV
+	}
+	if v > maxV {
+		log.RatedWarn(60, name+" exceeds cluster maximum, clamping",
+			zap.Int32("target", v), zap.Int32("maximum", maxV))
+		v = maxV
+	}
+	return v
+}
+
+func (m *versionManagerImpl) ResolveVecIndexVersion() int32 {
+	m.mu.Lock()
+	current := m.getCurrentVersion()
+	minimal := m.getMinimalVersion()
+	maximum := m.getMaximumVersion()
+	m.mu.Unlock()
+
+	version := current
+	if Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt64() != -1 {
+		target := Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32()
+		if Params.DataCoordCfg.ForceRebuildSegmentIndex.GetAsBool() {
+			version = target
+		} else {
+			version = max(version, target)
+		}
+	}
+	return clampVersion(version, minimal, maximum, "targetVecIndexVersion")
 }
 
 func (m *versionManagerImpl) GetIndexNonEncoding() bool {
