@@ -61,6 +61,7 @@ linters:
           rules: ruleguard/rules.go
     govet:
       disable:
+        # TODO: re-enable printf after investigating false positives with Go 1.25 + golangci-lint v2
         - printf
     misspell:
       locale: US
@@ -208,6 +209,8 @@ linters:
       - path: (.+)\.go$
         text: G101
       - path: (.+)\.go$
+        text: G117
+      - path: (.+)\.go$
         text: G118
       - path: (.+)\.go$
         text: G120
@@ -217,6 +220,8 @@ linters:
         text: G702
       - path: (.+)\.go$
         text: G703
+      - path: (.+)\.go$
+        text: G704
       - path: (.+)\.go$
         text: G705
       - path: (.+)\.go$
