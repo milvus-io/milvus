@@ -259,7 +259,12 @@ func (r *StatsResolver) TextAndJSONIndexStats() (
 			}
 
 		case "json_key_index":
-			resolvedPaths := r.resolveStatPaths(stat.Paths)
+			// JSON key index files are stored under a separate json_stats/ prefix,
+			// not under basePath/_stats/. The C++ loading code (BsonInvertedIndex::LoadIndex,
+			// CacheJsonStatsMetaToDisk) reconstructs full paths by prepending
+			// GetRemoteJsonStatsLogPrefix(). So we must strip the basePath/_stats/
+			// prefix that the manifest FFI adds, to recover the original relative paths.
+			resolvedPaths := r.relativeStatPaths(stat.Paths)
 			version, _ := strconv.ParseInt(stat.Metadata["version"], 10, 64)
 			buildID, _ := strconv.ParseInt(stat.Metadata["build_id"], 10, 64)
 			logSize, _ := strconv.ParseInt(stat.Metadata["log_size"], 10, 64)
@@ -307,6 +312,28 @@ func (r *StatsResolver) loadManifest() error {
 // by prepending basePath/_stats/, so the paths are ready to use as-is.
 func (r *StatsResolver) resolveStatPaths(paths []string) []string {
 	return paths
+}
+
+// relativeStatPaths strips the basePath/_stats/ prefix that the C++ loon FFI
+// adds via ToAbsolutePaths(), recovering the original relative paths stored
+// in the manifest. This is needed for stat types (e.g. json_key_index) whose
+// files are stored under a different remote prefix (e.g. json_stats/), not
+// under basePath/_stats/. The C++ loading code will reconstruct the correct
+// absolute path using its own prefix (GetRemoteJsonStatsLogPrefix).
+func (r *StatsResolver) relativeStatPaths(paths []string) []string {
+	if !r.isManifest() {
+		return paths
+	}
+	basePath, _, err := UnmarshalManifestPath(r.manifestPath)
+	if err != nil {
+		return paths
+	}
+	prefix := basePath + "/_stats/"
+	result := make([]string, len(paths))
+	for i, p := range paths {
+		result[i] = strings.TrimPrefix(p, prefix)
+	}
+	return result
 }
 
 // ParseStatKey parses a "type.fieldID" stat key into its type prefix and field ID.
