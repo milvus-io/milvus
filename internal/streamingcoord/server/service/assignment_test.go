@@ -1495,18 +1495,9 @@ func TestForcePromoteMultiplePChannels(t *testing.T) {
 func TestForcePromoteUpdateConfigError(t *testing.T) {
 	resource.InitForTest()
 
-	// Set up WAL mock with Broadcast that succeeds
-	mockBroadcastService := mock_streaming.NewMockBroadcast(t)
-	mockBroadcastService.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{
-		BroadcastID: 1,
-		AppendResults: map[string]*types.AppendResult{
-			"by-dev-1": {TimeTick: 100},
-		},
-	}, nil).Maybe()
-
 	mw := mock_streaming.NewMockWALAccesser(t)
 	mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
-	mw.EXPECT().Broadcast().Return(mockBroadcastService).Maybe()
+	mw.EXPECT().Broadcast().Return(mock_streaming.NewMockBroadcast(t)).Maybe()
 	streaming.SetWALForTest(mw)
 
 	broadcast.ResetBroadcaster()
