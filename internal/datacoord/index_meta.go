@@ -540,7 +540,11 @@ func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.Segment
 		zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
 		zap.Int64("buildID", buildID), zap.String("indexType", segIndex.IndexType))
 
-	segIndex.IndexState = commonpb.IndexState_Unissued
+	// Only override to Unissued if the caller hasn't set a specific state.
+	// Copy segment sets Finished because index files are already copied.
+	if segIndex.IndexState == commonpb.IndexState_IndexStateNone {
+		segIndex.IndexState = commonpb.IndexState_Unissued
+	}
 	if err := m.catalog.CreateSegmentIndex(ctx, segIndex); err != nil {
 		log.Ctx(ctx).Warn("meta update: adding segment index failed",
 			zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
