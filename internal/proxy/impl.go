@@ -7194,4 +7194,3 @@ func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvus
 		}
 	}
 }
-
