@@ -416,10 +416,11 @@ TEST_F(ExprMaterializedViewTest, TestUnaryRangeCompareExpr) {
 TEST_F(ExprMaterializedViewTest, TestInMultipleExpr) {
     constexpr int kNumValues = 15;
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
-        // Skip BOOL: only 2 unique values (true/false), always below
-        // the IN threshold so it gets split into OR equals.
-        if (data_type == DataType::BOOL)
+        // Skip Bool: "BoolField in [false, true]" covers the full domain
+        // and is optimized to AlwaysTrueExpr by the expression rewriter.
+        if (data_type == DataType::BOOL) {
             continue;
+        }
         std::string field_name = GetFieldName(data_type);
         std::string vals;
         for (int i = 0; i < kNumValues; i++) {
@@ -443,6 +444,11 @@ TEST_F(ExprMaterializedViewTest, TestInMultipleExpr) {
 // Test numeric and varchar expr: F0 not in [A]
 TEST_F(ExprMaterializedViewTest, TestUnaryLogicalNotInMultipleExpr) {
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
+        // Skip Bool: "BoolField not in [false, true]" covers the full domain
+        // and is optimized to AlwaysFalseExpr by the expression rewriter.
+        if (data_type == DataType::BOOL) {
+            continue;
+        }
         std::string field_name = GetFieldName(data_type);
         std::string val0 = GetTestValue(data_type, 0);
         std::string val1 = GetTestValue(data_type, 1);
