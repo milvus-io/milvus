@@ -602,7 +602,7 @@ func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, tar
 //   - mappings: Pre-calculated source->target path mappings
 //
 // Returns:
-//   - Vector/Scalar index metadata (fieldID -> VectorScalarIndexInfo)
+//   - Vector/Scalar index metadata (buildID -> VectorScalarIndexInfo)
 //   - Text index metadata (fieldID -> TextIndexStats)
 //   - JSON Key index metadata (fieldID -> JsonKeyStats)
 //   - error: Non-nil if any index file path has no mapping (fail-fast on missing mappings)
@@ -629,15 +629,22 @@ func buildIndexInfoFromSource(
 			targetPaths = append(targetPaths, targetPath)
 		}
 
-		indexInfos[srcIndex.GetFieldID()] = &datapb.VectorScalarIndexInfo{
+		// Use new buildID if available, otherwise fall back to source buildID
+		buildID := srcIndex.GetBuildID()
+		if newID, ok := target.GetNewBuildIds()[buildID]; ok {
+			buildID = newID
+		}
+
+		indexInfos[buildID] = &datapb.VectorScalarIndexInfo{
 			FieldId:                   srcIndex.GetFieldID(),
 			IndexId:                   srcIndex.GetIndexID(),
-			BuildId:                   srcIndex.GetBuildID(),
+			BuildId:                   buildID,
 			Version:                   srcIndex.GetIndexVersion(),
 			IndexFilePaths:            targetPaths,
 			IndexSize:                 int64(srcIndex.GetSerializedSize()),
 			CurrentIndexVersion:       srcIndex.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: srcIndex.GetCurrentScalarIndexVersion(),
+			IndexName:                 srcIndex.GetIndexName(),
 		}
 	}
 
@@ -674,6 +681,10 @@ func buildIndexInfoFromSource(
 
 		dstJson := proto.Clone(srcJson).(*datapb.JsonKeyStats)
 		dstJson.Files = targetFiles
+		// Use new buildID if available
+		if newID, ok := target.GetNewBuildIds()[dstJson.GetBuildID()]; ok {
+			dstJson.BuildID = newID
+		}
 		jsonKeyIndexInfos[fieldID] = dstJson
 	}
 
@@ -781,6 +792,22 @@ func generateTargetIndexPath(
 	if keywordIdx+segmentOffset >= len(parts) {
 		return "", fmt.Errorf("invalid %s path structure: %s (expected '%s' with at least %d components after it)",
 			indexType, sourcePath, indexType, segmentOffset+1)
+	}
+
+	// Replace buildID if a mapping exists in target.NewBuildIds
+	// All index types have buildID at offset 1, except JSONStats which has it at offset 2
+	buildIDOffset := 1
+	if indexType == IndexTypeJSONStats {
+		buildIDOffset = 2
+	}
+	if keywordIdx+buildIDOffset < len(parts) {
+		oldBuildIDStr := parts[keywordIdx+buildIDOffset]
+		oldBuildID, parseErr := strconv.ParseInt(oldBuildIDStr, 10, 64)
+		if parseErr == nil {
+			if newBuildID, ok := target.GetNewBuildIds()[oldBuildID]; ok {
+				parts[keywordIdx+buildIDOffset] = strconv.FormatInt(newBuildID, 10)
+			}
+		}
 	}
 
 	// Replace IDs at specified offsets

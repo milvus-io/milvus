@@ -1153,10 +1153,11 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 				return true
 			}
 
-			// Check if this index is referenced by any snapshot
-			// If snapshots reference this index, do not delete the index files
-			if snapshotIDs := snapshotMeta.GetSnapshotByIndex(ctx, segIdx.CollectionID, segIdx.IndexID); len(snapshotIDs) > 0 {
-				logger.Info("skip GC index files since index is referenced by snapshot",
+			// Check if this build is referenced by any snapshot
+			// If snapshots reference this buildID, do not delete the index files
+			if snapshotIDs := snapshotMeta.GetSnapshotByBuildID(segIdx.BuildID); len(snapshotIDs) > 0 {
+				logger.Info("skip GC index files since buildID is referenced by snapshot",
+					zap.Int64("buildID", segIdx.BuildID),
 					zap.Int64s("snapshotIDs", snapshotIDs))
 				return true
 			}

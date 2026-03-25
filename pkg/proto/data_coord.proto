@@ -1057,6 +1057,10 @@ message CopySegmentTarget {
   int64 collection_id = 1;  // target collection ID
   int64 partition_id = 2;   // target partition ID
   int64 segment_id = 3;     // target segment ID
+  // Mapping from source build ID to newly allocated build ID.
+  // Used to avoid build ID reuse across copy segments, which would
+  // corrupt the 1:1 segmentBuildInfo map in DataCoord indexMeta.
+  map<int64, int64> new_build_ids = 4;
 }
 
 message CopySegmentRequest {
@@ -1104,6 +1108,9 @@ message VectorScalarIndexInfo {
   int64 index_size = 6;                    // Total index size in bytes
   int32 current_index_version = 7;         // Index engine version
   int32 current_scalar_index_version = 8;  // Scalar index engine version
+  // Index name from source, used to match source→target index during restore.
+  // Required for JSON path indexes where one field can have multiple indexes.
+  string index_name = 9;
 }
 
 // CopySegmentResult contains the complete result of a copy segment operation
@@ -1118,7 +1125,8 @@ message CopySegmentResult {
   repeated FieldBinlog bm25logs = 6;
 
   // Index metadata
-  // Vector/Scalar indexes - map<fieldID, VectorScalarIndexInfo>
+  // Vector/Scalar indexes - map<buildID, VectorScalarIndexInfo>
+  // Key is buildID (not fieldID) to support multiple indexes per field (e.g., JSON path indexes).
   map<int64, VectorScalarIndexInfo> index_infos = 7;
 
   // Text indexes - map<fieldID, TextIndexStats>
@@ -1567,7 +1575,7 @@ message SnapshotMetadata {
   repeated string manifest_list = 5;
   repeated StorageV2SegmentManifest storagev2_manifest_list = 6;
   repeated int64 segment_ids = 7;
-  repeated int64 index_ids = 8;
+  reserved 8; // was index_ids, no longer needed (buildIDs provides more precise GC protection)
   repeated int64 build_ids = 9;
 }
 
