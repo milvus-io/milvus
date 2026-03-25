@@ -183,6 +183,47 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 	return b, nil
 }
 
+// validateForcePromoteConfiguration validates that the force promote configuration is safe.
+// Requirements:
+// 1. Must contain ONLY the current cluster
+// 2. Must have NO topology (no replication relationships)
+func validateForcePromoteConfiguration(config *commonpb.ReplicateConfiguration, currentClusterID string) error {
+	// Use config helper to validate the configuration structure
+	helper, err := replicateutil.NewConfigHelper(currentClusterID, config)
+	if err != nil {
+		return status.NewInvaildArgument("invalid replicate configuration for force promote: %v", err)
+	}
+
+	// Check that configuration contains exactly one cluster (the current cluster)
+	if len(config.Clusters) != 1 {
+		return status.NewInvaildArgument(
+			"force promote requires configuration with exactly one cluster (current cluster only), got %d clusters",
+			len(config.Clusters))
+	}
+
+	// Check that the single cluster is the current cluster
+	if config.Clusters[0].ClusterId != currentClusterID {
+		return status.NewInvaildArgument(
+			"force promote requires configuration with only current cluster %s, got cluster %s",
+			currentClusterID,
+			config.Clusters[0].ClusterId)
+	}
+
+	// Check that there is NO topology (no replication)
+	if len(config.CrossClusterTopology) > 0 {
+		return status.NewInvaildArgument(
+			"force promote requires configuration with no topology (single primary cluster), got %d topology edges",
+			len(config.CrossClusterTopology))
+	}
+
+	// Verify the cluster role is primary (should be true for single cluster with no topology)
+	if helper.GetCurrentCluster().Role() != replicateutil.RolePrimary {
+		return status.NewInvaildArgument("force promote configuration must result in current cluster being primary")
+	}
+
+	return nil
+}
+
 // handleForcePromote handles force promote logic for replicate configuration.
 // It promotes a secondary cluster to standalone primary immediately without waiting for CDC replication.
 func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *commonpb.ReplicateConfiguration) (*streamingpb.UpdateReplicateConfigurationResponse, error) {
@@ -332,6 +373,7 @@ func (s *assignmentServiceImpl) alterReplicateConfiguration(ctx context.Context,
 	// Update the configuration
 	// For force promote, incomplete broadcasts are already fixed by ackCallbackScheduler
 	// before this callback is invoked.
+
 	return balancer.UpdateReplicateConfiguration(ctx, result)
 }
 

@@ -96,6 +96,105 @@ func TestSecondaryReplicateManager(t *testing.T) {
 	testMessageOnSecondary(t, rm)
 }
 
+func TestSalvageCheckpointCaptureOnForcePromote(t *testing.T) {
+	// Setup: cluster starts as secondary with a checkpoint
+	txnBuffer := utility.NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			Checkpoint: &utility.WALCheckpoint{
+				MessageID: walimplstest.NewTestMessageID(1),
+				TimeTick:  1,
+				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
+					ClusterID: "test2",
+					PChannel:  "test2-rootcoord-dml_0",
+					MessageID: walimplstest.NewTestMessageID(100),
+					TimeTick:  1000,
+				},
+				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
+			},
+			TxnBuffer: txnBuffer,
+		},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RoleSecondary, rm.Role())
+
+	// Initially no salvage checkpoint
+	assert.Empty(t, rm.GetSalvageCheckpoint())
+
+	// Force promote to primary
+	err = rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessageWithForcePromote("test1", true, "test2"))
+	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
+
+	// Salvage checkpoint should be captured
+	salvageCPs := rm.GetSalvageCheckpoint()
+	assert.Len(t, salvageCPs, 1)
+	salvageCP := salvageCPs[0]
+	assert.Equal(t, "test2", salvageCP.ClusterID)
+	assert.Equal(t, "test2-rootcoord-dml_0", salvageCP.PChannel)
+	assert.Equal(t, uint64(1000), salvageCP.TimeTick)
+}
+
+func TestSalvageCheckpointNotCapturedOnNormalPromote(t *testing.T) {
+	// Setup: cluster starts as secondary
+	txnBuffer := utility.NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			Checkpoint: &utility.WALCheckpoint{
+				MessageID: walimplstest.NewTestMessageID(1),
+				TimeTick:  1,
+				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
+					ClusterID: "test2",
+					PChannel:  "test2-rootcoord-dml_0",
+					MessageID: walimplstest.NewTestMessageID(100),
+					TimeTick:  1000,
+				},
+				ReplicateConfig: newReplicateConfiguration("test2", "test1"),
+			},
+			TxnBuffer: txnBuffer,
+		},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RoleSecondary, rm.Role())
+
+	// Normal promote (not force)
+	err = rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessageWithForcePromote("test1", false, "test2"))
+	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
+
+	// Salvage checkpoint should NOT be captured
+	assert.Empty(t, rm.GetSalvageCheckpoint())
+}
+
+func TestSalvageCheckpointNotCapturedWhenAlreadyPrimary(t *testing.T) {
+	// Setup: cluster starts as primary (no secondary state)
+	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			Checkpoint: &utility.WALCheckpoint{
+				MessageID:           walimplstest.NewTestMessageID(1),
+				TimeTick:            1,
+				ReplicateCheckpoint: nil,
+				ReplicateConfig:     newReplicateConfiguration("test1", "test2"),
+			},
+		},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
+
+	// Force promote when already primary (no secondary state)
+	err = rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessageWithForcePromote("test1", true, "test2"))
+	assert.NoError(t, err)
+
+	// Salvage checkpoint should NOT be captured (no secondary state to capture)
+	assert.Empty(t, rm.GetSalvageCheckpoint())
+}
+
 func TestSecondaryReplicateManagerWithTxn(t *testing.T) {
 	txnBuffer := utility.NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 	txnMsgs := newReplicateTxnMessage("test1", "test2", 2)
@@ -144,7 +243,7 @@ func TestSecondaryReplicateManagerWithTxn(t *testing.T) {
 	}
 }
 
-func testSwitchReplicateMode(t *testing.T, rm ReplicateManager, primaryClusterID, secondaryClusterID string) {
+func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterID, secondaryClusterID string) {
 	ctx := context.Background()
 
 	// switch to primary
@@ -284,7 +383,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicateManager, primaryClusterID
 	assert.Equal(t, cp.TimeTick, uint64(0))
 }
 
-func testMessageOnPrimary(t *testing.T, rm ReplicateManager) {
+func testMessageOnPrimary(t *testing.T, rm ReplicatesManager) {
 	// switch to primary
 	err := rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessage("test1", "test2"))
 	assert.NoError(t, err)
@@ -311,7 +410,7 @@ func testMessageOnPrimary(t *testing.T, rm ReplicateManager) {
 	assert.Nil(t, g)
 }
 
-func testMessageOnSecondary(t *testing.T, rm ReplicateManager) {
+func testMessageOnSecondary(t *testing.T, rm ReplicatesManager) {
 	// switch to secondary
 	err := rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessage("test2", "test1"))
 	assert.NoError(t, err)
@@ -389,9 +488,14 @@ func newReplicateConfiguration(primaryClusterID string, secondaryClusterID ...st
 }
 
 func newAlterReplicateConfigMessage(primaryClusterID string, secondaryClusterID ...string) message.MutableAlterReplicateConfigMessageV2 {
+	return newAlterReplicateConfigMessageWithForcePromote(primaryClusterID, false, secondaryClusterID...)
+}
+
+func newAlterReplicateConfigMessageWithForcePromote(primaryClusterID string, forcePromote bool, secondaryClusterID ...string) message.MutableAlterReplicateConfigMessageV2 {
 	return message.MustAsMutableAlterReplicateConfigMessageV2(message.NewAlterReplicateConfigMessageBuilderV2().
 		WithHeader(&message.AlterReplicateConfigMessageHeader{
 			ReplicateConfiguration: newReplicateConfiguration(primaryClusterID, secondaryClusterID...),
+			ForcePromote:           forcePromote,
 		}).
 		WithBody(&message.AlterReplicateConfigMessageBody{}).
 		WithVChannel(primaryClusterID + "-rootcoord-dml_0").
