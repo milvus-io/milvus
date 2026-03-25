@@ -22,7 +22,10 @@
 
 #include "NamedType/named_type_impl.hpp"
 #include "bitset/bitset.h"
+#include "common/Common.h"
 #include "common/Consts.h"
+#include "common/Slice.h"
+#include "storage/IndexData.h"
 #include "common/FieldData.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
@@ -300,4 +303,118 @@ TEST(JsonIndexTest, TestJsonCast) {
             EXPECT_TRUE(result[id]);
         }
     }
+}
+
+// Verify that JsonInvertedIndex::Serialize correctly produces sliced
+// null_offset and non_exist_offset files, and that CompactIndexDatasByKey
+// can reassemble each independently from the shared _meta_slice.
+//
+// This reproduces the bug where both offset files shared a single
+// _meta_slice after Disassemble, but LoadIndexMetas downloaded them
+// separately. The old CompactIndexDatas fails because it tries to
+// find ALL slices referenced in _meta_slice, not just the target key's.
+TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
+    // Use a small slice size so both offset files get sliced.
+    auto old_slice_size = FILE_SLICE_SIZE.load();
+    FILE_SLICE_SIZE.store(64);
+
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        milvus::proto::schema::JSON);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
+
+    index::CreateIndexInfo cii;
+    cii.index_type = index::INVERTED_INDEX_TYPE;
+    cii.json_cast_type = JsonCastType::FromString("DOUBLE");
+    cii.json_path = "/a";
+    auto inv_index =
+        index::IndexFactory::GetInstance().CreateJsonIndex(cii, file_manager_ctx);
+    auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
+        static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
+
+    // Build with enough rows to produce large null_offset and
+    // non_exist_offset arrays (each > FILE_SLICE_SIZE = 64 bytes).
+    // - {"a": null}  → null_offset  (8 bytes per entry)
+    // - {"b": 1}     → non_exist_offset (key "a" doesn't exist)
+    // - {"a": 1.0}   → valid data (neither offset)
+    // 20 nulls + 20 non-exist → 160 bytes each, well above 64.
+    std::vector<milvus::Json> jsons;
+    for (int i = 0; i < 20; i++) {
+        jsons.push_back(
+            milvus::Json(simdjson::padded_string(R"({"a": null})")));
+    }
+    for (int i = 0; i < 20; i++) {
+        jsons.push_back(
+            milvus::Json(simdjson::padded_string(R"({"b": 1})")));
+    }
+    for (int i = 0; i < 10; i++) {
+        jsons.push_back(
+            milvus::Json(simdjson::padded_string(R"({"a": 1.0})")));
+    }
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    json_field->add_json_data(jsons);
+    json_index->BuildWithFieldData({json_field});
+    json_index->finish();
+
+    // Serialize calls Disassemble which creates a shared _meta_slice.
+    auto binary_set = json_index->Serialize({});
+
+    // Verify slicing occurred: _meta_slice exists, originals are gone.
+    ASSERT_TRUE(binary_set.Contains(INDEX_FILE_SLICE_META))
+        << "_meta_slice should exist when both offset files are sliced";
+    ASSERT_FALSE(binary_set.Contains(INDEX_NULL_OFFSET_FILE_NAME))
+        << "null_offset should be sliced into parts";
+    ASSERT_FALSE(binary_set.Contains(INDEX_NON_EXIST_OFFSET_FILE_NAME))
+        << "non_exist_offset should be sliced into parts";
+
+    // Helper: build a partial index_datas map containing only slices for
+    // the given key plus _meta_slice (simulates LoadIndexToMemory).
+    auto make_partial_datas = [&](const std::string& target_key) {
+        std::map<std::string, std::unique_ptr<storage::DataCodec>> result;
+        for (auto& [name, bin] : binary_set.binary_map_) {
+            if (name == INDEX_FILE_SLICE_META ||
+                name.find(target_key) != std::string::npos) {
+                result[name] = std::make_unique<storage::IndexData>(
+                    bin->data.get(), bin->size);
+            }
+        }
+        return result;
+    };
+
+    // --- Verify the bug: old CompactIndexDatas fails with partial data ---
+    {
+        auto partial = make_partial_datas(INDEX_NULL_OFFSET_FILE_NAME);
+        ASSERT_GT(partial.size(), 1);
+        // _meta_slice references both null_offset and non_exist_offset slices,
+        // but only null_offset slices are in the map → assertion failure.
+        EXPECT_THROW(CompactIndexDatas(partial), std::exception);
+    }
+
+    // --- Verify the fix: CompactIndexDatasByKey with null_offset ---
+    {
+        auto partial = make_partial_datas(INDEX_NULL_OFFSET_FILE_NAME);
+        auto slice_meta = std::move(partial.at(INDEX_FILE_SLICE_META));
+        auto result = CompactIndexDatasByKey(
+            INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), partial);
+        EXPECT_GT(result.codecs_.size(), 0);
+        EXPECT_EQ(result.size_, 20 * sizeof(size_t));
+    }
+
+    // --- Verify the fix: CompactIndexDatasByKey with non_exist_offset ---
+    {
+        auto partial = make_partial_datas(INDEX_NON_EXIST_OFFSET_FILE_NAME);
+        auto slice_meta = std::move(partial.at(INDEX_FILE_SLICE_META));
+        auto result = CompactIndexDatasByKey(
+            INDEX_NON_EXIST_OFFSET_FILE_NAME, std::move(slice_meta), partial);
+        EXPECT_GT(result.codecs_.size(), 0);
+        EXPECT_EQ(result.size_, 20 * sizeof(size_t));
+    }
+
+    FILE_SLICE_SIZE.store(old_slice_size);
 }

@@ -302,9 +302,11 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
         auto index_datas = this->file_manager_->LoadIndexToMemory(
             null_offset_files, load_priority);
 
-        auto null_offsets_data = CompactIndexDatas(index_datas);
-        auto null_offsets_data_codecs =
-            std::move(null_offsets_data.at(INDEX_NULL_OFFSET_FILE_NAME));
+        auto slice_meta = std::move(index_datas.at(INDEX_FILE_SLICE_META));
+        auto null_offsets_data_codecs = CompactIndexDatasByKey(
+            INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), index_datas);
+        AssertInfo(null_offsets_data_codecs.codecs_.size() > 0,
+                   "null offset file is empty");
         for (auto&& null_offsets_codec : null_offsets_data_codecs.codecs_) {
             fill_null_offsets(null_offsets_codec->PayloadData(),
                               null_offsets_codec->PayloadSize());
