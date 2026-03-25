@@ -1112,21 +1112,6 @@ ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id) {
     std::unique_lock<std::shared_mutex> lck(mutex_);
     if (get_bit(field_data_ready_bitset_, field_id)) {
         auto column = get_column(field_id);
-        // Multi-field column group: skip drop to avoid breaking shared storage.
-        // The memory stays but queries will use index raw data path instead.
-        if (column && column->IsInMultiFieldColumnGroup()) {
-            LOG_INFO(
-                "Skip dropping field {} in segment {}: multi-field column "
-                "group",
-                field_id.get(),
-                id_);
-            // Still drop binlog index if present
-            if (get_bit(binlog_index_bitset_, field_id)) {
-                set_bit(binlog_index_bitset_, field_id, false);
-                vector_indexings_.drop_field_indexing(field_id);
-            }
-            return;
-        }
         // PK field: skip drop because insert record reload depends on PK data
         if (schema_->get_primary_field_id().has_value() &&
             schema_->get_primary_field_id().value() == field_id) {
@@ -2933,7 +2918,8 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         // TODO: handle PK replacement for insert_record_ in future
     }
 
-    bool generated_interim_index = generate_interim_index(field_id, num_rows);
+    // now interim index does not touch column warmup
+    generate_interim_index(field_id, num_rows);
 
     std::string struct_name;
     const FieldMeta* field_meta_ptr = nullptr;
@@ -2947,12 +2933,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         }
         set_bit(field_data_ready_bitset_, field_id, true);
         update_row_count(num_rows);
-        if (generated_interim_index) {
-            auto column = get_column(field_id);
-            if (column) {
-                column->CancelWarmup();
-            }
-        }
+
         if (data_type == DataType::GEOMETRY &&
             segcore_config_.get_enable_geometry_cache()) {
             // Construct GeometryCache for the entire field
