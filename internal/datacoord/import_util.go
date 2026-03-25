@@ -599,6 +599,14 @@ func GetJobProgress(ctx context.Context, jobID int64,
 		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
 		return 10 + 30 + 30 + 10 + int64(progress*10), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
 
+	case internalpb.ImportJobState_Uncommitted:
+		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
+		return 100, internalpb.ImportJobState_Uncommitted, totalRows, totalRows, ""
+
+	case internalpb.ImportJobState_Committing:
+		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
+		return 100, internalpb.ImportJobState_Committing, totalRows, totalRows, ""
+
 	case internalpb.ImportJobState_Completed:
 		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
 		return 100, internalpb.ImportJobState_Completed, totalRows, totalRows, ""

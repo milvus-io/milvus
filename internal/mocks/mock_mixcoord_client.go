@@ -12368,6 +12368,225 @@ func (_c *MockMixCoordClient_WatchChannels_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// HandleCommitVchannel provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) HandleCommitVchannel(ctx context.Context, in *datapb.HandleCommitVchannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HandleCommitVchannel")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.HandleCommitVchannelRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.HandleCommitVchannelRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.HandleCommitVchannelRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_HandleCommitVchannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HandleCommitVchannel'
+type MockMixCoordClient_HandleCommitVchannel_Call struct {
+	*mock.Call
+}
+
+// HandleCommitVchannel is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.HandleCommitVchannelRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) HandleCommitVchannel(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_HandleCommitVchannel_Call {
+	return &MockMixCoordClient_HandleCommitVchannel_Call{Call: _e.mock.On("HandleCommitVchannel", append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_HandleCommitVchannel_Call) Run(run func(ctx context.Context, in *datapb.HandleCommitVchannelRequest, opts ...grpc.CallOption)) *MockMixCoordClient_HandleCommitVchannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.HandleCommitVchannelRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_HandleCommitVchannel_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_HandleCommitVchannel_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_HandleCommitVchannel_Call) RunAndReturn(run func(context.Context, *datapb.HandleCommitVchannelRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_HandleCommitVchannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CommitImport provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) CommitImport(ctx context.Context, in *datapb.CommitImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CommitImport")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitImportRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CommitImportRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CommitImportRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_CommitImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CommitImport'
+type MockMixCoordClient_CommitImport_Call struct {
+	*mock.Call
+}
+
+// CommitImport is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.CommitImportRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) CommitImport(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_CommitImport_Call {
+	return &MockMixCoordClient_CommitImport_Call{Call: _e.mock.On("CommitImport", append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_CommitImport_Call) Run(run func(ctx context.Context, in *datapb.CommitImportRequest, opts ...grpc.CallOption)) *MockMixCoordClient_CommitImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.CommitImportRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_CommitImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_CommitImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_CommitImport_Call) RunAndReturn(run func(context.Context, *datapb.CommitImportRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_CommitImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AbortImport provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) AbortImport(ctx context.Context, in *datapb.AbortImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AbortImport")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AbortImportRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AbortImportRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.AbortImportRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_AbortImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AbortImport'
+type MockMixCoordClient_AbortImport_Call struct {
+	*mock.Call
+}
+
+// AbortImport is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.AbortImportRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) AbortImport(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_AbortImport_Call {
+	return &MockMixCoordClient_AbortImport_Call{Call: _e.mock.On("AbortImport", append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_AbortImport_Call) Run(run func(ctx context.Context, in *datapb.AbortImportRequest, opts ...grpc.CallOption)) *MockMixCoordClient_AbortImport_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.AbortImportRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_AbortImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_AbortImport_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_AbortImport_Call) RunAndReturn(run func(context.Context, *datapb.AbortImportRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_AbortImport_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockMixCoordClient creates a new instance of MockMixCoordClient. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockMixCoordClient(t interface {
