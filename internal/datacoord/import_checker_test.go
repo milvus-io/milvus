@@ -793,3 +793,162 @@ func TestImportCheckerCompaction(t *testing.T) {
 	}, 2*time.Second, 100*time.Millisecond)
 	log.Info("job completed")
 }
+
+// ---------------------------------------------------------------------------
+// Tests for checkUncommittedJob
+// ---------------------------------------------------------------------------
+
+func (s *ImportCheckerSuite) TestCheckUncommittedJob_AutoCommitTrue() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+
+	// Put the job into Uncommitted state with auto_commit=true (default).
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).ImportJob.State = internalpb.ImportJobState_Uncommitted
+		job.(*importJob).ImportJob.AutoCommit = true
+	})
+
+	commitCalled := false
+	s.checker.commitImportFn = func(ctx context.Context, job ImportJob) error {
+		commitCalled = true
+		return nil
+	}
+
+	s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.True(commitCalled, "commitImportFn should be called when auto_commit=true")
+}
+
+func (s *ImportCheckerSuite) TestCheckUncommittedJob_AutoCommitFalse() {
+	// Put the job into Uncommitted state with auto_commit=false.
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).ImportJob.State = internalpb.ImportJobState_Uncommitted
+		job.(*importJob).ImportJob.AutoCommit = false
+	})
+
+	commitCalled := false
+	s.checker.commitImportFn = func(ctx context.Context, job ImportJob) error {
+		commitCalled = true
+		return nil
+	}
+
+	s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.False(commitCalled, "commitImportFn must NOT be called when auto_commit=false")
+	// Job state must remain Uncommitted.
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+func (s *ImportCheckerSuite) TestCheckUncommittedJob_NilFn_AutoCommitTrue() {
+	// Ensure no panic when commitImportFn is nil (e.g. in unit tests that don't inject it).
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).ImportJob.State = internalpb.ImportJobState_Uncommitted
+		job.(*importJob).ImportJob.AutoCommit = true
+	})
+	s.checker.commitImportFn = nil
+
+	// Should not panic; just log a warning.
+	s.NotPanics(func() {
+		s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Tests for checkCommittingJob
+// ---------------------------------------------------------------------------
+
+func (s *ImportCheckerSuite) TestCheckCommittingJob_AllVchannelsDone() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+
+	// All vchannels committed → expect transition to Completed.
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).ImportJob.State = internalpb.ImportJobState_Committing
+		job.(*importJob).ImportJob.Vchannels = []string{"ch0"}
+		job.(*importJob).ImportJob.CommittedVchannels = []string{"ch0"}
+	})
+
+	s.checker.checkCommittingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_Completed, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+func (s *ImportCheckerSuite) TestCheckCommittingJob_Partial() {
+	// Only some vchannels committed → job should stay Committing.
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).ImportJob.State = internalpb.ImportJobState_Committing
+		job.(*importJob).ImportJob.Vchannels = []string{"ch0", "ch1"}
+		job.(*importJob).ImportJob.CommittedVchannels = []string{"ch0"}
+	})
+
+	s.checker.checkCommittingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_Committing, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+// ---------------------------------------------------------------------------
+// Tests for checkPreImportingJob — empty-import fast path
+// ---------------------------------------------------------------------------
+
+func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitFalse() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+
+	// First, advance job to PreImporting by creating pre-import tasks.
+	alloc := s.alloc
+	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		id := rand.Int63()
+		return id, id + n, nil
+	})
+	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
+	s.checker.checkPendingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+
+	// Mark all pre-import tasks completed with totalRows == 0 (empty import).
+	preimportTasks := s.importMeta.GetTaskBy(context.TODO(), WithJob(s.jobID), WithType(PreImportTaskType))
+	for _, t := range preimportTasks {
+		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Completed),
+			UpdateFileStats([]*datapb.ImportFileStats{{TotalRows: 0}}))
+		s.NoError(err)
+	}
+
+	// Set auto_commit=false on the job.
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).ImportJob.AutoCommit = false
+	})
+
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+
+	// With auto_commit=false, empty import should land in Uncommitted, not Completed.
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
+
+func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitTrue() {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+
+	// First, advance job to PreImporting.
+	alloc := s.alloc
+	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
+		id := rand.Int63()
+		return id, id + n, nil
+	})
+	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
+	s.checker.checkPendingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+
+	// Mark all pre-import tasks completed with totalRows == 0 (empty import).
+	preimportTasks := s.importMeta.GetTaskBy(context.TODO(), WithJob(s.jobID), WithType(PreImportTaskType))
+	for _, t := range preimportTasks {
+		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Completed),
+			UpdateFileStats([]*datapb.ImportFileStats{{TotalRows: 0}}))
+		s.NoError(err)
+	}
+
+	// auto_commit=true (the default), so job should go directly to Completed.
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+		job.(*importJob).ImportJob.AutoCommit = true
+	})
+
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+
+	s.Equal(internalpb.ImportJobState_Completed, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+}
