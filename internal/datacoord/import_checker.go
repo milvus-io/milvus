@@ -65,12 +65,8 @@ func NewImportChecker(ctx context.Context,
 	importMeta ImportMeta,
 	ci CompactionInspector,
 	handler Handler,
-	commitImportFn ...func(ctx context.Context, job ImportJob) error,
+	commitImportFn func(ctx context.Context, job ImportJob) error, // required; nil OK for tests
 ) ImportChecker {
-	var fn func(ctx context.Context, job ImportJob) error
-	if len(commitImportFn) > 0 {
-		fn = commitImportFn[0]
-	}
 	return &importChecker{
 		ctx:            ctx,
 		meta:           meta,
@@ -79,7 +75,7 @@ func NewImportChecker(ctx context.Context,
 		importMeta:     importMeta,
 		ci:             ci,
 		handler:        handler,
-		commitImportFn: fn,
+		commitImportFn: commitImportFn,
 		closeChan:      make(chan struct{}),
 	}
 }
@@ -474,7 +470,8 @@ func (c *importChecker) checkUncommittedJob(job ImportJob) {
 	}
 	// auto_commit=true: trigger commit by broadcasting the WAL message.
 	if c.commitImportFn == nil {
-		log.Warn("commitImportFn not set, cannot auto-commit import job")
+		log.Error("commitImportFn is nil but auto_commit=true; job will stall in Uncommitted state",
+			zap.Int64("jobID", job.GetJobID()))
 		return
 	}
 	if err := c.commitImportFn(c.ctx, job); err != nil {
@@ -486,9 +483,10 @@ func (c *importChecker) checkUncommittedJob(job ImportJob) {
 // Once all vchannels have acknowledged the commit fence, the job transitions to Completed.
 func (c *importChecker) checkCommittingJob(job ImportJob) {
 	log := log.With(zap.Int64("jobID", job.GetJobID()))
+	// When Vchannels is empty, len == len is trivially true. This handles the degenerate
+	// case of a zero-channel import (e.g., empty collection); proceed to Completed immediately.
 	if len(job.GetCommittedVchannels()) < len(job.GetVchannels()) {
-		// Some vchannels still pending; WAL delivery is guaranteed, just wait.
-		return
+		return // still waiting for remaining vchannels
 	}
 	completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 	if err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(),
