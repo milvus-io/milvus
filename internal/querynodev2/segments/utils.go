@@ -1,16 +1,5 @@
 package segments
 
-/*
-#cgo pkg-config: milvus_core
-
-#include "segcore/collection_c.h"
-#include "segcore/segment_c.h"
-#include "segcore/segcore_init_c.h"
-#include "common/init_c.h"
-
-*/
-import "C"
-
 import (
 	"bytes"
 	"context"
@@ -181,15 +170,6 @@ func mergeRequestCost(requestCosts []*internalpb.CostAggregation) *internalpb.Co
 	}
 
 	return result
-}
-
-func getIndexEngineVersion() (minimal, current int32) {
-	GetDynamicPool().Submit(func() (any, error) {
-		cMinimal, cCurrent := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion()
-		minimal, current = int32(cMinimal), int32(cCurrent)
-		return nil, nil
-	}).Await()
-	return minimal, current
 }
 
 // getSegmentMetricLabel returns the label for segment metrics.
