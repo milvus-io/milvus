@@ -117,16 +117,12 @@ func (pw *packedRecordWriter) GetWrittenRowNum() int64 {
 
 func (pw *packedRecordWriter) Close() error {
 	if pw.writer != nil {
-		err := pw.writer.Close()
+		sizes, err := pw.writer.CloseAndTell(len(pw.columnGroups))
 		if err != nil {
 			return err
 		}
-		for id, fpath := range pw.pathsMap {
-			size, err := packed.GetFileSize(fpath, pw.storageConfig)
-			if err != nil {
-				return err
-			}
-			pw.columnGroupCompressed[id] = uint64(size)
+		for i, columnGroup := range pw.columnGroups {
+			pw.columnGroupCompressed[columnGroup.GroupID] = uint64(sizes[i])
 		}
 	}
 	return nil
