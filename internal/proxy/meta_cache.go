@@ -108,6 +108,7 @@ type collectionInfo struct {
 	consistencyLevel      commonpb.ConsistencyLevel
 	partitionKeyIsolation bool
 	queryMode             string
+	replicateID           string
 	updateTimestamp       uint64
 	collectionTTL         uint64
 	numPartitions         int64
@@ -481,6 +482,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	queryMode := common.GetQueryMode(collection.Properties...)
 
 	schemaInfo := newSchemaInfo(collection.Schema)
+	replicateID, _ := common.GetReplicateID(collection.Properties)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -514,8 +516,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		m.collInfo[database] = make(map[string]*collectionInfo)
 	}
 
-	replicateID, _ := common.GetReplicateID(collection.Properties)
-
 	if isAlias {
 		// Caller passed an alias; record the alias→realName mapping so
 		// subsequent ResolveCollectionAlias calls hit Level 2 cache.
@@ -533,7 +533,12 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		consistencyLevel:      collection.ConsistencyLevel,
 		partitionKeyIsolation: isolation,
 		queryMode:             queryMode,
+		replicateID:           replicateID,
+		updateTimestamp:       collection.UpdateTimestamp,
+		collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
+		vChannels:             collection.VirtualChannelNames,
 		pChannels:             collection.PhysicalChannelNames,
+		numPartitions:         collection.NumPartitions,
 		shardsNum:             collection.ShardsNum,
 		aliases:               collection.Aliases,
 		properties:            collection.Properties,
