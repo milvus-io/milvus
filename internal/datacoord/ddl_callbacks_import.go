@@ -214,28 +214,44 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 
 // rollbackImportV2AckCallback handles the ack callback for RollbackImport WAL message.
 // It transitions the import job to Failed state and drops all import segments for the job.
-// If the job is already Committing or Completed (commit won the race), this is a no-op.
+// If the job is already Committing, Completed, or Failed (commit won the race or already
+// rolled back), this is a no-op. The CAS on UpdateJob ensures that a concurrent state
+// change between the pre-read and the update is handled safely.
 func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result message.BroadcastResultRollbackImportMessageV2) error {
 	header := result.Message.Header()
 	jobID := header.GetJobId()
 	log.Ctx(ctx).Info("RollbackImport broadcast ack received", zap.Int64("jobID", jobID))
 
-	var needDrop bool
-	err := c.importMeta.UpdateJob(ctx, jobID, func(job ImportJob) {
-		if job.GetState() == internalpb.ImportJobState_Committing ||
-			job.GetState() == internalpb.ImportJobState_Completed {
-			log.Ctx(ctx).Info("RollbackImport: commit already won the race, skipping",
-				zap.Int64("jobID", jobID),
-				zap.String("currentState", job.GetState().String()))
-			return
-		}
-		job.(*importJob).ImportJob.State = internalpb.ImportJobState_Failed
-		needDrop = true
-	})
-	if err != nil || !needDrop {
+	job := c.importMeta.GetJob(ctx, jobID)
+	if job == nil {
+		log.Ctx(ctx).Warn("RollbackImport: job not found, skipping", zap.Int64("jobID", jobID))
+		return nil
+	}
+	state := job.GetState()
+	if state == internalpb.ImportJobState_Committing ||
+		state == internalpb.ImportJobState_Completed ||
+		state == internalpb.ImportJobState_Failed {
+		log.Ctx(ctx).Info("RollbackImport: job already in terminal/committed state, no-op",
+			zap.Int64("jobID", jobID), zap.String("state", state.String()))
+		return nil
+	}
+
+	// CAS: transition from the pre-read state → Failed.
+	// If state changed concurrently (e.g. commit won the race), UpdateJobStateWithCAS is a
+	// no-op and UpdateJob returns nil, so we skip the segment drop safely.
+	if err := c.importMeta.UpdateJob(ctx, jobID, UpdateJobStateWithCAS(state, internalpb.ImportJobState_Failed)); err != nil {
 		return err
 	}
-	// Mark all import segments for this job as Dropped
+
+	// Verify the CAS actually succeeded before dropping segments.
+	updated := c.importMeta.GetJob(ctx, jobID)
+	if updated == nil || updated.GetState() != internalpb.ImportJobState_Failed {
+		log.Ctx(ctx).Info("RollbackImport: CAS did not apply (concurrent state change), skipping segment drop",
+			zap.Int64("jobID", jobID))
+		return nil
+	}
+
+	// Drop all import segments for this job.
 	return c.dropImportJobSegments(ctx, jobID)
 }
 
