@@ -23,8 +23,10 @@ import (
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -301,12 +303,11 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		return x.i < y.i
 	})
 
-	endPositions := make([]int, len(recs))
+	remainingCounts := make([]int, len(recs))
 	var enqueueAll func(ri int) error
 	enqueueAll = func(ri int) error {
 		r := recs[ri]
-		hasValid := false
-		endPosition := 0
+		count := 0
 		for j := 0; j < r.Len(); j++ {
 			if predicate(r, ri, j) {
 				pq.Enqueue(&index{
@@ -314,11 +315,10 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 					i:  j,
 				})
 				numRows++
-				hasValid = true
-				endPosition = j
+				count++
 			}
 		}
-		if !hasValid {
+		if count == 0 {
 			err := advanceRecord(ri)
 			if err == io.EOF {
 				return nil
@@ -328,7 +328,37 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			}
 			return enqueueAll(ri)
 		}
-		endPositions[ri] = endPosition
+		remainingCounts[ri] = count
+
+		// Warn if the batch is not sorted by the first sort field.
+		// MergeSort assumes each batch is pre-sorted; unsorted batches produce
+		// incorrect output order (though the remainingCounts fix prevents panics).
+		if len(sortedByFieldIDs) > 0 {
+			fid := sortedByFieldIDs[0]
+			switch col := r.Column(fid).(type) {
+			case *array.Int64:
+				for j := 1; j < r.Len(); j++ {
+					if col.Value(j) < col.Value(j-1) {
+						log.Warn("MergeSort: batch not sorted by sort key, output order may be incorrect",
+							zap.Int("ri", ri), zap.Int("row", j),
+							zap.Int64("prev", col.Value(j-1)), zap.Int64("curr", col.Value(j)),
+							zap.Int("batchLen", r.Len()))
+						break
+					}
+				}
+			case *array.String:
+				for j := 1; j < r.Len(); j++ {
+					if col.Value(j) < col.Value(j-1) {
+						log.Warn("MergeSort: batch not sorted by sort key, output order may be incorrect",
+							zap.Int("ri", ri), zap.Int("row", j),
+							zap.String("prev", col.Value(j-1)), zap.String("curr", col.Value(j)),
+							zap.Int("batchLen", r.Len()))
+						break
+					}
+				}
+			}
+		}
+
 		return nil
 	}
 
@@ -362,8 +392,9 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			}
 		}
 
-		// If the popped idx reaches the last valid data of the segment, invalidate the cache and advance to the next record
-		if idx.i == endPositions[idx.ri] {
+		// When all enqueued rows from the current batch have been dequeued, advance to the next record batch
+		remainingCounts[idx.ri]--
+		if remainingCounts[idx.ri] == 0 {
 			err := advanceRecord(idx.ri)
 			if err == io.EOF {
 				continue

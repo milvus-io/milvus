@@ -18,12 +18,17 @@ package storage
 
 import (
 	"fmt"
+	"io"
+	"sort"
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
@@ -265,4 +270,155 @@ func TestSortByMoreThanOneField(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, batchSize*2, gotNumRows)
 	assert.NoError(t, rw.Close())
+}
+
+// buildInt64Array creates an arrow Int64 array from a slice.
+func buildInt64Array(values []int64) *array.Int64 {
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	defer builder.Release()
+	builder.AppendValues(values, nil)
+	return builder.NewInt64Array()
+}
+
+// makeRecord creates a Record with two Int64 fields (fieldA=100, fieldB=101).
+func makeRecord(fieldA, fieldB []int64) Record {
+	arrA := buildInt64Array(fieldA)
+	arrB := buildInt64Array(fieldB)
+	nRows := int64(len(fieldA))
+	fields := []arrow.Field{
+		{Name: "fieldA", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "fieldB", Type: arrow.PrimitiveTypes.Int64},
+	}
+	rec := array.NewRecord(arrow.NewSchema(fields, nil), []arrow.Array{arrA, arrB}, nRows)
+	return NewSimpleArrowRecord(rec, map[FieldID]int{100: 0, 101: 1})
+}
+
+// sliceRecordReader is a RecordReader that returns pre-built records in order.
+type sliceRecordReader struct {
+	records []Record
+	pos     int
+}
+
+func (r *sliceRecordReader) Next() (Record, error) {
+	if r.pos >= len(r.records) {
+		return nil, io.EOF
+	}
+	rec := r.records[r.pos]
+	r.pos++
+	return rec, nil
+}
+
+func (r *sliceRecordReader) Close() error { return nil }
+
+// TestMergeSortBatchNotSortedBySortKey_NoPanic verifies that MergeSort does
+// not panic when the last row of a batch (by index) is dequeued before other
+// rows from the same batch. This is the root cause of issue #48322: the old
+// endPositions mechanism assumed the row at the highest valid index would be
+// the last dequeued; when sorting by a different key than the data order, this
+// assumption is violated, causing premature advanceRecord and stale PQ entries
+// that access a replaced (shorter) batch → out-of-range panic.
+//
+// This test constructs the exact triggering scenario:
+//   - Batch 1 has 5 rows with fieldB=[50,10,40,20,1]. The last row (index 4)
+//     has the SMALLEST sort key, so it's dequeued FIRST.
+//   - Batch 2 has only 2 rows, shorter than batch 1.
+//   - With the old endPositions code, dequeuing index 4 triggers advanceRecord,
+//     replacing recs[0] with the 2-row batch. Stale entries at index 3 then
+//     access batch 2 at index 3 → panic: index out of range [3] with length 2.
+func TestMergeSortBatchNotSortedBySortKey_NoPanic(t *testing.T) {
+	const fieldA FieldID = 100
+	const fieldB FieldID = 101
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: fieldA, Name: "fieldA", DataType: schemapb.DataType_Int64},
+			{FieldID: fieldB, Name: "fieldB", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	// Reader 0: batch 1 has the last row (index 4) with the smallest fieldB.
+	// Batch 2 is shorter (2 rows) — stale index 3 from batch 1 would be OOB.
+	reader0 := &sliceRecordReader{records: []Record{
+		makeRecord([]int64{1, 2, 3, 4, 5}, []int64{50, 10, 40, 20, 1}),
+		makeRecord([]int64{6, 7}, []int64{60, 70}),
+	}}
+
+	// Reader 1: interleaves with reader 0 to exercise cross-reader comparisons.
+	reader1 := &sliceRecordReader{records: []Record{
+		makeRecord([]int64{10, 11, 12}, []int64{5, 25, 55}),
+	}}
+
+	var outputRows []int64
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			col := r.Column(fieldB).(*array.Int64)
+			for i := 0; i < col.Len(); i++ {
+				outputRows = append(outputRows, col.Value(i))
+			}
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	numRows, err := MergeSort(64*1024*1024, schema, []RecordReader{reader0, reader1}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{fieldB})
+
+	assert.NoError(t, err)
+	assert.Equal(t, 10, numRows) // 5 + 2 + 3 = 10 total rows
+
+	// Verify all values are present (no data loss). Sort order may not be
+	// globally correct since the input batches aren't sorted by the sort key,
+	// but no rows should be missing or duplicated.
+	sort.Slice(outputRows, func(i, j int) bool { return outputRows[i] < outputRows[j] })
+	expected := []int64{1, 5, 10, 20, 25, 40, 50, 55, 60, 70}
+	assert.Equal(t, expected, outputRows)
+}
+
+// TestMergeSortBatchNotSortedWithPredicate verifies the fix works when some
+// rows are filtered out by the predicate, ensuring remainingCounts correctly
+// tracks only valid (non-filtered) rows.
+func TestMergeSortBatchNotSortedWithPredicate(t *testing.T) {
+	const fieldA FieldID = 100
+	const fieldB FieldID = 101
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: fieldA, Name: "fieldA", DataType: schemapb.DataType_Int64},
+			{FieldID: fieldB, Name: "fieldB", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	reader0 := &sliceRecordReader{records: []Record{
+		makeRecord([]int64{1, 2, 3, 4, 5}, []int64{50, 10, 40, 20, 1}),
+		makeRecord([]int64{6, 7}, []int64{60, 70}),
+	}}
+
+	reader1 := &sliceRecordReader{records: []Record{
+		makeRecord([]int64{10, 11, 12}, []int64{5, 25, 55}),
+	}}
+
+	var outputRows []int64
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			col := r.Column(fieldB).(*array.Int64)
+			for i := 0; i < col.Len(); i++ {
+				outputRows = append(outputRows, col.Value(i))
+			}
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	// Predicate: exclude fieldB >= 50
+	numRows, err := MergeSort(64*1024*1024, schema, []RecordReader{reader0, reader1}, rw, func(r Record, ri, i int) bool {
+		val := r.Column(fieldB).(*array.Int64).Value(i)
+		return val < 50
+	}, []int64{fieldB})
+
+	assert.NoError(t, err)
+	// Filtered out: 50, 55, 60, 70. Remaining: 1,10,40,20 + 5,25 = 6
+	assert.Equal(t, 6, numRows)
+
+	sort.Slice(outputRows, func(i, j int) bool { return outputRows[i] < outputRows[j] })
+	expected := []int64{1, 5, 10, 20, 25, 40}
+	assert.Equal(t, expected, outputRows)
 }
