@@ -655,6 +655,11 @@ dataCoord:
   # if param forceRebuildSegmentIndex is not enabled, the newly created vector index will be aligned with the newer one of index engine's version and targetVecIndexVersion.
   # if param targetVecIndexVersion is not set, the default value is -1, which means no target vec index version, then the vector index will be aligned with index engine's version 
   targetVecIndexVersion: -1
+  forceRebuildScalarSegmentIndex: false # force rebuild scalar segment index to specified scalar index engine's version
+  # if param forceRebuildScalarSegmentIndex is enabled, the scalar index will be rebuilt to aligned with targetScalarIndexVersion.
+  # if param forceRebuildScalarSegmentIndex is not enabled, the newly created scalar index will be aligned with the newer one of scalar index engine's version and targetScalarIndexVersion.
+  # if param targetScalarIndexVersion is not set, the default value is -1, which means no target scalar index version, then the scalar index will be aligned with scalar index engine's version
+  targetScalarIndexVersion: -1
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flushing operation on same segment
   # Switch value to control if to enable segment compaction.
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
