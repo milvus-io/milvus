@@ -88,7 +88,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 }
 
 func (r *reader) Read() (*storage.InsertData, error) {
-	insertData, err := storage.NewInsertData(r.schema)
+	insertData, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +119,8 @@ func (r *reader) Read() (*storage.InsertData, error) {
 	if insertData.GetRowNum() == 0 {
 		return nil, io.EOF
 	}
+
+	common.RemoveUnpopulatedFunctionOutputFields(r.schema, insertData)
 
 	return insertData, nil
 }

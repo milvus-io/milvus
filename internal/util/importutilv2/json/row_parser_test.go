@@ -719,7 +719,7 @@ func (suite *RowParserSuite) TestParseError() {
 			{name: "dim error bf16_vector", content: suite.genAllTypesRowData("bf16_vector", []any{json.Number("0.3")})},
 			{name: "dim error int8_vector", content: suite.genAllTypesRowData("int8_vector", []any{json.Number("1")})},
 			{name: "format error sparse_vector", content: suite.genAllTypesRowData("sparse_vector", map[string]any{"indices": []int64{}})},
-			{name: "function output no need provide", content: suite.genAllTypesRowData("function_sparse_vector", map[string]float64{"1": 0.1, "2": 0.2})},
+			{name: "function output not allowed", content: suite.genAllTypesRowData("function_sparse_vector", map[string]float64{"1": 0.1, "2": 0.2})},
 		}
 	}
 

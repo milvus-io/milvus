@@ -849,6 +849,158 @@ func TestAnyToColumns(t *testing.T) {
 		// Field 'b' should not be present since it wasn't provided in any row
 		assert.False(t, fieldNames["b"])
 	})
+
+	t.Run("function output field not provided in any row", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+					},
+				},
+				{
+					FieldID:          102,
+					Name:             "fn_out",
+					DataType:         schemapb.DataType_Int64,
+					IsFunctionOutput: true,
+				},
+			},
+		}
+		rows := []map[string]interface{}{
+			{"id": int64(1), "vec": []float32{0.1, 0.2}},
+			{"id": int64(2), "vec": []float32{0.3, 0.4}},
+		}
+		fieldsData, err := anyToColumns(rows, nil, schema, true, false)
+		assert.NoError(t, err)
+		fieldNames := make(map[string]bool)
+		for _, fd := range fieldsData {
+			fieldNames[fd.FieldName] = true
+		}
+		assert.True(t, fieldNames["id"])
+		assert.True(t, fieldNames["vec"])
+		assert.False(t, fieldNames["fn_out"])
+	})
+
+	t.Run("function output field provided in all rows", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+					},
+				},
+				{
+					FieldID:          102,
+					Name:             "fn_out",
+					DataType:         schemapb.DataType_Int64,
+					IsFunctionOutput: true,
+				},
+			},
+		}
+		rows := []map[string]interface{}{
+			{"id": int64(1), "vec": []float32{0.1, 0.2}, "fn_out": int64(10)},
+			{"id": int64(2), "vec": []float32{0.3, 0.4}, "fn_out": int64(20)},
+		}
+		fieldsData, err := anyToColumns(rows, nil, schema, true, false)
+		assert.NoError(t, err)
+		fieldNames := make(map[string]bool)
+		for _, fd := range fieldsData {
+			fieldNames[fd.FieldName] = true
+		}
+		assert.True(t, fieldNames["fn_out"])
+	})
+
+	t.Run("function output field provided in row 0 but missing in later row", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+					},
+				},
+				{
+					FieldID:          102,
+					Name:             "fn_out",
+					DataType:         schemapb.DataType_Int64,
+					IsFunctionOutput: true,
+				},
+			},
+		}
+		rows := []map[string]interface{}{
+			{"id": int64(1), "vec": []float32{0.1, 0.2}, "fn_out": int64(10)},
+			{"id": int64(2), "vec": []float32{0.3, 0.4}}, // fn_out missing
+		}
+		_, err := anyToColumns(rows, nil, schema, true, false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "does not has field fn_out")
+	})
+
+	t.Run("function output field missing in row 0 but provided in later row", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+					},
+				},
+				{
+					FieldID:          102,
+					Name:             "fn_out",
+					DataType:         schemapb.DataType_Int64,
+					IsFunctionOutput: true,
+				},
+			},
+		}
+		rows := []map[string]interface{}{
+			{"id": int64(1), "vec": []float32{0.1, 0.2}},                      // fn_out missing
+			{"id": int64(2), "vec": []float32{0.3, 0.4}, "fn_out": int64(20)}, // fn_out provided
+		}
+		// row 0 doesn't have fn_out but row 1 does, column is allocated,
+		// so row 0 hits the "does not has field" error
+		_, err := anyToColumns(rows, nil, schema, true, false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "does not has field fn_out")
+	})
 }
 
 func TestCheckAndSetData(t *testing.T) {

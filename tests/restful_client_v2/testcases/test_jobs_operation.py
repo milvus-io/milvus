@@ -1119,7 +1119,7 @@ class TestCreateImportJob(TestBase):
         assert res[0]["default_varchar"] == "custom_value_1"
 
     def test_import_json_with_function_output_field(self):
-        """Test JSON import with function output field - should fail with error"""
+        """Test JSON import with BM25 function output field - should fail with error"""
         name = gen_collection_name()
         dim = 128
         num_entities = 3000
@@ -1188,10 +1188,11 @@ class TestCreateImportJob(TestBase):
             rsp = self.import_job_client.get_import_job_progress(job_id)
             if rsp['data']['state'] == "Failed":
                 reason = rsp['data'].get('reason', '').lower()
-                assert "output by function" in reason or "function" in reason
+                assert "not allowed to provide data for bm25 function output field" in reason or \
+                       "output by function" in reason or "function" in reason
                 finished = True
             elif rsp['data']['state'] == "Completed":
-                assert False, "Import should have failed for function output field"
+                assert False, "Import should have failed for BM25 function output field"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
                 assert False, "Import job timeout"
@@ -1335,7 +1336,7 @@ class TestCreateImportJob(TestBase):
         assert res[0]["default_value"] == default_value
 
     def test_import_csv_with_function_output_field(self):
-        """Test CSV import with function output field - should fail with error"""
+        """Test CSV import with BM25 function output field - should fail with error"""
         name = gen_collection_name()
         dim = 128
         num_entities = 3000
@@ -1408,13 +1409,797 @@ class TestCreateImportJob(TestBase):
             rsp = self.import_job_client.get_import_job_progress(job_id)
             if rsp['data']['state'] == "Failed":
                 reason = rsp['data'].get('reason', '').lower()
-                assert "output by function" in reason or "function" in reason
+                assert "not allowed to provide data for bm25 function output field" in reason or \
+                       "output by function" in reason or "function" in reason
                 finished = True
             elif rsp['data']['state'] == "Completed":
-                assert False, "Import should have failed for function output field in CSV"
+                assert False, "Import should have failed for BM25 function output field in CSV"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
                 assert False, "Import job timeout"
+
+    def test_import_json_with_non_bm25_function_output_rejected_by_default(self, tei_endpoint):
+        """Test JSON import with non-BM25 function output field is rejected by default"""
+        name = gen_collection_name()
+        dim = 768
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "text_emb",
+                        "type": "TextEmbedding",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["dense_vector"],
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_load_completed(name)
+
+        # Create JSON data with non-BM25 function output field
+        data = []
+        for i in range(num_entities):
+            data.append({
+                "id": i,
+                "text": f"sample text {i}",
+                "dense_vector": [np.float32(random.random()) for _ in range(dim)]
+            })
+
+        file_name = f"test_non_bm25_fn_output_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump(data, f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should fail because allowInsertNonBM25FunctionOutputs is not enabled
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                reason = rsp['data'].get('reason', '').lower()
+                assert "function output" in reason
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed for non-BM25 function output field without property enabled"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_json_with_non_bm25_function_output_allowed_with_property(self, tei_endpoint):
+        """Test JSON import with non-BM25 function output field succeeds after enabling property"""
+        name = gen_collection_name()
+        dim = 768
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "text_emb",
+                        "type": "TextEmbedding",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["dense_vector"],
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_load_completed(name)
+
+        # Enable allowInsertNonBM25FunctionOutputs
+        rsp = self.collection_client.alter_collection_properties(
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
+        assert rsp['code'] == 0
+
+        # Create JSON data with function output field
+        data = []
+        for i in range(num_entities):
+            data.append({
+                "id": i,
+                "text": f"sample text {i}",
+                "dense_vector": [np.float32(random.random()) for _ in range(dim)]
+            })
+
+        file_name = f"test_non_bm25_fn_output_allowed_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump(data, f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should succeed
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+
+    def test_import_json_without_non_bm25_function_output_field(self, tei_endpoint):
+        """Test JSON import without non-BM25 function output field - should succeed with auto-generation"""
+        name = gen_collection_name()
+        dim = 768
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "text_emb",
+                        "type": "TextEmbedding",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["dense_vector"],
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_load_completed(name)
+
+        # Create JSON data WITHOUT function output field - should be auto-generated
+        data = []
+        for i in range(num_entities):
+            data.append({
+                "id": i,
+                "text": f"sample text {i}"
+            })
+
+        file_name = f"test_json_no_non_bm25_fn_output_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump(data, f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should succeed with TextEmbedding auto-generating dense vectors
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+
+    def test_import_csv_with_non_bm25_function_output_rejected_by_default(self, tei_endpoint):
+        """Test CSV import with non-BM25 function output field is rejected by default"""
+        name = gen_collection_name()
+        dim = 768
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "text_emb",
+                        "type": "TextEmbedding",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["dense_vector"],
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_load_completed(name)
+
+        # Create CSV file with function output field
+        file_name = f"test_csv_non_bm25_fn_output_{uuid4()}.csv"
+        file_path = f"/tmp/{file_name}"
+
+        with open(file_path, 'w', newline='') as csvfile:
+            fieldnames = ['id', 'text', 'dense_vector']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for i in range(num_entities):
+                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
+                writer.writerow({
+                    'id': str(i),
+                    'text': f'sample text {i}',
+                    'dense_vector': vector_str
+                })
+
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should fail because allowInsertNonBM25FunctionOutputs is not enabled
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                reason = rsp['data'].get('reason', '').lower()
+                assert "function output" in reason
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed for non-BM25 function output field without property enabled"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_csv_with_non_bm25_function_output_allowed_with_property(self, tei_endpoint):
+        """Test CSV import with non-BM25 function output field succeeds after enabling property"""
+        name = gen_collection_name()
+        dim = 768
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "text_emb",
+                        "type": "TextEmbedding",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["dense_vector"],
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_load_completed(name)
+
+        # Enable allowInsertNonBM25FunctionOutputs
+        rsp = self.collection_client.alter_collection_properties(
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
+        assert rsp['code'] == 0
+
+        # Create CSV file with function output field
+        file_name = f"test_csv_non_bm25_fn_allowed_{uuid4()}.csv"
+        file_path = f"/tmp/{file_name}"
+
+        with open(file_path, 'w', newline='') as csvfile:
+            fieldnames = ['id', 'text', 'dense_vector']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for i in range(num_entities):
+                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
+                writer.writerow({
+                    'id': str(i),
+                    'text': f'sample text {i}',
+                    'dense_vector': vector_str
+                })
+
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should succeed
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+
+    def test_import_csv_without_non_bm25_function_output_field(self, tei_endpoint):
+        """Test CSV import without non-BM25 function output field - should succeed with auto-generation"""
+        name = gen_collection_name()
+        dim = 768
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "text_emb",
+                        "type": "TextEmbedding",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["dense_vector"],
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_load_completed(name)
+
+        # Create CSV file WITHOUT function output field
+        file_name = f"test_csv_no_non_bm25_fn_output_{uuid4()}.csv"
+        file_path = f"/tmp/{file_name}"
+
+        with open(file_path, 'w', newline='') as csvfile:
+            fieldnames = ['id', 'text']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for i in range(num_entities):
+                writer.writerow({
+                    'id': str(i),
+                    'text': f'sample text {i}'
+                })
+
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should succeed with TextEmbedding auto-generating dense vectors
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+
+    def test_import_parquet_with_non_bm25_function_output_rejected_by_default(self, tei_endpoint):
+        """Test Parquet import with non-BM25 function output field is rejected by default"""
+        name = gen_collection_name()
+        dim = 768
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "text_emb",
+                        "type": "TextEmbedding",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["dense_vector"],
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_load_completed(name)
+
+        # Create Parquet file with function output field
+        data = {
+            'id': list(range(num_entities)),
+            'text': [f'sample text {i}' for i in range(num_entities)],
+            'dense_vector': [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)]
+        }
+        df = pd.DataFrame(data)
+
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('text', pa.string()),
+            ('dense_vector', pa.list_(pa.float32()))
+        ])
+        file_name = f"test_parquet_non_bm25_fn_output_{uuid4()}.parquet"
+        file_path = f"/tmp/{file_name}"
+        table = pa.Table.from_pandas(df, schema=pa_schema)
+        pq.write_table(table, file_path)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should fail because allowInsertNonBM25FunctionOutputs is not enabled
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                reason = rsp['data'].get('reason', '').lower()
+                assert "function output" in reason
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed for non-BM25 function output field without property enabled"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_parquet_with_non_bm25_function_output_allowed_with_property(self, tei_endpoint):
+        """Test Parquet import with non-BM25 function output field succeeds after enabling property"""
+        name = gen_collection_name()
+        dim = 768
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "text_emb",
+                        "type": "TextEmbedding",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["dense_vector"],
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_load_completed(name)
+
+        # Enable allowInsertNonBM25FunctionOutputs
+        rsp = self.collection_client.alter_collection_properties(
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
+        assert rsp['code'] == 0
+
+        # Create Parquet file with function output field
+        data = {
+            'id': list(range(num_entities)),
+            'text': [f'sample text {i}' for i in range(num_entities)],
+            'dense_vector': [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)]
+        }
+        df = pd.DataFrame(data)
+
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('text', pa.string()),
+            ('dense_vector', pa.list_(pa.float32()))
+        ])
+        file_name = f"test_parquet_non_bm25_fn_allowed_{uuid4()}.parquet"
+        file_path = f"/tmp/{file_name}"
+        table = pa.Table.from_pandas(df, schema=pa_schema)
+        pq.write_table(table, file_path)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should succeed
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+
+    def test_import_parquet_without_non_bm25_function_output_field(self, tei_endpoint):
+        """Test Parquet import without non-BM25 function output field - should succeed with auto-generation"""
+        name = gen_collection_name()
+        dim = 768
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "text_emb",
+                        "type": "TextEmbedding",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["dense_vector"],
+                        "params": {"provider": "TEI", "endpoint": tei_endpoint}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_load_completed(name)
+
+        # Create Parquet file WITHOUT function output field
+        data = {
+            'id': list(range(num_entities)),
+            'text': [f'sample text {i}' for i in range(num_entities)]
+        }
+        df = pd.DataFrame(data)
+
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('text', pa.string())
+        ])
+        file_name = f"test_parquet_no_non_bm25_fn_output_{uuid4()}.parquet"
+        file_path = f"/tmp/{file_name}"
+        table = pa.Table.from_pandas(df, schema=pa_schema)
+        pq.write_table(table, file_path)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should succeed with TextEmbedding auto-generating dense vectors
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+
+    def test_import_json_bm25_output_rejected_even_with_property(self):
+        """Test JSON import with BM25 function output field is still rejected even with property enabled"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_function",
+                        "type": "BM25",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Enable property — should NOT affect BM25 output rejection
+        rsp = self.collection_client.alter_collection_properties(
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
+        assert rsp['code'] == 0
+
+        # Create JSON data with BM25 function output field
+        data = []
+        for i in range(num_entities):
+            data.append({
+                "id": i,
+                "text": f"sample text for BM25 {i}",
+                "sparse_vector": {"indices": [1, 2, 3], "values": [0.1, 0.2, 0.3]},
+                "dense_vector": [np.float32(random.random()) for _ in range(dim)]
+            })
+
+        file_name = f"test_bm25_output_with_property_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump(data, f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should still fail for BM25 output
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                reason = rsp['data'].get('reason', '').lower()
+                assert "bm25" in reason or "function output" in reason
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed for BM25 function output field"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_json_without_function_output_field(self):
+        """Test JSON import without function output field - BM25 should auto-generate"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_function",
+                        "type": "BM25",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create JSON data WITHOUT function output field
+        data = []
+        for i in range(num_entities):
+            data.append({
+                "id": i,
+                "text": f"sample text for document {i}",
+                "dense_vector": [np.float32(random.random()) for _ in range(dim)]
+            })
+
+        file_name = f"test_no_fn_output_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump(data, f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should succeed with BM25 auto-generating sparse vectors
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
 
     def test_import_csv_default_value_with_nullkey(self):
         """Test CSV import where default_value field has nullkey - should use default value"""
@@ -1831,6 +2616,985 @@ class TestCreateImportJob(TestBase):
         assert "name" in res[0]
         assert "extra_col1" not in res[0]
         assert "extra_col2" not in res[0]
+
+    def test_import_json_required_field_missing(self):
+        """Test JSON import with required field missing - should fail"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "required_text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create JSON data missing required_text field
+        data = []
+        for i in range(num_entities):
+            data.append({
+                "id": i,
+                "vector": [np.float32(random.random()) for _ in range(dim)]
+                # Missing required_text
+            })
+
+        file_name = f"test_required_missing_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump(data, f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should fail due to missing required field
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed due to missing required field"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_csv_required_field_missing(self):
+        """Test CSV import with required field missing from header - should fail"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "required_text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create CSV file missing required_text column
+        file_name = f"test_csv_required_missing_{uuid4()}.csv"
+        file_path = f"/tmp/{file_name}"
+
+        with open(file_path, 'w', newline='') as csvfile:
+            fieldnames = ['id', 'vector']  # Missing required_text
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for i in range(num_entities):
+                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
+                writer.writerow({
+                    'id': str(i),
+                    'vector': vector_str
+                })
+
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should fail due to missing required field
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed due to missing required field in CSV"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_parquet_required_field_missing(self):
+        """Test Parquet import with required field missing - should fail"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "required_text", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create Parquet file missing required_text column
+        data = {
+            'id': list(range(num_entities)),
+            'vector': [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)]
+            # Missing required_text
+        }
+        df = pd.DataFrame(data)
+
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('vector', pa.list_(pa.float32()))
+        ])
+        file_name = f"test_parquet_required_missing_{uuid4()}.parquet"
+        file_path = f"/tmp/{file_name}"
+        table = pa.Table.from_pandas(df, schema=pa_schema)
+        pq.write_table(table, file_path)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should fail due to missing required field
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed due to missing required field in Parquet"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_json_vector_dim_mismatch(self):
+        """Test JSON import with wrong vector dimension - should fail"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create JSON data with wrong vector dimension (64 instead of 128)
+        wrong_dim = 64
+        data = []
+        for i in range(num_entities):
+            data.append({
+                "id": i,
+                "vector": [np.float32(random.random()) for _ in range(wrong_dim)]
+            })
+
+        file_name = f"test_dim_mismatch_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump(data, f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should fail due to dimension mismatch
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                reason = rsp['data'].get('reason', '').lower()
+                assert "dim" in reason or "dimension" in reason or "mismatch" in reason
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed due to vector dimension mismatch"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_csv_vector_dim_mismatch(self):
+        """Test CSV import with wrong vector dimension - should fail"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create CSV file with wrong vector dimension
+        wrong_dim = 64
+        file_name = f"test_csv_dim_mismatch_{uuid4()}.csv"
+        file_path = f"/tmp/{file_name}"
+
+        with open(file_path, 'w', newline='') as csvfile:
+            fieldnames = ['id', 'vector']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for i in range(num_entities):
+                vector_str = '[' + ','.join([str(random.random()) for _ in range(wrong_dim)]) + ']'
+                writer.writerow({
+                    'id': str(i),
+                    'vector': vector_str
+                })
+
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should fail due to dimension mismatch
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                reason = rsp['data'].get('reason', '').lower()
+                assert "dim" in reason or "dimension" in reason or "mismatch" in reason
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed due to vector dimension mismatch in CSV"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_parquet_vector_dim_mismatch(self):
+        """Test Parquet import with wrong vector dimension - should fail"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create Parquet file with wrong vector dimension
+        wrong_dim = 64
+        data = {
+            'id': list(range(num_entities)),
+            'vector': [[np.float32(random.random()) for _ in range(wrong_dim)] for _ in range(num_entities)]
+        }
+        df = pd.DataFrame(data)
+
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('vector', pa.list_(pa.float32()))
+        ])
+        file_name = f"test_parquet_dim_mismatch_{uuid4()}.parquet"
+        file_path = f"/tmp/{file_name}"
+        table = pa.Table.from_pandas(df, schema=pa_schema)
+        pq.write_table(table, file_path)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should fail due to dimension mismatch
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                reason = rsp['data'].get('reason', '').lower()
+                assert "dim" in reason or "dimension" in reason or "mismatch" in reason
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed due to vector dimension mismatch in Parquet"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_parquet_with_nullable_and_default_fields(self):
+        """Test Parquet import with nullable and default fields missing - should auto-fill"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+        default_int_value = 999
+        default_varchar_value = "default_text"
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "nullable_int", "dataType": "Int64", "nullable": True},
+                    {"fieldName": "default_int", "dataType": "Int64", "defaultValue": default_int_value},
+                    {"fieldName": "nullable_varchar", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "256"}, "nullable": True},
+                    {"fieldName": "default_varchar", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "256"}, "defaultValue": default_varchar_value}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create Parquet file with only required fields (missing nullable and default fields)
+        data = {
+            'id': list(range(num_entities)),
+            'vector': [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)]
+        }
+        df = pd.DataFrame(data)
+
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('vector', pa.list_(pa.float32()))
+        ])
+        file_name = f"test_parquet_nullable_default_{uuid4()}.parquet"
+        file_path = f"/tmp/{file_name}"
+        table = pa.Table.from_pandas(df, schema=pa_schema)
+        pq.write_table(table, file_path)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should succeed
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+
+        # Verify nullable fields are null and default fields have default value
+        res = c.query(expr="id == 0", output_fields=["*"])
+        assert res[0]["nullable_int"] is None
+        assert res[0]["default_int"] == default_int_value
+        assert res[0]["nullable_varchar"] is None
+        assert res[0]["default_varchar"] == default_varchar_value
+
+    def test_import_json_extra_fields_with_dynamic(self):
+        """Test JSON import with extra fields when dynamic field is enabled - should be stored in dynamic"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create JSON data with extra fields
+        data = []
+        for i in range(num_entities):
+            data.append({
+                "id": i,
+                "vector": [np.float32(random.random()) for _ in range(dim)],
+                "extra_str": f"dynamic_value_{i}",
+                "extra_int": 1000 + i
+            })
+
+        file_name = f"test_json_dynamic_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump(data, f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+
+        # Verify dynamic fields are stored
+        res = c.query(expr="id == 0", output_fields=["extra_str", "extra_int"])
+        assert res[0]["extra_str"] == "dynamic_value_0"
+        assert res[0]["extra_int"] == 1000
+
+    def test_import_csv_extra_columns_with_dynamic(self):
+        """Test CSV import with extra columns when dynamic field is enabled - should be stored in dynamic"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create CSV file with extra columns
+        file_name = f"test_csv_dynamic_{uuid4()}.csv"
+        file_path = f"/tmp/{file_name}"
+
+        with open(file_path, 'w', newline='') as csvfile:
+            fieldnames = ['id', 'vector', 'extra_str', 'extra_int']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for i in range(num_entities):
+                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
+                writer.writerow({
+                    'id': str(i),
+                    'vector': vector_str,
+                    'extra_str': f'dynamic_value_{i}',
+                    'extra_int': str(1000 + i)
+                })
+
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+
+        # Verify dynamic fields are stored
+        res = c.query(expr="id == 0", output_fields=["extra_str", "extra_int"])
+        assert res[0]["extra_str"] == "dynamic_value_0"
+
+    def test_import_parquet_extra_fields_with_dynamic(self):
+        """Test Parquet import with $meta column when dynamic field is enabled - should be stored in dynamic.
+        Note: Unlike JSON/CSV, Parquet does NOT auto-collect extra columns into dynamic field.
+        Parquet only supports dynamic data via the special '$meta' column."""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create Parquet file with $meta column for dynamic fields
+        # Parquet requires using the special $meta column (JSON string) for dynamic data
+        data = {
+            'id': list(range(num_entities)),
+            'vector': [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)],
+            '$meta': [json.dumps({"extra_str": f"dynamic_value_{i}", "extra_int": 1000 + i}) for i in range(num_entities)]
+        }
+        df = pd.DataFrame(data)
+
+        file_name = f"test_parquet_dynamic_{uuid4()}.parquet"
+        file_path = f"/tmp/{file_name}"
+        df.to_parquet(file_path, engine='pyarrow')
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+
+        # Verify dynamic fields are stored via $meta
+        res = c.query(expr="id == 0", output_fields=["extra_str", "extra_int"])
+        assert res[0]["extra_str"] == "dynamic_value_0"
+        assert res[0]["extra_int"] == 1000
+
+    def test_import_csv_without_function_output_field(self):
+        """Test CSV import without BM25 function output field - should succeed with auto-generation"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_function",
+                        "type": "BM25",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create CSV file WITHOUT function output field
+        file_name = f"test_csv_no_fn_output_{uuid4()}.csv"
+        file_path = f"/tmp/{file_name}"
+
+        with open(file_path, 'w', newline='') as csvfile:
+            fieldnames = ['id', 'text', 'dense_vector']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for i in range(num_entities):
+                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
+                writer.writerow({
+                    'id': str(i),
+                    'text': f'sample text for document {i}',
+                    'dense_vector': vector_str
+                })
+
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should succeed with BM25 auto-generating sparse vectors
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+
+    def test_import_csv_bm25_output_rejected_even_with_property(self):
+        """Test CSV import with BM25 function output field is still rejected even with property enabled"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_function",
+                        "type": "BM25",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Enable property — should NOT affect BM25 output rejection
+        rsp = self.collection_client.alter_collection_properties(
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
+        assert rsp['code'] == 0
+
+        # Create CSV file with BM25 function output field
+        file_name = f"test_csv_bm25_with_property_{uuid4()}.csv"
+        file_path = f"/tmp/{file_name}"
+
+        with open(file_path, 'w', newline='') as csvfile:
+            fieldnames = ['id', 'text', 'sparse_vector', 'dense_vector']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for i in range(num_entities):
+                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
+                writer.writerow({
+                    'id': str(i),
+                    'text': f'sample text for BM25 {i}',
+                    'sparse_vector': '{"indices": [1, 2], "values": [0.1, 0.2]}',
+                    'dense_vector': vector_str
+                })
+
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should still fail for BM25 output
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                reason = rsp['data'].get('reason', '').lower()
+                assert "bm25" in reason or "function output" in reason
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed for BM25 function output field in CSV"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_parquet_with_function_output_field(self):
+        """Test Parquet import with BM25 function output field - should fail with error"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_function",
+                        "type": "BM25",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create Parquet file with BM25 function output field
+        # Use sparse vector as a map column in parquet
+        data = {
+            'id': list(range(num_entities)),
+            'text': [f'sample document {i}' for i in range(num_entities)],
+            'sparse_vector': [{"indices": [1, 2, 3], "values": [0.1, 0.2, 0.3]} for _ in range(num_entities)],
+            'dense_vector': [[random.random() for _ in range(dim)] for _ in range(num_entities)]
+        }
+
+        file_name = f"test_parquet_fn_output_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump([{k: data[k][i] for k in data} for i in range(num_entities)], f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should fail
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                reason = rsp['data'].get('reason', '').lower()
+                assert "not allowed to provide data for bm25 function output field" in reason or \
+                       "output by function" in reason or "function" in reason
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed for BM25 function output field in Parquet"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_parquet_without_function_output_field(self):
+        """Test Parquet import without BM25 function output field - should succeed with auto-generation"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_function",
+                        "type": "BM25",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Create Parquet file WITHOUT function output field
+        data = {
+            'id': list(range(num_entities)),
+            'text': [f'sample text for document {i}' for i in range(num_entities)],
+            'dense_vector': [[np.float32(random.random()) for _ in range(dim)] for _ in range(num_entities)]
+        }
+        df = pd.DataFrame(data)
+
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('text', pa.string()),
+            ('dense_vector', pa.list_(pa.float32()))
+        ])
+        file_name = f"test_parquet_no_fn_output_{uuid4()}.parquet"
+        file_path = f"/tmp/{file_name}"
+        table = pa.Table.from_pandas(df, schema=pa_schema)
+        pq.write_table(table, file_path)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should succeed with BM25 auto-generating sparse vectors
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+
+    def test_import_parquet_bm25_output_rejected_even_with_property(self):
+        """Test Parquet import with BM25 function output field is still rejected even with property enabled"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "256", "enable_analyzer": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_function",
+                        "type": "BM25",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+
+        # Enable property — should NOT affect BM25 output rejection
+        rsp = self.collection_client.alter_collection_properties(
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
+        assert rsp['code'] == 0
+
+        # Create JSON data with BM25 function output field (use JSON for easier sparse vector encoding)
+        data = []
+        for i in range(num_entities):
+            data.append({
+                "id": i,
+                "text": f"sample text for BM25 {i}",
+                "sparse_vector": {"indices": [1, 2, 3], "values": [0.1, 0.2, 0.3]},
+                "dense_vector": [np.float32(random.random()) for _ in range(dim)]
+            })
+
+        file_name = f"test_parquet_bm25_with_property_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump(data, f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+
+        # Import should still fail for BM25 output
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                reason = rsp['data'].get('reason', '').lower()
+                assert "bm25" in reason or "function output" in reason
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed for BM25 function output field"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
 
 
 @pytest.mark.L2

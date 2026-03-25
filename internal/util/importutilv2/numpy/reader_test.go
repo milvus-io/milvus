@@ -498,7 +498,7 @@ func TestNumpyCreateReaders(t *testing.T) {
 			{FieldID: 4, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
 		},
 		Functions: []*schemapb.FunctionSchema{
-			{Name: "bm25", InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse"}},
+			{Name: "bm25", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse"}},
 		},
 	}
 	_, err = CreateReaders(ctx, cm, schema, []string{"vec", "text"})
@@ -510,6 +510,7 @@ func TestNumpyCreateReaders(t *testing.T) {
 	_, err = CreateReaders(ctx, cm, schema, []string{"pk", "vec", "text"})
 	assert.Error(t, err)
 
+	// BM25 function output field is always rejected
 	_, err = CreateReaders(ctx, cm, schema, []string{"vec", "text", "sparse"})
 	assert.Error(t, err)
 
