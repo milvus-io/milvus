@@ -290,7 +290,7 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 		{
 			name:                "partition key isolation NOT equal",
 			expr:                "not(key_field == 10)",
-			expectedErrorString: "partition key isolation does not support NOT",
+			expectedErrorString: "partition key isolation does not support NotEqual",
 		},
 		{
 			name:                "partition key isolation equal AND with same field term",

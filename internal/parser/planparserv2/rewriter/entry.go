@@ -2,7 +2,6 @@ package rewriter
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -87,10 +86,13 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 
 func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 	// Handle NOT(TermExpr) before visiting child, so we can split not in → != and
+	// Skip bool types here — they are handled via visitTermExpr bool optimization + NOT simplification.
 	if expr.GetOp() == planpb.UnaryExpr_Not {
 		if te := expr.GetChild().GetTermExpr(); te != nil {
 			sortTermValues(te)
-			if !shouldUseInExprWithPK(te.GetColumnInfo().GetDataType(), len(te.GetValues()), te.GetColumnInfo().GetIsPrimaryKey()) {
+			if v.optimizeEnabled && effectiveDataType(te.GetColumnInfo()) == schemapb.DataType_Bool {
+				// Let bool NOT IN flow through to visitTermExpr for bool-specific optimization
+			} else if !shouldUseInExprWithPK(te.GetColumnInfo().GetDataType(), len(te.GetValues()), te.GetColumnInfo().GetIsPrimaryKey()) {
 				return splitTermToAndNotEquals(te)
 			}
 		}
