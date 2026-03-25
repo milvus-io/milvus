@@ -151,6 +151,11 @@ func reconstructArrayForStructArray(raw any, subFieldNames []string) (map[string
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid StructArray format in JSON, each row should be a key-value map, but got type %T", raw))
 	}
 
+	expectedFields := make(map[string]struct{}, len(subFieldNames))
+	for _, name := range subFieldNames {
+		expectedFields[name] = struct{}{}
+	}
+
 	buf := make(map[string][]any)
 	for i, elem := range rows {
 		row, ok := elem.(map[string]any)
@@ -159,10 +164,14 @@ func reconstructArrayForStructArray(raw any, subFieldNames []string) (map[string
 		}
 		if len(row) != len(subFieldNames) {
 			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("inconsistent fields in StructArray: element at index %d has %d fields, expected %d",
+				fmt.Sprintf("inconsistent field count in StructArray element: position=%d, actual=%d, expected=%d",
 					i, len(row), len(subFieldNames)))
 		}
 		for key, value := range row {
+			if _, ok := expectedFields[key]; !ok {
+				return nil, merr.WrapErrImportFailed(
+					fmt.Sprintf("unexpected field in StructArray element: field=%s, position=%d, expected fields=%v", key, i, subFieldNames))
+			}
 			buf[key] = append(buf[key], value)
 		}
 	}

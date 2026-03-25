@@ -332,6 +332,11 @@ func (r *StructFieldReader) readArrayOfVectorField(chunked *arrow.Chunked) (any,
 				var allVectors []float32
 				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
 					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
+					if int(vecEnd-vecStart) != r.dim {
+						return nil, nil, merr.WrapErrImportFailed(
+							fmt.Sprintf("vector dimension mismatch for field '%s': position=%d, actual=%d, expected=%d",
+								r.field.GetName(), structIdx, vecEnd-vecStart, r.dim))
+					}
 					for j := vecStart; j < vecEnd; j++ {
 						allVectors = append(allVectors, floatArr.Value(int(j)))
 					}
@@ -349,9 +354,15 @@ func (r *StructFieldReader) readArrayOfVectorField(chunked *arrow.Chunked) (any,
 					return nil, nil, merr.WrapErrImportFailed(
 						fmt.Sprintf("expected Uint8 array for Float16Vector field '%s', got %T", r.field.GetName(), fieldArray.ListValues()))
 				}
+				expectedBytes := int64(r.dim * 2)
 				var allVectors []byte
 				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
 					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
+					if vecEnd-vecStart != expectedBytes {
+						return nil, nil, merr.WrapErrImportFailed(
+							fmt.Sprintf("vector dimension mismatch for field '%s': position=%d, actual_bytes=%d, expected_bytes=%d",
+								r.field.GetName(), structIdx, vecEnd-vecStart, expectedBytes))
+					}
 					allVectors = append(allVectors, uint8Arr.Uint8Values()[vecStart:vecEnd]...)
 				}
 				result = append(result, &schemapb.VectorField{
@@ -367,9 +378,15 @@ func (r *StructFieldReader) readArrayOfVectorField(chunked *arrow.Chunked) (any,
 					return nil, nil, merr.WrapErrImportFailed(
 						fmt.Sprintf("expected Uint8 array for BFloat16Vector field '%s', got %T", r.field.GetName(), fieldArray.ListValues()))
 				}
+				expectedBytes := int64(r.dim * 2)
 				var allVectors []byte
 				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
 					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
+					if vecEnd-vecStart != expectedBytes {
+						return nil, nil, merr.WrapErrImportFailed(
+							fmt.Sprintf("vector dimension mismatch for field '%s': position=%d, actual_bytes=%d, expected_bytes=%d",
+								r.field.GetName(), structIdx, vecEnd-vecStart, expectedBytes))
+					}
 					allVectors = append(allVectors, uint8Arr.Uint8Values()[vecStart:vecEnd]...)
 				}
 				result = append(result, &schemapb.VectorField{
@@ -388,6 +405,11 @@ func (r *StructFieldReader) readArrayOfVectorField(chunked *arrow.Chunked) (any,
 				var allVectors []byte
 				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
 					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
+					if int(vecEnd-vecStart) != r.dim {
+						return nil, nil, merr.WrapErrImportFailed(
+							fmt.Sprintf("vector dimension mismatch for field '%s': position=%d, actual=%d, expected=%d",
+								r.field.GetName(), structIdx, vecEnd-vecStart, r.dim))
+					}
 					for j := vecStart; j < vecEnd; j++ {
 						allVectors = append(allVectors, byte(int8Arr.Value(int(j))))
 					}
@@ -405,9 +427,15 @@ func (r *StructFieldReader) readArrayOfVectorField(chunked *arrow.Chunked) (any,
 					return nil, nil, merr.WrapErrImportFailed(
 						fmt.Sprintf("expected Uint8 array for BinaryVector field '%s', got %T", r.field.GetName(), fieldArray.ListValues()))
 				}
+				expectedBytes := int64(r.dim / 8)
 				var allVectors []byte
 				for structIdx := startIdx; structIdx < endIdx; structIdx++ {
 					vecStart, vecEnd := fieldArray.ValueOffsets(int(structIdx))
+					if vecEnd-vecStart != expectedBytes {
+						return nil, nil, merr.WrapErrImportFailed(
+							fmt.Sprintf("vector dimension mismatch for field '%s': position=%d, actual_bytes=%d, expected_bytes=%d",
+								r.field.GetName(), structIdx, vecEnd-vecStart, expectedBytes))
+					}
 					allVectors = append(allVectors, uint8Arr.Uint8Values()[vecStart:vecEnd]...)
 				}
 				result = append(result, &schemapb.VectorField{

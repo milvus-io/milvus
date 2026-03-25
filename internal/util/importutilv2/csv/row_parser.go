@@ -182,14 +182,15 @@ func (r *rowParser) reconstructArrayForStructArray(structName string, subFieldsM
 		}
 		if len(dict) != expectedFieldCount {
 			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("inconsistent fields in StructArray: element at index %d has %d fields, expected %d",
+				fmt.Sprintf("inconsistent field count in StructArray element: position=%d, actual=%d, expected=%d",
 					i, len(dict), expectedFieldCount))
 		}
 		for key, value := range dict {
 			fieldName := typeutil.ConcatStructFieldName(structName, key)
 			_, ok := subFieldsMap[fieldName]
 			if !ok {
-				return nil, merr.WrapErrImportFailed(fmt.Sprintf("field %s not found", fieldName))
+				return nil, merr.WrapErrImportFailed(
+					fmt.Sprintf("unexpected field in StructArray element: field=%s, position=%d", fieldName, i))
 			}
 
 			flatStructs[fieldName] = append(flatStructs[fieldName], value)

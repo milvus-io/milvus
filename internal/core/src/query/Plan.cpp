@@ -51,7 +51,7 @@ ParsePlaceholderGroup(const Plan* plan,
         placeholder_group_blob.size());
 }
 
-bool
+static bool
 is_emb_list_placeholder(milvus::proto::common::PlaceholderType type) {
     using PHType = milvus::proto::common::PlaceholderType;
     return type == PHType::EmbListFloatVector ||
