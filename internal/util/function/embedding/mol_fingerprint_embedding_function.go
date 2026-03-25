@@ -156,29 +156,24 @@ func (f *MolFingerprintEmbeddingFunction) ProcessSearch(ctx context.Context, pla
 		return nil, fmt.Errorf("MolFingerprint supports up to [%d] pieces of data at a time, got [%d]", f.MaxBatch(), numRows)
 	}
 
-	// Convert SMILES to pickle and back to canonical SMILES to match storage path
-	// Storage: SMILES -> Pickle -> canonical SMILES -> fingerprint
-	// Search must follow the same path for consistency
-	canonicalSmilesList := make([]string, len(smilesList))
+	// Convert SMILES to pickle, then generate fingerprint directly from pickle.
+	// This ensures canonical consistency (same path as insert: SMILES → pickle → fingerprint)
+	// and avoids the extra pickle → SMILES → fingerprint round-trip.
+	pickleList := make([][]byte, len(smilesList))
 	for i, smiles := range smilesList {
 		if len(smiles) == 0 {
-			canonicalSmilesList[i] = ""
+			pickleList[i] = nil
 			continue
 		}
-		// Convert to pickle and back to get canonical SMILES
 		pickle, err := mol.ConvertSMILESToPickle(smiles)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert SMILES to pickle at index %d: %w", i, err)
 		}
-		canonical, err := mol.ConvertPickleToSMILES(pickle)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert pickle to canonical SMILES at index %d: %w", i, err)
-		}
-		canonicalSmilesList[i] = canonical
+		pickleList[i] = pickle
 	}
 
-	// Generate fingerprints using the runner with canonical SMILES
-	output, err := f.runner.BatchRun(canonicalSmilesList)
+	// Generate fingerprints directly from pickle data
+	output, err := f.runner.BatchRun(pickleList)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate fingerprints for search: %w", err)
 	}
