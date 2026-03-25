@@ -50,6 +50,19 @@ func normalizeMACCSFingerprint(fp []byte) []byte {
 	return normalized
 }
 
+// GenerateMACCSFingerprintFromPickle generates a MACCS fingerprint directly from pickle data
+func GenerateMACCSFingerprintFromPickle(pickle []byte) ([]byte, error) {
+	if len(pickle) == 0 {
+		return make([]byte, MACCSNumBytes), nil
+	}
+
+	fp, err := cgoGenerateMACCSFingerprintFromPickle(pickle)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeMACCSFingerprint(fp), nil
+}
+
 // MACCSFingerprintToFloatVector converts binary MACCS fingerprint to float32 vector
 // Each bit becomes 0.0 or 1.0
 func MACCSFingerprintToFloatVector(fingerprint []byte) []float32 {

@@ -18,6 +18,7 @@
 
 #include "common/FieldDataInterface.h"
 #include "common/Vector.h"
+#include "common/mol_c.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "segcore/SegmentInterface.h"
@@ -85,14 +86,20 @@ class PhyMolFunctionFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::MolFunctionFilterExpr> expr_;
-    // Cached query pickle (converted from SMILES once per segment)
-    std::string query_pickle_;
-    bool query_pickle_cached_ = false;
+    // Cached query molecule handle (parsed from SMILES once, reused across all rows)
+    MolHandle query_mol_ = nullptr;
     // Fingerprint pre-filter state
     std::vector<uint8_t> query_fingerprint_;
     bool query_fp_cached_ = false;
     TargetBitmap fp_candidates_;
     bool fp_candidates_cached_ = false;
+
+ public:
+    ~PhyMolFunctionFilterExpr() override {
+        if (query_mol_) {
+            FreeMolHandle(query_mol_);
+        }
+    }
 };
 }  //namespace exec
 }  // namespace milvus

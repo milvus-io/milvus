@@ -119,6 +119,98 @@ func cgoGeneratePatternFingerprint(smiles string, fingerprintSize int) ([]byte, 
 	return C.GoBytes(unsafe.Pointer(result.data), C.int(result.size)), nil
 }
 
+// cgoGenerateMorganFingerprintFromPickle calls the C++ RDKit implementation
+func cgoGenerateMorganFingerprintFromPickle(pickle []byte, radius int, fingerprintSize int) ([]byte, error) {
+	if len(pickle) == 0 {
+		return nil, fmt.Errorf("empty pickle data")
+	}
+
+	result := C.GenerateMorganFingerprintFromPickle((*C.uint8_t)(unsafe.Pointer(&pickle[0])), C.size_t(len(pickle)), C.int(radius), C.int(fingerprintSize))
+	defer C.FreeMolDataResult(&result)
+
+	if result.error_code != C.MOL_SUCCESS {
+		if result.error_msg != nil {
+			return nil, fmt.Errorf("Morgan fingerprint from pickle failed: %s", C.GoString(result.error_msg))
+		}
+		return nil, fmt.Errorf("Morgan fingerprint from pickle failed with error code: %d", result.error_code)
+	}
+
+	if result.data == nil || result.size == 0 {
+		return nil, fmt.Errorf("Morgan fingerprint from pickle returned empty result")
+	}
+
+	return C.GoBytes(unsafe.Pointer(result.data), C.int(result.size)), nil
+}
+
+// cgoGenerateMACCSFingerprintFromPickle calls the C++ RDKit implementation
+func cgoGenerateMACCSFingerprintFromPickle(pickle []byte) ([]byte, error) {
+	if len(pickle) == 0 {
+		return nil, fmt.Errorf("empty pickle data")
+	}
+
+	result := C.GenerateMACCSFingerprintFromPickle((*C.uint8_t)(unsafe.Pointer(&pickle[0])), C.size_t(len(pickle)))
+	defer C.FreeMolDataResult(&result)
+
+	if result.error_code != C.MOL_SUCCESS {
+		if result.error_msg != nil {
+			return nil, fmt.Errorf("MACCS fingerprint from pickle failed: %s", C.GoString(result.error_msg))
+		}
+		return nil, fmt.Errorf("MACCS fingerprint from pickle failed with error code: %d", result.error_code)
+	}
+
+	if result.data == nil || result.size == 0 {
+		return nil, fmt.Errorf("MACCS fingerprint from pickle returned empty result")
+	}
+
+	return C.GoBytes(unsafe.Pointer(result.data), C.int(result.size)), nil
+}
+
+// cgoGenerateRDKitFingerprintFromPickle calls the C++ RDKit implementation
+func cgoGenerateRDKitFingerprintFromPickle(pickle []byte, minPath int, maxPath int, fingerprintSize int) ([]byte, error) {
+	if len(pickle) == 0 {
+		return nil, fmt.Errorf("empty pickle data")
+	}
+
+	result := C.GenerateRDKitFingerprintFromPickle((*C.uint8_t)(unsafe.Pointer(&pickle[0])), C.size_t(len(pickle)), C.int(minPath), C.int(maxPath), C.int(fingerprintSize))
+	defer C.FreeMolDataResult(&result)
+
+	if result.error_code != C.MOL_SUCCESS {
+		if result.error_msg != nil {
+			return nil, fmt.Errorf("RDKit fingerprint from pickle failed: %s", C.GoString(result.error_msg))
+		}
+		return nil, fmt.Errorf("RDKit fingerprint from pickle failed with error code: %d", result.error_code)
+	}
+
+	if result.data == nil || result.size == 0 {
+		return nil, fmt.Errorf("RDKit fingerprint from pickle returned empty result")
+	}
+
+	return C.GoBytes(unsafe.Pointer(result.data), C.int(result.size)), nil
+}
+
+// cgoGeneratePatternFingerprintFromPickle calls the C++ RDKit implementation
+func cgoGeneratePatternFingerprintFromPickle(pickle []byte, fingerprintSize int) ([]byte, error) {
+	if len(pickle) == 0 {
+		return nil, fmt.Errorf("empty pickle data")
+	}
+
+	result := C.GeneratePatternFingerprintFromPickle((*C.uint8_t)(unsafe.Pointer(&pickle[0])), C.size_t(len(pickle)), C.int(fingerprintSize))
+	defer C.FreeMolDataResult(&result)
+
+	if result.error_code != C.MOL_SUCCESS {
+		if result.error_msg != nil {
+			return nil, fmt.Errorf("Pattern fingerprint from pickle failed: %s", C.GoString(result.error_msg))
+		}
+		return nil, fmt.Errorf("Pattern fingerprint from pickle failed with error code: %d", result.error_code)
+	}
+
+	if result.data == nil || result.size == 0 {
+		return nil, fmt.Errorf("Pattern fingerprint from pickle returned empty result")
+	}
+
+	return C.GoBytes(unsafe.Pointer(result.data), C.int(result.size)), nil
+}
+
 // cgoConvertSMILESToPickle converts SMILES to RDKit pickle format
 func cgoConvertSMILESToPickle(smiles string) ([]byte, error) {
 	cSmiles := C.CString(smiles)

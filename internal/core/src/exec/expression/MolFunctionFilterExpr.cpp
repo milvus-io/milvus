@@ -138,7 +138,10 @@ PhyMolFunctionFilterExpr::SearchFingerprintIndex() {
     fp_candidates_.resize(active_count_);
     fp_candidates_.reset();
 
-    TryMolPatternIndex();
+    if (!TryMolPatternIndex()) {
+        // No index available — conservatively mark all rows as candidates
+        fp_candidates_.set();
+    }
     fp_candidates_cached_ = true;
 }
 
@@ -154,16 +157,14 @@ PhyMolFunctionFilterExpr::EvalForDataSegment() {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
 
-    // Cache query pickle from SMILES (once per segment)
-    if (!query_pickle_cached_) {
-        auto result = ConvertSMILESToPickle(expr_->smiles_.c_str());
-        AssertInfo(result.error_code == MOL_SUCCESS,
-                   "Failed to convert query SMILES to pickle: {}",
-                   result.error_msg ? result.error_msg : "unknown error");
-        query_pickle_.assign(reinterpret_cast<const char*>(result.data),
-                             result.size);
-        FreeMolDataResult(&result);
-        query_pickle_cached_ = true;
+    // Cache query molecule handle from SMILES (once, reused across all rows)
+    if (!query_mol_) {
+        query_mol_ = ParseSMILESToMol(expr_->smiles_.c_str());
+        if (!query_mol_) {
+            ThrowInfo(ErrorCode::InvalidArgument,
+                      "Invalid SMILES in mol_contains: \"{}\"",
+                      expr_->smiles_);
+        }
     }
 
     // Run fingerprint pre-filter once per segment
@@ -211,18 +212,17 @@ PhyMolFunctionFilterExpr::EvalForDataSegment() {
             const auto* row_data =
                 reinterpret_cast<const uint8_t*>(data[i].data());
             auto row_size = data[i].size();
-            const auto* query_data =
-                reinterpret_cast<const uint8_t*>(query_pickle_.data());
-            auto query_size = query_pickle_.size();
 
             int match_result;
             if (expr_->op_ ==
                 proto::plan::MolFunctionFilterExpr_MolOp_Substructure) {
-                match_result = HasSubstructMatch(
-                    row_data, row_size, query_data, query_size);
+                // row molecule contains query substructure
+                match_result = HasSubstructMatchWithQuery(
+                    row_data, row_size, query_mol_);
             } else {
-                match_result = HasSubstructMatch(
-                    query_data, query_size, row_data, row_size);
+                // query molecule contains row substructure
+                match_result = HasSubstructMatchWithMol(
+                    query_mol_, row_data, row_size);
             }
             res[i] = (match_result == 1);
             global_offset++;

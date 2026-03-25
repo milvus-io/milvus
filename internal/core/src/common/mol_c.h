@@ -68,17 +68,62 @@ MolDataResult GenerateRDKitFingerprint(const char* smiles, int min_path, int max
 // Returns MolDataResult with binary fingerprint on success, or error on failure
 MolDataResult GeneratePatternFingerprint(const char* smiles, int fingerprint_size);
 
+// Generate Morgan fingerprint from pickle data
+// pickle_data: molecule in pickle format
+// pickle_size: size of pickle data
+// radius: fingerprint radius (e.g., 2)
+// fingerprint_size: number of bits (e.g., 2048)
+MolDataResult GenerateMorganFingerprintFromPickle(const uint8_t* pickle_data, size_t pickle_size, int radius, int fingerprint_size);
+
+// Generate MACCS fingerprint from pickle data
+// pickle_data: molecule in pickle format
+// pickle_size: size of pickle data
+MolDataResult GenerateMACCSFingerprintFromPickle(const uint8_t* pickle_data, size_t pickle_size);
+
+// Generate RDKit fingerprint from pickle data
+// pickle_data: molecule in pickle format
+// pickle_size: size of pickle data
+// min_path: minimum path length (e.g., 1)
+// max_path: maximum path length (e.g., 7)
+// fingerprint_size: number of bits (e.g., 2048)
+MolDataResult GenerateRDKitFingerprintFromPickle(const uint8_t* pickle_data, size_t pickle_size, int min_path, int max_path, int fingerprint_size);
+
 // Generate RDKit pattern fingerprint from pickle data (recommended for substructure screening)
 // pickle_data: molecule in pickle format
 // pickle_size: size of pickle data
 // fingerprint_size: number of bits (e.g., 2048)
-// Returns MolDataResult with binary fingerprint on success, or error on failure
 MolDataResult GeneratePatternFingerprintFromPickle(const uint8_t* pickle_data, size_t pickle_size, int fingerprint_size);
 
 // Check substructure match between two molecules in pickle format
 // Returns: 1=match, 0=no match, negative=error
 int HasSubstructMatch(const uint8_t* mol_pickle, size_t mol_size,
                       const uint8_t* query_pickle, size_t query_size);
+
+// Opaque molecule handle for reuse across multiple substructure matches.
+// Avoids repeated pickle deserialization when matching one query against many rows.
+typedef void* MolHandle;
+
+// Parse a SMILES string into a persistent molecule handle.
+// Returns NULL on failure. Caller must free with FreeMolHandle.
+MolHandle ParseSMILESToMol(const char* smiles);
+
+// Parse pickle binary data into a persistent molecule handle.
+// Returns NULL on failure. Caller must free with FreeMolHandle.
+MolHandle ParsePickleToMol(const uint8_t* pickle_data, size_t pickle_size);
+
+// Free a molecule handle created by ParseSMILESToMol or ParsePickleToMol.
+void FreeMolHandle(MolHandle handle);
+
+// Check substructure match: mol (pickle) contains query (handle).
+// The query handle is pre-parsed to avoid repeated deserialization.
+// Returns: 1=match, 0=no match, negative=error
+int HasSubstructMatchWithQuery(const uint8_t* mol_pickle, size_t mol_size,
+                               MolHandle query_handle);
+
+// Check substructure match: query (handle) contains mol (pickle).
+// Returns: 1=match, 0=no match, negative=error
+int HasSubstructMatchWithMol(MolHandle mol_handle,
+                             const uint8_t* query_pickle, size_t query_size);
 
 #ifdef __cplusplus
 }
