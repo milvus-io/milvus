@@ -195,6 +195,101 @@ func TestSalvageCheckpointNotCapturedWhenAlreadyPrimary(t *testing.T) {
 	assert.Empty(t, rm.GetSalvageCheckpoint())
 }
 
+func TestSalvageCheckpointLoadedFromEtcd(t *testing.T) {
+	// Simulate WAL recovery where salvage checkpoints were previously persisted to etcd
+	// and loaded back into the ReplicateManagerRecoverParam.
+	preLoaded := []*utility.ReplicateCheckpoint{
+		{ClusterID: "cluster-a", PChannel: "cluster-a-rootcoord-dml_0", TimeTick: 100},
+		{ClusterID: "cluster-b", PChannel: "cluster-b-rootcoord-dml_0", TimeTick: 200},
+	}
+
+	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			Checkpoint: &utility.WALCheckpoint{
+				MessageID:       walimplstest.NewTestMessageID(1),
+				TimeTick:        1,
+				ReplicateConfig: newReplicateConfiguration("test1", "test2"),
+			},
+		},
+		SalvageCheckpoints: preLoaded,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
+
+	salvageCPs := rm.GetSalvageCheckpoint()
+	assert.Len(t, salvageCPs, 2)
+
+	byCluster := make(map[string]*utility.ReplicateCheckpoint, 2)
+	for _, cp := range salvageCPs {
+		byCluster[cp.ClusterID] = cp
+	}
+	assert.Equal(t, uint64(100), byCluster["cluster-a"].TimeTick)
+	assert.Equal(t, "cluster-a-rootcoord-dml_0", byCluster["cluster-a"].PChannel)
+	assert.Equal(t, uint64(200), byCluster["cluster-b"].TimeTick)
+	assert.Equal(t, "cluster-b-rootcoord-dml_0", byCluster["cluster-b"].PChannel)
+}
+
+func TestSalvageCheckpointMultipleForcePromotes(t *testing.T) {
+	// Start as secondary of cluster-a, force promote to primary,
+	// then become secondary of cluster-b, force promote again.
+	// Both salvage checkpoints should accumulate (keyed by source cluster).
+	txnBuffer := utility.NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	rm, err := RecoverReplicateManager(&ReplicateManagerRecoverParam{
+		ChannelInfo:      types.PChannelInfo{Name: "test1-rootcoord-dml_0", Term: 1},
+		CurrentClusterID: "test1",
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{
+			Checkpoint: &utility.WALCheckpoint{
+				MessageID: walimplstest.NewTestMessageID(1),
+				TimeTick:  1,
+				ReplicateCheckpoint: &utility.ReplicateCheckpoint{
+					ClusterID: "cluster-a",
+					PChannel:  "cluster-a-rootcoord-dml_0",
+					MessageID: walimplstest.NewTestMessageID(10),
+					TimeTick:  100,
+				},
+				ReplicateConfig: newReplicateConfiguration("cluster-a", "test1"),
+			},
+			TxnBuffer: txnBuffer,
+		},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RoleSecondary, rm.Role())
+	assert.Empty(t, rm.GetSalvageCheckpoint())
+
+	// First force promote: secondary(cluster-a) -> primary
+	err = rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessageWithForcePromote("test1", true, "cluster-a"))
+	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
+	cps := rm.GetSalvageCheckpoint()
+	assert.Len(t, cps, 1)
+	assert.Equal(t, "cluster-a", cps[0].ClusterID)
+
+	// Now become secondary of cluster-b
+	err = rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessage("cluster-b", "test1"))
+	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RoleSecondary, rm.Role())
+
+	// Still one salvage checkpoint from first promote
+	assert.Len(t, rm.GetSalvageCheckpoint(), 1)
+
+	// Second force promote: secondary(cluster-b) -> primary
+	err = rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessageWithForcePromote("test1", true, "cluster-b"))
+	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
+
+	// Both salvage checkpoints should now be present
+	cps = rm.GetSalvageCheckpoint()
+	assert.Len(t, cps, 2)
+	byCluster := make(map[string]*utility.ReplicateCheckpoint, 2)
+	for _, cp := range cps {
+		byCluster[cp.ClusterID] = cp
+	}
+	assert.Contains(t, byCluster, "cluster-a")
+	assert.Contains(t, byCluster, "cluster-b")
+}
+
 func TestSecondaryReplicateManagerWithTxn(t *testing.T) {
 	txnBuffer := utility.NewTxnBuffer(log.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 	txnMsgs := newReplicateTxnMessage("test1", "test2", 2)
