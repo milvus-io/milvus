@@ -260,7 +260,7 @@ BUILD_TIME = $(shell date -u)
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
 GO_VERSION = $(shell go version)
 BUILD_DATE = $(shell date -u +%Y%m%d)
-MILVUS_VERSION := $(shell tag=$$(git describe --exact-match --tags 2>/dev/null) && echo "$$tag" | sed 's/^v//' || echo "$(GIT_BRANCH_SAFE)-$(BUILD_DATE)-$(GIT_COMMIT)")
+MILVUS_VERSION := $(shell tag=$$(git describe --exact-match --tags --match 'v*' 2>/dev/null) && echo "$$tag" | sed 's/^v//' || echo "$(GIT_BRANCH_SAFE)-$(BUILD_DATE)-$(GIT_COMMIT)")
 
 print-build-info:
 	@echo "Build Tag: $(BUILD_TAGS)"
