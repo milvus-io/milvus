@@ -243,10 +243,13 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 		return err
 	}
 
-	// Verify the CAS actually succeeded before dropping segments.
+	// Read back to check if our CAS actually applied.
+	// UpdateJob holds the mutex, so the in-memory state after it returns reflects
+	// whether the CAS fired (state matched 'from') or was a no-op (state had already
+	// changed before this goroutine acquired the lock).
 	updated := c.importMeta.GetJob(ctx, jobID)
 	if updated == nil || updated.GetState() != internalpb.ImportJobState_Failed {
-		log.Ctx(ctx).Info("RollbackImport: CAS did not apply (concurrent state change), skipping segment drop",
+		log.Ctx(ctx).Info("RollbackImport CAS was no-op (state changed before lock acquired), skipping segment drop",
 			zap.Int64("jobID", jobID))
 		return nil
 	}
@@ -256,8 +259,8 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 }
 
 // dropImportJobSegments marks all segments belonging to the given import job as Dropped.
-func (s *Server) dropImportJobSegments(ctx context.Context, jobID int64) error {
-	tasks := s.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
+func (c *DDLCallbacks) dropImportJobSegments(ctx context.Context, jobID int64) error {
+	tasks := c.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
 	for _, task := range tasks {
 		it, ok := task.(*importTask)
 		if !ok {
@@ -267,14 +270,14 @@ func (s *Server) dropImportJobSegments(ctx context.Context, jobID int64) error {
 		candidates = append(candidates, it.GetSegmentIDs()...)
 		candidates = append(candidates, it.GetSortedSegmentIDs()...)
 		for _, segID := range candidates {
-			seg := s.meta.GetSegment(ctx, segID)
+			seg := c.meta.GetSegment(ctx, segID)
 			if seg == nil {
 				continue
 			}
 			if seg.GetState() == commonpb.SegmentState_Dropped {
 				continue
 			}
-			if err := s.meta.SetState(ctx, segID, commonpb.SegmentState_Dropped); err != nil {
+			if err := c.meta.SetState(ctx, segID, commonpb.SegmentState_Dropped); err != nil {
 				log.Ctx(ctx).Warn("failed to drop import segment during rollback",
 					zap.Int64("jobID", jobID),
 					zap.Int64("segmentID", segID),
@@ -284,16 +287,4 @@ func (s *Server) dropImportJobSegments(ctx context.Context, jobID int64) error {
 		}
 	}
 	return nil
-}
-
-// UpdateJobStateWithCAS returns an UpdateJobAction that transitions from→to only
-// if the current state matches 'from'. If the state has already changed (race:
-// abort won before commit, or commit won before abort), this is a no-op.
-func UpdateJobStateWithCAS(from, to internalpb.ImportJobState) UpdateJobAction {
-	return func(job ImportJob) {
-		if job.GetState() != from {
-			return
-		}
-		job.(*importJob).ImportJob.State = to
-	}
 }

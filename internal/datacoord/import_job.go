@@ -98,6 +98,21 @@ func UpdateJobCompleteTime(completeTime string) UpdateJobAction {
 	}
 }
 
+// UpdateJobStateWithCAS returns an UpdateJobAction that transitions from→to only
+// if the current state matches 'from'. If the state has already changed (race:
+// abort won before commit, or commit won before abort), this is a no-op.
+// It delegates to UpdateJobState so all terminal-state side effects (CleanupTs,
+// RequestedDiskSize reset, etc.) are applied correctly.
+func UpdateJobStateWithCAS(from, to internalpb.ImportJobState) UpdateJobAction {
+	return func(job ImportJob) {
+		if job.GetState() != from {
+			return // CAS guard: state already changed, no-op
+		}
+		// Delegate to UpdateJobState to include all side effects (CleanupTs, RequestedDiskSize, etc.)
+		UpdateJobState(to)(job)
+	}
+}
+
 type ImportJob interface {
 	GetJobID() int64
 	GetCollectionID() int64
