@@ -231,12 +231,19 @@ func TestBalancer(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, doneErr)
 
-	// Verify GetAllStreamingNodes filters out frozen node 1.
-	nodes, err := b.GetAllStreamingNodes(ctx)
+	// Verify GetAvailableStreamingNodes filters out frozen node 1.
+	nodes, err := b.GetAvailableStreamingNodes(ctx)
 	assert.NoError(t, err)
 	assert.NotContains(t, nodes, int64(1))
 	assert.Contains(t, nodes, int64(2))
 	assert.Contains(t, nodes, int64(3))
+
+	// Verify GetAllStreamingNodes still returns all nodes including frozen.
+	allNodes, err := b.GetAllStreamingNodes(ctx)
+	assert.NoError(t, err)
+	assert.Contains(t, allNodes, int64(1))
+	assert.Contains(t, allNodes, int64(2))
+	assert.Contains(t, allNodes, int64(3))
 
 	resp, err = b.UpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{
 		Config: &streamingpb.WALBalancePolicyConfig{
@@ -269,8 +276,8 @@ func TestBalancer(t *testing.T) {
 	assert.NoError(t, err)
 	b.Trigger(ctx)
 
-	// Verify GetAllStreamingNodes returns all nodes after defreeze.
-	nodes, err = b.GetAllStreamingNodes(ctx)
+	// Verify GetAvailableStreamingNodes returns all nodes after defreeze.
+	nodes, err = b.GetAvailableStreamingNodes(ctx)
 	assert.NoError(t, err)
 	assert.Contains(t, nodes, int64(1))
 	assert.Contains(t, nodes, int64(2))

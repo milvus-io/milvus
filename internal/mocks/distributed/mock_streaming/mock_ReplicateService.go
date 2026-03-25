@@ -7,9 +7,9 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 

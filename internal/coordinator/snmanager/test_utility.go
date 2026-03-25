@@ -29,5 +29,6 @@ func ResetDoNothingStreamingNodeManager(t *testing.T) {
 		return ctx.Err()
 	}).Maybe()
 	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{}, nil).Maybe()
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{}, nil).Maybe()
 	balance.Register(b)
 }
