@@ -77,13 +77,19 @@ func NewCredentialProvider() minioCred.Provider {
 	return globalCredProvider
 }
 
+// iamTokenCreator is the subset of *iam.IamClient used by HuaweiCredentialProvider.
+// It is defined as an interface to allow substitution in tests.
+type iamTokenCreator interface {
+	CreateTemporaryAccessKeyByToken(request *model.CreateTemporaryAccessKeyByTokenRequest) (*model.CreateTemporaryAccessKeyByTokenResponse, error)
+}
+
 type HuaweiCredentialProvider struct {
 	credentials minioCred.Value
 	expiration  time.Time
 
 	basicCred auth.ICredential
 	regionObj *region.Region
-	iamClient *iam.IamClient
+	iamClient iamTokenCreator
 
 	mu     sync.Mutex
 	inited bool

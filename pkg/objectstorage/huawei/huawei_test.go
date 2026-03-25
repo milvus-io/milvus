@@ -5,10 +5,34 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
+	"github.com/huaweicloud/huaweicloud-sdk-go-v3/services/iam/v3/model"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// mockIAMClient implements iamTokenCreator for unit tests.
+type mockIAMClient struct {
+	response *model.CreateTemporaryAccessKeyByTokenResponse
+	err      error
+}
+
+func (m *mockIAMClient) CreateTemporaryAccessKeyByToken(
+	_ *model.CreateTemporaryAccessKeyByTokenRequest,
+) (*model.CreateTemporaryAccessKeyByTokenResponse, error) {
+	return m.response, m.err
+}
+
+func makeFullCredential(ak, sk, token, expiresAt string) *model.Credential {
+	return &model.Credential{
+		Access:        ak,
+		Secret:        sk,
+		Securitytoken: token,
+		ExpiresAt:     expiresAt,
+	}
+}
 
 const OBSDefaultAddress = "obs.cn-east-3.myhuaweicloud.com"
 
@@ -296,4 +320,161 @@ func TestHuaweiCredentialProvider_RetrieveCooldown(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "cooldown")
 	})
+}
+
+// TestNewMinioClient_NilOpts covers the opts==nil branch in NewMinioClient.
+func TestNewMinioClient_NilOpts(t *testing.T) {
+	client, err := NewMinioClient(OBSDefaultAddress+":443", nil)
+	require.NoError(t, err)
+	assert.Equal(t, OBSDefaultAddress+":443", client.EndpointURL().Host)
+}
+
+func TestHuaweiCredentialProvider_Retrieve_STSError_WithCachedCreds(t *testing.T) {
+	c := &HuaweiCredentialProvider{
+		inited: true,
+		iamClient: &mockIAMClient{
+			err: errors.New("STS network error"),
+		},
+		credentials: credentials.Value{
+			AccessKeyID:     "CACHED_AK",
+			SecretAccessKey: "CACHED_SK",
+			SessionToken:    "CACHED_TOKEN",
+			SignerType:      credentials.SignatureV4,
+		},
+		expiration: time.Now().UTC().Add(1 * time.Minute),
+	}
+
+	val, err := c.Retrieve()
+	require.NoError(t, err)
+	assert.Equal(t, "CACHED_AK", val.AccessKeyID)
+	assert.True(t, c.lastReloadFailed)
+}
+
+func TestHuaweiCredentialProvider_Retrieve_STSError_NoCachedCreds(t *testing.T) {
+	c := &HuaweiCredentialProvider{
+		inited: true,
+		iamClient: &mockIAMClient{
+			err: errors.New("STS network error"),
+		},
+	}
+
+	_, err := c.Retrieve()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create temporary access key")
+	assert.True(t, c.lastReloadFailed)
+}
+
+func TestHuaweiCredentialProvider_Retrieve_NilCredential_NoCachedCreds(t *testing.T) {
+	c := &HuaweiCredentialProvider{
+		inited: true,
+		iamClient: &mockIAMClient{
+			response: &model.CreateTemporaryAccessKeyByTokenResponse{
+				Credential: nil,
+			},
+		},
+	}
+
+	_, err := c.Retrieve()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "incomplete credential")
+}
+
+func TestHuaweiCredentialProvider_Retrieve_NilCredential_WithCachedCreds(t *testing.T) {
+	c := &HuaweiCredentialProvider{
+		inited: true,
+		iamClient: &mockIAMClient{
+			response: &model.CreateTemporaryAccessKeyByTokenResponse{
+				Credential: nil,
+			},
+		},
+		credentials: credentials.Value{
+			AccessKeyID:     "CACHED_AK",
+			SecretAccessKey: "CACHED_SK",
+			SessionToken:    "CACHED_TOKEN",
+			SignerType:      credentials.SignatureV4,
+		},
+		expiration: time.Now().UTC().Add(1 * time.Minute),
+	}
+
+	val, err := c.Retrieve()
+	require.NoError(t, err)
+	assert.Equal(t, "CACHED_AK", val.AccessKeyID)
+}
+
+func TestHuaweiCredentialProvider_Retrieve_BadExpiration_NoCachedCreds(t *testing.T) {
+	c := &HuaweiCredentialProvider{
+		inited: true,
+		iamClient: &mockIAMClient{
+			response: &model.CreateTemporaryAccessKeyByTokenResponse{
+				Credential: makeFullCredential("AK", "SK", "TOKEN", "NOT-A-DATE"),
+			},
+		},
+	}
+
+	_, err := c.Retrieve()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse expiration time")
+}
+
+func TestHuaweiCredentialProvider_Retrieve_BadExpiration_WithCachedCreds(t *testing.T) {
+	c := &HuaweiCredentialProvider{
+		inited: true,
+		iamClient: &mockIAMClient{
+			response: &model.CreateTemporaryAccessKeyByTokenResponse{
+				Credential: makeFullCredential("AK", "SK", "TOKEN", "NOT-A-DATE"),
+			},
+		},
+		credentials: credentials.Value{
+			AccessKeyID:     "CACHED_AK",
+			SecretAccessKey: "CACHED_SK",
+			SessionToken:    "CACHED_TOKEN",
+			SignerType:      credentials.SignatureV4,
+		},
+		expiration: time.Now().UTC().Add(1 * time.Minute),
+	}
+
+	val, err := c.Retrieve()
+	require.NoError(t, err)
+	assert.Equal(t, "CACHED_AK", val.AccessKeyID)
+}
+
+func TestHuaweiCredentialProvider_Retrieve_Success(t *testing.T) {
+	futureExpiry := time.Now().UTC().Add(2 * time.Hour).Format(time.RFC3339)
+	c := &HuaweiCredentialProvider{
+		inited: true,
+		iamClient: &mockIAMClient{
+			response: &model.CreateTemporaryAccessKeyByTokenResponse{
+				Credential: makeFullCredential("NEW_AK", "NEW_SK", "NEW_TOKEN", futureExpiry),
+			},
+		},
+	}
+
+	val, err := c.Retrieve()
+	require.NoError(t, err)
+	assert.Equal(t, "NEW_AK", val.AccessKeyID)
+	assert.Equal(t, "NEW_SK", val.SecretAccessKey)
+	assert.Equal(t, "NEW_TOKEN", val.SessionToken)
+	assert.Equal(t, credentials.SignatureV4, val.SignerType)
+	assert.Equal(t, "NEW_AK", c.credentials.AccessKeyID)
+	assert.False(t, c.expiration.IsZero())
+	assert.False(t, c.lastReloadFailed)
+	assert.Equal(t, int64(1), c.stsSuccessCount.Load())
+}
+
+func TestHuaweiCredentialProvider_Retrieve_CacheHitAfterSuccess(t *testing.T) {
+	futureExpiry := time.Now().UTC().Add(2 * time.Hour).Format(time.RFC3339)
+	mc := &mockIAMClient{
+		response: &model.CreateTemporaryAccessKeyByTokenResponse{
+			Credential: makeFullCredential("AK", "SK", "TOKEN", futureExpiry),
+		},
+	}
+
+	c := &HuaweiCredentialProvider{inited: true, iamClient: mc}
+
+	_, err := c.Retrieve()
+	require.NoError(t, err)
+
+	// Second call: expiration is 2h away, well past the 3min grace — should hit cache
+	_, err = c.Retrieve()
+	require.NoError(t, err)
 }
