@@ -275,3 +275,35 @@ TEST_F(MvccFastPathTest, TimestampGuard_CurrentQueryTs_TakesFastPath) {
     EXPECT_TRUE(result.all_rows_visible)
         << "query_timestamp >= max_insert_timestamp should trigger fast path";
 }
+
+// ---------------------------------------------------------------------------
+// Regression: sequential Level 1 queries must not share mutable bitmap state.
+// A downstream operator (e.g. ElementFilterBitsNode) may flip() the bitmap
+// in-place.  The second query must still see a clean all-zero bitmap.
+// ---------------------------------------------------------------------------
+TEST_F(MvccFastPathTest, Level1_NoCachePollution_SequentialQueries) {
+    auto segment = CreateSealedSegment();
+
+    // First query – Level 1
+    auto result1 = RunMvccPlan(segment.get());
+    ASSERT_TRUE(result1.all_rows_visible);
+    auto col1 =
+        std::dynamic_pointer_cast<ColumnVector>(result1.output->child(0));
+    ASSERT_NE(col1, nullptr);
+    TargetBitmapView view1(col1->GetRawData(), col1->size());
+    EXPECT_EQ(view1.count(), 0);
+
+    // Simulate downstream mutation (ElementFilterBitsNode does doc_bitset.flip)
+    view1.flip();
+    EXPECT_EQ(view1.count(), N_);
+
+    // Second query on the same thread – must NOT see the flipped bits
+    auto result2 = RunMvccPlan(segment.get());
+    ASSERT_TRUE(result2.all_rows_visible);
+    auto col2 =
+        std::dynamic_pointer_cast<ColumnVector>(result2.output->child(0));
+    ASSERT_NE(col2, nullptr);
+    TargetBitmapView view2(col2->GetRawData(), col2->size());
+    EXPECT_EQ(view2.count(), 0)
+        << "Second query must return clean bitmap, not polluted cache";
+}

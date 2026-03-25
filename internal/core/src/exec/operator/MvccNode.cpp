@@ -88,22 +88,9 @@ PhyMvccNode::GetOutput() {
             is_finished_ = true;
             query_context->set_all_rows_visible(true);
 
-            // Reuse thread-local zero bitmap to avoid per-query allocation.
-            // INVARIANT: This cached bitmap is never read by downstream operators.
-            // all_rows_visible=true causes VectorSearchNode to use empty BitsetView
-            // directly, bypassing this bitmap entirely. The cache exists only to
-            // satisfy the Operator interface (GetOutput must return non-null
-            // RowVectorPtr with size>0).
-            thread_local int64_t cached_size = 0;
-            thread_local RowVectorPtr cached_output;
-            if (cached_size != active_count_) {
-                auto col = std::make_shared<ColumnVector>(
-                    TargetBitmap(active_count_), TargetBitmap(active_count_));
-                cached_output =
-                    std::make_shared<RowVector>(std::vector<VectorPtr>{col});
-                cached_size = active_count_;
-            }
-            return cached_output;
+            auto col = std::make_shared<ColumnVector>(
+                TargetBitmap(active_count_), TargetBitmap(active_count_));
+            return std::make_shared<RowVector>(std::vector<VectorPtr>{col});
         }
 
         // Level 2: Sealed + has deletes → only apply delete mask, skip timestamps
