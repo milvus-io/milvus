@@ -3348,11 +3348,10 @@ type queryNodeConfig struct {
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
 	EnableGeometryCache           ParamItem `refreshable:"false"`
 
-	// TODO(tiered storage 2) this should be refreshable?
-	TieredWarmupScalarField         ParamItem `refreshable:"false"`
-	TieredWarmupScalarIndex         ParamItem `refreshable:"false"`
-	TieredWarmupVectorField         ParamItem `refreshable:"false"`
-	TieredWarmupVectorIndex         ParamItem `refreshable:"false"`
+	TieredWarmupScalarField         ParamItem `refreshable:"true"`
+	TieredWarmupScalarIndex         ParamItem `refreshable:"true"`
+	TieredWarmupVectorField         ParamItem `refreshable:"true"`
+	TieredWarmupVectorIndex         ParamItem `refreshable:"true"`
 	TieredMemoryLowWatermarkRatio   ParamItem `refreshable:"false"`
 	TieredMemoryHighWatermarkRatio  ParamItem `refreshable:"false"`
 	TieredDiskLowWatermarkRatio     ParamItem `refreshable:"false"`
@@ -3365,8 +3364,9 @@ type queryNodeConfig struct {
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
 	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
 	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
-	TieredLoadingTimeoutMs          ParamItem `refreshable:"false"`
-	StorageUsageTrackingEnabled     ParamItem `refreshable:"false"`
+	TieredLoadingTimeoutMs          ParamItem `refreshable:"true"`
+	TieredWarmupLoadingTimeoutMs    ParamItem `refreshable:"true"`
+	StorageUsageTrackingEnabled     ParamItem `refreshable:"true"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -3531,7 +3531,6 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Key:          "queryNode.segcore.tieredStorage.warmup.scalarField",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
-		Forbidden:    true,
 		Doc: `options: sync, async, disable.
 Specifies the timing for warming up the Tiered Storage cache.
 - "sync": data will be loaded into the cache before a segment is considered loaded.
@@ -3546,7 +3545,6 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.warmup.scalarIndex",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
-		Forbidden:    true,
 		Export:       true,
 	}
 	p.TieredWarmupScalarIndex.Init(base.mgr)
@@ -3555,7 +3553,6 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.warmup.vectorField",
 		Version:      "2.6.0",
 		DefaultValue: "disable",
-		Forbidden:    true,
 		Doc:          `cache warmup for vector field raw data is by default disabled.`,
 		Export:       true,
 	}
@@ -3565,7 +3562,6 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.warmup.vectorIndex",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
-		Forbidden:    true,
 		Export:       true,
 	}
 	p.TieredWarmupVectorIndex.Init(base.mgr)
@@ -3763,7 +3759,6 @@ If set to 0, time based eviction is disabled.`,
 		Key:          "queryNode.segcore.tieredStorage.storageUsageTrackingEnabled",
 		Version:      "2.6.3",
 		DefaultValue: "false",
-		Forbidden:    true,
 		Doc:          "Enable storage usage tracking for Tiered Storage. Defaults to false.",
 		Export:       true,
 	}
@@ -3790,18 +3785,19 @@ If set to 0, time based eviction is disabled.`,
 		Key:          "queryNode.segcore.tieredStorage.loadingTimeoutMs",
 		Version:      "2.6.10",
 		DefaultValue: "0",
-		Forbidden:    true,
-		Formatter: func(v string) string {
-			timeout := getAsInt64(v)
-			if timeout < 0 {
-				return "0"
-			}
-			return fmt.Sprintf("%d", timeout)
-		},
-		Doc:    "Loading timeout in milliseconds for cache slot loading. 0 means no timeout.",
-		Export: false,
+		Doc:          "Loading timeout in milliseconds for cache slot loading. -1 means no timeout, 0 means immediate failure if resource cannot be reserved, >0 means a specific timeout.",
+		Export:       false,
 	}
 	p.TieredLoadingTimeoutMs.Init(base.mgr)
+
+	p.TieredWarmupLoadingTimeoutMs = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.warmupLoadingTimeoutMs",
+		Version:      "2.6.13",
+		DefaultValue: "0",
+		Doc:          "Loading timeout in milliseconds for cache warmup loading. -1 means no timeout, 0 means immediate failure if resource cannot be reserved, >0 means a specific timeout.",
+		Export:       false,
+	}
+	p.TieredWarmupLoadingTimeoutMs.Init(base.mgr)
 
 	p.EnableDisk = ParamItem{
 		Key:          "queryNode.enableDisk",
