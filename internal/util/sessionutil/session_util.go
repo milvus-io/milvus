@@ -110,6 +110,7 @@ const (
 type IndexEngineVersion struct {
 	MinimalIndexVersion int32 `json:"MinimalIndexVersion,omitempty"`
 	CurrentIndexVersion int32 `json:"CurrentIndexVersion,omitempty"`
+	MaximumIndexVersion int32 `json:"MaximumIndexVersion,omitempty"`
 }
 
 // SessionRaw the persistent part of Session.
@@ -198,10 +199,11 @@ func WithResueNodeID(b bool) SessionOption {
 }
 
 // WithIndexEngineVersion should be only used by querynode.
-func WithIndexEngineVersion(minimal, current int32) SessionOption {
+func WithIndexEngineVersion(minimal, current, maximum int32) SessionOption {
 	return func(session *Session) {
 		session.IndexEngineVersion.MinimalIndexVersion = minimal
 		session.IndexEngineVersion.CurrentIndexVersion = current
+		session.IndexEngineVersion.MaximumIndexVersion = maximum
 	}
 }
 
