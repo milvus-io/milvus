@@ -35,7 +35,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -46,23 +45,16 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -396,93 +388,7 @@ func (s *Server) initDataCoord() error {
 	RegisterDDLCallbacks(s)
 	log.Info("init datacoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
 
-	s.initMessageCallback()
 	return nil
-}
-
-// initMessageCallback initializes the message callback.
-// TODO: we should build a ddl framework to handle the message ack callback for ddl messages
-func (s *Server) initMessageCallback() {
-	registry.RegisterImportV1AckCallback(func(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
-		body := result.Message.MustBody()
-		if body.Schema != nil {
-			body.Schema.DbName = body.DbName
-		}
-		vchannels := result.GetVChannelsWithoutControlChannel()
-		importResp, err := s.ImportV2(ctx, &internalpb.ImportRequestInternal{
-			CollectionID:   body.GetCollectionID(),
-			CollectionName: body.GetCollectionName(),
-			PartitionIDs:   body.GetPartitionIDs(),
-			ChannelNames:   vchannels,
-			Schema:         body.GetSchema(),
-			Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
-				return &internalpb.ImportFile{
-					Id:    file.GetId(),
-					Paths: file.GetPaths(),
-				}
-			}),
-			Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
-			DataTimestamp: body.GetBase().GetTimestamp(),
-			JobID:         body.GetJobID(),
-		})
-		err = merr.CheckRPCCall(importResp, err)
-		if errors.Is(err, merr.ErrCollectionNotFound) {
-			log.Ctx(ctx).Warn("import message failed because of collection not found, skip it", zap.String("job_id", importResp.GetJobID()), zap.Error(err))
-			return nil
-		}
-		if err != nil {
-			log.Ctx(ctx).Warn("import message failed", zap.String("job_id", importResp.GetJobID()), zap.Error(err))
-			return err
-		}
-		log.Ctx(ctx).Info("import message handled", zap.String("job_id", importResp.GetJobID()))
-		return nil
-	})
-
-	registry.RegisterImportV1CheckCallback(func(ctx context.Context, msg message.BroadcastImportMessageV1) error {
-		b := msg.MustBody()
-		options := funcutil.Map2KeyValuePair(b.GetOptions())
-		_, err := importutilv2.GetTimeoutTs(options)
-		if err != nil {
-			return err
-		}
-		err = ValidateBinlogImportRequest(ctx, s.meta.chunkManager, b.GetFiles(), options)
-		if err != nil {
-			return err
-		}
-		err = ValidateMaxImportJobExceed(ctx, s.importMeta)
-		if err != nil {
-			return err
-		}
-		balancer, err := balance.GetWithContext(ctx)
-		if err != nil {
-			return err
-		}
-		channelAssignment, err := balancer.GetLatestChannelAssignment()
-		if err != nil {
-			return err
-		}
-		replicateConfig := channelAssignment.ReplicateConfiguration
-		if replicateConfig != nil && len(replicateConfig.GetClusters()) > 1 {
-			return status.NewReplicateViolation("import in replicating cluster is not supported yet")
-		}
-		return nil
-	})
-
-	registry.RegisterBatchUpdateManifestV2AckCallback(func(ctx context.Context, result message.BroadcastResultBatchUpdateManifestMessageV2) error {
-		body := result.Message.MustBody()
-		var operators []UpdateOperator
-		for _, item := range body.GetItems() {
-			operators = append(operators, UpdateManifestVersion(item.GetSegmentId(), item.GetManifestVersion()))
-		}
-		if len(operators) > 0 {
-			if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
-				log.Ctx(ctx).Warn("batch update manifest version failed", zap.Error(err))
-				return err
-			}
-		}
-		log.Ctx(ctx).Info("batch update manifest version handled", zap.Int("itemCount", len(body.GetItems())))
-		return nil
-	})
 }
 
 // Start initialize `Server` members and start loops, follow steps are taken:
