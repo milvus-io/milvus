@@ -876,6 +876,74 @@ func TestReplicateServiceGetCheckpoint(t *testing.T) {
 	})
 }
 
+func TestReplicateServiceGetSalvageCheckpoint(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		h := mock_handler.NewMockHandlerClient(t)
+
+		expected := []*wal.ReplicateCheckpoint{
+			{ClusterID: "primary", PChannel: "primary-rootcoord-dml_0", TimeTick: 500},
+		}
+		h.EXPECT().GetSalvageCheckpoint(mock.Anything, "test-channel").Return(expected, nil)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+
+		checkpoints, err := rs.GetSalvageCheckpoint(context.Background(), "test-channel")
+		assert.NoError(t, err)
+		assert.Equal(t, expected, checkpoints)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		h := mock_handler.NewMockHandlerClient(t)
+
+		h.EXPECT().GetSalvageCheckpoint(mock.Anything, "bad-channel").Return(nil, errors.New("not found"))
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+
+		checkpoints, err := rs.GetSalvageCheckpoint(context.Background(), "bad-channel")
+		assert.Error(t, err)
+		assert.Nil(t, checkpoints)
+	})
+
+	t.Run("closed_lifetime", func(t *testing.T) {
+		c := mock_client.NewMockClient(t)
+		h := mock_handler.NewMockHandlerClient(t)
+
+		rs := &replicateService{
+			walAccesserImpl: &walAccesserImpl{
+				lifetime:             typeutil.NewLifetime(),
+				clusterID:            "by-dev",
+				streamingCoordClient: c,
+				handlerClient:        h,
+				producers:            make(map[string]*producer.ResumableProducer),
+			},
+		}
+		rs.lifetime.SetState(typeutil.LifetimeStateStopped)
+		rs.lifetime.Wait()
+
+		checkpoints, err := rs.GetSalvageCheckpoint(context.Background(), "test-channel")
+		assert.ErrorIs(t, err, ErrWALAccesserClosed)
+		assert.Nil(t, checkpoints)
+	})
+}
+
 func TestReplicateServiceAppendClosed(t *testing.T) {
 	c := mock_client.NewMockClient(t)
 	h := mock_handler.NewMockHandlerClient(t)
