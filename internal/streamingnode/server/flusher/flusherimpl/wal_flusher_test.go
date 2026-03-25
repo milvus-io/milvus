@@ -154,13 +154,11 @@ func newMockMixcoord(t *testing.T, maybe bool) *mocks.MockMixCoordClient {
 	return mixcoord
 }
 
-func TestDispatch_CommitImportMessage(t *testing.T) {
-	t.Skip("placeholder — requires mock setup")
-}
+// TestDispatch_CommitImportMessage: verifies that dispatch() calls FlushChannel and HandleCommitVchannel.
+// TODO: implement once WALFlusherImpl test infrastructure supports mock MixCoordClient injection.
 
-func TestDispatch_RollbackImportMessage_NoOp(t *testing.T) {
-	t.Skip("placeholder — requires mock setup")
-}
+// TestDispatch_RollbackImportMessage_NoOp: verifies that dispatch() returns nil without calling any external API.
+// TODO: implement using table-driven test with a mock WALFlusherImpl.
 
 func newMockWAL(t *testing.T, maybe bool) *mock_wal.MockWAL {
 	w := mock_wal.NewMockWAL(t)

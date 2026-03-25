@@ -293,7 +293,7 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		// Trigger async DML flush to ensure DML before this commit is flushed.
 		// FlushChannel failure is non-fatal: log warn and continue.
 		if err := resource.Resource().WriteBufferManager().
-			FlushChannel(impl.notifier.Context(), vchannel, msg.TimeTick()); err != nil {
+			FlushChannel(context.Background(), vchannel, msg.TimeTick()); err != nil {
 			impl.logger.Warn("FlushChannel on CommitImport failed (non-fatal)",
 				zap.String("vchannel", vchannel), zap.Int64("jobID", jobID), zap.Error(err))
 		}
@@ -304,7 +304,7 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 			return errors.Wrap(err, "failed to get MixCoordClient for HandleCommitVchannel")
 		}
 		resp, err := mixCoord.HandleCommitVchannel(impl.notifier.Context(), &datapb.HandleCommitVchannelRequest{
-			Base:     commonpbutil.NewMsgBase(),
+			Base:     commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
 			JobId:    jobID,
 			Vchannel: vchannel,
 		})
