@@ -288,9 +288,9 @@ CStatus
 CloseAndTell(CPackedWriter c_packed_writer, int64_t* sizes, size_t num_groups) {
     SCOPE_CGO_CALL_METRIC();
 
-    auto packed_writer = static_cast<
-        std::shared_ptr<milvus_storage::PackedRecordBatchWriter>*>(
-        c_packed_writer);
+    auto packed_writer =
+        static_cast<std::shared_ptr<milvus_storage::PackedRecordBatchWriter>*>(
+            c_packed_writer);
 
     try {
         auto status = (*packed_writer)->Close();
