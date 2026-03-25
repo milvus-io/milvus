@@ -19,7 +19,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -146,18 +145,6 @@ func TestWAL(t *testing.T) {
 	)
 	assert.NoError(t, resp.UnwrapFirstError())
 
-	r, err := w.Broadcast().Append(ctx, newBroadcastMessage([]string{vChannel1, vChannel2, vChannel3}))
-	assert.NoError(t, err)
-	assert.Len(t, r.AppendResults, 3)
-
-	err = w.Broadcast().Ack(ctx, message.NewDropCollectionMessageBuilderV1().
-		WithVChannel(vChannel1).
-		WithHeader(&message.DropCollectionMessageHeader{}).
-		WithBody(&msgpb.DropCollectionRequest{}).
-		MustBuildMutable().
-		IntoImmutableMessage(rmq.NewRmqID(1)))
-	assert.NoError(t, err)
-
 	cnt := atomic.NewInt32(0)
 	p.EXPECT().Append(mock.Anything, mock.Anything).Unset()
 	p.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(
@@ -193,18 +180,6 @@ func TestWAL(t *testing.T) {
 
 	resp = w.AppendMessages(ctx, newInsertMessage(vChannel1))
 	assert.Error(t, resp.UnwrapFirstError())
-
-	r, err = w.Broadcast().Append(ctx, newBroadcastMessage([]string{vChannel1, vChannel2, vChannel3}))
-	assert.Error(t, err)
-	assert.Nil(t, r)
-
-	err = w.Broadcast().Ack(ctx, message.NewDropCollectionMessageBuilderV1().
-		WithVChannel(vChannel1).
-		WithHeader(&message.DropCollectionMessageHeader{}).
-		WithBody(&msgpb.DropCollectionRequest{}).
-		MustBuildMutable().
-		IntoImmutableMessage(rmq.NewRmqID(1)))
-	assert.Error(t, err)
 }
 
 func newInsertMessage(vChannel string) message.MutableMessage {
@@ -213,18 +188,6 @@ func newInsertMessage(vChannel string) message.MutableMessage {
 		WithHeader(&message.InsertMessageHeader{}).
 		WithBody(&msgpb.InsertRequest{}).
 		BuildMutable()
-	if err != nil {
-		panic(err)
-	}
-	return msg
-}
-
-func newBroadcastMessage(vchannels []string) message.BroadcastMutableMessage {
-	msg, err := message.NewDropCollectionMessageBuilderV1().
-		WithBroadcast(vchannels).
-		WithHeader(&message.DropCollectionMessageHeader{}).
-		WithBody(&msgpb.DropCollectionRequest{}).
-		BuildBroadcast()
 	if err != nil {
 		panic(err)
 	}

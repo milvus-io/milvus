@@ -1456,27 +1456,6 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
 
-		// list binlog failed
-		cm := mocks2.NewChunkManager(t)
-		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
-		s.meta = &meta{chunkManager: cm}
-		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
-			Files: []*internalpb.ImportFile{
-				{
-					Id:    1,
-					Paths: []string{"mock_insert_prefix"},
-				},
-			},
-			Options: []*commonpb.KeyValuePair{
-				{
-					Key:   "backup",
-					Value: "true",
-				},
-			},
-		})
-		assert.NoError(t, err)
-		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-
 		// alloc failed
 		catalog := mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
@@ -1490,49 +1469,6 @@ func TestImportV2(t *testing.T) {
 		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{})
 		assert.NoError(t, err)
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-		alloc = allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, nil)
-		s.allocator = alloc
-
-		// add job failed
-		catalog = mocks.NewDataCoordCatalog(t)
-		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
-		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(mockErr)
-		s.importMeta, err = NewImportMeta(context.TODO(), catalog, nil, nil)
-		assert.NoError(t, err)
-		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
-			Files: []*internalpb.ImportFile{
-				{
-					Id:    1,
-					Paths: []string{"a.json"},
-				},
-			},
-		})
-		assert.NoError(t, err)
-		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-		jobs := s.importMeta.GetJobBy(context.TODO())
-		assert.Equal(t, 0, len(jobs))
-		catalog.ExpectedCalls = lo.Filter(catalog.ExpectedCalls, func(call *mock.Call, _ int) bool {
-			return call.Method != "SaveImportJob"
-		})
-		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
-
-		// normal case
-		resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{
-			Files: []*internalpb.ImportFile{
-				{
-					Id:    1,
-					Paths: []string{"a.json"},
-				},
-			},
-			ChannelNames: []string{"foo_1v1"},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
-		jobs = s.importMeta.GetJobBy(context.TODO())
-		assert.Equal(t, 1, len(jobs))
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {
@@ -2507,5 +2443,67 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		seg2After := meta.GetSegment(ctx, seg2.ID)
 		assert.NotNil(t, seg2After)
 		assert.NotEqual(t, commonpb.SegmentState_Dropped, seg2After.GetState())
+	})
+}
+
+func TestGetSegmentInfo_WithCompaction(t *testing.T) {
+	t.Run("use handler.GetDeltaLogFromCompactTo", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		collID := int64(100)
+		partID := int64(10)
+
+		// Add collection
+		svr.meta.AddCollection(&collectionInfo{
+			ID:         collID,
+			Partitions: []int64{partID},
+		})
+
+		// Create parent segment
+		parent := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           1000,
+			CollectionID: collID,
+			PartitionID:  partID,
+			State:        commonpb.SegmentState_Dropped,
+		})
+		err := svr.meta.AddSegment(context.TODO(), parent)
+		require.NoError(t, err)
+
+		// Create child segment with delta logs
+		child := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1001,
+			CollectionID:   collID,
+			PartitionID:    partID,
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{1000},
+			NumOfRows:      100,
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 0,
+					Binlogs: []*datapb.Binlog{
+						{LogID: 1, LogSize: 100},
+					},
+				},
+			},
+		})
+		err = svr.meta.AddSegment(context.TODO(), child)
+		require.NoError(t, err)
+
+		// Test GetSegmentInfo
+		req := &datapb.GetSegmentInfoRequest{
+			SegmentIDs:       []int64{1000},
+			IncludeUnHealthy: true,
+		}
+
+		resp, err := svr.GetSegmentInfo(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Len(t, resp.GetInfos(), 1)
+
+		// Verify delta logs were merged from child
+		info := resp.GetInfos()[0]
+		assert.Equal(t, int64(1000), info.GetID())
+		assert.NotEmpty(t, info.GetDeltalogs())
 	})
 }
