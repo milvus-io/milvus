@@ -482,7 +482,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	queryMode := common.GetQueryMode(collection.Properties...)
 
 	schemaInfo := newSchemaInfo(collection.Schema)
-	replicateID, _ := common.GetReplicateID(collection.Properties)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -515,6 +514,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	if !dbOk {
 		m.collInfo[database] = make(map[string]*collectionInfo)
 	}
+
+	replicateID, _ := common.GetReplicateID(collection.Properties)
 
 	if isAlias {
 		// Caller passed an alias; record the alias→realName mapping so
