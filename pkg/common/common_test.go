@@ -439,6 +439,19 @@ func TestIsBigTopKOptimizationEnabled(t *testing.T) {
 	})
 }
 
+func TestClampScalarIndexVersion(t *testing.T) {
+	max := MaximumScalarIndexEngineVersion
+
+	// Values at or below maximum pass through unchanged
+	assert.Equal(t, int32(0), ClampScalarIndexVersion(0))
+	assert.Equal(t, int32(1), ClampScalarIndexVersion(1))
+	assert.Equal(t, max, ClampScalarIndexVersion(max))
+
+	// Values above maximum are clamped
+	assert.Equal(t, max, ClampScalarIndexVersion(max+1))
+	assert.Equal(t, max, ClampScalarIndexVersion(max+100))
+}
+
 func TestWKTWKBConversion(t *testing.T) {
 	testCases := []struct {
 		name string

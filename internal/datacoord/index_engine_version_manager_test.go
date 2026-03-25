@@ -1,12 +1,14 @@
 package datacoord
 
 import (
+	"math"
 	"testing"
 
 	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {
@@ -378,6 +380,299 @@ func Test_IndexEngineVersionManager_GetMinimalSessionVer(t *testing.T) {
 	assert.True(t, exists, "node 2 should exist in sessionVersion map")
 	_, exists = vm.sessionVersion[3]
 	assert.True(t, exists, "node 3 should exist in sessionVersion map")
+}
+
+func Test_IndexEngineVersionManager_GetMaximumIndexEngineVersion(t *testing.T) {
+	m := newIndexEngineVersionManager()
+
+	// empty - returns MaxInt32 (no upper bound)
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumIndexEngineVersion())
+
+	// all nodes report Maximum=0 (old QNs) - returns MaxInt32
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 20, MaximumIndexVersion: 0},
+			},
+		},
+	})
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumIndexEngineVersion())
+
+	// mix of old QN (Max=0) and new QN (Max=30) - skip old, return 30
+	m.AddNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:           2,
+			IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 15, MaximumIndexVersion: 30},
+		},
+	})
+	assert.Equal(t, int32(30), m.GetMaximumIndexEngineVersion())
+
+	// add another new QN with lower Max - returns MIN
+	m.AddNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:           3,
+			IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 18, MaximumIndexVersion: 25},
+		},
+	})
+	assert.Equal(t, int32(25), m.GetMaximumIndexEngineVersion())
+
+	// remove the node with lower Max - returns 30
+	m.RemoveNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 3}})
+	assert.Equal(t, int32(30), m.GetMaximumIndexEngineVersion())
+}
+
+func Test_IndexEngineVersionManager_GetMaximumScalarIndexEngineVersion(t *testing.T) {
+	m := newIndexEngineVersionManager()
+
+	// empty - returns MaxInt32
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumScalarIndexEngineVersion())
+
+	// all nodes report Maximum=0 (old QNs)
+	m.Startup(map[string]*sessionutil.Session{
+		"1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 2, MaximumIndexVersion: 0},
+			},
+		},
+	})
+	assert.Equal(t, int32(math.MaxInt32), m.GetMaximumScalarIndexEngineVersion())
+
+	// new QN with Maximum set
+	m.AddNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:                 2,
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 2, MaximumIndexVersion: 5},
+		},
+	})
+	assert.Equal(t, int32(5), m.GetMaximumScalarIndexEngineVersion())
+
+	// another QN with lower Maximum
+	m.AddNode(&sessionutil.Session{
+		SessionRaw: sessionutil.SessionRaw{
+			ServerID:                 3,
+			ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 2, MaximumIndexVersion: 3},
+		},
+	})
+	assert.Equal(t, int32(3), m.GetMaximumScalarIndexEngineVersion())
+}
+
+func Test_IndexEngineVersionManager_ResolveVecIndexVersion(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("no target override", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 10, MaximumIndexVersion: 20},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "-1")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "false")
+
+		assert.Equal(t, int32(10), m.ResolveVecIndexVersion())
+	})
+
+	t.Run("target override without force rebuild", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 10, MaximumIndexVersion: 20},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "15")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "false")
+
+		// max(current=10, target=15) = 15
+		assert.Equal(t, int32(15), m.ResolveVecIndexVersion())
+	})
+
+	t.Run("force rebuild with target in safe range", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 3, CurrentIndexVersion: 10, MaximumIndexVersion: 20},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "5")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "true")
+
+		// force rebuild: target=5 is within [minimal=3, max=20], use directly
+		assert.Equal(t, int32(5), m.ResolveVecIndexVersion())
+	})
+
+	t.Run("force rebuild with target below cluster minimal - clamped to minimal", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 8, CurrentIndexVersion: 10, MaximumIndexVersion: 20},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "5")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "true")
+
+		// force rebuild: target=5 < clusterMinimal=8, clamped to 8
+		assert.Equal(t, int32(8), m.ResolveVecIndexVersion())
+	})
+
+	t.Run("target exceeds maximum - clamped", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 3, CurrentIndexVersion: 10, MaximumIndexVersion: 20},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "25")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "true")
+
+		// target=25 > max=20, clamped to 20
+		assert.Equal(t, int32(20), m.ResolveVecIndexVersion())
+	})
+
+	t.Run("multi-node force rebuild clamped to cluster minimal", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		// QN1: Min=5, QN2: Min=8 => cluster minimal = MAX(5,8) = 8
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 5, CurrentIndexVersion: 15, MaximumIndexVersion: 25},
+			},
+		})
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           2,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 8, CurrentIndexVersion: 12, MaximumIndexVersion: 30},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "6")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "true")
+
+		// force rebuild: target=6 < clusterMinimal=8, clamped to 8
+		// clusterMax = MIN(25,30) = 25
+		assert.Equal(t, int32(8), m.ResolveVecIndexVersion())
+	})
+
+	t.Run("all old QNs - no upper bound check", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 0, CurrentIndexVersion: 10, MaximumIndexVersion: 0},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "15")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "false")
+
+		// old QN (Max=0) => GetMaximum returns MaxInt32, no upper clamp
+		assert.Equal(t, int32(15), m.ResolveVecIndexVersion())
+	})
+}
+
+func Test_IndexEngineVersionManager_ResolveScalarIndexVersion(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("no target override", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 2, MaximumIndexVersion: 5},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "-1")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "false")
+
+		assert.Equal(t, int32(2), m.ResolveScalarIndexVersion())
+	})
+
+	t.Run("target override without force rebuild", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 2, MaximumIndexVersion: 5},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "3")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "false")
+
+		// max(current=2, target=3) = 3
+		assert.Equal(t, int32(3), m.ResolveScalarIndexVersion())
+	})
+
+	t.Run("force rebuild with target in safe range", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 1, CurrentIndexVersion: 3, MaximumIndexVersion: 5},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "2")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+
+		// force rebuild: target=2 is within [minimal=1, max=5], use directly
+		assert.Equal(t, int32(2), m.ResolveScalarIndexVersion())
+	})
+
+	t.Run("force rebuild with target below cluster minimal - clamped to minimal", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 2, CurrentIndexVersion: 3, MaximumIndexVersion: 5},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "1")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+
+		// force rebuild: target=1 < clusterMinimal=2, clamped to 2
+		assert.Equal(t, int32(2), m.ResolveScalarIndexVersion())
+	})
+
+	t.Run("target exceeds maximum - clamped", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 1, CurrentIndexVersion: 2, MaximumIndexVersion: 5},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "10")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+
+		// target=10 > max=5, clamped to 5
+		assert.Equal(t, int32(5), m.ResolveScalarIndexVersion())
+	})
+
+	t.Run("multi-node force rebuild clamped to cluster minimal", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		// QN1: Min=1, QN2: Min=2 => cluster minimal = MAX(1,2) = 2
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 1,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 1, CurrentIndexVersion: 3, MaximumIndexVersion: 5},
+			},
+		})
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:                 2,
+				ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 2, CurrentIndexVersion: 4, MaximumIndexVersion: 6},
+			},
+		})
+		Params.Save("dataCoord.targetScalarIndexVersion", "1")
+		Params.Save("dataCoord.forceRebuildScalarSegmentIndex", "true")
+
+		// force rebuild: target=1 < clusterMinimal=2, clamped to 2
+		// clusterCurrent = MIN(3,4) = 3, clusterMax = MIN(5,6) = 5
+		assert.Equal(t, int32(2), m.ResolveScalarIndexVersion())
+	})
 }
 
 func Test_IndexEngineVersionManager_SessionVersionCleanupOnStartup(t *testing.T) {
