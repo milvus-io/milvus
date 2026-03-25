@@ -2664,3 +2664,83 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<VectorArrayTestParam>& info) {
         return std::get<3>(info.param);
     });
+
+// ==================== DropFieldData Guard Tests ====================
+
+TEST(SealedDropFieldData, SkipPKField) {
+    // DropFieldData should skip dropping PK field data
+    auto schema = std::make_shared<Schema>();
+    auto dim = 4;
+    auto metric_type = knowhere::metric::L2;
+    auto vec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+
+    auto N = 100;
+    auto dataset = DataGen(schema, N);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // PK field data should be present
+    EXPECT_TRUE(segment->HasFieldData(pk_id));
+
+    // Try to drop PK field - should be skipped
+    segment->DropFieldData(pk_id);
+
+    // PK field data should still be present (protected)
+    EXPECT_TRUE(segment->HasFieldData(pk_id));
+}
+
+TEST(SealedDropFieldData, DropNonPKField) {
+    // DropFieldData should successfully drop non-PK, non-column-group fields
+    auto schema = std::make_shared<Schema>();
+    auto dim = 4;
+    auto metric_type = knowhere::metric::L2;
+    auto vec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+
+    auto N = 100;
+    auto dataset = DataGen(schema, N);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Vec field data should be present
+    EXPECT_TRUE(segment->HasFieldData(vec_id));
+
+    // Drop vec field - should succeed (not PK, not column group)
+    segment->DropFieldData(vec_id);
+
+    // Vec field data should be gone
+    EXPECT_FALSE(segment->HasFieldData(vec_id));
+}
+
+TEST(SealedDropFieldData, PKFieldStillDropsBinlogIndex) {
+    // When dropping PK field, field data is preserved but binlog index
+    // (if present) should still be cleared.
+    auto schema = std::make_shared<Schema>();
+    auto dim = 4;
+    auto metric_type = knowhere::metric::L2;
+    auto vec_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+
+    auto N = 100;
+    auto dataset = DataGen(schema, N);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // PK field data should be present
+    EXPECT_TRUE(segment->HasFieldData(pk_id));
+
+    // Drop PK field - field data should remain
+    segment->DropFieldData(pk_id);
+    EXPECT_TRUE(segment->HasFieldData(pk_id));
+
+    // Drop again - should be a no-op (idempotent)
+    segment->DropFieldData(pk_id);
+    EXPECT_TRUE(segment->HasFieldData(pk_id));
+}
