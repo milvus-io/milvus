@@ -130,6 +130,7 @@ linters:
           - depguard
           - whitespace
           - revive
+          - gocritic
         path: ^internal/(datacoord|datanode)/
       - linters:
           - unconvert
