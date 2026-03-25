@@ -1,13 +1,22 @@
 package segments
 
+/*
+#cgo pkg-config: milvus_core
+
+#include "segcore/collection_c.h"
+#include "segcore/segment_c.h"
+#include "segcore/segcore_init_c.h"
+#include "common/init_c.h"
+
+*/
+import "C"
+
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"strconv"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -24,9 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -159,7 +166,7 @@ func getPKsFromColumnBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.C
 	return pks, nil
 }
 
-// mergeRequestCost merge the costs of request, the cost may came from different worker in same channel
+// mergeRequestCost merge the costs of request, the cost may come from different worker in same channel
 // or different channel in same collection, for now we just choose the part with the highest response time
 func mergeRequestCost(requestCosts []*internalpb.CostAggregation) *internalpb.CostAggregation {
 	var result *internalpb.CostAggregation
@@ -170,6 +177,15 @@ func mergeRequestCost(requestCosts []*internalpb.CostAggregation) *internalpb.Co
 	}
 
 	return result
+}
+
+func getIndexEngineVersion() (minimal, current, maximum int32) {
+	GetDynamicPool().Submit(func() (any, error) {
+		cMinimal, cCurrent, cMaximum := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion(), C.GetMaximumIndexVersion()
+		minimal, current, maximum = int32(cMinimal), int32(cCurrent), int32(cMaximum)
+		return nil, nil
+	}).Await()
+	return minimal, current, maximum
 }
 
 // getSegmentMetricLabel returns the label for segment metrics.
@@ -188,13 +204,6 @@ func FilterZeroValuesFromSlice(intVals []int64) []int64 {
 		}
 	}
 	return result
-}
-
-// withLazyLoadTimeoutContext returns a new context with lazy load timeout.
-func withLazyLoadTimeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	lazyLoadTimeout := paramtable.Get().QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
-	// TODO: use context.WithTimeoutCause instead of contextutil.WithTimeoutCause in go1.21
-	return contextutil.WithTimeoutCause(ctx, lazyLoadTimeout, errLazyLoadTimeout)
 }
 
 func GetSegmentRelatedDataSize(segment Segment) int64 {

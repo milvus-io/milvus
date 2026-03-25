@@ -3,6 +3,7 @@ package datacoord
 import (
 	"math"
 
+	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -36,16 +37,22 @@ type IndexEngineVersionManager interface {
 	// Vector index version methods (from knowhere library)
 	GetCurrentIndexEngineVersion() int32
 	GetMinimalIndexEngineVersion() int32
+
+	// Maximum version methods
 	GetMaximumIndexEngineVersion() int32
+	GetMaximumScalarIndexEngineVersion() int32
 
 	// Scalar index version methods (Milvus-defined)
 	GetCurrentScalarIndexEngineVersion() int32
 	GetMinimalScalarIndexEngineVersion() int32
 
-	// ResolveVecIndexVersion computes the final build version considering target override and max clamp
+	// Resolve methods: compute final build version considering target override and max clamp
 	ResolveVecIndexVersion() int32
+	ResolveScalarIndexVersion() int32
 
 	GetIndexNonEncoding() bool
+
+	GetMinimalSessionVer() semver.Version
 }
 
 type versionManagerImpl struct {
@@ -53,6 +60,7 @@ type versionManagerImpl struct {
 	versions            map[int64]sessionutil.IndexEngineVersion
 	scalarIndexVersions map[int64]sessionutil.IndexEngineVersion
 	indexNonEncoding    map[int64]bool
+	sessionVersion      map[int64]semver.Version
 }
 
 func newIndexEngineVersionManager() IndexEngineVersionManager {
@@ -60,6 +68,7 @@ func newIndexEngineVersionManager() IndexEngineVersionManager {
 		versions:            map[int64]sessionutil.IndexEngineVersion{},
 		scalarIndexVersions: map[int64]sessionutil.IndexEngineVersion{},
 		indexNonEncoding:    map[int64]bool{},
+		sessionVersion:      map[int64]semver.Version{},
 	}
 }
 
@@ -102,6 +111,7 @@ func (m *versionManagerImpl) removeNodeByID(sessionID int64) {
 	delete(m.versions, sessionID)
 	delete(m.scalarIndexVersions, sessionID)
 	delete(m.indexNonEncoding, sessionID)
+	delete(m.sessionVersion, sessionID)
 }
 
 func (m *versionManagerImpl) Update(session *sessionutil.Session) {
@@ -112,26 +122,25 @@ func (m *versionManagerImpl) Update(session *sessionutil.Session) {
 }
 
 func (m *versionManagerImpl) addOrUpdate(session *sessionutil.Session) {
-	log.Info("addOrUpdate version",
-		zap.Int64("nodeId", session.ServerID),
+	log.Info("addOrUpdate version", zap.Int64("nodeId", session.ServerID),
+		zap.String("sessionVersion", session.Version.String()),
 		zap.Int32("minimal", session.IndexEngineVersion.MinimalIndexVersion),
 		zap.Int32("current", session.IndexEngineVersion.CurrentIndexVersion),
 		zap.Int32("maximum", session.IndexEngineVersion.MaximumIndexVersion),
-		zap.Int32("currentScalar", session.ScalarIndexEngineVersion.CurrentIndexVersion))
+		zap.Int32("currentScalar", session.ScalarIndexEngineVersion.CurrentIndexVersion),
+		zap.Int32("maximumScalar", session.ScalarIndexEngineVersion.MaximumIndexVersion))
 	m.versions[session.ServerID] = session.IndexEngineVersion
 	m.scalarIndexVersions[session.ServerID] = session.ScalarIndexEngineVersion
 	m.indexNonEncoding[session.ServerID] = session.IndexNonEncoding
+	m.sessionVersion[session.ServerID] = session.Version
 }
 
 func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.getCurrentVersion()
-}
-
-func (m *versionManagerImpl) getCurrentVersion() int32 {
 	if len(m.versions) == 0 {
+		log.Info("index versions is empty")
 		return 0
 	}
 
@@ -141,6 +150,7 @@ func (m *versionManagerImpl) getCurrentVersion() int32 {
 			current = version.CurrentIndexVersion
 		}
 	}
+	log.Info("Merged current version", zap.Int32("current", current))
 	return current
 }
 
@@ -148,11 +158,8 @@ func (m *versionManagerImpl) GetMinimalIndexEngineVersion() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.getMinimalVersion()
-}
-
-func (m *versionManagerImpl) getMinimalVersion() int32 {
 	if len(m.versions) == 0 {
+		log.Info("index versions is empty")
 		return 0
 	}
 
@@ -162,6 +169,7 @@ func (m *versionManagerImpl) getMinimalVersion() int32 {
 			minimal = version.MinimalIndexVersion
 		}
 	}
+	log.Info("Merged minimal version", zap.Int32("minimal", minimal))
 	return minimal
 }
 
@@ -207,14 +215,6 @@ func (m *versionManagerImpl) GetMaximumIndexEngineVersion() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.getMaximumVersion()
-}
-
-func (m *versionManagerImpl) getMaximumVersion() int32 {
-	if len(m.versions) == 0 {
-		return math.MaxInt32
-	}
-
 	maximum := int32(math.MaxInt32)
 	for _, version := range m.versions {
 		if version.MaximumIndexVersion == 0 {
@@ -224,18 +224,40 @@ func (m *versionManagerImpl) getMaximumVersion() int32 {
 			maximum = version.MaximumIndexVersion
 		}
 	}
+	if maximum == math.MaxInt32 {
+		return math.MaxInt32
+	}
 	return maximum
 }
 
-// clampVersion clamps v into [minV, maxV], logging a rate-limited warning on each adjustment.
+func (m *versionManagerImpl) GetMaximumScalarIndexEngineVersion() int32 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	maximum := int32(math.MaxInt32)
+	for _, version := range m.scalarIndexVersions {
+		if version.MaximumIndexVersion == 0 {
+			continue
+		}
+		if version.MaximumIndexVersion < maximum {
+			maximum = version.MaximumIndexVersion
+		}
+	}
+	if maximum == math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return maximum
+}
+
+// clampVersion clamps v into [minV, maxV], logging a warning on each adjustment.
 func clampVersion(v, minV, maxV int32, name string) int32 {
 	if v < minV {
-		log.RatedWarn(60, name+" below cluster minimum, clamping",
+		log.Warn(name+" below cluster minimum, clamping",
 			zap.Int32("target", v), zap.Int32("minimum", minV))
 		v = minV
 	}
 	if v > maxV {
-		log.RatedWarn(60, name+" exceeds cluster maximum, clamping",
+		log.Warn(name+" exceeds cluster maximum, clamping",
 			zap.Int32("target", v), zap.Int32("maximum", maxV))
 		v = maxV
 	}
@@ -243,13 +265,7 @@ func clampVersion(v, minV, maxV int32, name string) int32 {
 }
 
 func (m *versionManagerImpl) ResolveVecIndexVersion() int32 {
-	m.mu.Lock()
-	current := m.getCurrentVersion()
-	minimal := m.getMinimalVersion()
-	maximum := m.getMaximumVersion()
-	m.mu.Unlock()
-
-	version := current
+	version := m.GetCurrentIndexEngineVersion()
 	if Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt64() != -1 {
 		target := Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32()
 		if Params.DataCoordCfg.ForceRebuildSegmentIndex.GetAsBool() {
@@ -258,7 +274,30 @@ func (m *versionManagerImpl) ResolveVecIndexVersion() int32 {
 			version = max(version, target)
 		}
 	}
-	return clampVersion(version, minimal, maximum, "targetVecIndexVersion")
+	return clampVersion(
+		version,
+		m.GetMinimalIndexEngineVersion(),
+		m.GetMaximumIndexEngineVersion(),
+		"targetVecIndexVersion",
+	)
+}
+
+func (m *versionManagerImpl) ResolveScalarIndexVersion() int32 {
+	version := m.GetCurrentScalarIndexEngineVersion()
+	if Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt64() != -1 {
+		target := Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt32()
+		if Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.GetAsBool() {
+			version = target
+		} else {
+			version = max(version, target)
+		}
+	}
+	return clampVersion(
+		version,
+		m.GetMinimalScalarIndexEngineVersion(),
+		m.GetMaximumScalarIndexEngineVersion(),
+		"targetScalarIndexVersion",
+	)
 }
 
 func (m *versionManagerImpl) GetIndexNonEncoding() bool {
@@ -274,4 +313,21 @@ func (m *versionManagerImpl) GetIndexNonEncoding() bool {
 		noneEncoding = noneEncoding && encoding
 	}
 	return noneEncoding
+}
+
+func (m *versionManagerImpl) GetMinimalSessionVer() semver.Version {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	minVer := semver.Version{}
+	first := true
+	for _, version := range m.sessionVersion {
+		if first {
+			minVer = version
+			first = false
+		} else if version.LT(minVer) {
+			minVer = version
+		}
+	}
+	return minVer
 }

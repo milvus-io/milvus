@@ -521,7 +521,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				InsertFiles:               files,
 				FieldSchema:               field,
 				StorageConfig:             newStorageConfig,
-				CurrentScalarIndexVersion: t.plan.GetCurrentScalarIndexVersion(),
+				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(t.plan.GetCurrentScalarIndexVersion()),
 				StorageVersion:            t.storageVersion,
 				Manifest:                  t.manifest,
 			}
@@ -548,7 +548,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				Files:                     lo.Keys(uploaded),
 				LogSize:                   totalSize,
 				MemorySize:                totalSize,
-				CurrentScalarIndexVersion: common.CurrentScalarIndexEngineVersion,
+				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(t.plan.GetCurrentScalarIndexVersion()),
 			}
 			mu.Unlock()
 

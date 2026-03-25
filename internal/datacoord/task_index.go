@@ -289,6 +289,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	})
 
 	currentVecIndexVersion := it.indexEngineVersionManager.ResolveVecIndexVersion()
+	currentScalarIndexVersion := it.indexEngineVersionManager.ResolveScalarIndexVersion()
 
 	// Create the job request
 	req := &workerpb.CreateJobRequest{
@@ -301,7 +302,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		TypeParams:                typeParams,
 		NumRows:                   segIndex.NumRows,
 		CurrentIndexVersion:       currentVecIndexVersion,
-		CurrentScalarIndexVersion: it.indexEngineVersionManager.GetCurrentScalarIndexEngineVersion(),
+		CurrentScalarIndexVersion: currentScalarIndexVersion,
 		CollectionID:              segment.GetCollectionID(),
 		PartitionID:               segment.GetPartitionID(),
 		SegmentID:                 segment.GetID(),

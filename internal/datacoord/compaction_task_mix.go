@@ -380,7 +380,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		SlotUsage:                 t.GetSlotUsage(),
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
-		CurrentScalarIndexVersion: t.ievm.GetCurrentScalarIndexEngineVersion(),
+		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 	}
 	segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
 	segments := make([]*SegmentInfo, 0, len(taskProto.GetInputSegments()))
