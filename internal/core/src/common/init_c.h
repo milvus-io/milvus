@@ -40,6 +40,9 @@ void
 SetLowPriorityThreadCoreCoefficient(const float);
 
 void
+SetThreadPoolMaxThreadsSize(const int);
+
+void
 SetDefaultExprEvalBatchSize(int64_t val);
 
 void
