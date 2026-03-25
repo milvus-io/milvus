@@ -906,6 +906,99 @@ class TestInsertVectorNegative(TestBase):
         assert rsp['code'] == 1804
         assert "fail to deal the insert data" in rsp['message']
 
+    def test_insert_with_bm25_function_output_field_data(self):
+        """
+        Insert data that includes BM25 function output field - should be rejected
+        """
+        name = gen_collection_name()
+        self.name = name
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "512", "enable_analyzer": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_fn",
+                        "type": "BM25",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25",
+                 "params": {"index_type": "SPARSE_INVERTED_INDEX"}}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_collection_load_completed(name)
+
+        # insert data with BM25 function output field should fail
+        data = [
+            {"id": i, "text": f"sample text {i}",
+             "sparse_vector": {1: 0.5, 2: 0.3}}
+            for i in range(10)
+        ]
+        insert_payload = {"collectionName": name, "data": data}
+        rsp = self.vector_client.vector_insert(insert_payload)
+        assert rsp['code'] != 0
+        assert "function output" in rsp['message'].lower() or "bm25" in rsp['message'].lower()
+
+    def test_insert_without_bm25_function_output_field_data(self):
+        """
+        Insert data without providing BM25 function output field - should succeed
+        """
+        name = gen_collection_name()
+        self.name = name
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "512", "enable_analyzer": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_fn",
+                        "type": "BM25",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25",
+                 "params": {"index_type": "SPARSE_INVERTED_INDEX"}}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_collection_load_completed(name)
+
+        # insert data without function output field should succeed
+        data = [
+            {"id": i, "text": f"sample text {i}"}
+            for i in range(10)
+        ]
+        insert_payload = {"collectionName": name, "data": data}
+        rsp = self.vector_client.vector_insert(insert_payload)
+        assert rsp['code'] == 0
+        assert rsp['data']['insertCount'] == 10
+
 
 @pytest.mark.L0
 class TestUpsertVector(TestBase):

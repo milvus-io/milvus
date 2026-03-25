@@ -409,11 +409,9 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					continue
 				}
 
-				// if field is a function output field, user must not provide data for it
-				if field.GetIsFunctionOutput() {
-					if dataString != "" {
-						return merr.WrapErrParameterInvalid("", "not allowed to provide input data for function output field: "+fieldName), reallyDataArray, validDataMap
-					}
+				// skip function output field if user didn't provide data,
+				// let proxy validate when data is provided
+				if field.GetIsFunctionOutput() && dataString == "" {
 					continue
 				}
 
@@ -833,6 +831,15 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 	nameDims := make(map[string]int64)
 	fieldData := make(map[string]*schemapb.FieldData)
 
+	// Pre-compute the set of field names present across all rows,
+	// so we can skip absent function output fields with a map lookup instead of scanning rows.
+	presentFieldNames := make(map[string]struct{})
+	for _, row := range rows {
+		for name := range row {
+			presentFieldNames[name] = struct{}{}
+		}
+	}
+
 	for _, field := range sch.Fields {
 		if field.IsPrimaryKey {
 			pkFieldName = field.Name
@@ -843,9 +850,11 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 		if (field.IsPrimaryKey && field.AutoID && inInsert && !allowInsertAutoID) || field.IsDynamic {
 			continue
 		}
-		// skip function output field
+		// skip function output field if no row provides data for it
 		if field.GetIsFunctionOutput() {
-			continue
+			if _, ok := presentFieldNames[field.Name]; !ok {
+				continue
+			}
 		}
 		var data interface{}
 		switch field.DataType {
@@ -940,10 +949,9 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				continue
 			}
 			if field.GetIsFunctionOutput() {
-				if ok {
-					return nil, fmt.Errorf("row %d has data provided for function output field %s", idx, field.Name)
+				if _, allocated := nameColumns[field.Name]; !allocated {
+					continue
 				}
-				continue
 			}
 			if !ok {
 				if partialUpdate {

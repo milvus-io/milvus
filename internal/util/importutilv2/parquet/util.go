@@ -141,12 +141,18 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
 		}
-		// function output field must not be provided
+		// validate function output field
 		if field.GetIsFunctionOutput() {
-			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("the field '%s' is output by function, no need to provide", field.GetName()))
+			if typeutil.IsBM25FunctionOutputField(field, schema) {
+				return nil, merr.WrapErrImportFailed(
+					fmt.Sprintf("not allowed to provide data for BM25 function output field '%s'", field.GetName()))
+			}
+			if !common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.GetProperties()) {
+				return nil, merr.WrapErrImportFailed(
+					fmt.Sprintf("not allowed to provide data for function output field '%s', "+
+						"set collection property '%s' to enable", field.GetName(), common.CollectionAllowInsertNonBM25FunctionOutputs))
+			}
 		}
-
 		cr, err := NewFieldReader(ctx, fileReader, i, field, common2.GetSchemaTimezone(schema))
 		if err != nil {
 			return nil, err
