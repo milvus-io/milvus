@@ -154,6 +154,14 @@ func newMockMixcoord(t *testing.T, maybe bool) *mocks.MockMixCoordClient {
 	return mixcoord
 }
 
+func TestDispatch_CommitImportMessage(t *testing.T) {
+	t.Skip("placeholder — requires mock setup")
+}
+
+func TestDispatch_RollbackImportMessage_NoOp(t *testing.T) {
+	t.Skip("placeholder — requires mock setup")
+}
+
 func newMockWAL(t *testing.T, maybe bool) *mock_wal.MockWAL {
 	w := mock_wal.NewMockWAL(t)
 	w.EXPECT().WALName().Return(message.WALNameRocksmq).Maybe()
