@@ -325,8 +325,8 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     cii.index_type = index::INVERTED_INDEX_TYPE;
     cii.json_cast_type = JsonCastType::FromString("DOUBLE");
     cii.json_path = "/a";
-    auto inv_index =
-        index::IndexFactory::GetInstance().CreateJsonIndex(cii, file_manager_ctx);
+    auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        cii, file_manager_ctx);
     auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
         static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
 
@@ -338,16 +338,16 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     // 20 nulls + 20 non-exist → 160 bytes each, well above 64.
     std::vector<milvus::Json> jsons;
     for (int i = 0; i < 20; i++) {
-        jsons.push_back(
-            milvus::Json(simdjson::padded_string(R"({"a": null})")));
+        jsons.push_back(milvus::Json(
+            simdjson::padded_string(std::string(R"({"a": null})"))));
     }
     for (int i = 0; i < 20; i++) {
         jsons.push_back(
-            milvus::Json(simdjson::padded_string(R"({"b": 1})")));
+            milvus::Json(simdjson::padded_string(std::string(R"({"b": 1})"))));
     }
     for (int i = 0; i < 10; i++) {
-        jsons.push_back(
-            milvus::Json(simdjson::padded_string(R"({"a": 1.0})")));
+        jsons.push_back(milvus::Json(
+            simdjson::padded_string(std::string(R"({"a": 1.0})"))));
     }
 
     auto json_field =
