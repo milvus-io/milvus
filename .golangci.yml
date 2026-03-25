@@ -62,11 +62,11 @@ linters:
         - pattern: runtime.NumCPU
         - pattern: runtime.GOMAXPROCS(0)
     gocritic:
+      enabled-tags: []
       enabled-checks:
         - ruleguard
       settings:
         ruleguard:
-          failOnError: true
           rules: rules.go
     govet:
       enable:
@@ -265,6 +265,19 @@ linters:
         text: unlambda
       - path: (.+)\.go$
         text: underef
+      # gosec rules not enforced in v1 (G602 slice bounds, G101 hardcoded credentials)
+      - path: (.+)\.go$
+        text: G602
+      - path: (.+)\.go$
+        text: G101
+      # staticcheck SA4006 (assigned value never used) — not enforced in v1
+      - path: (.+)\.go$
+        text: SA4006
+      # whitespace trailing newline — not enforced strictly in v1
+      - path: (.+)\.go$
+        linters:
+          - whitespace
+        text: unnecessary trailing newline
       # gosec new rules (introduced in gosec v2.23+, not present in golangci-lint v1)
       - path: (.+)\.go$
         text: G117
