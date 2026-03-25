@@ -50,6 +50,10 @@ type importChecker struct {
 	ci         CompactionInspector
 	handler    Handler
 
+	// commitImportFn broadcasts a CommitImport WAL message.
+	// Injected at construction time so the checker does not depend on *Server.
+	commitImportFn func(ctx context.Context, job ImportJob) error
+
 	closeOnce sync.Once
 	closeChan chan struct{}
 }
@@ -61,16 +65,22 @@ func NewImportChecker(ctx context.Context,
 	importMeta ImportMeta,
 	ci CompactionInspector,
 	handler Handler,
+	commitImportFn ...func(ctx context.Context, job ImportJob) error,
 ) ImportChecker {
+	var fn func(ctx context.Context, job ImportJob) error
+	if len(commitImportFn) > 0 {
+		fn = commitImportFn[0]
+	}
 	return &importChecker{
-		ctx:        ctx,
-		meta:       meta,
-		broker:     broker,
-		alloc:      alloc,
-		importMeta: importMeta,
-		ci:         ci,
-		handler:    handler,
-		closeChan:  make(chan struct{}),
+		ctx:            ctx,
+		meta:           meta,
+		broker:         broker,
+		alloc:          alloc,
+		importMeta:     importMeta,
+		ci:             ci,
+		handler:        handler,
+		commitImportFn: fn,
+		closeChan:      make(chan struct{}),
 	}
 }
 
@@ -109,6 +119,10 @@ func (c *importChecker) Start() {
 					c.checkSortingJob(job)
 				case internalpb.ImportJobState_IndexBuilding:
 					c.checkIndexBuildingJob(job)
+				case internalpb.ImportJobState_Uncommitted:
+					c.checkUncommittedJob(job)
+				case internalpb.ImportJobState_Committing:
+					c.checkCommittingJob(job)
 				case internalpb.ImportJobState_Failed:
 					c.checkFailedJob(job)
 				}
@@ -266,8 +280,15 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 	}
 
 	if totalRows == 0 {
-		log.Info("no data to import, skip the subsequent stages, just update job state to Completed")
-		updateJobState(internalpb.ImportJobState_Completed)
+		if job.GetAutoCommit() {
+			// backward-compatible: auto-commit jobs skip Uncommitted directly to Completed
+			log.Info("no data to import, auto_commit=true, transitioning directly to Completed")
+			updateJobState(internalpb.ImportJobState_Completed)
+		} else {
+			// replication cluster: surface Uncommitted so platform can observe and commit
+			log.Info("no data to import, auto_commit=false, transitioning to Uncommitted")
+			updateJobState(internalpb.ImportJobState_Uncommitted)
+		}
 		return
 	}
 
@@ -440,6 +461,47 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 
 	LogResultSegmentsInfo(job.GetJobID(), c.meta, targetSegmentIDs)
 	log.Info("import job all completed", zap.Duration("jobTimeCost/total", totalDuration))
+}
+
+// checkUncommittedJob handles jobs in the Uncommitted state.
+// If auto_commit=true, it triggers a commit via broadcastCommitImportMessage.
+// If auto_commit=false, it waits for an explicit CommitImport RPC from the platform.
+func (c *importChecker) checkUncommittedJob(job ImportJob) {
+	log := log.With(zap.Int64("jobID", job.GetJobID()))
+	if !job.GetAutoCommit() {
+		// Wait for explicit CommitImport from the replication platform.
+		return
+	}
+	// auto_commit=true: trigger commit by broadcasting the WAL message.
+	if c.commitImportFn == nil {
+		log.Warn("commitImportFn not set, cannot auto-commit import job")
+		return
+	}
+	if err := c.commitImportFn(c.ctx, job); err != nil {
+		log.Warn("auto-commit import failed", zap.Error(err))
+	}
+}
+
+// checkCommittingJob handles jobs in the Committing state.
+// Once all vchannels have acknowledged the commit fence, the job transitions to Completed.
+func (c *importChecker) checkCommittingJob(job ImportJob) {
+	log := log.With(zap.Int64("jobID", job.GetJobID()))
+	if len(job.GetCommittedVchannels()) < len(job.GetVchannels()) {
+		// Some vchannels still pending; WAL delivery is guaranteed, just wait.
+		return
+	}
+	completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
+	if err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(),
+		UpdateJobState(internalpb.ImportJobState_Completed),
+		UpdateJobCompleteTime(completeTime),
+	); err != nil {
+		log.Warn("failed to transition Committing to Completed", zap.Error(err))
+		return
+	}
+	totalDuration := job.GetTR().ElapseSpan()
+	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
+	log.Info("import job Committing done, all vchannels committed",
+		zap.Duration("jobTimeCost/total", totalDuration))
 }
 
 // unsetSegmentImporting unsets the isImporting flag for segments.

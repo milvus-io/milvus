@@ -131,6 +131,7 @@ type ImportJob interface {
 	GetCompleteTime() string
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
+	GetAutoCommit() bool
 	GetTR() *timerecord.TimeRecorder
 	GetDataTs() uint64
 	Clone() ImportJob
