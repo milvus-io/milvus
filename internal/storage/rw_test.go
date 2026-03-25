@@ -418,7 +418,7 @@ func (s *PackedBinlogRecordSuite) TestV3StatsWrittenUnderBasePath() {
 	require.True(s.T(), ok, "manifest must contain bloom filter stats under key %q", bfKey)
 	require.NotEmpty(s.T(), bfStat.Paths)
 
-	basePath := path.Join(common.SegmentInsertLogPath,
+	basePath := path.Join(dir, common.SegmentInsertLogPath,
 		metautil.JoinIDPath(s.collectionID, s.partitionID, s.segmentID))
 	for _, p := range bfStat.Paths {
 		assert.True(s.T(), strings.HasPrefix(p, basePath+"/_stats/"),

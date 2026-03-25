@@ -268,11 +268,12 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		return nil, err
 	}
 
-	binlogs, stats, bm25stats, _, _ := srw.GetLogs()
+	binlogs, stats, bm25stats, manifestPath, _ := srw.GetLogs()
 	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err
 	}
+	st.manifestPath = manifestPath
 
 	// For V3 segments, register bloom filter and BM25 stats in manifest.
 	// After registration, stats/bm25stats are set to nil so the legacy
@@ -320,7 +321,8 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
-		int64(numValidRows), insertLogs, statsLogs, bm25StatsLogs)
+		int64(numValidRows), insertLogs, statsLogs, bm25StatsLogs,
+		st.manifestPath)
 
 	debug.FreeOSMemory()
 	elapse := st.tr.RecordSpan()
@@ -546,6 +548,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 			req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
 			req.InsertLogs = insertBinlogs
+			req.ManifestPath = st.manifestPath
 			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil)
 
 			// set analyzer extra info
@@ -602,7 +605,8 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
-		textIndexLogs)
+		textIndexLogs,
+		st.manifestPath)
 	totalElapse := st.tr.RecordSpan()
 	log.Info("create text index done",
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
@@ -694,6 +698,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 
 			req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
 			req.InsertLogs = insertBinlogs
+			req.ManifestPath = st.manifestPath
 			options := &BuildIndexOptions{
 				JsonStatsMaxShreddingColumns: jsonStatsMaxShreddingColumns,
 				JsonStatsShreddingRatio:      jsonStatsShreddingRatioThreshold,
@@ -758,7 +763,8 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
-		jsonKeyIndexStats)
+		jsonKeyIndexStats,
+		st.manifestPath)
 
 	metrics.DataNodeBuildJSONStatsLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(totalElapse.Seconds())
 	log.Info("create json key index done",

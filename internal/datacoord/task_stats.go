@@ -399,6 +399,24 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	if err != nil && !errors.Is(err, merr.ErrSegmentNotFound) {
 		return err
 	}
+
+	// Update segment manifest version so subsequent stats tasks use the latest version.
+	if manifest := result.GetManifest(); manifest != "" {
+		segID := st.GetSegmentID()
+		if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
+			segID = st.GetTargetSegmentID()
+		}
+		if updateErr := st.meta.UpdateSegmentsInfo(ctx, UpdateManifest(segID, manifest)); updateErr != nil {
+			log.Ctx(ctx).Warn("failed to update manifest after stats task",
+				zap.Int64("taskID", st.GetTaskID()),
+				zap.Int64("segmentID", segID),
+				zap.Error(updateErr))
+			if !errors.Is(updateErr, merr.ErrSegmentNotFound) {
+				return updateErr
+			}
+		}
+	}
+
 	log.Ctx(ctx).Info("SetJobInfo for stats task success", zap.Int64("taskID", st.GetTaskID()),
 		zap.Int64("oldSegmentID", st.GetSegmentID()), zap.Int64("targetSegmentID", st.GetTargetSegmentID()),
 		zap.String("subJobType", st.GetSubJobType().String()), zap.String("state", st.GetState().String()))
