@@ -150,7 +150,7 @@ func (s *StreamingNodeManager) GetStreamingQueryNodeIDs() typeutil.UniqueSet {
 	if err != nil {
 		panic(err)
 	}
-	streamingNodes, err := balancer.GetAllStreamingNodes(context.Background())
+	streamingNodes, err := balancer.GetAvailableStreamingNodes(context.Background())
 	if err != nil {
 		// when the streaming coord is on shutdown, the balancer will return an error,
 		// causing panic, so we need to return the previous node ids.
