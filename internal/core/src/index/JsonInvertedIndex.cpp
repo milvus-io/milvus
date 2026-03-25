@@ -140,11 +140,14 @@ JsonInvertedIndex<T>::LoadIndexMetas(
         auto index_datas = this->mem_file_manager_->LoadIndexToMemory(
             non_exist_offset_files, load_priority);
 
-        auto non_exist_offset_data = CompactIndexDatas(index_datas);
-        auto non_exist_offset_data_codecs = std::move(
-            non_exist_offset_data.at(INDEX_NON_EXIST_OFFSET_FILE_NAME));
-        for (auto&& non_exist_offset_codec :
-             non_exist_offset_data_codecs.codecs_) {
+        auto slice_meta = std::move(index_datas.at(INDEX_FILE_SLICE_META));
+        auto non_exist_offset_data =
+            CompactIndexDatasByKey(INDEX_NON_EXIST_OFFSET_FILE_NAME,
+                                   std::move(slice_meta),
+                                   index_datas);
+        AssertInfo(non_exist_offset_data.codecs_.size() > 0,
+                   "non exist offset file is empty");
+        for (auto&& non_exist_offset_codec : non_exist_offset_data.codecs_) {
             fill_non_exist_offset(non_exist_offset_codec->PayloadData(),
                                   non_exist_offset_codec->PayloadSize());
         }
