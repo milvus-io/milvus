@@ -126,9 +126,9 @@ func (hc *handlerClientImpl) GetSalvageCheckpoint(ctx context.Context, pchannel 
 		if !shouldUseRemoteWAL(err) {
 			return nil, err
 		}
-		// TODO: Add streaming proto RPC for remote WAL support
-		// For now, return nil for remote WAL (salvage checkpoint is primarily used locally on the new primary)
-		return ([]*wal.ReplicateCheckpoint)(nil), nil
+		// The salvage checkpoint is only meaningful on the streaming node that performed the force promote,
+		// so this path should not be reached in practice.
+		return nil, errors.New("GetSalvageCheckpoint is not implemented for remote WAL")
 	})
 	if err != nil {
 		return nil, err

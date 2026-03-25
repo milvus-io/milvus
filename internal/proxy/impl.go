@@ -7177,7 +7177,7 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 	var salvageCheckpointProto *commonpb.ReplicateCheckpoint
 	salvageCheckpoints, err := streaming.WAL().Replicate().GetSalvageCheckpoint(ctx, req.GetTargetPchannel())
 	if err != nil {
-		logger.Warn("failed to get salvage checkpoints", zap.Error(err))
+		return nil, err
 	}
 	for _, cp := range salvageCheckpoints {
 		if cp.ClusterID == req.GetSourceClusterId() {

@@ -75,16 +75,6 @@ func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() error {
 
 // persistDirtySnapshot persists the dirty snapshot to the catalog.
 func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl zapcore.Level) (err error) {
-	// Persist salvage checkpoint if one was captured during force promote.
-	// This is independent of the normal snapshot and must not be done under r.mu.
-	if cp := rs.consumePendingSalvageCheckpoint(); cp != nil {
-		if err := rs.retryOperationWithBackoff(ctx, rs.Logger().With(zap.String("op", "persistSalvageCheckpoint")), func(ctx context.Context) error {
-			return resource.Resource().StreamingNodeCatalog().SaveSalvageCheckpoint(ctx, rs.channel.Name, cp.IntoProto())
-		}); err != nil {
-			return err
-		}
-	}
-
 	if rs.pendingPersistSnapshot == nil {
 		// if there's no dirty snapshot, generate a new one.
 		rs.pendingPersistSnapshot = rs.consumeDirtySnapshot()
@@ -141,6 +131,16 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl zap
 	}
 	if err := conc.BlockOnAll(futures...); err != nil {
 		return err
+	}
+
+	// Salvage checkpoint must be persisted before the consume checkpoint to guarantee ordering:
+	// if the node crashes between these two writes, the next snapshot retry will re-persist both.
+	if snapshot.SalvageCheckpoint != nil {
+		if err := rs.retryOperationWithBackoff(ctx, rs.Logger().With(zap.String("op", "persistSalvageCheckpoint")), func(ctx context.Context) error {
+			return resource.Resource().StreamingNodeCatalog().SaveSalvageCheckpoint(ctx, rs.channel.Name, snapshot.SalvageCheckpoint.IntoProto())
+		}); err != nil {
+			return err
+		}
 	}
 
 	// checkpoint updates should always be persisted after other updates success.

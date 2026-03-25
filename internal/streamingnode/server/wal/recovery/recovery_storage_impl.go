@@ -184,7 +184,7 @@ func (r *recoveryStorageImpl) notifyPersist() {
 func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.dirtyCounter == 0 {
+	if r.dirtyCounter == 0 && r.pendingSalvageCheckpoint == nil {
 		return nil
 	}
 
@@ -208,12 +208,17 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 			vchannels[vchannel.meta.Vchannel] = dirtySnapshot
 		}
 	}
+	// Atomically capture the salvage checkpoint alongside other dirty state.
+	// Clearing it here (under r.mu) ensures it is only consumed once.
+	salvageCP := r.pendingSalvageCheckpoint
+	r.pendingSalvageCheckpoint = nil
 	// clear the dirty counter.
 	r.dirtyCounter = 0
 	return &RecoverySnapshot{
 		VChannels:          vchannels,
 		SegmentAssignments: segments,
 		Checkpoint:         r.checkpoint.Clone(),
+		SalvageCheckpoint:  salvageCP,
 	}
 }
 
@@ -675,14 +680,4 @@ func (r *recoveryStorageImpl) getFlusherCheckpoint() *WALCheckpoint {
 		}
 	}
 	return minimumCheckpoint
-}
-
-// consumePendingSalvageCheckpoint returns and clears the pending salvage checkpoint.
-// Called from the background task (no lock held at call site).
-func (r *recoveryStorageImpl) consumePendingSalvageCheckpoint() *utility.ReplicateCheckpoint {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	cp := r.pendingSalvageCheckpoint
-	r.pendingSalvageCheckpoint = nil
-	return cp
 }
