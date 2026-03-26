@@ -80,7 +80,7 @@ func TestProxy_GetReplicateInfo_GetSalvageCheckpointError(t *testing.T) {
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	resp, err := node.GetReplicateInfo(context.Background(), &milvuspb.GetReplicateInfoRequest{
-		TargetPchannel: "test-pchannel",
+		TargetPchannel:  "test-pchannel",
 		SourceClusterId: "source-cluster",
 	})
 	assert.EqualError(t, err, "salvage error")
