@@ -51,8 +51,9 @@ func TestProxy_GetReplicateInfo_GetCheckpointError(t *testing.T) {
 
 	mockWAL := mock_streaming.NewMockWALAccesser(t)
 	mockWAL.EXPECT().Replicate().Return(replicateService)
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	node := &Proxy{}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -73,8 +74,9 @@ func TestProxy_GetReplicateInfo_GetSalvageCheckpointError(t *testing.T) {
 
 	mockWAL := mock_streaming.NewMockWALAccesser(t)
 	mockWAL.EXPECT().Replicate().Return(replicateService)
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	node := &Proxy{}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -96,8 +98,9 @@ func TestProxy_GetReplicateInfo_Success_NoSalvageCheckpoints(t *testing.T) {
 
 	mockWAL := mock_streaming.NewMockWALAccesser(t)
 	mockWAL.EXPECT().Replicate().Return(replicateService)
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	node := &Proxy{}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -126,8 +129,9 @@ func TestProxy_GetReplicateInfo_Success_MatchingSourceCluster(t *testing.T) {
 
 	mockWAL := mock_streaming.NewMockWALAccesser(t)
 	mockWAL.EXPECT().Replicate().Return(replicateService)
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	node := &Proxy{}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -157,8 +161,9 @@ func TestProxy_GetReplicateInfo_Success_NoMatchingSourceCluster(t *testing.T) {
 
 	mockWAL := mock_streaming.NewMockWALAccesser(t)
 	mockWAL.EXPECT().Replicate().Return(replicateService)
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	node := &Proxy{}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -186,8 +191,9 @@ func TestProxy_GetReplicateInfo_Success_NoSourceClusterIDFilter(t *testing.T) {
 
 	mockWAL := mock_streaming.NewMockWALAccesser(t)
 	mockWAL.EXPECT().Replicate().Return(replicateService)
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	node := &Proxy{}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
