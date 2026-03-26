@@ -320,6 +320,8 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         milvus::proto::schema::JSON);
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
+    // Mark the field as nullable so that null rows populate null_offset_.
+    file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
 
     index::CreateIndexInfo cii;
     cii.index_type = index::INVERTED_INDEX_TYPE;
@@ -332,27 +334,45 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
 
     // Build with enough rows to produce large null_offset and
     // non_exist_offset arrays (each > FILE_SLICE_SIZE = 64 bytes).
-    // - {"a": null}  → null_offset  (8 bytes per entry)
-    // - {"b": 1}     → non_exist_offset (key "a" doesn't exist)
-    // - {"a": 1.0}   → valid data (neither offset)
-    // 20 nulls + 20 non-exist → 160 bytes each, well above 64.
+    //
+    // With schema.nullable() == true:
+    //   - First 20 rows are field-level null (is_valid=false):
+    //     → both null_adder and non_exist_adder are called for each
+    //   - Next 20 rows are {"b": 1} (key "a" doesn't exist):
+    //     → only non_exist_adder is called for each
+    //   - Last 10 rows are {"a": 1.0} (valid data):
+    //     → only data_adder is called
+    //
+    // Result: null_offset_ = 20 entries (160 bytes),
+    //         non_exist_offsets_ = 40 entries (320 bytes).
+    // Both are well above FILE_SLICE_SIZE = 64 bytes.
+    constexpr int kNullRows = 20;
+    constexpr int kNonExistRows = 20;
+    constexpr int kValidRows = 10;
+
     std::vector<milvus::Json> jsons;
-    for (int i = 0; i < 20; i++) {
-        jsons.push_back(milvus::Json(
-            simdjson::padded_string(std::string(R"({"a": null})"))));
+    // Placeholder JSON for null rows (will be marked invalid in bitmap)
+    for (int i = 0; i < kNullRows; i++) {
+        jsons.push_back(
+            milvus::Json(simdjson::padded_string(std::string(R"({"a": 0})"))));
     }
-    for (int i = 0; i < 20; i++) {
+    for (int i = 0; i < kNonExistRows; i++) {
         jsons.push_back(
             milvus::Json(simdjson::padded_string(std::string(R"({"b": 1})"))));
     }
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < kValidRows; i++) {
         jsons.push_back(milvus::Json(
             simdjson::padded_string(std::string(R"({"a": 1.0})"))));
     }
 
     auto json_field =
-        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
     json_field->add_json_data(jsons);
+    // Mark the first kNullRows as invalid (null at the field level).
+    auto* valid_data = json_field->ValidData();
+    for (int i = 0; i < kNullRows; i++) {
+        valid_data[i >> 3] &= ~(1 << (i & 0x07));
+    }
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
 
@@ -384,7 +404,7 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     // --- Verify the bug: old CompactIndexDatas fails with partial data ---
     {
         auto partial = make_partial_datas(INDEX_NULL_OFFSET_FILE_NAME);
-        ASSERT_GT(partial.size(), 1);
+        ASSERT_GT(partial.size(), 1u);
         // _meta_slice references both null_offset and non_exist_offset slices,
         // but only null_offset slices are in the map → assertion failure.
         EXPECT_THROW(CompactIndexDatas(partial), std::exception);
@@ -396,8 +416,9 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         auto slice_meta = std::move(partial.at(INDEX_FILE_SLICE_META));
         auto result = CompactIndexDatasByKey(
             INDEX_NULL_OFFSET_FILE_NAME, std::move(slice_meta), partial);
-        EXPECT_GT(result.codecs_.size(), 0);
-        EXPECT_EQ(result.size_, 20 * sizeof(size_t));
+        EXPECT_GT(result.codecs_.size(), 0u);
+        EXPECT_EQ(result.size_,
+                  static_cast<int64_t>(kNullRows * sizeof(size_t)));
     }
 
     // --- Verify the fix: CompactIndexDatasByKey with non_exist_offset ---
@@ -406,8 +427,11 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         auto slice_meta = std::move(partial.at(INDEX_FILE_SLICE_META));
         auto result = CompactIndexDatasByKey(
             INDEX_NON_EXIST_OFFSET_FILE_NAME, std::move(slice_meta), partial);
-        EXPECT_GT(result.codecs_.size(), 0);
-        EXPECT_EQ(result.size_, 20 * sizeof(size_t));
+        EXPECT_GT(result.codecs_.size(), 0u);
+        // non_exist_offsets includes both null rows and non-existent rows
+        EXPECT_EQ(
+            result.size_,
+            static_cast<int64_t>((kNullRows + kNonExistRows) * sizeof(size_t)));
     }
 
     FILE_SLICE_SIZE.store(old_slice_size);

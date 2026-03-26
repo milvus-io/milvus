@@ -210,8 +210,9 @@ void
 InvertedIndexTantivy<T>::LoadIndexMetas(
     const std::vector<std::string>& index_files, const Config& config) {
     auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
-        null_offset_.resize((size_t)size / sizeof(size_t));
-        memcpy(null_offset_.data(), data, (size_t)size);
+        auto prev_size = null_offset_.size();
+        null_offset_.resize(prev_size + (size_t)size / sizeof(size_t));
+        memcpy(null_offset_.data() + prev_size, data, (size_t)size);
     };
     auto null_offset_file_itr = std::find_if(
         index_files.begin(), index_files.end(), [&](const std::string& file) {

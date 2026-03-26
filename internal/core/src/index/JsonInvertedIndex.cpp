@@ -100,8 +100,9 @@ JsonInvertedIndex<T>::LoadIndexMetas(
     const std::vector<std::string>& index_files, const Config& config) {
     InvertedIndexTantivy<T>::LoadIndexMetas(index_files, config);
     auto fill_non_exist_offset = [&](const uint8_t* data, int64_t size) {
-        non_exist_offsets_.resize((size_t)size / sizeof(size_t));
-        memcpy(non_exist_offsets_.data(), data, (size_t)size);
+        auto prev_size = non_exist_offsets_.size();
+        non_exist_offsets_.resize(prev_size + (size_t)size / sizeof(size_t));
+        memcpy(non_exist_offsets_.data() + prev_size, data, (size_t)size);
     };
     auto non_exist_offset_file_itr = std::find_if(
         index_files.begin(), index_files.end(), [&](const std::string& file) {
