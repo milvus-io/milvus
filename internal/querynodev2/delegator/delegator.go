@@ -432,23 +432,24 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	var err error
 	if partialResultRequiredDataRatio >= 1.0 {
 		tSafe, err = sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
-		if err != nil {
-			log.Warn("delegator search failed to wait tsafe", zap.Error(err))
-			return nil, err
-		}
-		if req.GetReq().GetMvccTimestamp() == 0 {
-			req.Req.MvccTimestamp = tSafe
-		}
 	} else {
+		// partial search enabled, could ignore streaming data
 		tSafe = sd.GetTSafe()
-		if req.GetReq().GetMvccTimestamp() == 0 {
-			req.Req.MvccTimestamp = tSafe
-		}
 	}
 
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
+
+	if err != nil {
+		log.Warn("delegator search failed to wait tsafe", zap.Error(err))
+		return nil, err
+	}
+
+	// use tsafe as mvcc timestamp if request not provide it
+	if req.GetReq().GetMvccTimestamp() == 0 {
+		req.Req.MvccTimestamp = tSafe
+	}
 
 	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
@@ -558,16 +559,18 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
 	tSafe, err := sd.waitTSafe(ctx, req.Req.GetGuaranteeTimestamp())
+	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
+		paramtable.GetStringNodeID(), metrics.QueryLabel).
+		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 	if err != nil {
 		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
 		return err
 	}
+
+	// use tsafe as mvcc timestamp if request not provide it
 	if req.GetReq().GetMvccTimestamp() == 0 {
 		req.Req.MvccTimestamp = tSafe
 	}
-	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
-		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
 	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(float64(1.0), req.GetReq().GetPartitionIDs()...)
 	if err != nil {
@@ -638,22 +641,24 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	var err error
 	if partialResultRequiredDataRatio >= 1.0 {
 		tSafe, err = sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
-		if err != nil {
-			log.Warn("delegator search failed to wait tsafe", zap.Error(err))
-			return nil, err
-		}
-		if req.GetReq().GetMvccTimestamp() == 0 {
-			req.Req.MvccTimestamp = tSafe
-		}
 	} else {
-		if req.GetReq().GetMvccTimestamp() == 0 {
-			req.Req.MvccTimestamp = sd.GetTSafe()
-		}
+		// partial search enabled, could ignore streaming data
+		tSafe = sd.GetTSafe()
 	}
 
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
+
+	if err != nil {
+		log.Warn("delegator search failed to wait tsafe", zap.Error(err))
+		return nil, err
+	}
+
+	// use tsafe as mvcc timestamp if request not provide it
+	if req.GetReq().GetMvccTimestamp() == 0 {
+		req.Req.MvccTimestamp = tSafe
+	}
 
 	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
