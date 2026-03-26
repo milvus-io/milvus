@@ -88,6 +88,13 @@ project( milvus VERSION "${MILVUS_VERSION}" )
 set( CMAKE_CXX_STANDARD 17 )
 set( CMAKE_CXX_STANDARD_REQUIRED on )
 
+# Use std::shared_ptr/std::string_view etc. instead of opentelemetry::nostd::
+# equivalents.  This MUST be consistent across every translation unit that
+# includes OTel headers; a mismatch causes an ODR violation / ABI break
+# because nostd::shared_ptr has a completely different memory layout (32-byte
+# PlacementBuffer) compared to std::shared_ptr (16 bytes).
+add_compile_definitions( OPENTELEMETRY_STL_VERSION=2017 )
+
 set( MILVUS_SOURCE_DIR      ${PROJECT_SOURCE_DIR} )
 set( MILVUS_BINARY_DIR      ${PROJECT_BINARY_DIR} )
 set( MILVUS_ENGINE_SRC      ${PROJECT_SOURCE_DIR}/src )
