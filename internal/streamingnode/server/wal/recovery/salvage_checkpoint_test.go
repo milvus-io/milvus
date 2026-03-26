@@ -1,10 +1,15 @@
 package recovery
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -180,4 +185,59 @@ func TestConsumeDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
 		assert.Equal(t, 0, rs.dirtyCounter)
 		assert.Nil(t, rs.pendingSalvageCheckpoint)
 	})
+}
+
+func TestIsDirtyWithSalvageCheckpoint(t *testing.T) {
+	// dirtyCounter==0 but pendingSalvageCheckpoint != nil → isDirty() should be true.
+	cp := &utility.ReplicateCheckpoint{
+		ClusterID: "cluster-x",
+		PChannel:  "test-pchannel",
+		TimeTick:  500,
+	}
+	rs := &recoveryStorageImpl{
+		currentClusterID:         "test1",
+		channel:                  types.PChannelInfo{Name: "test-pchannel"},
+		checkpoint:               &WALCheckpoint{MessageID: walimplstest.NewTestMessageID(10), TimeTick: 10},
+		segments:                 map[int64]*segmentRecoveryInfo{},
+		vchannels:                map[string]*vchannelRecoveryInfo{},
+		pendingSalvageCheckpoint: cp,
+		dirtyCounter:             0,
+		metrics:                  newRecoveryStorageMetrics(types.PChannelInfo{Name: "test-pchannel"}),
+	}
+	assert.True(t, rs.isDirty())
+
+	// Consuming the snapshot clears pendingSalvageCheckpoint.
+	snapshot := rs.consumeDirtySnapshot()
+	assert.NotNil(t, snapshot)
+	assert.False(t, rs.isDirty())
+}
+
+func TestPersistDirtySnapshotWithSalvageCheckpoint(t *testing.T) {
+	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	snCatalog.EXPECT().SaveSalvageCheckpoint(mock.Anything, "test-pchannel", mock.Anything).Return(nil)
+	snCatalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, "test-pchannel", mock.Anything).Return(nil)
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog))
+
+	cp := &utility.ReplicateCheckpoint{
+		ClusterID: "cluster-x",
+		PChannel:  "test-pchannel",
+		MessageID: walimplstest.NewTestMessageID(50),
+		TimeTick:  500,
+	}
+	rs := &recoveryStorageImpl{
+		cfg:     newConfig(),
+		channel: types.PChannelInfo{Name: "test-pchannel"},
+		checkpoint: &WALCheckpoint{
+			MessageID: walimplstest.NewTestMessageID(10),
+			TimeTick:  10,
+		},
+		segments:                 map[int64]*segmentRecoveryInfo{},
+		vchannels:                map[string]*vchannelRecoveryInfo{},
+		pendingSalvageCheckpoint: cp,
+		metrics:                  newRecoveryStorageMetrics(types.PChannelInfo{Name: "test-pchannel"}),
+	}
+
+	err := rs.persistDirtySnapshot(context.Background(), zap.InfoLevel)
+	assert.NoError(t, err)
+	assert.Nil(t, rs.pendingPersistSnapshot)
 }

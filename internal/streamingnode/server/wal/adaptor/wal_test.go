@@ -189,6 +189,10 @@ func (f *testOneWALFramework) testReadAndWrite(ctx context.Context, rwWAL wal.WA
 	require.True(f.t, status.AsStreamingError(err).IsReplicateViolation())
 	require.Nil(f.t, cp)
 
+	// No force promote has occurred, so salvage checkpoints should be empty.
+	salvageCPs := rwWAL.GetSalvageCheckpoint()
+	require.Nil(f.t, salvageCPs)
+
 	f.testSendCreateCollection(ctx, rwWAL)
 	defer f.testSendDropCollection(ctx, rwWAL)
 
