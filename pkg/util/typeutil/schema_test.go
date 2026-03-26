@@ -2124,6 +2124,199 @@ func TestMergeFieldData(t *testing.T) {
 		err := MergeFieldData([]*schemapb.FieldData{emptyField}, []*schemapb.FieldData{emptyField})
 		assert.Error(t, err)
 	})
+
+	t.Run("nullable vector with nil Vectors.Data", func(t *testing.T) {
+		// Simulate: dst has valid FloatVector data, src has all-null batch (Vectors.Data == nil)
+		dstFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vector",
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 4,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{1, 2, 3, 4, 5, 6, 7, 8},
+							},
+						},
+					},
+				},
+				FieldId:   200,
+				ValidData: []bool{true, true},
+			},
+		}
+		srcFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vector",
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim:  4,
+						Data: nil, // all nulls in this batch
+					},
+				},
+				FieldId:   200,
+				ValidData: []bool{false, false},
+			},
+		}
+
+		err := MergeFieldData(dstFields, srcFields)
+		assert.NoError(t, err)
+		assert.Equal(t, []bool{true, true, false, false}, dstFields[0].ValidData)
+		// Vector data unchanged since src had no data
+		assert.Equal(t, []float32{1, 2, 3, 4, 5, 6, 7, 8}, dstFields[0].GetVectors().GetFloatVector().Data)
+	})
+
+	t.Run("nullable vector with nil Vectors", func(t *testing.T) {
+		// Simulate: dst has valid FloatVector data, src has nil Vectors entirely
+		dstFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vector",
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 4,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{1, 2, 3, 4},
+							},
+						},
+					},
+				},
+				FieldId:   201,
+				ValidData: []bool{true},
+			},
+		}
+		srcFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vector",
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: nil, // entirely nil
+				},
+				FieldId:   201,
+				ValidData: []bool{false},
+			},
+		}
+
+		err := MergeFieldData(dstFields, srcFields)
+		assert.NoError(t, err)
+		assert.Equal(t, []bool{true, false}, dstFields[0].ValidData)
+		assert.Equal(t, []float32{1, 2, 3, 4}, dstFields[0].GetVectors().GetFloatVector().Data)
+	})
+
+	t.Run("nullable vector dst nil src valid", func(t *testing.T) {
+		// Simulate: dst had all-null batches (nil Vectors.Data), src has valid data
+		dstFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vector",
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim:  4,
+						Data: nil, // all previous batches were null
+					},
+				},
+				FieldId:   202,
+				ValidData: []bool{false, false},
+			},
+		}
+		srcFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vector",
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 4,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{1, 2, 3, 4},
+							},
+						},
+					},
+				},
+				FieldId:   202,
+				ValidData: []bool{true},
+			},
+		}
+
+		err := MergeFieldData(dstFields, srcFields)
+		assert.NoError(t, err)
+		assert.Equal(t, []bool{false, false, true}, dstFields[0].ValidData)
+		assert.Equal(t, []float32{1, 2, 3, 4}, dstFields[0].GetVectors().GetFloatVector().Data)
+	})
+
+	t.Run("nullable vector both nil", func(t *testing.T) {
+		// Both dst and src have nil vector data
+		dstFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vector",
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim:  4,
+						Data: nil,
+					},
+				},
+				FieldId:   203,
+				ValidData: []bool{false},
+			},
+		}
+		srcFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vector",
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim:  4,
+						Data: nil,
+					},
+				},
+				FieldId:   203,
+				ValidData: []bool{false},
+			},
+		}
+
+		err := MergeFieldData(dstFields, srcFields)
+		assert.NoError(t, err)
+		assert.Equal(t, []bool{false, false}, dstFields[0].ValidData)
+	})
+
+	t.Run("nil Field with ValidData", func(t *testing.T) {
+		// Field is entirely nil (another representation of all-null)
+		dstFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vector",
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 4,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{1, 2, 3, 4},
+							},
+						},
+					},
+				},
+				FieldId:   204,
+				ValidData: []bool{true},
+			},
+		}
+		srcFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vector",
+				Field:     nil, // entirely nil
+				FieldId:   204,
+				ValidData: []bool{false},
+			},
+		}
+
+		err := MergeFieldData(dstFields, srcFields)
+		assert.NoError(t, err)
+		assert.Equal(t, []bool{true, false}, dstFields[0].ValidData)
+		assert.Equal(t, []float32{1, 2, 3, 4}, dstFields[0].GetVectors().GetFloatVector().Data)
+	})
 }
 
 type FieldDataSuite struct {

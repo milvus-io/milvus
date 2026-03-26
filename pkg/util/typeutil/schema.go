@@ -1898,6 +1898,14 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 	}
 	for _, srcFieldData := range src {
 		switch fieldType := srcFieldData.Field.(type) {
+		case nil:
+			// Field is entirely nil, which can happen for nullable fields with all null values.
+			// Only merge ValidData.
+			if _, ok := fieldID2Data[srcFieldData.FieldId]; !ok {
+				return errors.New("fields in src but not in dst: " + srcFieldData.Type.String())
+			}
+			fieldData := fieldID2Data[srcFieldData.FieldId]
+			fieldData.ValidData = append(fieldData.ValidData, srcFieldData.GetValidData()...)
 		case *schemapb.FieldData_Scalars:
 			if _, ok := fieldID2Data[srcFieldData.FieldId]; !ok {
 				return errors.New("fields in src but not in dst: " + srcFieldData.Type.String())
@@ -2027,6 +2035,11 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 			fieldData := fieldID2Data[srcFieldData.FieldId]
 			// Merge ValidData for nullable vectors
 			fieldData.ValidData = append(fieldData.ValidData, srcFieldData.GetValidData()...)
+			// For nullable vector fields, Vectors or Vectors.Data can be nil when all values
+			// in the batch are null. In that case, only ValidData needs merging (done above).
+			if fieldType.Vectors == nil || fieldType.Vectors.Data == nil {
+				continue
+			}
 			dstVector := fieldData.GetVectors()
 			switch srcVector := fieldType.Vectors.Data.(type) {
 			case *schemapb.VectorField_BinaryVector:
