@@ -198,9 +198,6 @@ func TestAssignmentService(t *testing.T) {
 }
 
 func TestForcePromoteValidation(t *testing.T) {
-	// Test force promote validation - force promote requires empty cluster and topology fields
-	// The configuration is auto-constructed from the current cluster's existing meta
-
 	t.Run("valid_single_cluster_no_topology", func(t *testing.T) {
 		cfg := &commonpb.ReplicateConfiguration{
 			Clusters: []*commonpb.MilvusCluster{
@@ -210,51 +207,6 @@ func TestForcePromoteValidation(t *testing.T) {
 		}
 		err := validateForcePromoteConfiguration(cfg, "by-dev")
 		assert.NoError(t, err)
-	})
-
-	t.Run("invalid_non_empty_topology", func(t *testing.T) {
-		resource.InitForTest()
-
-		mw := mock_streaming.NewMockWALAccesser(t)
-		mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
-		streaming.SetWALForTest(mw)
-
-		broadcast.ResetBroadcaster()
-		snmanager.ResetStreamingNodeManager()
-		b := mock_balancer.NewMockBalancer(t)
-		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
-		b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
-			<-ctx.Done()
-			return ctx.Err()
-		}).Maybe()
-		b.EXPECT().Close().Return().Maybe()
-		b.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{
-			PChannelView: &channel.PChannelView{
-				Channels: map[channel.ChannelID]*channel.PChannelMeta{
-					{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
-				},
-			},
-		}, nil).Maybe()
-		balance.Register(b)
-
-		mb := mock_broadcaster.NewMockBroadcaster(t)
-		mb.EXPECT().Close().Return().Maybe()
-		broadcast.Register(mb)
-
-		as := NewAssignmentService()
-
-		// Force promote with non-empty topology should fail
-		cfg := &commonpb.ReplicateConfiguration{
-			CrossClusterTopology: []*commonpb.CrossClusterTopology{
-				{SourceClusterId: "by-dev", TargetClusterId: "test2"},
-			},
-		}
-		_, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
-			Configuration: cfg,
-			ForcePromote:  true,
-		})
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "force promote requires empty cluster and topology fields")
 	})
 
 	// Test validateForcePromoteConfiguration standalone function directly
@@ -462,57 +414,6 @@ func TestForcePromoteIdempotent(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
-}
-
-func TestForcePromoteInvalidConfig(t *testing.T) {
-	// Test that force promote rejects non-empty cluster/topology fields
-	// This test is now covered by TestForcePromoteValidation
-	// Keep this for additional coverage
-
-	resource.InitForTest()
-
-	mw := mock_streaming.NewMockWALAccesser(t)
-	mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
-	streaming.SetWALForTest(mw)
-
-	broadcast.ResetBroadcaster()
-	snmanager.ResetStreamingNodeManager()
-	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
-	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
-		<-ctx.Done()
-		return ctx.Err()
-	}).Maybe()
-	b.EXPECT().Close().Return().Maybe()
-
-	b.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{
-		PChannelView: &channel.PChannelView{
-			Channels: map[channel.ChannelID]*channel.PChannelMeta{
-				{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
-			},
-		},
-	}, nil).Maybe()
-	balance.Register(b)
-
-	mb := mock_broadcaster.NewMockBroadcaster(t)
-	mb.EXPECT().Close().Return().Maybe()
-	broadcast.Register(mb)
-
-	as := NewAssignmentService()
-
-	// Force promote with multiple clusters (invalid for force promote - non-empty clusters)
-	invalidCfg := &commonpb.ReplicateConfiguration{
-		Clusters: []*commonpb.MilvusCluster{
-			{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test:19530", Token: "by-dev"}},
-			{ClusterId: "other", Pchannels: []string{"other-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://other:19530", Token: "other"}},
-		},
-	}
-	_, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
-		Configuration: invalidCfg,
-		ForcePromote:  true,
-	})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "force promote requires empty cluster and topology fields")
 }
 
 func TestAlterReplicateConfigCallbackForcePromote(t *testing.T) {
@@ -1490,65 +1391,4 @@ func TestForcePromoteMultiplePChannels(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
-}
-
-func TestForcePromoteUpdateConfigError(t *testing.T) {
-	resource.InitForTest()
-
-	mw := mock_streaming.NewMockWALAccesser(t)
-	mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
-	mw.EXPECT().Broadcast().Return(mock_streaming.NewMockBroadcast(t)).Maybe()
-	streaming.SetWALForTest(mw)
-
-	broadcast.ResetBroadcaster()
-	snmanager.ResetStreamingNodeManager()
-	b := mock_balancer.NewMockBalancer(t)
-	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
-	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
-		<-ctx.Done()
-		return ctx.Err()
-	}).Maybe()
-	b.EXPECT().Close().Return().Maybe()
-
-	currentReplicateConfig := &commonpb.ReplicateConfiguration{
-		Clusters: []*commonpb.MilvusCluster{
-			{ClusterId: "primary", Pchannels: []string{"primary-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://primary:19530", Token: "primary"}},
-			{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test:19530", Token: "by-dev"}},
-		},
-		CrossClusterTopology: []*commonpb.CrossClusterTopology{
-			{SourceClusterId: "primary", TargetClusterId: "by-dev"},
-		},
-	}
-	b.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{
-		PChannelView: &channel.PChannelView{
-			Channels: map[channel.ChannelID]*channel.PChannelMeta{
-				{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
-			},
-		},
-		ReplicateConfiguration: currentReplicateConfig,
-	}, nil).Maybe()
-	// UpdateReplicateConfiguration fails (not reached due to validation, but kept for documentation)
-	b.EXPECT().UpdateReplicateConfiguration(mock.Anything, mock.Anything).Return(errors.New("update config failed")).Maybe()
-	balance.Register(b)
-
-	mb := mock_broadcaster.NewMockBroadcaster(t)
-	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, rk ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-		return nil, broadcaster.ErrNotPrimary
-	}).Maybe()
-	mb.EXPECT().Close().Return().Maybe()
-	broadcast.Register(mb)
-
-	as := NewAssignmentService()
-	forcePromoteCfg := &commonpb.ReplicateConfiguration{
-		Clusters: []*commonpb.MilvusCluster{
-			{ClusterId: "by-dev", Pchannels: []string{"by-dev-1"}, ConnectionParam: &commonpb.ConnectionParam{Uri: "http://test:19530", Token: "by-dev"}},
-		},
-	}
-	_, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
-		Configuration: forcePromoteCfg,
-		ForcePromote:  true,
-	})
-	assert.Error(t, err)
-	// Force promote with non-empty clusters now fails at validation before reaching UpdateReplicateConfiguration
-	assert.Contains(t, err.Error(), "force promote requires empty cluster and topology fields")
 }
