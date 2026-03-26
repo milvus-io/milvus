@@ -25,9 +25,12 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
@@ -80,9 +83,52 @@ func (s *analyzeTaskSuite) SetupSuite() {
 	}
 	analyzeMt.tasks[s.taskID] = analyzeTask
 
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  s.fieldID,
+				Name:     "vector_field",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		},
+	}
+
+	collections := typeutil.NewConcurrentMap[int64, *collectionInfo]()
+	collections.Insert(s.collID, &collectionInfo{Schema: schema})
+
+	segments := NewSegmentsInfo()
+	segments.SetSegment(101, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           101,
+			CollectionID: s.collID,
+			PartitionID:  s.partID,
+			State:        commonpb.SegmentState_Flushed,
+			NumOfRows:    1000,
+			Binlogs: []*datapb.FieldBinlog{
+				{FieldID: s.fieldID, Binlogs: []*datapb.Binlog{{LogID: 1001}, {LogID: 1002}}},
+			},
+		},
+	})
+	segments.SetSegment(102, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           102,
+			CollectionID: s.collID,
+			PartitionID:  s.partID,
+			State:        commonpb.SegmentState_Flushed,
+			NumOfRows:    2000,
+			Binlogs: []*datapb.FieldBinlog{
+				{FieldID: s.fieldID, Binlogs: []*datapb.Binlog{{LogID: 2001}, {LogID: 2002}}},
+			},
+		},
+	})
+
 	s.mt = &meta{
 		analyzeMeta: analyzeMt,
-		collections: typeutil.NewConcurrentMap[int64, *collectionInfo](),
+		collections: collections,
+		segments:    segments,
 	}
 }
 
