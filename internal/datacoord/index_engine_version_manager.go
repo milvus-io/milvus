@@ -139,8 +139,11 @@ func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.getCurrentVersion()
+}
+
+func (m *versionManagerImpl) getCurrentVersion() int32 {
 	if len(m.versions) == 0 {
-		log.Info("index versions is empty")
 		return 0
 	}
 
@@ -150,7 +153,6 @@ func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {
 			current = version.CurrentIndexVersion
 		}
 	}
-	log.Info("Merged current version", zap.Int32("current", current))
 	return current
 }
 
@@ -158,8 +160,11 @@ func (m *versionManagerImpl) GetMinimalIndexEngineVersion() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.getMinimalVersion()
+}
+
+func (m *versionManagerImpl) getMinimalVersion() int32 {
 	if len(m.versions) == 0 {
-		log.Info("index versions is empty")
 		return 0
 	}
 
@@ -169,7 +174,6 @@ func (m *versionManagerImpl) GetMinimalIndexEngineVersion() int32 {
 			minimal = version.MinimalIndexVersion
 		}
 	}
-	log.Info("Merged minimal version", zap.Int32("minimal", minimal))
 	return minimal
 }
 
@@ -177,8 +181,11 @@ func (m *versionManagerImpl) GetCurrentScalarIndexEngineVersion() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.getCurrentScalarVersion()
+}
+
+func (m *versionManagerImpl) getCurrentScalarVersion() int32 {
 	if len(m.scalarIndexVersions) == 0 {
-		log.Info("scalar index versions is empty")
 		return 0
 	}
 
@@ -188,7 +195,6 @@ func (m *versionManagerImpl) GetCurrentScalarIndexEngineVersion() int32 {
 			current = version.CurrentIndexVersion
 		}
 	}
-	log.Info("Merged current scalar index version", zap.Int32("current", current))
 	return current
 }
 
@@ -196,8 +202,11 @@ func (m *versionManagerImpl) GetMinimalScalarIndexEngineVersion() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.getMinimalScalarVersion()
+}
+
+func (m *versionManagerImpl) getMinimalScalarVersion() int32 {
 	if len(m.scalarIndexVersions) == 0 {
-		log.Info("scalar index versions is empty")
 		return 0
 	}
 
@@ -207,13 +216,20 @@ func (m *versionManagerImpl) GetMinimalScalarIndexEngineVersion() int32 {
 			minimal = version.MinimalIndexVersion
 		}
 	}
-	log.Info("Merged minimal scalar index version", zap.Int32("minimal", minimal))
 	return minimal
 }
 
 func (m *versionManagerImpl) GetMaximumIndexEngineVersion() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	return m.getMaximumVersion()
+}
+
+func (m *versionManagerImpl) getMaximumVersion() int32 {
+	if len(m.versions) == 0 {
+		return math.MaxInt32
+	}
 
 	maximum := int32(math.MaxInt32)
 	for _, version := range m.versions {
@@ -223,9 +239,6 @@ func (m *versionManagerImpl) GetMaximumIndexEngineVersion() int32 {
 		if version.MaximumIndexVersion < maximum {
 			maximum = version.MaximumIndexVersion
 		}
-	}
-	if maximum == math.MaxInt32 {
-		return math.MaxInt32
 	}
 	return maximum
 }
@@ -234,6 +247,14 @@ func (m *versionManagerImpl) GetMaximumScalarIndexEngineVersion() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.getMaximumScalarVersion()
+}
+
+func (m *versionManagerImpl) getMaximumScalarVersion() int32 {
+	if len(m.scalarIndexVersions) == 0 {
+		return math.MaxInt32
+	}
+
 	maximum := int32(math.MaxInt32)
 	for _, version := range m.scalarIndexVersions {
 		if version.MaximumIndexVersion == 0 {
@@ -243,21 +264,18 @@ func (m *versionManagerImpl) GetMaximumScalarIndexEngineVersion() int32 {
 			maximum = version.MaximumIndexVersion
 		}
 	}
-	if maximum == math.MaxInt32 {
-		return math.MaxInt32
-	}
 	return maximum
 }
 
-// clampVersion clamps v into [minV, maxV], logging a warning on each adjustment.
+// clampVersion clamps v into [minV, maxV], logging a rate-limited warning on each adjustment.
 func clampVersion(v, minV, maxV int32, name string) int32 {
 	if v < minV {
-		log.Warn(name+" below cluster minimum, clamping",
+		log.RatedWarn(60, name+" below cluster minimum, clamping",
 			zap.Int32("target", v), zap.Int32("minimum", minV))
 		v = minV
 	}
 	if v > maxV {
-		log.Warn(name+" exceeds cluster maximum, clamping",
+		log.RatedWarn(60, name+" exceeds cluster maximum, clamping",
 			zap.Int32("target", v), zap.Int32("maximum", maxV))
 		v = maxV
 	}
@@ -265,7 +283,11 @@ func clampVersion(v, minV, maxV int32, name string) int32 {
 }
 
 func (m *versionManagerImpl) ResolveVecIndexVersion() int32 {
-	version := m.GetCurrentIndexEngineVersion()
+	m.mu.Lock()
+	current, minimal, maximum := m.getCurrentVersion(), m.getMinimalVersion(), m.getMaximumVersion()
+	m.mu.Unlock()
+
+	version := current
 	if Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt64() != -1 {
 		target := Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt32()
 		if Params.DataCoordCfg.ForceRebuildSegmentIndex.GetAsBool() {
@@ -274,16 +296,15 @@ func (m *versionManagerImpl) ResolveVecIndexVersion() int32 {
 			version = max(version, target)
 		}
 	}
-	return clampVersion(
-		version,
-		m.GetMinimalIndexEngineVersion(),
-		m.GetMaximumIndexEngineVersion(),
-		"targetVecIndexVersion",
-	)
+	return clampVersion(version, minimal, maximum, "targetVecIndexVersion")
 }
 
 func (m *versionManagerImpl) ResolveScalarIndexVersion() int32 {
-	version := m.GetCurrentScalarIndexEngineVersion()
+	m.mu.Lock()
+	current, minimal, maximum := m.getCurrentScalarVersion(), m.getMinimalScalarVersion(), m.getMaximumScalarVersion()
+	m.mu.Unlock()
+
+	version := current
 	if Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt64() != -1 {
 		target := Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt32()
 		if Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.GetAsBool() {
@@ -292,12 +313,7 @@ func (m *versionManagerImpl) ResolveScalarIndexVersion() int32 {
 			version = max(version, target)
 		}
 	}
-	return clampVersion(
-		version,
-		m.GetMinimalScalarIndexEngineVersion(),
-		m.GetMaximumScalarIndexEngineVersion(),
-		"targetScalarIndexVersion",
-	)
+	return clampVersion(version, minimal, maximum, "targetScalarIndexVersion")
 }
 
 func (m *versionManagerImpl) GetIndexNonEncoding() bool {
