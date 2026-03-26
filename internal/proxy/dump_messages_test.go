@@ -180,8 +180,9 @@ func TestDumpMessages_ContextCanceled(t *testing.T) {
 
 	mockWAL := mock_streaming.NewMockWALAccesser(t)
 	mockWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(mockScanner)
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	// Cancel before DumpMessages is called so ctx.Done() fires immediately in the select
 	cancel()
@@ -208,8 +209,9 @@ func TestDumpMessages_ScannerError(t *testing.T) {
 
 	mockWAL := mock_streaming.NewMockWALAccesser(t)
 	mockWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(mockScanner)
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	stream := &mockDumpMessagesServer{ctx: context.Background()}
 	node := &Proxy{}
@@ -233,8 +235,9 @@ func TestDumpMessages_ScannerDoneSuccessfully(t *testing.T) {
 
 	mockWAL := mock_streaming.NewMockWALAccesser(t)
 	mockWAL.EXPECT().Read(mock.Anything, mock.Anything).Return(mockScanner)
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	stream := &mockDumpMessagesServer{ctx: context.Background()}
 	node := &Proxy{}
@@ -263,8 +266,9 @@ func TestDumpMessages_MessageSentSuccessfully(t *testing.T) {
 			ch <- buildTestImmutableMessage(200) // > endTimetick (100), triggers return nil
 			return mockScanner
 		})
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	stream := &mockDumpMessagesServer{ctx: context.Background()}
 	node := &Proxy{}
@@ -294,8 +298,9 @@ func TestDumpMessages_FilterByStartTimetick(t *testing.T) {
 			ch <- buildTestImmutableMessage(250) // > endTimetick (200), stops loop
 			return mockScanner
 		})
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	stream := &mockDumpMessagesServer{ctx: context.Background()}
 	node := &Proxy{}
@@ -324,8 +329,9 @@ func TestDumpMessages_StopAtEndTimetick(t *testing.T) {
 			ch <- buildTestImmutableMessage(200) // > endTimetick (100), stops immediately
 			return mockScanner
 		})
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	stream := &mockDumpMessagesServer{ctx: context.Background()}
 	node := &Proxy{}
@@ -355,8 +361,9 @@ func TestDumpMessages_FilterSystemMessages(t *testing.T) {
 			ch <- buildTestImmutableMessage(200) // > endTimetick, stops loop
 			return mockScanner
 		})
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	stream := &mockDumpMessagesServer{ctx: context.Background()}
 	node := &Proxy{}
@@ -385,8 +392,9 @@ func TestDumpMessages_SendError(t *testing.T) {
 			ch <- buildTestImmutableMessage(50)
 			return mockScanner
 		})
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	sendErr := errors.New("send error")
 	stream := &mockDumpMessagesServer{ctx: context.Background(), sendErr: sendErr}
@@ -414,8 +422,9 @@ func TestDumpMessages_ChannelClosed(t *testing.T) {
 			close(ch)
 			return mockScanner
 		})
+	prevWAL := streaming.WAL()
 	streaming.SetWALForTest(mockWAL)
-	defer streaming.SetWALForTest(nil)
+	defer streaming.SetWALForTest(prevWAL)
 
 	stream := &mockDumpMessagesServer{ctx: context.Background()}
 	node := &Proxy{}
