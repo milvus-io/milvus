@@ -813,7 +813,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         client.close()
 
         # search with client closed
-        error = {"err_code": 999, "err_msg": "'NoneType' object has no attribute 'search'"}
+        error = {"err_code": 999, "err_msg": "should create connection first"}
         self.search(
             client,
             collection_name,

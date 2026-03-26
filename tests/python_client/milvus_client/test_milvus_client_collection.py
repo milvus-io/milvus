@@ -2252,7 +2252,7 @@ class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client_temp, collection_name, default_dim)
         self.close(client_temp)
-        error = {ct.err_code: 1, ct.err_msg: "'NoneType' object has no attribute 'drop_collection'"}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.drop_collection(client_temp, collection_name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -2645,7 +2645,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # Remove connection
         self.close(client_temp)
-        error = {ct.err_code: 1, ct.err_msg: "'NoneType' object has no attribute 'create_collection'"}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.create_collection(client_temp, collection_name, default_dim,
                                check_task=CheckTasks.err_res, check_items=error)
 
@@ -2662,7 +2662,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client_temp, collection_name, default_dim)
         self.close(client_temp)
-        error = {ct.err_code: 1, ct.err_msg: "'NoneType' object has no attribute 'load_collection'"}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.load_collection(client_temp, collection_name,
                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -2679,7 +2679,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client_temp, collection_name, default_dim)
         self.close(client_temp)
-        error = {ct.err_code: 999, ct.err_msg: "'NoneType' object has no attribute 'release_collection'"}
+        error = {ct.err_code: 999, ct.err_msg: 'should create connection first'}
         self.release_collection(client_temp, collection_name,
                                 check_task=CheckTasks.err_res, check_items=error)
 
@@ -3764,7 +3764,7 @@ class TestMilvusClientHasCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client_temp, collection_name, default_dim)
         self.close(client_temp)
-        error = {ct.err_code: 1, ct.err_msg: "'NoneType' object has no attribute 'has_collection'"}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.has_collection(client_temp, collection_name,
                             check_task=CheckTasks.err_res, check_items=error)
 
@@ -3810,7 +3810,7 @@ class TestMilvusClientListCollection(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client_temp, collection_name, default_dim)
         self.close(client_temp)
-        error = {ct.err_code: 999, ct.err_msg: "'NoneType' object has no attribute 'list_collections'"}
+        error = {ct.err_code: 999, ct.err_msg: 'should create connection first'}
         self.list_collections(client_temp,
                               check_task=CheckTasks.err_res, check_items=error)
 
