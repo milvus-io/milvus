@@ -19,36 +19,30 @@ mlog is a context-aware logging library built on [zap](https://github.com/uber-g
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
 │  │  logger.go   │  │  context.go  │  │      field.go          │  │
 │  │              │  │              │  │                        │  │
-│  │ - Init()     │  │ - WithFields │  │ - Field constructors   │  │
-│  │ - InitNode() │  │ - GetProp..  │  │ - PropagatedString     │  │
-│  │ - Log()      │  │ - logContext │  │ - PropagatedInt64      │  │
-│  │ - Debug()    │  │              │  │                        │  │
-│  │ - Info()     │  │              │  └────────────────────────┘  │
-│  │ - Warn()     │  └──────────────┘                              │
-│  │ - Error()    │  ┌──────────────┐  ┌────────────────────────┐  │
-│  │ - Logger     │  │  rated.go    │  │    field_enum.go       │  │
-│  │   .With()    │  │              │  │                        │  │
-│  │   .WithLazy  │  │ - RatedLog   │  │ - Well-known keys      │  │
-│  └──────────────┘  │ - RatedDebug │  │   (KeyXXX)             │  │
-│                     │ - RatedInfo  │  │ - Field helpers        │  │
-│  ┌──────────────┐  │ - RatedWarn  │  │   (FieldXXX)           │  │
-│  │  level.go    │  │ - RatedError │  │                        │  │
-│  │              │  └──────────────┘  └────────────────────────┘  │
-│  │ - SetLevel   │                                                │
-│  │ - GetLevel   │                                                │
+│  │ - Log()      │  │ - WithFields │  │ - Field constructors   │  │
+│  │ - Debug()    │  │ - GetProp..  │  │ - PropagatedString     │  │
+│  │ - Info()     │  │ - logContext │  │ - PropagatedInt64      │  │
+│  │ - Warn()     │  │              │  │                        │  │
+│  │ - Error()    │  │              │  └────────────────────────┘  │
+│  │ - Logger     │  └──────────────┘                              │
+│  │   .With()    │  ┌──────────────┐  ┌────────────────────────┐  │
+│  │   .WithLazy  │  │  rated.go    │  │    field_enum.go       │  │
+│  └──────────────┘  │              │  │                        │  │
+│                     │ - RatedLog   │  │ - Well-known keys      │  │
+│  ┌──────────────┐  │ - RatedDebug │  │   (FieldXXX)           │  │
+│  │  level.go    │  │ - RatedInfo  │  │ - Field helpers        │  │
+│  │              │  │ - RatedWarn  │  │                        │  │
+│  │ - SetLevel   │  │ - RatedError │  └────────────────────────┘  │
+│  │ - GetLevel   │  └──────────────┘                              │
 │  └──────────────┘                                                │
 ├──────────────────────────────────────────────────────────────────┤
-│                        mlog/grpc Package                         │
+│                     interceptor.go (gRPC)                        │
 ├──────────────────────────────────────────────────────────────────┤
-│  ┌────────────────────────────────────────────────────────┐      │
-│  │                   interceptor.go                       │      │
-│  │                                                        │      │
-│  │  - UnaryServerInterceptor(module)                      │      │
-│  │  - StreamServerInterceptor(module)                     │      │
-│  │  - UnaryClientInterceptor()                            │      │
-│  │  - StreamClientInterceptor()                           │      │
-│  │  - extractPropagated() / injectPropagated()            │      │
-│  └────────────────────────────────────────────────────────┘      │
+│  - UnaryServerInterceptor(module)                                │
+│  - StreamServerInterceptor(module)                               │
+│  - UnaryClientInterceptor()                                      │
+│  - StreamClientInterceptor()                                     │
+│  - extractPropagated() / injectPropagated()                      │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -78,41 +72,28 @@ type logContext struct {
 
 ### 3. Well-Known Keys
 
-Predefined standard field names (lowercase with underscores, gRPC metadata compatible):
+Predefined standard field names (lowercase with underscores, gRPC metadata compatible).
+Keys are unexported; use `FieldXxx()` constructors instead of raw key strings:
 
-```go
-const (
-    KeyNodeID         = "node_id"
-    KeyModule         = "module"
-    KeyTraceID        = "trace_id"
-    KeySpanID         = "span_id"
-    KeyDbID           = "db_id"
-    KeyDbName         = "db_name"
-    KeyCollectionID   = "collection_id"
-    KeyCollectionName = "collection_name"
-    KeyPartitionID    = "partition_id"
-    KeyPartitionName  = "partition_name"
-    KeySegmentID      = "segment_id"
-    KeyVChannel       = "vchannel"
-    KeyPChannel       = "pchannel"
-    KeyMessageID      = "message_id"
-    KeyMessage        = "message"
-)
-```
+| Key | FieldXxx Constructor |
+|-----|---------------------|
+| `node_id` | `FieldNodeID(val)` |
+| `module` | `FieldModule(val)` |
+| `trace_id` | `FieldTraceID(val)` |
+| `span_id` | `FieldSpanID(val)` |
+| `db_id` | `FieldDbID(val, opts...)` |
+| `db_name` | `FieldDbName(val, opts...)` |
+| `collection_id` | `FieldCollectionID(val, opts...)` |
+| `collection_name` | `FieldCollectionName(val, opts...)` |
+| `partition_id` | `FieldPartitionID(val, opts...)` |
+| `partition_name` | `FieldPartitionName(val, opts...)` |
+| `segment_id` | `FieldSegmentID(val, opts...)` |
+| `vchannel` | `FieldVChannel(val, opts...)` |
+| `pchannel` | `FieldPChannel(val, opts...)` |
+| `message_id` | `FieldMessageID(val)` |
+| `message` | `FieldMessage(val)` |
 
 ## Usage Guide
-
-### Initialization
-
-```go
-// Option 1: Use custom logger
-logger, _ := zap.NewProduction()
-mlog.Init(logger)
-
-// Option 2: Initialize with node ID (recommended, nodeId included in all logs)
-logger, _ := zap.NewProduction()
-mlog.InitNode(logger, nodeId)
-```
 
 ### Basic Logging
 
@@ -203,8 +184,8 @@ mlog.Info(ctx, "task done")
 ```go
 // Client: Mark fields for propagation
 ctx = mlog.WithFields(ctx,
-    mlog.PropagatedString(mlog.KeyCollectionName, "my_collection"),
-    mlog.PropagatedInt64(mlog.KeyCollectionID, 12345),
+    mlog.FieldCollectionName("my_collection", mlog.OptPropagated()),
+    mlog.FieldCollectionID(12345, mlog.OptPropagated()),
 )
 
 // Get propagated fields (for manual propagation scenarios)
@@ -214,19 +195,21 @@ props := mlog.GetPropagated(ctx)
 
 ### gRPC Interceptors
 
+Interceptors are defined in `interceptor.go` within the `mlog` package (not a subpackage):
+
 ```go
-import mloggrpc "github.com/milvus-io/milvus/pkg/v2/mlog/grpc"
+import "github.com/milvus-io/milvus/pkg/v2/mlog"
 
 // Server configuration
 server := grpc.NewServer(
-    grpc.UnaryInterceptor(mloggrpc.UnaryServerInterceptor("querynode")),
-    grpc.StreamInterceptor(mloggrpc.StreamServerInterceptor("querynode")),
+    grpc.UnaryInterceptor(mlog.UnaryServerInterceptor("querynode")),
+    grpc.StreamInterceptor(mlog.StreamServerInterceptor("querynode")),
 )
 
 // Client configuration
 conn, _ := grpc.Dial(addr,
-    grpc.WithUnaryInterceptor(mloggrpc.UnaryClientInterceptor()),
-    grpc.WithStreamInterceptor(mloggrpc.StreamClientInterceptor()),
+    grpc.WithUnaryInterceptor(mlog.UnaryClientInterceptor()),
+    grpc.WithStreamInterceptor(mlog.StreamClientInterceptor()),
 )
 ```
 
@@ -341,23 +324,23 @@ func HandleRequest(ctx context.Context, req *Request) {
 }
 ```
 
-### 3. Use PropagatedString/PropagatedInt64 for Cross-Service Fields
+### 3. Use OptPropagated() for Cross-Service Fields
 
 ```go
-// Use Propagated version for fields that need cross-service tracing
+// Use OptPropagated() for fields that need cross-service tracing
 ctx = mlog.WithFields(ctx,
-    mlog.PropagatedString(mlog.KeyCollectionName, collectionName),
-    mlog.PropagatedInt64(mlog.KeyCollectionID, collectionId),
+    mlog.FieldCollectionName(collectionName, mlog.OptPropagated()),
+    mlog.FieldCollectionID(collectionId, mlog.OptPropagated()),
 )
 ```
 
-### 4. Use Predefined Well-Known Keys
+### 4. Use Predefined FieldXxx Constructors
 
 ```go
-// Recommended: Use predefined constants
-mlog.String(mlog.KeyCollectionName, name)
+// Recommended: Use FieldXxx constructors
+mlog.FieldCollectionName(name)
 
-// Not recommended: Hard-coded strings
+// Not recommended: Hard-coded key strings
 mlog.String("collection_name", name)
 ```
 
@@ -365,9 +348,9 @@ mlog.String("collection_name", name)
 
 ```go
 // Each service uses its corresponding module name
-mloggrpc.UnaryServerInterceptor("proxy")
-mloggrpc.UnaryServerInterceptor("querynode")
-mloggrpc.UnaryServerInterceptor("datanode")
+mlog.UnaryServerInterceptor("proxy")
+mlog.UnaryServerInterceptor("querynode")
+mlog.UnaryServerInterceptor("datanode")
 ```
 
 ## API Reference
@@ -378,8 +361,6 @@ mloggrpc.UnaryServerInterceptor("datanode")
 
 | Function | Description |
 |----------|-------------|
-| `Init(logger)` | Initialize global logger |
-| `InitNode(logger, nodeId)` | Initialize with node ID |
 | `Debug(ctx, msg, fields...)` | Log at Debug level |
 | `Info(ctx, msg, fields...)` | Log at Info level |
 | `Warn(ctx, msg, fields...)` | Log at Warn level |
@@ -419,9 +400,9 @@ mloggrpc.UnaryServerInterceptor("datanode")
 | `RatedError(ctx, limit, msg, fields...)` | Rate-limited log at Error level |
 | `RatedLog(ctx, level, limit, msg, fields...)` | Rate-limited log at specified level |
 
-Rate-limited functions use per-call-site `rate.Limiter` (lazy-initialized via `sync.Map`). When a log entry is suppressed, an `_ignored` count field is attached to the next allowed entry.
+Rate-limited functions use per-call-site `rate.Limiter` (lazy-initialized via `sync.Map`). When a log entry is suppressed, a `_suppressed` count field is attached to the next allowed entry.
 
-### mlog/grpc Package
+### gRPC Interceptors (in mlog package)
 
 | Function | Description |
 |----------|-------------|
@@ -474,16 +455,16 @@ Predefined field constructors providing type-safe field creation:
 **Usage Example:**
 
 ```go
-// Using FieldXXX functions (recommended)
+// Using FieldXxx functions (recommended)
 mlog.Info(ctx, "segment loaded",
     mlog.FieldCollectionID(12345),
     mlog.FieldSegmentID(67890),
 )
 
-// Equivalent to using Key constants
+// Equivalent raw key usage (not recommended — keys are unexported)
 mlog.Info(ctx, "segment loaded",
-    mlog.Int64(mlog.KeyCollectionID, 12345),
-    mlog.Int64(mlog.KeySegmentID, 67890),
+    mlog.Int64("collection_id", 12345),
+    mlog.Int64("segment_id", 67890),
 )
 ```
 

@@ -27,7 +27,7 @@ func newBenchLogger() *zap.Logger {
 // setupBench initializes mlog with a discard logger for benchmarks.
 func setupBench() {
 	SetLevel(DebugLevel)
-	Init(newBenchLogger())
+	initForTest(newBenchLogger())
 }
 
 // ---------------------------------------------------------------------------

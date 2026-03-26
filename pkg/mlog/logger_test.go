@@ -14,6 +14,17 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+// initForTest replaces the global logger for testing purposes.
+func initForTest(logger *zap.Logger) {
+	initGlobalLogger(logger)
+}
+
+// initNodeForTest initializes the logger with node-level metadata for testing.
+func initNodeForTest(logger *zap.Logger, nodeId int64) {
+	field := Int64(keyNodeID, nodeId)
+	globalLogger.Store(logger.WithOptions(zap.AddCallerSkip(1)).With(field))
+}
+
 // testLogEntry represents a parsed JSON log entry
 type testLogEntry struct {
 	Level   string `json:"level"`
@@ -41,7 +52,7 @@ func createTestLogger(buf *bytes.Buffer) *zap.Logger {
 func TestInfoLogsAtInfoLevel(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	ctx := context.Background()
@@ -57,7 +68,7 @@ func TestInfoLogsAtInfoLevel(t *testing.T) {
 func TestDebugLogsAtDebugLevel(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Set global level to Debug to enable debug logs
@@ -78,7 +89,7 @@ func TestDebugLogsAtDebugLevel(t *testing.T) {
 func TestWarnLogsAtWarnLevel(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	ctx := context.Background()
@@ -94,7 +105,7 @@ func TestWarnLogsAtWarnLevel(t *testing.T) {
 func TestErrorLogsAtErrorLevel(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	ctx := context.Background()
@@ -110,7 +121,7 @@ func TestErrorLogsAtErrorLevel(t *testing.T) {
 func TestLogIncludesCallSiteFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	ctx := context.Background()
@@ -126,7 +137,7 @@ func TestLogIncludesCallSiteFields(t *testing.T) {
 func TestLogIncludesContextFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	ctx := context.Background()
@@ -142,7 +153,7 @@ func TestLogIncludesContextFields(t *testing.T) {
 func TestLogCombinesContextAndCallSiteFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	ctx := context.Background()
@@ -159,7 +170,7 @@ func TestLogCombinesContextAndCallSiteFields(t *testing.T) {
 func TestBackgroundContextNoWarningField(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	Info(context.Background(), "test with background context")
@@ -185,7 +196,7 @@ func TestLogLevelFiltering(t *testing.T) {
 		zapcore.InfoLevel, // Only Info and above
 	)
 	logger := zap.New(core)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	ctx := context.Background()
@@ -205,7 +216,7 @@ func TestLogLevelFiltering(t *testing.T) {
 func TestLogFunction(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	ctx := context.Background()
@@ -229,7 +240,7 @@ func resetLogger() {
 func TestInitNodeSetsNodeId(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	InitNode(logger, 12345)
+	initNodeForTest(logger, 12345)
 	defer resetLogger()
 
 	ctx := context.Background()
@@ -244,7 +255,7 @@ func TestInitNodeSetsNodeId(t *testing.T) {
 func TestInitNodeFieldIncludedInAllLogs(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	InitNode(logger, 99)
+	initNodeForTest(logger, 99)
 	defer resetLogger()
 
 	// Set global level to Debug to enable all logs
@@ -272,7 +283,7 @@ func TestInitNodeFieldIncludedInAllLogs(t *testing.T) {
 func TestEarlyReturnWhenLevelDisabled(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Set level to Error, so Debug/Info/Warn should be skipped
@@ -300,7 +311,7 @@ func TestEarlyReturnWhenLevelDisabled(t *testing.T) {
 func TestWithCreatesLoggerWithFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	componentLogger := With(String("module", "querynode"), Int64("node_id", 123))
@@ -318,7 +329,7 @@ func TestWithCreatesLoggerWithFields(t *testing.T) {
 func TestLoggerCombinesWithContextFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	componentLogger := With(String("module", "datanode"))
@@ -337,7 +348,7 @@ func TestLoggerCombinesWithContextFields(t *testing.T) {
 func TestLoggerWith(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	baseLogger := With(String("module", "proxy"))
@@ -356,7 +367,7 @@ func TestLoggerWith(t *testing.T) {
 func TestLoggerWithLazy(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	baseLogger := With(String("module", "indexnode"))
@@ -385,7 +396,7 @@ func TestLoggerLevel(t *testing.T) {
 func TestLoggerAllLevels(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	oldLevel := GetLevel()
@@ -416,7 +427,7 @@ func TestLoggerAllLevels(t *testing.T) {
 func TestLoggerBackgroundContext(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	componentLogger := With(String("module", "test"))
@@ -432,7 +443,7 @@ func TestLoggerBackgroundContext(t *testing.T) {
 func TestLoggerOptimizationUsesCtxLoggerWhenMoreFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Component has 1 field
@@ -463,7 +474,7 @@ func TestLoggerOptimizationUsesCtxLoggerWhenMoreFields(t *testing.T) {
 func TestLoggerOptimizationUsesComponentLoggerWhenMoreFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Component has 3 fields
@@ -493,7 +504,7 @@ func TestLoggerOptimizationUsesComponentLoggerWhenMoreFields(t *testing.T) {
 func TestLoggerEarlyReturnWhenDisabled(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	oldLevel := GetLevel()
@@ -528,7 +539,7 @@ func TestLoggerWithEmptyFields(t *testing.T) {
 func TestPackageLevelWithLazy(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Test WithLazy with fields
@@ -547,7 +558,7 @@ func TestPackageLevelWithLazy(t *testing.T) {
 func TestPackageLevelWithLazyEmptyFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Test WithLazy with no fields
@@ -565,7 +576,7 @@ func TestPackageLevelWithLazyEmptyFields(t *testing.T) {
 func TestPackageLevelWithEmptyFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Test With with no fields
@@ -583,7 +594,7 @@ func TestPackageLevelWithEmptyFields(t *testing.T) {
 func TestLoggerLogCtxMoreFieldsNoComponentNoExtra(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Component has 0 fields
@@ -606,7 +617,7 @@ func TestLoggerLogCtxMoreFieldsNoComponentNoExtra(t *testing.T) {
 func TestLoggerLogCtxMoreFieldsNoComponentWithExtra(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Component has 0 fields
@@ -630,7 +641,7 @@ func TestLoggerLogCtxMoreFieldsNoComponentWithExtra(t *testing.T) {
 func TestLoggerLogCtxMoreFieldsWithComponentNoExtra(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Component has 1 field
@@ -658,7 +669,7 @@ func TestLoggerLogCtxMoreFieldsWithComponentNoExtra(t *testing.T) {
 func TestLoggerLogComponentMoreFieldsNoCtxNoExtra(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Component has fields
@@ -681,7 +692,7 @@ func TestLoggerLogComponentMoreFieldsNoCtxNoExtra(t *testing.T) {
 func TestLoggerLogComponentMoreFieldsNoCtxWithExtra(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Component has fields
@@ -704,7 +715,7 @@ func TestLoggerLogComponentMoreFieldsNoCtxWithExtra(t *testing.T) {
 func TestLoggerLogComponentMoreFieldsWithCtxNoExtra(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Component has 3 fields (more than ctx)
@@ -732,7 +743,7 @@ func TestLoggerLogComponentMoreFieldsWithCtxNoExtra(t *testing.T) {
 func TestLoggerLogBackgroundContextWithFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	componentLogger := With(String("module", "test"))
@@ -751,7 +762,7 @@ func TestLoggerLogBackgroundContextWithFields(t *testing.T) {
 func TestLoggerLogBackgroundContextNoFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	componentLogger := With(String("module", "test"))
@@ -769,7 +780,7 @@ func TestLoggerLogBackgroundContextNoFields(t *testing.T) {
 func TestGlobalLogWithCachedLogger(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Create context with fields (this creates a cached logger)
@@ -789,7 +800,7 @@ func TestGlobalLogWithCachedLogger(t *testing.T) {
 func TestLoggerLogComponentMoreFieldsWithCtxAndExtra(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Component has 3 fields (more than ctx)
@@ -821,7 +832,7 @@ func TestLoggerLogComponentMoreFieldsWithCtxAndExtra(t *testing.T) {
 func TestGlobalLogWithContextFieldsNoCache(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Create context with fields
@@ -844,7 +855,7 @@ func TestGlobalLogWithContextFieldsNoCache(t *testing.T) {
 func TestGlobalLogNoCachedLoggerWithFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	// Directly create a context with logContext that has fields but nil logger
@@ -870,7 +881,7 @@ func TestGlobalLogNoCachedLoggerWithFields(t *testing.T) {
 func TestDPanicLogsAtDPanicLevel(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	ctx := context.Background()
@@ -886,7 +897,7 @@ func TestDPanicLogsAtDPanicLevel(t *testing.T) {
 func TestPanicLogsAtPanicLevel(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	ctx := context.Background()
@@ -904,7 +915,7 @@ func TestPanicLogsAtPanicLevel(t *testing.T) {
 func TestDPanicIncludesFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	ctx := context.Background()
@@ -922,7 +933,7 @@ func TestDPanicIncludesFields(t *testing.T) {
 func TestDPanicBackgroundContext(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	DPanic(context.Background(), "dpanic background ctx")
@@ -936,7 +947,7 @@ func TestDPanicBackgroundContext(t *testing.T) {
 func TestLoggerDPanic(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	componentLogger := With(String("module", "test"))
@@ -953,7 +964,7 @@ func TestLoggerDPanic(t *testing.T) {
 func TestLoggerPanic(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 
 	componentLogger := With(String("module", "test"))

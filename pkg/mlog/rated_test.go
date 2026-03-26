@@ -25,7 +25,7 @@ func resetRatedRegistry() {
 func TestRatedInfoFirstCallAlwaysLogs(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -42,7 +42,7 @@ func TestRatedInfoFirstCallAlwaysLogs(t *testing.T) {
 func TestRatedInfoSuppressesSubsequentCalls(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -59,7 +59,7 @@ func TestRatedInfoSuppressesSubsequentCalls(t *testing.T) {
 func TestRatedInfoReportsIgnoredCount(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -100,21 +100,21 @@ func TestRatedInfoReportsIgnoredCount(t *testing.T) {
 			return false
 		}
 		if ignored := entry.ignoreCount.Swap(0); ignored > 0 {
-			fields = append(fields, Int64("_ignored", ignored))
+			fields = append(fields, Int64("_suppressed", ignored))
 		}
 		return true
 	}()
 
 	assert.True(t, result)
 	require.Len(t, fields, 1)
-	assert.Equal(t, "_ignored", fields[0].Key)
+	assert.Equal(t, "_suppressed", fields[0].Key)
 	assert.Equal(t, int64(5), fields[0].Integer)
 }
 
 func TestRatedDebugLogsAtDebugLevel(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -135,7 +135,7 @@ func TestRatedDebugLogsAtDebugLevel(t *testing.T) {
 func TestRatedWarnLogsAtWarnLevel(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -152,7 +152,7 @@ func TestRatedWarnLogsAtWarnLevel(t *testing.T) {
 func TestRatedErrorLogsAtErrorLevel(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -169,7 +169,7 @@ func TestRatedErrorLogsAtErrorLevel(t *testing.T) {
 func TestRatedInfoWithFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -186,7 +186,7 @@ func TestRatedInfoWithFields(t *testing.T) {
 func TestRatedInfoWithContextFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -204,7 +204,7 @@ func TestRatedInfoWithContextFields(t *testing.T) {
 func TestRatedInfoLevelFiltering(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -226,7 +226,7 @@ func TestRatedInfoLevelFiltering(t *testing.T) {
 func TestRatedInfoDifferentCallSitesIndependent(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -269,7 +269,7 @@ func TestRatedInfoIgnoredCountIntegration(t *testing.T) {
 func TestLoggerRatedInfoFirstCallLogs(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -288,7 +288,7 @@ func TestLoggerRatedInfoFirstCallLogs(t *testing.T) {
 func TestLoggerRatedDebugLogs(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -310,7 +310,7 @@ func TestLoggerRatedDebugLogs(t *testing.T) {
 func TestLoggerRatedWarnLogs(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -328,7 +328,7 @@ func TestLoggerRatedWarnLogs(t *testing.T) {
 func TestLoggerRatedErrorLogs(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -346,7 +346,7 @@ func TestLoggerRatedErrorLogs(t *testing.T) {
 func TestLoggerRatedSuppressesSubsequentCalls(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -363,7 +363,7 @@ func TestLoggerRatedSuppressesSubsequentCalls(t *testing.T) {
 func TestLoggerRatedLevelFiltering(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -386,7 +386,7 @@ func TestLoggerRatedLevelFiltering(t *testing.T) {
 func TestLoggerRatedWithContextFields(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -465,7 +465,7 @@ func TestRatedEntryConcurrentIgnoreCount(t *testing.T) {
 func TestRatedInfoBackgroundContext(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -481,7 +481,7 @@ func TestRatedInfoBackgroundContext(t *testing.T) {
 func TestLoggerRatedInfoBackgroundContext(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -496,12 +496,12 @@ func TestLoggerRatedInfoBackgroundContext(t *testing.T) {
 	assert.Equal(t, "test", entry["module"])
 }
 
-// Test suppression for all levels and the _ignored field in output
+// Test suppression for all levels and the _suppressed field in output
 
 func TestRatedDebugSuppressesSubsequentCalls(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -521,7 +521,7 @@ func TestRatedDebugSuppressesSubsequentCalls(t *testing.T) {
 func TestRatedWarnSuppressesSubsequentCalls(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -537,7 +537,7 @@ func TestRatedWarnSuppressesSubsequentCalls(t *testing.T) {
 func TestRatedErrorSuppressesSubsequentCalls(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -553,7 +553,7 @@ func TestRatedErrorSuppressesSubsequentCalls(t *testing.T) {
 func TestRatedIgnoredFieldEndToEnd(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -562,7 +562,7 @@ func TestRatedIgnoredFieldEndToEnd(t *testing.T) {
 	// All calls on the same line in a loop → same pc → same rate limiter entry.
 	// i=0: first call, goes through (burst=1). i=1..3: suppressed (ignoreCount=3).
 	// Before i=4: replace limiter to allow next call, reset buf.
-	// i=4: goes through with _ignored=3.
+	// i=4: goes through with _suppressed=3.
 	for i := 0; i < 5; i++ {
 		if i == 4 {
 			ratedRegistry.Range(func(key, value any) bool {
@@ -578,13 +578,13 @@ func TestRatedIgnoredFieldEndToEnd(t *testing.T) {
 	err := json.Unmarshal(buf.Bytes(), &entry)
 	require.NoError(t, err)
 	assert.Equal(t, "rated msg", entry["msg"])
-	assert.Equal(t, float64(3), entry["_ignored"], "should report 3 ignored entries")
+	assert.Equal(t, float64(3), entry["_suppressed"], "should report 3 ignored entries")
 }
 
 func TestLoggerRatedIgnoredFieldEndToEnd(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -592,7 +592,7 @@ func TestLoggerRatedIgnoredFieldEndToEnd(t *testing.T) {
 	ctx := context.Background()
 
 	// Same loop pattern: i=0 goes through, i=1..5 suppressed (ignoreCount=5),
-	// before i=6: replace limiter, reset buf. i=6: goes through with _ignored=5.
+	// before i=6: replace limiter, reset buf. i=6: goes through with _suppressed=5.
 	for i := 0; i < 7; i++ {
 		if i == 6 {
 			ratedRegistry.Range(func(key, value any) bool {
@@ -609,13 +609,13 @@ func TestLoggerRatedIgnoredFieldEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "logger rated msg", entry["msg"])
 	assert.Equal(t, "test", entry["module"])
-	assert.Equal(t, float64(5), entry["_ignored"], "should report 5 ignored entries")
+	assert.Equal(t, float64(5), entry["_suppressed"], "should report 5 ignored entries")
 }
 
 func TestLoggerRatedDebugSuppresses(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -636,7 +636,7 @@ func TestLoggerRatedDebugSuppresses(t *testing.T) {
 func TestLoggerRatedWarnSuppresses(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -653,7 +653,7 @@ func TestLoggerRatedWarnSuppresses(t *testing.T) {
 func TestLoggerRatedErrorSuppresses(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -670,7 +670,7 @@ func TestLoggerRatedErrorSuppresses(t *testing.T) {
 func TestRatedLogAtSpecifiedLevel(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -688,7 +688,7 @@ func TestRatedLogAtSpecifiedLevel(t *testing.T) {
 func TestRatedLogSuppresses(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -704,7 +704,7 @@ func TestRatedLogSuppresses(t *testing.T) {
 func TestRatedLogLevelFiltering(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -720,7 +720,7 @@ func TestRatedLogLevelFiltering(t *testing.T) {
 func TestLoggerRatedLogAtSpecifiedLevel(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 
@@ -739,7 +739,7 @@ func TestLoggerRatedLogAtSpecifiedLevel(t *testing.T) {
 func TestLoggerRatedLogSuppresses(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := createTestLogger(buf)
-	Init(logger)
+	initForTest(logger)
 	defer resetLogger()
 	defer resetRatedRegistry()
 

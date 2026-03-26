@@ -9,11 +9,6 @@
 //	ctx := context.Background()
 //	mlog.Info(ctx, "request received", mlog.String("path", "/api/search"))
 //
-// Node-level initialization (once per process):
-//
-//	logger, _ := zap.NewProduction()
-//	mlog.InitNode(logger, nodeId) // nodeId included in all log entries
-//
 // Scoped context logging:
 //
 //	ctx = mlog.WithFields(ctx, mlog.String("request_id", "abc123"))
@@ -35,9 +30,4 @@
 // Runtime log level changes:
 //
 //	mlog.SetLevel(mlog.DebugLevel)
-//
-// Custom logger initialization:
-//
-//	logger, _ := zap.NewDevelopment()
-//	mlog.Init(logger)
 package mlog

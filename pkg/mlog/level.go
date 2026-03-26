@@ -24,8 +24,6 @@ var globalLevel = zap.NewAtomicLevelAt(InfoLevel)
 
 // SetLevel changes the log level at runtime.
 // This affects all loggers created with the default config.
-// For custom loggers passed via Init(), the caller should
-// manage their own AtomicLevel.
 func SetLevel(level Level) {
 	globalLevel.SetLevel(level)
 }
