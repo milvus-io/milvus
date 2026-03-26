@@ -8,15 +8,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 
 func Test_extractPropagatedFromMetadata(t *testing.T) {
-	// Note: gRPC metadata keys are normalized to lowercase
+	// Type-encoded keys: "mlog-s-" for string, "mlog-i-" for int64
 	md := metadata.New(map[string]string{
-		MetadataPrefix + "collectionname": "my_collection",
-		MetadataPrefix + "collectionid":   "12345",
+		metadataPrefixString + "collectionname": "my_collection",
+		metadataPrefixInt64 + "collectionid":    "12345",
 	})
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 
@@ -26,12 +27,21 @@ func Test_extractPropagatedFromMetadata(t *testing.T) {
 	assert.Len(t, props, 2)
 	assert.Equal(t, "my_collection", props["collectionname"])
 	assert.Equal(t, "12345", props["collectionid"])
+
+	// Verify int64 field preserves type
+	fields := FieldsFromContext(ctx)
+	for _, f := range fields {
+		if f.Key == "collectionid" {
+			assert.Equal(t, zapcore.Int64Type, f.Type)
+			assert.Equal(t, int64(12345), f.Integer)
+		}
+	}
 }
 
 func Test_extractPropagatedIgnoresNonPrefixedKeys(t *testing.T) {
 	md := metadata.New(map[string]string{
-		MetadataPrefix + "propagated": "value",
-		"other-key":                   "other-value",
+		metadataPrefixString + "propagated": "value",
+		"other-key":                         "other-value",
 	})
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 
@@ -40,6 +50,20 @@ func Test_extractPropagatedIgnoresNonPrefixedKeys(t *testing.T) {
 	props := GetPropagated(ctx)
 	assert.Len(t, props, 1)
 	assert.Equal(t, "value", props["propagated"])
+}
+
+func Test_extractPropagatedLegacyFormat(t *testing.T) {
+	// Legacy format without type prefix — treated as string
+	md := metadata.New(map[string]string{
+		MetadataPrefix + "oldkey": "oldvalue",
+	})
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+
+	ctx = extractPropagated(ctx)
+
+	props := GetPropagated(ctx)
+	assert.Len(t, props, 1)
+	assert.Equal(t, "oldvalue", props["oldkey"])
 }
 
 func Test_extractPropagatedNoMetadata(t *testing.T) {
@@ -71,8 +95,8 @@ func Test_injectPropagatedToMetadata(t *testing.T) {
 
 	md, ok := metadata.FromOutgoingContext(ctx)
 	assert.True(t, ok)
-	assert.Equal(t, []string{"my_collection"}, md.Get(MetadataPrefix+"collectionname"))
-	assert.Equal(t, []string{"12345"}, md.Get(MetadataPrefix+"collectionid"))
+	assert.Equal(t, []string{"my_collection"}, md.Get(metadataPrefixString+"collectionname"))
+	assert.Equal(t, []string{"12345"}, md.Get(metadataPrefixInt64+"collectionid"))
 }
 
 func Test_injectPropagatedNoPropagatedFields(t *testing.T) {
@@ -93,12 +117,11 @@ func Test_injectPropagatedAppendsToExistingMetadata(t *testing.T) {
 	md, ok := metadata.FromOutgoingContext(ctx)
 	assert.True(t, ok)
 	assert.Equal(t, []string{"existing-value"}, md.Get("existing-key"))
-	assert.Equal(t, []string{"new-value"}, md.Get(MetadataPrefix+"new-key"))
+	assert.Equal(t, []string{"new-value"}, md.Get(metadataPrefixString+"new-key"))
 }
 
 func TestRoundTripPropagation(t *testing.T) {
 	// Simulate client side: create context with propagated fields
-	// Note: use lowercase keys since gRPC normalizes metadata keys to lowercase
 	clientCtx := context.Background()
 	clientCtx = WithFields(clientCtx,
 		propagatedStringField("collectionname", "test_collection"),
@@ -115,11 +138,23 @@ func TestRoundTripPropagation(t *testing.T) {
 	// Server extracts from incoming metadata
 	serverCtx = extractPropagated(serverCtx)
 
-	// Verify propagated fields are preserved
+	// Verify propagated fields are preserved with correct types
 	props := GetPropagated(serverCtx)
 	assert.Len(t, props, 2)
 	assert.Equal(t, "test_collection", props["collectionname"])
 	assert.Equal(t, "99999", props["collectionid"])
+
+	// Verify int64 type is preserved across the round trip
+	for _, f := range FieldsFromContext(serverCtx) {
+		if f.Key == "collectionid" {
+			assert.Equal(t, zapcore.Int64Type, f.Type)
+			assert.Equal(t, int64(99999), f.Integer)
+		}
+		if f.Key == "collectionname" {
+			assert.Equal(t, zapcore.StringType, f.Type)
+			assert.Equal(t, "test_collection", f.String)
+		}
+	}
 }
 
 func TestMetadataPrefix(t *testing.T) {
@@ -130,7 +165,7 @@ func TestUnaryServerInterceptorExtractsFields(t *testing.T) {
 	interceptor := UnaryServerInterceptor("test-module")
 
 	md := metadata.New(map[string]string{
-		MetadataPrefix + "key": "value",
+		metadataPrefixString + "key": "value",
 	})
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 
@@ -165,7 +200,7 @@ func TestUnaryClientInterceptorInjectsFields(t *testing.T) {
 
 	md, ok := metadata.FromOutgoingContext(invokerCtx)
 	assert.True(t, ok)
-	assert.Equal(t, []string{"value"}, md.Get(MetadataPrefix+"key"))
+	assert.Equal(t, []string{"value"}, md.Get(metadataPrefixString+"key"))
 }
 
 // mockServerStream is a minimal mock for grpc.ServerStream
@@ -182,7 +217,7 @@ func TestStreamServerInterceptorExtractsFields(t *testing.T) {
 	interceptor := StreamServerInterceptor("test-module")
 
 	md := metadata.New(map[string]string{
-		MetadataPrefix + "key": "value",
+		metadataPrefixString + "key": "value",
 	})
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 	mockStream := &mockServerStream{ctx: ctx}
@@ -205,8 +240,8 @@ func TestStreamServerInterceptorWrappedStreamContext(t *testing.T) {
 	interceptor := StreamServerInterceptor("test-module")
 
 	md := metadata.New(map[string]string{
-		MetadataPrefix + "a": "1",
-		MetadataPrefix + "b": "2",
+		metadataPrefixString + "a": "1",
+		metadataPrefixString + "b": "2",
 	})
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 	mockStream := &mockServerStream{ctx: ctx}
@@ -244,7 +279,7 @@ func TestStreamClientInterceptorInjectsFields(t *testing.T) {
 
 	md, ok := metadata.FromOutgoingContext(streamerCtx)
 	assert.True(t, ok)
-	assert.Equal(t, []string{"value"}, md.Get(MetadataPrefix+"key"))
+	assert.Equal(t, []string{"value"}, md.Get(metadataPrefixString+"key"))
 }
 
 func TestRegularFieldsNotPropagated(t *testing.T) {
@@ -292,7 +327,7 @@ func Test_extractPropagatedWithTraceContextAndMetadata(t *testing.T) {
 
 	// Add gRPC metadata
 	md := metadata.New(map[string]string{
-		MetadataPrefix + "collectionname": "my_collection",
+		metadataPrefixString + "collectionname": "my_collection",
 	})
 	ctx = metadata.NewIncomingContext(ctx, md)
 
@@ -325,7 +360,7 @@ func Test_extractPropagatedNoTraceContext(t *testing.T) {
 
 func Test_extractPropagatedWithExtraFields(t *testing.T) {
 	md := metadata.New(map[string]string{
-		MetadataPrefix + "key": "value",
+		metadataPrefixString + "key": "value",
 	})
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 
@@ -392,7 +427,7 @@ func TestUnaryServerInterceptorModuleWithMetadata(t *testing.T) {
 	interceptor := UnaryServerInterceptor("querynode")
 
 	md := metadata.New(map[string]string{
-		MetadataPrefix + "collectionname": "my_collection",
+		metadataPrefixString + "collectionname": "my_collection",
 	})
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 
@@ -445,7 +480,7 @@ func TestStreamServerInterceptorModuleWithMetadata(t *testing.T) {
 	interceptor := StreamServerInterceptor("streamingnode")
 
 	md := metadata.New(map[string]string{
-		MetadataPrefix + "key": "value",
+		metadataPrefixString + "key": "value",
 	})
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 	mockStream := &mockServerStream{ctx: ctx}

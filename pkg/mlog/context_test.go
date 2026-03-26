@@ -112,7 +112,7 @@ func TestWithFieldsDoesNotMutateParent(t *testing.T) {
 func TestPropagatedStringField(t *testing.T) {
 	f := propagatedStringField("key", "value")
 	assert.Equal(t, "key", f.Key)
-	assert.Equal(t, zapcore.ObjectMarshalerType, f.Type)
+	assert.Equal(t, zapcore.StringType, f.Type)
 	assert.True(t, isPropagatedField(&f))
 	assert.Equal(t, "value", getPropagatedValue(&f))
 }
@@ -120,7 +120,7 @@ func TestPropagatedStringField(t *testing.T) {
 func TestPropagatedInt64Field(t *testing.T) {
 	f := propagatedInt64Field("key", 12345)
 	assert.Equal(t, "key", f.Key)
-	assert.Equal(t, zapcore.ObjectMarshalerType, f.Type)
+	assert.Equal(t, zapcore.Int64Type, f.Type)
 	assert.True(t, isPropagatedField(&f))
 	assert.Equal(t, "12345", getPropagatedValue(&f))
 }
