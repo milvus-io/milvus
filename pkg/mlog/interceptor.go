@@ -2,15 +2,23 @@ package mlog
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 
 // MetadataPrefix is the prefix for mlog fields in gRPC metadata.
+// Type-encoded prefixes: "mlog-s-" for string, "mlog-i-" for int64.
 const MetadataPrefix = "mlog-"
+
+const (
+	metadataPrefixString = MetadataPrefix + "s-"
+	metadataPrefixInt64  = MetadataPrefix + "i-"
+)
 
 // UnaryServerInterceptor extracts propagated fields from incoming metadata
 // and adds module field to the context.
@@ -62,13 +70,30 @@ func extractPropagated(ctx context.Context, extraFields ...Field) context.Contex
 		fields = append(fields, String(keySpanID, spanCtx.SpanID().String()))
 	}
 
-	// Extract propagated fields from gRPC metadata
+	// Extract propagated fields from gRPC metadata.
+	// Format: "mlog-{t}-{key}" where {t} is 's' (string) or 'i' (int64).
+	// Legacy format "mlog-{key}" (no type tag) falls back to string.
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		for key, vals := range md {
-			if strings.HasPrefix(key, MetadataPrefix) && len(vals) > 0 {
-				fieldKey := strings.TrimPrefix(key, MetadataPrefix)
-				fields = append(fields, propagatedStringField(fieldKey, vals[0]))
+			if len(vals) == 0 || !strings.HasPrefix(key, MetadataPrefix) {
+				continue
 			}
+			rest := key[len(MetadataPrefix):] // after "mlog-"
+			if len(rest) >= 2 && rest[1] == '-' {
+				fieldKey := rest[2:]
+				switch rest[0] {
+				case 'i':
+					if v, err := strconv.ParseInt(vals[0], 10, 64); err == nil {
+						fields = append(fields, propagatedInt64Field(fieldKey, v))
+					}
+					continue
+				case 's':
+					fields = append(fields, propagatedStringField(fieldKey, vals[0]))
+					continue
+				}
+			}
+			// Legacy format without type tag — treat as string
+			fields = append(fields, propagatedStringField(rest, vals[0]))
 		}
 	}
 
@@ -82,15 +107,27 @@ func extractPropagated(ctx context.Context, extraFields ...Field) context.Contex
 }
 
 // injectPropagated injects propagated fields into outgoing gRPC metadata.
+// Keys are type-encoded: "mlog-s-<key>" for string, "mlog-i-<key>" for int64.
 func injectPropagated(ctx context.Context) context.Context {
-	props := GetPropagated(ctx)
-	if len(props) == 0 {
+	lc := getLogContext(ctx)
+	if len(lc.fieldKeys) == 0 {
 		return ctx
 	}
 
-	pairs := make([]string, 0, len(props)*2)
-	for k, v := range props {
-		pairs = append(pairs, MetadataPrefix+k, v)
+	var pairs []string
+	for _, f := range lc.fieldKeys {
+		if !isPropagatedField(f) {
+			continue
+		}
+		switch f.Type {
+		case zapcore.Int64Type:
+			pairs = append(pairs, metadataPrefixInt64+f.Key, strconv.FormatInt(f.Integer, 10))
+		default:
+			pairs = append(pairs, metadataPrefixString+f.Key, getPropagatedValue(f))
+		}
+	}
+	if len(pairs) == 0 {
+		return ctx
 	}
 	return metadata.AppendToOutgoingContext(ctx, pairs...)
 }

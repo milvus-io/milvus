@@ -403,24 +403,22 @@ func TestStackAndSkipFields(t *testing.T) {
 	assert.Equal(t, zap.Skip(), f)
 }
 
-// Test propagatedString MarshalLogObject
-func TestPropagatedStringMarshalLogObject(t *testing.T) {
-	p := propagatedString{val: "test_value"}
-
-	enc := zapcore.NewMapObjectEncoder()
-	err := p.MarshalLogObject(enc)
-	assert.NoError(t, err)
-	assert.Equal(t, "test_value", enc.Fields["value"])
+// Test propagated string field produces flat output
+func TestPropagatedStringFlatOutput(t *testing.T) {
+	f := propagatedStringField("collection_name", "test_value")
+	assert.Equal(t, zapcore.StringType, f.Type)
+	assert.Equal(t, "collection_name", f.Key)
+	assert.Equal(t, "test_value", f.String)
+	assert.IsType(t, propagatedMarker{}, f.Interface)
 }
 
-// Test propagatedInt64 MarshalLogObject
-func TestPropagatedInt64MarshalLogObject(t *testing.T) {
-	p := propagatedInt64{val: 12345}
-
-	enc := zapcore.NewMapObjectEncoder()
-	err := p.MarshalLogObject(enc)
-	assert.NoError(t, err)
-	assert.Equal(t, int64(12345), enc.Fields["value"])
+// Test propagated int64 field produces flat output
+func TestPropagatedInt64FlatOutput(t *testing.T) {
+	f := propagatedInt64Field("collection_id", 12345)
+	assert.Equal(t, zapcore.Int64Type, f.Type)
+	assert.Equal(t, "collection_id", f.Key)
+	assert.Equal(t, int64(12345), f.Integer)
+	assert.IsType(t, propagatedMarker{}, f.Interface)
 }
 
 type testStringer struct {

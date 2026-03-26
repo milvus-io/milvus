@@ -110,69 +110,54 @@ func Stack(key string) Field               { return zap.Stack(key) }
 func StackSkip(key string, skip int) Field { return zap.StackSkip(key, skip) }
 func Skip() Field                          { return zap.Skip() }
 
-// propagatedString is an internal type for string fields that should be propagated via RPC.
-// It implements zapcore.ObjectMarshaler to output the value when logged.
-type propagatedString struct {
-	val string
-}
-
-// MarshalLogObject implements zapcore.ObjectMarshaler.
-func (p propagatedString) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddString("value", p.val)
-	return nil
-}
-
-// propagatedInt64 is an internal type for int64 fields that should be propagated via RPC.
-// It implements zapcore.ObjectMarshaler to output the value when logged.
-type propagatedInt64 struct {
-	val int64
-}
-
-// MarshalLogObject implements zapcore.ObjectMarshaler.
-func (p propagatedInt64) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddInt64("value", p.val)
-	return nil
-}
+// propagatedMarker is a zero-size sentinel stored in Field.Interface to mark
+// a field for RPC propagation. The field itself uses native StringType or
+// Int64Type so that zap encodes it as a flat key-value pair (not a nested object).
+//
+// This works because zap's Field.AddTo only reads Field.String for StringType
+// and Field.Integer for Int64Type; it never inspects Field.Interface for these types.
+type propagatedMarker struct{}
 
 // propagatedStringField creates a string field that will be propagated via RPC.
-// The field is logged and transmitted in gRPC metadata.
+// The field is logged as a flat string and transmitted in gRPC metadata.
 // The key is automatically converted to lowercase for gRPC metadata compatibility.
 func propagatedStringField(key string, val string) Field {
 	return Field{
 		Key:       strings.ToLower(key),
-		Type:      zapcore.ObjectMarshalerType,
-		Interface: propagatedString{val: val},
+		Type:      zapcore.StringType,
+		String:    val,
+		Interface: propagatedMarker{},
 	}
 }
 
 // propagatedInt64Field creates an int64 field that will be propagated via RPC.
-// The value is converted to string for transmission.
+// The field is logged as a flat int64 and transmitted in gRPC metadata.
 // The key is automatically converted to lowercase for gRPC metadata compatibility.
 func propagatedInt64Field(key string, val int64) Field {
 	return Field{
 		Key:       strings.ToLower(key),
-		Type:      zapcore.ObjectMarshalerType,
-		Interface: propagatedInt64{val: val},
+		Type:      zapcore.Int64Type,
+		Integer:   val,
+		Interface: propagatedMarker{},
 	}
 }
 
 // isPropagatedField checks if a field is marked for RPC propagation.
 func isPropagatedField(f *Field) bool {
-	switch f.Interface.(type) {
-	case propagatedString, propagatedInt64:
-		return true
-	default:
-		return false
-	}
+	_, ok := f.Interface.(propagatedMarker)
+	return ok
 }
 
 // getPropagatedValue extracts the string value from a propagated field.
 func getPropagatedValue(f *Field) string {
-	switch v := f.Interface.(type) {
-	case propagatedString:
-		return v.val
-	case propagatedInt64:
-		return strconv.FormatInt(v.val, 10)
+	if _, ok := f.Interface.(propagatedMarker); !ok {
+		return ""
+	}
+	switch f.Type {
+	case zapcore.StringType:
+		return f.String
+	case zapcore.Int64Type:
+		return strconv.FormatInt(f.Integer, 10)
 	default:
 		return ""
 	}
