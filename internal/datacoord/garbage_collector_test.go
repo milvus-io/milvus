@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -2972,4 +2973,264 @@ func TestGarbageCollector_recycleUnusedJSONStatsFiles_SnapshotReference(t *testi
 
 	assert.Empty(t, removedFiles,
 		"JSON stats files should not be removed when segment is referenced by snapshot")
+}
+
+func Test_parseV3SegmentID(t *testing.T) {
+	rootPath := "files"
+
+	t.Run("valid V3 data path", func(t *testing.T) {
+		segID, err := parseV3SegmentID(rootPath, "files/insert_log/1/10/100/_data/0_abc.parquet")
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), segID)
+	})
+
+	t.Run("valid V3 stats path", func(t *testing.T) {
+		segID, err := parseV3SegmentID(rootPath, "files/insert_log/1/10/200/_stats/bloom_filter.101/42")
+		assert.NoError(t, err)
+		assert.Equal(t, int64(200), segID)
+	})
+
+	t.Run("valid V3 delta path", func(t *testing.T) {
+		segID, err := parseV3SegmentID(rootPath, "files/insert_log/1/10/300/_delta/501")
+		assert.NoError(t, err)
+		assert.Equal(t, int64(300), segID)
+	})
+
+	t.Run("valid V3 metadata path", func(t *testing.T) {
+		segID, err := parseV3SegmentID(rootPath, "files/insert_log/1/10/400/_metadata/manifest-5.avro")
+		assert.NoError(t, err)
+		assert.Equal(t, int64(400), segID)
+	})
+
+	t.Run("not insert_log prefix", func(t *testing.T) {
+		_, err := parseV3SegmentID(rootPath, "files/delta_log/1/10/100/501")
+		assert.Error(t, err)
+	})
+
+	t.Run("too few parts", func(t *testing.T) {
+		_, err := parseV3SegmentID(rootPath, "files/insert_log/1/10")
+		assert.Error(t, err)
+	})
+
+	t.Run("wrong rootPath", func(t *testing.T) {
+		_, err := parseV3SegmentID("other_root", "files/insert_log/1/10/100/_data/file")
+		assert.Error(t, err)
+	})
+
+	t.Run("non-numeric segmentID", func(t *testing.T) {
+		_, err := parseV3SegmentID(rootPath, "files/insert_log/1/10/not-a-number/_data/file")
+		assert.Error(t, err)
+	})
+}
+
+func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
+	ctx := context.Background()
+
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-gc-v3"))
+
+	catalog := &datacoord.Catalog{}
+	smMeta := &snapshotMeta{}
+
+	m := &meta{
+		catalog:      catalog,
+		snapshotMeta: smMeta,
+		segments: &SegmentsInfo{
+			segments: make(map[int64]*SegmentInfo),
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	basePath := "/tmp/test-gc-v3/insert_log/100/10/2001"
+	manifestPath := packed.MarshalManifestPath(basePath, 1)
+
+	// V3 dropped segment with ManifestPath and StorageVersion=3
+	v3Segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             2001,
+			CollectionID:   100,
+			PartitionID:    10,
+			State:          commonpb.SegmentState_Dropped,
+			DroppedAt:      uint64(time.Now().Add(-time.Hour).UnixNano()),
+			InsertChannel:  "ch1",
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   manifestPath,
+		},
+	}
+
+	// V1 dropped segment (no ManifestPath, StorageVersion=0)
+	v1Segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            2002,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Dropped,
+			DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
+			InsertChannel: "ch1",
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []*datapb.Binlog{{LogPath: "log1", LogSize: 100}},
+				},
+			},
+		},
+	}
+
+	m.segments.segments[2001] = v3Segment
+	m.segments.segments[2002] = v1Segment
+
+	gc := newGarbageCollector(m, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: time.Hour * 24,
+		dropTolerance:    0,
+	})
+
+	// Track calls
+	removeWithPrefixCalled := false
+	var removeWithPrefixArg string
+	removeObjectFilesCalled := false
+	droppedSegmentIDs := []int64{}
+
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
+	defer mockIsRefIndexLoaded.UnPatch()
+	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).Return([]int64{}).Build()
+	defer mockGetSnapshotBySegment.UnPatch()
+	mockListLoaded := mockey.Mock((*ServerHandler).ListLoadedSegments).Return([]int64{}, nil).Build()
+	defer mockListLoaded.UnPatch()
+	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true).Build()
+	defer mockChannelExists.UnPatch()
+	mockDropSegment := mockey.Mock((*datacoord.Catalog).DropSegment).To(func(c *datacoord.Catalog, ctx context.Context, segment *datapb.SegmentInfo) error {
+		droppedSegmentIDs = append(droppedSegmentIDs, segment.ID)
+		return nil
+	}).Build()
+	defer mockDropSegment.UnPatch()
+
+	// Mock RemoveWithPrefix for V3 segment
+	mockRemoveWithPrefix := mockey.Mock((*storage.LocalChunkManager).RemoveWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string) error {
+			removeWithPrefixCalled = true
+			removeWithPrefixArg = prefix
+			return nil
+		}).Build()
+	defer mockRemoveWithPrefix.UnPatch()
+
+	// Mock removeObjectFiles for V1 segment
+	mockRemoveObjectFiles := mockey.Mock((*garbageCollector).removeObjectFiles).To(
+		func(gc *garbageCollector, ctx context.Context, logs map[string]struct{}) error {
+			removeObjectFilesCalled = true
+			return nil
+		}).Build()
+	defer mockRemoveObjectFiles.UnPatch()
+
+	gc.recycleDroppedSegments(ctx, nil)
+
+	// V3 segment should use RemoveWithPrefix with basePath
+	assert.True(t, removeWithPrefixCalled, "V3 segment should use RemoveWithPrefix")
+	assert.Equal(t, basePath, removeWithPrefixArg, "RemoveWithPrefix should be called with basePath")
+
+	// V1 segment should use removeObjectFiles
+	assert.True(t, removeObjectFilesCalled, "V1 segment should use removeObjectFiles")
+
+	// Both segments should be dropped from meta
+	assert.Contains(t, droppedSegmentIDs, int64(2001))
+	assert.Contains(t, droppedSegmentIDs, int64(2002))
+	assert.Nil(t, m.GetSegment(ctx, 2001))
+	assert.Nil(t, m.GetSegment(ctx, 2002))
+}
+
+func TestGarbageCollector_recycleUnusedBinlogFiles_SkipV3(t *testing.T) {
+	ctx := context.Background()
+
+	rootPath := "gc"
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-gc-v3-orphan"))
+
+	m := &meta{
+		segments: &SegmentsInfo{
+			segments: make(map[int64]*SegmentInfo),
+		},
+		channelCPs:   newChannelCps(),
+		snapshotMeta: &snapshotMeta{},
+	}
+
+	// Add a V3 segment to meta
+	v3Segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             500,
+			CollectionID:   1,
+			PartitionID:    10,
+			State:          commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(rootPath+"/insert_log/1/10/500", 1),
+		},
+	}
+	m.segments.segments[500] = v3Segment
+
+	gc := newGarbageCollector(m, &ServerHandler{}, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: 0,
+		dropTolerance:    0,
+	})
+
+	removedFiles := []string{}
+
+	// Mock snapshot methods to avoid nil pointer on snapshotMeta internals
+	mockAllLoaded := mockey.Mock((*snapshotMeta).IsAllRefIndexLoaded).Return(true).Build()
+	defer mockAllLoaded.UnPatch()
+	mockCollLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
+	defer mockCollLoaded.UnPatch()
+	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).Return([]int64{}).Build()
+	defer mockGetSnapshotBySegment.UnPatch()
+
+	// Mock WalkWithPrefix to return V3 files under insert_log
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
+			recursive bool, fn storage.ChunkObjectWalkFunc,
+		) error {
+			if strings.Contains(prefix, common.SegmentInsertLogPath) {
+				// V3 file that matches 6-part format (ParseSegmentIDByBinlog will succeed)
+				fn(&storage.ChunkObjectInfo{
+					FilePath:   rootPath + "/insert_log/1/10/500/0/data.parquet",
+					ModifyTime: time.Now().Add(-time.Hour),
+				})
+				// V3 file under _data/ (ParseSegmentIDByBinlog will fail, fallback to parseV3SegmentID)
+				fn(&storage.ChunkObjectInfo{
+					FilePath:   rootPath + "/insert_log/1/10/500/_data/0_abc.parquet",
+					ModifyTime: time.Now().Add(-time.Hour),
+				})
+				// V3 file under _stats/ (ParseSegmentIDByBinlog will fail)
+				fn(&storage.ChunkObjectInfo{
+					FilePath:   rootPath + "/insert_log/1/10/500/_stats/bloom_filter.101/42",
+					ModifyTime: time.Now().Add(-time.Hour),
+				})
+				// V3 file under _delta/ (ParseSegmentIDByBinlog will fail)
+				fn(&storage.ChunkObjectInfo{
+					FilePath:   rootPath + "/insert_log/1/10/500/_delta/501",
+					ModifyTime: time.Now().Add(-time.Hour),
+				})
+				// V3 file under _metadata/ (ParseSegmentIDByBinlog will fail)
+				fn(&storage.ChunkObjectInfo{
+					FilePath:   rootPath + "/insert_log/1/10/500/_metadata/manifest-1.avro",
+					ModifyTime: time.Now().Add(-time.Hour),
+				})
+			}
+			return nil
+		}).Build()
+	defer mockWalk.UnPatch()
+
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, filePath string) error {
+			removedFiles = append(removedFiles, filePath)
+			return nil
+		}).Build()
+	defer mockRemove.UnPatch()
+
+	gc.recycleUnusedBinlogFiles(ctx)
+
+	// None of the V3 files should be removed — they are managed by loon
+	assert.Empty(t, removedFiles, "V3 segment files should not be removed by orphan scan")
 }
