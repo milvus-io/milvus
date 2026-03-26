@@ -558,6 +558,21 @@ func Test_IndexEngineVersionManager_ResolveVecIndexVersion(t *testing.T) {
 		assert.Equal(t, int32(8), m.ResolveVecIndexVersion())
 	})
 
+	t.Run("target below current without force", func(t *testing.T) {
+		m := newIndexEngineVersionManager()
+		m.AddNode(&sessionutil.Session{
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{MinimalIndexVersion: 3, CurrentIndexVersion: 10, MaximumIndexVersion: 20},
+			},
+		})
+		Params.Save("dataCoord.targetVecIndexVersion", "5")
+		Params.Save("dataCoord.forceRebuildSegmentIndex", "false")
+
+		// max(current=10, target=5) = 10
+		assert.Equal(t, int32(10), m.ResolveVecIndexVersion())
+	})
+
 	t.Run("all old QNs - no upper bound check", func(t *testing.T) {
 		m := newIndexEngineVersionManager()
 		m.AddNode(&sessionutil.Session{
