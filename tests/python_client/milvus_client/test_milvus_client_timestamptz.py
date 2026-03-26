@@ -746,6 +746,7 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         # step 3: query the rows
         for row in rows:
             row[default_timestamp_field_name] = default_timestamp_value
+        rows = cf.convert_timestamptz(rows, default_timestamp_field_name, "UTC")
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
                             check_task=CheckTasks.check_query_results,
                             check_items={exp_res: rows,
