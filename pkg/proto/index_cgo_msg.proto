@@ -105,6 +105,7 @@ message BuildIndexInfo {
   int64 json_stats_write_batch_size = 29;
   string manifest = 30;
   string analyzer_extra_info = 31;
+  string stats_base_path = 32;  // remote base path for stats files, computed by Go caller
 }
 
 message StoragePluginContext {
@@ -126,6 +127,7 @@ message LoadTextIndexInfo {
   int64 index_size = 10;
   int32 current_scalar_index_version = 11;
   string warmup_policy = 12;  // "disable", "sync", or "async"; empty means use global config
+  string base_path = 13;  // remote base path; files are relative to this path
 }
 
 message LoadJsonKeyIndexInfo {
@@ -141,4 +143,5 @@ message LoadJsonKeyIndexInfo {
   string mmap_dir_path = 10;
   int64 stats_size = 11;
   string warmup_policy = 12;  // "disable", "sync", or "async"; empty means use global config
+  string base_path = 13;  // remote base path; files are relative to this path
 }

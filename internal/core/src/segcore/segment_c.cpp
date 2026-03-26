@@ -667,6 +667,9 @@ LoadJsonKeyIndex(CTraceContext c_trace,
             config[milvus::index::WARMUP] = info_proto->warmup_policy();
         }
         config[milvus::index::INDEX_SIZE] = info_proto->stats_size();
+        if (!info_proto->base_path().empty()) {
+            config[STATS_BASE_PATH_KEY] = info_proto->base_path();
+        }
 
         milvus::storage::FileManagerContext file_ctx(
             field_meta, index_meta, remote_chunk_manager, fs);

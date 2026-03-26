@@ -199,6 +199,9 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     config[DIM_KEY] = info->dim();
     config[DATA_TYPE_KEY] = info->field_schema().data_type();
     config[ELEMENT_TYPE_KEY] = info->field_schema().element_type();
+    if (!info->stats_base_path().empty()) {
+        config[STATS_BASE_PATH_KEY] = info->stats_base_path();
+    }
 
     if (!info->analyzer_extra_info().empty()) {
         config["analyzer_extra_info"] = info->analyzer_extra_info();
@@ -379,6 +382,8 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
+        fileManagerContext.set_stats_base_path(
+            build_index_info->stats_base_path());
 
         if (build_index_info->manifest() != "") {
             auto loon_properties = MakeInternalPropertiesFromStorageConfig(
@@ -412,6 +417,116 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
             build_index_info->json_stats_shredding_ratio_threshold(),
             build_index_info->json_stats_write_batch_size(),
             tantivy_index_version);
+        index->Build(config);
+        auto create_index_result = index->Upload(config);
+        create_index_result->SerializeAt(
+            reinterpret_cast<milvus::ProtoLayout*>(result));
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (SegcoreError& e) {
+        auto status = CStatus();
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
+BuildTextIndex(ProtoLayoutInterface result,
+               const uint8_t* serialized_build_index_info,
+               const uint64_t len) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto build_index_info =
+            std::make_unique<milvus::proto::indexcgo::BuildIndexInfo>();
+        auto res =
+            build_index_info->ParseFromArray(serialized_build_index_info, len);
+        AssertInfo(res, "Unmarshal build index info failed");
+
+        auto field_type = static_cast<milvus::DataType>(
+            build_index_info->field_schema().data_type());
+
+        auto storage_config =
+            get_storage_config(build_index_info->storage_config());
+        auto config = get_config(build_index_info);
+
+        // init file manager
+        milvus::storage::FieldDataMeta field_meta{
+            build_index_info->collectionid(),
+            build_index_info->partitionid(),
+            build_index_info->segmentid(),
+            build_index_info->field_schema().fieldid(),
+            build_index_info->field_schema()};
+
+        milvus::storage::IndexMeta index_meta{
+            build_index_info->segmentid(),
+            build_index_info->field_schema().fieldid(),
+            build_index_info->buildid(),
+            build_index_info->index_version(),
+            "",
+            build_index_info->field_schema().name(),
+            field_type,
+            build_index_info->dim(),
+        };
+        auto chunk_manager =
+            milvus::storage::CreateChunkManager(storage_config);
+        auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+
+        milvus::storage::FileManagerContext fileManagerContext(
+            field_meta, index_meta, chunk_manager, fs);
+        fileManagerContext.set_stats_base_path(
+            build_index_info->stats_base_path());
+
+        if (build_index_info->manifest() != "") {
+            auto loon_properties = MakeInternalPropertiesFromStorageConfig(
+                ToCStorageConfig(storage_config));
+            fileManagerContext.set_loon_ffi_properties(loon_properties);
+        }
+
+        if (build_index_info->has_storage_plugin_context()) {
+            auto cipherPlugin =
+                milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+            AssertInfo(cipherPlugin != nullptr, "failed to get cipher plugin");
+            cipherPlugin->Update(
+                build_index_info->storage_plugin_context().encryption_zone_id(),
+                build_index_info->storage_plugin_context().collection_id(),
+                build_index_info->storage_plugin_context().encryption_key());
+            auto plugin_context = std::make_shared<CPluginContext>();
+            plugin_context->ez_id =
+                build_index_info->storage_plugin_context().encryption_zone_id();
+            plugin_context->collection_id =
+                build_index_info->storage_plugin_context().collection_id();
+            fileManagerContext.set_plugin_context(plugin_context);
+        }
+
+        auto scalar_index_engine_version =
+            build_index_info->current_scalar_index_version();
+        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] =
+            scalar_index_engine_version;
+        auto tantivy_index_version =
+            scalar_index_engine_version <= 1
+                ? milvus::index::TANTIVY_INDEX_MINIMUM_VERSION
+                : milvus::index::TANTIVY_INDEX_LATEST_VERSION;
+        config[milvus::index::TANTIVY_INDEX_VERSION] = tantivy_index_version;
+
+        auto field_schema =
+            FieldMeta::ParseFrom(build_index_info->field_schema());
+
+        auto index = std::make_unique<index::TextMatchIndex>(
+            fileManagerContext,
+            tantivy_index_version,
+            "milvus_tokenizer",
+            field_schema.get_analyzer_params().c_str(),
+            build_index_info->analyzer_extra_info().c_str());
+
         index->Build(config);
         auto create_index_result = index->Upload(config);
         create_index_result->SerializeAt(

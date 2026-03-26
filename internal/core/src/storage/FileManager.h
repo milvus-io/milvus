@@ -103,6 +103,11 @@ struct FileManagerContext {
         loon_ffi_properties = std::move(properties);
     }
 
+    void
+    set_stats_base_path(const std::string& path) {
+        stats_base_path = path;
+    }
+
     FieldDataMeta fieldDataMeta;
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
@@ -110,6 +115,7 @@ struct FileManagerContext {
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
+    std::string stats_base_path;
 };
 
 #define FILEMANAGER_TRY try {
@@ -292,6 +298,9 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteTextLogPrefix() const {
+        if (!stats_base_path_.empty()) {
+            return stats_base_path_;
+        }
         boost::filesystem::path prefix = rcm_->GetRootPath();
         boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
         boost::filesystem::path path1 =
@@ -306,6 +315,9 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteTextLogPrefixV2() const {
+        if (!stats_base_path_.empty()) {
+            return stats_base_path_;
+        }
         return std::string(TEXT_LOG_ROOT_PATH) + "/" +
                std::to_string(index_meta_.build_id) + "/" +
                std::to_string(index_meta_.index_version) + "/" +
@@ -340,6 +352,10 @@ class FileManagerImpl : public milvus::FileManager {
     milvus_storage::ArrowFileSystemPtr fs_;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
+
+    // stats base path computed by Go caller; when non-empty, overrides
+    // the internally computed remote prefix for text/json stats files.
+    std::string stats_base_path_;
 };
 
 using FileManagerImplPtr = std::shared_ptr<FileManagerImpl>;

@@ -550,7 +550,11 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
 			req.InsertLogs = insertBinlogs
 			req.ManifestPath = st.manifestPath
-			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil)
+			statsBasePath, err := computeStatsBasePath(req, st.manifestPath, "text_index", field.GetFieldID())
+			if err != nil {
+				return err
+			}
+			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil, statsBasePath)
 			buildIndexParams.IndexParams = []*commonpb.KeyValuePair{
 				{Key: "index_type", Value: "INVERTED"},
 				{Key: "is_text_match", Value: "true"},
@@ -603,8 +607,19 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		return err
 	}
 
-	// When manifest_path is set, register text index stats in manifest
+	// When manifest_path is set, register text index stats in manifest.
+	// C++ Upload() returns relative paths; convert to absolute by prepending basePath
+	// before registering with manifest (loon library expects absolute paths).
 	if st.manifestPath != "" && len(textIndexLogs) > 0 {
+		for _, stats := range textIndexLogs {
+			basePath, err := computeStatsBasePath(st.req, st.manifestPath, "text_index", stats.GetFieldID())
+			if err != nil {
+				return err
+			}
+			for i, f := range stats.GetFiles() {
+				stats.Files[i] = basePath + "/" + f
+			}
+		}
 		statEntries := packed.TextIndexStatEntries(textIndexLogs, st.req.GetCurrentScalarIndexVersion())
 		newManifest, err := packed.AddStatsToManifest(
 			st.manifestPath, st.req.GetStorageConfig(), statEntries)
@@ -720,7 +735,11 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 				JsonStatsShreddingRatio:      jsonStatsShreddingRatioThreshold,
 				JsonStatsWriteBatchSize:      jsonStatsWriteBatchSize,
 			}
-			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options)
+			statsBasePath, err := computeStatsBasePath(req, st.manifestPath, "json_key_index", field.GetFieldID())
+			if err != nil {
+				return err
+			}
+			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options, statsBasePath)
 
 			statsResult, err := indexcgowrapper.CreateJSONKeyStats(egCtx, buildIndexParams)
 			if err != nil {
@@ -759,8 +778,19 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		return err
 	}
 
-	// When manifest_path is set, register JSON key stats in manifest
+	// When manifest_path is set, register JSON key stats in manifest.
+	// C++ Upload() returns relative paths; convert to absolute by prepending basePath
+	// before registering with manifest (loon library expects absolute paths).
 	if st.manifestPath != "" && len(jsonKeyIndexStats) > 0 {
+		for _, stats := range jsonKeyIndexStats {
+			basePath, err := computeStatsBasePath(st.req, st.manifestPath, "json_key_index", stats.GetFieldID())
+			if err != nil {
+				return err
+			}
+			for i, f := range stats.GetFiles() {
+				stats.Files[i] = basePath + "/" + f
+			}
+		}
 		statEntries := packed.JSONKeyStatEntries(jsonKeyIndexStats)
 		newManifest, err := packed.AddStatsToManifest(
 			st.manifestPath, st.req.GetStorageConfig(), statEntries)
@@ -789,12 +819,39 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	return nil
 }
 
+// computeStatsBasePath computes the remote base path for stats files.
+// V2 segments use the traditional top-level directory paths (text_log/, json_stats/).
+// V3 segments use basePath/_stats/{type}.{fieldID} under the segment's manifest base path.
+func computeStatsBasePath(req *workerpb.CreateStatsRequest, manifestPath string, statsType string, fieldID int64) (string, error) {
+	if req.GetStorageVersion() == storage.StorageV3 {
+		basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to unmarshal manifest path for %s basePath: %w", statsType, err)
+		}
+		return fmt.Sprintf("%s/_stats/%s.%d", basePath, statsType, fieldID), nil
+	}
+	// V2: compute traditional path
+	rootPath := req.GetStorageConfig().GetRootPath()
+	switch statsType {
+	case "text_index":
+		return metautil.BuildTextIndexPrefix(rootPath,
+			req.GetTaskID(), req.GetTaskVersion(),
+			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil
+	case "json_key_index":
+		return metautil.BuildJsonKeyStatsPrefix(rootPath, common.JSONStatsDataFormatVersion,
+			req.GetTaskID(), req.GetTaskVersion(),
+			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil
+	}
+	return "", fmt.Errorf("unknown stats type: %s", statsType)
+}
+
 func buildIndexParams(
 	req *workerpb.CreateStatsRequest,
 	files []string,
 	field *schemapb.FieldSchema,
 	storageConfig *indexcgopb.StorageConfig,
 	options *BuildIndexOptions,
+	statsBasePath string,
 ) *indexcgopb.BuildIndexInfo {
 	if options == nil {
 		options = &BuildIndexOptions{}
@@ -815,6 +872,7 @@ func buildIndexParams(
 		JsonStatsShreddingRatioThreshold: options.JsonStatsShreddingRatio,
 		JsonStatsWriteBatchSize:          options.JsonStatsWriteBatchSize,
 		Manifest:                         req.GetManifestPath(),
+		StatsBasePath:                    statsBasePath,
 	}
 
 	if req.GetStorageVersion() == storage.StorageV2 || req.GetStorageVersion() == storage.StorageV3 {
