@@ -150,6 +150,9 @@ func (impl *replicatesManagerImpl) GetReplicateCheckpoint() (*utility.ReplicateC
 func (impl *replicatesManagerImpl) GetSalvageCheckpoint() []*utility.ReplicateCheckpoint {
 	impl.mu.Lock()
 	defer impl.mu.Unlock()
+	if len(impl.salvageCheckpoints) == 0 {
+		return nil
+	}
 	result := make([]*utility.ReplicateCheckpoint, 0, len(impl.salvageCheckpoints))
 	for _, cp := range impl.salvageCheckpoints {
 		result = append(result, cp)
