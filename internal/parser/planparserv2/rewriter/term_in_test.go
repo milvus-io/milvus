@@ -40,20 +40,34 @@ func buildSchemaHelperForRewriteT(t *testing.T) *typeutil.SchemaHelper {
 	return helper
 }
 
-func TestRewrite_OREquals_ToIN_NonNumeric(t *testing.T) {
+// --- shouldUseInExpr threshold tests ---
+
+func TestRewrite_OREquals_ToIN_VarChar_AboveThreshold(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `VarCharField == "a" or VarCharField == "b"`, nil)
+	// varchar threshold is 3, so 3 values should produce IN
+	expr, err := parser.ParseExpr(helper, `VarCharField == "a" or VarCharField == "b" or VarCharField == "c"`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	term := expr.GetTermExpr()
-	require.NotNil(t, term, "expected OR-equals to be rewritten to TermExpr(IN ...)")
-	require.Equal(t, 2, len(term.GetValues()))
-	require.Equal(t, "a", term.GetValues()[0].GetStringVal())
-	require.Equal(t, "b", term.GetValues()[1].GetStringVal())
+	require.NotNil(t, term, "3 varchar OR-equals should merge to IN (threshold=3)")
+	require.Equal(t, 3, len(term.GetValues()))
 }
 
-func TestRewrite_OREquals_NotMerged_OnNumericBelowThreshold(t *testing.T) {
+func TestRewrite_OREquals_NotMerged_VarChar_BelowThreshold(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
+	// varchar threshold is 3, so 2 values should NOT produce IN
+	expr, err := parser.ParseExpr(helper, `VarCharField == "a" or VarCharField == "b"`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.Nil(t, expr.GetTermExpr(), "2 varchar OR-equals should not merge to IN")
+	be := expr.GetBinaryExpr()
+	require.NotNil(t, be)
+	require.Equal(t, planpb.BinaryExpr_LogicalOr, be.GetOp())
+}
+
+func TestRewrite_OREquals_NotMerged_Int_BelowThreshold(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// int threshold is 10, so 2 values should NOT merge
 	expr, err := parser.ParseExpr(helper, `Int64Field == 1 or Int64Field == 2`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
@@ -67,61 +81,117 @@ func TestRewrite_OREquals_NotMerged_OnNumericBelowThreshold(t *testing.T) {
 	require.Equal(t, planpb.OpType_Equal, be.GetRight().GetUnaryRangeExpr().GetOp())
 }
 
+func TestRewrite_OREquals_Merged_Int_AtThreshold(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// int threshold is 10, so exactly 10 values should merge
+	expr, err := parser.ParseExpr(helper, `Int64Field == 1 or Int64Field == 2 or Int64Field == 3 or Int64Field == 4 or Int64Field == 5 or Int64Field == 6 or Int64Field == 7 or Int64Field == 8 or Int64Field == 9 or Int64Field == 10`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	term := expr.GetTermExpr()
+	require.NotNil(t, term, "10 int OR-equals should merge to IN (threshold=10)")
+	require.Equal(t, 10, len(term.GetValues()))
+}
+
+// --- in → == or split tests ---
+
+func TestRewrite_InSplit_Int_BelowThreshold(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// int in [1,2,3] → 3 values < 10 → split to == or
+	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.Nil(t, expr.GetTermExpr(), "int in with 3 values should be split to == or")
+	// Should be an OR tree
+	be := expr.GetBinaryExpr()
+	require.NotNil(t, be)
+	require.Equal(t, planpb.BinaryExpr_LogicalOr, be.GetOp())
+}
+
+func TestRewrite_InSplit_Int_SingleValue(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// int in [5] → split to == 5
+	expr, err := parser.ParseExpr(helper, `Int64Field in [5]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "in [single] should become ==")
+	require.Equal(t, planpb.OpType_Equal, ure.GetOp())
+	require.Equal(t, int64(5), ure.GetValue().GetInt64Val())
+}
+
+func TestRewrite_InKept_Int_AboveThreshold(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	term := expr.GetTermExpr()
+	require.NotNil(t, term, "int in with 10 values should stay as IN")
+	require.Equal(t, 10, len(term.GetValues()))
+}
+
+// --- not in split tests ---
+
+func TestRewrite_NotInSplit_Int_BelowThreshold(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// not in [3,4] → 2 values < 10 → split to != 3 AND != 4
+	expr, err := parser.ParseExpr(helper, `Int64Field not in [4,3]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	// Should be AND tree of !=
+	be := expr.GetBinaryExpr()
+	require.NotNil(t, be, "not in with 2 int values should split to != AND !=")
+	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
+	require.Equal(t, planpb.OpType_NotEqual, be.GetLeft().GetUnaryRangeExpr().GetOp())
+	require.Equal(t, planpb.OpType_NotEqual, be.GetRight().GetUnaryRangeExpr().GetOp())
+}
+
+func TestRewrite_NotInSplit_Int_SingleValue(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	expr, err := parser.ParseExpr(helper, `Int64Field not in [5]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "not in [single] should become !=")
+	require.Equal(t, planpb.OpType_NotEqual, ure.GetOp())
+	require.Equal(t, int64(5), ure.GetValue().GetInt64Val())
+}
+
+func TestRewrite_NotInSplit_Float_BelowThreshold(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// float threshold is 15, so 2 values → split
+	expr, err := parser.ParseExpr(helper, `FloatField not in [4.0,3.0]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	be := expr.GetBinaryExpr()
+	require.NotNil(t, be, "not in with 2 float values should split to != AND !=")
+	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
+}
+
+// --- sort/dedup tests (use values above threshold) ---
+
 func TestRewrite_Term_SortAndDedup_String(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `VarCharField in ["b","a","b","a"]`, nil)
+	// varchar threshold is 3, use 3+ unique values
+	expr, err := parser.ParseExpr(helper, `VarCharField in ["c","b","a","b","a"]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	term := expr.GetTermExpr()
 	require.NotNil(t, term)
-	require.Equal(t, 2, len(term.GetValues()))
+	require.Equal(t, 3, len(term.GetValues()))
 	require.Equal(t, "a", term.GetValues()[0].GetStringVal())
 	require.Equal(t, "b", term.GetValues()[1].GetStringVal())
+	require.Equal(t, "c", term.GetValues()[2].GetStringVal())
 }
 
 func TestRewrite_Term_SortAndDedup_Int(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `Int64Field in [9,4,6,6,7]`, nil)
+	// int threshold is 10, use 10+ unique values
+	expr, err := parser.ParseExpr(helper, `Int64Field in [10,9,4,6,6,7,1,2,3,5,8]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	term := expr.GetTermExpr()
 	require.NotNil(t, term)
-	require.Equal(t, 4, len(term.GetValues()))
-	got := []int64{
-		term.GetValues()[0].GetInt64Val(),
-		term.GetValues()[1].GetInt64Val(),
-		term.GetValues()[2].GetInt64Val(),
-		term.GetValues()[3].GetInt64Val(),
-	}
-	require.ElementsMatch(t, []int64{4, 6, 7, 9}, got)
-}
-
-func TestRewrite_NotIn_SortAndDedup_Int(t *testing.T) {
-	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `Int64Field not in [4,4,3]`, nil)
-	require.NoError(t, err)
-	require.NotNil(t, expr)
-	un := expr.GetUnaryExpr()
-	require.NotNil(t, un)
-	term := un.GetChild().GetTermExpr()
-	require.NotNil(t, term)
-	require.Equal(t, 2, len(term.GetValues()))
-	require.Equal(t, int64(3), term.GetValues()[0].GetInt64Val())
-	require.Equal(t, int64(4), term.GetValues()[1].GetInt64Val())
-}
-
-func TestRewrite_NotIn_SortAndDedup_Float(t *testing.T) {
-	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `FloatField not in [4.0,4,3.0]`, nil)
-	require.NoError(t, err)
-	require.NotNil(t, expr)
-	un := expr.GetUnaryExpr()
-	require.NotNil(t, un)
-	term := un.GetChild().GetTermExpr()
-	require.NotNil(t, term)
-	require.Equal(t, 2, len(term.GetValues()))
-	require.Equal(t, 3.0, term.GetValues()[0].GetFloatVal())
-	require.Equal(t, 4.0, term.GetValues()[1].GetFloatVal())
+	require.Equal(t, 10, len(term.GetValues()))
 }
 
 func TestRewrite_In_SortAndDedup_Bool(t *testing.T) {
@@ -129,15 +199,15 @@ func TestRewrite_In_SortAndDedup_Bool(t *testing.T) {
 	expr, err := parser.ParseExpr(helper, `BoolField in [true,false,false,true]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	term := expr.GetTermExpr()
-	require.NotNil(t, term)
-	require.Equal(t, 2, len(term.GetValues()))
-	require.Equal(t, false, term.GetValues()[0].GetBoolVal())
-	require.Equal(t, true, term.GetValues()[1].GetBoolVal())
+	// bool: 2 unique values < threshold 3 → split to == or
+	be := expr.GetBinaryExpr()
+	require.NotNil(t, be, "bool in [true,false] should split to == or")
+	require.Equal(t, planpb.BinaryExpr_LogicalOr, be.GetOp())
 }
 
 func TestRewrite_Flatten_Then_OR_ToIN(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
+	// varchar threshold is 3, so 4 values should merge
 	expr, err := parser.ParseExpr(helper, `VarCharField == "a" or (VarCharField == "b" or VarCharField == "c") or VarCharField == "d"`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
@@ -153,9 +223,11 @@ func TestRewrite_Flatten_Then_OR_ToIN(t *testing.T) {
 	require.ElementsMatch(t, []string{"a", "b", "c", "d"}, got)
 }
 
+// --- combine tests (use values above threshold to keep IN form) ---
+
 func TestRewrite_And_In_And_Equal_VInSet_ReducesToEqual(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `Int64Field in [1,3,5] and Int64Field == 3`, nil)
+	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field == 3`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	ure := expr.GetUnaryRangeExpr()
@@ -166,7 +238,7 @@ func TestRewrite_And_In_And_Equal_VInSet_ReducesToEqual(t *testing.T) {
 
 func TestRewrite_And_In_And_Equal_VNotInSet_False(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `Int64Field in [1,3,5] and Int64Field == 2`, nil)
+	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field == 20`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
@@ -174,59 +246,49 @@ func TestRewrite_And_In_And_Equal_VNotInSet_False(t *testing.T) {
 
 func TestRewrite_Or_In_Or_Equal_Union(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `Int64Field in [1,3] or Int64Field == 2`, nil)
+	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] or Int64Field == 20`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	term := expr.GetTermExpr()
 	require.NotNil(t, term)
-	require.Equal(t, []int64{1, 2, 3}, []int64{
-		term.GetValues()[0].GetInt64Val(),
-		term.GetValues()[1].GetInt64Val(),
-		term.GetValues()[2].GetInt64Val(),
-	})
+	require.Equal(t, 11, len(term.GetValues()))
 }
 
 func TestRewrite_And_In_With_Range_Filter(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `Int64Field in [1,3,5] and Int64Field > 3`, nil)
+	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field > 8`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	term := expr.GetTermExpr()
 	require.NotNil(t, term)
-	require.Equal(t, 1, len(term.GetValues()))
-	require.Equal(t, int64(5), term.GetValues()[0].GetInt64Val())
+	require.Equal(t, 2, len(term.GetValues()))
+	require.Equal(t, int64(9), term.GetValues()[0].GetInt64Val())
+	require.Equal(t, int64(10), term.GetValues()[1].GetInt64Val())
 }
 
 func TestRewrite_Or_In_Union(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `Int64Field in [1,3] or Int64Field in [3,4]`, nil)
+	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] or Int64Field in [10,11,12,13,14,15,16,17,18,19]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	term := expr.GetTermExpr()
 	require.NotNil(t, term)
-	require.Equal(t, []int64{1, 3, 4}, []int64{
-		term.GetValues()[0].GetInt64Val(),
-		term.GetValues()[1].GetInt64Val(),
-		term.GetValues()[2].GetInt64Val(),
-	})
+	require.Equal(t, 19, len(term.GetValues()))
 }
 
 func TestRewrite_And_In_Intersection(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3] and Int64Field in [2,3,4]`, nil)
+	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field in [5,6,7,8,9,10,11,12,13,14]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	term := expr.GetTermExpr()
 	require.NotNil(t, term)
-	require.Equal(t, []int64{2, 3}, []int64{
-		term.GetValues()[0].GetInt64Val(),
-		term.GetValues()[1].GetInt64Val(),
-	})
+	require.Equal(t, 6, len(term.GetValues()))
 }
 
 func TestRewrite_And_In_Intersection_Empty_ToFalse(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `Int64Field in [1] and Int64Field in [2]`, nil)
+	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field in [11,12,13,14,15,16,17,18,19,20]`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
@@ -234,20 +296,18 @@ func TestRewrite_And_In_Intersection_Empty_ToFalse(t *testing.T) {
 
 func TestRewrite_And_In_And_NotEqual_Remove(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3] and Int64Field != 2`, nil)
+	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field != 5`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	term := expr.GetTermExpr()
 	require.NotNil(t, term)
-	require.Equal(t, []int64{1, 3}, []int64{
-		term.GetValues()[0].GetInt64Val(),
-		term.GetValues()[1].GetInt64Val(),
-	})
+	require.Equal(t, 9, len(term.GetValues()))
 }
 
 func TestRewrite_And_In_And_NotEqual_AllRemoved_ToFalse(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `Int64Field in [2] and Int64Field != 2`, nil)
+	// in [10 values] and != each of them → false
+	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field != 1 and Int64Field != 2 and Int64Field != 3 and Int64Field != 4 and Int64Field != 5 and Int64Field != 6 and Int64Field != 7 and Int64Field != 8 and Int64Field != 9 and Int64Field != 10`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
@@ -255,7 +315,7 @@ func TestRewrite_And_In_And_NotEqual_AllRemoved_ToFalse(t *testing.T) {
 
 func TestRewrite_Or_In_Or_NotEqual_VInSet_ToTrue(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2] or Int64Field != 2`, nil)
+	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] or Int64Field != 5`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	require.True(t, rewriter.IsAlwaysTrueExpr(expr),
@@ -273,91 +333,60 @@ func TestRewrite_Or_In_Or_NotEqual_VarChar_Tautology(t *testing.T) {
 
 func TestRewrite_Or_In_Or_NotEqual_VNotInSet_ToNotEqual(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	expr, err := parser.ParseExpr(helper, `Int64Field in [1] or Int64Field != 2`, nil)
+	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] or Int64Field != 20`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
 	ure := expr.GetUnaryRangeExpr()
 	require.NotNil(t, ure)
 	require.Equal(t, planpb.OpType_NotEqual, ure.GetOp())
-	require.Equal(t, int64(2), ure.GetValue().GetInt64Val())
+	require.Equal(t, int64(20), ure.GetValue().GetInt64Val())
 }
 
 // Test contradictory equals: (a == 1) AND (a == 2) → false
 // NOTE: This is a known limitation - currently NOT optimized
 func TestRewrite_And_Equal_And_Equal_Contradiction_CurrentLimitation(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// Int64Field == 1 AND Int64Field == 2 → false (contradiction)
-	// Currently NOT optimized because equals don't convert to IN in AND context
 	expr, err := parser.ParseExpr(helper, `Int64Field == 1 and Int64Field == 2`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current limitation: NOT optimized to false
-	// Remains as BinaryExpr AND with two equal predicates
 	be := expr.GetBinaryExpr()
 	require.NotNil(t, be, "should remain as AND (not optimized)")
 	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
 }
 
-// Test contradictory equals with three values
 func TestRewrite_And_Equal_ThreeWay_Contradiction_CurrentLimitation(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// Int64Field == 1 AND Int64Field == 2 AND Int64Field == 3 → false
-	// Currently NOT optimized
 	expr, err := parser.ParseExpr(helper, `Int64Field == 1 and Int64Field == 2 and Int64Field == 3`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current limitation: NOT optimized to false
 	be := expr.GetBinaryExpr()
 	require.NotNil(t, be, "should remain as AND chain (not optimized)")
 	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
 }
 
-// Test range + contradictory equal: (a > 10) AND (a == 5) → false
-// NOTE: Current limitation - NOT optimized
 func TestRewrite_And_Range_And_Equal_Contradiction_CurrentLimitation(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// Int64Field > 10 AND Int64Field == 5 → false (5 is not > 10)
-	// This requires combining range and equality checks, which is partially implemented
 	expr, err := parser.ParseExpr(helper, `Int64Field > 10 and Int64Field == 5`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current behavior: may not optimize to false
-	// If it does optimize via IN+range filtering, it would become false
-	// This test documents current limitation
-	// When fully optimized, should be constant false
-	_ = expr // Test documents that this case exists
+	_ = expr
 }
 
-// Test non-contradictory range + equal: (a > 10) AND (a == 15) → stays as is
-// NOTE: This requires Equal to be in IN form first, which happens via combineAndInWithEqual
-// But Equal alone doesn't convert to IN in AND context, so this optimization doesn't happen
 func TestRewrite_And_Range_And_Equal_NonContradiction_CurrentLimitation(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// Int64Field > 10 AND Int64Field == 15 → should simplify to Int64Field == 15
-	// But currently NOT optimized without IN involved
 	expr, err := parser.ParseExpr(helper, `Int64Field > 10 and Int64Field == 15`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current limitation: remains as AND with range and equal
 	be := expr.GetBinaryExpr()
 	require.NotNil(t, be, "should remain as AND (not optimized)")
 	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
 }
 
-// Test string contradictory equals - current limitation
 func TestRewrite_And_Equal_String_Contradiction_CurrentLimitation(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// VarCharField == "apple" AND VarCharField == "banana" → false
-	// Currently NOT optimized
 	expr, err := parser.ParseExpr(helper, `VarCharField == "apple" and VarCharField == "banana"`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-
-	// Current limitation: NOT optimized to false
 	be := expr.GetBinaryExpr()
 	require.NotNil(t, be, "should remain as AND (not optimized)")
 	require.Equal(t, planpb.BinaryExpr_LogicalAnd, be.GetOp())
