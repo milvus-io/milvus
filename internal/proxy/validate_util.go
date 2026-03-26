@@ -404,6 +404,15 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			if err != nil {
 				return err
 			}
+
+			expectedRows := getExpectedVectorRows(field, f)
+			if field.GetVectors() == nil || field.GetVectors().GetVectorArray() == nil {
+				if expectedRows != 0 {
+					return errNumRowsMismatch(field.GetFieldName(), 0)
+				}
+				continue
+			}
+
 			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return err
@@ -415,7 +424,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			}
 
 			n := uint64(len(field.GetVectors().GetVectorArray().GetData()))
-			if n != numRows {
+			if n != expectedRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 
@@ -554,6 +563,16 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 		}
 
 	case *schemapb.FieldData_Vectors:
+		// Vector types (including ArrayOfVector) stay in compact format.
+		// FieldDataIdxComputer + AppendFieldData handle compact nullable vectors correctly.
+		// Just validate the data length matches the number of valid rows.
+		if vectorArray := field.GetVectors().GetVectorArray(); vectorArray != nil {
+			n := getValidNumber(field.GetValidData())
+			if len(vectorArray.Data) != n {
+				return merr.WrapErrParameterInvalid(n, len(vectorArray.Data), "the length of ArrayOfVector field is wrong")
+			}
+		}
+		// Non-array vector types are handled elsewhere (they use flat byte arrays, not slices)
 	default:
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 	}

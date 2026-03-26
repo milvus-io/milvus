@@ -3855,7 +3855,7 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 		assert.Contains(t, err.Error(), "vectors")
 	})
 
-	t.Run("error - unsupported field data type", func(t *testing.T) {
+	t.Run("error - unsupported field data type with data", func(t *testing.T) {
 		structField := &schemapb.StructArrayFieldSchema{
 			Name: "test_struct",
 			Fields: []*schemapb.FieldSchema{
@@ -3864,11 +3864,16 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 		}
 		schema := createTestSchema("test_collection", []*schemapb.StructArrayFieldSchema{structField}, nil)
 
+		// Use a Scalars field with non-ArrayData (e.g. LongData) to trigger "scalar array data is nil"
 		unsupportedFieldData := &schemapb.FieldData{
 			FieldName: "field1",
 			Type:      schemapb.DataType_Array,
-			Field: &schemapb.FieldData_StructArrays{
-				StructArrays: &schemapb.StructArrayField{},
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1}},
+					},
+				},
 			},
 		}
 		structFieldData := createStructArrayFieldData("test_struct", []*schemapb.FieldData{unsupportedFieldData})
@@ -3877,8 +3882,7 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 		err := checkAndFlattenStructFieldData(schema, insertMsg)
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "unexpected field data type in struct array field")
-		assert.Contains(t, err.Error(), "test_struct")
+		assert.Contains(t, err.Error(), "scalar array data is nil")
 	})
 
 	t.Run("error - inconsistent array length", func(t *testing.T) {
@@ -3923,8 +3927,8 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 		err := checkAndFlattenStructFieldData(schema, insertMsg)
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "the number of struct array fields is not the same as needed")
-		assert.Contains(t, err.Error(), "expected: 2, actual: 1")
+		assert.Contains(t, err.Error(), "required struct array field")
+		assert.Contains(t, err.Error(), "struct2")
 	})
 
 	t.Run("edge case - empty struct fields", func(t *testing.T) {
@@ -4145,16 +4149,16 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		assert.Contains(t, err.Error(), "the maximum length specified for the field")
 	})
 
-	t.Run("nullable field not supported", func(t *testing.T) {
+	t.Run("nullable field in struct is allowed", func(t *testing.T) {
 		field := &schemapb.FieldSchema{
 			Name:        "nullable_field",
 			DataType:    schemapb.DataType_Array,
 			ElementType: schemapb.DataType_Int32,
 			Nullable:    true,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
 		}
 		err := ValidateFieldsInStruct(field, schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "nullable is not supported for fields in struct array now")
+		assert.NoError(t, err)
 	})
 
 	// t.Run("sparse float vector in array of vector", func(t *testing.T) {

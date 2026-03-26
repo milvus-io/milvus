@@ -337,6 +337,11 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 				res += int(fs.GetVectors().GetDim())
 			}
 		case schemapb.DataType_ArrayOfVector:
+			validData := fs.GetValidData()
+			isNullRow := len(validData) > 0 && rowOffset < len(validData) && !validData[rowOffset]
+			if isNullRow {
+				continue
+			}
 			arrayVector := fs.GetVectors().GetVectorArray()
 			if int(fieldIdx) >= len(arrayVector.GetData()) {
 				return 0, errors.New("offset out range of field datas")

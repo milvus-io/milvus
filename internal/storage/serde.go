@@ -1074,7 +1074,7 @@ func newSingleFieldRecordWriter(field *schemapb.FieldSchema, writer io.Writer, o
 		)
 	}
 
-	if field.GetNullable() && typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) {
+	if field.GetNullable() && typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) && !typeutil.IsVectorArrayType(field.DataType) {
 		arrowType = arrow.BinaryTypes.Binary
 		fieldMetadata = arrow.NewMetadata(
 			[]string{"dim"},
@@ -1309,11 +1309,13 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 				validData = fd.ValidData
 			case *Int8VectorFieldData:
 				validData = fd.ValidData
+			case *VectorArrayFieldData:
+				validData = fd.ValidData
 			}
 			// Use len(validData) as logical row count, GetRow takes logical index
 			for j := 0; j < len(validData); j++ {
 				if !validData[j] {
-					fBuilder.(*array.BinaryBuilder).AppendNull()
+					fBuilder.AppendNull()
 				} else {
 					rowData := fieldData.GetRow(j)
 					err := typeEntry.serialize(fBuilder, rowData, elementType)

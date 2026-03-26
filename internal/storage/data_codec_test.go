@@ -1157,7 +1157,7 @@ func TestInsertCodec(t *testing.T) {
 			StructSubInt32Field:       &ArrayFieldData{schemapb.DataType_Int32, []*schemapb.ScalarField{}, nil, false},
 			ArrayField:                &ArrayFieldData{schemapb.DataType_Int32, []*schemapb.ScalarField{}, nil, false},
 			JSONField:                 &JSONFieldData{[][]byte{}, nil, false},
-			StructSubFloatVectorField: &VectorArrayFieldData{0, schemapb.DataType_FloatVector, []*schemapb.VectorField{}},
+			StructSubFloatVectorField: &VectorArrayFieldData{Dim: 0, ElementType: schemapb.DataType_FloatVector, Data: []*schemapb.VectorField{}},
 		},
 	}
 	b, err := insertCodec.Serialize(PartitionID, SegmentID, insertDataEmpty)

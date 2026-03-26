@@ -806,12 +806,19 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		case schemapb.DataType_ArrayOfVector:
 			vectorArray := srcField.GetVectors().GetVectorArray()
+			validData := srcField.GetValidData()
 
-			fieldData = &VectorArrayFieldData{
+			fd := &VectorArrayFieldData{
 				ElementType: field.GetElementType(),
 				Data:        vectorArray.GetData(),
 				Dim:         vectorArray.GetDim(),
+				ValidData:   validData,
+				Nullable:    field.GetNullable(),
 			}
+			if len(validData) > 0 {
+				fd.L2PMapping.Build(validData, 0, len(validData))
+			}
+			fieldData = fd
 		case schemapb.DataType_Geometry:
 			srcData := srcField.GetScalars().GetGeometryData().GetData()
 			validData := srcField.GetValidData()
@@ -1116,6 +1123,25 @@ func mergeSparseFloatVectorField(data *InsertData, fid FieldID, field *SparseFlo
 	fieldData.AppendAllRows(field)
 }
 
+func mergeVectorArrayField(data *InsertData, fid FieldID, field *VectorArrayFieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &VectorArrayFieldData{
+			Data:        nil,
+			Dim:         field.Dim,
+			ElementType: field.ElementType,
+			ValidData:   nil,
+			Nullable:    field.Nullable,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*VectorArrayFieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+	if len(field.ValidData) > 0 {
+		fieldData.L2PMapping.Build(field.ValidData, len(fieldData.ValidData), len(field.ValidData))
+	}
+	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
+}
+
 func mergeInt8VectorField(data *InsertData, fid FieldID, field *Int8VectorFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &Int8VectorFieldData{
@@ -1174,6 +1200,8 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 		mergeSparseFloatVectorField(data, fid, field)
 	case *Int8VectorFieldData:
 		mergeInt8VectorField(data, fid, field)
+	case *VectorArrayFieldData:
+		mergeVectorArrayField(data, fid, field)
 	}
 }
 
@@ -1575,6 +1603,7 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						Dim: rawData.Dim,
 					},
 				},
+				ValidData: rawData.ValidData,
 			}
 		default:
 			return insertRecord, errors.New("unsupported data type when transter storage.InsertData to internalpb.InsertRecord")

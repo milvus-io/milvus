@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -517,4 +518,68 @@ func Test_nextFieldID(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestCheckStructArrayFieldSchema_NullableValidation(t *testing.T) {
+	t.Run("nullable struct with nullable sub-field passes", func(t *testing.T) {
+		schemas := []*schemapb.StructArrayFieldSchema{
+			{
+				Name:     "my_struct",
+				Nullable: true,
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:        "sub_a",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+						Nullable:    true,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
+					},
+				},
+			},
+		}
+		err := checkStructArrayFieldSchema(schemas)
+		assert.NoError(t, err)
+	})
+
+	t.Run("non-nullable struct rejects nullable sub-field", func(t *testing.T) {
+		schemas := []*schemapb.StructArrayFieldSchema{
+			{
+				Name:     "my_struct",
+				Nullable: false,
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:        "sub_a",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+						Nullable:    true,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
+					},
+				},
+			},
+		}
+		err := checkStructArrayFieldSchema(schemas)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot be nullable individually")
+		assert.Contains(t, err.Error(), "my_struct")
+		assert.Contains(t, err.Error(), "sub_a")
+	})
+
+	t.Run("non-nullable struct with non-nullable sub-field passes", func(t *testing.T) {
+		schemas := []*schemapb.StructArrayFieldSchema{
+			{
+				Name:     "my_struct",
+				Nullable: false,
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:        "sub_a",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
+					},
+				},
+			},
+		}
+		err := checkStructArrayFieldSchema(schemas)
+		assert.NoError(t, err)
+	})
 }

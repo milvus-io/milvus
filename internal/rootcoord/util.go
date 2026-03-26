@@ -483,6 +483,12 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 			if err := checkDupKvPairs(field.GetIndexParams(), "index"); err != nil {
 				return err
 			}
+
+			// If struct is not nullable, sub-fields must not be nullable individually
+			if !schema.GetNullable() && field.GetNullable() {
+				return merr.WrapErrParameterInvalidMsg("sub-field in non-nullable struct cannot be nullable individually, set nullable on the struct instead: structName=%s, subFieldName=%s",
+					schema.Name, field.Name)
+			}
 		}
 	}
 	return nil
