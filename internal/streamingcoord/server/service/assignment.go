@@ -229,14 +229,6 @@ func validateForcePromoteConfiguration(config *commonpb.ReplicateConfiguration, 
 func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *commonpb.ReplicateConfiguration) (*streamingpb.UpdateReplicateConfigurationResponse, error) {
 	log.Ctx(ctx).Warn("Force promote replicate configuration requested")
 
-	// VALIDATION 1: Force promote requires empty cluster and topology fields
-	// The configuration will be constructed from the current cluster's existing meta
-	// Use len() instead of != nil because empty slices (from client builder) are not nil
-	if len(config.GetClusters()) > 0 || len(config.GetCrossClusterTopology()) > 0 {
-		return nil, status.NewInvaildArgument(
-			"force promote requires empty cluster and topology fields; it promotes the cluster to primary automatically")
-	}
-
 	// Use WithSecondaryClusterResourceKey to:
 	// 1. Acquire exclusive cluster-level resource key
 	// 2. Verify the cluster is secondary (not primary)
