@@ -23,20 +23,11 @@ func init() {
 	globalLogger.Store(logger)
 }
 
-// Init replaces the global logger with the provided one.
+// initGlobalLogger replaces the global logger with the provided one.
 // The caller is responsible for configuring the logger.
 // AddCallerSkip(1) is automatically applied.
-func Init(logger *zap.Logger) {
+func initGlobalLogger(logger *zap.Logger) {
 	globalLogger.Store(logger.WithOptions(zap.AddCallerSkip(1)))
-}
-
-// InitNode initializes the logger with node-level metadata.
-// nodeId is global and included in all log entries.
-// Call this once at process startup.
-func InitNode(logger *zap.Logger, nodeId int64) {
-	// Add nodeId to the logger directly, so all derived loggers include it
-	field := Int64(keyNodeID, nodeId)
-	globalLogger.Store(logger.WithOptions(zap.AddCallerSkip(1)).With(field))
 }
 
 // getLogger returns the current global logger
@@ -49,6 +40,8 @@ func getLogger() *zap.Logger {
 // when zap captures the caller.
 func prepareLog(ctx context.Context, fields []Field) (*zap.Logger, []Field) {
 	if ctx == nil {
+		// Safe: fields originates from variadic ...Field, so its cap == len;
+		// append always allocates a new backing array here.
 		return getLogger(), append(fields, nilContextField)
 	}
 

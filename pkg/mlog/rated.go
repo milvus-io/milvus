@@ -33,7 +33,7 @@ func getOrCreateRatedEntry(pc uintptr, limit rate.Limit) *ratedEntry {
 
 // ratedAllow checks if a log entry should be emitted based on rate limiting.
 // If suppressed, increments ignore count and returns false.
-// If allowed and previous entries were suppressed, appends an _ignored field.
+// If allowed and previous entries were suppressed, appends a _suppressed field.
 func ratedAllow(pc uintptr, limit rate.Limit, fields *[]Field) bool {
 	entry := getOrCreateRatedEntry(pc, limit)
 	if !entry.limiter.Allow() {
@@ -41,7 +41,7 @@ func ratedAllow(pc uintptr, limit rate.Limit, fields *[]Field) bool {
 		return false
 	}
 	if ignored := entry.ignoreCount.Swap(0); ignored > 0 {
-		*fields = append(*fields, Int64("_ignored", ignored))
+		*fields = append(*fields, Int64("_suppressed", ignored))
 	}
 	return true
 }

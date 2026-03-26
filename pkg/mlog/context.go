@@ -107,15 +107,7 @@ func getLogContext(ctx context.Context) *logContext {
 
 // FieldsFromContext extracts fields from context as a slice.
 func FieldsFromContext(ctx context.Context) []Field {
-	lc := getLogContext(ctx)
-	if len(lc.fieldKeys) == 0 {
-		return nil
-	}
-	fields := make([]Field, 0, len(lc.fieldKeys))
-	for _, f := range lc.fieldKeys {
-		fields = append(fields, *f)
-	}
-	return fields
+	return getLogContext(ctx).getFields()
 }
 
 // fieldCount returns the number of fields in the logContext.
