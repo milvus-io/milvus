@@ -724,7 +724,8 @@ func (s *FillExpressionValueSuite) TestTermExprWithMixedNumericTypesForJSON() {
 
 	s.Run("non-JSON field should not be affected by mixed type normalization", func() {
 		// Int64Field is not a JSON field, so mixed types would be an error or handled differently
-		exprStr := `Int64Field in [1, 2, 3]`
+		// Use >= 10 values to stay above the integer IN threshold and keep TermExpr form
+		exprStr := `Int64Field in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]`
 
 		expr, err := ParseExpr(schemaH, exprStr, nil)
 		s.NoError(err)
@@ -733,10 +734,10 @@ func (s *FillExpressionValueSuite) TestTermExprWithMixedNumericTypesForJSON() {
 		// Verify values remain as integers for non-JSON field
 		te := expr.GetTermExpr()
 		s.NotNil(te, "expected TermExpr")
-		s.Len(te.GetValues(), 3)
-		s.Equal(int64(1), te.GetValues()[0].GetInt64Val())
-		s.Equal(int64(2), te.GetValues()[1].GetInt64Val())
-		s.Equal(int64(3), te.GetValues()[2].GetInt64Val())
+		s.Len(te.GetValues(), 10)
+		for i := 0; i < 10; i++ {
+			s.Equal(int64(i+1), te.GetValues()[i].GetInt64Val())
+		}
 	})
 
 	s.Run("not in with mixed int and float should normalize all to float", func() {
