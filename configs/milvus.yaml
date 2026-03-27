@@ -950,6 +950,16 @@ common:
   parquetStatsSkipIndex:
     enabled: false # whether to skip parquet stats index when reading; set true to enable skipping.
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
+  storage:
+    manifestTransactionRetryLimit: 10 # Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts
+    stv2:
+      splitSystemColumn:
+        enabled: true # enable split system column policy in storage v2
+        includePK: true # whether split system column policy include pk field
+      splitByAvgSize:
+        enabled: true # enable split by average size policy in storage v2
+        threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
+    useLoonFFI: true
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
@@ -1028,15 +1038,6 @@ common:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
-  storage:
-    stv2:
-      splitSystemColumn:
-        enabled: true # enable split system column policy in storage v2
-        includePK: true # whether split system column policy include pk field
-      splitByAvgSize:
-        enabled: true # enable split by average size policy in storage v2
-        threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
-    useLoonFFI: true
   traceLogMode: 0 # trace request info
   bloomFilterSize: 100000 # bloom filter initial size
   bloomFilterType: BlockedBloomFilter # bloom filter type, support BasicBloomFilter and BlockedBloomFilter
