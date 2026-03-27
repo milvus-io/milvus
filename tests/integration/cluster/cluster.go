@@ -234,7 +234,7 @@ func (c *MiniClusterV3) initInternalClient() {
 // ModifyMilvusConfig modifies the milvus config.
 // Meanwhile it will return a guard function to revert the config into default.
 // It doesn't promise that the configuration will be applied immediately,
-// milvus may not support the dynamic configuration change for some configurations or some configration may be applied slowly.
+// milvus may not support the dynamic configuration change for some configurations or some configuration may be applied slowly.
 // If you want to ensure the config is applied, you should restart the target component or wait it to be ready.
 func (c *MiniClusterV3) MustModifyMilvusConfig(kvs map[string]string) func() {
 	keys := make([]string, 0, len(kvs))

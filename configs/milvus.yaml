@@ -165,7 +165,7 @@ minio:
   useVirtualHost: false # Whether use virtual host mode for bucket. WARNING: For Aliyun OSS and Tencent COS, this parameter is useless and is set to true by default
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
   # The maximum number of objects requested per batch in minio ListObjects rpc, 
-  # 0 means using oss client by default, decrease these configration if ListObjects timeout
+  # 0 means using oss client by default, decrease these configuration if ListObjects timeout
   listObjectsMaxKeys: 0
 
 # Milvus supports four message queues (MQ): rocksmq (based on RocksDB), Pulsar, Kafka, and Woodpecker.
