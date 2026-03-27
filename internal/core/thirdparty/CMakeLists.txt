@@ -25,13 +25,18 @@ set(MAKE_BUILD_ARGS "-j6")
 include(FetchContent)
 set(FETCHCONTENT_BASE_DIR  ${MILVUS_BINARY_DIR}/3rdparty_download)
 set(FETCHCONTENT_QUIET     OFF)
+option(MILVUS_USE_KNOWHERE_RS_SHIM "Build Milvus against the knowhere-rs compatibility shim" OFF)
 
 # Find pthreads
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 add_subdirectory(milvus-common)
 
-add_subdirectory(knowhere)
+if (MILVUS_USE_KNOWHERE_RS_SHIM)
+    add_subdirectory(knowhere-rs-shim)
+else ()
+    add_subdirectory(knowhere)
+endif ()
 
 add_subdirectory(boost_ext)
 add_subdirectory(rocksdb)
@@ -48,4 +53,3 @@ if (LINUX)
 endif()
 
 add_subdirectory(milvus-storage)
-
