@@ -25,10 +25,11 @@ echo "Building plan parser shared library (${OS}, .${EXT}) ..."
 
 go env -w CGO_ENABLED="1"
 
-# Build Go c-shared library
+# Build Go c-shared library using package path (not file path) to ensure
+# proper module dependency resolution in all build environments.
 GO111MODULE=on go build -buildmode=c-shared \
     -o "${OUTPUT_LIB}/libmilvus-planparser.${EXT}" \
-    "${CWRAPPER_DIR}/wrapper.go"
+    ./internal/parser/planparserv2/cwrapper
 
 # Fix install name on macOS so dependent libraries can find it via @loader_path
 if [[ "${OS}" == "Darwin" ]]; then

@@ -13,7 +13,7 @@ The framework allows developers to:
 - Execute end-to-end test scenarios
 - Execute the method of any component from its client
 - Simulate component failures and recovery
-- Modify the milvus configration at runtime or startup
+- Modify the milvus configuration at runtime or startup
 
 The test framework is built on top of Go's testing package and the testify/suite framework, making it easy to write structured and maintainable integration tests.
 
@@ -119,7 +119,7 @@ Some utility methods are provided in `MiniClusterSuite` to interact with the clu
 
 #### method of `MiniClusterV3`
 
-- Use `s.Cluster.MustModifyMilvusConfig` to modify the milvus configuration at runtime, it will return a guard function to restore the modified configuration. It doesn't promise that the configuration will be applied immediately, milvus may not support the dynamic configuration change for some configurations or some configration may be applied slowly.
+- Use `s.Cluster.MustModifyMilvusConfig` to modify the milvus configuration at runtime, it will return a guard function to restore the modified configuration. It doesn't promise that the configuration will be applied immediately, milvus may not support the dynamic configuration change for some configurations or some configuration may be applied slowly.
 - Use `s.Cluster.Add*` to add components to the cluster, such as `AddMixCoord`, `AddProxy`, `AddDataNode`, `AddQueryNode`, `AddStreamingNode`. it will return the `MilvusProcess` object to manage the lifetime of new incoming component. It will block until the component is healthy by default, use `WithoutWaitForReady` option to avoid it.
 - Use `s.Cluster.Default*` to get the default component, such as `DefaultMixCoord`, `DefaultProxy`, `DefaultDataNode`, `DefaultQueryNode`, `DefaultStreamingNode`.
 - Use `s.*Client` to get the grpc client of the default component that can be got from `s.Cluster.Default*`, such as `s.MixCoordClient`, `s.ProxyClient`, `s.DataNodeClient`, `s.QueryNodeClient`, `s.StreamingNodeClient`.
