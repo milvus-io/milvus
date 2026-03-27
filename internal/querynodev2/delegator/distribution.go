@@ -122,6 +122,10 @@ type distribution struct {
 	// protects current & segments
 	mut sync.RWMutex
 
+	// async snapshot generation
+	snapshotNotifier chan struct{} // capacity 1, notify background goroutine to regenerate snapshot
+	snapshotDone     chan struct{} // closed when background goroutine exits
+
 	// distribution info
 	channelName string
 	queryView   *channelQueryView
@@ -146,16 +150,40 @@ type SegmentEntry struct {
 
 func NewDistribution(channelName string, queryView *channelQueryView) *distribution {
 	dist := &distribution{
-		channelName:     channelName,
-		growingSegments: make(map[UniqueID]SegmentEntry),
-		sealedSegments:  make(map[UniqueID]SegmentEntry),
-		snapshots:       typeutil.NewConcurrentMap[int64, *snapshot](),
-		current:         atomic.NewPointer[snapshot](nil),
-		queryView:       queryView,
+		channelName:      channelName,
+		growingSegments:  make(map[UniqueID]SegmentEntry),
+		sealedSegments:   make(map[UniqueID]SegmentEntry),
+		snapshots:        typeutil.NewConcurrentMap[int64, *snapshot](),
+		current:          atomic.NewPointer[snapshot](nil),
+		queryView:        queryView,
+		snapshotNotifier: make(chan struct{}, 1),
+		snapshotDone:     make(chan struct{}),
 	}
+	// generate initial snapshot synchronously
 	dist.genSnapshot()
 	dist.updateServiceable("NewDistribution")
+	// start background snapshot loop
+	go dist.snapshotLoop()
 	return dist
+}
+
+// notifySnapshotUpdate sends a non-blocking notification to regenerate snapshot.
+func (d *distribution) notifySnapshotUpdate() {
+	select {
+	case d.snapshotNotifier <- struct{}{}:
+	default:
+	}
+}
+
+// snapshotLoop runs in a background goroutine, regenerating snapshot on notification.
+func (d *distribution) snapshotLoop() {
+	defer close(d.snapshotDone)
+	for range d.snapshotNotifier {
+		d.mut.Lock()
+		d.genSnapshot()
+		d.updateServiceable("snapshotLoop")
+		d.mut.Unlock()
+	}
 }
 
 func (d *distribution) SetIDFOracle(idfOracle IDFOracle) {
@@ -335,9 +363,9 @@ func (d *distribution) updateServiceable(triggerAction string) {
 
 // AddDistributions add multiple segment entries.
 func (d *distribution) AddDistributions(entries ...SegmentEntry) {
-	d.mut.Lock()
 	var toRefund []pkoracle.Candidate
 
+	d.mut.Lock()
 	for _, entry := range entries {
 		oldEntry, ok := d.sealedSegments[entry.SegmentID]
 		if ok && oldEntry.Version >= entry.Version {
@@ -348,7 +376,6 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 				zap.Int64("newVersion", entry.Version),
 				zap.Int64("newNode", entry.NodeID),
 			)
-			// if new entry has candidate but we skip it, refund the new candidate
 			if entry.Candidate != nil {
 				toRefund = append(toRefund, entry.Candidate)
 			}
@@ -356,9 +383,7 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 		}
 
 		if ok {
-			// remain the target version for already loaded segment to void skipping this segment when executing search
 			entry.TargetVersion = oldEntry.TargetVersion
-			// if old entry has candidate and we're replacing it, refund old candidate
 			if oldEntry.Candidate != nil {
 				toRefund = append(toRefund, oldEntry.Candidate)
 			}
@@ -367,12 +392,9 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 		}
 		d.sealedSegments[entry.SegmentID] = entry
 	}
-
-	d.genSnapshot()
-	d.updateServiceable("AddDistributions")
 	d.mut.Unlock()
 
-	// refund old candidates after releasing lock (synchronous to avoid use-after-free)
+	d.notifySnapshotUpdate()
 	refundCandidates(toRefund)
 }
 
@@ -386,20 +408,17 @@ func refundCandidates(candidates []pkoracle.Candidate) {
 // AddGrowing adds growing segment distribution.
 func (d *distribution) AddGrowing(entries ...SegmentEntry) {
 	d.mut.Lock()
-	defer d.mut.Unlock()
-
 	for _, entry := range entries {
 		d.growingSegments[entry.SegmentID] = entry
 	}
+	d.mut.Unlock()
 
-	d.genSnapshot()
+	d.notifySnapshotUpdate()
 }
 
 // AddOffline set segmentIDs to offlines.
 func (d *distribution) MarkOfflineSegments(segmentIDs ...int64) {
 	d.mut.Lock()
-	defer d.mut.Unlock()
-
 	updated := false
 	for _, segmentID := range segmentIDs {
 		entry, ok := d.sealedSegments[segmentID]
@@ -412,13 +431,13 @@ func (d *distribution) MarkOfflineSegments(segmentIDs ...int64) {
 		entry.NodeID = -1
 		d.sealedSegments[segmentID] = entry
 	}
+	d.mut.Unlock()
 
 	if updated {
 		log.Info("mark sealed segment offline from distribution",
 			zap.String("channelName", d.channelName),
 			zap.Int64s("segmentIDs", segmentIDs))
-		d.genSnapshot()
-		d.updateServiceable("MarkOfflineSegments")
+		d.notifySnapshotUpdate()
 	}
 }
 
@@ -478,6 +497,8 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 		d.sealedSegments[id] = entry
 	}
 
+	// SyncTargetVersion needs synchronous genSnapshot because idfOracle.SetNext
+	// depends on the snapshot just generated.
 	d.genSnapshot()
 	if d.idfOracle != nil {
 		d.idfOracle.SetNext(d.current.Load())
@@ -506,17 +527,18 @@ func (d *distribution) GetQueryView() *channelQueryView {
 }
 
 // RemoveDistributions remove segments distributions and returns the clear signal channel.
+// The returned channel is closed when the snapshot that still contains the removed segments
+// is expired (i.e., all in-flight reads using that snapshot have finished).
 func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growingSegments []SegmentEntry) chan struct{} {
-	d.mut.Lock()
 	var toRefund []pkoracle.Candidate
 
+	d.mut.Lock()
 	for _, sealed := range sealedSegments {
 		entry, ok := d.sealedSegments[sealed.SegmentID]
 		if !ok {
 			continue
 		}
 		if entry.NodeID == sealed.NodeID || sealed.NodeID == wildcardNodeID {
-			// collect candidate before deletion
 			if entry.Candidate != nil {
 				toRefund = append(toRefund, entry.Candidate)
 			}
@@ -529,11 +551,19 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 		if !ok {
 			continue
 		}
-		// Note: growing segment's Candidate (LocalSegment) is NOT refunded here
-		// because the segment lifecycle is managed by segmentManager
-		// The BF inside LocalSegment will be cleaned when segment.Release() is called
 		delete(d.growingSegments, growing.SegmentID)
 	}
+
+	// Capture current snapshot's cleared channel. The next genSnapshot will
+	// create a new snapshot and expire this one, closing the channel.
+	var signal chan struct{}
+	if current := d.current.Load(); current != nil {
+		signal = current.cleared
+	} else {
+		signal = make(chan struct{})
+		close(signal)
+	}
+	d.mut.Unlock()
 
 	log.Info("remove segments from distribution",
 		zap.String("channelName", d.channelName),
@@ -542,13 +572,7 @@ func (d *distribution) RemoveDistributions(sealedSegments []SegmentEntry, growin
 		zap.Int("sealedCandidatesRefunded", len(toRefund)),
 	)
 
-	d.updateServiceable("RemoveDistributions")
-	// wait previous read even not distribution changed
-	// in case of segment balance caused segment lost track
-	signal := d.genSnapshot()
-	d.mut.Unlock()
-
-	// refund sealed segment candidates after releasing lock (synchronous to avoid use-after-free)
+	d.notifySnapshotUpdate()
 	refundCandidates(toRefund)
 
 	return signal
@@ -691,6 +715,12 @@ func BatchGetFromSegments(pks []storage.PrimaryKey, partitionID int64, sealed []
 	}
 
 	return result
+}
+
+// Close stops the background snapshot loop and waits for it to exit.
+func (d *distribution) Close() {
+	close(d.snapshotNotifier)
+	<-d.snapshotDone
 }
 
 // RefundAllCandidates refunds resources for all sealed segment candidates.

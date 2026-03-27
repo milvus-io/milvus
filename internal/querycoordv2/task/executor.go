@@ -858,18 +858,12 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 		return nil, nil, nil, err
 	}
 	loadFields := ex.meta.GetLoadFields(ctx, task.CollectionID())
-	partitions, err := utils.GetPartitions(ctx, ex.targetMgr, collectionID)
-	if err != nil {
-		log.Warn("failed to get partitions of collection", zap.Error(err))
-		return nil, nil, nil, err
-	}
 
 	loadMeta := packLoadMeta(
 		ex.meta.GetLoadType(ctx, task.CollectionID()),
 		collectionInfo,
 		task.ResourceGroup(),
 		loadFields,
-		partitions...,
 	)
 
 	// get channel first, in case of target updated after segment info fetched

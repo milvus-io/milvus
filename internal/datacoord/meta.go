@@ -577,8 +577,6 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 				storedBinlogSize[collIDStr][segment.GetState().String()] += segmentSize
 				binlogFileCount[collIDStr] += int64(getBinlogFileCount(segment.SegmentInfo))
-			} else {
-				log.Ctx(context.TODO()).Warn("not found database name", zap.Int64("collectionID", segment.GetCollectionID()))
 			}
 
 			if _, ok := collectionRowsNum[segment.GetCollectionID()]; !ok {

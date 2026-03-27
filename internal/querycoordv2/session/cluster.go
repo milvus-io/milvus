@@ -134,7 +134,7 @@ func (c *QueryCluster) LoadSegments(ctx context.Context, nodeID int64, req *quer
 	var status *commonpb.Status
 	var err error
 	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
-		req := proto.Clone(req).(*querypb.LoadSegmentsRequest)
+		req = proto.Clone(req).(*querypb.LoadSegmentsRequest)
 		req.Base.TargetID = nodeID
 		status, err = cli.LoadSegments(ctx, req)
 	})

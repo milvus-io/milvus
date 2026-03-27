@@ -569,13 +569,14 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		// automatically by SyncDistribution when the segment is not in target.
 		return err
 	}
+	log.Debug("load stream delete done")
 
 	return nil
 }
 
 func (sd *shardDelegator) addDistributionIfVersionOK(version uint64, entries ...SegmentEntry) error {
-	sd.schemaChangeMutex.Lock()
-	defer sd.schemaChangeMutex.Unlock()
+	sd.schemaChangeMutex.RLock()
+	defer sd.schemaChangeMutex.RUnlock()
 	if version < sd.schemaVersion {
 		return merr.WrapErrServiceInternal("schema version changed")
 	}
