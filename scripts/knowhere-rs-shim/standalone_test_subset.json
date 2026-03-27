@@ -1,0 +1,411 @@
+[
+  {
+    "suite": "go_client",
+    "runner": "go_test",
+    "working_dir": "tests/go_client",
+    "file": "tests/go_client/testcases/collection_test.go",
+    "path_kinds": ["index_build", "sealed_search"],
+    "index_families": ["HNSW"],
+    "cases": ["TestCreateCollectionFastOption"],
+    "selection_reason": "Fast collection creation with inline HNSW index and vector search directly exercises standalone index build and search wiring."
+  },
+  {
+    "suite": "go_client",
+    "runner": "go_test",
+    "working_dir": "tests/go_client",
+    "file": "tests/go_client/testcases/groupby_search_test.go",
+    "path_kinds": ["groupby_search", "growing_search", "hybrid_search", "search_iterator", "range_search"],
+    "index_families": ["FLAT", "IVF_FLAT", "HNSW", "IVF_SQ8", "BIN_FLAT", "BIN_IVF_FLAT"],
+    "cases": [
+      "TestSearchGroupByFloatDefault",
+      "TestSearchGroupByFloatDefaultCosine",
+      "TestSearchGroupByBinaryDefault",
+      "TestSearchGroupByBinaryGrowing",
+      "TestSearchGroupByFloatGrowing",
+      "TestSearchGroupByPagination",
+      "TestSearchGroupByIterator",
+      "TestSearchGroupByRangeSearch",
+      "TestSearchGroupByHybridSearch"
+    ],
+    "selection_reason": "These cases use vector search results as the primary assertion surface for group-by, including float, binary, and growing paths."
+  },
+  {
+    "suite": "go_client",
+    "runner": "go_test",
+    "working_dir": "tests/go_client",
+    "file": "tests/go_client/testcases/hybrid_search_test.go",
+    "path_kinds": ["hybrid_search", "range_search", "groupby_search", "sparse_search"],
+    "index_families": ["HNSW", "mixed_multivector", "SPARSE_INVERTED_INDEX", "SPARSE_WAND"],
+    "cases": [
+      "TestHybridSearchDefault",
+      "TestHybridSearchTemplateParam",
+      "TestHybridSearchMultiVectorsDefault",
+      "TestHybridSearchMultiVectorsPagination",
+      "TestHybridSearchMultiVectorsRangeSearch",
+      "TestHybridSearchSparseVector",
+      "TestHybridSearchGroupBy"
+    ],
+    "selection_reason": "Hybrid search cases cover multivector retrieval, reranking entry points, sparse search, and vector-side filtering under standalone."
+  },
+  {
+    "suite": "go_client",
+    "runner": "go_test",
+    "working_dir": "tests/go_client",
+    "file": "tests/go_client/testcases/index_test.go",
+    "path_kinds": ["index_build", "index_describe", "index_param_validation"],
+    "index_families": [
+      "FLAT",
+      "IVF_FLAT",
+      "IVF_SQ8",
+      "IVF_PQ",
+      "HNSW",
+      "SCANN",
+      "DISKANN",
+      "BIN_FLAT",
+      "BIN_IVF_FLAT",
+      "AUTO_INDEX",
+      "SPARSE_INVERTED_INDEX",
+      "SPARSE_WAND"
+    ],
+    "cases": [
+      "TestIndexVectorDefault",
+      "TestIndexVectorIP",
+      "TestIndexVectorCosine",
+      "TestIndexAutoFloatVector",
+      "TestIndexAutoBinaryVector",
+      "TestIndexAutoSparseVector",
+      "TestIndexBinaryFlat",
+      "TestIndexBinaryIvfFlat",
+      "TestCreateIndexWithoutName",
+      "TestCreateIndexDup",
+      "TestCreateIndexSparseVectorGeneric",
+      "TestCreateIndexSparseVector",
+      "TestCreateIndexInvalidParams"
+    ],
+    "selection_reason": "These are the dedicated standalone vector-index build and describe cases across float, binary, sparse, and auto-index families."
+  },
+  {
+    "suite": "go_client",
+    "runner": "go_test",
+    "working_dir": "tests/go_client",
+    "file": "tests/go_client/testcases/load_release_test.go",
+    "path_kinds": ["load_release", "hybrid_search"],
+    "index_families": ["HNSW", "mixed_multivector", "SPARSE_INVERTED_INDEX", "SPARSE_WAND"],
+    "cases": [
+      "TestLoadCollection",
+      "TestLoadCollectionAsync",
+      "TestLoadCollectionMultiPartitions",
+      "TestLoadMultiVectorsIndex",
+      "TestLoadCollectionAllFields",
+      "TestLoadCollectionSparse",
+      "TestLoadPartialHybridSearch",
+      "TestReleaseCollection",
+      "TestReleasePartitions"
+    ],
+    "selection_reason": "Selected load/release cases only when they depend on a built vector index or on partial-load semantics that affect vector retrieval."
+  },
+  {
+    "suite": "go_client",
+    "runner": "go_test",
+    "working_dir": "tests/go_client",
+    "file": "tests/go_client/testcases/search_iterator_test.go",
+    "path_kinds": ["search_iterator", "growing_search", "groupby_search"],
+    "index_families": ["HNSW"],
+    "cases": [
+      "TestSearchIteratorDefault",
+      "TestSearchIteratorGrowing",
+      "TestSearchIteratorHitEmpty",
+      "TestSearchIteratorBatchSize",
+      "TestSearchIteratorOutputAllFields",
+      "TestSearchIteratorGroupBy",
+      "TestSearchIteratorIgnoreGrowing"
+    ],
+    "selection_reason": "Iterator cases cover standalone pagination and growing-search behavior on top of the vector search runtime."
+  },
+  {
+    "suite": "go_client",
+    "runner": "go_test",
+    "working_dir": "tests/go_client",
+    "file": "tests/go_client/testcases/search_test.go",
+    "path_kinds": [
+      "sealed_search",
+      "growing_search",
+      "sparse_search",
+      "range_search",
+      "multivector_search",
+      "predicate_search"
+    ],
+    "index_families": [
+      "HNSW",
+      "BIN_IVF_FLAT",
+      "SCANN",
+      "SPARSE_INVERTED_INDEX",
+      "SPARSE_WAND",
+      "mixed_multivector"
+    ],
+    "cases": [
+      "TestSearchDefault",
+      "TestSearchDefaultGrowing",
+      "TestSearchEmptyCollection",
+      "TestSearchEmptySparseCollection",
+      "TestSearchPartitions",
+      "TestSearchEmptyOutputFields",
+      "TestSearchOutputAllFields",
+      "TestSearchOutputBinaryPk",
+      "TestSearchOutputSparse",
+      "TestSearchNotMatchMetricType",
+      "TestSearchInvalidSearchParams",
+      "TestSearchInvalidScannReorderK",
+      "TestSearchScannAllMetricsWithRawData",
+      "TestSearchExpr",
+      "TestSearchJsonFieldExpr",
+      "TestSearchDynamicFieldExpr",
+      "TestSearchArrayFieldExpr",
+      "TestSearchMultiVectors",
+      "TestSearchSparseVector",
+      "TestSearchWithEmptySparseVector",
+      "TestSearchFromEmptySparseVector",
+      "TestSearchSparseVectorPagination",
+      "TestSearchSparseVectorNotSupported",
+      "TestRangeSearchSparseVector"
+    ],
+    "selection_reason": "This file contains the core standalone vector-search product surface, including growing fallback, predicates, sparse, SCANN, and multivector cases."
+  },
+  {
+    "suite": "python_client",
+    "runner": "pytest",
+    "working_dir": "tests/python_client",
+    "file": "tests/python_client/testcases/indexes/test_hnsw.py",
+    "path_kinds": ["index_build", "sealed_search", "search_param_validation"],
+    "index_families": ["HNSW"],
+    "cases": [
+      "TestHnswBuildParams::test_hnsw_build_params",
+      "TestHnswBuildParams::test_hnsw_on_all_vector_types",
+      "TestHnswBuildParams::test_hnsw_on_all_metrics",
+      "TestHnswSearchParams::test_hnsw_search_params"
+    ],
+    "selection_reason": "Dedicated HNSW standalone client coverage for build params, metrics, vector types, and search params."
+  },
+  {
+    "suite": "python_client",
+    "runner": "pytest",
+    "working_dir": "tests/python_client",
+    "file": "tests/python_client/testcases/indexes/test_hnsw_sq.py",
+    "path_kinds": ["index_build", "sealed_search", "search_param_validation"],
+    "index_families": ["HNSW_SQ"],
+    "cases": [
+      "TestHnswSQBuildParams::test_hnsw_sq_build_params",
+      "TestHnswSQBuildParams::test_hnsw_sq_on_all_vector_types",
+      "TestHnswSQBuildParams::test_hnsw_sq_on_all_metrics",
+      "TestHnswSQSearchParams::test_hnsw_sq_search_params"
+    ],
+    "selection_reason": "Dedicated quantized HNSW standalone coverage through the official Python client."
+  },
+  {
+    "suite": "python_client",
+    "runner": "pytest",
+    "working_dir": "tests/python_client",
+    "file": "tests/python_client/testcases/indexes/test_diskann.py",
+    "path_kinds": ["index_build", "sealed_search", "search_param_validation"],
+    "index_families": ["DISKANN"],
+    "cases": [
+      "TestDiskannBuildParams::test_diskann_build_params",
+      "TestDiskannBuildParams::test_diskann_on_all_vector_types",
+      "TestDiskannBuildParams::test_diskann_on_all_metrics",
+      "TestDiskannSearchParams::test_diskann_search_params"
+    ],
+    "selection_reason": "Official standalone DISKANN index coverage is part of the replaceability question because the product test requests it directly."
+  },
+  {
+    "suite": "python_client",
+    "runner": "pytest",
+    "working_dir": "tests/python_client",
+    "file": "tests/python_client/testcases/indexes/test_ivf_rabitq.py",
+    "path_kinds": ["index_build", "sealed_search", "search_param_validation"],
+    "index_families": ["IVF_RABITQ"],
+    "cases": [
+      "TestIvfRabitqBuildParams::test_ivf_rabitq_build_params",
+      "TestIvfRabitqBuildParams::test_ivf_rabitq_on_all_vector_types",
+      "TestIvfRabitqBuildParams::test_ivf_rabitq_on_all_metrics",
+      "TestIvfRabitqSearchParams::test_ivf_rabitq_search_params"
+    ],
+    "selection_reason": "Official standalone IVF_RABITQ cases are direct index-family requests and belong in the original-test subset."
+  },
+  {
+    "suite": "python_client",
+    "runner": "pytest",
+    "working_dir": "tests/python_client",
+    "file": "tests/python_client/testcases/test_index.py",
+    "path_kinds": ["index_build", "sealed_search", "index_param_validation", "load_release"],
+    "index_families": [
+      "mixed_float_indexes",
+      "BIN_FLAT",
+      "BIN_IVF_FLAT",
+      "HNSW",
+      "DISKANN",
+      "AUTO_INDEX",
+      "SCANN"
+    ],
+    "cases": [
+      "TestIndexOperation::test_index_params",
+      "TestIndexOperation::test_index_params_flush",
+      "TestNewIndexBase::test_create_index_default",
+      "TestNewIndexBase::test_create_index_search_with_query_vectors",
+      "TestNewIndexBase::test_create_index_ip",
+      "TestNewIndexBase::test_create_index_search_with_query_vectors_ip",
+      "TestNewIndexBase::test_index_collection_with_after_load",
+      "TestNewIndexBinary::test_create_binary_index_HNSW",
+      "TestNewIndexBinary::test_create_binary_index_all_metrics",
+      "TestIndexDiskann::test_create_index_with_diskann_normal",
+      "TestAutoIndex::test_create_autoindex_with_no_params",
+      "TestAutoIndex::test_create_autoindex_with_params",
+      "TestScaNNIndex::test_create_scann_index"
+    ],
+    "selection_reason": "Selected generic Python client cases only when the assertion is about vector-index creation, search, or load behavior rather than collection administration."
+  },
+  {
+    "suite": "python_client",
+    "runner": "pytest",
+    "working_dir": "tests/python_client",
+    "file": "tests/python_client/testcases/test_e2e.py",
+    "path_kinds": ["index_build", "load_release", "sealed_search"],
+    "index_families": ["default_vector_index"],
+    "cases": ["TestE2e::test_milvus_default"],
+    "selection_reason": "The default end-to-end Python client scenario builds and searches a vector index in standalone mode."
+  },
+  {
+    "suite": "python_client",
+    "runner": "pytest",
+    "working_dir": "tests/python_client",
+    "file": "tests/python_client/testcases/test_high_level_api.py",
+    "path_kinds": ["sealed_search", "predicate_search", "metric_validation"],
+    "index_families": ["default_vector_index"],
+    "cases": [
+      "TestHighLevelApi::test_high_level_search_not_consistent_metric_type",
+      "TestHighLevelApi::test_high_level_search_query_default",
+      "TestHighLevelApi::test_high_level_array_insert_search",
+      "TestHighLevelApi::test_high_level_search_query_string",
+      "TestHighLevelApi::test_high_level_search_different_metric_types"
+    ],
+    "selection_reason": "These high-level API cases remain in scope because they still validate the underlying vector-index/search engine rather than pure client ergonomics."
+  },
+  {
+    "suite": "restful_client",
+    "runner": "pytest",
+    "working_dir": "tests/restful_client",
+    "file": "tests/restful_client/testcases/test_restful_sdk_mix_use_scenario.py",
+    "path_kinds": ["index_build", "load_release", "sealed_search"],
+    "index_families": ["sdk_selected_index"],
+    "cases": [
+      "TestRestfulSdkCompatibility::test_collection_created_index_by_sdk_describe_by_restful",
+      "TestRestfulSdkCompatibility::test_collection_load_by_sdk_describe_by_restful",
+      "TestRestfulSdkCompatibility::test_collection_create_by_sdk_search_vector_by_restful",
+      "TestRestfulSdkCompatibility::test_collection_create_by_restful_search_vector_by_sdk"
+    ],
+    "selection_reason": "SDK/REST mixing cases are included only when they validate index build, load state, or vector search behavior across client surfaces."
+  },
+  {
+    "suite": "restful_client",
+    "runner": "pytest",
+    "working_dir": "tests/restful_client",
+    "file": "tests/restful_client/testcases/test_vector_operations.py",
+    "path_kinds": ["sealed_search", "predicate_search"],
+    "index_families": ["requested_metric"],
+    "cases": [
+      "TestSearchVector::test_search_vector_with_simple_payload",
+      "TestSearchVector::test_search_vector_with_complex_payload",
+      "TestSearchVector::test_search_vector_with_complex_int_filter",
+      "TestSearchVector::test_search_vector_with_complex_varchar_filter",
+      "TestSearchVector::test_search_vector_with_complex_int64_varchar_and_filter"
+    ],
+    "selection_reason": "REST vector search cases are included only when they issue actual ANN search requests whose results depend on standalone index/search behavior."
+  },
+  {
+    "suite": "restful_client_v2",
+    "runner": "pytest",
+    "working_dir": "tests/restful_client_v2",
+    "file": "tests/restful_client_v2/testcases/test_collection_operations.py",
+    "path_kinds": ["index_build", "load_release"],
+    "index_families": ["HNSW", "AUTOINDEX", "binary_vector_indexes", "mixed_multivector"],
+    "cases": [
+      "TestCreateCollection::test_create_collections_one_float_vector_with_index",
+      "TestCreateCollection::test_create_collections_multi_float_vector_with_one_index",
+      "TestCreateCollection::test_create_collections_multi_float_vector_with_all_index",
+      "TestCreateCollection::test_create_collections_binary_vector_datatype",
+      "TestLoadReleaseCollection::test_load_and_release_collection",
+      "TestCollectionProperties::test_refresh_load_collection"
+    ],
+    "selection_reason": "Collection-operation cases are retained only where standalone collection creation or loading embeds vector index semantics."
+  },
+  {
+    "suite": "restful_client_v2",
+    "runner": "pytest",
+    "working_dir": "tests/restful_client_v2",
+    "file": "tests/restful_client_v2/testcases/test_index_operation.py",
+    "path_kinds": ["index_build", "metric_validation"],
+    "index_families": ["mixed_float_indexes", "binary_vector_indexes"],
+    "cases": [
+      "TestCreateIndex::test_index_default",
+      "TestCreateIndex::test_index_for_binary_vector_field",
+      "TestCreateIndexNegative::test_index_for_binary_vector_field_with_mismatch_metric_type"
+    ],
+    "selection_reason": "This is the dedicated RESTful v2 vector-index file; selected cases cover default index build and binary vector metric handling."
+  },
+  {
+    "suite": "restful_client_v2",
+    "runner": "pytest",
+    "working_dir": "tests/restful_client_v2",
+    "file": "tests/restful_client_v2/testcases/test_restful_sdk_mix_use_scenario.py",
+    "path_kinds": ["index_build", "load_release", "sealed_search"],
+    "index_families": ["sdk_selected_index"],
+    "cases": [
+      "TestRestfulSdkCompatibility::test_collection_created_index_by_sdk_describe_by_restful",
+      "TestRestfulSdkCompatibility::test_collection_load_by_sdk_describe_by_restful",
+      "TestRestfulSdkCompatibility::test_collection_create_by_sdk_search_vector_by_restful",
+      "TestRestfulSdkCompatibility::test_collection_create_by_restful_search_vector_by_sdk"
+    ],
+    "selection_reason": "The v2 mix-use cases mirror the same cross-surface replaceability checks for index build, load, and vector search."
+  },
+  {
+    "suite": "restful_client_v2",
+    "runner": "pytest",
+    "working_dir": "tests/restful_client_v2",
+    "file": "tests/restful_client_v2/testcases/test_vector_operations.py",
+    "path_kinds": [
+      "sealed_search",
+      "sparse_search",
+      "binary_search",
+      "range_search",
+      "growing_search",
+      "hybrid_search",
+      "advanced_search",
+      "metric_validation"
+    ],
+    "index_families": [
+      "HNSW",
+      "BIN_FLAT",
+      "BIN_IVF_FLAT",
+      "SPARSE_INVERTED_INDEX",
+      "SPARSE_WAND",
+      "mixed_multivector"
+    ],
+    "cases": [
+      "TestSearchVector::test_search_vector_with_all_vector_datatype",
+      "TestSearchVector::test_search_vector_with_float_vector_datatype",
+      "TestSearchVector::test_search_vector_with_sparse_float_vector_datatype",
+      "TestSearchVector::test_search_vector_with_binary_vector_datatype",
+      "TestSearchVector::test_search_vector_with_simple_payload",
+      "TestSearchVector::test_search_vector_with_complex_payload",
+      "TestSearchVector::test_search_vector_with_consistency_level",
+      "TestSearchVector::test_search_vector_with_range_search",
+      "TestSearchVector::test_search_vector_with_ignore_growing",
+      "TestSearchVectorNegative::test_search_vector_with_invalid_metric_type",
+      "TestAdvancedSearchVector::test_advanced_search_vector_with_multi_float32_vector_datatype",
+      "TestHybridSearchVector::test_hybrid_search_vector_with_multi_float32_vector_datatype",
+      "TestHybridSearchVector::test_hybrid_search_vector_with_offset",
+      "TestHybridSearchVector::test_hybrid_search_vector_with_invalid_offset",
+      "TestHybridSearchVector::test_hybrid_search_vector_with_large_offset"
+    ],
+    "selection_reason": "The v2 vector-operation suite is the densest RESTful standalone ANN coverage, including binary, sparse, advanced, hybrid, and ignore-growing behavior."
+  }
+]
