@@ -310,7 +310,7 @@ We recommend using version 1.2 and above.`,
 
 	p.EtcdEnableAuth = ParamItem{
 		Key:          "etcd.auth.enabled",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Version:      "2.3.7",
 		Doc:          "Whether to enable authentication",
 		Export:       true,
@@ -322,20 +322,30 @@ We recommend using version 1.2 and above.`,
 	}
 
 	p.EtcdAuthUserName = ParamItem{
-		Key:     "etcd.auth.userName",
-		Version: "2.3.7",
-		Doc:     "username for etcd authentication",
-		Export:  true,
+		Key:          "etcd.auth.userName",
+		Version:      "2.3.7",
+		DefaultValue: "etcdadmin",
+		Doc:          "username for etcd authentication",
+		Export:       true,
 	}
 	p.EtcdAuthUserName.Init(base.mgr)
 
 	p.EtcdAuthPassword = ParamItem{
-		Key:     "etcd.auth.password",
-		Version: "2.3.7",
-		Doc:     "password for etcd authentication",
-		Export:  true,
+		Key:          "etcd.auth.password",
+		Version:      "2.3.7",
+		DefaultValue: "etcdadmin",
+		Doc:          "password for etcd authentication",
+		Export:       true,
 	}
 	p.EtcdAuthPassword.Init(base.mgr)
+
+	if p.EtcdEnableAuth.GetAsBool() && !p.UseEmbedEtcd.GetAsBool() {
+		if p.EtcdAuthUserName.GetValue() == "" || p.EtcdAuthPassword.GetValue() == "" {
+			panic("etcd auth is enabled but userName or password is empty. " +
+				"Set etcd.auth.userName and etcd.auth.password in milvus.yaml, " +
+				"or via environment variables etcd_auth_userName and etcd_auth_password")
+		}
+	}
 }
 
 func (p *EtcdConfig) GetAll() map[string]string {
