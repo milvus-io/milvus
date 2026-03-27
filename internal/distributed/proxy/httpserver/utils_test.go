@@ -510,9 +510,10 @@ func TestPrintCollectionDetails(t *testing.T) {
 	assert.Equal(t, DefaultMetricType, getMetricType(nil))
 	fields := []*schemapb.FieldSchema{}
 	for _, field := range newCollectionSchema(coll).Fields {
-		if field.DataType == schemapb.DataType_VarChar {
+		switch field.DataType {
+		case schemapb.DataType_VarChar:
 			fields = append(fields, field)
-		} else if field.DataType == schemapb.DataType_Array {
+		case schemapb.DataType_Array:
 			fields = append(fields, field)
 		}
 	}

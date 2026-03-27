@@ -1476,7 +1476,7 @@ func (sm *snapshotManager) calculateProgress(job CopySegmentJob) int32 {
 // This eliminates code duplication between GetRestoreState and ListRestoreJobs.
 func (sm *snapshotManager) calculateTimeCost(job CopySegmentJob) uint64 {
 	if job.GetStartTs() > 0 && job.GetCompleteTs() > 0 {
-		return uint64((job.GetCompleteTs() - job.GetStartTs()) / 1e6) // Convert nanoseconds to milliseconds
+		return (job.GetCompleteTs() - job.GetStartTs()) / 1e6 // Convert nanoseconds to milliseconds
 	}
 	return 0
 }

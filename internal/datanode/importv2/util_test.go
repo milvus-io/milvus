@@ -714,7 +714,7 @@ func TestUtil_FillDynamicData(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, count, insertData.Data[dynamicFieldID].RowNum())
 
-	// the dynamic field is allready filled, do nothing
+	// the dynamic field is already filled, do nothing
 	err = FillDynamicData(schema, insertData, count)
 	assert.NoError(t, err)
 	assert.Equal(t, count, insertData.Data[dynamicFieldID].RowNum())

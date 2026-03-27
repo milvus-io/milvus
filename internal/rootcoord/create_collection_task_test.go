@@ -1569,7 +1569,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		fileResourceObserver := NewMockFileResourceObserver(t)
 		fileResourceObserver.EXPECT().CheckAllQnReady().Return(nil)
 
-		task.Core.fileResourceObserver = fileResourceObserver
+		task.fileResourceObserver = fileResourceObserver
 		err = task.prepareSchema(context.TODO())
 		assert.NoError(t, err)
 

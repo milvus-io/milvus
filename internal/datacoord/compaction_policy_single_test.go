@@ -237,7 +237,7 @@ func (s *SingleCompactionPolicySuite) TestSegmentSortCompaction() {
 	segments[101] = buildTestSegment(101, collID, datapb.SegmentLevel_L1, 0, 10000, 201, false, true)
 	segments[102] = buildTestSegment(102, collID, datapb.SegmentLevel_L1, 0, 10000, 201, true, true)
 	segments[103] = buildTestSegment(103, collID, datapb.SegmentLevel_L1, 0, 10000, 201, true, true)
-	segments[103].SegmentInfo.State = commonpb.SegmentState_Dropped
+	segments[103].State = commonpb.SegmentState_Dropped
 	segmentsInfo := &SegmentsInfo{
 		segments: segments,
 		secondaryIndexes: segmentInfoIndexes{

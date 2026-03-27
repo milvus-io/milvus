@@ -75,11 +75,12 @@ var _ ChunkManager = (*RemoteChunkManager)(nil)
 func NewRemoteChunkManager(ctx context.Context, c *objectstorage.Config) (*RemoteChunkManager, error) {
 	var client ObjectStorage
 	var err error
-	if c.CloudProvider == objectstorage.CloudProviderAzure {
+	switch c.CloudProvider {
+	case objectstorage.CloudProviderAzure:
 		client, err = newAzureObjectStorageWithConfig(ctx, c)
-	} else if c.CloudProvider == objectstorage.CloudProviderGCPNative {
+	case objectstorage.CloudProviderGCPNative:
 		client, err = newGcpNativeObjectStorageWithConfig(ctx, c)
-	} else {
+	default:
 		client, err = newMinioObjectStorageWithConfig(ctx, c)
 	}
 	if err != nil {

@@ -576,7 +576,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	t.CreateCollectionRequest.Schema, err = proto.Marshal(t.schema)
+	t.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err
 	}
@@ -957,11 +957,11 @@ func (t *dropCollectionTask) PreExecute(ctx context.Context) error {
 	// No need to check collection name
 	// Validation shall be preformed in `CreateCollection`
 	// also permit drop collection one with bad collection name
-	_, err := globalMetaCache.GetCollectionID(ctx, t.DropCollectionRequest.GetDbName(), t.GetCollectionName())
+	_, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.GetCollectionName())
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrDatabaseNotFound) {
 			// make dropping collection idempotent.
-			log.Ctx(ctx).Warn("drop non-existent collection", zap.String("collection", t.DropCollectionRequest.GetCollectionName()), zap.String("database", t.DropCollectionRequest.GetDbName()))
+			log.Ctx(ctx).Warn("drop non-existent collection", zap.String("collection", t.GetCollectionName()), zap.String("database", t.GetDbName()))
 			return nil
 		}
 		return err
@@ -1106,7 +1106,7 @@ func (t *hasCollectionTask) Execute(ctx context.Context) error {
 	t.result = &milvuspb.BoolResponse{
 		Status: merr.Success(),
 	}
-	_, err := globalMetaCache.GetCollectionID(ctx, t.HasCollectionRequest.GetDbName(), t.HasCollectionRequest.GetCollectionName())
+	_, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.GetCollectionName())
 	// error other than
 	if err != nil && !errors.Is(err, merr.ErrCollectionNotFound) {
 		t.result.Status = merr.Status(err)
@@ -2572,7 +2572,7 @@ func (t *loadCollectionTask) PreExecute(ctx context.Context) error {
 
 func (t *loadCollectionTask) GetLoadPriority() commonpb.LoadPriority {
 	loadPriority := commonpb.LoadPriority_HIGH
-	loadPriorityStr, ok := t.LoadCollectionRequest.LoadParams[LoadPriorityName]
+	loadPriorityStr, ok := t.LoadParams[LoadPriorityName]
 	if ok && loadPriorityStr == "low" {
 		loadPriority = commonpb.LoadPriority_LOW
 	}
@@ -2836,7 +2836,7 @@ func (t *loadPartitionsTask) PreExecute(ctx context.Context) error {
 
 func (t *loadPartitionsTask) GetLoadPriority() commonpb.LoadPriority {
 	loadPriority := commonpb.LoadPriority_HIGH
-	loadPriorityStr, ok := t.LoadPartitionsRequest.LoadParams[LoadPriorityName]
+	loadPriorityStr, ok := t.LoadParams[LoadPriorityName]
 	if ok && loadPriorityStr == "low" {
 		loadPriority = commonpb.LoadPriority_LOW
 	}
@@ -3163,8 +3163,8 @@ func (t *UpdateResourceGroupsTask) PreExecute(ctx context.Context) error {
 func (t *UpdateResourceGroupsTask) Execute(ctx context.Context) error {
 	var err error
 	t.result, err = t.mixCoord.UpdateResourceGroups(ctx, &querypb.UpdateResourceGroupsRequest{
-		Base:           t.UpdateResourceGroupsRequest.GetBase(),
-		ResourceGroups: t.UpdateResourceGroupsRequest.GetResourceGroups(),
+		Base:           t.GetBase(),
+		ResourceGroups: t.GetResourceGroups(),
 	})
 	return merr.CheckRPCCall(t.result, err)
 }
@@ -3738,7 +3738,7 @@ func (t *HighlightTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *HighlightTask) getHighlightOnShardleader(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	t.GetHighlightRequest.Channel = channel
+	t.Channel = channel
 	resp, err := qn.GetHighlight(ctx, t.GetHighlightRequest)
 	if err != nil {
 		return err

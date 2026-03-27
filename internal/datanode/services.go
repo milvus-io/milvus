@@ -981,9 +981,9 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 		if err != nil {
 			return merr.Status(err), nil
 		}
-		cancelled := node.externalCollectionManager.CancelTask(clusterID, taskID)
+		canceled := node.externalCollectionManager.CancelTask(clusterID, taskID)
 		info := node.externalCollectionManager.Delete(clusterID, taskID)
-		if !cancelled && info != nil && info.Cancel != nil {
+		if !canceled && info != nil && info.Cancel != nil {
 			info.Cancel()
 		}
 		log.Ctx(ctx).Info("DropTask for external collection completed",

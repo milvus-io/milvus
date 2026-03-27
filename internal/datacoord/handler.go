@@ -273,8 +273,7 @@ func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 		}, ids...)
 	}
 
-	var compactionFromExistWithCache func(segID UniqueID) bool
-	compactionFromExistWithCache = func(segID UniqueID) bool {
+	var compactionFromExistWithCache func(segID UniqueID) bool = func(segID UniqueID) bool {
 		var compactionFromExist func(segID UniqueID) bool
 		compactionFromExistMap := make(map[UniqueID]bool)
 
@@ -816,7 +815,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 		Collection: &datapb.CollectionDescription{
 			Schema:              schema,
 			NumShards:           int64(resp.GetShardsNum()),
-			NumPartitions:       int64(resp.GetNumPartitions()),
+			NumPartitions:       resp.GetNumPartitions(),
 			Partitions:          partitionMapping,
 			VirtualChannelNames: resp.GetVirtualChannelNames(),
 		},

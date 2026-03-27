@@ -201,7 +201,7 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 
 	// growing segments's stats should always be loaded, for generating merged pk bf.
 	loadSegmentStats("growing", unflushed)
-	if !(streamingutil.IsStreamingServiceEnabled() || paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()) {
+	if !streamingutil.IsStreamingServiceEnabled() && !paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() {
 		loadSegmentStats("sealed", flushed)
 	}
 

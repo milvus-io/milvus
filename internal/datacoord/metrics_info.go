@@ -252,7 +252,7 @@ func (s *Server) getDataCoordMetrics(ctx context.Context) metricsinfo.DataCoordI
 		CollectionMetrics: s.getCollectionMetrics(ctx),
 	}
 
-	metricsinfo.FillDeployMetricsWithEnv(&ret.BaseComponentInfos.SystemInfo)
+	metricsinfo.FillDeployMetricsWithEnv(&ret.SystemInfo)
 
 	return ret
 }
@@ -275,17 +275,17 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 	if err != nil {
 		log.Warn("invalid metrics of DataNode was found",
 			zap.Error(err))
-		infos.BaseComponentInfos.ErrorReason = err.Error()
+		infos.ErrorReason = err.Error()
 		// err handled, returns nil
 		return infos, nil
 	}
-	infos.BaseComponentInfos.Name = metrics.GetComponentName()
+	infos.Name = metrics.GetComponentName()
 
 	if metrics.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("invalid metrics of DataNode was found",
 			zap.Any("error_code", metrics.GetStatus().GetErrorCode()),
 			zap.Any("error_reason", metrics.GetStatus().GetReason()))
-		infos.BaseComponentInfos.ErrorReason = metrics.GetStatus().GetReason()
+		infos.ErrorReason = metrics.GetStatus().GetReason()
 		return infos, nil
 	}
 
@@ -293,10 +293,10 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 	if err != nil {
 		log.Warn("invalid metrics of DataNode found",
 			zap.Error(err))
-		infos.BaseComponentInfos.ErrorReason = err.Error()
+		infos.ErrorReason = err.Error()
 		return infos, nil
 	}
-	infos.BaseComponentInfos.HasError = false
+	infos.HasError = false
 	return infos, nil
 }
 
@@ -315,17 +315,17 @@ func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetri
 	if err != nil {
 		log.Warn("invalid metrics of IndexNode was found",
 			zap.Error(err))
-		infos.BaseComponentInfos.ErrorReason = err.Error()
+		infos.ErrorReason = err.Error()
 		// err handled, returns nil
 		return infos, nil
 	}
-	infos.BaseComponentInfos.Name = metrics.GetComponentName()
+	infos.Name = metrics.GetComponentName()
 
 	if metrics.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("invalid metrics of DataNode was found",
 			zap.Any("error_code", metrics.GetStatus().GetErrorCode()),
 			zap.Any("error_reason", metrics.GetStatus().GetReason()))
-		infos.BaseComponentInfos.ErrorReason = metrics.GetStatus().GetReason()
+		infos.ErrorReason = metrics.GetStatus().GetReason()
 		return infos, nil
 	}
 
@@ -333,10 +333,10 @@ func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetri
 	if err != nil {
 		log.Warn("invalid metrics of DataNode found",
 			zap.Error(err))
-		infos.BaseComponentInfos.ErrorReason = err.Error()
+		infos.ErrorReason = err.Error()
 		return infos, nil
 	}
-	infos.BaseComponentInfos.HasError = false
+	infos.HasError = false
 	return infos, nil
 }
 

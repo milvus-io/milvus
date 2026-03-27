@@ -98,12 +98,12 @@ func TestNewCopySegmentTask(t *testing.T) {
 
 		// Test Cancel
 		copyTask.Cancel()
-		// Verify context is cancelled
+		// Verify context is canceled
 		select {
 		case <-copyTask.ctx.Done():
 			// Expected behavior
 		default:
-			t.Fatal("context should be cancelled")
+			t.Fatal("context should be canceled")
 		}
 	})
 

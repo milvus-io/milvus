@@ -248,7 +248,7 @@ func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_MultipleFragmen
 
 	// Verify segments are reasonably balanced
 	if len(result) > 1 {
-		var minRows, maxRows int64 = result[0].GetNumOfRows(), result[0].GetNumOfRows()
+		minRows, maxRows := result[0].GetNumOfRows(), result[0].GetNumOfRows()
 		for _, seg := range result {
 			if seg.GetNumOfRows() < minRows {
 				minRows = seg.GetNumOfRows()

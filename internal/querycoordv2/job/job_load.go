@@ -172,7 +172,7 @@ func (job *LoadCollectionJob) Execute() error {
 		Schema:    collInfo.GetSchema(),
 	}
 	incomingPartitions := typeutil.NewSet(req.GetPartitionIds()...)
-	currentPartitions := job.meta.CollectionManager.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
+	currentPartitions := job.meta.GetPartitionsByCollection(job.ctx, req.GetCollectionId())
 	toReleasePartitions := make([]int64, 0)
 	for _, partition := range currentPartitions {
 		if !incomingPartitions.Contain(partition.GetPartitionID()) {
@@ -181,12 +181,12 @@ func (job *LoadCollectionJob) Execute() error {
 	}
 	if len(toReleasePartitions) > 0 {
 		job.targetObserver.ReleasePartition(req.GetCollectionId(), toReleasePartitions...)
-		if err := job.meta.CollectionManager.RemovePartition(job.ctx, req.GetCollectionId(), toReleasePartitions...); err != nil {
+		if err := job.meta.RemovePartition(job.ctx, req.GetCollectionId(), toReleasePartitions...); err != nil {
 			return errors.Wrap(err, "failed to remove partitions")
 		}
 	}
 
-	if err = job.meta.CollectionManager.PutCollection(job.ctx, collection, partitions...); err != nil {
+	if err = job.meta.PutCollection(job.ctx, collection, partitions...); err != nil {
 		msg := "failed to store collection and partitions"
 		log.Warn(msg, zap.Error(err))
 		return errors.Wrap(err, msg)
@@ -246,7 +246,7 @@ func getLocalReplicaConfig(ctx context.Context, m *meta.Meta, collectionID int64
 	}
 
 	// Get current replicas from meta for idempotent generation
-	currentReplicas := m.ReplicaManager.GetByCollection(ctx, collectionID)
+	currentReplicas := m.GetByCollection(ctx, collectionID)
 	currentReplicaMap := make(map[int64]*meta.Replica)
 	for _, r := range currentReplicas {
 		currentReplicaMap[r.GetID()] = r

@@ -312,7 +312,7 @@ func (s *mixCoordImpl) ListBatchQueryNodes(w http.ResponseWriter, req *http.Requ
 	if err != nil {
 		logger.Info("ListBatchQueryNodes failed to list query nodes", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to list query node, %s"}`, err.Error())))
+		fmt.Fprintf(w, `{"msg": "failed to list query node, %s"}`, err.Error())
 		return
 	}
 
@@ -323,7 +323,7 @@ func (s *mixCoordImpl) ListBatchQueryNodes(w http.ResponseWriter, req *http.Requ
 	if err != nil {
 		logger.Info("ListBatchQueryNodes failed to encode response", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to list query node, %s"}`, err.Error())))
+		fmt.Fprintf(w, `{"msg": "failed to list query node, %s"}`, err.Error())
 		return
 	}
 	logger.Info("ListBatchQueryNodes success", zap.Any("response", string(bytes)))
@@ -551,7 +551,7 @@ func (s *mixCoordImpl) getBatchBalanceStatus(w http.ResponseWriter, req *http.Re
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf(`{"msg": "OK", "status": "%v"}`, balanceStatus)))
+	fmt.Fprintf(w, `{"msg": "OK", "status": "%v"}`, balanceStatus)
 }
 
 func (s *mixCoordImpl) controlQueryCoordChannelBalanceStatus(ctx context.Context, status string) error {
@@ -1178,7 +1178,7 @@ func (s *mixCoordImpl) HandleAlterWAL(w http.ResponseWriter, req *http.Request) 
 				zap.String("targetWAL", requestBody.TargetWALName))
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(fmt.Sprintf(`{"msg": "target WAL type '%s' is already configured, no change needed"}`, currentMQType)))
+			fmt.Fprintf(w, `{"msg": "target WAL type '%s' is already configured, no change needed"}`, currentMQType)
 			return
 		}
 	}

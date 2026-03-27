@@ -84,10 +84,10 @@ func adaptImplsToRWWAL(
 		isFenced:               atomic.NewBool(false),
 		appendRateCounter:      utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
-	wal.writeMetrics.SetLogger(wal.roWALAdaptorImpl.Logger())
+	wal.writeMetrics.SetLogger(wal.Logger())
 	interceptorParam.WAL.Set(wal)
-	wal.WALRateLimitComponent.RegisterMemoryObserver()
-	wal.WALRateLimitComponent.RegisterAppendRateObserver(wal.appendRateCounter)
+	wal.RegisterMemoryObserver()
+	wal.RegisterAppendRateObserver(wal.appendRateCounter)
 	return wal
 }
 
@@ -162,7 +162,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		return nil, status.NewChannelFenced(w.Channel().String())
 	}
 
-	if msg.MessageType().IsDMLMessageType() && w.WALRateLimitComponent.IsRejected() {
+	if msg.MessageType().IsDMLMessageType() && w.IsRejected() {
 		// if the wal is rate limit rejected, we reject all the DML operation to protect the wal from being overloaded.
 		return nil, status.NewRateLimitRejected("")
 	}

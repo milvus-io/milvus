@@ -1457,7 +1457,7 @@ func (data *SparseFloatVectorFieldData) AppendDataRows(rows interface{}) error {
 	if !ok {
 		return merr.WrapErrParameterInvalid("SparseFloatVectorFieldData", rows, "Wrong rows type")
 	}
-	data.Contents = append(data.SparseFloatArray.Contents, v.Contents...)
+	data.Contents = append(data.Contents, v.Contents...)
 	if data.Dim < v.Dim {
 		data.Dim = v.Dim
 	}

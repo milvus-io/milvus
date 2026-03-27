@@ -200,8 +200,8 @@ func TestExternalCollectionManager_CancelTask(t *testing.T) {
 		return info != nil
 	}, time.Second, 10*time.Millisecond)
 
-	cancelled := manager.CancelTask(clusterID, taskID)
-	assert.True(t, cancelled)
+	canceled := manager.CancelTask(clusterID, taskID)
+	assert.True(t, canceled)
 
 	require.Eventually(t, func() bool {
 		select {

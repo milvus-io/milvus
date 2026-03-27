@@ -60,7 +60,7 @@ type profileType struct {
 // dumpPprof collects various performance profiles
 func dumpPprof() {
 	// Get pprof directory from configuration
-	pprofDir := paramtable.Get().ServiceParam.ProfileCfg.PprofPath.GetValue()
+	pprofDir := paramtable.Get().ProfileCfg.PprofPath.GetValue()
 
 	// Clean existing directory if not empty
 	if pprofDir != "" {

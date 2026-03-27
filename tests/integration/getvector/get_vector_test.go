@@ -221,7 +221,8 @@ func (s *TestGetVectorSuite) run() {
 	s.Require().EqualValues(topk, result.GetTopK())
 
 	// check output vectors
-	if s.vecType == schemapb.DataType_FloatVector {
+	switch s.vecType {
+	case schemapb.DataType_FloatVector:
 		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetFloatVector().GetData(), nq*topk*dim)
 		rawData := vecFieldData.GetVectors().GetFloatVector().GetData()
 		resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetFloatVector().GetData()
@@ -240,7 +241,7 @@ func (s *TestGetVectorSuite) run() {
 				s.Require().ElementsMatch(expect, actual)
 			}
 		}
-	} else if s.vecType == schemapb.DataType_Float16Vector {
+	case schemapb.DataType_Float16Vector:
 		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetFloat16Vector(), nq*topk*dim*2)
 		rawData := vecFieldData.GetVectors().GetFloat16Vector()
 		resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetFloat16Vector()
@@ -260,7 +261,7 @@ func (s *TestGetVectorSuite) run() {
 				s.Require().ElementsMatch(expect, actual)
 			}
 		}
-	} else if s.vecType == schemapb.DataType_BFloat16Vector {
+	case schemapb.DataType_BFloat16Vector:
 		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetBfloat16Vector(), nq*topk*dim*2)
 		rawData := vecFieldData.GetVectors().GetBfloat16Vector()
 		resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetBfloat16Vector()
@@ -280,7 +281,7 @@ func (s *TestGetVectorSuite) run() {
 				s.Require().ElementsMatch(expect, actual)
 			}
 		}
-	} else if s.vecType == schemapb.DataType_SparseFloatVector {
+	case schemapb.DataType_SparseFloatVector:
 		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetSparseFloatVector().GetContents(), nq*topk)
 		rawData := vecFieldData.GetVectors().GetSparseFloatVector().GetContents()
 		resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetSparseFloatVector().GetContents()
@@ -295,7 +296,7 @@ func (s *TestGetVectorSuite) run() {
 				s.Require().Equal(rawData[id], resData[i])
 			}
 		}
-	} else if s.vecType == schemapb.DataType_Int8Vector {
+	case schemapb.DataType_Int8Vector:
 		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetInt8Vector(), nq*topk*dim)
 		rawData := vecFieldData.GetVectors().GetInt8Vector()
 		resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetInt8Vector()
@@ -315,7 +316,7 @@ func (s *TestGetVectorSuite) run() {
 				s.Require().ElementsMatch(expect, actual)
 			}
 		}
-	} else {
+	default:
 		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetBinaryVector(), nq*topk*dim/8)
 		rawData := vecFieldData.GetVectors().GetBinaryVector()
 		resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetBinaryVector()

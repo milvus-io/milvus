@@ -325,7 +325,7 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 			appender := &nullDefaultAppender[int32]{}
 			if defaultVal != nil {
 				v := defaultVal.GetIntData()
-				err = appender.AppendDefault(fieldData, int32(v), rowNum)
+				err = appender.AppendDefault(fieldData, v, rowNum)
 			} else if nullable {
 				err = appender.AppendNull(fieldData, rowNum)
 			}
@@ -633,7 +633,7 @@ func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.Collection
 
 	for fieldID, fd := range data.Data {
 		if fd == nil {
-			// normaly is impossible, just to avoid potential crash here
+			// normally is impossible, just to avoid potential crash here
 			continue
 		}
 		if fd.RowNum() == 0 && CanBeZeroRowField(fields[fieldID]) {

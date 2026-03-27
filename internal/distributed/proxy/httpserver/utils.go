@@ -118,7 +118,7 @@ func joinArray(data interface{}) string {
 			buffer.WriteString(",")
 		}
 
-		buffer.WriteString(fmt.Sprintf("%v", arr.Index(i)))
+		fmt.Fprintf(&buffer, "%v", arr.Index(i))
 	}
 
 	return buffer.String()
@@ -128,7 +128,8 @@ func convertRange(field *schemapb.FieldSchema, result gjson.Result) (string, err
 	var resultStr string
 	fieldType := field.DataType
 
-	if fieldType == schemapb.DataType_Int64 {
+	switch fieldType {
+	case schemapb.DataType_Int64:
 		dataArray := make([]int64, 0, len(result.Array()))
 		for _, data := range result.Array() {
 			if data.Type == gjson.String {
@@ -146,7 +147,7 @@ func convertRange(field *schemapb.FieldSchema, result gjson.Result) (string, err
 			}
 		}
 		resultStr = joinArray(dataArray)
-	} else if fieldType == schemapb.DataType_VarChar {
+	case schemapb.DataType_VarChar:
 		dataArray := make([]string, 0, len(result.Array()))
 		for _, data := range result.Array() {
 			value, err := cast.ToStringE(data.Str)

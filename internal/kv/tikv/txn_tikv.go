@@ -189,11 +189,9 @@ func (kv *txnTiKV) HasPrefix(ctx context.Context, prefix string) (bool, error) {
 	}
 	defer iter.Close()
 
-	r := false
+	r := iter.Valid()
 	// Iterater only needs to check the first key-value pair
-	if iter.Valid() {
-		r = true
-	}
+
 	CheckElapseAndWarn(start, "Slow txnTiKV HasPrefix() operation", zap.String("prefix", prefix))
 	return r, nil
 }

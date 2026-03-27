@@ -118,7 +118,7 @@ func registerDefaults() {
 			// On Proxy node: require root user authentication via HTTP Basic Auth
 			if err := checkExprRootAuth(req); err != nil {
 				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte(fmt.Sprintf(`{"msg": "%s"}`, err.Error())))
+				fmt.Fprintf(w, `{"msg": "%s"}`, err.Error())
 				return
 			}
 			// Use bypass since we've already authenticated
@@ -127,7 +127,7 @@ func registerDefaults() {
 			output, err := expr.Exec(code, auth)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(fmt.Sprintf(`{"msg": "failed to execute expression, %s"}`, err.Error())))
+				fmt.Fprintf(w, `{"msg": "failed to execute expression, %s"}`, err.Error())
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -157,7 +157,7 @@ func RegisterStopComponent(triggerComponentStop func(role string) error) {
 			if err := triggerComponentStop(role); err != nil {
 				log.Warn("failed to trigger component stop", zap.Error(err))
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(fmt.Sprintf(`{"msg": "failed to trigger component stop, %s"}`, err.Error())))
+				fmt.Fprintf(w, `{"msg": "failed to trigger component stop, %s"}`, err.Error())
 				return
 			}
 			log.Info("finish to trigger component stop", zap.String("role", role))
@@ -177,7 +177,7 @@ func RegisterCheckComponentReady(checkActive func(role string) error) {
 			if err := checkActive(role); err != nil {
 				log.Warn("failed to check component ready", zap.Error(err))
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(fmt.Sprintf(`{"msg": "failed to to check component ready, %s"}`, err.Error())))
+				fmt.Fprintf(w, `{"msg": "failed to to check component ready, %s"}`, err.Error())
 				return
 			}
 			log.Info("finish to check component ready", zap.String("role", role))

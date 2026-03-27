@@ -63,24 +63,24 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 		return
 	}
 
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case *datapb.CompactionPlan:
-		plan := msg.(*datapb.CompactionPlan)
+		plan := msg
 		plan.PluginContext = append(plan.PluginContext, pluginContext...)
 	case *workerpb.CreateJobRequest:
-		job := msg.(*workerpb.CreateJobRequest)
+		job := msg
 		job.PluginContext = append(job.PluginContext, pluginContext...)
 	case *workerpb.AnalyzeRequest:
-		job := msg.(*workerpb.AnalyzeRequest)
+		job := msg
 		job.PluginContext = append(job.PluginContext, pluginContext...)
 	case *workerpb.CreateStatsRequest:
-		job := msg.(*workerpb.CreateStatsRequest)
+		job := msg
 		job.PluginContext = append(job.PluginContext, pluginContext...)
 	case *datapb.ImportRequest:
-		job := msg.(*datapb.ImportRequest)
+		job := msg
 		job.PluginContext = append(job.PluginContext, pluginContext...)
 	case *datapb.PreImportRequest:
-		job := msg.(*datapb.PreImportRequest)
+		job := msg
 		job.PluginContext = append(job.PluginContext, pluginContext...)
 	default:
 		return

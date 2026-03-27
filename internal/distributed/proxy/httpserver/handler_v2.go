@@ -701,11 +701,12 @@ func (h *HandlersV2) getCollectionLoadState(ctx context.Context, c *gin.Context,
 	if err != nil {
 		return resp, err
 	}
-	if resp.(*milvuspb.GetLoadStateResponse).State == commonpb.LoadState_LoadStateNotExist {
+	switch resp.(*milvuspb.GetLoadStateResponse).State {
+	case commonpb.LoadState_LoadStateNotExist:
 		err = merr.WrapErrCollectionNotFound(req.CollectionName)
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return resp, err
-	} else if resp.(*milvuspb.GetLoadStateResponse).State == commonpb.LoadState_LoadStateNotLoad {
+	case commonpb.LoadState_LoadStateNotLoad:
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
 			HTTPReturnLoadState: resp.(*milvuspb.GetLoadStateResponse).State.String(),
 		}})

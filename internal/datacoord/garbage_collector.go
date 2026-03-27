@@ -916,7 +916,7 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 		}
 
 		// Skip to GC if all segments meta of the corresponding collection are not removed
-		if gcConfirmed, _ := collectionID2GcStatus[collectionID]; !gcConfirmed {
+		if gcConfirmed := collectionID2GcStatus[collectionID]; !gcConfirmed {
 			skippedCnt++
 			continue
 		}

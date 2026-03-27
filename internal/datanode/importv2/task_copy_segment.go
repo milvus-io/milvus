@@ -224,7 +224,7 @@ func (t *CopySegmentTask) GetBufferSize() int64 {
 	return 0 // Copy task doesn't use memory buffer (direct file copy)
 }
 
-// Cancel aborts the task execution by cancelling the context.
+// Cancel aborts the task execution by canceling the context.
 // This will interrupt any ongoing file copy operations.
 func (t *CopySegmentTask) Cancel() {
 	t.cancel()

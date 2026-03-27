@@ -100,7 +100,7 @@ func (t *addCollectionFunctionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	newColl := proto.Clone(coll.schema.CollectionSchema).(*schemapb.CollectionSchema)
-	newColl.Functions = append(coll.schema.CollectionSchema.Functions, t.FunctionSchema)
+	newColl.Functions = append(coll.schema.Functions, t.FunctionSchema)
 	if err := validateFunction(newColl, t.FunctionSchema.Name, false); err != nil {
 		return err
 	}

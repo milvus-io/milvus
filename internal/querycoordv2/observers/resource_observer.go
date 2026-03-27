@@ -70,7 +70,7 @@ func (ob *ResourceObserver) schedule(ctx context.Context) {
 	defer ob.wg.Done()
 	log.Info("Start check resource group loop")
 
-	listener := ob.meta.ResourceManager.ListenResourceGroupChanged(ctx)
+	listener := ob.meta.ListenResourceGroupChanged(ctx)
 	for {
 		ob.waitRGChangedOrTimeout(ctx, listener)
 		// stop if the context is canceled.

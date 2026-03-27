@@ -469,25 +469,25 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 		zap.Int64("nodeID", t.GetNodeId()),
 	)
 
-	// Check if job has been cancelled/superseded before querying worker
+	// Check if job has been canceled/superseded before querying worker
 	job := t.refreshMeta.GetJob(t.GetJobId())
 	if job == nil {
-		log.Info("job not found, task has been cancelled")
+		log.Info("job not found, task has been canceled")
 		// Best-effort cleanup: try to drop task on worker if it was assigned
 		if t.GetNodeId() != 0 {
 			_ = cluster.DropExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 		}
-		t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job cancelled")
+		t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled")
 		return
 	}
 	if job.GetState() == indexpb.JobState_JobStateFailed {
-		log.Info("job has been marked as failed, cancelling task",
+		log.Info("job has been marked as failed, canceling task",
 			zap.String("jobFailReason", job.GetFailReason()))
 		// Best-effort cleanup: try to drop task on worker if it was assigned
 		if t.GetNodeId() != 0 {
 			_ = cluster.DropExternalCollectionTask(t.GetNodeId(), t.GetTaskId())
 		}
-		t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job cancelled: "+job.GetFailReason())
+		t.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, "job canceled: "+job.GetFailReason())
 		return
 	}
 

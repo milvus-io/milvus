@@ -796,7 +796,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		// Task should be marked as failed
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-		assert.Contains(t, metaTask.GetFailReason(), "job cancelled")
+		assert.Contains(t, metaTask.GetFailReason(), "job canceled")
 	})
 
 	t.Run("job_already_failed", func(t *testing.T) {
@@ -836,7 +836,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		// Task should be marked as failed
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-		assert.Contains(t, metaTask.GetFailReason(), "job cancelled")
+		assert.Contains(t, metaTask.GetFailReason(), "job canceled")
 	})
 
 	t.Run("query_failed", func(t *testing.T) {
@@ -1336,7 +1336,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker_JobNotFoundNodeIdZero(t
 
 	metaTask := refreshMeta.GetTask(1001)
 	assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-	assert.Contains(t, metaTask.GetFailReason(), "job cancelled")
+	assert.Contains(t, metaTask.GetFailReason(), "job canceled")
 }
 
 // ==================== SetJobInfo Additional Tests ====================

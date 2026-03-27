@@ -104,8 +104,8 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 			{FieldID: 101, DataType: schemapb.DataType_JSON, Name: "JSON"},
 		},
 	}
-	checker.meta.CollectionManager.PutCollection(ctx, coll)
-	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.PutCollection(ctx, coll)
+	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -116,8 +116,8 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+	checker.meta.HandleNodeUp(ctx, 1)
+	checker.meta.HandleNodeUp(ctx, 2)
 
 	// dist
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
@@ -157,8 +157,8 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 	// test skip load index for read only node
 	suite.nodeMgr.Stopping(1)
 	suite.nodeMgr.Stopping(2)
-	suite.meta.ResourceManager.HandleNodeStopping(ctx, 1)
-	suite.meta.ResourceManager.HandleNodeStopping(ctx, 2)
+	suite.meta.HandleNodeStopping(ctx, 1)
+	suite.meta.HandleNodeStopping(ctx, 2)
 	utils.RecoverAllCollection(suite.meta)
 	tasks = checker.Check(context.Background())
 	suite.Require().Len(tasks, 0)
@@ -177,8 +177,8 @@ func (suite *IndexCheckerSuite) TestIndexInfoNotMatch() {
 			{FieldID: 101, DataType: schemapb.DataType_JSON, Name: "JSON"},
 		},
 	}
-	checker.meta.CollectionManager.PutCollection(ctx, coll)
-	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.PutCollection(ctx, coll)
+	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -189,8 +189,8 @@ func (suite *IndexCheckerSuite) TestIndexInfoNotMatch() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+	checker.meta.HandleNodeUp(ctx, 1)
+	checker.meta.HandleNodeUp(ctx, 2)
 
 	// dist
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
@@ -245,8 +245,8 @@ func (suite *IndexCheckerSuite) TestGetIndexInfoFailed() {
 			{FieldID: 101, DataType: schemapb.DataType_JSON, Name: "JSON"},
 		},
 	}
-	checker.meta.CollectionManager.PutCollection(ctx, coll)
-	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.PutCollection(ctx, coll)
+	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -257,8 +257,8 @@ func (suite *IndexCheckerSuite) TestGetIndexInfoFailed() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+	checker.meta.HandleNodeUp(ctx, 1)
+	checker.meta.HandleNodeUp(ctx, 2)
 
 	// dist
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
@@ -292,8 +292,8 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 			{FieldID: 101, DataType: schemapb.DataType_JSON, Name: "JSON"},
 		},
 	}
-	checker.meta.CollectionManager.PutCollection(ctx, coll)
-	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.PutCollection(ctx, coll)
+	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -304,8 +304,8 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+	checker.meta.HandleNodeUp(ctx, 1)
+	checker.meta.HandleNodeUp(ctx, 2)
 
 	// dist
 	segment := utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel")
@@ -369,8 +369,8 @@ func (suite *IndexCheckerSuite) TestLoadJsonIndex() {
 		},
 	}
 	coll.LoadFields = []int64{101}
-	checker.meta.CollectionManager.PutCollection(ctx, coll)
-	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.PutCollection(ctx, coll)
+	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -381,8 +381,8 @@ func (suite *IndexCheckerSuite) TestLoadJsonIndex() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+	checker.meta.HandleNodeUp(ctx, 1)
+	checker.meta.HandleNodeUp(ctx, 2)
 
 	// dist
 	fieldIndexInfo := &querypb.FieldIndexInfo{
@@ -435,8 +435,8 @@ func (suite *IndexCheckerSuite) TestLoadJsonIndex() {
 	// test skip load json index for read only node
 	suite.nodeMgr.Stopping(1)
 	suite.nodeMgr.Stopping(2)
-	suite.meta.ResourceManager.HandleNodeStopping(ctx, 1)
-	suite.meta.ResourceManager.HandleNodeStopping(ctx, 2)
+	suite.meta.HandleNodeStopping(ctx, 1)
+	suite.meta.HandleNodeStopping(ctx, 2)
 	utils.RecoverAllCollection(suite.meta)
 	tasks = checker.Check(context.Background())
 	suite.Require().Len(tasks, 0)
@@ -456,8 +456,8 @@ func (suite *IndexCheckerSuite) TestJsonIndexNotMatch() {
 			{FieldID: 101, DataType: schemapb.DataType_JSON, Name: "JSON"},
 		},
 	}
-	checker.meta.CollectionManager.PutCollection(ctx, coll)
-	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.PutCollection(ctx, coll)
+	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -468,8 +468,8 @@ func (suite *IndexCheckerSuite) TestJsonIndexNotMatch() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+	checker.meta.HandleNodeUp(ctx, 1)
+	checker.meta.HandleNodeUp(ctx, 2)
 
 	// dist
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
@@ -517,8 +517,8 @@ func (suite *IndexCheckerSuite) TestCreateNewJsonIndex() {
 			{FieldID: 101, DataType: schemapb.DataType_JSON, Name: "JSON"},
 		},
 	}
-	checker.meta.CollectionManager.PutCollection(ctx, coll)
-	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	checker.meta.PutCollection(ctx, coll)
+	checker.meta.Put(ctx, utils.CreateTestReplica(200, 1, []int64{1, 2}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost",
@@ -529,8 +529,8 @@ func (suite *IndexCheckerSuite) TestCreateNewJsonIndex() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
-	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+	checker.meta.HandleNodeUp(ctx, 1)
+	checker.meta.HandleNodeUp(ctx, 2)
 
 	// dist
 	fieldIndexInfo := &querypb.FieldIndexInfo{

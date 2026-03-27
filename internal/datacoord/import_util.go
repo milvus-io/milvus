@@ -335,7 +335,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 
 	idBegin, idEnd, err := common.AllocAutoID(func(n uint32) (int64, int64, error) {
 		ids, ide, e := alloc.AllocN(int64(n))
-		return int64(ids), int64(ide), e
+		return ids, ide, e
 	}, uint32(preAllocIDNum), Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
 		return nil, err
@@ -829,7 +829,7 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt()
 	if task.GetType() == ImportTaskType {
 		// ImportTask use dynamic buffer size calculated by vchannels and partitions
-		taskBufferSize = int(baseBufferSize) * len(job.GetVchannels()) * len(job.GetPartitionIDs())
+		taskBufferSize = baseBufferSize * len(job.GetVchannels()) * len(job.GetPartitionIDs())
 	} else {
 		// PreImportTask use fixed buffer size
 		taskBufferSize = baseBufferSize
