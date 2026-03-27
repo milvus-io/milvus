@@ -127,7 +127,7 @@ func registerDefaults() {
 			output, err := expr.Exec(code, auth)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, `{"msg": "failed to execute expression, %s"}`, err.Error())
+				fmt.Fprintf(w, `{"msg": "failed to execute expression, %s"}`, err.Error()) //nolint:gosec // error message is safe to include in response
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")

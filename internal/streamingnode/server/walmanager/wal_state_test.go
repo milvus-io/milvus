@@ -126,7 +126,6 @@ func TestStateWithCond(t *testing.T) {
 			defer wg.Done()
 			oldState := stateCond.GetState()
 			for isStateBefore(oldState, targetState) {
-
 				err := stateCond.WatchChanged(context.Background(), oldState)
 				assert.NoError(t, err)
 				newState := stateCond.GetState()

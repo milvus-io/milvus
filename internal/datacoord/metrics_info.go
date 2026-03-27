@@ -65,7 +65,7 @@ func (s *Server) getCollectionMetrics(ctx context.Context) *metricsinfo.DataCoor
 }
 
 func (s *Server) getChannelsJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
-	channels, err := getMetrics[*metricsinfo.Channel](s, ctx, req)
+	channels, err := getMetrics[*metricsinfo.Channel](ctx, s, req)
 	// fill checkpoint timestamp
 	channel2Checkpoints := s.meta.GetChannelCheckpoints()
 	for _, channel := range channels {
@@ -156,12 +156,12 @@ func (s *Server) getDistJSON(ctx context.Context, req *milvuspb.GetMetricsReques
 }
 
 func (s *Server) getDataNodeSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
-	ret, err := getMetrics[*metricsinfo.Segment](s, ctx, req)
+	ret, err := getMetrics[*metricsinfo.Segment](ctx, s, req)
 	return metricsinfo.MarshalGetMetricsValues(ret, err)
 }
 
 func (s *Server) getSyncTaskJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) (string, error) {
-	ret, err := getMetrics[*metricsinfo.SyncTask](s, ctx, req)
+	ret, err := getMetrics[*metricsinfo.SyncTask](ctx, s, req)
 	return metricsinfo.MarshalGetMetricsValues(ret, err)
 }
 

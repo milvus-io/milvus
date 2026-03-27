@@ -1467,6 +1467,7 @@ func genDynamicFields(fields []string, list []*schemapb.FieldData) []string {
 	return dynamicFields
 }
 
+//nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
 func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
 	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
 ) ([]map[string]interface{}, error) {

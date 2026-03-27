@@ -175,8 +175,8 @@ func Test_newKnapsackTimeBased(t *testing.T) {
 		name       string
 		candidates []*timeElement
 		args       args
-		initOrder []int64
-		packOrder []int64
+		initOrder  []int64
+		packOrder  []int64
 	}{
 		{
 			name: "sort by earliestTs",
@@ -197,7 +197,7 @@ func Test_newKnapsackTimeBased(t *testing.T) {
 					residualSize int64
 				}{size: 30, earliestTs: 5, residualSize: 8},
 			),
-			args:       args{size: 60, leftSize: 60, minSegs: 1, maxSegs: 3},
+			args:      args{size: 60, leftSize: 60, minSegs: 1, maxSegs: 3},
 			initOrder: []int64{2, 1, 0},
 			packOrder: []int64{2, 1, 0},
 		},
@@ -220,7 +220,7 @@ func Test_newKnapsackTimeBased(t *testing.T) {
 					residualSize int64
 				}{size: 102, earliestTs: 5, residualSize: 60},
 			),
-			args:       args{size: 150, leftSize: 100, minSegs: 1, maxSegs: 3},
+			args:      args{size: 150, leftSize: 100, minSegs: 1, maxSegs: 3},
 			initOrder: []int64{0, 2, 1},
 			packOrder: []int64{0, 2},
 		},

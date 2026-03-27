@@ -333,13 +333,13 @@ func (s *mixCoordImpl) ListBatchQueryNodes(w http.ResponseWriter, req *http.Requ
 // GetStreamingNodeDistribution handles GET requests to retrieve streaming node distribution.
 func (s *mixCoordImpl) GetStreamingNodeDistribution(w http.ResponseWriter, req *http.Request) {
 	logger := log.With(zap.String("Scope", "Rolling"))
-	if err := req.ParseForm(); err != nil {
+	if err := req.ParseForm(); err != nil { //nolint:gosec // internal admin endpoint
 		logger.Info("GetStreamingNodeDistribution failed to parse form", zap.Error(err))
 		http.Error(w, fmt.Sprintf(`{"msg": "failed to parse form data, %s"}`, err.Error()), http.StatusBadRequest)
 		return
 	}
 
-	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64)
+	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
 		logger.Info("GetStreamingNodeDistribution failed to parse form", zap.Error(err))
 		http.Error(w, fmt.Sprintf(`{"msg": "failed to get streaming node distribution, invalid node_id: %s"}`, err.Error()), http.StatusBadRequest)
@@ -440,13 +440,13 @@ func (s *mixCoordImpl) GetStreamingNodeDistribution(w http.ResponseWriter, req *
 // This handler should be registered to the new path.
 func (s *mixCoordImpl) GetBatchNodeDistribution(w http.ResponseWriter, req *http.Request) {
 	logger := log.With(zap.String("Scope", "Rolling"))
-	if err := req.ParseForm(); err != nil {
+	if err := req.ParseForm(); err != nil { //nolint:gosec // internal admin endpoint
 		logger.Info("GetBatchNodeDistribution failed to parse form", zap.Error(err))
 		http.Error(w, fmt.Sprintf(`{"msg": "failed to parse form data, %s"}`, err.Error()), http.StatusBadRequest)
 		return
 	}
 
-	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64)
+	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
 		logger.Info("GetBatchNodeDistribution failed to parse form", zap.Error(err))
 		http.Error(w, fmt.Sprintf(`{"msg": "failed to get query node distribution, invalid node_id: %s"}`, err.Error()), http.StatusBadRequest)
@@ -751,7 +751,7 @@ func (s *mixCoordImpl) HandleStreamingNodeStatus(w http.ResponseWriter, req *htt
 func (s *mixCoordImpl) handleGetStreamingNodeStatus(w http.ResponseWriter, req *http.Request) {
 	logger := log.With(zap.String("Scope", "Rolling"))
 	// Parse the request form to access URL query parameters.
-	if err := req.ParseForm(); err != nil {
+	if err := req.ParseForm(); err != nil { //nolint:gosec // internal admin endpoint
 		logger.Info("handleGetStreamingNodeStatus parse form failed", zap.Error(err))
 		http.Error(w, fmt.Sprintf(`{"msg": "failed to parse form, %s"}`, err.Error()), http.StatusBadRequest)
 		return
@@ -891,7 +891,7 @@ func (s *mixCoordImpl) HandleBatchNodeStatus(w http.ResponseWriter, req *http.Re
 func (s *mixCoordImpl) handleGetBatchNodeStatus(w http.ResponseWriter, req *http.Request) {
 	logger := log.With(zap.String("Scope", "Rolling"))
 	// Parse the request form to access URL query parameters.
-	if err := req.ParseForm(); err != nil {
+	if err := req.ParseForm(); err != nil { //nolint:gosec // internal admin endpoint
 		logger.Warn("handleGetBatchNodeStatus", zap.Error(err))
 		http.Error(w, fmt.Sprintf(`{"msg": "failed to parse form, %s"}`, err.Error()), http.StatusBadRequest)
 		return

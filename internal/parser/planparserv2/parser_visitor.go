@@ -237,7 +237,7 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	}
 
 	leftExpr, rightExpr := getExpr(left), getExpr(right)
-	reverse := !(leftValueExpr == nil)
+	reverse := leftValueExpr != nil
 
 	if leftExpr == nil || rightExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())
@@ -326,7 +326,7 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 	}
 
 	leftExpr, rightExpr := getExpr(left), getExpr(right)
-	reverse := !(leftValueExpr == nil)
+	reverse := leftValueExpr != nil
 
 	if leftExpr == nil || rightExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid arithmetic expression, left: %s, op: %s, right: %s", ctx.Expr(0).GetText(), ctx.GetOp(), ctx.Expr(1).GetText())

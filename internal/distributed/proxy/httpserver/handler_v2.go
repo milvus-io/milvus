@@ -69,7 +69,7 @@ func NewHandlersV2(proxyClient types.ProxyComponent) *HandlersV2 {
 	}
 }
 
-var routeToMethod = map[string]string{
+var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a route-to-method mapping
 	"/v2/vectordb/collections/list":                 "ShowCollections",
 	"/v2/vectordb/collections/has":                  "HasCollection",
 	"/v2/vectordb/collections/describe":             "DescribeCollection",

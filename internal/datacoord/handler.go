@@ -273,7 +273,7 @@ func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 		}, ids...)
 	}
 
-	var compactionFromExistWithCache func(segID UniqueID) bool = func(segID UniqueID) bool {
+	compactionFromExistWithCache := func(segID UniqueID) bool {
 		var compactionFromExist func(segID UniqueID) bool
 		compactionFromExistMap := make(map[UniqueID]bool)
 
