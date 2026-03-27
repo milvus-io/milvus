@@ -598,7 +598,7 @@ class TestMilvusClientReleasePartitionInvalid(TestMilvusClientV2Base):
         # Close the client connection
         self.close(client_temp)
         # Try to release partition after disconnect - should raise exception
-        error = {ct.err_code: 1, ct.err_msg: "'NoneType' object has no attribute 'release_partitions'"}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.release_partitions(client_temp, collection_name, partition_name,
                                 check_task=CheckTasks.err_res, check_items=error)
 
@@ -1091,7 +1091,7 @@ class TestMilvusClientLoadPartitionInvalid(TestMilvusClientV2Base):
         # Close the client connection
         self.close(client_temp)
         # Try to release partition after disconnect - should raise exception
-        error = {ct.err_code: 1, ct.err_msg: "'NoneType' object has no attribute 'load_partitions'"}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         self.load_partitions(client_temp, collection_name, partition_name,
                              check_task=CheckTasks.err_res, check_items=error)
 

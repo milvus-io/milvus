@@ -633,16 +633,15 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         client.close()
         log.info("test_search_no_connection: closed client connection")
 
-        # 3. search without connection — after client.close(), the internal gRPC handler
-        # is set to None, so pymilvus raises AttributeError instead of MilvusException
+        # 3. search without connection
         log.info("test_search_no_connection: searching without connection")
         self.search(client, collection_name,
                     data=vectors[:default_nq], anns_field=default_search_field,
                     search_params=default_search_params, limit=default_limit,
                     filter=default_search_exp,
                     check_task=CheckTasks.err_res,
-                    check_items={"err_code": -1,
-                                 "err_msg": "'NoneType' object has no attribute 'search'"})
+                    check_items={"err_code": 1,
+                                 "err_msg": "should create connection first"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_no_collection(self):
