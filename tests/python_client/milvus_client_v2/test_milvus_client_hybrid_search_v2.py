@@ -922,11 +922,10 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
 
         # output * fields   
         output_fields = ["*"]
-        # sparse fields cannot be output, so specify the expected output fields
-        sparse_fields = [self.sparse_vector_field_name1, self.sparse_vector_field_name2,
-                         self.nullable_sparse_vec_field_name]
+        # BM25-generated sparse fields cannot be output, so exclude them from expected
+        bm25_sparse_fields = [self.sparse_vector_field_name1, self.sparse_vector_field_name2]
         expected_output_fields = [field_name for field_name in self.all_fields
-                                  if field_name not in sparse_fields]
+                                  if field_name not in bm25_sparse_fields]
         res1 = self.hybrid_search(client, self.collection_name, reqs=req_list,
                                   ranker=WeightedRanker(0.5, 0.5),
                                   limit=limit, output_fields=output_fields,
