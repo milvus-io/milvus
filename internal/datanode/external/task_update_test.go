@@ -108,7 +108,8 @@ func (s *UpdateExternalTaskSuite) TestTaskLifecycle() {
 }
 
 func (s *UpdateExternalTaskSuite) TestPreExecuteWithNilRequest() {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is deferred below
+	defer cancel()
 	task := &UpdateExternalTask{
 		ctx:    ctx,
 		cancel: cancel,

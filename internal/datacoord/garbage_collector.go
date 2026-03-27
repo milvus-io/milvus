@@ -139,12 +139,16 @@ func (gc *gcPauseRecords) Insert(ticket string, pauseUntil time.Time) error {
 			records = append(records, record)
 		}
 	}
+	gc.records = typeutil.NewObjectArrayBasedMaximumHeap(records, func(r gcPauseRecord) int64 {
+		return r.pauseUntil.UnixNano()
+	})
 
 	if gc.records.Len() < gc.maxLen {
 		gc.records.Push(gcPauseRecord{
 			ticket:     ticket,
 			pauseUntil: pauseUntil,
 		})
+		return nil
 	}
 
 	// too many pause records, refresh heap

@@ -693,10 +693,8 @@ func (t *clusteringCompactionTask) doClean() error {
 				operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
 				if !hasResultSegments {
 					toSegments, _ := t.meta.(*meta).GetCompactionTo(segID)
-					if toSegments != nil {
-						for _, toSeg := range toSegments {
-							operators = append(operators, UpdateStatusOperator(toSeg.GetID(), commonpb.SegmentState_Dropped))
-						}
+					for _, toSeg := range toSegments {
+						operators = append(operators, UpdateStatusOperator(toSeg.GetID(), commonpb.SegmentState_Dropped))
 					}
 				}
 			}

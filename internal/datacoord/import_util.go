@@ -239,9 +239,8 @@ func AllocImportSegment(ctx context.Context,
 		log.Error("failed to alloc id for import segment", zap.Error(err))
 		return nil, err
 	}
-	ts := dataTimestamp
-	if ts == 0 {
-		ts, err = alloc.AllocTimestamp(ctx)
+	if dataTimestamp == 0 {
+		_, err = alloc.AllocTimestamp(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -681,9 +680,7 @@ func ListBinlogsAndGroupBySegment(ctx context.Context,
 	if len(segmentDeltaPaths) == 0 {
 		return segmentImportFiles, nil
 	}
-	deltaSegmentIDs := lo.KeyBy(segmentDeltaPaths, func(deltaPrefix string) string {
-		return path.Base(deltaPrefix)
-	})
+	deltaSegmentIDs := lo.KeyBy(segmentDeltaPaths, path.Base)
 
 	for i := range segmentImportFiles {
 		segmentID := path.Base(segmentImportFiles[i].GetPaths()[0])

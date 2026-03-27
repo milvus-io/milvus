@@ -283,21 +283,21 @@ func Test_sealByBlockingL0(t *testing.T) {
 			DmlPosition:   &msgpb.MsgPosition{Timestamp: 40},
 		},
 	}
-	growing_1 := &SegmentInfo{
+	growing1 := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:            2001,
 			InsertChannel: "channel_1",
 			StartPosition: &msgpb.MsgPosition{Timestamp: 10},
 		},
 	}
-	growing_2 := &SegmentInfo{
+	growing2 := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:            2002,
 			InsertChannel: "channel_1",
 			StartPosition: &msgpb.MsgPosition{Timestamp: 35},
 		},
 	}
-	growing_3 := &SegmentInfo{
+	growing3 := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:            2003,
 			InsertChannel: "channel_1",
@@ -311,7 +311,7 @@ func Test_sealByBlockingL0(t *testing.T) {
 			sizeLimit:       -1,
 			entryNumLimit:   100,
 			l0Segments:      []*SegmentInfo{l0_1, l0_2},           // ts: [10,20] [30, 40], entryNum: 50, 60
-			growingSegments: []*SegmentInfo{growing_1, growing_2}, // ts: [10, 35]
+			growingSegments: []*SegmentInfo{growing1, growing2}, // ts: [10, 35]
 			expected:        []int64{2001},
 		},
 		{
@@ -320,13 +320,13 @@ func Test_sealByBlockingL0(t *testing.T) {
 			sizeLimit:       1, // 1MB
 			entryNumLimit:   -1,
 			l0Segments:      []*SegmentInfo{l0_1, l0_2},           // ts: [10,20] [30, 40], entryNum: 1MB, 2MB
-			growingSegments: []*SegmentInfo{growing_1, growing_2}, // ts: [10, 35]
+			growingSegments: []*SegmentInfo{growing1, growing2}, // ts: [10, 35]
 			expected:        []int64{2001, 2002},
 		},
 		{
 			tag:             "empty_input",
 			channel:         "channel_1",
-			growingSegments: []*SegmentInfo{growing_1, growing_2},
+			growingSegments: []*SegmentInfo{growing1, growing2},
 			sizeLimit:       1,
 			entryNumLimit:   50,
 			expected:        []int64{},
@@ -335,7 +335,7 @@ func Test_sealByBlockingL0(t *testing.T) {
 			tag:             "all_disabled",
 			channel:         "channel_1",
 			l0Segments:      []*SegmentInfo{l0_1, l0_2},
-			growingSegments: []*SegmentInfo{growing_1, growing_2},
+			growingSegments: []*SegmentInfo{growing1, growing2},
 			sizeLimit:       -1,
 			entryNumLimit:   -1,
 			expected:        []int64{},
@@ -344,7 +344,7 @@ func Test_sealByBlockingL0(t *testing.T) {
 			tag:             "growing_segment_with_nil_start_position",
 			channel:         "channel_1",
 			l0Segments:      []*SegmentInfo{l0_1, l0_2},
-			growingSegments: []*SegmentInfo{growing_3},
+			growingSegments: []*SegmentInfo{growing3},
 			expected:        []int64{},
 		},
 	}

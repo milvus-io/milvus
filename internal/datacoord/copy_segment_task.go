@@ -985,7 +985,7 @@ func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 	}
 
 	err := meta.UpdateSegment(result.GetSegmentId(),
-		SetJsonKeyIndexLogs(result.GetJsonKeyIndexInfos()))
+		SetJSONKeyIndexLogs(result.GetJsonKeyIndexInfos()))
 	if err != nil {
 		log.Warn("failed to update json key index",
 			WrapCopySegmentTaskLog(task,

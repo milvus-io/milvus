@@ -809,7 +809,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Sorting))
 	assert.NoError(t, err)
 
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             100,
 			IsImporting:    true,
@@ -819,7 +819,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			CompactionFrom: []int64{10},
 		},
 	})
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             110,
 			IsImporting:    true,
@@ -829,7 +829,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			CompactionFrom: []int64{11},
 		},
 	})
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             120,
 			IsImporting:    true,
@@ -844,7 +844,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             200,
 			IsImporting:    true,
@@ -854,7 +854,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			CompactionFrom: []int64{20},
 		},
 	})
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             210,
 			IsImporting:    true,
@@ -864,7 +864,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 			CompactionFrom: []int64{21},
 		},
 	})
-	err = meta.AddSegment(ctx, &SegmentInfo{
+	_ = meta.AddSegment(ctx, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             220,
 			IsImporting:    true,

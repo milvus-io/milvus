@@ -1881,7 +1881,7 @@ func TestHandleSessionEvent(t *testing.T) {
 		}
 		err = svr.handleSessionEvent(context.Background(), typeutil.DataNodeRole, evt)
 		assert.NoError(t, err)
-		dataNodes = svr.nodeManager.GetClientIDs()
+		_ = svr.nodeManager.GetClientIDs()
 	})
 
 	t.Run("nil evt", func(t *testing.T) {

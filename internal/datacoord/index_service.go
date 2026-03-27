@@ -225,7 +225,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	} else {
 		// Normal path: allocate new index ID
 		var err error
-		indexID, err = s.allocator.AllocID(ctx)
+		_, err = s.allocator.AllocID(ctx)
 		if err != nil {
 			log.Warn("failed to alloc indexID", zap.Error(err))
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()

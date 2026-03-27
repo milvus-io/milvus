@@ -19,6 +19,7 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
@@ -594,7 +595,7 @@ func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, tar
 	parts[logTypeIndex+2] = targetPartitionIDStr
 	parts[logTypeIndex+3] = targetSegmentIDStr
 
-	return strings.Join(parts, "/"), nil
+	return path.Join(parts...), nil
 }
 
 // buildIndexInfoFromSource builds complete index metadata from source information.
@@ -849,7 +850,7 @@ func generateTargetIndexPath(
 	parts[keywordIdx+partitionOffset] = strconv.FormatInt(target.GetPartitionId(), 10)
 	parts[keywordIdx+segmentOffset] = strconv.FormatInt(target.GetSegmentId(), 10)
 
-	return strings.Join(parts, "/"), nil
+	return path.Join(parts...), nil
 }
 
 // ============================================================================
@@ -975,7 +976,7 @@ func shortenSingleJsonStatsPath(fullPath string) string {
 	parts := strings.Split(fullPath, "/")
 	for i, part := range parts {
 		if part == common.JSONStatsPath && i+8 < len(parts) {
-			return strings.Join(parts[i+8:], "/")
+			return path.Join(parts[i+8:]...)
 		}
 	}
 

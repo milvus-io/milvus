@@ -18,7 +18,7 @@ package importv2
 
 import (
 	"context"
-	"errors"
+	"github.com/cockroachdb/errors"
 	"fmt"
 	"sync"
 	"time"

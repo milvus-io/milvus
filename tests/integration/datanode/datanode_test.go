@@ -44,7 +44,7 @@ type DataNodeSuite struct {
 	dim               int
 	numCollections    int
 	rowsPerCollection int
-	waitTimeInSec     time.Duration
+	waitTime     time.Duration
 	prefix            string
 }
 
@@ -53,7 +53,7 @@ func (s *DataNodeSuite) setupParam() {
 	s.dim = 128
 	s.numCollections = 2
 	s.rowsPerCollection = 100
-	s.waitTimeInSec = time.Second * 1
+	s.waitTime = time.Second * 1
 }
 
 func (s *DataNodeSuite) loadCollection(collectionName string) {
@@ -236,7 +236,7 @@ func (s *DataNodeSuite) setupData() {
 	log.Info(fmt.Sprintf("=========================start to search %s=========================", searchName))
 	s.search(searchName)
 	log.Info("=========================Search finished=========================")
-	time.Sleep(s.waitTimeInSec)
+	time.Sleep(s.waitTime)
 	s.checkCollections()
 	log.Info(fmt.Sprintf("=========================start to search2 %s=========================", searchName))
 	s.search(searchName)
@@ -275,7 +275,7 @@ func (s *DataNodeSuite) checkQNRestarts(idx int) {
 	// Add new data nodes.
 	qn1 := s.Cluster.AddDataNode()
 	qn2 := s.Cluster.AddDataNode()
-	time.Sleep(s.waitTimeInSec)
+	time.Sleep(s.waitTime)
 	cn := fmt.Sprintf("new_collection_r_%d", idx)
 	s.loadCollection(cn)
 	s.search(cn)
@@ -285,7 +285,7 @@ func (s *DataNodeSuite) checkQNRestarts(idx int) {
 	} else {
 		qn2.Stop()
 	}
-	time.Sleep(s.waitTimeInSec)
+	time.Sleep(s.waitTime)
 	cn = fmt.Sprintf("new_collection_x_%d", idx)
 	s.loadCollection(cn)
 	s.search(cn)
@@ -297,7 +297,7 @@ func (s *DataNodeSuite) TestSwapQN() {
 	// Test case with new data nodes added
 	s.Cluster.AddDataNode()
 	s.Cluster.AddDataNode()
-	time.Sleep(s.waitTimeInSec)
+	time.Sleep(s.waitTime)
 	cn := "new_collection_a"
 	s.loadCollection(cn)
 	s.search(cn)

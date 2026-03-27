@@ -17,7 +17,7 @@
 package importv2
 
 import (
-	"errors"
+	"github.com/cockroachdb/errors"
 	"fmt"
 	"sync"
 	"testing"

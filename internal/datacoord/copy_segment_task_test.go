@@ -18,7 +18,7 @@ package datacoord
 
 import (
 	"context"
-	"errors"
+	"github.com/cockroachdb/errors"
 	"testing"
 	"time"
 

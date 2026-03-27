@@ -290,7 +290,7 @@ func Test_CheckRowsEqual(t *testing.T) {
 		DataType: schemapb.DataType_Bool,
 	}
 	schema.Fields = append(schema.Fields, newField)
-	insertData.Data[newField.GetFieldID()], err = storage.NewFieldData(newField.GetDataType(), newField, 1)
+	insertData.Data[newField.GetFieldID()], _ = storage.NewFieldData(newField.GetDataType(), newField, 1)
 	err = CheckRowsEqual(schema, insertData)
 	assert.Error(t, err)
 

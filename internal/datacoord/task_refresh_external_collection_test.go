@@ -184,7 +184,7 @@ func TestRefreshExternalCollectionTask_GetTaskType(t *testing.T) {
 
 func TestRefreshExternalCollectionTask_GetTaskState(t *testing.T) {
 	task, _ := createTestRefreshTaskWithStubs(t, 1001, 1, 100)
-	assert.Equal(t, taskcommon.State(indexpb.JobState_JobStateInit), task.GetTaskState())
+	assert.Equal(t, indexpb.JobState_JobStateInit, task.GetTaskState())
 }
 
 func TestRefreshExternalCollectionTask_GetTaskSlot(t *testing.T) {

@@ -668,7 +668,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		for _, v := range vs {
 			offset++
 
-			row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
+			row, ok := v.Value.(map[typeutil.UniqueID]interface{})
 			if !ok {
 				log.Warn("convert interface to map wrong")
 				return errors.New("unexpected error")
@@ -681,7 +681,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 					}
 				}
 			}
-			if entityFilter.Filtered((*v).PK.GetValue(), uint64((*v).Timestamp), expireTs) {
+			if entityFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp), expireTs) {
 				continue
 			}
 

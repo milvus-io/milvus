@@ -257,7 +257,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 		dropCallback: dropCallback,
 	}
 
-	ctx, cancel := context.WithCancel(params.Ctx)
+	ctx, cancel := context.WithCancel(params.Ctx) //nolint:gosec // cancel is stored in cancelFn and called in Close()
 	ds := &DataSyncService{
 		ctx:      ctx,
 		cancelFn: cancel,

@@ -40,7 +40,7 @@ func adaptImplsToROWAL(
 		log.FieldComponent("wal"),
 		zap.String("channel", basicWAL.Channel().String()),
 	)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored in availableCancel and called in Close()
 	roWAL := &roWALAdaptorImpl{
 		WALRateLimitComponent: rate.NewWALRateLimitComponent(basicWAL.Channel()),
 

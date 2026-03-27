@@ -231,7 +231,7 @@ func (s *ArrayStructDataNodeSuite) checkFieldsData(fieldsData []*schemapb.FieldD
 		for i := 0; i < s.rowsPerCollection; i++ {
 			switch fieldData.FieldName {
 			case integration.Int64Field:
-				break
+				// no-op: pk field validation not needed
 			case integration.FloatVecField:
 				for j := 0; j < s.dim; j++ {
 					s.Equal(fieldData.GetVectors().GetFloatVector().Data[j],

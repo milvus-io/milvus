@@ -75,7 +75,7 @@ func (t *refreshExternalCollectionTask) GetTaskType() taskcommon.Type {
 
 func (t *refreshExternalCollectionTask) GetTaskState() taskcommon.State {
 	// taskcommon.State is a type alias of indexpb.JobState, so this is type-safe.
-	return taskcommon.State(t.GetState())
+	return t.GetState()
 }
 
 func (t *refreshExternalCollectionTask) GetTaskSlot() int64 {

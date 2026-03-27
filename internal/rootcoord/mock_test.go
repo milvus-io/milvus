@@ -764,7 +764,7 @@ func cleanTestEnv() {
 	if path == "" {
 		return
 	}
-	if err := os.RemoveAll(path); err != nil {
+	if err := os.RemoveAll(path); err != nil { //nolint:gosec // path is from test environment variable
 		log.Warn("failed to clean test directories", zap.Error(err), zap.String("path", path))
 	}
 	log.Debug("clean test environment", zap.String("path", path))

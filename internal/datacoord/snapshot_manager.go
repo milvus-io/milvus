@@ -1219,7 +1219,7 @@ func (sm *snapshotManager) createRestoreJob(
 				NumOfRows:           segDesc.GetNumOfRows(),
 				State:               commonpb.SegmentState_Importing,
 				MaxRowNum:           Params.DataCoordCfg.SegmentMaxSize.GetAsInt64(),
-				Level:               datapb.SegmentLevel(segDesc.GetSegmentLevel()),
+				Level:               segDesc.GetSegmentLevel(),
 				CreatedByCompaction: false,
 				LastExpireTime:      math.MaxUint64,
 				StartPosition:       startPos,

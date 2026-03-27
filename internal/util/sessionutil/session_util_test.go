@@ -909,7 +909,7 @@ func TestForceKill(t *testing.T) {
 		return
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestForceKill") /* #nosec G204 */
+	cmd := exec.Command(os.Args[0], "-test.run=TestForceKill") /* #nosec G204 */ //nolint:gosec // os.Args[0] is the test binary, not user input
 	cmd.Env = append(os.Environ(), "TEST_EXIT=1")
 
 	err := cmd.Run()

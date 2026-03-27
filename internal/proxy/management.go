@@ -168,7 +168,7 @@ func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
 		_, collectionID, err = DecodeTicket(ticket)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to decode ticket, %s"}`, err.Error())
+			fmt.Fprintf(w, `{"msg": "failed to decode ticket, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
 			return
 		}
 	}
@@ -459,7 +459,7 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 		value, err := strconv.ParseBool(copyMode)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error())
+			fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
 			return
 		}
 		request.CopyMode = value
@@ -528,7 +528,7 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 		value, err := strconv.ParseBool(copyMode)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error())
+			fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
 			return
 		}
 		request.CopyMode = value
@@ -551,21 +551,21 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 }
 
 func (node *Proxy) CheckQueryNodeDistribution(w http.ResponseWriter, req *http.Request) {
-	err := req.ParseForm()
+	err := req.ParseForm() //nolint:gosec // internal admin endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())
+		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
 		return
 	}
 
-	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64)
+	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, `{"msg": failed to check whether query node has same distribution", %s"}`, err.Error())
 		return
 	}
 
-	target, err := strconv.ParseInt(req.FormValue("target_node_id"), 10, 64)
+	target, err := strconv.ParseInt(req.FormValue("target_node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())

@@ -18,7 +18,7 @@ package external
 
 import (
 	"context"
-	"errors"
+	"github.com/cockroachdb/errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -109,9 +109,7 @@ func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 	err := manager.SubmitTask(clusterID, req, taskFunc)
 	assert.NoError(t, err)
 
-	require.Eventually(t, func() bool {
-		return executed.Load()
-	}, time.Second, 10*time.Millisecond)
+	require.Eventually(t, executed.Load, time.Second, 10*time.Millisecond)
 
 	require.Eventually(t, func() bool {
 		info := manager.Get(clusterID, taskID)
@@ -401,9 +399,7 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 
 	close(unblock)
 
-	require.Eventually(t, func() bool {
-		return executed.Load()
-	}, time.Second, 10*time.Millisecond)
+	require.Eventually(t, executed.Load, time.Second, 10*time.Millisecond)
 
 	// Task should have executed before close
 	assert.True(t, executed.Load())
