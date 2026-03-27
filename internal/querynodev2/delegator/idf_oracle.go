@@ -39,9 +39,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -61,7 +63,7 @@ type IDFOracle interface {
 	// LoadSealed loads BM25 stats for a sealed segment from remote storage.
 	// Internally handles: streaming download → local disk → optional parse → register.
 	// Idempotent: skips if segment already loaded.
-	LoadSealed(ctx context.Context, segmentID int64, bm25Logs []*datapb.FieldBinlog, cm storage.ChunkManager) error
+	LoadSealed(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager) error
 
 	BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error)
 
@@ -255,6 +257,7 @@ func (o *idfOracle) preloadSealed(segmentID int64, stats *sealedBm25Stats, memor
 
 	// skip preload if first target was loaded.
 	if o.targetVersion.Load() != 0 {
+		o.sealed.Insert(segmentID, stats)
 		return
 	}
 	o.sealed.Insert(segmentID, stats)
@@ -279,20 +282,28 @@ func (o *idfOracle) RegisterGrowing(segmentID int64, stats bm25Stats) {
 
 // LoadSealed loads BM25 stats for a sealed segment from remote storage to local disk.
 // Idempotent: skips if segment already loaded.
-func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, bm25Logs []*datapb.FieldBinlog, cm storage.ChunkManager) error {
+func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager) error {
 	_, err, _ := o.sf.Do(fmt.Sprintf("load_sealed_%d", segmentID), func() (any, error) {
 		if o.sealed.Contain(segmentID) {
 			return nil, nil
 		}
 
-		binlogPaths := filterBM25Logs(bm25Logs)
-		if len(binlogPaths) == 0 {
+		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
+		if err != nil {
+			log.Warn("load remote segment bm25 stats failed",
+				zap.Int64("segmentID", segmentID),
+				zap.Error(err),
+			)
+			return nil, err
+		}
+
+		if len(logpaths) == 0 {
 			return nil, nil
 		}
 
 		needParse := o.targetVersion.Load() == 0 && paramtable.Get().QueryNodeCfg.IDFPreload.GetAsBool()
 
-		result, err := o.streamLoad(ctx, segmentID, binlogPaths, cm, needParse)
+		result, err := o.streamLoad(ctx, segmentID, logpaths, cm, needParse)
 		if err != nil {
 			// cleanup on failure
 			os.RemoveAll(path.Join(o.dirPath, fmt.Sprintf("%d", segmentID)))

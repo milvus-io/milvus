@@ -418,7 +418,7 @@ func (sd *shardDelegator) loadBM25Stats(ctx context.Context, infos []*querypb.Se
 	for _, info := range infos {
 		info := info
 		futures = append(futures, pool.Submit(func() (any, error) {
-			if err := sd.idfOracle.LoadSealed(ctx, info.GetSegmentID(), info.GetBm25Logs(), cm); err != nil {
+			if err := sd.idfOracle.LoadSealed(ctx, info.GetSegmentID(), info, cm); err != nil {
 				log.Warn("failed to load bm25 stats for segment",
 					zap.Int64("collectionID", req.GetCollectionID()),
 					zap.Int64("segmentID", info.GetSegmentID()),
