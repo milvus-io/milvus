@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "knowhere/expected.h"
+#include "knowhere/sparse_utils.h"
 
 namespace knowhere {
 
@@ -63,6 +64,17 @@ enum Type {
 
 template <typename T>
 struct IndexStaticFaced {
+    static std::unique_ptr<BaseConfig>
+    CreateConfig(const std::string&, int64_t) {
+        return std::make_unique<BaseConfig>();
+    }
+
+    static Status
+    ConfigCheck(const std::string&, int64_t, const Config&, std::string& message) {
+        message.clear();
+        return Status::success;
+    }
+
     static expected<Resource>
     EstimateLoadResource(const std::string&,
                          int64_t,
@@ -86,13 +98,5 @@ inline bool
 UseDiskLoad(const std::string&, int64_t) {
     return false;
 }
-
-namespace sparse {
-template <typename T>
-class SparseRow {
- public:
-    SparseRow() = default;
-};
-}  // namespace sparse
 
 }  // namespace knowhere

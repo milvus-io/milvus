@@ -22,18 +22,66 @@ enum class Status {
     invalid_binary_set = 11,
 };
 
+inline const char*
+Status2String(Status status) {
+    switch (status) {
+        case Status::success:
+            return "success";
+        case Status::invalid_args:
+            return "invalid_args";
+        case Status::invalid_param_in_json:
+            return "invalid_param_in_json";
+        case Status::out_of_range_in_json:
+            return "out_of_range_in_json";
+        case Status::type_conflict_in_json:
+            return "type_conflict_in_json";
+        case Status::invalid_metric_type:
+            return "invalid_metric_type";
+        case Status::empty_index:
+            return "empty_index";
+        case Status::not_implemented:
+            return "not_implemented";
+        case Status::index_not_trained:
+            return "index_not_trained";
+        case Status::invalid_index_error:
+            return "invalid_index_error";
+        case Status::invalid_cluster_error:
+            return "invalid_cluster_error";
+        case Status::invalid_binary_set:
+            return "invalid_binary_set";
+    }
+    return "unknown";
+}
+
 template <typename T>
 class expected {
  public:
+    expected() : value_(std::make_optional<T>()) {
+    }
+
     expected(const T& value) : value_(value) {
     }
 
     expected(T&& value) : value_(std::move(value)) {
     }
 
-    expected(Status error) : error_(error) {
+    expected(const Status& error) : error_(error) {
         assert(error != Status::success);
     }
+
+    expected(Status&& error) : error_(error) {
+        assert(error != Status::success);
+    }
+
+    expected(const expected<T>&) = default;
+
+    expected(expected<T>&&) noexcept = default;
+
+    expected&
+    operator=(const expected<T>&) = default;
+
+    expected&
+    operator=(expected<T>&&) noexcept = default;
 
     bool
     has_value() const {
@@ -66,6 +114,14 @@ class expected {
     void
     operator<<(const std::string& message) {
         message_ += message;
+    }
+
+    expected<T>&
+    operator=(const Status& error) {
+        assert(error != Status::success);
+        value_.reset();
+        error_ = error;
+        return *this;
     }
 
  private:

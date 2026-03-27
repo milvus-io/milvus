@@ -82,9 +82,21 @@ class DataSet {
     }
 
     void
+    SetTensorBeginId(int64_t offset) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        data_[meta::INPUT_BEG_ID] = offset;
+    }
+
+    void
     SetIsOwner(bool is_owner) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
         is_owner_ = is_owner;
+    }
+
+    void
+    SetIsSparse(bool is_sparse) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        is_sparse_ = is_sparse;
     }
 
     const float*
@@ -129,6 +141,19 @@ class DataSet {
         return it == data_.end() ? 0 : *std::get_if<int64_t>(&it->second);
     }
 
+    int64_t
+    GetTensorBeginId() const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        auto it = data_.find(meta::INPUT_BEG_ID);
+        return it == data_.end() ? 0 : *std::get_if<int64_t>(&it->second);
+    }
+
+    bool
+    IsSparse() const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        return is_sparse_;
+    }
+
     template <typename T>
     void
     Set(const std::string& key, T&& value) {
@@ -151,6 +176,7 @@ class DataSet {
     mutable std::shared_mutex mutex_;
     std::map<std::string, Var> data_;
     bool is_owner_ = true;
+    bool is_sparse_ = false;
 };
 
 using DataSetPtr = std::shared_ptr<DataSet>;

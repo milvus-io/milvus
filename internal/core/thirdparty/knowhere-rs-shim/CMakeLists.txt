@@ -28,3 +28,7 @@ target_link_libraries(knowhere_rs_compile_surface_smoke PRIVATE knowhere)
 add_executable(knowhere_rs_hnsw_roundtrip_smoke tests/hnsw_roundtrip_smoke.cpp)
 target_compile_features(knowhere_rs_hnsw_roundtrip_smoke PRIVATE cxx_std_17)
 target_link_libraries(knowhere_rs_hnsw_roundtrip_smoke PRIVATE knowhere)
+
+add_executable(knowhere_rs_brute_force_smoke tests/brute_force_smoke.cpp)
+target_compile_features(knowhere_rs_brute_force_smoke PRIVATE cxx_std_17)
+target_link_libraries(knowhere_rs_brute_force_smoke PRIVATE knowhere)

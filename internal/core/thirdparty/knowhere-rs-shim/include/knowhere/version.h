@@ -20,6 +20,16 @@ class Version {
         return Version(kCurrentVersion);
     }
 
+    static constexpr Version
+    GetMinimalVersion() {
+        return Version(kCurrentVersion);
+    }
+
+    static constexpr Version
+    GetMaximumVersion() {
+        return Version(kCurrentVersion);
+    }
+
     static constexpr bool
     VersionSupport(const Version&) {
         return true;
