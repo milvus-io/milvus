@@ -67,6 +67,16 @@ ScalarIndexCreator::ScalarIndexCreator(
             config, milvus::index::TANTIVY_INDEX_VERSION)
             .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
 
+    auto is_text_match_str =
+        milvus::index::GetValueFromConfig<std::string>(config, "is_text_match")
+            .value_or("false");
+    index_info.is_text_match = (is_text_match_str == "true");
+
+    index_info.analyzer_extra_info =
+        milvus::index::GetValueFromConfig<std::string>(config,
+                                                       "analyzer_extra_info")
+            .value_or("");
+
     index_info.field_type = dtype_;
     index_info.index_type = index_type();
     if (dtype == DataType::JSON) {
