@@ -310,7 +310,7 @@ func Test_sealByBlockingL0(t *testing.T) {
 			channel:         "channel_1",
 			sizeLimit:       -1,
 			entryNumLimit:   100,
-			l0Segments:      []*SegmentInfo{l0_1, l0_2},           // ts: [10,20] [30, 40], entryNum: 50, 60
+			l0Segments:      []*SegmentInfo{l0_1, l0_2},         // ts: [10,20] [30, 40], entryNum: 50, 60
 			growingSegments: []*SegmentInfo{growing1, growing2}, // ts: [10, 35]
 			expected:        []int64{2001},
 		},
@@ -319,7 +319,7 @@ func Test_sealByBlockingL0(t *testing.T) {
 			channel:         "channel_1",
 			sizeLimit:       1, // 1MB
 			entryNumLimit:   -1,
-			l0Segments:      []*SegmentInfo{l0_1, l0_2},           // ts: [10,20] [30, 40], entryNum: 1MB, 2MB
+			l0Segments:      []*SegmentInfo{l0_1, l0_2},         // ts: [10,20] [30, 40], entryNum: 1MB, 2MB
 			growingSegments: []*SegmentInfo{growing1, growing2}, // ts: [10, 35]
 			expected:        []int64{2001, 2002},
 		},

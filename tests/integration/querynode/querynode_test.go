@@ -44,7 +44,7 @@ type QueryNodeSuite struct {
 	dim               int
 	numCollections    int
 	rowsPerCollection int
-	waitTime     time.Duration
+	waitTime          time.Duration
 	prefix            string
 }
 
