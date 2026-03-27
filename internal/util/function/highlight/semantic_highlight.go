@@ -62,11 +62,11 @@ func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commo
 		switch param.Key {
 		case queryKeyName:
 			if err := json.Unmarshal([]byte(param.Value), &queries); err != nil {
-				return nil, fmt.Errorf("Parse queries failed, err: %v", err)
+				return nil, fmt.Errorf("parse queries failed, err: %v", err)
 			}
 		case inputFieldKeyName:
 			if err := json.Unmarshal([]byte(param.Value), &inputFields); err != nil {
-				return nil, fmt.Errorf("Parse input_field failed, err: %v", err)
+				return nil, fmt.Errorf("parse input_field failed, err: %v", err)
 			}
 		}
 	}
@@ -171,7 +171,7 @@ func (highlight *SemanticHighlight) processOneQuery(ctx context.Context, query s
 		return nil, nil, err
 	}
 	if len(highlights) != len(documents) || len(scores) != len(documents) {
-		return nil, nil, fmt.Errorf("Highlights size must equal to documents size, but got highlights size [%d], scores size [%d], documents size [%d]", len(highlights), len(scores), len(documents))
+		return nil, nil, fmt.Errorf("highlights size must equal to documents size, but got highlights size [%d], scores size [%d], documents size [%d]", len(highlights), len(scores), len(documents))
 	}
 
 	return highlights, scores, nil
@@ -192,7 +192,7 @@ func (highlight *SemanticHighlight) Process(ctx context.Context, topks []int64, 
 
 	for i, query := range highlight.queries {
 		size := topks[i]
-		singleQueryHighlights, singleQueryScores, err := highlight.processOneQuery(ctx, query, documents[start:start+size])
+		singleQueryHighlights, singleQueryScores, err := highlight.processOneQuery(ctx, query, documents[start:start+size]) //nolint:gosec // bounds are guaranteed by topks summing to len(documents)
 		if err != nil {
 			return nil, nil, err
 		}

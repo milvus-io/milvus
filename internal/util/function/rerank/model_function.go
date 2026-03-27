@@ -73,7 +73,7 @@ func NewModelProvider(params []*commonpb.KeyValuePair, extraInfo *models.ModelEx
 			provider := strings.ToLower(param.Value)
 			conf := paramtable.Get().FunctionCfg.GetRerankModelProviders(provider)
 			if !models.IsEnable(conf) {
-				return nil, fmt.Errorf("Rerank provider: [%s] is disabled", provider)
+				return nil, fmt.Errorf("rerank provider: [%s] is disabled", provider)
 			}
 			credentials := credentials.NewCredentials(paramtable.Get().CredentialCfg.GetCredentials())
 			switch provider {
@@ -93,9 +93,9 @@ func NewModelProvider(params []*commonpb.KeyValuePair, extraInfo *models.ModelEx
 				conf := paramtable.Get().FunctionCfg.ZillizProviders.GetValue()
 				return newZillizProvider(params, conf, extraInfo)
 			default:
-				return nil, fmt.Errorf("Unknow rerank model provider:%s", param.Value)
+				return nil, fmt.Errorf("unknown rerank model provider:%s", param.Value)
 			}
 		}
 	}
-	return nil, fmt.Errorf("Lost rerank params:%s ", providerParamName)
+	return nil, fmt.Errorf("lost rerank params:%s ", providerParamName)
 }

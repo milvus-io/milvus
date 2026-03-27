@@ -83,7 +83,7 @@ func NewYCEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *s
 		return nil, err
 	}
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.YandexCloudAKEnvStr)
+		return nil, fmt.Errorf("missing credentials config or configure the %s environment variable in the Milvus service", models.YandexCloudAKEnvStr)
 	}
 	if url == "" {
 		url = defaultYCTextEmbeddingURL
@@ -142,11 +142,11 @@ func (provider *YCEmbeddingProvider) CallEmbedding(ctx context.Context, texts []
 
 		embeddings := extractYCEmbeddings(resp)
 		if end-i != len(embeddings) {
-			return nil, fmt.Errorf("Get embedding failed. The number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(embeddings))
+			return nil, fmt.Errorf("get embedding failed, the number of texts and embeddings does not match text:[%d], embedding:[%d]", end-i, len(embeddings))
 		}
 		for _, emb := range embeddings {
 			if len(emb) != int(provider.fieldDim) {
-				return nil, fmt.Errorf("The required embedding dim is [%d], but the embedding obtained from the model is [%d]",
+				return nil, fmt.Errorf("the required embedding dim is [%d], but the embedding obtained from the model is [%d]",
 					provider.fieldDim, len(emb))
 			}
 			data = append(data, emb)
