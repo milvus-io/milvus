@@ -20,11 +20,9 @@ package hookutil
 
 import (
 	"fmt"
-	"plugin"
 	"sync"
 	"sync/atomic"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
@@ -72,25 +70,9 @@ func initHook() error {
 		return nil
 	}
 
-	log.Info("start to load plugin", zap.String("path", path))
-	LockHookInit()
-	defer UnlockHookInit()
-	p, err := plugin.Open(path)
+	hookVal, err := LoadPlugin[hook.Hook](path, "MilvusHook")
 	if err != nil {
-		return fmt.Errorf("fail to open the plugin, error: %s", err.Error())
-	}
-	log.Info("plugin open")
-
-	h, err := p.Lookup("MilvusHook")
-	if err != nil {
-		return fmt.Errorf("fail to the 'MilvusHook' object in the plugin, error: %s", err.Error())
-	}
-
-	var hookVal hook.Hook
-	var ok bool
-	hookVal, ok = h.(hook.Hook)
-	if !ok {
-		return errors.New("fail to convert the `Hook` interface")
+		return err
 	}
 	if err = hookVal.Init(paramtable.GetHookParams().SoConfig.GetValue()); err != nil {
 		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
@@ -109,14 +91,9 @@ func initHook() error {
 		}()
 	})
 
-	e, err := p.Lookup("MilvusExtension")
+	extVal, err := LoadPlugin[hook.Extension](path, "MilvusExtension")
 	if err != nil {
-		return fmt.Errorf("fail to the 'MilvusExtension' object in the plugin, error: %s", err.Error())
-	}
-	var extVal hook.Extension
-	extVal, ok = e.(hook.Extension)
-	if !ok {
-		return errors.New("fail to convert the `Extension` interface")
+		return err
 	}
 	storeExtension(extVal)
 
@@ -127,13 +104,11 @@ func InitOnceHook() {
 	initOnce.Do(func() {
 		err := initHook()
 		if err != nil {
-			logFunc := log.Warn
+			soPath := paramtable.Get().ProxyCfg.SoPath.GetValue()
 			if paramtable.Get().CommonCfg.PanicWhenPluginFail.GetAsBool() {
-				logFunc = log.Panic
+				log.Panic(fmt.Sprintf("fail to init hook, so_path=%s, error=%v", soPath, err))
 			}
-			logFunc("fail to init hook",
-				zap.String("so_path", paramtable.Get().ProxyCfg.SoPath.GetValue()),
-				zap.Error(err))
+			log.Warn("fail to init hook", zap.String("so_path", soPath), zap.Error(err))
 		}
 	})
 }
