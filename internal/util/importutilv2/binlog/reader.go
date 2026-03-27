@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
@@ -228,7 +229,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 				case schemapb.DataType_Int64:
 					pk = rec.Column(0).(*array.Int64).Value(i)
 				case schemapb.DataType_VarChar:
-					pk = rec.Column(0).(*array.String).Value(i)
+					pk = strings.Clone(rec.Column(0).(*array.String).Value(i))
 				}
 				if tsExisting, ok := tempData[pk]; ok && tsExisting > ts {
 					// skip if existing entry is newer

@@ -19,6 +19,7 @@ package parquet
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -259,7 +260,7 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 					}
 				case *array.String:
 					if !field.IsNull(int(structIdx)) {
-						combinedData = append(combinedData, field.Value(int(structIdx)))
+						combinedData = append(combinedData, strings.Clone(field.Value(int(structIdx))))
 					}
 				}
 			}

@@ -19,7 +19,6 @@ package compaction
 import (
 	"context"
 	"io"
-	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/cockroachdb/errors"
@@ -51,7 +50,7 @@ func readFromReader(reader storage.RecordReader, pkType schemapb.DataType) ([]st
 			if pkType == schemapb.DataType_Int64 {
 				pk = storage.NewInt64PrimaryKey(rec.Column(0).(*array.Int64).Value(i))
 			} else {
-				pk = storage.NewVarCharPrimaryKey(strings.Clone(rec.Column(0).(*array.String).Value(i)))
+				pk = storage.NewVarCharPrimaryKey(rec.Column(0).(*array.String).Value(i))
 			}
 			ts := typeutil.Timestamp(rec.Column(1).(*array.Int64).Value(i))
 			pks = append(pks, pk)
