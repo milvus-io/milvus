@@ -1566,6 +1566,13 @@ func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResul
 		return fmt.Errorf("num of queries is inconsistent between search results(%d) and ground truth(%d)", results.GetNumQueries(), gts.GetNumQueries())
 	}
 
+	// When search returns no results, IDs field is nil. Set recalls to 0 for all queries.
+	if results.GetIds() == nil || results.GetIds().GetIdField() == nil ||
+		gts.GetIds() == nil || gts.GetIds().GetIdField() == nil {
+		results.Recalls = make([]float32, results.GetNumQueries())
+		return nil
+	}
+
 	switch results.GetIds().GetIdField().(type) {
 	case *schemapb.IDs_IntId:
 		switch gts.GetIds().GetIdField().(type) {
