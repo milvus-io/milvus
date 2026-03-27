@@ -441,10 +441,17 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
         }
         EXPECT_EQ(index->Count(), (add_cont + 1) * N);
     } else if (is_sparse) {
+        // Use the CC (concurrent) variant of sparse index types, since
+        // non-CC sparse indices do not support incremental Add() after
+        // the initial Build().
+        auto cc_index_type =
+            (index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND)
+                ? knowhere::IndexEnum::INDEX_SPARSE_WAND_CC
+                : knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC;
         auto index =
             std::make_unique<milvus::index::VectorMemIndex<sparse_u32_f32>>(
                 DataType::NONE,
-                index_type,
+                cc_index_type,
                 metric_type,
                 knowhere::Version::GetCurrentVersion().VersionNumber(),
                 false,
