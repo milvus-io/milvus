@@ -32,7 +32,6 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"plugin"
 	"strings"
 	"sync"
 	"time"
@@ -555,30 +554,16 @@ func (node *QueryNode) SetAddress(address string) {
 
 // initHook initializes parameter tuning hook.
 func (node *QueryNode) initHook() error {
-	log := log.Ctx(node.ctx)
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
 	if path == "" {
 		return errors.New("fail to set the plugin path")
 	}
-	log.Info("start to load plugin", zap.String("path", path))
 
-	hookutil.LockHookInit()
-	defer hookutil.UnlockHookInit()
-	p, err := plugin.Open(path)
+	hoo, err := hookutil.LoadPlugin[optimizers.QueryHook](path, "QueryNodePlugin")
 	if err != nil {
-		return fmt.Errorf("fail to open the plugin, error: %s", err.Error())
-	}
-	log.Info("plugin open")
-
-	h, err := p.Lookup("QueryNodePlugin")
-	if err != nil {
-		return fmt.Errorf("fail to find the 'QueryNodePlugin' object in the plugin, error: %s", err.Error())
+		return err
 	}
 
-	hoo, ok := h.(optimizers.QueryHook)
-	if !ok {
-		return errors.New("fail to convert the `Hook` interface")
-	}
 	if err = hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
 		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
 	}
