@@ -84,16 +84,6 @@ func TestGetParamsFromJSON_InvalidJSON(t *testing.T) {
 func TestGetParamsFromJSON_EmptyJSON(t *testing.T) {
 	// Test compatibility
 	emptyJSON := ``
-	result, err := ParseParamsFromJSON(emptyJSON)
-	assert.NoError(t, err)
-	assert.Equal(t, Params{
-		StorageVersion:            storage.StorageV3,
-		UseLoonFFI:                true,
-		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
-		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
-		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
-		PreferSegmentSizeRatio:    paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
-		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
-		StorageConfig:             CreateStorageConfig(),
-	}, result)
+	_, err := ParseParamsFromJSON(emptyJSON)
+	assert.Error(t, err)
 }
