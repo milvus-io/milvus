@@ -419,7 +419,9 @@ func (w *SegmentWriter) SerializeYield() ([]*storage.Blob, *writebuffer.TimeRang
 	}
 
 	tr := w.GetTimeRange()
-	w.clear()
+	if err := w.clear(); err != nil {
+		return nil, nil, err
+	}
 
 	return fieldData, tr, nil
 }
@@ -428,14 +430,18 @@ func (w *SegmentWriter) GetTotalSize() int64 {
 	return w.syncedSize.Load() + int64(w.writer.GetWrittenUncompressed())
 }
 
-func (w *SegmentWriter) clear() {
+func (w *SegmentWriter) clear() error {
 	w.syncedSize.Add(int64(w.writer.GetWrittenUncompressed()))
 
-	writer, closers, _ := newBinlogWriter(w.collectionID, w.partitionID, w.segmentID, w.sch, w.batchSize)
+	writer, closers, err := newBinlogWriter(w.collectionID, w.partitionID, w.segmentID, w.sch, w.batchSize)
+	if err != nil {
+		return err
+	}
 	w.writer = writer
 	w.closers = closers
 	w.tsFrom = math.MaxUint64
 	w.tsTo = 0
+	return nil
 }
 
 // deprecated: use NewMultiSegmentWriter instead

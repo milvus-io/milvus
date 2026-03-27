@@ -59,7 +59,7 @@ func printBinlogFile(filename string) error {
 
 	at, err := mmap.Open(filename)
 	if err != nil {
-		return nil
+		return err
 	}
 	defer at.Close()
 
