@@ -896,7 +896,7 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 		}
 		vectorArrayFieldData := fieldData.(*VectorArrayFieldData)
 
-		if validData != nil && len(validData) > 0 {
+		if len(validData) > 0 {
 			return 0, fmt.Errorf("nullable ArrayOfVector is not supported in V1 storage format")
 		}
 		vectorArrayFieldData.Data = append(vectorArrayFieldData.Data, singleData...)

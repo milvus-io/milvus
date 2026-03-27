@@ -563,16 +563,6 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 		}
 
 	case *schemapb.FieldData_Vectors:
-		// Vector types (including ArrayOfVector) stay in compact format.
-		// FieldDataIdxComputer + AppendFieldData handle compact nullable vectors correctly.
-		// Just validate the data length matches the number of valid rows.
-		if vectorArray := field.GetVectors().GetVectorArray(); vectorArray != nil {
-			n := getValidNumber(field.GetValidData())
-			if len(vectorArray.Data) != n {
-				return merr.WrapErrParameterInvalid(n, len(vectorArray.Data), "the length of ArrayOfVector field is wrong")
-			}
-		}
-		// Non-array vector types are handled elsewhere (they use flat byte arrays, not slices)
 	default:
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 	}

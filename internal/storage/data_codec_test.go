@@ -2028,3 +2028,63 @@ func TestAddFieldDataToPayload(t *testing.T) {
 	})
 	assert.Error(t, err)
 }
+
+func TestAddFieldDataToPayload_BanNullableArrayOfVector(t *testing.T) {
+	data := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data:        []*schemapb.VectorField{makeFloatVec(4, 1, 2, 3, 4)},
+		ValidData:   []bool{true, false},
+		Nullable:    true,
+	}
+
+	w, err := newInsertEventWriter(schemapb.DataType_ArrayOfVector, WithDim(4), WithElementType(schemapb.DataType_FloatVector))
+	require.NoError(t, err)
+	defer w.Close()
+
+	err = AddFieldDataToPayload(w, schemapb.DataType_ArrayOfVector, data)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "nullable ArrayOfVector is not supported in V1 storage format")
+}
+
+func TestAddInsertData_BanNullableArrayOfVector(t *testing.T) {
+	insertData := &InsertData{Data: make(map[FieldID]FieldData)}
+
+	singleData := []*schemapb.VectorField{makeFloatVec(4, 1, 2, 3, 4)}
+	validData := []bool{true, false}
+
+	_, err := AddInsertData(
+		schemapb.DataType_ArrayOfVector,
+		singleData,
+		insertData,
+		100,
+		2,
+		nil,
+		4,
+		validData,
+	)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "nullable ArrayOfVector is not supported in V1 storage format")
+}
+
+func TestAddInsertData_NonNullableArrayOfVector(t *testing.T) {
+	insertData := &InsertData{Data: make(map[FieldID]FieldData)}
+
+	singleData := []*schemapb.VectorField{makeFloatVec(4, 1, 2, 3, 4)}
+
+	n, err := AddInsertData(
+		schemapb.DataType_ArrayOfVector,
+		singleData,
+		insertData,
+		100,
+		1,
+		nil,
+		4,
+		nil,
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, n)
+
+	fd := insertData.Data[100].(*VectorArrayFieldData)
+	assert.Equal(t, 1, len(fd.Data))
+}

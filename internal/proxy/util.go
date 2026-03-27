@@ -1995,13 +1995,51 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 		}
 		totalSubFields := len(structArrays.StructArrays.Fields)
 		if hasDataCount == 0 {
-			// All sub-fields are empty — skip flattening, let checkFieldsDataBySchema
-			// handle missing nullable fields.
-			continue
-		}
-		if hasDataCount != totalSubFields {
-			return fmt.Errorf("inconsistent sub-field data in struct '%s': %d of %d sub-fields have data, all must be present or all absent",
-				structName, hasDataCount, totalSubFields)
+			// All sub-fields have empty payload. Patch nil Fields in-place with
+			// empty wrappers so the normal flatten path below can process them.
+			// Downstream fillWithValue/checkAligned will validate ValidData consistency.
+			for _, subField := range structArrays.StructArrays.Fields {
+				subFieldSchema := typeutil.GetFieldByID(schema, subField.FieldId)
+				if subFieldSchema == nil {
+					return fmt.Errorf("sub-field not found in struct schema, fieldName: %s, fieldId: %d, structName: %s", subField.FieldName, subField.FieldId, structName)
+				}
+				emptyField, err := typeutil.GenEmptyFieldData(subFieldSchema)
+				if err != nil {
+					return err
+				}
+				subField.Field = emptyField.Field
+			}
+		} else {
+			if hasDataCount != totalSubFields {
+				return fmt.Errorf("inconsistent sub-field data in struct '%s': %d of %d sub-fields have data, all must be present or all absent",
+					structName, hasDataCount, totalSubFields)
+			}
+
+			// Validate that all sub-fields share the same ValidData mask.
+			// Nullable is a struct-level concept: a row is either entirely null or entirely present.
+			if structSchema.GetNullable() {
+				var refValidData []bool
+				var refFieldName string
+				refInitialized := false
+				for _, subField := range structArrays.StructArrays.Fields {
+					if !refInitialized {
+						refValidData = subField.ValidData
+						refFieldName = subField.FieldName
+						refInitialized = true
+						continue
+					}
+					if len(subField.ValidData) != len(refValidData) {
+						return fmt.Errorf("sub-field ValidData length mismatch in struct '%s': '%s' has %d, '%s' has %d",
+							structName, refFieldName, len(refValidData), subField.FieldName, len(subField.ValidData))
+					}
+					for j := range refValidData {
+						if subField.ValidData[j] != refValidData[j] {
+							return fmt.Errorf("sub-field ValidData mismatch in struct '%s' at row %d: '%s'=%v, '%s'=%v",
+								structName, j, refFieldName, refValidData[j], subField.FieldName, subField.ValidData[j])
+						}
+					}
+				}
+			}
 		}
 
 		// Check the array length of the struct array field data

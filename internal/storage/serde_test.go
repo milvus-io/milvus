@@ -1150,3 +1150,73 @@ func TestActualSizeInBytesCompareWithDataSizeInBytes(t *testing.T) {
 		assert.Less(t, actualSize, uint64(totalRows*byteWidth))
 	})
 }
+
+func TestBuildRecord_NullableArrayOfVector(t *testing.T) {
+	dim := 4
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     100,
+				Name:        "vec_array",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				Nullable:    true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: fmt.Sprintf("%d", dim)},
+				},
+			},
+		},
+	}
+
+	vec0 := makeFloatVec(dim, 1, 2, 3, 4)
+	vec2 := makeFloatVec(dim, 5, 6, 7, 8)
+
+	insertData := &InsertData{
+		Data: map[FieldID]FieldData{
+			100: &VectorArrayFieldData{
+				Data:        []*schemapb.VectorField{vec0, vec2},
+				ElementType: schemapb.DataType_FloatVector,
+				Dim:         int64(dim),
+				ValidData:   []bool{true, false, true},
+				Nullable:    true,
+				L2PMapping: func() LogicalToPhysicalMapping {
+					var m LogicalToPhysicalMapping
+					m.Build([]bool{true, false, true}, 0, 3)
+					return m
+				}(),
+			},
+		},
+	}
+
+	arrowSchema, err := ConvertToArrowSchema(schema, false)
+	assert.NoError(t, err)
+
+	recordBuilder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer recordBuilder.Release()
+
+	err = BuildRecord(recordBuilder, insertData, schema)
+	assert.NoError(t, err)
+
+	record := recordBuilder.NewRecord()
+	defer record.Release()
+
+	assert.Equal(t, int64(3), record.NumRows())
+
+	// Verify metadata preserved (elementType + dim)
+	field := arrowSchema.Field(0)
+	assert.True(t, field.HasMetadata())
+
+	elementTypeStr, ok := field.Metadata.GetValue("elementType")
+	assert.True(t, ok)
+	assert.Equal(t, fmt.Sprintf("%d", int32(schemapb.DataType_FloatVector)), elementTypeStr)
+
+	dimStr, ok := field.Metadata.GetValue("dim")
+	assert.True(t, ok)
+	assert.Equal(t, fmt.Sprintf("%d", dim), dimStr)
+
+	// Verify null bitmap
+	col := record.Column(0)
+	assert.True(t, col.IsValid(0))
+	assert.True(t, col.IsNull(1))
+	assert.True(t, col.IsValid(2))
+}

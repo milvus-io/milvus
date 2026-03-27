@@ -8019,4 +8019,40 @@ func TestFillWithNullValue_Geometry(t *testing.T) {
 		assert.Equal(t, []byte{0x03, 0x04}, field.GetScalars().GetGeometryData().GetData()[2])
 		assert.Nil(t, field.GetScalars().GetGeometryData().GetData()[3])
 	})
+
+	t.Run("ArrayOfVector stays compact", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			FieldName: "vec_array",
+			Type:      schemapb.DataType_ArrayOfVector,
+			ValidData: []bool{true, false, true},
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 4,
+					Data: &schemapb.VectorField_VectorArray{
+						VectorArray: &schemapb.VectorArray{
+							Data: []*schemapb.VectorField{
+								{Dim: 4, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}},
+								{Dim: 4, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{5, 6, 7, 8}}}},
+							},
+							Dim:         4,
+							ElementType: schemapb.DataType_FloatVector,
+						},
+					},
+				},
+			},
+		}
+
+		fieldSchema := &schemapb.FieldSchema{
+			Name:        "vec_array",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector,
+			Nullable:    true,
+		}
+		err := FillWithNullValue(field, fieldSchema, 3)
+		assert.NoError(t, err)
+
+		vectorArray := field.GetVectors().GetVectorArray()
+		require.NotNil(t, vectorArray)
+		assert.Equal(t, 2, len(vectorArray.Data))
+	})
 }

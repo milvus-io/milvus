@@ -3,6 +3,8 @@ package storage
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
@@ -476,4 +478,130 @@ func (s *ArrayFieldDataSuite) TestArrayFieldData() {
 	s.Equal(126, insertData.GetMemorySize())
 	s.False(insertData.IsEmpty())
 	s.Equal(115, insertData.GetRowSize(0))
+}
+
+func makeFloatVec(dim int, vals ...float32) *schemapb.VectorField {
+	return &schemapb.VectorField{
+		Dim: int64(dim),
+		Data: &schemapb.VectorField_FloatVector{
+			FloatVector: &schemapb.FloatArray{Data: vals},
+		},
+	}
+}
+
+func TestVectorArrayFieldData_NullableAppendAndGetRow(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data:        make([]*schemapb.VectorField, 0),
+		ValidData:   make([]bool, 0),
+		Nullable:    true,
+	}
+
+	vec0 := makeFloatVec(4, 1, 2, 3, 4)
+	vec2 := makeFloatVec(4, 5, 6, 7, 8)
+
+	require.NoError(t, fd.AppendRow(vec0))
+	require.NoError(t, fd.AppendRow(nil))
+	require.NoError(t, fd.AppendRow(vec2))
+
+	assert.Equal(t, 3, fd.RowNum(), "RowNum should count logical rows including nulls")
+	assert.Equal(t, 2, len(fd.Data), "Data should only contain valid rows (compact)")
+	assert.Equal(t, []bool{true, false, true}, fd.GetValidData())
+	assert.True(t, fd.GetNullable())
+
+	assert.Equal(t, vec0, fd.GetRow(0))
+	assert.Nil(t, fd.GetRow(1), "null row should return nil")
+	assert.Equal(t, vec2, fd.GetRow(2))
+}
+
+func TestVectorArrayFieldData_NonNullable(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data:        make([]*schemapb.VectorField, 0),
+		Nullable:    false,
+	}
+
+	vec := makeFloatVec(4, 1, 2, 3, 4)
+	require.NoError(t, fd.AppendRow(vec))
+
+	assert.Equal(t, 1, fd.RowNum())
+	assert.False(t, fd.GetNullable())
+	assert.Nil(t, fd.GetValidData())
+	assert.Equal(t, vec, fd.GetRow(0))
+}
+
+func TestVectorArrayFieldData_AppendValidDataRows(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data: []*schemapb.VectorField{
+			makeFloatVec(4, 1, 2, 3, 4),
+			makeFloatVec(4, 5, 6, 7, 8),
+		},
+		Nullable: true,
+	}
+
+	err := fd.AppendValidDataRows([]bool{true, false, true})
+	require.NoError(t, err)
+
+	assert.Equal(t, []bool{true, false, true}, fd.GetValidData())
+	assert.Equal(t, 0, fd.L2PMapping.GetPhysicalOffset(0))
+	assert.Equal(t, -1, fd.L2PMapping.GetPhysicalOffset(1))
+	assert.Equal(t, 1, fd.L2PMapping.GetPhysicalOffset(2))
+
+	assert.NoError(t, fd.AppendValidDataRows(nil))
+	assert.Error(t, fd.AppendValidDataRows("bad"))
+}
+
+func TestVectorArrayFieldData_GetMemorySize(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data:        []*schemapb.VectorField{makeFloatVec(4, 1, 2, 3, 4)},
+		ValidData:   []bool{true, false},
+		Nullable:    true,
+	}
+
+	assert.Greater(t, fd.GetMemorySize(), 0)
+}
+
+func TestVectorArrayFieldData_AllNull(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data:        make([]*schemapb.VectorField, 0),
+		ValidData:   make([]bool, 0),
+		Nullable:    true,
+	}
+
+	for i := 0; i < 3; i++ {
+		require.NoError(t, fd.AppendRow(nil))
+	}
+
+	assert.Equal(t, 3, fd.RowNum())
+	assert.Equal(t, 0, len(fd.Data))
+	for i := 0; i < 3; i++ {
+		assert.Nil(t, fd.GetRow(i))
+	}
+}
+
+func TestNewFieldData_NullableArrayOfVector(t *testing.T) {
+	schema := &schemapb.FieldSchema{
+		FieldID:     100,
+		Name:        "vec_arr",
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector,
+		Nullable:    true,
+		TypeParams:  []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+	}
+	fd, err := NewFieldData(schemapb.DataType_ArrayOfVector, schema, 10)
+	require.NoError(t, err)
+
+	vafd, ok := fd.(*VectorArrayFieldData)
+	require.True(t, ok)
+	assert.True(t, vafd.Nullable)
+	assert.NotNil(t, vafd.ValidData)
+	assert.Equal(t, int64(4), vafd.Dim)
 }
