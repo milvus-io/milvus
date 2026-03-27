@@ -134,6 +134,12 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 
 	pendingTasks := make([]*broadcastTask, 0, len(s.pendingAckedTasks))
 	for _, task := range s.pendingAckedTasks {
+		if task.IsForcePromoteMessage() {
+			// Force promote: fix incomplete broadcasts in background (BlockUntilAllAck → fix).
+			// The task still goes through normal FastLock → doAckCallback below.
+			go s.doForcePromoteFixIncompleteBroadcasts(task)
+		}
+
 		g, err := s.rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
 		if err != nil {
 			s.Logger().Warn("lock is occupied, delay the ack callback", zap.Uint64("broadcastID", task.Header().BroadcastID), zap.Error(err))

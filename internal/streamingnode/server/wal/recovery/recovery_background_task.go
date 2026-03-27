@@ -27,7 +27,7 @@ func (rs *recoveryStorageImpl) isDirty() bool {
 
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	return rs.dirtyCounter > 0
+	return rs.dirtyCounter > 0 || rs.pendingSalvageCheckpoint != nil
 }
 
 // TODO: !!! all recovery persist operation should be a compare-and-swap operation to
@@ -131,6 +131,16 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl zap
 	}
 	if err := conc.BlockOnAll(futures...); err != nil {
 		return err
+	}
+
+	// Salvage checkpoint must be persisted before the consume checkpoint to guarantee ordering:
+	// if the node crashes between these two writes, the next snapshot retry will re-persist both.
+	if snapshot.SalvageCheckpoint != nil {
+		if err := rs.retryOperationWithBackoff(ctx, rs.Logger().With(zap.String("op", "persistSalvageCheckpoint")), func(ctx context.Context) error {
+			return resource.Resource().StreamingNodeCatalog().SaveSalvageCheckpoint(ctx, rs.channel.Name, snapshot.SalvageCheckpoint.IntoProto())
+		}); err != nil {
+			return err
+		}
 	}
 
 	// checkpoint updates should always be persisted after other updates success.

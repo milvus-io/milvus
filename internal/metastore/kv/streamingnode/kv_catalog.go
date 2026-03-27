@@ -10,6 +10,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -271,6 +272,35 @@ func (c *catalog) SaveConsumeCheckpoint(ctx context.Context, pchannelName string
 	return c.metaKV.Save(ctx, key, string(value))
 }
 
+// SaveSalvageCheckpoint saves the salvage checkpoint, keyed by the source cluster ID.
+// Multiple salvage checkpoints can exist for a channel (one per source cluster).
+func (c *catalog) SaveSalvageCheckpoint(ctx context.Context, pchannelName string, checkpoint *commonpb.ReplicateCheckpoint) error {
+	key := buildSalvageCheckpointPath(pchannelName, checkpoint.GetClusterId())
+	value, err := proto.Marshal(checkpoint)
+	if err != nil {
+		return err
+	}
+	return c.metaKV.Save(ctx, key, string(value))
+}
+
+// GetSalvageCheckpoint gets all salvage checkpoints for a channel (one per source cluster).
+func (c *catalog) GetSalvageCheckpoint(ctx context.Context, pchannelName string) ([]*commonpb.ReplicateCheckpoint, error) {
+	prefix := buildSalvageCheckpointPrefix(pchannelName)
+	_, values, err := c.metaKV.LoadWithPrefix(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	checkpoints := make([]*commonpb.ReplicateCheckpoint, 0, len(values))
+	for _, value := range values {
+		val := &commonpb.ReplicateCheckpoint{}
+		if err = proto.Unmarshal([]byte(value), val); err != nil {
+			return nil, err
+		}
+		checkpoints = append(checkpoints, val)
+	}
+	return checkpoints, nil
+}
+
 // Prefix functions: return paths ending with "/" for LoadWithPrefix queries.
 
 // buildWALPrefix returns the prefix for all WAL metadata under a pchannel.
@@ -316,4 +346,14 @@ func removePrefix(prefix string, keys []string) []string {
 		keys[idx] = typeutil.After(key, prefix)
 	}
 	return keys
+}
+
+// buildSalvageCheckpointPrefix builds the prefix for all salvage checkpoints under a pchannel.
+func buildSalvageCheckpointPrefix(pchannelName string) string {
+	return buildWALPrefix(pchannelName) + KeySalvageCheckpoint + "/"
+}
+
+// buildSalvageCheckpointPath builds the path for salvage checkpoint for a specific source cluster.
+func buildSalvageCheckpointPath(pchannelName, sourceClusterID string) string {
+	return buildSalvageCheckpointPrefix(pchannelName) + sourceClusterID
 }

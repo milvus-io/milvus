@@ -4451,8 +4451,7 @@ func (_c *MockDataCoordClient_WatchChannels_Call) RunAndReturn(run func(context.
 func NewMockDataCoordClient(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockDataCoordClient {
+}) *MockDataCoordClient {
 	mock := &MockDataCoordClient{}
 	mock.Mock.Test(t)
 
