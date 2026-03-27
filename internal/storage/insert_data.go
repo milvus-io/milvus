@@ -148,7 +148,7 @@ func (i *InsertData) Append(row map[FieldID]interface{}) error {
 	for fID, v := range row {
 		field, ok := i.Data[fID]
 		if !ok {
-			return fmt.Errorf("Missing field when appending row, got %d", fID)
+			return fmt.Errorf("missing field when appending row, got %d", fID)
 		}
 
 		if err := field.AppendRow(v); err != nil {
@@ -400,7 +400,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 		}
 		return data, nil
 	default:
-		return nil, fmt.Errorf("Unexpected schema data type: %d", dataType)
+		return nil, fmt.Errorf("unexpected schema data type: %d", dataType)
 	}
 }
 

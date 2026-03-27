@@ -175,8 +175,8 @@ func Test_newKnapsackTimeBased(t *testing.T) {
 		name       string
 		candidates []*timeElement
 		args       args
-		init_order []int64
-		pack_order []int64
+		initOrder []int64
+		packOrder []int64
 	}{
 		{
 			name: "sort by earliestTs",
@@ -198,8 +198,8 @@ func Test_newKnapsackTimeBased(t *testing.T) {
 				}{size: 30, earliestTs: 5, residualSize: 8},
 			),
 			args:       args{size: 60, leftSize: 60, minSegs: 1, maxSegs: 3},
-			init_order: []int64{2, 1, 0},
-			pack_order: []int64{2, 1, 0},
+			initOrder: []int64{2, 1, 0},
+			packOrder: []int64{2, 1, 0},
 		},
 		{
 			name: "sort by residualSize",
@@ -221,8 +221,8 @@ func Test_newKnapsackTimeBased(t *testing.T) {
 				}{size: 102, earliestTs: 5, residualSize: 60},
 			),
 			args:       args{size: 150, leftSize: 100, minSegs: 1, maxSegs: 3},
-			init_order: []int64{0, 2, 1},
-			pack_order: []int64{0, 2},
+			initOrder: []int64{0, 2, 1},
+			packOrder: []int64{0, 2},
 		},
 	}
 
@@ -239,12 +239,12 @@ func Test_newKnapsackTimeBased(t *testing.T) {
 				return a.GetID() < b.GetID()
 			})
 			for i, candidate := range p.candidates {
-				assert.Equal(t, tt.init_order[i], candidate.id)
+				assert.Equal(t, tt.initOrder[i], candidate.id)
 			}
 			got, _ := p.pack(tt.args.size, tt.args.leftSize, tt.args.minSegs, tt.args.maxSegs)
-			assert.Equal(t, len(tt.pack_order), len(got))
+			assert.Equal(t, len(tt.packOrder), len(got))
 			for i, candidate := range got {
-				assert.Equal(t, tt.pack_order[i], candidate.id)
+				assert.Equal(t, tt.packOrder[i], candidate.id)
 			}
 		})
 	}

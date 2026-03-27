@@ -393,7 +393,7 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 				}
 			}
 		default:
-			return fmt.Errorf("Unexpected data type: %d, cannot be filled with default value", dataType)
+			return fmt.Errorf("unexpected data type: %d, cannot be filled with default value", dataType)
 		}
 
 		if err != nil {

@@ -341,7 +341,7 @@ func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetri
 }
 
 // getMetrics retrieves and aggregates the metrics of the datanode to a slice
-func getMetrics[T any](s *Server, ctx context.Context, req *milvuspb.GetMetricsRequest) ([]T, error) {
+func getMetrics[T any](ctx context.Context, s *Server, req *milvuspb.GetMetricsRequest) ([]T, error) {
 	var metrics []T
 	var mu sync.Mutex
 	errorGroup, ctx := errgroup.WithContext(ctx)

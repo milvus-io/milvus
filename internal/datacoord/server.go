@@ -1105,7 +1105,7 @@ func (s *Server) CleanMeta() error {
 	err2 := s.watchClient.RemoveWithPrefix(s.ctx, "")
 	if err2 != nil {
 		if err != nil {
-			err = fmt.Errorf("Failed to CleanMeta[metadata cleanup error: %w][watchdata cleanup error: %v]", err, err2)
+			err = fmt.Errorf("failed to CleanMeta[metadata cleanup error: %w][watchdata cleanup error: %v]", err, err2)
 		} else {
 			err = err2
 		}

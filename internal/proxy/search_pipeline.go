@@ -2400,7 +2400,7 @@ func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
 			return newPipeline(hybridSearchWithRequeryPipe, t)
 		}
 	}
-	return nil, merr.WrapErrServiceInternal("Unsupported pipeline")
+	return nil, merr.WrapErrServiceInternal("unsupported pipeline")
 }
 
 func newSearchPipeline(t *searchTask) (*pipeline, error) {

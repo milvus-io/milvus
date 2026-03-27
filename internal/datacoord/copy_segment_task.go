@@ -720,7 +720,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			}
 
 			// Sync JSON key indexes
-			if err = syncJsonKeyIndexes(ctx, result, task, meta, copyMeta); err != nil {
+			if err = syncJSONKeyIndexes(ctx, result, task, meta, copyMeta); err != nil {
 				return err
 			}
 
@@ -956,7 +956,7 @@ func syncTextIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 // Index Synchronization: JSON Key Indexes
 // ===========================================================================================
 
-// syncJsonKeyIndexes synchronizes JSON key index metadata to segment.
+// syncJSONKeyIndexes synchronizes JSON key index metadata to segment.
 //
 // Process flow:
 //  1. Update segment with JSON key index logs
@@ -977,7 +977,7 @@ func syncTextIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 // - Indexes on keys within JSON fields
 // - Stored inline with segment metadata (not in indexMeta)
 // - Enables efficient queries on JSON field contents
-func syncJsonKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
+func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 	task CopySegmentTask, meta *meta, copyMeta CopySegmentMeta,
 ) error {
 	if len(result.GetJsonKeyIndexInfos()) == 0 {

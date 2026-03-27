@@ -263,7 +263,7 @@ func (kv *txnTiKV) MultiLoad(ctx context.Context, keys []string) ([]string, erro
 		validValues = append(validValues, strVal)
 	}
 	if len(missingValues) != 0 {
-		loggingErr = fmt.Errorf("There are invalid keys: %s", missingValues)
+		loggingErr = fmt.Errorf("there are invalid keys: %s", missingValues)
 	}
 
 	CheckElapseAndWarn(start, "Slow txnTiKV MultiLoad() operation", zap.Any("keys", keys))
