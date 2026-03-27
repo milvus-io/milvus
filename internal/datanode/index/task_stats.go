@@ -31,6 +31,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
@@ -550,15 +551,30 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			req.InsertLogs = insertBinlogs
 			req.ManifestPath = st.manifestPath
 			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil)
+			buildIndexParams.IndexParams = []*commonpb.KeyValuePair{
+				{Key: "index_type", Value: "INVERTED"},
+				{Key: "is_text_match", Value: "true"},
+			}
 
 			// set analyzer extra info
 			if len(analyzerExtraInfo) > 0 {
 				buildIndexParams.AnalyzerExtraInfo = analyzerExtraInfo
 			}
 
-			uploaded, err := indexcgowrapper.CreateTextIndex(egCtx, buildIndexParams)
+			index, err := indexcgowrapper.CreateIndex(egCtx, buildIndexParams)
 			if err != nil {
 				return err
+			}
+			defer index.Delete()
+
+			indexStats, err := index.UpLoad()
+			if err != nil {
+				return err
+			}
+
+			uploaded := make(map[string]int64)
+			for _, info := range indexStats.GetSerializedIndexInfos() {
+				uploaded[info.FileName] = info.FileSize
 			}
 
 			mu.Lock()

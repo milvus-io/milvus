@@ -30,6 +30,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
@@ -598,6 +599,10 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(t.plan.GetCurrentScalarIndexVersion()),
 				StorageVersion:            t.storageVersion,
 				Manifest:                  segment.GetManifest(),
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: "index_type", Value: "INVERTED"},
+					{Key: "is_text_match", Value: "true"},
+				},
 			}
 
 			if len(analyzerExtraInfo) > 0 {
@@ -612,9 +617,21 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 					partitionID,
 					segmentID)
 			}
-			uploaded, err := indexcgowrapper.CreateTextIndex(egCtx, buildIndexParams)
+
+			index, err := indexcgowrapper.CreateIndex(egCtx, buildIndexParams)
 			if err != nil {
 				return err
+			}
+			defer index.Delete()
+
+			indexStats, err := index.UpLoad()
+			if err != nil {
+				return err
+			}
+
+			uploaded := make(map[string]int64)
+			for _, info := range indexStats.GetSerializedIndexInfos() {
+				uploaded[info.FileName] = info.FileSize
 			}
 
 			mu.Lock()
