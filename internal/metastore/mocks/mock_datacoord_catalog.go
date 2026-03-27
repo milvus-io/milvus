@@ -2144,9 +2144,9 @@ func (_c *DataCoordCatalog_ListPreImportTasks_Call) RunAndReturn(run func(contex
 	return _c
 }
 
-// ListSegmentIndexes provides a mock function with given fields: ctx
-func (_m *DataCoordCatalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error) {
-	ret := _m.Called(ctx)
+// ListSegmentIndexes provides a mock function with given fields: ctx, collectionID
+func (_m *DataCoordCatalog) ListSegmentIndexes(ctx context.Context, collectionID int64) ([]*model.SegmentIndex, error) {
+	ret := _m.Called(ctx, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListSegmentIndexes")
@@ -2154,19 +2154,19 @@ func (_m *DataCoordCatalog) ListSegmentIndexes(ctx context.Context) ([]*model.Se
 
 	var r0 []*model.SegmentIndex
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) ([]*model.SegmentIndex, error)); ok {
-		return rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) ([]*model.SegmentIndex, error)); ok {
+		return rf(ctx, collectionID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) []*model.SegmentIndex); ok {
-		r0 = rf(ctx)
+	if rf, ok := ret.Get(0).(func(context.Context, int64) []*model.SegmentIndex); ok {
+		r0 = rf(ctx, collectionID)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*model.SegmentIndex)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = rf(ctx)
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2181,13 +2181,14 @@ type DataCoordCatalog_ListSegmentIndexes_Call struct {
 
 // ListSegmentIndexes is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *DataCoordCatalog_Expecter) ListSegmentIndexes(ctx interface{}) *DataCoordCatalog_ListSegmentIndexes_Call {
-	return &DataCoordCatalog_ListSegmentIndexes_Call{Call: _e.mock.On("ListSegmentIndexes", ctx)}
+//   - collectionID int64
+func (_e *DataCoordCatalog_Expecter) ListSegmentIndexes(ctx interface{}, collectionID interface{}) *DataCoordCatalog_ListSegmentIndexes_Call {
+	return &DataCoordCatalog_ListSegmentIndexes_Call{Call: _e.mock.On("ListSegmentIndexes", ctx, collectionID)}
 }
 
-func (_c *DataCoordCatalog_ListSegmentIndexes_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListSegmentIndexes_Call {
+func (_c *DataCoordCatalog_ListSegmentIndexes_Call) Run(run func(ctx context.Context, collectionID int64)) *DataCoordCatalog_ListSegmentIndexes_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
@@ -2197,7 +2198,7 @@ func (_c *DataCoordCatalog_ListSegmentIndexes_Call) Return(_a0 []*model.SegmentI
 	return _c
 }
 
-func (_c *DataCoordCatalog_ListSegmentIndexes_Call) RunAndReturn(run func(context.Context) ([]*model.SegmentIndex, error)) *DataCoordCatalog_ListSegmentIndexes_Call {
+func (_c *DataCoordCatalog_ListSegmentIndexes_Call) RunAndReturn(run func(context.Context, int64) ([]*model.SegmentIndex, error)) *DataCoordCatalog_ListSegmentIndexes_Call {
 	_c.Call.Return(run)
 	return _c
 }

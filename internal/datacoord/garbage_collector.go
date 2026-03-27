@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -607,6 +610,16 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		// TODO: Does all files in the same segment have the same segmentID?
 		segmentID, err := storage.ParseSegmentIDByBinlog(gc.option.cli.RootPath(), chunkInfo.FilePath)
 		if err != nil {
+			// Try V3 path format: insert_log/{coll}/{part}/{seg}/...
+			// V3 orphan files are managed by loon (milvus-storage), skip them.
+			if v3SegID, parseErr := parseV3SegmentID(gc.option.cli.RootPath(), chunkInfo.FilePath); parseErr == nil {
+				v3Seg := gc.meta.GetSegment(ctx, v3SegID)
+				if v3Seg == nil || v3Seg.GetStorageVersion() == storage.StorageV3 {
+					// V3 segment file or orphan V3 file — skip, managed by loon
+					valid++
+					return true
+				}
+			}
 			unexpectedFailure.Inc()
 			logger.Warn("garbageCollector recycleUnusedBinlogFiles parse segment id error",
 				zap.String("filePath", chunkInfo.FilePath),
@@ -615,6 +628,13 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		}
 
 		segment := gc.meta.GetSegment(ctx, segmentID)
+
+		// Skip V3 segments — orphan files managed by loon
+		if segment != nil && segment.GetStorageVersion() == storage.StorageV3 {
+			valid++
+			return true
+		}
+
 		if checker(chunkInfo, segment) {
 			valid++
 			logger.Info("garbageCollector recycleUnusedBinlogFiles skip file since it is valid", zap.String("filePath", chunkInfo.FilePath), zap.Int64("segmentID", segmentID))
@@ -813,6 +833,37 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 		}
 
 		cloned := segment.Clone()
+
+		// V3 segment: delete entire basePath recursively
+		if cloned.GetStorageVersion() == storage.StorageV3 {
+			basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
+			if err != nil {
+				log.Warn("GC V3 segment failed to parse manifest path",
+					zap.String("manifestPath", cloned.GetManifestPath()),
+					zap.Error(err))
+				cloned = nil
+				continue
+			}
+			log.Info("GC V3 segment start, removing basePath...",
+				zap.String("basePath", basePath))
+			if err := gc.option.cli.RemoveWithPrefix(ctx, basePath); err != nil {
+				log.Warn("GC V3 segment remove basePath failed",
+					zap.String("basePath", basePath),
+					zap.Error(err))
+				cloned = nil
+				continue
+			}
+			if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
+				log.Warn("GC segment meta failed to drop segment", zap.Error(err))
+				cloned = nil
+				continue
+			}
+			log.Info("GC V3 segment done")
+			cloned = nil
+			continue
+		}
+
+		// V1/V2 segment: delete individual log files
 		binlog.DecompressBinLogs(cloned.SegmentInfo)
 
 		logs := getLogs(cloned)
@@ -914,6 +965,22 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 func (gc *garbageCollector) isExpire(dropts Timestamp) bool {
 	droptime := time.Unix(0, int64(dropts))
 	return time.Since(droptime) > gc.option.dropTolerance
+}
+
+// parseV3SegmentID attempts to parse segmentID from a V3 path format.
+// V3 paths: {root}/insert_log/{coll}/{part}/{seg}/...
+// Returns segmentID or error if path doesn't match.
+func parseV3SegmentID(rootPath, filePath string) (int64, error) {
+	if !strings.HasPrefix(filePath, rootPath) {
+		return 0, fmt.Errorf("path %q does not contain rootPath %q", filePath, rootPath)
+	}
+	p := strings.TrimPrefix(filePath[len(rootPath):], "/")
+	parts := strings.Split(p, "/")
+	// Minimum: insert_log/coll/part/seg/something
+	if len(parts) < 5 || parts[0] != common.SegmentInsertLogPath {
+		return 0, fmt.Errorf("not a V3 insert_log path: %s", filePath)
+	}
+	return strconv.ParseInt(parts[3], 10, 64)
 }
 
 func getLogs(sinfo *SegmentInfo) map[string]struct{} {
@@ -1153,10 +1220,11 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 				return true
 			}
 
-			// Check if this index is referenced by any snapshot
-			// If snapshots reference this index, do not delete the index files
-			if snapshotIDs := snapshotMeta.GetSnapshotByIndex(ctx, segIdx.CollectionID, segIdx.IndexID); len(snapshotIDs) > 0 {
-				logger.Info("skip GC index files since index is referenced by snapshot",
+			// Check if this build is referenced by any snapshot
+			// If snapshots reference this buildID, do not delete the index files
+			if snapshotIDs := snapshotMeta.GetSnapshotByBuildID(segIdx.BuildID); len(snapshotIDs) > 0 {
+				logger.Info("skip GC index files since buildID is referenced by snapshot",
+					zap.Int64("buildID", segIdx.BuildID),
 					zap.Int64s("snapshotIDs", snapshotIDs))
 				return true
 			}

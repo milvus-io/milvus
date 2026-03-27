@@ -49,6 +49,7 @@ const (
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
 	DefaultBM25LoadThreadCoreCoefficient       = 1
+	DefaultThreadPoolMaxThreadsSize            = 16
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -230,6 +231,7 @@ type commonConfig struct {
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
 	BM25LoadThreadCoreCoefficient       ParamItem `refreshable:"true"`
+	ThreadPoolMaxThreadsSize            ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -243,8 +245,9 @@ type commonConfig struct {
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
 	ParquetStatsSkipIndex               ParamItem `refreshable:"true"`
 
-	StorageType ParamItem `refreshable:"false"`
-	SimdType    ParamItem `refreshable:"false"`
+	StorageType                   ParamItem `refreshable:"false"`
+	ManifestTransactionRetryLimit ParamItem `refreshable:"true"`
+	SimdType                      ParamItem `refreshable:"false"`
 
 	DiskWriteMode         ParamItem `refreshable:"true"`
 	DiskWriteBufferSizeKb ParamItem `refreshable:"true"`
@@ -342,6 +345,9 @@ type commonConfig struct {
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
 	QNFileResourceMode        ParamItem `refreshable:"true"`
 	DNFileResourceMode        ParamItem `refreshable:"true"`
+
+	// group by
+	GroupByMaxGroups ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -637,6 +643,15 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.StorageType.Init(base.mgr)
 
+	p.ManifestTransactionRetryLimit = ParamItem{
+		Key:          "common.storage.manifestTransactionRetryLimit",
+		Version:      "2.6.10",
+		DefaultValue: "10",
+		Doc:          "Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts",
+		Export:       true,
+	}
+	p.ManifestTransactionRetryLimit.Init(base.mgr)
+
 	p.HighPriorityThreadCoreCoefficient = ParamItem{
 		Key:          "common.threadCoreCoefficient.highPriority",
 		Version:      "2.0.0",
@@ -676,6 +691,15 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 	}
 	p.BM25LoadThreadCoreCoefficient.Init(base.mgr)
+
+	p.ThreadPoolMaxThreadsSize = ParamItem{
+		Key:          "common.threadCoreCoefficient.maxThreadsSize",
+		Version:      "2.6.13",
+		DefaultValue: strconv.Itoa(DefaultThreadPoolMaxThreadsSize),
+		Doc:          "The maximum number of threads in the thread pool, only effective when greater than 0",
+		Export:       true,
+	}
+	p.ThreadPoolMaxThreadsSize.Init(base.mgr)
 
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",
@@ -1345,6 +1369,21 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       true,
 	}
 	p.DNFileResourceMode.Init(base.mgr)
+
+	p.GroupByMaxGroups = ParamItem{
+		Key:          "common.groupBy.maxGroups",
+		Version:      "2.6.0",
+		DefaultValue: "100000",
+		Doc:          "Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt64(v) <= 0 {
+				return "100000"
+			}
+			return v
+		},
+	}
+	p.GroupByMaxGroups.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -4641,6 +4680,8 @@ type dataCoordConfig struct {
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 	ForceRebuildSegmentIndex       ParamItem `refreshable:"true"`
 	TargetVecIndexVersion          ParamItem `refreshable:"true"`
+	ForceRebuildScalarSegmentIndex ParamItem `refreshable:"true"`
+	TargetScalarIndexVersion       ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 	BlockingL0EntryNum             ParamItem `refreshable:"true"`
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
@@ -5716,6 +5757,28 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Export: true,
 	}
 	p.TargetVecIndexVersion.Init(base.mgr)
+
+	p.ForceRebuildScalarSegmentIndex = ParamItem{
+		Key:          "dataCoord.forceRebuildScalarSegmentIndex",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		PanicIfEmpty: true,
+		Doc:          "force rebuild scalar segment index to specified scalar index engine's version",
+		Export:       true,
+	}
+	p.ForceRebuildScalarSegmentIndex.Init(base.mgr)
+
+	p.TargetScalarIndexVersion = ParamItem{
+		Key:          "dataCoord.targetScalarIndexVersion",
+		Version:      "3.0.0",
+		DefaultValue: "-1",
+		PanicIfEmpty: true,
+		Doc: `if param forceRebuildScalarSegmentIndex is enabled, the scalar index will be rebuilt to aligned with targetScalarIndexVersion.
+if param forceRebuildScalarSegmentIndex is not enabled, the newly created scalar index will be aligned with the newer one of scalar index engine's version and targetScalarIndexVersion.
+if param targetScalarIndexVersion is not set, the default value is -1, which means no target scalar index version, then the scalar index will be aligned with scalar index engine's version`,
+		Export: true,
+	}
+	p.TargetScalarIndexVersion.Init(base.mgr)
 
 	p.SegmentFlushInterval = ParamItem{
 		Key:          "dataCoord.segmentFlushInterval",

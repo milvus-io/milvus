@@ -27,6 +27,13 @@ class ChunkedColumnInterface {
  public:
     virtual ~ChunkedColumnInterface() = default;
 
+    // Check if this column is part of a multi-field column group.
+    // Used to guard DropFieldData from breaking shared storage.
+    virtual bool
+    IsInMultiFieldColumnGroup() const {
+        return false;
+    }
+
     // Default implementation does nothing.
     virtual void
     ManualEvictCache() const {

@@ -280,6 +280,186 @@ func (_c *MockVersionManager_GetMinimalScalarIndexEngineVersion_Call) RunAndRetu
 	return _c
 }
 
+// GetMaximumIndexEngineVersion provides a mock function with no fields
+func (_m *MockVersionManager) GetMaximumIndexEngineVersion() int32 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetMaximumIndexEngineVersion")
+	}
+
+	var r0 int32
+	if rf, ok := ret.Get(0).(func() int32); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int32)
+	}
+
+	return r0
+}
+
+// MockVersionManager_GetMaximumIndexEngineVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMaximumIndexEngineVersion'
+type MockVersionManager_GetMaximumIndexEngineVersion_Call struct {
+	*mock.Call
+}
+
+// GetMaximumIndexEngineVersion is a helper method to define mock.On call
+func (_e *MockVersionManager_Expecter) GetMaximumIndexEngineVersion() *MockVersionManager_GetMaximumIndexEngineVersion_Call {
+	return &MockVersionManager_GetMaximumIndexEngineVersion_Call{Call: _e.mock.On("GetMaximumIndexEngineVersion")}
+}
+
+func (_c *MockVersionManager_GetMaximumIndexEngineVersion_Call) Run(run func()) *MockVersionManager_GetMaximumIndexEngineVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockVersionManager_GetMaximumIndexEngineVersion_Call) Return(_a0 int32) *MockVersionManager_GetMaximumIndexEngineVersion_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockVersionManager_GetMaximumIndexEngineVersion_Call) RunAndReturn(run func() int32) *MockVersionManager_GetMaximumIndexEngineVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetMaximumScalarIndexEngineVersion provides a mock function with no fields
+func (_m *MockVersionManager) GetMaximumScalarIndexEngineVersion() int32 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetMaximumScalarIndexEngineVersion")
+	}
+
+	var r0 int32
+	if rf, ok := ret.Get(0).(func() int32); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int32)
+	}
+
+	return r0
+}
+
+// MockVersionManager_GetMaximumScalarIndexEngineVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMaximumScalarIndexEngineVersion'
+type MockVersionManager_GetMaximumScalarIndexEngineVersion_Call struct {
+	*mock.Call
+}
+
+// GetMaximumScalarIndexEngineVersion is a helper method to define mock.On call
+func (_e *MockVersionManager_Expecter) GetMaximumScalarIndexEngineVersion() *MockVersionManager_GetMaximumScalarIndexEngineVersion_Call {
+	return &MockVersionManager_GetMaximumScalarIndexEngineVersion_Call{Call: _e.mock.On("GetMaximumScalarIndexEngineVersion")}
+}
+
+func (_c *MockVersionManager_GetMaximumScalarIndexEngineVersion_Call) Run(run func()) *MockVersionManager_GetMaximumScalarIndexEngineVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockVersionManager_GetMaximumScalarIndexEngineVersion_Call) Return(_a0 int32) *MockVersionManager_GetMaximumScalarIndexEngineVersion_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockVersionManager_GetMaximumScalarIndexEngineVersion_Call) RunAndReturn(run func() int32) *MockVersionManager_GetMaximumScalarIndexEngineVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ResolveVecIndexVersion provides a mock function with no fields
+func (_m *MockVersionManager) ResolveVecIndexVersion() int32 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ResolveVecIndexVersion")
+	}
+
+	var r0 int32
+	if rf, ok := ret.Get(0).(func() int32); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int32)
+	}
+
+	return r0
+}
+
+// MockVersionManager_ResolveVecIndexVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResolveVecIndexVersion'
+type MockVersionManager_ResolveVecIndexVersion_Call struct {
+	*mock.Call
+}
+
+// ResolveVecIndexVersion is a helper method to define mock.On call
+func (_e *MockVersionManager_Expecter) ResolveVecIndexVersion() *MockVersionManager_ResolveVecIndexVersion_Call {
+	return &MockVersionManager_ResolveVecIndexVersion_Call{Call: _e.mock.On("ResolveVecIndexVersion")}
+}
+
+func (_c *MockVersionManager_ResolveVecIndexVersion_Call) Run(run func()) *MockVersionManager_ResolveVecIndexVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockVersionManager_ResolveVecIndexVersion_Call) Return(_a0 int32) *MockVersionManager_ResolveVecIndexVersion_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockVersionManager_ResolveVecIndexVersion_Call) RunAndReturn(run func() int32) *MockVersionManager_ResolveVecIndexVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ResolveScalarIndexVersion provides a mock function with no fields
+func (_m *MockVersionManager) ResolveScalarIndexVersion() int32 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ResolveScalarIndexVersion")
+	}
+
+	var r0 int32
+	if rf, ok := ret.Get(0).(func() int32); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int32)
+	}
+
+	return r0
+}
+
+// MockVersionManager_ResolveScalarIndexVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResolveScalarIndexVersion'
+type MockVersionManager_ResolveScalarIndexVersion_Call struct {
+	*mock.Call
+}
+
+// ResolveScalarIndexVersion is a helper method to define mock.On call
+func (_e *MockVersionManager_Expecter) ResolveScalarIndexVersion() *MockVersionManager_ResolveScalarIndexVersion_Call {
+	return &MockVersionManager_ResolveScalarIndexVersion_Call{Call: _e.mock.On("ResolveScalarIndexVersion")}
+}
+
+func (_c *MockVersionManager_ResolveScalarIndexVersion_Call) Run(run func()) *MockVersionManager_ResolveScalarIndexVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockVersionManager_ResolveScalarIndexVersion_Call) Return(_a0 int32) *MockVersionManager_ResolveScalarIndexVersion_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockVersionManager_ResolveScalarIndexVersion_Call) RunAndReturn(run func() int32) *MockVersionManager_ResolveScalarIndexVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetMinimalSessionVer provides a mock function with no fields
 func (_m *MockVersionManager) GetMinimalSessionVer() semver.Version {
 	ret := _m.Called()

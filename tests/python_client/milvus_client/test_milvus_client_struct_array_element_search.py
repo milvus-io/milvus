@@ -278,8 +278,15 @@ class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
             num_elems = rng.randint(min_elems, max_elems)
             struct_array = []
             for j in range(num_elems):
+                # Use a distinctive unit vector for row 0, element 0 so it
+                # never collides with any seed-generated vector and Top-1
+                # assertions reliably return row 0.
+                if i == 0 and j == 0:
+                    emb = [1.0] + [0.0] * (dim - 1)
+                else:
+                    emb = _seed_vector(i * 1000 + j, dim)
                 struct_array.append({
-                    "embedding": _seed_vector(i * 1000 + j, dim),
+                    "embedding": emb,
                     "int_val": i * 100 + j,
                     "str_val": f"row_{i}_elem_{j}",
                     "float_val": float(i + j * 0.1),
@@ -1207,8 +1214,12 @@ class TestStructArrayMatchFamily(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 10)
             struct_array = []
             for j in range(num_elems):
+                if i == 0 and j == 0:
+                    emb = [1.0] + [0.0] * (dim - 1)
+                else:
+                    emb = _seed_vector(i * 1000 + j, dim)
                 struct_array.append({
-                    "embedding": _seed_vector(i * 1000 + j, dim),
+                    "embedding": emb,
                     "int_val": i * 100 + j,
                     "str_val": f"row_{i}_elem_{j}",
                     "float_val": float(i + j * 0.1),
@@ -2054,8 +2065,12 @@ class TestStructArrayNestedIndex(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 10)
             struct_array = []
             for j in range(num_elems):
+                if i == 0 and j == 0:
+                    emb = [1.0] + [0.0] * (dim - 1)
+                else:
+                    emb = _seed_vector(i * 1000 + j, dim)
                 elem = {
-                    "embedding": _seed_vector(i * 1000 + j, dim),
+                    "embedding": emb,
                     "int_val": i * 100 + j,
                     "str_val": f"row_{i}_elem_{j}",
                     "float_val": float(i + j * 0.1),
@@ -3150,8 +3165,12 @@ class TestStructArrayMatchQuery(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 10)
             struct_array = []
             for j in range(num_elems):
+                if i == 0 and j == 0:
+                    emb = [1.0] + [0.0] * (dim - 1)
+                else:
+                    emb = _seed_vector(i * 1000 + j, dim)
                 struct_array.append({
-                    "embedding": _seed_vector(i * 1000 + j, dim),
+                    "embedding": emb,
                     "int_val": i * 100 + j,
                     "str_val": f"row_{i}_elem_{j}",
                     "color": COLORS[j % 3],
@@ -3500,8 +3519,12 @@ class TestStructArrayElementFilterHybridSearch(TestMilvusClientV2Base):
             num_elems = rng.randint(3, 8)
             struct_array = []
             for j in range(num_elems):
+                if i == 0 and j == 0:
+                    emb = [1.0] + [0.0] * (dim - 1)
+                else:
+                    emb = _seed_vector(i * 1000 + j, dim)
                 struct_array.append({
-                    "embedding": _seed_vector(i * 1000 + j, dim),
+                    "embedding": emb,
                     "int_val": i * 100 + j,
                     "color": COLORS[j % 3],
                 })

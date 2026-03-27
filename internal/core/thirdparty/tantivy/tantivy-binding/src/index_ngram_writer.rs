@@ -45,11 +45,10 @@ impl IndexWriterWrapper {
 
         let (schema, field) = build_ngram_schema(field_name);
 
-        let index = Index::create_in_dir(path, schema).unwrap();
+        let index = Index::create_in_dir(path, schema)?;
         index.tokenizers().register(NGRAM_TOKENIZER, tokenizer);
-        let index_writer = index
-            .writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)
-            .unwrap();
+        let index_writer =
+            index.writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)?;
 
         Ok(IndexWriterWrapper::V7(IndexWriterWrapperImpl {
             field,

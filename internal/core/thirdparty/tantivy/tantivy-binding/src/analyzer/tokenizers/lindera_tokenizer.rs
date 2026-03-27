@@ -120,6 +120,7 @@ pub struct LinderaTokenStream<'a> {
 
 const DICT_KIND_KEY: &str = "dict_kind";
 const FILTER_KEY: &str = "filter";
+const MODE_KEY: &str = "mode";
 
 impl<'a> TokenStream for LinderaTokenStream<'a> {
     fn advance(&mut self) -> bool {
@@ -178,7 +179,8 @@ impl LinderaTokenizer {
 
         let dictionary = load_dictionary_from_kind(&kind, build_dir, download_urls)?;
 
-        let segmenter = LinderaSegmenter::new(Mode::Normal, dictionary, None);
+        let mode = get_lindera_mode(params)?;
+        let segmenter = LinderaSegmenter::new(mode, dictionary, None);
         let mut tokenizer = LinderaTokenizer::from_segmenter(segmenter);
 
         // append lindera filter
@@ -263,6 +265,27 @@ impl DictionaryKindParser for &str {
     }
 }
 
+fn get_lindera_mode(params: &json::Map<String, json::Value>) -> Result<Mode> {
+    match params.get(MODE_KEY) {
+        Some(value) => {
+            let mode_str = value.as_str().ok_or_else(|| {
+                TantivyBindingError::InvalidArgument(format!(
+                    "lindera tokenizer mode must be string"
+                ))
+            })?;
+            match mode_str {
+                "normal" => Ok(Mode::Normal),
+                "decompose" => Ok(Mode::Decompose(Default::default())),
+                _ => Err(TantivyBindingError::InvalidArgument(format!(
+                    "lindera tokenizer mode must be \"normal\" or \"decompose\", got \"{}\"",
+                    mode_str
+                ))),
+            }
+        }
+        _ => Ok(Mode::Normal),
+    }
+}
+
 fn fetch_lindera_kind(params: &json::Map<String, json::Value>) -> Result<DictionaryKind> {
     params
         .get(DICT_KIND_KEY)
@@ -292,22 +315,18 @@ fn fetch_lindera_tags_from_params(
     params
         .get("tags")
         .ok_or_else(|| {
-            TantivyBindingError::InvalidArgument(format!(
-                "lindera japanese stop tag filter tags must be set"
-            ))
+            TantivyBindingError::InvalidArgument(format!("lindera filter tags must be set"))
         })?
         .as_array()
         .ok_or_else(|| {
-            TantivyBindingError::InvalidArgument(format!(
-                "lindera japanese stop tags filter tags must be array"
-            ))
+            TantivyBindingError::InvalidArgument(format!("lindera filter tags must be array"))
         })?
         .iter()
         .map(|v| {
             v.as_str()
                 .ok_or_else(|| {
                     TantivyBindingError::InvalidArgument(format!(
-                        "lindera japanese stop tags filter tags must be string"
+                        "lindera filter tags must be string"
                     ))
                 })
                 .map(|s| s.to_string())
@@ -478,6 +497,68 @@ mod tests {
         }
 
         print!("test tokens :{:?}\n", results)
+    }
+
+    #[test]
+    fn test_lindera_tokenizer_decompose_mode() {
+        let params = r#"{
+            "type": "lindera",
+            "dict_kind": "ipadic",
+            "mode": "decompose"
+        }"#;
+        let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
+        assert!(json_param.is_ok());
+
+        let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap());
+        assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
+
+        let mut binding = tokenizer.unwrap();
+        let stream =
+            binding.token_stream("東京スカイツリーの最寄り駅はとうきょうスカイツリー駅です");
+        let mut results = Vec::<String>::new();
+        for token in stream.tokens {
+            results.push(token.text.to_string());
+        }
+
+        print!("test decompose mode tokens :{:?}\n", results)
+    }
+
+    #[test]
+    fn test_lindera_tokenizer_normal_mode_explicit() {
+        let params = r#"{
+            "type": "lindera",
+            "dict_kind": "ipadic",
+            "mode": "normal"
+        }"#;
+        let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
+        assert!(json_param.is_ok());
+
+        let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap());
+        assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
+
+        let mut binding = tokenizer.unwrap();
+        let stream =
+            binding.token_stream("東京スカイツリーの最寄り駅はとうきょうスカイツリー駅です");
+        let mut results = Vec::<String>::new();
+        for token in stream.tokens {
+            results.push(token.text.to_string());
+        }
+
+        print!("test normal mode tokens :{:?}\n", results)
+    }
+
+    #[test]
+    fn test_lindera_tokenizer_invalid_mode() {
+        let params = r#"{
+            "type": "lindera",
+            "dict_kind": "ipadic",
+            "mode": "invalid"
+        }"#;
+        let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
+        assert!(json_param.is_ok());
+
+        let tokenizer = LinderaTokenizer::from_json(&json_param.unwrap());
+        assert!(tokenizer.is_err());
     }
 
     #[test]
