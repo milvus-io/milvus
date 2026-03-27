@@ -1438,7 +1438,6 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         self.drop_user(client, user_name=user_name)
 
     @pytest.mark.parametrize("with_db", [False, True])
-    # TODO: previously skipped for https://github.com/milvus-io/milvus/issues/44843
     def test_milvus_client_verify_grant_collection_load_privilege(self, host, port, with_db):
         """
         target: test milvus client api verify grant collection load privilege
@@ -1489,7 +1488,6 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
             self.drop_database(client, db_name)
 
     @pytest.mark.parametrize("with_db", [False, True])
-    # TODO: previously skipped for https://github.com/milvus-io/milvus/issues/44843
     def test_milvus_client_verify_grant_collection_release_privilege(self, host, port, with_db):
         """
         target: test milvus client api verify grant collection release privilege
@@ -1542,7 +1540,6 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
             self.drop_database(client, db_name)
 
     @pytest.mark.parametrize("with_db", [False, True])
-    # TODO: previously skipped for https://github.com/milvus-io/milvus/issues/44843
     def test_milvus_client_verify_grant_collection_insert_privilege(self, host, port, with_db):
         """
         target: test milvus client api verify grant collection insert privilege
@@ -1595,7 +1592,6 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
             self.drop_database(client, db_name)
 
     @pytest.mark.parametrize("with_db", [False, True])
-    # TODO: previously skipped for https://github.com/milvus-io/milvus/issues/44843
     def test_milvus_client_verify_grant_collection_delete_privilege(self, host, port, with_db):
         """
         target: test milvus client api verify grant collection delete privilege
@@ -1645,7 +1641,6 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
             self.using_database(client, "default")
             self.drop_database(client, db_name)
 
-    # TODO: previously skipped for https://github.com/milvus-io/milvus/issues/44843
     def test_milvus_client_new_user_default_owns_public_role_permission(self, host, port):
         """
         target: test milvus client api new user owns public role privilege
@@ -1711,7 +1706,6 @@ class TestMilvusClientRbacAdvance(TestMilvusClientV2Base):
         self.drop_user(client, user_name=user_name)
 
     @pytest.mark.parametrize("role_name", ["admin", "public"])
-    # TODO: previously skipped for https://github.com/milvus-io/milvus/issues/44843
     def test_milvus_client_remove_user_from_default_role(self, role_name, host, port):
         """
         target: test milvus client api remove user from default role (admin or public)
@@ -1857,7 +1851,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
 
     # ==================== P0 Tests ====================
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_new_user_default_public_role_permission(self, host, port):
         """
         target: test new user with no explicit role has no privileges except list_collections
@@ -1926,7 +1919,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         # cleanup
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_verify_grant_collection_insert_privilege(self, host, port):
         """
         target: test grant Insert on specific collection only
@@ -1972,7 +1964,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.drop_collection(client, col_a)
         self.drop_collection(client, col_b)
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_verify_grant_collection_delete_privilege(self, host, port):
         """
         target: test grant Delete privilege on collection
@@ -2008,7 +1999,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         # cleanup
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_verify_grant_collection_search_privilege(self, host, port):
         """
         target: test grant Search privilege on collection
@@ -2049,7 +2039,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         # cleanup
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_verify_grant_collection_query_privilege(self, host, port):
         """
         target: test grant Query privilege on collection
@@ -2090,7 +2079,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         # cleanup
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_verify_grant_collection_load_privilege(self, host, port):
         """
         target: test grant Load + GetLoadingProgress privilege on collection
@@ -2129,7 +2117,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         # cleanup
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_verify_grant_collection_release_privilege(self, host, port):
         """
         target: test grant Release privilege on collection
@@ -2159,7 +2146,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         # cleanup
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_verify_global_all_privilege(self, host, port):
         """
         target: test grant Global All privilege
@@ -2202,7 +2188,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_role(user_client, role_name=tmp_role)
         self.drop_role(user_client, role_name=tmp_role)
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_role_revoke_user_privilege(self, host, port):
         """
         target: test grant and revoke Global UpdateUser privilege
@@ -2242,7 +2227,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
                              new_password=another_password,
                              check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_verify_grant_wildcard_object_name(self, host, port):
         """
         target: test grant Insert with wildcard object name
@@ -2280,7 +2264,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.drop_collection(client, col_a)
         self.drop_collection(client, col_b)
 
-    @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_verify_grant_wildcard_privilege(self, host, port):
         """
         target: test grant Collection * (all privileges) on specific collection
@@ -2337,7 +2320,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
 
     # ==================== P1 Tests ====================
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_verify_grant_create_index_privilege(self, host, port):
         """
         target: test grant CreateIndex privilege on collection
@@ -2368,7 +2350,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         # cleanup
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_verify_grant_drop_index_privilege(self, host, port):
         """
         target: test grant DropIndex privilege on collection
@@ -2407,7 +2388,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         # cleanup
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_verify_grant_compaction_privilege(self, host, port):
         """
         target: test grant Compaction privilege on collection
@@ -2442,7 +2422,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         # cleanup
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_verify_grant_flush_privilege(self, host, port):
         """
         target: test grant Flush privilege on collection
@@ -2477,7 +2456,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         # cleanup
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_verify_grant_global_create_collection_privilege(self, host, port):
         """
         target: test grant Global CreateCollection privilege
@@ -2508,7 +2486,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         # cleanup
         self.drop_collection(client, coll_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_verify_grant_global_drop_collection_privilege(self, host, port):
         """
         target: test grant Global DropCollection privilege
@@ -2534,7 +2511,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         user_client, _ = self.init_milvus_client(uri=uri, user=user_name, password=password)
         self.drop_collection(user_client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_verify_grant_global_create_ownership_privilege(self, host, port):
         """
         target: test grant Global CreateOwnership privilege
@@ -2566,7 +2542,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.drop_role(client, role_name=tmp_role)
         self.drop_user(client, user_name=tmp_user)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_verify_grant_global_drop_ownership_privilege(self, host, port):
         """
         target: test grant Global DropOwnership privilege
@@ -2596,7 +2571,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.drop_user(user_client, user_name=tmp_user)
         self.drop_role(user_client, role_name=tmp_role)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_verify_grant_global_select_ownership_privilege(self, host, port):
         """
         target: test grant Global SelectOwnership privilege
@@ -2621,7 +2595,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         roles, _ = self.list_roles(user_client)
         assert len(roles) >= 2
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_verify_grant_global_manage_ownership_privilege(self, host, port):
         """
         target: test grant Global ManageOwnership privilege
@@ -2657,7 +2630,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.drop_role(client, role_name=tmp_role)
         self.drop_user(client, user_name=tmp_user)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_verify_grant_user_update_privilege(self, host, port):
         """
         target: test grant Global UpdateUser privilege
@@ -2681,7 +2653,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.update_password(user_client, user_name=user_name, old_password=password,
                              new_password=new_password)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_verify_grant_user_select_privilege(self, host, port):
         """
         target: test grant Global SelectUser privilege
@@ -2708,7 +2679,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         users, _ = self.list_users(user_client)
         assert user_name in users
 
-    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip("public role privileges may be granted via built-in groups and cannot be individually revoked")
     def test_milvus_client_revoke_public_role_privilege(self, host, port):
         """
@@ -2738,7 +2708,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
                                     collection_name="*", db_name="*")
             time.sleep(20)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_revoke_user_after_delete_user(self, host, port):
         """
         target: test recreate user after delete
@@ -2769,7 +2738,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         res, _ = self.list_collections(user_client)
         assert isinstance(res, list)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_grant_connect_privilege(self, host, port):
         """
         target: test grant SelectUser privilege allows list_users and list_collections
@@ -2799,7 +2767,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.create_collection(user_client, coll_name, default_dim,
                                check_task=CheckTasks.check_permission_deny)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_public_role_privilege_all_dbs(self, host, port):
         """
         target: test public role user can list_collections in all databases
@@ -2838,7 +2805,6 @@ class TestMilvusClientRbacPrivilegeVerify(TestMilvusClientV2Base):
         self.drop_database(client, db_a)
         self.drop_database(client, db_b)
 
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_built_in_privilege_groups_e2e(self, host, port):
         """
         target: test built-in privilege groups end to end
