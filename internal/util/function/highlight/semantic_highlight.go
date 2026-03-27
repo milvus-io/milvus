@@ -191,7 +191,7 @@ func (highlight *SemanticHighlight) Process(ctx context.Context, topks []int64, 
 	start := int64(0)
 
 	for i, query := range highlight.queries {
-		size := topks[i] //nolint:gosec // bounds checked by loop condition
+		size := topks[i]                                                                                                    //nolint:gosec // bounds checked by loop condition
 		singleQueryHighlights, singleQueryScores, err := highlight.processOneQuery(ctx, query, documents[start:start+size]) //nolint:gosec // bounds are guaranteed by topks summing to len(documents)
 		if err != nil {
 			return nil, nil, err
