@@ -31,12 +31,14 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -286,6 +288,9 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 			ob.syncNextTargetToDelegator(ctx, collectionID, ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID)), newVersion)
 		}
 	}
+
+	// Update the all-replicas checkpoint metric
+	ob.updateAllReplicasCheckpointMetric(ctx, collectionID)
 }
 
 func (ob *TargetObserver) init(ctx context.Context, collectionID int64) {
@@ -591,6 +596,47 @@ func (ob *TargetObserver) genSyncAction(ctx context.Context, leaderView *meta.Le
 	}
 
 	return action
+}
+
+func (ob *TargetObserver) updateAllReplicasCheckpointMetric(ctx context.Context, collectionID int64) {
+	channels := ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
+	if len(channels) == 0 {
+		return
+	}
+	currentVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
+	if currentVersion == 0 {
+		return
+	}
+	replicas := ob.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+	if len(replicas) == 0 {
+		return
+	}
+
+	for channelName, dmlChannel := range channels {
+		allReady := true
+		for _, replica := range replicas {
+			delegators := ob.distMgr.ChannelDistManager.GetByFilter(
+				meta.WithReplica2Channel(replica),
+				meta.WithChannelName2Channel(channelName),
+			)
+			hasReady := lo.ContainsBy(delegators, func(ch *meta.DmChannel) bool {
+				return ch.View != nil &&
+					ch.View.TargetVersion >= currentVersion &&
+					ch.IsServiceable()
+			})
+			if !hasReady {
+				allReady = false
+				break
+			}
+		}
+		if allReady {
+			ts, _ := tsoutil.ParseTS(dmlChannel.GetSeekPosition().GetTimestamp())
+			metrics.QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds.WithLabelValues(
+				paramtable.GetStringNodeID(),
+				channelName,
+			).Set(float64(ts.Unix()))
+		}
+	}
 }
 
 func (ob *TargetObserver) updateCurrentTarget(ctx context.Context, collectionID int64) {

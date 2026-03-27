@@ -622,8 +622,9 @@ Use consistent and descriptive naming:
 - **Segment-level protection**: The garbage collector checks `GetSnapshotBySegment()` before deleting any segment
   - Segments referenced by any snapshot are skipped during GC
   - Protection applies to both metadata (Etcd) and data files (S3)
-- **Index-level protection**: The garbage collector checks `GetSnapshotByIndex()` before deleting index files
-  - Index files referenced by snapshots are preserved even after drop index operations
+- **Build-level protection**: The garbage collector checks `GetSnapshotByBuildID()` before deleting index files
+  - Index files referenced by snapshots (identified by buildID) are preserved even after drop index operations
+  - BuildID uniquely identifies a specific index build task, providing precise file-level protection
   - Ensures index data availability during snapshot restore
 - **Implementation location**: `internal/datacoord/garbage_collector.go`
 

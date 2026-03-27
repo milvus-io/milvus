@@ -745,7 +745,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size,
-        int32_t consistency_level)
+        int32_t consistency_level,
+        const query::PlanOptions& plan_options = {})
         : SegmentExpr(std::move(input),
                       name,
                       op_ctx,
@@ -755,7 +756,10 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       FromValCase(expr->val_.val_case()),
                       active_count,
                       batch_size,
-                      consistency_level),
+                      consistency_level,
+                      false,
+                      false,
+                      plan_options),
           expr_(expr) {
         auto val_type = FromValCase(expr_->val_.val_case());
         if ((val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
@@ -777,10 +781,14 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                 pinned_ngram_index_ = segment->GetNgramIndex(op_ctx_, field_id);
             }
         }
+        DetermineExecPath();
     }
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    void
+    DetermineExecPath() override;
 
     bool
     SupportOffsetInput() override {
@@ -896,14 +904,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     template <typename T>
     bool
-    CanUseIndex();
-
-    template <typename T>
-    bool
     CanUseIndexForArray();
-
-    bool
-    CanUseIndexForJson(DataType val_type);
 
     VectorPtr
     ExecTextMatch();

@@ -59,18 +59,11 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 	}
 	dynamicField := typeutil.GetDynamicField(schema)
 
-	functionOutputFields := make(map[string]int64)
-	for _, field := range schema.GetFields() {
-		if field.GetIsFunctionOutput() {
-			functionOutputFields[field.GetName()] = field.GetFieldID()
-		}
-	}
-
 	allFields := typeutil.GetAllFieldSchemas(schema)
 
 	name2Field := lo.SliceToMap(
 		lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
-			return !field.GetIsFunctionOutput() && !typeutil.IsAutoPKField(field) && field.GetName() != dynamicField.GetName()
+			return !typeutil.IsAutoPKField(field) && field.GetName() != dynamicField.GetName()
 		}),
 		func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
 			return field.GetName(), field
@@ -116,19 +109,23 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 			fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", pkField.GetName()))
 	}
 
-	// function output field, don't provide
-	for fieldName := range functionOutputFields {
-		_, existInHeader := headerMap[fieldName]
-		if existInHeader {
-			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("the field '%s' is output by function, no need to provide", fieldName))
-		}
-	}
-
 	for fieldName, field := range name2Field {
 		_, existInHeader := headerMap[fieldName]
 		_, subField := structArraySubFields[fieldName]
-		if field.GetNullable() || field.GetDefaultValue() != nil || subField {
+		if field.GetIsFunctionOutput() {
+			// validate function output field if provided in header
+			if existInHeader {
+				if typeutil.IsBM25FunctionOutputField(field, schema) {
+					return nil, merr.WrapErrImportFailed(
+						fmt.Sprintf("not allowed to provide data for BM25 function output field '%s'", field.GetName()))
+				}
+				if !pkgcommon.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.GetProperties()) {
+					return nil, merr.WrapErrImportFailed(
+						fmt.Sprintf("not allowed to provide data for function output field '%s', "+
+							"set collection property '%s' to enable", field.GetName(), pkgcommon.CollectionAllowInsertNonBM25FunctionOutputs))
+				}
+			}
+		} else if field.GetNullable() || field.GetDefaultValue() != nil || subField {
 			// nullable/defaultValue fields, provide or not provide both ok
 		} else if !existInHeader {
 			// not nullable/defaultValue/autoPK/functionOutput fields, must provide
@@ -263,6 +260,9 @@ func (r *rowParser) Parse(strArr []string) (Row, error) {
 	for fieldName, field := range r.name2Field {
 		fieldID := field.GetFieldID()
 		if _, ok := row[fieldID]; !ok {
+			if field.GetIsFunctionOutput() {
+				continue
+			}
 			if field.GetNullable() {
 				row[fieldID] = nil
 			}

@@ -339,7 +339,7 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		JsonKeyStatsDataFormat:           common.JSONStatsDataFormatVersion,
 		TaskSlot:                         st.taskSlot,
 		StorageVersion:                   segment.StorageVersion,
-		CurrentScalarIndexVersion:        st.ievm.GetCurrentScalarIndexEngineVersion(),
+		CurrentScalarIndexVersion:        st.ievm.ResolveScalarIndexVersion(),
 		JsonStatsMaxShreddingColumns:     Params.DataCoordCfg.JSONStatsMaxShreddingColumns.GetAsInt64(),
 		JsonStatsShreddingRatioThreshold: Params.DataCoordCfg.JSONStatsShreddingRatioThreshold.GetAsFloat(),
 		JsonStatsWriteBatchSize:          Params.DataCoordCfg.JSONStatsWriteBatchSize.GetAsInt64(),
@@ -367,6 +367,27 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
 			break
 		}
+	case indexpb.StatsSubJob_Sort:
+		// For V2 segments (no manifest), persist statsLogs and bm25Logs.
+		// For V3 segments (manifest set), stats are already in manifest.
+		segment := st.meta.GetHealthySegment(ctx, st.GetTargetSegmentID())
+		if segment != nil && segment.GetManifestPath() == "" {
+			var operators []SegmentOperator
+			if len(result.GetStatsLogs()) > 0 {
+				operators = append(operators, SetStatslogs(result.GetStatsLogs()))
+			}
+			if len(result.GetBm25Logs()) > 0 {
+				operators = append(operators, SetBm25Statslogs(result.GetBm25Logs()))
+			}
+			if len(operators) > 0 {
+				err = st.meta.UpdateSegment(st.GetTargetSegmentID(), operators...)
+				if err != nil {
+					log.Ctx(ctx).Warn("save sort stats result failed", zap.Int64("taskID", st.GetTaskID()),
+						zap.Int64("segmentID", st.GetTargetSegmentID()), zap.Error(err))
+					break
+				}
+			}
+		}
 	case indexpb.StatsSubJob_BM25Job:
 	// bm25 logs are generated during with segment flush.
 	default:
@@ -378,6 +399,24 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	if err != nil && !errors.Is(err, merr.ErrSegmentNotFound) {
 		return err
 	}
+
+	// Update segment manifest version so subsequent stats tasks use the latest version.
+	if manifest := result.GetManifest(); manifest != "" {
+		segID := st.GetSegmentID()
+		if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
+			segID = st.GetTargetSegmentID()
+		}
+		if updateErr := st.meta.UpdateSegmentsInfo(ctx, UpdateManifest(segID, manifest)); updateErr != nil {
+			log.Ctx(ctx).Warn("failed to update manifest after stats task",
+				zap.Int64("taskID", st.GetTaskID()),
+				zap.Int64("segmentID", segID),
+				zap.Error(updateErr))
+			if !errors.Is(updateErr, merr.ErrSegmentNotFound) {
+				return updateErr
+			}
+		}
+	}
+
 	log.Ctx(ctx).Info("SetJobInfo for stats task success", zap.Int64("taskID", st.GetTaskID()),
 		zap.Int64("oldSegmentID", st.GetSegmentID()), zap.Int64("targetSegmentID", st.GetTargetSegmentID()),
 		zap.String("subJobType", st.GetSubJobType().String()), zap.String("state", st.GetState().String()))

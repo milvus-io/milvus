@@ -1034,6 +1034,263 @@ class TestTextEmbeddingSearchNegative(TestBase):
         rsp = self.collection_client.collection_create(payload)
         assert rsp['code'] != 0, f"Expected creation to fail with dimension mismatch, but got: {rsp}"
 
+
+class TestTextEmbeddingFunctionOutput(TestBase):
+    """
+    ******************************************************************
+      Test cases for inserting data with text embedding function output field
+      via RESTful API. Covers allowInsertNonBM25FunctionOutputs property.
+    ******************************************************************
+    """
+
+    def test_insert_text_embedding_output_field_rejected_by_default(self, tei_endpoint):
+        """
+        target: test inserting text embedding function output field data is rejected by default
+        method: create collection with TEI text embedding function, insert data with dense vector
+        expected: insert should fail because allowInsertNonBM25FunctionOutputs is not enabled
+        """
+        name = gen_collection_name(prefix)
+        self.name = name
+        dim = 768
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "document", "dataType": "VarChar", "elementTypeParams": {"max_length": "65535"}},
+                    {"fieldName": "dense", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "tei",
+                        "type": "TextEmbedding",
+                        "inputFieldNames": ["document"],
+                        "outputFieldNames": ["dense"],
+                        "params": {
+                            "provider": "TEI",
+                            "endpoint": tei_endpoint
+                        }
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense", "indexName": "dense_index", "metricType": "COSINE"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_collection_load_completed(name)
+
+        # insert data with function output field (dense vector) should fail
+        import random
+        data = [
+            {"id": i, "document": fake_en.text(),
+             "dense": [random.random() for _ in range(dim)]}
+            for i in range(5)
+        ]
+        rsp = self.vector_client.vector_insert({"collectionName": name, "data": data})
+        assert rsp['code'] != 0
+        assert "function output" in rsp['message'].lower()
+
+    def test_insert_text_embedding_output_field_allowed_with_property(self, tei_endpoint):
+        """
+        target: test inserting text embedding function output field data succeeds
+                after enabling allowInsertNonBM25FunctionOutputs
+        method: create collection, alter property, insert data with user-provided dense vector
+        expected: insert should succeed and search should return results
+        """
+        name = gen_collection_name(prefix)
+        self.name = name
+        dim = 768
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "document", "dataType": "VarChar", "elementTypeParams": {"max_length": "65535"}},
+                    {"fieldName": "dense", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "tei",
+                        "type": "TextEmbedding",
+                        "inputFieldNames": ["document"],
+                        "outputFieldNames": ["dense"],
+                        "params": {
+                            "provider": "TEI",
+                            "endpoint": tei_endpoint
+                        }
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense", "indexName": "dense_index", "metricType": "COSINE"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_collection_load_completed(name)
+
+        # enable allowInsertNonBM25FunctionOutputs
+        rsp = self.collection_client.alter_collection_properties(
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
+        assert rsp['code'] == 0
+
+        # insert data with user-provided dense vector should now succeed
+        from sklearn import preprocessing
+        nb = 10
+        data = []
+        for i in range(nb):
+            vec = preprocessing.normalize([np.random.rand(dim).astype(np.float32)])[0].tolist()
+            data.append({
+                "id": i,
+                "document": fake_en.text(),
+                "dense": vec
+            })
+        rsp = self.vector_client.vector_insert({"collectionName": name, "data": data})
+        assert rsp['code'] == 0, f"Insert failed: {rsp}"
+        assert rsp['data']['insertCount'] == nb
+
+        # verify search works with the user-provided vectors
+        search_payload = {
+            "collectionName": name,
+            "data": [data[0]["dense"]],
+            "limit": 5,
+            "outputFields": ["id", "document"]
+        }
+        rsp = self.vector_client.vector_search(search_payload)
+        assert rsp['code'] == 0
+        assert len(rsp['data']) > 0
+
+    def test_insert_without_output_field_still_works_with_property(self, tei_endpoint):
+        """
+        target: test normal insert (without function output field) still works
+                after enabling allowInsertNonBM25FunctionOutputs
+        method: create collection, alter property, insert data without dense vector
+        expected: insert should succeed with TEI auto-generating embeddings
+        """
+        name = gen_collection_name(prefix)
+        self.name = name
+        dim = 768
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "document", "dataType": "VarChar", "elementTypeParams": {"max_length": "65535"}},
+                    {"fieldName": "dense", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "tei",
+                        "type": "TextEmbedding",
+                        "inputFieldNames": ["document"],
+                        "outputFieldNames": ["dense"],
+                        "params": {
+                            "provider": "TEI",
+                            "endpoint": tei_endpoint
+                        }
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense", "indexName": "dense_index", "metricType": "COSINE"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_collection_load_completed(name)
+
+        # enable property
+        rsp = self.collection_client.alter_collection_properties(
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
+        assert rsp['code'] == 0
+
+        # insert without function output field — TEI should auto-generate
+        nb = 10
+        data = [{"id": i, "document": fake_en.text()} for i in range(nb)]
+        rsp = self.vector_client.vector_insert({"collectionName": name, "data": data})
+        assert rsp['code'] == 0, f"Insert failed: {rsp}"
+        assert rsp['data']['insertCount'] == nb
+
+    def test_insert_bm25_output_field_always_rejected_even_with_property(self, tei_endpoint):
+        """
+        target: test BM25 function output field is always rejected even with
+                allowInsertNonBM25FunctionOutputs enabled
+        method: create collection with both TEI and BM25, enable property, insert with BM25 output
+        expected: insert should fail for BM25 output field
+        """
+        name = gen_collection_name(prefix)
+        self.name = name
+        dim = 768
+
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "document", "dataType": "VarChar",
+                     "elementTypeParams": {"max_length": "65535", "enable_analyzer": True}},
+                    {"fieldName": "dense", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "sparse", "dataType": "SparseFloatVector"}
+                ],
+                "functions": [
+                    {
+                        "name": "tei",
+                        "type": "TextEmbedding",
+                        "inputFieldNames": ["document"],
+                        "outputFieldNames": ["dense"],
+                        "params": {
+                            "provider": "TEI",
+                            "endpoint": tei_endpoint
+                        }
+                    },
+                    {
+                        "name": "bm25_fn",
+                        "type": "BM25",
+                        "inputFieldNames": ["document"],
+                        "outputFieldNames": ["sparse"],
+                        "params": {}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "dense", "indexName": "dense_index", "metricType": "COSINE"},
+                {"fieldName": "sparse", "indexName": "sparse_index", "metricType": "BM25",
+                 "params": {"index_type": "SPARSE_INVERTED_INDEX"}}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+        self.wait_collection_load_completed(name)
+
+        # enable property — allows non-BM25 outputs, but BM25 should still be rejected
+        rsp = self.collection_client.alter_collection_properties(
+            name, {"collection.function.allowInsertNonBM25FunctionOutputs": "true"})
+        assert rsp['code'] == 0
+
+        # insert data with BM25 output field (sparse) should fail
+        data = [
+            {"id": i, "document": fake_en.text(),
+             "sparse": {1: 0.5, 2: 0.3, 3: 0.1}}
+            for i in range(5)
+        ]
+        rsp = self.vector_client.vector_insert({"collectionName": name, "data": data})
+        assert rsp['code'] != 0
+        assert "bm25" in rsp['message'].lower() or "function output" in rsp['message'].lower()
+
+
 class TestModelRerankFunction(TestBase):
     """
     ******************************************************************

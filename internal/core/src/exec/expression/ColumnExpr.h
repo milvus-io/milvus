@@ -143,6 +143,11 @@ class PhyColumnExpr : public Expr {
         return expr_->GetColumn();
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        return false;
+    }
+
  private:
     bool is_indexed_;
 

@@ -106,6 +106,7 @@ struct CellSpec {
     size_t file_idx;          // index into the remote_files list
     int64_t local_rg_offset;  // file-local row group start offset
     int64_t rg_count;         // number of row groups in this cell
+    int64_t memory_size = 0;  // estimated Arrow memory in bytes; 0 = unknown
 };
 
 // Result of loading a single cell: cid + the arrow tables read.

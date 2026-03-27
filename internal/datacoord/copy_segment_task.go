@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
@@ -164,6 +166,7 @@ type copySegmentTask struct {
 	copyMeta     CopySegmentMeta          // For accessing job metadata and updating task state
 	meta         *meta                    // For accessing segment metadata and collection schema
 	snapshotMeta *snapshotMeta            // For accessing snapshot data (source binlogs)
+	alloc        allocator.Allocator      // For allocating new build IDs to avoid buildID reuse
 	tr           *timerecord.TimeRecorder // For measuring task duration (pending, executing, total)
 	times        *taskcommon.Times        // For tracking task lifecycle timestamps
 }
@@ -227,6 +230,7 @@ func (t *copySegmentTask) Clone() CopySegmentTask {
 		copyMeta:     t.copyMeta,
 		meta:         t.meta,
 		snapshotMeta: t.snapshotMeta,
+		alloc:        t.alloc,
 		tr:           t.tr,
 		times:        t.times,
 	}
@@ -566,13 +570,42 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		}
 		sources = append(sources, source)
 
-		// Build target with only IDs (binlog paths will be generated during copy)
+		// Collect all unique source build IDs from index files and allocate new ones
+		// to avoid buildID reuse across copy segments, which would corrupt the
+		// 1:1 segmentBuildInfo map in DataCoord indexMeta.
+		newBuildIDs := make(map[int64]int64)
+		allocNewBuildID := func(srcBuildID int64) error {
+			if _, exists := newBuildIDs[srcBuildID]; !exists {
+				newID, err := t.alloc.AllocID(ctx)
+				if err != nil {
+					return merr.WrapErrServiceInternal(fmt.Sprintf("failed to allocate new buildID for source buildID %d", srcBuildID), err.Error())
+				}
+				newBuildIDs[srcBuildID] = newID
+			}
+			return nil
+		}
+		for _, indexFile := range sourceSegDesc.GetIndexFiles() {
+			if err := allocNewBuildID(indexFile.GetBuildID()); err != nil {
+				return nil, err
+			}
+		}
+		for _, jsonKeyIndex := range sourceSegDesc.GetJsonKeyIndexFiles() {
+			if err := allocNewBuildID(jsonKeyIndex.GetBuildID()); err != nil {
+				return nil, err
+			}
+		}
+
+		// Build target with IDs and buildID mappings
 		target := &datapb.CopySegmentTarget{
 			CollectionId: job.GetCollectionId(),
 			PartitionId:  partitionID,
 			SegmentId:    targetSegID,
+			NewBuildIds:  newBuildIDs,
 		}
-		log.Info("prepare copy segment source and target", zap.Any("source", sourceSegDesc), zap.Any("target", target))
+		log.Info("prepare copy segment source and target",
+			zap.Any("source", sourceSegDesc),
+			zap.Any("target", target),
+			zap.Any("newBuildIDs", newBuildIDs))
 		targets = append(targets, target)
 	}
 
@@ -754,6 +787,18 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 		return nil
 	}
 
+	// Build indexName -> target indexID mapping from target collection's index definitions.
+	// The source snapshot stores the source collection's indexID, but the target collection
+	// has new indexIDs allocated during RestoreIndexes(). We must use the target indexID
+	// so that segmentIndexes entries match the index definitions in indexes map.
+	// Using indexName (instead of fieldID) as key because a single JSON field can have
+	// multiple indexes on different paths, and indexName is preserved during RestoreIndexes.
+	targetIndexes := meta.indexMeta.GetIndexesForCollection(task.GetCollectionId(), "")
+	indexNameToTargetID := make(map[string]int64, len(targetIndexes))
+	for _, index := range targetIndexes {
+		indexNameToTargetID[index.IndexName] = index.IndexID
+	}
+
 	// Find partition ID from task's ID mappings
 	var partitionID int64
 	for _, mapping := range task.GetIdMappings() {
@@ -764,12 +809,25 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 	}
 
 	// Sync each vector/scalar index
-	for fieldID, indexInfo := range result.GetIndexInfos() {
+	for _, indexInfo := range result.GetIndexInfos() {
+		// Resolve target indexID by indexName instead of fieldID.
+		// This correctly handles JSON path indexes where one field has multiple indexes.
+		targetIndexID, ok := indexNameToTargetID[indexInfo.GetIndexName()]
+		if !ok {
+			log.Warn("no index definition found for index name in target collection, skip syncing",
+				WrapCopySegmentTaskLog(task,
+					zap.String("indexName", indexInfo.GetIndexName()),
+					zap.Int64("fieldID", indexInfo.GetFieldId()),
+					zap.Int64("sourceIndexID", indexInfo.GetIndexId()))...)
+			continue
+		}
+
+		now := time.Now().Unix()
 		segIndex := &model.SegmentIndex{
 			SegmentID:                 result.GetSegmentId(),
 			CollectionID:              task.GetCollectionId(),
 			PartitionID:               partitionID,
-			IndexID:                   indexInfo.GetIndexId(),
+			IndexID:                   targetIndexID,
 			BuildID:                   indexInfo.GetBuildId(),
 			IndexState:                commonpb.IndexState_Finished,
 			IndexFileKeys:             indexInfo.GetIndexFilePaths(),
@@ -778,8 +836,8 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			IndexVersion:              indexInfo.GetVersion(),
 			CurrentIndexVersion:       indexInfo.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: indexInfo.GetCurrentScalarIndexVersion(),
-			CreatedUTCTime:            uint64(time.Now().Unix()),
-			FinishedUTCTime:           uint64(time.Now().Unix()),
+			CreatedUTCTime:            uint64(now),
+			FinishedUTCTime:           uint64(now),
 			NumRows:                   result.GetImportedRows(),
 		}
 
@@ -788,8 +846,8 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			log.Warn("failed to add segment index",
 				WrapCopySegmentTaskLog(task,
 					zap.Int64("segmentID", result.GetSegmentId()),
-					zap.Int64("fieldID", fieldID),
-					zap.Int64("indexID", indexInfo.GetIndexId()),
+					zap.String("indexName", indexInfo.GetIndexName()),
+					zap.Int64("indexID", targetIndexID),
 					zap.Error(err))...)
 
 			// Mark task and job as failed
@@ -814,8 +872,10 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 		log.Info("synced vector/scalar index",
 			WrapCopySegmentTaskLog(task,
 				zap.Int64("segmentID", result.GetSegmentId()),
-				zap.Int64("fieldID", fieldID),
-				zap.Int64("indexID", indexInfo.GetIndexId()),
+				zap.String("indexName", indexInfo.GetIndexName()),
+				zap.Int64("fieldID", indexInfo.GetFieldId()),
+				zap.Int64("indexID", targetIndexID),
+				zap.Int64("sourceIndexID", indexInfo.GetIndexId()),
 				zap.Int64("buildID", indexInfo.GetBuildId()))...)
 	}
 	return nil

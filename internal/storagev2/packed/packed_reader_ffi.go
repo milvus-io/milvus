@@ -162,6 +162,10 @@ func (r *FFIPackedReader) ReadNext() (arrow.Record, error) {
 
 // Close closes the FFI reader
 func (r *FFIPackedReader) Close() error {
+	if r.cPackedReader == nil {
+		return nil
+	}
+
 	// no need to manual release current batch
 	// stream reader handles it
 
@@ -170,6 +174,7 @@ func (r *FFIPackedReader) Close() error {
 	}
 
 	status := C.CloseFFIReader(r.cPackedReader)
+	r.cPackedReader = nil
 	return ConsumeCStatusIntoError(&status)
 }
 

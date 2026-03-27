@@ -51,9 +51,12 @@ const (
 	// DefaultServiceRoot default root path used in kv by Session
 	DefaultServiceRoot = "session/"
 	// DefaultIDKey default id key for Session
-	DefaultIDKey                = "id"
-	MilvusNodeIDForTesting      = "MILVUS_NODE_ID_FOR_TESTING"
-	exitCodeSessionLeaseExpired = 1
+	DefaultIDKey           = "id"
+	MilvusNodeIDForTesting = "MILVUS_NODE_ID_FOR_TESTING"
+	// ExitCodeEtcd is the exit code used when the process must terminate due to
+	// an unrecoverable etcd failure (session lease expired, watch channel closed, etc.).
+	// Using a distinctive code (80) so K8s pod status can identify etcd-related crashes.
+	ExitCodeEtcd = 80
 
 	serverVersionKey = "version"
 )
@@ -110,16 +113,16 @@ const (
 type IndexEngineVersion struct {
 	MinimalIndexVersion int32 `json:"MinimalIndexVersion,omitempty"`
 	CurrentIndexVersion int32 `json:"CurrentIndexVersion,omitempty"`
+	MaximumIndexVersion int32 `json:"MaximumIndexVersion,omitempty"`
 }
 
 // SessionRaw the persistent part of Session.
 type SessionRaw struct {
-	ServerID                 int64  `json:"ServerID,omitempty"`
-	ServerName               string `json:"ServerName,omitempty"`
-	Address                  string `json:"Address,omitempty"`
-	Exclusive                bool   `json:"Exclusive,omitempty"`
-	Stopping                 bool   `json:"Stopping,omitempty"`
-	TriggerKill              bool
+	ServerID                 int64              `json:"ServerID,omitempty"`
+	ServerName               string             `json:"ServerName,omitempty"`
+	Address                  string             `json:"Address,omitempty"`
+	Exclusive                bool               `json:"Exclusive,omitempty"`
+	Stopping                 bool               `json:"Stopping,omitempty"`
 	Version                  string             `json:"Version"`
 	IndexEngineVersion       IndexEngineVersion `json:"IndexEngineVersion,omitempty"`
 	ScalarIndexEngineVersion IndexEngineVersion `json:"ScalarIndexEngineVersion,omitempty"`
@@ -140,10 +143,6 @@ func (s *SessionRaw) GetServerID() int64 {
 
 func (s *SessionRaw) GetServerLabel() map[string]string {
 	return s.ServerLabels
-}
-
-func (s *SessionRaw) IsTriggerKill() bool {
-	return s.TriggerKill
 }
 
 // Session is a struct to store service's session, including ServerID, ServerName,
@@ -167,7 +166,8 @@ type Session struct {
 	watchCancel       atomic.Pointer[context.CancelFunc]
 	wg                sync.WaitGroup
 
-	metaRoot string
+	metaRoot       string
+	isMixCoordMode atomic.Bool
 
 	registered         atomic.Value
 	registeredRevision atomic.Int64
@@ -198,18 +198,20 @@ func WithResueNodeID(b bool) SessionOption {
 }
 
 // WithIndexEngineVersion should be only used by querynode.
-func WithIndexEngineVersion(minimal, current int32) SessionOption {
+func WithIndexEngineVersion(minimal, current, maximum int32) SessionOption {
 	return func(session *Session) {
 		session.IndexEngineVersion.MinimalIndexVersion = minimal
 		session.IndexEngineVersion.CurrentIndexVersion = current
+		session.IndexEngineVersion.MaximumIndexVersion = maximum
 	}
 }
 
 // WithScalarIndexEngineVersion should be only used by querynode.
-func WithScalarIndexEngineVersion(minimal, current int32) SessionOption {
+func WithScalarIndexEngineVersion(minimal, current, maximum int32) SessionOption {
 	return func(session *Session) {
 		session.ScalarIndexEngineVersion.MinimalIndexVersion = minimal
 		session.ScalarIndexEngineVersion.CurrentIndexVersion = current
+		session.ScalarIndexEngineVersion.MaximumIndexVersion = maximum
 	}
 }
 
@@ -297,11 +299,10 @@ func NewSessionWithEtcd(ctx context.Context, metaRoot string, client *clientv3.C
 
 // Init will initialize base struct of the Session, including ServerName, ServerID,
 // Address, Exclusive. ServerID is obtained in getServerID.
-func (s *Session) Init(serverName, address string, exclusive bool, triggerKill bool) {
+func (s *Session) Init(serverName, address string, exclusive bool) {
 	s.ServerName = serverName
 	s.Address = address
 	s.Exclusive = exclusive
-	s.TriggerKill = triggerKill
 	s.checkIDExist()
 	serverID, err := s.getServerID()
 	if err != nil {
@@ -636,19 +637,19 @@ func (s *Session) checkKeepaliveTTL(nextKeepaliveInstant time.Time) error {
 		if errors.Is(err, v3rpc.ErrLeaseNotFound) {
 			s.Logger().Error("confirm the lease is not found, the session is expired without activing closing", zap.Error(err))
 			log.Cleanup()
-			os.Exit(exitCodeSessionLeaseExpired)
+			os.Exit(ExitCodeEtcd)
 		}
 		if ctx.Err() != nil && errors.Is(context.Cause(ctx), errSessionExpiredAtClientSide) {
 			s.Logger().Error("session expired at client side, the session is expired without activing closing", zap.Error(err))
 			log.Cleanup()
-			os.Exit(exitCodeSessionLeaseExpired)
+			os.Exit(ExitCodeEtcd)
 		}
 		return errors.Wrap(err, "failed to check TTL")
 	}
 	if ttlResp.TTL <= 0 {
 		s.Logger().Error("confirm the lease is expired, the session is expired without activing closing", zap.Error(err))
 		log.Cleanup()
-		os.Exit(exitCodeSessionLeaseExpired)
+		os.Exit(ExitCodeEtcd)
 	}
 	s.Logger().Info("check TTL success, try to keep alive...", zap.Int64("ttl", ttlResp.TTL))
 	return nil
@@ -943,7 +944,18 @@ func (w *sessionWatcher) EventChannel() <-chan *SessionEvent {
 	return w.eventCh
 }
 
+// SetMixCoordMode marks this session as shared across multiple coordinators in MixCoord mode.
+// When in MixCoord mode, Stop() is a no-op — MixCoord is responsible for calling Stop() after
+// clearing the flag.
+func (s *Session) SetMixCoordMode(enable bool) {
+	s.isMixCoordMode.Store(enable)
+}
+
 func (s *Session) Stop() {
+	if s.isMixCoordMode.Load() {
+		log.Info("session stop skipped, session is in MixCoord mode", zap.String("serverName", s.ServerName))
+		return
+	}
 	log.Info("session stopping", zap.String("serverName", s.ServerName))
 	if s.cancel != nil {
 		s.cancel()

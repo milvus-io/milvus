@@ -88,44 +88,32 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
 template <>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForArray<milvus::Array>() {
-    bool res;
-    if (!SegmentExpr::CanUseIndex()) {
-        use_index_ = res = false;
-        return res;
-    }
+    // HasCompatibleScalarIndex() is already confirmed by SegmentExpr::DetermineExecPath()
+    // before this is called. Only check index type compatibility here.
     switch (expr_->column_.element_type_) {
         case DataType::BOOL:
-            res = CanUseIndexForArray<bool>();
-            break;
+            return CanUseIndexForArray<bool>();
         case DataType::INT8:
-            res = CanUseIndexForArray<int8_t>();
-            break;
+            return CanUseIndexForArray<int8_t>();
         case DataType::INT16:
-            res = CanUseIndexForArray<int16_t>();
-            break;
+            return CanUseIndexForArray<int16_t>();
         case DataType::INT32:
-            res = CanUseIndexForArray<int32_t>();
-            break;
+            return CanUseIndexForArray<int32_t>();
         case DataType::INT64:
-            res = CanUseIndexForArray<int64_t>();
-            break;
+            return CanUseIndexForArray<int64_t>();
         case DataType::FLOAT:
         case DataType::DOUBLE:
             // not accurate on floating point number, rollback to bruteforce.
-            res = false;
-            break;
+            return false;
         case DataType::VARCHAR:
         case DataType::STRING:
-            res = CanUseIndexForArray<std::string_view>();
-            break;
+            return CanUseIndexForArray<std::string_view>();
         default:
             ThrowInfo(DataTypeInvalid,
                       "unsupported element type when execute array "
                       "equal for index: {}",
                       expr_->column_.element_type_);
     }
-    use_index_ = res;
-    return res;
 }
 
 template <typename T>
@@ -251,7 +239,6 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             span.GetSpan()->SetAttribute("json_filter_expr_type",
                                          "unary_range");
             auto val_type = expr_->val_.val_case();
-            auto val_type_inner = FromValCase(val_type);
             if (CanUseNgramIndex() && !has_offset_input_) {
                 auto res = ExecNgramMatch(context);
                 // If nullopt is returned, it means the query cannot be
@@ -262,7 +249,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 }
             }
 
-            if (CanUseIndexForJson(val_type_inner) && !has_offset_input_) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 switch (val_type) {
                     case proto::plan::GenericValue::ValCase::kBoolVal:
                         result = ExecRangeVisitorImplForIndex<bool>();
@@ -316,24 +303,20 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto val_type = expr_->val_.val_case();
             switch (val_type) {
                 case proto::plan::GenericValue::ValCase::kBoolVal:
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<bool>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kInt64Val:
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<int64_t>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kFloatVal:
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<double>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kStringVal:
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplArray<std::string>(context);
                     break;
                 case proto::plan::GenericValue::ValCase::kArrayVal:
-                    if (!has_offset_input_ &&
-                        CanUseIndexForArray<milvus::Array>()) {
+                    if (exec_path_ == ExprExecPath::ScalarIndex &&
+                        !has_offset_input_) {
                         result = ExecRangeVisitorImplArrayForIndex<
                             proto::plan::Array>(context);
                     } else {
@@ -713,10 +696,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                            ExprValueType>;
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
-    FieldId field_id = expr_->column_.field_id_;
 
-    if (!has_offset_input_ &&
-        CanUseJsonStats(context, field_id, expr_->column_.nested_path_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::JsonStats) {
         milvus::ScopedTimer timer(
             "unary_range_json_by_stats",
             [this](double us) { json_filter_stats_latency_us_ += us; });
@@ -1324,12 +1305,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
         cached_index_chunk_id_ = 0;
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 template <typename T>
@@ -1352,7 +1331,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         }
     }
 
-    if (!has_offset_input_ && is_pk_field_ && IsCompareOp(expr_->op_type_)) {
+    if (!has_offset_input_ && exec_path_ == ExprExecPath::PkIndex) {
         if (pk_type_ == DataType::VARCHAR) {
             return ExecRangeVisitorImplForPk<std::string_view>(context);
         } else {
@@ -1360,7 +1339,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         }
     }
 
-    if (CanUseIndex<T>() && !has_offset_input_) {
+    if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
         return ExecRangeVisitorImplForData<T>(context);
@@ -1402,12 +1381,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
         }
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 template <typename T>
@@ -1518,11 +1495,10 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
                                  : batch_size_;
                 overflow_check_pos_ += batch_size;
             }
-            auto valid =
-                (input != nullptr)
-                    ? ProcessChunksForValidByOffsets<T>(
-                          SegmentExpr::CanUseIndex(), *input)
-                    : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
+            auto valid = (input != nullptr)
+                             ? ProcessChunksForValidByOffsets<T>(
+                                   UseIndexCursor(), *input)
+                             : ProcessChunksForValid<T>(UseIndexCursor());
             auto res_vec = std::make_shared<ColumnVector>(
                 TargetBitmap(batch_size), std::move(valid));
             TargetBitmapView res(res_vec->GetRawData(), batch_size);
@@ -1794,33 +1770,100 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     return res_vec;
 }
 
-template <typename T>
-bool
-PhyUnaryRangeFilterExpr::CanUseIndex() {
-    use_index_ = SegmentExpr::CanUseIndex() &&
-                 SegmentExpr::CanUseIndexForOp<T>(expr_->op_type_);
-    return use_index_;
-}
+void
+PhyUnaryRangeFilterExpr::DetermineExecPath() {
+    // TextMatch/PhraseMatch use a separate text index path (segment_->GetTextIndex()),
+    // not the pinned_index_ scalar index path.
+    if (expr_->op_type_ == proto::plan::OpType::TextMatch ||
+        expr_->op_type_ == proto::plan::OpType::PhraseMatch) {
+        exec_path_ = ExprExecPath::TextIndex;
+        return;
+    }
 
-bool
-PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
-    if (!SegmentExpr::CanUseIndex()) {
-        use_index_ = false;
-        return false;
+    // PkIndex: use primary key index for compare operations on PK fields.
+    if (is_pk_field_ && IsCompareOp(expr_->op_type_)) {
+        exec_path_ = ExprExecPath::PkIndex;
+        return;
     }
-    bool has_index = pinned_index_.size() > 0;
-    switch (val_type) {
-        case DataType::STRING:
-        case DataType::VARCHAR:
-            use_index_ = has_index &&
-                         expr_->op_type_ != proto::plan::OpType::Match &&
-                         expr_->op_type_ != proto::plan::OpType::PostfixMatch &&
-                         expr_->op_type_ != proto::plan::OpType::InnerMatch;
+
+    // JsonStats: use JSON statistics to skip segments when possible.
+    if (CanUseJsonStatsAtInit()) {
+        exec_path_ = ExprExecPath::JsonStats;
+        return;
+    }
+
+    SegmentExpr::DetermineExecPath();
+    if (exec_path_ != ExprExecPath::ScalarIndex) {
+        return;
+    }
+
+    // Refine: check if the index supports this specific operation/type.
+    // May downgrade from ScalarIndex to RawData.
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+
+    bool can_use = false;
+    switch (data_type) {
+        case DataType::BOOL:
+            can_use = SegmentExpr::CanUseIndexForOp<bool>(expr_->op_type_);
             break;
+        case DataType::INT8:
+            can_use = SegmentExpr::CanUseIndexForOp<int8_t>(expr_->op_type_);
+            break;
+        case DataType::INT16:
+            can_use = SegmentExpr::CanUseIndexForOp<int16_t>(expr_->op_type_);
+            break;
+        case DataType::INT32:
+            can_use = SegmentExpr::CanUseIndexForOp<int32_t>(expr_->op_type_);
+            break;
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+            can_use = SegmentExpr::CanUseIndexForOp<int64_t>(expr_->op_type_);
+            break;
+        case DataType::FLOAT:
+            can_use = SegmentExpr::CanUseIndexForOp<float>(expr_->op_type_);
+            break;
+        case DataType::DOUBLE:
+            can_use = SegmentExpr::CanUseIndexForOp<double>(expr_->op_type_);
+            break;
+        case DataType::VARCHAR:
+            can_use =
+                SegmentExpr::CanUseIndexForOp<std::string>(expr_->op_type_);
+            break;
+        case DataType::JSON: {
+            auto val_type = FromValCase(expr_->val_.val_case());
+            switch (val_type) {
+                case DataType::STRING:
+                case DataType::VARCHAR:
+                    can_use =
+                        expr_->op_type_ != proto::plan::OpType::Match &&
+                        expr_->op_type_ != proto::plan::OpType::PostfixMatch &&
+                        expr_->op_type_ != proto::plan::OpType::InnerMatch;
+                    break;
+                default:
+                    can_use = true;
+            }
+            break;
+        }
+        case DataType::ARRAY: {
+            auto val_type = expr_->val_.val_case();
+            switch (val_type) {
+                case proto::plan::GenericValue::ValCase::kArrayVal:
+                    can_use = CanUseIndexForArray<milvus::Array>();
+                    break;
+                default:
+                    can_use = false;
+            }
+            break;
+        }
         default:
-            use_index_ = has_index;
+            can_use = false;
     }
-    return use_index_;
+    if (!can_use) {
+        exec_path_ = ExprExecPath::RawData;
+    }
 }
 
 VectorPtr
@@ -1920,6 +1963,14 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
             v.active_count = active_count_;
             exec::ExprResCacheManager::Instance().Put(key, v);
         }
+    }
+
+    // When execute_all_at_once_ and result is not shared with cache, move to avoid copy
+    if (execute_all_at_once_ && cached_match_res_.use_count() == 1) {
+        MoveCursor();
+        return std::make_shared<ColumnVector>(
+            std::move(*cached_match_res_),
+            std::move(*cached_index_chunk_valid_res_));
     }
 
     TargetBitmap result;

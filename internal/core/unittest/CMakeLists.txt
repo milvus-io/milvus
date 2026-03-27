@@ -62,6 +62,7 @@ set(MILVUS_TEST_FILES
         test_async_warmup.cpp
         test_sort_buffer.cpp
         test_query_order_by.cpp
+        test_determine_use_index.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )

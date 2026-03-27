@@ -133,9 +133,9 @@ func createTestSnapshotMetaLoaded(t *testing.T) *snapshotMeta {
 
 // insertTestSnapshot inserts snapshot data into snapshotMeta for testing.
 // Use this for setting up test data when you don't need to go through SaveSnapshot.
-func insertTestSnapshot(sm *snapshotMeta, info *datapb.SnapshotInfo, segmentIDs, indexIDs []int64) {
+func insertTestSnapshot(sm *snapshotMeta, info *datapb.SnapshotInfo, segmentIDs []int64) {
 	sm.snapshotID2Info.Insert(info.GetId(), info)
-	sm.snapshotID2RefIndex.Insert(info.GetId(), NewLoadedSnapshotRefIndex(segmentIDs, indexIDs, nil))
+	sm.snapshotID2RefIndex.Insert(info.GetId(), NewLoadedSnapshotRefIndex(segmentIDs, nil))
 	sm.addToSecondaryIndexes(info)
 }
 
@@ -212,8 +212,8 @@ func TestSnapshotMeta_ListSnapshots_AllCollections(t *testing.T) {
 	snapshot2.SnapshotInfo.Id = 2
 
 	sm := createTestSnapshotMetaLoaded(t)
-	insertTestSnapshot(sm, snapshot1.SnapshotInfo, nil, nil)
-	insertTestSnapshot(sm, snapshot2.SnapshotInfo, nil, nil)
+	insertTestSnapshot(sm, snapshot1.SnapshotInfo, nil)
+	insertTestSnapshot(sm, snapshot2.SnapshotInfo, nil)
 
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
@@ -363,9 +363,9 @@ func TestSnapshotMeta_GetSnapshotBySegment_Success(t *testing.T) {
 	snapshotInfo3.Id = 3
 
 	sm := createTestSnapshotMetaLoaded(t)
-	insertTestSnapshot(sm, snapshotInfo1, []int64{1001, 1002}, []int64{2001})
-	insertTestSnapshot(sm, snapshotInfo2, []int64{1003, 1004}, []int64{2002})
-	insertTestSnapshot(sm, snapshotInfo3, []int64{1001}, []int64{2003})
+	insertTestSnapshot(sm, snapshotInfo1, []int64{1001, 1002})
+	insertTestSnapshot(sm, snapshotInfo2, []int64{1003, 1004})
+	insertTestSnapshot(sm, snapshotInfo3, []int64{1001})
 
 	// Act
 	snapshotIDs := sm.GetSnapshotBySegment(ctx, collectionID, segmentID)
@@ -386,7 +386,7 @@ func TestSnapshotMeta_GetSnapshotBySegment_EmptyResult(t *testing.T) {
 	snapshotInfo.Id = 1
 
 	sm := createTestSnapshotMetaLoaded(t)
-	insertTestSnapshot(sm, snapshotInfo, []int64{1001, 1002}, []int64{2001})
+	insertTestSnapshot(sm, snapshotInfo, []int64{1001, 1002})
 
 	// Act
 	snapshotIDs := sm.GetSnapshotBySegment(ctx, collectionID, segmentID)
@@ -410,91 +410,11 @@ func TestSnapshotMeta_GetSnapshotBySegment_MultipleMatches(t *testing.T) {
 	snapshotInfo2.Id = 2
 
 	sm := createTestSnapshotMetaLoaded(t)
-	insertTestSnapshot(sm, snapshotInfo1, []int64{1001, 1002}, []int64{2001})
-	insertTestSnapshot(sm, snapshotInfo2, []int64{1001, 1003}, []int64{2002})
+	insertTestSnapshot(sm, snapshotInfo1, []int64{1001, 1002})
+	insertTestSnapshot(sm, snapshotInfo2, []int64{1001, 1003})
 
 	// Act
 	snapshotIDs := sm.GetSnapshotBySegment(ctx, collectionID, segmentID)
-
-	// Assert
-	assert.Len(t, snapshotIDs, 2)
-	assert.Contains(t, snapshotIDs, UniqueID(1))
-	assert.Contains(t, snapshotIDs, UniqueID(2))
-}
-
-// --- GetSnapshotByIndex Tests ---
-
-func TestSnapshotMeta_GetSnapshotByIndex_Success(t *testing.T) {
-	// Arrange
-	ctx := context.Background()
-	collectionID := UniqueID(100)
-	indexID := UniqueID(2001)
-
-	snapshotInfo1 := createTestSnapshotInfoForMeta()
-	snapshotInfo1.CollectionId = 100
-	snapshotInfo1.Id = 1
-
-	snapshotInfo2 := createTestSnapshotInfoForMeta()
-	snapshotInfo2.CollectionId = 100
-	snapshotInfo2.Id = 2
-
-	snapshotInfo3 := createTestSnapshotInfoForMeta()
-	snapshotInfo3.CollectionId = 200 // Different collection
-	snapshotInfo3.Id = 3
-
-	sm := createTestSnapshotMetaLoaded(t)
-	insertTestSnapshot(sm, snapshotInfo1, []int64{1001}, []int64{2001, 2002})
-	insertTestSnapshot(sm, snapshotInfo2, []int64{1002}, []int64{2003, 2004})
-	insertTestSnapshot(sm, snapshotInfo3, []int64{1003}, []int64{2001})
-
-	// Act
-	snapshotIDs := sm.GetSnapshotByIndex(ctx, collectionID, indexID)
-
-	// Assert
-	assert.Len(t, snapshotIDs, 1)
-	assert.Contains(t, snapshotIDs, UniqueID(1)) // Only snapshot1 matches
-}
-
-func TestSnapshotMeta_GetSnapshotByIndex_EmptyResult(t *testing.T) {
-	// Arrange
-	ctx := context.Background()
-	collectionID := UniqueID(100)
-	indexID := UniqueID(9999) // Non-existent index
-
-	snapshotInfo := createTestSnapshotInfoForMeta()
-	snapshotInfo.CollectionId = 100
-	snapshotInfo.Id = 1
-
-	sm := createTestSnapshotMetaLoaded(t)
-	insertTestSnapshot(sm, snapshotInfo, []int64{1001}, []int64{2001, 2002})
-
-	// Act
-	snapshotIDs := sm.GetSnapshotByIndex(ctx, collectionID, indexID)
-
-	// Assert
-	assert.Len(t, snapshotIDs, 0)
-}
-
-func TestSnapshotMeta_GetSnapshotByIndex_MultipleMatches(t *testing.T) {
-	// Arrange
-	ctx := context.Background()
-	collectionID := UniqueID(100)
-	indexID := UniqueID(2001)
-
-	snapshotInfo1 := createTestSnapshotInfoForMeta()
-	snapshotInfo1.CollectionId = 100
-	snapshotInfo1.Id = 1
-
-	snapshotInfo2 := createTestSnapshotInfoForMeta()
-	snapshotInfo2.CollectionId = 100
-	snapshotInfo2.Id = 2
-
-	sm := createTestSnapshotMetaLoaded(t)
-	insertTestSnapshot(sm, snapshotInfo1, []int64{1001}, []int64{2001, 2002})
-	insertTestSnapshot(sm, snapshotInfo2, []int64{1002}, []int64{2001, 2003})
-
-	// Act
-	snapshotIDs := sm.GetSnapshotByIndex(ctx, collectionID, indexID)
 
 	// Assert
 	assert.Len(t, snapshotIDs, 2)
@@ -616,7 +536,6 @@ func TestSnapshotMeta_Reload_Success_WithMockey(t *testing.T) {
 	snapshotData := createTestSnapshotDataForMeta()
 	// Add pre-computed IDs to test fast path
 	snapshotData.SegmentIDs = []int64{1001}
-	snapshotData.IndexIDs = []int64{2001}
 	// Use the SnapshotInfo from snapshotData for catalog.ListSnapshots
 	snapshotInfo := snapshotData.SnapshotInfo
 
@@ -655,7 +574,6 @@ func TestSnapshotMeta_Reload_Success_WithMockey(t *testing.T) {
 	// Verify segment and index IDs are correctly loaded
 	assert.True(t, refIndex.IsLoaded())
 	assert.True(t, refIndex.ContainsSegment(1001))
-	assert.True(t, refIndex.ContainsIndex(2001))
 }
 
 func TestSnapshotMeta_Reload_CatalogError_WithMockey(t *testing.T) {
@@ -709,7 +627,6 @@ func TestSnapshotMeta_Reload_Concurrent_MultipleSnapshots(t *testing.T) {
 			},
 			// Pre-computed IDs for fast path (new format)
 			SegmentIDs: []int64{snapshotID * 10, snapshotID*10 + 1},
-			IndexIDs:   []int64{snapshotID * 100},
 		}
 		snapshotInfos[i] = snapshotData.SnapshotInfo
 		snapshotDataMap.Store(snapshotID, snapshotData)
@@ -742,7 +659,6 @@ func TestSnapshotMeta_Reload_Concurrent_MultipleSnapshots(t *testing.T) {
 					Segments:   original.Segments,
 					Indexes:    original.Indexes,
 					SegmentIDs: original.SegmentIDs,
-					IndexIDs:   original.IndexIDs,
 				}, nil
 			}
 		}
@@ -774,9 +690,6 @@ func TestSnapshotMeta_Reload_Concurrent_MultipleSnapshots(t *testing.T) {
 		expectedData, _ := snapshotDataMap.Load(snapshotInfo.Id)
 		for _, segID := range expectedData.(*SnapshotData).SegmentIDs {
 			assert.True(t, refIndex.ContainsSegment(segID))
-		}
-		for _, idxID := range expectedData.(*SnapshotData).IndexIDs {
-			assert.True(t, refIndex.ContainsIndex(idxID))
 		}
 	}
 }
@@ -814,7 +727,6 @@ func TestSnapshotMeta_Reload_Concurrent_PartialFailure(t *testing.T) {
 					Segments:     []*datapb.SegmentDescription{{SegmentId: info.Id * 10}},
 					Indexes:      []*indexpb.IndexInfo{{IndexID: info.Id * 100}},
 					SegmentIDs:   []int64{info.Id * 10},
-					IndexIDs:     []int64{info.Id * 100},
 				}, nil
 			}
 		}
@@ -948,7 +860,6 @@ func TestSnapshotMeta_SaveSnapshot_Success_WithMockey(t *testing.T) {
 	refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotData.SnapshotInfo.GetId())
 	assert.True(t, exists)
 	assert.True(t, refIndex.ContainsSegment(1001))
-	assert.True(t, refIndex.ContainsIndex(2001))
 	// Verify S3Location was set
 	assert.Equal(t, metadataFilePath, snapshotData.SnapshotInfo.S3Location)
 }
@@ -1218,15 +1129,12 @@ func TestSnapshotMeta_DropSnapshot_MarkDeletingError_WithMockey(t *testing.T) {
 
 func TestSnapshotRefIndex_NewLoaded(t *testing.T) {
 	// Test NewLoadedSnapshotRefIndex creates a pre-loaded refIndex
-	refIndex := NewLoadedSnapshotRefIndex([]int64{1001, 1002}, []int64{2001, 2002}, []int64{3001, 3002})
+	refIndex := NewLoadedSnapshotRefIndex([]int64{1001, 1002}, []int64{3001, 3002})
 
 	// Should not block (already loaded)
 	assert.True(t, refIndex.ContainsSegment(1001))
 	assert.True(t, refIndex.ContainsSegment(1002))
 	assert.False(t, refIndex.ContainsSegment(1003))
-	assert.True(t, refIndex.ContainsIndex(2001))
-	assert.True(t, refIndex.ContainsIndex(2002))
-	assert.False(t, refIndex.ContainsIndex(2003))
 	assert.True(t, refIndex.ContainsBuildID(3001))
 	assert.True(t, refIndex.ContainsBuildID(3002))
 	assert.False(t, refIndex.ContainsBuildID(3003))
@@ -1238,28 +1146,25 @@ func TestSnapshotRefIndex_SetLoaded(t *testing.T) {
 
 	// Initially empty
 	assert.False(t, refIndex.ContainsSegment(1001))
-	assert.False(t, refIndex.ContainsIndex(2001))
+	assert.False(t, refIndex.ContainsBuildID(3001))
 
 	// Set loaded data
-	refIndex.SetLoaded([]int64{1001, 1002}, []int64{2001}, []int64{3001})
+	refIndex.SetLoaded([]int64{1001, 1002}, []int64{3001})
 
 	// Should contain the loaded IDs
 	assert.True(t, refIndex.ContainsSegment(1001))
 	assert.True(t, refIndex.ContainsSegment(1002))
 	assert.False(t, refIndex.ContainsSegment(1003))
-	assert.True(t, refIndex.ContainsIndex(2001))
-	assert.False(t, refIndex.ContainsIndex(2002))
 	assert.True(t, refIndex.ContainsBuildID(3001))
 	assert.False(t, refIndex.ContainsBuildID(3002))
 }
 
 func TestSnapshotRefIndex_EmptySets(t *testing.T) {
 	// Test refIndex with empty/nil sets (e.g., after load failure)
-	refIndex := NewLoadedSnapshotRefIndex(nil, nil, nil)
+	refIndex := NewLoadedSnapshotRefIndex(nil, nil)
 
 	// Should not block and should return false for all queries
 	assert.False(t, refIndex.ContainsSegment(1001))
-	assert.False(t, refIndex.ContainsIndex(2001))
 	assert.False(t, refIndex.ContainsBuildID(3001))
 }
 
@@ -1276,7 +1181,7 @@ func TestSnapshotMeta_GetSnapshotByBuildID(t *testing.T) {
 	}
 	sm.snapshotID2Info.Insert(info1.GetId(), info1)
 	sm.snapshotID2RefIndex.Insert(info1.GetId(), NewLoadedSnapshotRefIndex(
-		[]int64{1001}, []int64{2001}, []int64{3001, 3002}))
+		[]int64{1001}, []int64{3001, 3002}))
 	sm.addToSecondaryIndexes(info1)
 
 	// Insert another snapshot with different buildIDs
@@ -1287,7 +1192,7 @@ func TestSnapshotMeta_GetSnapshotByBuildID(t *testing.T) {
 	}
 	sm.snapshotID2Info.Insert(info2.GetId(), info2)
 	sm.snapshotID2RefIndex.Insert(info2.GetId(), NewLoadedSnapshotRefIndex(
-		[]int64{1002}, []int64{2002}, []int64{3003}))
+		[]int64{1002}, []int64{3003}))
 	sm.addToSecondaryIndexes(info2)
 
 	// Found in first snapshot
@@ -1316,7 +1221,7 @@ func TestSnapshotMeta_GetSnapshotByBuildID_NilBuildIDs(t *testing.T) {
 	}
 	sm.snapshotID2Info.Insert(info.GetId(), info)
 	sm.snapshotID2RefIndex.Insert(info.GetId(), NewLoadedSnapshotRefIndex(
-		[]int64{1001}, []int64{2001}, nil))
+		[]int64{1001}, nil))
 	sm.addToSecondaryIndexes(info)
 
 	assert.Empty(t, sm.GetSnapshotByBuildID(3001))
@@ -1333,18 +1238,16 @@ func TestSnapshotMeta_ConcurrentOperations(t *testing.T) {
 	snapshotData := createTestSnapshotDataForMeta()
 
 	// Act - simulate concurrent operations
-	insertTestSnapshot(sm, snapshotData.SnapshotInfo, []int64{1001}, []int64{2001})
+	insertTestSnapshot(sm, snapshotData.SnapshotInfo, []int64{1001})
 
 	// These operations should work concurrently
 	snapshots, err := sm.ListSnapshots(ctx, 0, 0)
 	segmentSnapshots := sm.GetSnapshotBySegment(ctx, 100, 1001)
-	indexSnapshots := sm.GetSnapshotByIndex(ctx, 100, 2001)
 
 	// Assert
 	assert.NoError(t, err)
 	assert.Len(t, snapshots, 1)
 	assert.Len(t, segmentSnapshots, 1)
-	assert.Len(t, indexSnapshots, 1)
 }
 
 func TestSnapshotMeta_EmptyMaps(t *testing.T) {
@@ -1355,14 +1258,12 @@ func TestSnapshotMeta_EmptyMaps(t *testing.T) {
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, 100, 1)
 	segmentSnapshots := sm.GetSnapshotBySegment(ctx, 100, 1001)
-	indexSnapshots := sm.GetSnapshotByIndex(ctx, 100, 2001)
 	snapshot, getErr := sm.GetSnapshot(ctx, "nonexistent")
 
 	// Assert
 	assert.NoError(t, err)
 	assert.Len(t, snapshots, 0)
 	assert.Len(t, segmentSnapshots, 0)
-	assert.Len(t, indexSnapshots, 0)
 	assert.Error(t, getErr)
 	assert.Nil(t, snapshot)
 }
@@ -1433,7 +1334,7 @@ func TestSnapshotMeta_ListSnapshots_FilterByCollection(t *testing.T) {
 
 func TestSnapshotMeta_Reload_LegacyFormat_NoPrecomputedIDs(t *testing.T) {
 	// Test reload with legacy snapshots that don't have pre-computed IDs
-	// In current implementation, SegmentIDs/IndexIDs will be empty for legacy snapshots
+	// In current implementation, SegmentIDs will be empty for legacy snapshots
 	// Arrange
 	ctx := context.Background()
 	sm := createTestSnapshotMeta(t)
@@ -1452,7 +1353,6 @@ func TestSnapshotMeta_Reload_LegacyFormat_NoPrecomputedIDs(t *testing.T) {
 		Segments:     nil, // Not populated when includeSegments=false
 		Indexes:      nil,
 		SegmentIDs:   nil, // Empty - legacy format
-		IndexIDs:     nil, // Empty - legacy format
 	}
 
 	// Mock catalog.ListSnapshots
@@ -1489,7 +1389,6 @@ func TestSnapshotMeta_Reload_LegacyFormat_NoPrecomputedIDs(t *testing.T) {
 
 	// Legacy snapshots will have empty ID sets
 	assert.False(t, refIndex.ContainsSegment(1001))
-	assert.False(t, refIndex.ContainsIndex(2001))
 }
 
 func TestSnapshotMeta_Reload_MixedFormats(t *testing.T) {
@@ -1540,7 +1439,6 @@ func TestSnapshotMeta_Reload_MixedFormats(t *testing.T) {
 					S3Location:   newFormatInfo.S3Location,
 				},
 				SegmentIDs: []int64{10010, 10011},
-				IndexIDs:   []int64{100100},
 			}, nil
 		}
 
@@ -1553,7 +1451,6 @@ func TestSnapshotMeta_Reload_MixedFormats(t *testing.T) {
 				S3Location:   legacyFormatInfo.S3Location,
 			},
 			SegmentIDs: nil, // Empty - legacy format
-			IndexIDs:   nil, // Empty - legacy format
 		}, nil
 	}).Build()
 	defer mock2.UnPatch()
@@ -1580,11 +1477,9 @@ func TestSnapshotMeta_Reload_MixedFormats(t *testing.T) {
 	// Verify new format snapshot has pre-computed IDs
 	assert.True(t, newRefIndex.ContainsSegment(10010))
 	assert.True(t, newRefIndex.ContainsSegment(10011))
-	assert.True(t, newRefIndex.ContainsIndex(100100))
 
 	// Verify legacy format snapshot has empty ID sets
 	assert.False(t, legacyRefIndex.ContainsSegment(10020))
-	assert.False(t, legacyRefIndex.ContainsIndex(100200))
 
 	// Verify call counts
 	newCount, _ := callCounts.Load(newFormatInfo.S3Location)
@@ -1637,7 +1532,6 @@ func TestSnapshotMeta_Reload_SkipPendingAndDeletingState_WithMockey(t *testing.T
 		return &SnapshotData{
 			SnapshotInfo: committedSnapshot,
 			SegmentIDs:   []int64{1001},
-			IndexIDs:     []int64{2001},
 		}, nil
 	}).Build()
 	defer mock2.UnPatch()
@@ -1814,9 +1708,8 @@ func TestSnapshotRefIndex_SetFailed(t *testing.T) {
 	assert.True(t, refIndex.IsFailed())
 	assert.False(t, refIndex.IsLoaded())
 
-	// ContainsSegment/Index should return false for failed state
+	// ContainsSegment/ContainsBuildID should return false for failed state
 	assert.False(t, refIndex.ContainsSegment(1001))
-	assert.False(t, refIndex.ContainsIndex(2001))
 }
 
 func TestSnapshotRefIndex_TransitionFromFailedToLoaded(t *testing.T) {
@@ -1828,13 +1721,12 @@ func TestSnapshotRefIndex_TransitionFromFailedToLoaded(t *testing.T) {
 	assert.True(t, refIndex.IsFailed())
 
 	// Now set as loaded with data
-	refIndex.SetLoaded([]int64{1001, 1002}, []int64{2001}, []int64{3001})
+	refIndex.SetLoaded([]int64{1001, 1002}, []int64{3001})
 
 	// Should now be loaded, not failed
 	assert.False(t, refIndex.IsFailed())
 	assert.True(t, refIndex.IsLoaded())
 	assert.True(t, refIndex.ContainsSegment(1001))
-	assert.True(t, refIndex.ContainsIndex(2001))
 	assert.True(t, refIndex.ContainsBuildID(3001))
 }
 
@@ -1899,7 +1791,7 @@ func TestSnapshotMeta_IsRefIndexLoadedForCollection_AllLoaded(t *testing.T) {
 			Name:         fmt.Sprintf("test_snapshot_%d", i),
 		}
 		sm.snapshotID2Info.Insert(snapshotInfo.Id, snapshotInfo)
-		sm.snapshotID2RefIndex.Insert(snapshotInfo.Id, NewLoadedSnapshotRefIndex([]int64{i * 1000}, []int64{i * 2000}, nil))
+		sm.snapshotID2RefIndex.Insert(snapshotInfo.Id, NewLoadedSnapshotRefIndex([]int64{i * 1000}, nil))
 		sm.addToSecondaryIndexes(snapshotInfo)
 	}
 
@@ -1920,7 +1812,7 @@ func TestSnapshotMeta_IsRefIndexLoadedForCollection_HasFailed(t *testing.T) {
 		Name:         "snapshot1",
 	}
 	sm.snapshotID2Info.Insert(snapshot1.Id, snapshot1)
-	sm.snapshotID2RefIndex.Insert(snapshot1.Id, NewLoadedSnapshotRefIndex([]int64{1001}, nil, nil))
+	sm.snapshotID2RefIndex.Insert(snapshot1.Id, NewLoadedSnapshotRefIndex([]int64{1001}, nil))
 	sm.addToSecondaryIndexes(snapshot1)
 
 	// Add a failed RefIndex for same collection
@@ -1950,7 +1842,7 @@ func TestSnapshotMeta_IsRefIndexLoadedForCollection_OtherCollectionFailed(t *tes
 		Name:         "snapshot1",
 	}
 	sm.snapshotID2Info.Insert(snapshot1.Id, snapshot1)
-	sm.snapshotID2RefIndex.Insert(snapshot1.Id, NewLoadedSnapshotRefIndex([]int64{1001}, nil, nil))
+	sm.snapshotID2RefIndex.Insert(snapshot1.Id, NewLoadedSnapshotRefIndex([]int64{1001}, nil))
 	sm.addToSecondaryIndexes(snapshot1)
 
 	// Add failed RefIndex for collection 200
@@ -2009,12 +1901,12 @@ func TestSnapshotMeta_GetSnapshotBySegment_AllCollections_Found(t *testing.T) {
 	info1 := createTestSnapshotInfoForMeta()
 	info1.CollectionId = 100
 	info1.Id = 1
-	insertTestSnapshot(sm, info1, []int64{1001, 1002}, []int64{2001})
+	insertTestSnapshot(sm, info1, []int64{1001, 1002})
 
 	info2 := createTestSnapshotInfoForMeta()
 	info2.CollectionId = 200
 	info2.Id = 2
-	insertTestSnapshot(sm, info2, []int64{1003, 1004}, []int64{2002})
+	insertTestSnapshot(sm, info2, []int64{1003, 1004})
 
 	snapshotIDs := sm.GetSnapshotBySegment(ctx, -1, 1001)
 	assert.Len(t, snapshotIDs, 1)
@@ -2028,7 +1920,7 @@ func TestSnapshotMeta_GetSnapshotBySegment_AllCollections_NotFound(t *testing.T)
 	info1 := createTestSnapshotInfoForMeta()
 	info1.CollectionId = 100
 	info1.Id = 1
-	insertTestSnapshot(sm, info1, []int64{1001, 1002}, []int64{2001})
+	insertTestSnapshot(sm, info1, []int64{1001, 1002})
 
 	snapshotIDs := sm.GetSnapshotBySegment(ctx, -1, 9999)
 	assert.Len(t, snapshotIDs, 0)
@@ -2050,12 +1942,12 @@ func TestSnapshotMeta_GetSnapshotBySegment_AllCollections_CrossCollection(t *tes
 	info1 := createTestSnapshotInfoForMeta()
 	info1.CollectionId = 100
 	info1.Id = 1
-	insertTestSnapshot(sm, info1, []int64{2001, 2002}, []int64{3001})
+	insertTestSnapshot(sm, info1, []int64{2001, 2002})
 
 	info2 := createTestSnapshotInfoForMeta()
 	info2.CollectionId = 200
 	info2.Id = 2
-	insertTestSnapshot(sm, info2, []int64{1001, 1002}, []int64{3002})
+	insertTestSnapshot(sm, info2, []int64{1001, 1002})
 
 	// Should find segment 1001 even though it's in collection 200
 	snapshotIDs := sm.GetSnapshotBySegment(ctx, -1, 1001)
@@ -2073,7 +1965,7 @@ func TestSnapshotMeta_IsAllRefIndexLoaded(t *testing.T) {
 	info1 := createTestSnapshotInfoForMeta()
 	info1.CollectionId = 100
 	info1.Id = 1
-	insertTestSnapshot(sm, info1, []int64{1001}, []int64{2001})
+	insertTestSnapshot(sm, info1, []int64{1001})
 	assert.True(t, sm.IsAllRefIndexLoaded())
 
 	// Add a not-loaded snapshot

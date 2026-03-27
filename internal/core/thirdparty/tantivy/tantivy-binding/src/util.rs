@@ -22,7 +22,7 @@ pub fn index_exist(path: &str) -> bool {
         );
         return false;
     };
-    let exists = Index::exists(&dir).unwrap();
+    let exists = Index::exists(&dir).unwrap_or(false);
     if !exists {
         init_log();
         let files: Vec<_> = std::fs::read_dir(path)

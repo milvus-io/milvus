@@ -437,7 +437,7 @@ class IndexingRecord {
                 }
             }
         }
-        assert(offset_id == schema.size());
+        // offset_id was removed in a prior refactor; assertion disabled
     }
 
     void

@@ -7,15 +7,14 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
@@ -50,29 +49,31 @@ func TestReplicate(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := streaming.WAL().Replicate().UpdateReplicateConfiguration(ctx, &commonpb.ReplicateConfiguration{
-		Clusters: []*commonpb.MilvusCluster{
-			{
-				ClusterId: "primary",
-				ConnectionParam: &commonpb.ConnectionParam{
-					Uri:   "localhost:19530",
-					Token: "test-token",
+	err := streaming.WAL().Replicate().UpdateReplicateConfiguration(ctx, &milvuspb.UpdateReplicateConfigurationRequest{
+		ReplicateConfiguration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{
+					ClusterId: "primary",
+					ConnectionParam: &commonpb.ConnectionParam{
+						Uri:   "localhost:19530",
+						Token: "test-token",
+					},
+					Pchannels: pchannels1,
 				},
-				Pchannels: pchannels1,
-			},
-			{
-				ClusterId: "by-dev",
-				ConnectionParam: &commonpb.ConnectionParam{
-					Uri:   "localhost:19531",
-					Token: "test-token",
+				{
+					ClusterId: "by-dev",
+					ConnectionParam: &commonpb.ConnectionParam{
+						Uri:   "localhost:19531",
+						Token: "test-token",
+					},
+					Pchannels: pchannels2,
 				},
-				Pchannels: pchannels2,
 			},
-		},
-		CrossClusterTopology: []*commonpb.CrossClusterTopology{
-			{
-				SourceClusterId: "primary",
-				TargetClusterId: "by-dev",
+			CrossClusterTopology: []*commonpb.CrossClusterTopology{
+				{
+					SourceClusterId: "primary",
+					TargetClusterId: "by-dev",
+				},
 			},
 		},
 	})
@@ -128,63 +129,31 @@ func TestReplicateCreateCollection(t *testing.T) {
 	}
 }
 
-func TestStreamingBroadcast(t *testing.T) {
-	t.Skip("cat not running without streaming service at background")
-	streamingutil.SetStreamingServiceEnabled()
-	streaming.Init()
-	defer streaming.Release()
-
-	msg, _ := message.NewCreateCollectionMessageBuilderV1().
-		WithHeader(&message.CreateCollectionMessageHeader{
-			CollectionId: 1,
-			PartitionIds: []int64{1, 2, 3},
-		}).
-		WithBody(&msgpb.CreateCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_CreateCollection,
-				Timestamp: 1,
-			},
-			CollectionID:   1,
-			CollectionName: collectionName,
-		}).
-		WithBroadcast(vChannels).
-		BuildBroadcast()
-
-	resp, err := streaming.WAL().Broadcast().Append(context.Background(), msg)
-	assert.NoError(t, err)
-	assert.NotNil(t, resp)
-	t.Logf("CreateCollection: %+v\t%+v\n", resp, err)
-
-	// repeated broadcast with same resource key should be rejected
-	resp2, err := streaming.WAL().Broadcast().Append(context.Background(), msg)
-	assert.Error(t, err)
-	assert.True(t, status.AsStreamingError(err).IsResourceAcquired())
-	assert.Nil(t, resp2)
-}
-
 func TestStreamingProduce(t *testing.T) {
 	t.Skip("cat not running without streaming service at background")
 	streamingutil.SetStreamingServiceEnabled()
 	streaming.Init()
 	defer streaming.Release()
-	msg, _ := message.NewCreateCollectionMessageBuilderV1().
-		WithHeader(&message.CreateCollectionMessageHeader{
-			CollectionId: 1,
-			PartitionIds: []int64{1, 2, 3},
-		}).
-		WithBody(&msgpb.CreateCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_CreateCollection,
-				Timestamp: 1,
-			},
-			CollectionID:   1,
-			CollectionName: collectionName,
-		}).
-		WithBroadcast(vChannels).
-		BuildBroadcast()
 
-	resp, err := streaming.WAL().Broadcast().Append(context.Background(), msg)
-	t.Logf("CreateCollection: %+v\t%+v\n", resp, err)
+	for _, vChannel := range vChannels {
+		msg, _ := message.NewCreateCollectionMessageBuilderV1().
+			WithHeader(&message.CreateCollectionMessageHeader{
+				CollectionId: 1,
+				PartitionIds: []int64{1, 2, 3},
+			}).
+			WithBody(&msgpb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_CreateCollection,
+					Timestamp: 1,
+				},
+				CollectionID:   1,
+				CollectionName: collectionName,
+			}).
+			WithVChannel(vChannel).
+			BuildMutable()
+		resp, err := streaming.WAL().RawAppend(context.Background(), msg)
+		t.Logf("CreateCollection: %+v\t%+v\n", resp, err)
+	}
 
 	for i := 0; i < 500; i++ {
 		time.Sleep(time.Millisecond * 1)
@@ -203,14 +172,7 @@ func TestStreamingProduce(t *testing.T) {
 
 	for i := 0; i < 500; i++ {
 		time.Sleep(time.Millisecond * 1)
-		txn, err := streaming.WAL().Txn(context.Background(), streaming.TxnOption{
-			VChannel:  vChannels[0],
-			Keepalive: 500 * time.Millisecond,
-		})
-		if err != nil {
-			t.Errorf("txn failed: %v", err)
-			return
-		}
+		msgs := make([]message.MutableMessage, 0)
 		for j := 0; j < 5; j++ {
 			msg, _ := message.NewInsertMessageBuilderV1().
 				WithHeader(&message.InsertMessageHeader{
@@ -221,27 +183,27 @@ func TestStreamingProduce(t *testing.T) {
 				}).
 				WithVChannel(vChannels[0]).
 				BuildMutable()
-			err := txn.Append(context.Background(), msg)
-			fmt.Printf("%+v\n", err)
+			msgs = append(msgs, msg)
 		}
-		result, err := txn.Commit(context.Background())
+		err := streaming.WAL().AppendMessages(context.Background(), msgs...).UnwrapFirstError()
 		if err != nil {
 			t.Errorf("txn failed: %v", err)
 		}
-		t.Logf("txn commit: %+v\n", result)
 	}
 
-	msg, _ = message.NewDropCollectionMessageBuilderV1().
-		WithHeader(&message.DropCollectionMessageHeader{
-			CollectionId: 1,
-		}).
-		WithBody(&msgpb.DropCollectionRequest{
-			CollectionID: 1,
-		}).
-		WithBroadcast(vChannels).
-		BuildBroadcast()
-	resp, err = streaming.WAL().Broadcast().Append(context.Background(), msg)
-	t.Logf("DropCollection: %+v\t%+v\n", resp, err)
+	for _, vChannel := range vChannels {
+		msg, _ := message.NewDropCollectionMessageBuilderV1().
+			WithHeader(&message.DropCollectionMessageHeader{
+				CollectionId: 1,
+			}).
+			WithBody(&msgpb.DropCollectionRequest{
+				CollectionID: 1,
+			}).
+			WithVChannel(vChannel).
+			BuildMutable()
+		resp, err := streaming.WAL().RawAppend(context.Background(), msg)
+		t.Logf("DropCollection: %+v\t%+v\n", resp, err)
+	}
 }
 
 func TestStreamingConsume(t *testing.T) {

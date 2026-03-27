@@ -24,15 +24,31 @@ import "C"
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
+	"math"
 	"unsafe"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+// getRetryLimit returns the configured manifest transaction retry limit.
+// Multiple stats tasks (text index, JSON key, BM25) can write to the same
+// segment's manifest concurrently, causing optimistic transaction conflicts.
+// The retry mechanism re-reads the latest manifest version and re-applies
+// the changes on each attempt.
+func getRetryLimit() C.uint32_t {
+	val := paramtable.Get().CommonCfg.ManifestTransactionRetryLimit.GetAsInt64()
+	if val <= 0 {
+		val = 10
+	}
+	if val > math.MaxUint32 {
+		val = math.MaxUint32
+	}
+	return C.uint32_t(val)
+}
 
 // DeltaLogEntry represents a delta log to be added to the manifest
 type DeltaLogEntry struct {
@@ -76,18 +92,16 @@ func AddDeltaLogsToManifest(
 
 	// Start transaction
 	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), 1, &transactionHandle)
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), getRetryLimit(), &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer C.loon_transaction_destroy(transactionHandle)
 
-	// Add each delta log to the transaction
+	// Add each delta log to the transaction.
+	// The C++ loon library converts absolute paths to relative at commit time
 	for _, deltaLog := range deltaLogs {
-		// Convert full path to relative path
-		relativePath := toRelativePath(deltaLog.Path, basePath, storageConfig.GetRootPath())
-
-		cPath := C.CString(relativePath)
+		cPath := C.CString(deltaLog.Path)
 		result = C.loon_transaction_add_delta_log(transactionHandle, cPath, C.int64_t(deltaLog.NumEntries))
 		C.free(unsafe.Pointer(cPath))
 
@@ -96,7 +110,7 @@ func AddDeltaLogsToManifest(
 		}
 
 		log.Debug("Added delta log to transaction",
-			zap.String("relativePath", relativePath),
+			zap.String("path", deltaLog.Path),
 			zap.Int64("numEntries", deltaLog.NumEntries))
 	}
 
@@ -170,45 +184,67 @@ func GetDeltaLogPathsFromManifest(
 	return paths, nil
 }
 
-// toRelativePath converts a full path to a path relative to basePath/_delta/.
-// The C loon library stores delta log paths relative to basePath/_delta/ (the kDeltaPath convention).
-// When deserializing, it prepends basePath/_delta/ to the relative path and normalizes.
-//
-// For V3 delta paths ({basePath}/_delta/{logID}), the file is already under basePath/_delta/,
-// so the relative path is simply the filename ({logID}).
-//
-// For legacy delta paths ({rootPath}/delta_log/{collID}/{partID}/{segID}/{logID}),
-// we need baseDepth + 1 levels of "../" to escape basePath/_delta/ back to rootPath.
-func toRelativePath(fullPath, basePath, rootPath string) string {
-	// V3 path: if fullPath is under basePath/_delta/, just return the filename
-	deltaDir := filepath.Join(basePath, "_delta") + "/"
-	if strings.HasPrefix(fullPath, deltaDir) {
-		return strings.TrimPrefix(fullPath, deltaDir)
+// StatEntry represents a stat entry to be added to the manifest.
+type StatEntry struct {
+	Key      string            // Manifest stat key, e.g. "bloom_filter.100"
+	Files    []string          // Relative file paths under manifest base path
+	Metadata map[string]string // Optional key-value metadata
+}
+
+// AddStatsToManifest adds stats to an existing manifest and returns the new manifest path.
+func AddStatsToManifest(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	stats []StatEntry,
+) (string, error) {
+	if len(stats) == 0 {
+		return manifestPath, nil
 	}
 
-	// Legacy path: compute relative path from basePath/_delta/ via "../" traversal
-	if strings.HasPrefix(fullPath, rootPath) {
-		// Get the path relative to rootPath for both
-		fullRel := strings.TrimPrefix(fullPath, rootPath)
-		fullRel = strings.TrimPrefix(fullRel, "/")
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse manifest path: %w", err)
+	}
 
-		baseRel := strings.TrimPrefix(basePath, rootPath)
-		baseRel = strings.TrimPrefix(baseRel, "/")
+	log.Debug("AddStatsToManifest",
+		zap.String("basePath", basePath),
+		zap.Int64("version", version),
+		zap.Int("numStats", len(stats)))
 
-		// Count the depth of basePath to know how many "../" we need.
-		// Add 1 for the _delta/ subdirectory that C prepends during deserialization.
-		baseDepth := len(strings.Split(baseRel, "/")) + 1
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create properties: %w", err)
+	}
+	defer C.loon_properties_free(cProperties)
 
-		// Build the relative path: go up baseDepth levels, then down to fullRel
-		var parts []string
-		for i := 0; i < baseDepth; i++ {
-			parts = append(parts, "..")
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+
+	var transactionHandle C.LoonTransactionHandle
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), getRetryLimit(), &transactionHandle)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return "", fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer C.loon_transaction_destroy(transactionHandle)
+
+	// The C++ loon library converts absolute paths to relative at commit time
+	for _, stat := range stats {
+		if err := UpdateTransactionStat(transactionHandle, stat.Key, stat.Files, stat.Metadata); err != nil {
+			return "", fmt.Errorf("failed to update stat %s: %w", stat.Key, err)
 		}
-		parts = append(parts, fullRel)
-
-		return filepath.Join(parts...)
+		log.Debug("Added stat to transaction",
+			zap.String("key", stat.Key),
+			zap.Strings("files", stat.Files))
 	}
 
-	// Fallback: return as-is
-	return fullPath
+	var commitVersion C.int64_t
+	result = C.loon_transaction_commit(transactionHandle, &commitVersion)
+	if err := HandleLoonFFIResult(result); err != nil {
+		return "", fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	newManifestPath := MarshalManifestPath(basePath, int64(commitVersion))
+	log.Debug("Stats committed to manifest", zap.Int64("newVersion", int64(commitVersion)))
+
+	return newManifestPath, nil
 }

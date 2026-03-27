@@ -41,6 +41,9 @@ void
 SetLowPriorityThreadCoreCoefficient(const float);
 
 void
+SetThreadPoolMaxThreadsSize(const int);
+
+void
 SetDefaultExprEvalBatchSize(int64_t val);
 
 void
@@ -70,6 +73,10 @@ InitTrace(CTraceConfig* config);
 
 void
 SetTrace(CTraceConfig* config);
+
+// OpenSSL FIPS status
+void
+LogOpenSSLFIPSStatus();
 
 // Expr result cache
 void

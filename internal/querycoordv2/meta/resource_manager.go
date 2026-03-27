@@ -19,6 +19,7 @@ package meta
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -95,18 +96,20 @@ func (rm *ResourceManager) Recover(ctx context.Context) error {
 
 	// Resource group meta upgrade to latest version.
 	upgrades := make([]*querypb.ResourceGroup, 0)
+	nodeToRG := make(map[int64]string) // local map for duplicate node detection during recovery
 	for _, meta := range rgs {
 		needUpgrade := meta.Config == nil
 
 		rg := NewResourceGroupFromMeta(meta, rm.nodeMgr)
-		rm.setupInMemResourceGroup(rg)
+		// Check for duplicate node assignments before committing to memory.
 		for _, node := range rg.GetNodes() {
-			if _, ok := rm.nodeIDMap[node]; ok {
+			if existingRG, ok := nodeToRG[node]; ok {
 				// unreachable code, should never happen.
-				panic(fmt.Sprintf("dirty meta, node has been assign to multi resource group, %s, %s", rm.nodeIDMap[node], rg.GetName()))
+				panic(fmt.Sprintf("dirty meta, node has been assign to multi resource group, %s, %s", existingRG, rg.GetName()))
 			}
-			rm.nodeIDMap[node] = rg.GetName()
+			nodeToRG[node] = rg.GetName()
 		}
+		rm.setupInMemResourceGroup(rg)
 		log.Info("Recover resource group",
 			zap.String("rgName", rg.GetName()),
 			zap.Int64s("nodes", rm.groups[rg.GetName()].GetNodes()),
@@ -215,6 +218,17 @@ func (rm *ResourceManager) updateResourceGroups(ctx context.Context, rgs map[str
 		modifiedRG = append(modifiedRG, rg)
 	}
 
+	// Detect node transfer intent: if rgA is being zeroed (old request=N,limit=N → new 0,0)
+	// and rgB's new config matches rgA's old (new request=N,limit=N), directly move rgA's
+	// nodes to rgB. This preserves node assignment stability during RG transitions.
+	rm.transferNodesOnRGSwap(modifiedRG)
+
+	// Rebuild updates slice since node lists may have changed.
+	updates = updates[:0]
+	for _, rg := range modifiedRG {
+		updates = append(updates, rg.GetMeta())
+	}
+
 	if err := rm.catalog.SaveResourceGroup(ctx, updates...); err != nil {
 		for rgName, cfg := range rgs {
 			log.Warn("failed to update resource group",
@@ -238,6 +252,76 @@ func (rm *ResourceManager) updateResourceGroups(ctx context.Context, rgs map[str
 	// notify that resource group config has been changed.
 	rm.rgChangedNotifier.NotifyAll()
 	return nil
+}
+
+// transferNodesOnRGSwap detects "RG rename" intent in a batch config update and
+// directly transfers nodes between paired RGs to preserve node assignment stability.
+//
+// During replica scale-up/down, the external control plane changes RG names
+// (e.g., __default_resource_group → rg_for_replica_1). Without this optimization,
+// nodes would first be pushed to __recycle_resource_group by the async resource_observer,
+// then pulled into rg_for_replica_1 — with non-deterministic node selection at each hop,
+// breaking the original node-to-replica mapping and potentially causing replica unavailability.
+//
+// Detection: for each RG being zeroed (old config request=N,limit=N → new 0,0),
+// find the first unmatched RG in the same batch whose new config matches (request=N,limit=N).
+// RGs are sorted by name so the lexicographically smallest recipient wins.
+func (rm *ResourceManager) transferNodesOnRGSwap(modifiedRGs []*ResourceGroup) {
+	// Sort by name for deterministic matching order.
+	sort.Slice(modifiedRGs, func(i, j int) bool {
+		return modifiedRGs[i].GetName() < modifiedRGs[j].GetName()
+	})
+
+	matched := make(map[int]bool)
+	for i, rg := range modifiedRGs {
+		// Find a zeroed RG: new config (0,0) but old config had (N,N) with nodes.
+		newReq := rg.GetConfig().GetRequests().GetNodeNum()
+		newLim := rg.GetConfig().GetLimits().GetNodeNum()
+		if newReq != 0 || newLim != 0 {
+			continue
+		}
+		oldRG := rm.groups[rg.GetName()]
+		if oldRG == nil {
+			continue
+		}
+		oldReq := oldRG.GetConfig().GetRequests().GetNodeNum()
+		oldLim := oldRG.GetConfig().GetLimits().GetNodeNum()
+		nodes := oldRG.GetNodes()
+		if oldReq <= 0 || oldLim <= 0 || len(nodes) == 0 {
+			continue
+		}
+
+		// Find the first unmatched recipient whose new (request, limit) == old (request, limit).
+		for j, candidate := range modifiedRGs {
+			if j == i || matched[j] || candidate.NodeNum() > 0 {
+				continue
+			}
+			cReq := candidate.GetConfig().GetRequests().GetNodeNum()
+			cLim := candidate.GetConfig().GetLimits().GetNodeNum()
+			if cReq != oldReq || cLim != oldLim {
+				continue
+			}
+
+			// Swap nodes from donor to recipient.
+			donorMut := rg.CopyForWrite()
+			recipientMut := candidate.CopyForWrite()
+			for _, node := range nodes {
+				donorMut.UnassignNode(node)
+				recipientMut.AssignNode(node)
+			}
+			modifiedRGs[i] = donorMut.ToResourceGroup()
+			modifiedRGs[j] = recipientMut.ToResourceGroup()
+			matched[i] = true
+			matched[j] = true
+
+			log.Info("direct node transfer on RG swap",
+				zap.String("from", rg.GetName()),
+				zap.String("to", candidate.GetName()),
+				zap.Int64s("nodes", nodes),
+			)
+			break
+		}
+	}
 }
 
 // Deprecated: only for compatibility with unittest.
@@ -371,17 +455,17 @@ func (rm *ResourceManager) DropResourceGroup(ctx context.Context, rgName string)
 	return nil
 }
 
-// GetNodesOfMultiRG return nodes of multi rg, it can be used to get a consistent view of nodes of multi rg.
-func (rm *ResourceManager) GetNodesOfMultiRG(ctx context.Context, rgName []string) (map[string]typeutil.UniqueSet, error) {
+// GetResourceGroups return snapshots of multi resource groups, it can be used to get a consistent view of multi rg.
+func (rm *ResourceManager) GetResourceGroups(ctx context.Context, rgNames []string) (map[string]*ResourceGroup, error) {
 	rm.rwmutex.RLock()
 	defer rm.rwmutex.RUnlock()
 
-	ret := make(map[string]typeutil.UniqueSet)
-	for _, name := range rgName {
+	ret := make(map[string]*ResourceGroup, len(rgNames))
+	for _, name := range rgNames {
 		if rm.groups[name] == nil {
 			return nil, merr.WrapErrResourceGroupNotFound(name)
 		}
-		ret[name] = typeutil.NewUniqueSet(rm.groups[name].GetNodes()...)
+		ret[name] = rm.groups[name].Snapshot()
 	}
 	return ret, nil
 }
@@ -973,7 +1057,6 @@ func (rm *ResourceManager) transferNode(ctx context.Context, rgName string, node
 	for _, rg := range modifiedRG {
 		rm.setupInMemResourceGroup(rg)
 	}
-	rm.nodeIDMap[node] = rgName
 	log.Info("transfer node to resource group",
 		zap.String("rgName", rgName),
 		zap.String("originalRG", originalRG),
@@ -1003,8 +1086,7 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 
 		// Commit updates to memory.
 		rm.setupInMemResourceGroup(rg)
-		delete(rm.nodeIDMap, node)
-		log.Info("unassign node to resource group",
+		log.Info("unassign node from resource group",
 			zap.String("rgName", rg.GetName()),
 			zap.Int64("node", node),
 		)
@@ -1085,21 +1167,25 @@ func (rm *ResourceManager) validateResourceGroupIsDeletable(rgName string) error
 
 // setupInMemResourceGroup setup resource group in memory.
 func (rm *ResourceManager) setupInMemResourceGroup(r *ResourceGroup) {
-	// clear old metrics.
+	// clear old metrics and nodeIDMap entries.
+	// Use GetAllNodes (bypasses label filter) to ensure all physical nodes are cleaned up,
+	// even when the RG's label filter has changed.
 	if oldR, ok := rm.groups[r.GetName()]; ok {
-		for _, nodeID := range oldR.GetNodes() {
+		for _, nodeID := range oldR.GetAllNodes() {
 			metrics.QueryCoordResourceGroupInfo.DeletePartialMatch(prometheus.Labels{
 				metrics.ResourceGroupLabelName: r.GetName(),
 				metrics.NodeIDLabelName:        strconv.FormatInt(nodeID, 10),
 			})
+			delete(rm.nodeIDMap, nodeID)
 		}
 	}
-	// add new metrics.
-	for _, nodeID := range r.GetNodes() {
+	// add new metrics and nodeIDMap entries.
+	for _, nodeID := range r.GetAllNodes() {
 		metrics.QueryCoordResourceGroupInfo.WithLabelValues(
 			r.GetName(),
 			strconv.FormatInt(nodeID, 10),
 		).Set(1)
+		rm.nodeIDMap[nodeID] = r.GetName()
 	}
 	rm.groups[r.GetName()] = r
 }

@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -102,13 +103,24 @@ func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager 
 		}
 
 		for _, segment := range segments {
-			// Compare manifest path for now
-			// alternative is to compare version, but it's not recommended to add extra info in segmentinfo
-			// we may use data view version in the future
-			if segment.ManifestPath != segmentInfo.GetManifestPath() {
-				log.RatedInfo(10, "segment is not updated", zap.Int64("segmentID", segmentID))
+			cmp, err := packed.CompareManifestPath(segment.ManifestPath, segmentInfo.GetManifestPath())
+			if err != nil {
+				log.RatedWarn(10, "segment manifest path not comparable",
+					zap.Int64("segmentID", segmentID),
+					zap.String("distManifest", segment.ManifestPath),
+					zap.String("targetManifest", segmentInfo.GetManifestPath()),
+					zap.Error(err))
+				return err
+			}
+			if cmp < 0 {
+				// dist manifest is older than target, segment data is not ready yet
+				log.RatedInfo(10, "segment manifest is outdated",
+					zap.Int64("segmentID", segmentID),
+					zap.String("distManifest", segment.ManifestPath),
+					zap.String("targetManifest", segmentInfo.GetManifestPath()))
 				return merr.WrapErrSegmentNotLoaded(segmentID)
 			}
+			// cmp >= 0: dist manifest is same or newer than target, segment data is ready
 		}
 	}
 	return nil

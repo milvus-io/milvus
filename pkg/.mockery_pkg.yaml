@@ -29,6 +29,9 @@ packages:
     interfaces:
       AssignmentDiscoverWatcher:
       AssignmentRebalanceTrigger:
+  github.com/milvus-io/milvus/pkg/v2/streaming/util/ratelimit:
+    interfaces:
+      RateLimitObserver:
   github.com/milvus-io/milvus/pkg/v2/proto/streamingpb:
     interfaces:
       StreamingNodeHandlerService_ConsumeServer:

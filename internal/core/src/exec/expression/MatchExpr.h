@@ -75,6 +75,11 @@ class PhyMatchFilterExpr : public Expr {
         return std::nullopt;
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        return false;
+    }
+
  private:
     std::shared_ptr<const milvus::expr::MatchExpr> expr_;
     const segcore::SegmentInternalInterface* segment_;

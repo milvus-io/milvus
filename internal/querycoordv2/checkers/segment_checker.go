@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -329,7 +330,22 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	}
 	isSegmentUpdate := func(segment *datapb.SegmentInfo) bool {
 		segInDist, existInDist := distMap[segment.ID]
-		return existInDist && segInDist.ManifestPath != segment.GetManifestPath()
+		if !existInDist {
+			return false
+		}
+		// Only trigger reopen when dist manifest is older than target manifest.
+		// If dist manifest is same or newer (e.g., loaded after L0 compaction updated DataCoord),
+		// the data is already up-to-date and no reopen is needed.
+		cmp, err := packed.CompareManifestPath(segInDist.ManifestPath, segment.GetManifestPath())
+		if err != nil {
+			log.Ctx(ctx).RatedWarn(10, "manifest path not comparable, skip reopen",
+				zap.Int64("segmentID", segment.GetID()),
+				zap.String("distManifest", segInDist.ManifestPath),
+				zap.String("targetManifest", segment.GetManifestPath()),
+				zap.Error(err))
+			return false
+		}
+		return cmp < 0
 	}
 
 	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)

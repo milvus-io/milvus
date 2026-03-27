@@ -16,10 +16,12 @@
 #include <gtest/gtest.h>
 #include <cstddef>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "arrow/api.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/common/metadata.h"
 #include "segcore/memory_planner.h"
@@ -173,4 +175,136 @@ TEST(ParallelDegreeSplitStrategy, ContinuousExceedingAvgSize) {
     EXPECT_EQ(blocks.size(), 2);
     EXPECT_EQ(blocks[0], (RowGroupBlock{1, 4}));
     EXPECT_EQ(blocks[1], (RowGroupBlock{5, 4}));
+}
+
+// ---- LoadCellBatchAsync tests ----
+
+namespace {
+
+// Helper: create a BatchReaderFactory that returns empty Arrow tables.
+// Records (batch_key, rg_offset, total_rg_count) for each call.
+BatchReaderFactory
+MakeMockReaderFactory() {
+    return [](size_t /*batch_key*/,
+              int64_t /*rg_offset*/,
+              int64_t total_rg_count,
+              int64_t /*reader_memory_limit*/)
+               -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+        // Return one empty table per row group
+        auto schema = arrow::schema({arrow::field("x", arrow::int64())});
+        std::vector<std::shared_ptr<arrow::Table>> tables;
+        for (int64_t i = 0; i < total_rg_count; ++i) {
+            tables.push_back(arrow::Table::MakeEmpty(schema).ValueOrDie());
+        }
+        return tables;
+    };
+}
+
+// Helper to run LoadCellBatchAsync and return future count (= batch count).
+size_t
+RunAndCountBatches(std::vector<CellSpec> cell_specs, int64_t memory_limit) {
+    auto channel = std::make_shared<CellReaderChannel>(64);
+    auto futures = LoadCellBatchAsync(nullptr,
+                                      std::move(cell_specs),
+                                      MakeMockReaderFactory(),
+                                      channel,
+                                      memory_limit);
+    for (auto& f : futures) {
+        f.get();
+    }
+    return futures.size();
+}
+
+}  // namespace
+
+TEST(LoadCellBatchAsync, MemoryBasedSplit) {
+    // 10 cells x 64MB each, limit=128MB -> 5 batches (2 cells each)
+    constexpr int64_t MB = 1 << 20;
+    std::vector<CellSpec> specs;
+    for (int i = 0; i < 10; ++i) {
+        specs.push_back({/*cid=*/i,
+                         /*file_idx=*/0,
+                         /*local_rg_offset=*/i,
+                         /*rg_count=*/1,
+                         /*memory_size=*/64 * MB});
+    }
+    auto batches = RunAndCountBatches(specs, 128 * MB);
+    EXPECT_EQ(batches, 5);
+}
+
+TEST(LoadCellBatchAsync, ZeroMemorySizeAsserts) {
+    // memory_size=0 must trigger assertion failure
+    constexpr int64_t MB = 1 << 20;
+    std::vector<CellSpec> specs = {{/*cid=*/0,
+                                    /*file_idx=*/0,
+                                    /*local_rg_offset=*/0,
+                                    /*rg_count=*/1,
+                                    /*memory_size=*/0}};
+    EXPECT_ANY_THROW(RunAndCountBatches(specs, 128 * MB));
+}
+
+TEST(LoadCellBatchAsync, UnevenCellSizes) {
+    // Cells with different memory sizes are batched by memory limit
+    // 2 small cells (16MB each) fit in one batch, 1 large cell (96MB) alone
+    constexpr int64_t MB = 1 << 20;
+    std::vector<CellSpec> specs = {
+        {0, 0, 0, 1, 16 * MB},
+        {1, 0, 1, 1, 16 * MB},
+        {2, 0, 2, 1, 96 * MB},
+        {3, 0, 3, 1, 16 * MB},
+        {4, 0, 4, 1, 16 * MB},
+    };
+    // limit=48MB: first batch [0,1]=32MB, second [2]=96MB (single cell > limit),
+    // third [3,4]=32MB -> 3 batches
+    auto batches = RunAndCountBatches(specs, 48 * MB);
+    EXPECT_EQ(batches, 3);
+}
+
+TEST(LoadCellBatchAsync, SingleCellExceedsLimit) {
+    // 1 cell of 256MB with limit=128MB -> 1 batch (can't split a cell)
+    constexpr int64_t MB = 1 << 20;
+    std::vector<CellSpec> specs = {{/*cid=*/0,
+                                    /*file_idx=*/0,
+                                    /*local_rg_offset=*/0,
+                                    /*rg_count=*/1,
+                                    /*memory_size=*/256 * MB}};
+    auto batches = RunAndCountBatches(specs, 128 * MB);
+    EXPECT_EQ(batches, 1);
+}
+
+TEST(LoadCellBatchAsync, FileBoundarySplit) {
+    // 4 cells x 32MB across 2 files, limit=128MB
+    // File boundary forces a split even though memory fits
+    constexpr int64_t MB = 1 << 20;
+    std::vector<CellSpec> specs = {
+        {0, /*file_idx=*/0, 0, 1, 32 * MB},
+        {1, /*file_idx=*/0, 1, 1, 32 * MB},
+        {2, /*file_idx=*/1, 0, 1, 32 * MB},
+        {3, /*file_idx=*/1, 1, 1, 32 * MB},
+    };
+    auto batches = RunAndCountBatches(specs, 128 * MB);
+    // Should be at least 2 batches (one per file)
+    EXPECT_GE(batches, 2);
+}
+
+TEST(LoadCellBatchAsync, ContiguityBreak) {
+    // Cells with rg_offset gap -> split at gap
+    constexpr int64_t MB = 1 << 20;
+    std::vector<CellSpec> specs = {
+        {0, 0, /*local_rg_offset=*/0, 1, 32 * MB},
+        {1, 0, /*local_rg_offset=*/1, 1, 32 * MB},
+        // gap: offset 3 instead of 2
+        {2, 0, /*local_rg_offset=*/3, 1, 32 * MB},
+        {3, 0, /*local_rg_offset=*/4, 1, 32 * MB},
+    };
+    auto batches = RunAndCountBatches(specs, 256 * MB);
+    // Should split at the contiguity break
+    EXPECT_EQ(batches, 2);
+}
+
+TEST(LoadCellBatchAsync, EmptyCells) {
+    auto channel = std::make_shared<CellReaderChannel>(64);
+    auto futures = LoadCellBatchAsync(
+        nullptr, {}, MakeMockReaderFactory(), channel, 128 << 20);
+    EXPECT_EQ(futures.size(), 0);
 }

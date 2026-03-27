@@ -409,11 +409,9 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					continue
 				}
 
-				// if field is a function output field, user must not provide data for it
-				if field.GetIsFunctionOutput() {
-					if dataString != "" {
-						return merr.WrapErrParameterInvalid("", "not allowed to provide input data for function output field: "+fieldName), reallyDataArray, validDataMap
-					}
+				// skip function output field if user didn't provide data,
+				// let proxy validate when data is provided
+				if field.GetIsFunctionOutput() && dataString == "" {
 					continue
 				}
 
@@ -833,6 +831,15 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 	nameDims := make(map[string]int64)
 	fieldData := make(map[string]*schemapb.FieldData)
 
+	// Pre-compute the set of field names present across all rows,
+	// so we can skip absent function output fields with a map lookup instead of scanning rows.
+	presentFieldNames := make(map[string]struct{})
+	for _, row := range rows {
+		for name := range row {
+			presentFieldNames[name] = struct{}{}
+		}
+	}
+
 	for _, field := range sch.Fields {
 		if field.IsPrimaryKey {
 			pkFieldName = field.Name
@@ -843,9 +850,11 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 		if (field.IsPrimaryKey && field.AutoID && inInsert && !allowInsertAutoID) || field.IsDynamic {
 			continue
 		}
-		// skip function output field
+		// skip function output field if no row provides data for it
 		if field.GetIsFunctionOutput() {
-			continue
+			if _, ok := presentFieldNames[field.Name]; !ok {
+				continue
+			}
 		}
 		var data interface{}
 		switch field.DataType {
@@ -940,10 +949,9 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				continue
 			}
 			if field.GetIsFunctionOutput() {
-				if ok {
-					return nil, fmt.Errorf("row %d has data provided for function output field %s", idx, field.Name)
+				if _, allocated := nameColumns[field.Name]; !allocated {
+					continue
 				}
-				continue
 			}
 			if !ok {
 				if partialUpdate {
@@ -1912,30 +1920,61 @@ func MetricsHandlerFunc(c *gin.Context) {
 }
 
 func LoggerHandlerFunc() gin.HandlerFunc {
-	return gin.LoggerWithConfig(gin.LoggerConfig{
-		SkipPaths: proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings(),
-		Formatter: func(param gin.LogFormatterParams) string {
-			if param.Latency > time.Minute {
-				param.Latency = param.Latency.Truncate(time.Second)
-			}
-			traceID, ok := param.Keys["traceID"]
-			if !ok {
-				traceID = ""
-			}
+	notlogged := proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings()
+	var skip map[string]struct{}
+	if length := len(notlogged); length > 0 {
+		skip = make(map[string]struct{}, length)
+		for _, p := range notlogged {
+			skip[p] = struct{}{}
+		}
+	}
 
-			accesslog.SetHTTPParams(&param)
-			return fmt.Sprintf("[%v] [GIN] [%s] [traceID=%s] [code=%3d] [latency=%v] [client=%s] [method=%s] [error=%s]\n",
-				param.TimeStamp.Format("2006/01/02 15:04:05.000 Z07:00"),
-				param.Path,
-				traceID,
-				param.StatusCode,
-				param.Latency,
-				param.ClientIP,
-				param.Method,
-				param.ErrorMessage,
-			)
-		},
-	})
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		raw := c.Request.URL.RawQuery
+
+		c.Next()
+
+		if _, ok := skip[path]; ok {
+			return
+		}
+
+		param := gin.LogFormatterParams{
+			Request:      c.Request,
+			TimeStamp:    time.Now(),
+			ClientIP:     c.ClientIP(),
+			Method:       c.Request.Method,
+			StatusCode:   c.Writer.Status(),
+			ErrorMessage: c.Errors.ByType(gin.ErrorTypePrivate).String(),
+			BodySize:     c.Writer.Size(),
+		}
+		param.Latency = param.TimeStamp.Sub(start)
+		if param.Latency > time.Minute {
+			param.Latency = param.Latency.Truncate(time.Second)
+		}
+		if raw != "" {
+			path = path + "?" + raw
+		}
+		param.Path = path
+
+		traceID, _ := c.Get("traceID")
+		if traceID == nil {
+			traceID = ""
+		}
+
+		accesslog.SetHTTPParams(c, &param)
+		fmt.Fprintf(gin.DefaultWriter, "[%v] [GIN] [%s] [traceID=%s] [code=%3d] [latency=%v] [client=%s] [method=%s] [error=%s]\n",
+			param.TimeStamp.Format("2006/01/02 15:04:05.000 Z07:00"),
+			param.Path,
+			traceID,
+			param.StatusCode,
+			param.Latency,
+			param.ClientIP,
+			param.Method,
+			param.ErrorMessage,
+		)
+	}
 }
 
 func RequestHandlerFunc(c *gin.Context) {

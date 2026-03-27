@@ -44,6 +44,7 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
                       batch_size,
                       consistency_level),
           expr_(expr) {
+        DetermineExecPath();
     }
 
     void

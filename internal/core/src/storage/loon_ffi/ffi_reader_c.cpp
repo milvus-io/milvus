@@ -192,8 +192,12 @@ CloseFFIReader(CFFIPackedReader c_packed_reader) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
+        if (c_packed_reader == nullptr) {
+            return milvus::SuccessCStatus();
+        }
         auto reader =
             static_cast<milvus_storage::api::Reader*>(c_packed_reader);
+        AssertInfo(reader, "cannot close nullptr ffi reader");
         delete reader;
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

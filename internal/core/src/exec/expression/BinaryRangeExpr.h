@@ -269,7 +269,8 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
         int64_t batch_size,
-        int32_t consistency_level)
+        int32_t consistency_level,
+        const query::PlanOptions& plan_options = {})
         : SegmentExpr(std::move(input),
                       name,
                       op_ctx,
@@ -279,12 +280,19 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
                       FromValCase(expr->lower_val_.val_case()),
                       active_count,
                       batch_size,
-                      consistency_level),
+                      consistency_level,
+                      false,
+                      false,
+                      plan_options),
           expr_(expr) {
+        DetermineExecPath();
     }
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    void
+    DetermineExecPath() override;
 
     std::string
     ToString() const override {

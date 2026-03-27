@@ -38,15 +38,15 @@ type RowParser interface {
 }
 
 type rowParser struct {
-	id2Dim               map[int64]int
-	id2Field             map[int64]*schemapb.FieldSchema
-	name2FieldID         map[string]int64
-	pkField              *schemapb.FieldSchema
-	dynamicField         *schemapb.FieldSchema
-	functionOutputFields map[string]int64
-
-	structArrays      map[string][]string
-	allowInsertAutoID bool
+	id2Dim                   map[int64]int
+	id2Field                 map[int64]*schemapb.FieldSchema
+	name2FieldID             map[string]int64
+	pkField                  *schemapb.FieldSchema
+	dynamicField             *schemapb.FieldSchema
+	rejectedFuncOutputFields map[int64]string // fieldID → error message, pre-computed from schema
+	functionOutputFieldIDs   map[int64]struct{}
+	structArrays             map[string][]string
+	allowInsertAutoID        bool
 
 	timezone string
 }
@@ -58,12 +58,8 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 		return field.GetFieldID()
 	})
 
-	functionOutputFields := make(map[string]int64)
 	id2Dim := make(map[int64]int)
 	for id, field := range id2Field {
-		if field.GetIsFunctionOutput() {
-			functionOutputFields[field.GetName()] = field.GetFieldID()
-		}
 		if typeutil.IsVectorType(field.GetDataType()) && !typeutil.IsSparseFloatVectorType(field.GetDataType()) {
 			dim, err := typeutil.GetDim(field)
 			if err != nil {
@@ -81,13 +77,31 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 
 	name2FieldID := lo.SliceToMap(
 		lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
-			return !field.GetIsFunctionOutput() && !typeutil.IsAutoPKField(field) && field.GetName() != dynamicField.GetName()
+			return !typeutil.IsAutoPKField(field) && field.GetName() != dynamicField.GetName()
 		}),
 		func(field *schemapb.FieldSchema) (string, int64) {
 			return field.GetName(), field.GetFieldID()
 		},
 	)
 	allowInsertAutoID, _ := pkgcommon.IsAllowInsertAutoID(schema.GetProperties()...)
+	allowNonBM25 := pkgcommon.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.GetProperties())
+
+	rejectedFuncOutputFields := make(map[int64]string)
+	functionOutputFieldIDs := make(map[int64]struct{})
+	for _, field := range schema.GetFields() {
+		if !field.GetIsFunctionOutput() {
+			continue
+		}
+		functionOutputFieldIDs[field.GetFieldID()] = struct{}{}
+		if typeutil.IsBM25FunctionOutputField(field, schema) {
+			rejectedFuncOutputFields[field.GetFieldID()] = fmt.Sprintf(
+				"not allowed to provide data for BM25 function output field '%s'", field.GetName())
+		} else if !allowNonBM25 {
+			rejectedFuncOutputFields[field.GetFieldID()] = fmt.Sprintf(
+				"not allowed to provide data for function output field '%s', "+
+					"set collection property '%s' to enable", field.GetName(), pkgcommon.CollectionAllowInsertNonBM25FunctionOutputs)
+		}
+	}
 
 	structArrays := lo.SliceToMap(
 		schema.GetStructArrayFields(),
@@ -101,15 +115,16 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 	)
 
 	return &rowParser{
-		id2Dim:               id2Dim,
-		id2Field:             id2Field,
-		name2FieldID:         name2FieldID,
-		pkField:              pkField,
-		dynamicField:         dynamicField,
-		functionOutputFields: functionOutputFields,
-		structArrays:         structArrays,
-		allowInsertAutoID:    allowInsertAutoID,
-		timezone:             common.GetSchemaTimezone(schema),
+		id2Dim:                   id2Dim,
+		id2Field:                 id2Field,
+		name2FieldID:             name2FieldID,
+		pkField:                  pkField,
+		dynamicField:             dynamicField,
+		rejectedFuncOutputFields: rejectedFuncOutputFields,
+		functionOutputFieldIDs:   functionOutputFieldIDs,
+		structArrays:             structArrays,
+		allowInsertAutoID:        allowInsertAutoID,
+		timezone:                 common.GetSchemaTimezone(schema),
 	}, nil
 }
 
@@ -211,6 +226,9 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 		}
 
 		if found {
+			if errMsg, rejected := r.rejectedFuncOutputFields[fieldID]; rejected {
+				return merr.WrapErrImportFailed(errMsg)
+			}
 			data, err := r.parseEntity(fieldID, value)
 			if err != nil {
 				return err
@@ -235,10 +253,6 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 
 	// read values from json file
 	for key, value := range stringMap {
-		if _, ok := r.functionOutputFields[key]; ok {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the field '%s' is output by function, no need to provide", key))
-		}
-
 		if subFieldNames, ok := r.structArrays[key]; ok {
 			values, err := reconstructArrayForStructArray(value, subFieldNames)
 			if err != nil {
@@ -270,6 +284,9 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 	// if nullable/defaultValue fields have no values, fill with nil or default value
 	for fieldName, fieldID := range r.name2FieldID {
 		if _, ok = row[fieldID]; !ok {
+			if _, isFuncOutput := r.functionOutputFieldIDs[fieldID]; isFuncOutput {
+				continue
+			}
 			if r.id2Field[fieldID].GetNullable() {
 				row[fieldID] = nil
 			}

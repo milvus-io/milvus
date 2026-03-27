@@ -44,6 +44,15 @@ namespace milvus {
 namespace exec {
 
 void
+PhyExistsFilterExpr::DetermineExecPath() {
+    if (CanUseJsonStatsAtInit()) {
+        exec_path_ = ExprExecPath::JsonStats;
+        return;
+    }
+    SegmentExpr::DetermineExecPath();
+}
+
+void
 PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span(
         "PhyExistsFilterExpr::Eval", tracer::GetRootSpan(), true);
@@ -59,7 +68,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     switch (data_type) {
         case DataType::JSON: {
             span.GetSpan()->SetAttribute("json_filter_expr_type", "exists");
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
                 result = EvalJsonExistsForIndex();
             } else {
                 result = EvalJsonExistsForDataSegment(context);
@@ -129,12 +138,10 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                           index->GetCastType());
         }
     }
-    TargetBitmap res;
-    res.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_index_chunk_pos_, real_batch_size);
     current_index_chunk_pos_ += real_batch_size;
-    return std::make_shared<ColumnVector>(std::move(res),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 VectorPtr
@@ -142,8 +149,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonStats(context, field_id, expr_->column_.nested_path_) &&
-        !has_offset_input_) {
+    if (exec_path_ == ExprExecPath::JsonStats && !has_offset_input_) {
         milvus::ScopedTimer timer("exists_json_by_stats", [this](double us) {
             json_filter_stats_latency_us_ += us;
         });
@@ -274,12 +280,10 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
         }
     }
 
-    TargetBitmap result;
-    result.append(
+    auto res = MoveOrSliceBitmap(
         *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
     MoveCursor();
-    return std::make_shared<ColumnVector>(std::move(result),
-                                          TargetBitmap(real_batch_size, true));
+    return res;
 }
 
 }  //namespace exec

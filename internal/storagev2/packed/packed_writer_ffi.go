@@ -43,7 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-func createStorageConfig() *indexpb.StorageConfig {
+func CreateStorageConfig() *indexpb.StorageConfig {
 	var storageConfig *indexpb.StorageConfig
 
 	if paramtable.Get().CommonCfg.StorageType.GetValue() == "local" {
@@ -85,7 +85,7 @@ func NewFFIPackedWriter(basePath string, baseVersion int64, schema *arrow.Schema
 	defer cdata.ReleaseCArrowSchema(&cas)
 
 	if storageConfig == nil {
-		storageConfig = createStorageConfig()
+		storageConfig = CreateStorageConfig()
 	}
 
 	pattern := strings.Join(lo.Map(columnGroups, func(columnGroup storagecommon.ColumnGroup, _ int) string {
@@ -178,7 +178,7 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 	defer C.free(unsafe.Pointer(cBasePath))
 	var transationHandle C.LoonTransactionHandle
 
-	result = C.loon_transaction_begin(cBasePath, pw.cProperties, C.int64_t(pw.baseVersion), 1, &transationHandle)
+	result = C.loon_transaction_begin(cBasePath, pw.cProperties, C.int64_t(pw.baseVersion), getRetryLimit(), &transationHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}

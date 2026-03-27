@@ -91,6 +91,46 @@ PhyFilterBitsNode::GetOutput() {
 
     TargetBitmap bitset;
     TargetBitmap valid_bitset;
+
+    // optimization: if all expressions can be executed at once,
+    // execute in a single pass and flip in-place to avoid bitmap copies.
+    if (exprs_->CanExecuteAllAtOnce()) {
+        tracer::AddEvent("expr_execute_all_at_once");
+        exprs_->SetExecuteAllAtOnce();
+
+        exprs_->Eval(0, 1, true, eval_ctx, results_);
+        AssertInfo(results_.size() == 1 && results_[0] != nullptr,
+                   "PhyFilterBitsNode result size should be size one and not "
+                   "be nullptr");
+        auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results_[0]);
+        AssertInfo(col_vec && col_vec->IsBitmap(),
+                   "PhyFilterBitsNode result should be bitmap ColumnVector");
+
+        auto col_vec_size = col_vec->size();
+        // flip in-place on the result bitmap, no extra copy
+        TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
+        view.flip();
+        num_processed_rows_ = col_vec_size;
+
+        AssertInfo(col_vec_size == need_process_rows_,
+                   "bitset size: {}, need_process_rows_: {}",
+                   col_vec_size,
+                   need_process_rows_);
+
+        std::vector<VectorPtr> col_res;
+        col_res.push_back(std::move(results_[0]));
+
+        std::chrono::high_resolution_clock::time_point scalar_end =
+            std::chrono::high_resolution_clock::now();
+        double scalar_cost =
+            std::chrono::duration<double, std::micro>(scalar_end - scalar_start)
+                .count();
+        milvus::monitor::internal_core_search_latency_scalar.Observe(
+            scalar_cost / 1000);
+
+        return std::make_shared<RowVector>(col_res);
+    }
+
     while (num_processed_rows_ < need_process_rows_) {
         exprs_->Eval(0, 1, true, eval_ctx, results_);
 
