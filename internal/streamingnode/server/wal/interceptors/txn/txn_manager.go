@@ -212,6 +212,11 @@ func (m *TxnManager) RollbackAllInFlightTransactions() {
 	m.Logger().Info("Rolled back in-flight transactions",
 		zap.Int64s("txnIDs", ids))
 
+	// Signal GracefulClose if it's already waiting and all sessions are now cleared.
+	if len(m.sessions) == 0 && m.closed != nil {
+		m.closed.Close()
+	}
+
 	m.notifyRecoverDone()
 }
 

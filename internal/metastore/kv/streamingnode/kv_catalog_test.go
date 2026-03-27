@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
@@ -197,6 +198,99 @@ func TestCatalogVChannel(t *testing.T) {
 	}
 }
 
+func TestCatalogSalvageCheckpoint(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("save_and_get_success", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		catalog := NewCataLog(kv)
+
+		cp := &commonpb.ReplicateCheckpoint{
+			ClusterId: "source-cluster",
+			Pchannel:  "source-cluster-rootcoord-dml_0",
+		}
+		cpBytes, err := proto.Marshal(cp)
+		assert.NoError(t, err)
+
+		kv.EXPECT().Save(mock.Anything, mock.Anything, string(cpBytes)).Return(nil)
+		err = catalog.SaveSalvageCheckpoint(ctx, "p1", cp)
+		assert.NoError(t, err)
+
+		kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(
+			[]string{"streamingnode-meta/wal/p1/salvage-checkpoint/source-cluster"},
+			[]string{string(cpBytes)},
+			nil,
+		)
+		checkpoints, err := catalog.GetSalvageCheckpoint(ctx, "p1")
+		assert.NoError(t, err)
+		assert.Len(t, checkpoints, 1)
+		assert.Equal(t, "source-cluster", checkpoints[0].ClusterId)
+		assert.Equal(t, "source-cluster-rootcoord-dml_0", checkpoints[0].Pchannel)
+	})
+
+	t.Run("save_error", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		catalog := NewCataLog(kv)
+
+		kv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("etcd error"))
+		err := catalog.SaveSalvageCheckpoint(ctx, "p1", &commonpb.ReplicateCheckpoint{ClusterId: "c1"})
+		assert.Error(t, err)
+	})
+
+	t.Run("get_load_error", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		catalog := NewCataLog(kv)
+
+		kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, errors.New("etcd error"))
+		checkpoints, err := catalog.GetSalvageCheckpoint(ctx, "p1")
+		assert.Error(t, err)
+		assert.Nil(t, checkpoints)
+	})
+
+	t.Run("get_unmarshal_error", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		catalog := NewCataLog(kv)
+
+		kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(
+			[]string{"key"},
+			[]string{"invalid-proto-bytes"},
+			nil,
+		)
+		checkpoints, err := catalog.GetSalvageCheckpoint(ctx, "p1")
+		assert.Error(t, err)
+		assert.Nil(t, checkpoints)
+	})
+
+	t.Run("get_empty", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		catalog := NewCataLog(kv)
+
+		kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil)
+		checkpoints, err := catalog.GetSalvageCheckpoint(ctx, "p1")
+		assert.NoError(t, err)
+		assert.Empty(t, checkpoints)
+	})
+
+	t.Run("get_multiple_clusters", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		catalog := NewCataLog(kv)
+
+		cp1 := &commonpb.ReplicateCheckpoint{ClusterId: "cluster-a"}
+		cp2 := &commonpb.ReplicateCheckpoint{ClusterId: "cluster-b"}
+		bytes1, _ := proto.Marshal(cp1)
+		bytes2, _ := proto.Marshal(cp2)
+
+		kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(
+			[]string{"key1", "key2"},
+			[]string{string(bytes1), string(bytes2)},
+			nil,
+		)
+		checkpoints, err := catalog.GetSalvageCheckpoint(ctx, "p1")
+		assert.NoError(t, err)
+		assert.Len(t, checkpoints, 2)
+	})
+}
+
 func TestBuildPrefixAndKey(t *testing.T) {
 	// Prefix functions
 	assert.Equal(t, "streamingnode-meta/wal/p1/", buildWALPrefix("p1"))
@@ -207,6 +301,9 @@ func TestBuildPrefixAndKey(t *testing.T) {
 
 	assert.Equal(t, "streamingnode-meta/wal/p1/vchannel/", buildVChannelPrefix("p1"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/vchannel/", buildVChannelPrefix("p2"))
+
+	assert.Equal(t, "streamingnode-meta/wal/p1/salvage-checkpoint/", buildSalvageCheckpointPrefix("p1"))
+	assert.Equal(t, "streamingnode-meta/wal/p2/salvage-checkpoint/", buildSalvageCheckpointPrefix("p2"))
 
 	// Key functions
 	assert.Equal(t, "streamingnode-meta/wal/p1/segment-assign/1", buildSegmentAssignmentKey("p1", 1))
@@ -219,4 +316,7 @@ func TestBuildPrefixAndKey(t *testing.T) {
 
 	assert.Equal(t, "streamingnode-meta/wal/p1/consume-checkpoint", buildConsumeCheckpointKey("p1"))
 	assert.Equal(t, "streamingnode-meta/wal/p2/consume-checkpoint", buildConsumeCheckpointKey("p2"))
+
+	assert.Equal(t, "streamingnode-meta/wal/p1/salvage-checkpoint/cluster-a", buildSalvageCheckpointPath("p1", "cluster-a"))
+	assert.Equal(t, "streamingnode-meta/wal/p2/salvage-checkpoint/cluster-b", buildSalvageCheckpointPath("p2", "cluster-b"))
 }

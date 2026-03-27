@@ -9,4 +9,5 @@ const (
 	DirectorySchema        = "schema"
 
 	KeyConsumeCheckpoint = "consume-checkpoint"
+	KeySalvageCheckpoint = "salvage-checkpoint"
 )

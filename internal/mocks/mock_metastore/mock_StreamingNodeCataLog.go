@@ -5,6 +5,8 @@ package mock_metastore
 import (
 	context "context"
 
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
 	mock "github.com/stretchr/testify/mock"
 
 	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -78,6 +80,65 @@ func (_c *MockStreamingNodeCataLog_GetConsumeCheckpoint_Call) Return(_a0 *stream
 }
 
 func (_c *MockStreamingNodeCataLog_GetConsumeCheckpoint_Call) RunAndReturn(run func(context.Context, string) (*streamingpb.WALCheckpoint, error)) *MockStreamingNodeCataLog_GetConsumeCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetSalvageCheckpoint provides a mock function with given fields: ctx, pChannelName
+func (_m *MockStreamingNodeCataLog) GetSalvageCheckpoint(ctx context.Context, pChannelName string) ([]*commonpb.ReplicateCheckpoint, error) {
+	ret := _m.Called(ctx, pChannelName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSalvageCheckpoint")
+	}
+
+	var r0 []*commonpb.ReplicateCheckpoint
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*commonpb.ReplicateCheckpoint, error)); ok {
+		return rf(ctx, pChannelName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) []*commonpb.ReplicateCheckpoint); ok {
+		r0 = rf(ctx, pChannelName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*commonpb.ReplicateCheckpoint)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, pChannelName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingNodeCataLog_GetSalvageCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSalvageCheckpoint'
+type MockStreamingNodeCataLog_GetSalvageCheckpoint_Call struct {
+	*mock.Call
+}
+
+// GetSalvageCheckpoint is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pChannelName string
+func (_e *MockStreamingNodeCataLog_Expecter) GetSalvageCheckpoint(ctx interface{}, pChannelName interface{}) *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call {
+	return &MockStreamingNodeCataLog_GetSalvageCheckpoint_Call{Call: _e.mock.On("GetSalvageCheckpoint", ctx, pChannelName)}
+}
+
+func (_c *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call) Run(run func(ctx context.Context, pChannelName string)) *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call) Return(_a0 []*commonpb.ReplicateCheckpoint, _a1 error) *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call) RunAndReturn(run func(context.Context, string) ([]*commonpb.ReplicateCheckpoint, error)) *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -244,6 +305,54 @@ func (_c *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call) Return(_a0 error)
 }
 
 func (_c *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call) RunAndReturn(run func(context.Context, string, *streamingpb.WALCheckpoint) error) *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveSalvageCheckpoint provides a mock function with given fields: ctx, pChannelName, checkpoint
+func (_m *MockStreamingNodeCataLog) SaveSalvageCheckpoint(ctx context.Context, pChannelName string, checkpoint *commonpb.ReplicateCheckpoint) error {
+	ret := _m.Called(ctx, pChannelName, checkpoint)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveSalvageCheckpoint")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, *commonpb.ReplicateCheckpoint) error); ok {
+		r0 = rf(ctx, pChannelName, checkpoint)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStreamingNodeCataLog_SaveSalvageCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveSalvageCheckpoint'
+type MockStreamingNodeCataLog_SaveSalvageCheckpoint_Call struct {
+	*mock.Call
+}
+
+// SaveSalvageCheckpoint is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pChannelName string
+//   - checkpoint *commonpb.ReplicateCheckpoint
+func (_e *MockStreamingNodeCataLog_Expecter) SaveSalvageCheckpoint(ctx interface{}, pChannelName interface{}, checkpoint interface{}) *MockStreamingNodeCataLog_SaveSalvageCheckpoint_Call {
+	return &MockStreamingNodeCataLog_SaveSalvageCheckpoint_Call{Call: _e.mock.On("SaveSalvageCheckpoint", ctx, pChannelName, checkpoint)}
+}
+
+func (_c *MockStreamingNodeCataLog_SaveSalvageCheckpoint_Call) Run(run func(ctx context.Context, pChannelName string, checkpoint *commonpb.ReplicateCheckpoint)) *MockStreamingNodeCataLog_SaveSalvageCheckpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(*commonpb.ReplicateCheckpoint))
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_SaveSalvageCheckpoint_Call) Return(_a0 error) *MockStreamingNodeCataLog_SaveSalvageCheckpoint_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_SaveSalvageCheckpoint_Call) RunAndReturn(run func(context.Context, string, *commonpb.ReplicateCheckpoint) error) *MockStreamingNodeCataLog_SaveSalvageCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }

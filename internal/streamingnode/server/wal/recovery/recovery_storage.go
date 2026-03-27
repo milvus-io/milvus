@@ -24,6 +24,9 @@ type RecoverySnapshot struct {
 	TxnBuffer          *utility.TxnBuffer
 	// Used during WAL alteration process
 	AlterWALInfo *AlterWALInfo
+	// SalvageCheckpoint captures the replicate checkpoint at force-promote time.
+	// It must be persisted before the consume checkpoint so that the ordering guarantee holds.
+	SalvageCheckpoint *utility.ReplicateCheckpoint
 }
 
 // AlterWALInfo contains information about WAL alteration process.
