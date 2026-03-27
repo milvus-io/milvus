@@ -1,6 +1,12 @@
 add_library(knowhere SHARED src/placeholder.cpp)
 target_include_directories(knowhere PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(knowhere PUBLIC cxx_std_17)
+find_path(KNOWHERE_RS_SHIM_NLOHMANN_INCLUDE_DIR nlohmann/json.hpp)
+if (KNOWHERE_RS_SHIM_NLOHMANN_INCLUDE_DIR)
+    target_include_directories(knowhere PUBLIC ${KNOWHERE_RS_SHIM_NLOHMANN_INCLUDE_DIR})
+endif ()
 set(KNOWHERE_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include CACHE INTERNAL "Path to knowhere include directory")
 
 add_executable(knowhere_rs_compile_surface_smoke tests/compile_surface_smoke.cpp)
+target_compile_features(knowhere_rs_compile_surface_smoke PRIVATE cxx_std_17)
 target_link_libraries(knowhere_rs_compile_surface_smoke PRIVATE knowhere)
