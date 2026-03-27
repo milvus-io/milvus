@@ -980,9 +980,9 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 
 	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).TextAndJSONIndexStatsWithBasePaths()
 	textIndexedInfo := statsResult.TextIndexStats
-	jsonKeyIndexInfo := statsResult.JsonKeyStats
+	jsonKeyIndexInfo := statsResult.JSONKeyStats
 	textBasePaths := statsResult.TextBasePaths
-	jsonBasePaths := statsResult.JsonBasePaths
+	jsonBasePaths := statsResult.JSONBasePaths
 	if statsResult.Err() != nil {
 		log.Warn("failed to load text/json stats from manifest",
 			zap.String("manifestPath", loadInfo.GetManifestPath()), zap.Error(statsResult.Err()))
@@ -2394,8 +2394,8 @@ func (loader *segmentLoader) LoadJSONIndex(ctx context.Context,
 	if statsResult.Err() != nil {
 		return statsResult.Err()
 	}
-	jsonKeyIndexInfo := statsResult.JsonKeyStats
-	jsonBasePaths := statsResult.JsonBasePaths
+	jsonKeyIndexInfo := statsResult.JSONKeyStats
+	jsonBasePaths := statsResult.JSONBasePaths
 	if len(jsonKeyIndexInfo) == 0 {
 		return nil
 	}

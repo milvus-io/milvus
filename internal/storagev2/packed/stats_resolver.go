@@ -214,9 +214,9 @@ func (r *StatsResolver) BM25StatsPaths() (map[int64][]string, error) {
 // StatsResult holds stats info together with the base paths for each field.
 type StatsResult struct {
 	TextIndexStats map[int64]*datapb.TextIndexStats
-	JsonKeyStats   map[int64]*datapb.JsonKeyStats
+	JSONKeyStats   map[int64]*datapb.JsonKeyStats
 	TextBasePaths  map[int64]string // fieldID -> basePath for text index
-	JsonBasePaths  map[int64]string // fieldID -> basePath for json key stats
+	JSONBasePaths  map[int64]string // fieldID -> basePath for json key stats
 }
 
 // TextAndJSONIndexStats returns text index and JSON key stats.
@@ -226,7 +226,7 @@ func (r *StatsResolver) TextAndJSONIndexStats() (
 	map[int64]*datapb.TextIndexStats, map[int64]*datapb.JsonKeyStats, error,
 ) {
 	result := r.TextAndJSONIndexStatsWithBasePaths()
-	return result.TextIndexStats, result.JsonKeyStats, result.err
+	return result.TextIndexStats, result.JSONKeyStats, result.err
 }
 
 // TextAndJSONIndexStatsWithBasePaths returns stats with base path information.
@@ -237,7 +237,7 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 		return &StatsResultWithErr{
 			StatsResult: StatsResult{
 				TextIndexStats: r.textStatsLogs,
-				JsonKeyStats:   r.jsonKeyStats,
+				JSONKeyStats:   r.jsonKeyStats,
 			},
 		}
 	}
@@ -321,9 +321,9 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 	return &StatsResultWithErr{
 		StatsResult: StatsResult{
 			TextIndexStats: textIndexedInfo,
-			JsonKeyStats:   jsonKeyIndexInfo,
+			JSONKeyStats:   jsonKeyIndexInfo,
 			TextBasePaths:  textBasePaths,
-			JsonBasePaths:  jsonBasePaths,
+			JSONBasePaths:  jsonBasePaths,
 		},
 	}
 }

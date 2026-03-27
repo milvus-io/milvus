@@ -420,7 +420,7 @@ func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo) (
 				zap.String("manifestPath", src.GetManifestPath()),
 				zap.Error(result.Err()))
 		} else {
-			return result.TextIndexStats, result.JsonKeyStats, result.TextBasePaths, result.JsonBasePaths
+			return result.TextIndexStats, result.JSONKeyStats, result.TextBasePaths, result.JSONBasePaths
 		}
 	}
 
