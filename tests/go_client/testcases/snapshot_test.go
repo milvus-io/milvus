@@ -108,8 +108,8 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
-	insertBatchSize := 30000
-	deleteBatchSize := 10000
+	insertBatchSize := 20000
+	deleteBatchSize := 5000
 	numOfBatch := 5
 
 	// Step 1: Create collection and insert initial 3000 records
@@ -130,9 +130,12 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 		_, insertRes := hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), insertOpt)
 		require.Equal(t, insertBatchSize, insertRes.IDs.Len())
 	}
-	// Flush to ensure deletion is persisted
-	_, err = mc.Flush(ctx, client.NewFlushOption(collName))
+	// Flush to ensure data is persisted
+	flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
 	common.CheckErr(t, err, true)
+	err = flushTask.Await(ctx)
+	common.CheckErr(t, err, true)
+	// wait for rate limiter reset before next flush (rate=0.1 means 1 flush per 10s)
 	time.Sleep(10 * time.Second)
 
 	// Verify initial data count
@@ -150,15 +153,16 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	}
 
 	// Flush to ensure deletion is persisted
-	_, err = mc.Flush(ctx, client.NewFlushOption(collName))
+	flushTask2, err := mc.Flush(ctx, client.NewFlushOption(collName))
 	common.CheckErr(t, err, true)
-	time.Sleep(10 * time.Second)
+	err = flushTask2.Await(ctx)
+	common.CheckErr(t, err, true)
 
 	// Verify data count after deletion
 	queryRes2, err := mc.Query(ctx, client.NewQueryOption(collName).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ = queryRes2.Fields[0].GetAsInt64(0)
-	require.Equal(t, int64(100000), count)
+	require.Equal(t, int64(75000), count)
 
 	// Step 2: Create snapshot
 	snapshotName := fmt.Sprintf("restore_snapshot_%s", common.GenRandomString(snapshotPrefix, 6))
@@ -194,7 +198,7 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	queryRes3, err := mc.Query(ctx, client.NewQueryOption(collName).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ = queryRes3.Fields[0].GetAsInt64(0)
-	require.Equal(t, int64(250000), count)
+	require.Equal(t, int64(175000), count)
 
 	// Step 4: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
@@ -226,7 +230,7 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 			WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ = queryRes5.Fields[0].GetAsInt64(0)
-	require.Equal(t, int64(100000), count)
+	require.Equal(t, int64(75000), count)
 
 	// Clean up
 	dropOpt := client.NewDropSnapshotOption(snapshotName)
