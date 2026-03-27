@@ -181,6 +181,9 @@ class UnsupportedIndexNode : public IndexNode {
     std::string index_type_;
 };
 
+std::shared_ptr<IndexNode>
+MakeHnswRustNode();
+
 class IndexFactory {
  public:
     static IndexFactory&
@@ -192,6 +195,9 @@ class IndexFactory {
     template <typename T, typename... Args>
     expected<Index<IndexNode>>
     Create(const std::string& name, Args&&...) const {
+        if (name == IndexEnum::INDEX_HNSW) {
+            return Index<IndexNode>(MakeHnswRustNode());
+        }
         return Index<IndexNode>(
             std::make_shared<UnsupportedIndexNode>(name));
     }
