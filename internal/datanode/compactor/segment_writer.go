@@ -305,9 +305,7 @@ func (w *SegmentWriter) WriteRecord(r storage.Record) error {
 			w.pkstats.Update(pk)
 		case schemapb.DataType_VarChar:
 			pkArray := r.Column(w.GetPkID()).(*array.String)
-			pk := &storage.VarCharPrimaryKey{
-				Value: pkArray.Value(i),
-			}
+			pk := storage.NewVarCharPrimaryKey(pkArray.Value(i))
 			w.pkstats.Update(pk)
 		default:
 			panic("invalid data type")
