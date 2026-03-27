@@ -91,6 +91,7 @@ func GetCStorageConfig(storageConfig *indexpb.StorageConfig) C.CStorageConfig {
 		use_custom_part_upload: true,
 		max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
 		tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
+		use_crc32c_checksum:    C.bool(storageConfig.GetUseCrc32CChecksum()),
 	}
 	return cStorageConfig
 }

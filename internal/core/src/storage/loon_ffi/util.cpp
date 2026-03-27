@@ -123,6 +123,10 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         values.emplace_back(c_storage_config.tls_min_version);
     }
 
+    keys.emplace_back(PROPERTY_FS_USE_CRC32C_CHECKSUM);
+    values.emplace_back(c_storage_config.use_crc32c_checksum ? "true"
+                                                             : "false");
+
     // Create Properties using FFI
     auto properties = std::make_shared<LoonProperties>();
     LoonFFIResult result = loon_properties_create(
@@ -236,6 +240,11 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
                                       c_storage_config.tls_min_version);
     }
 
+    milvus_storage::api::SetValue(
+        *properties_map,
+        PROPERTY_FS_USE_CRC32C_CHECKSUM,
+        c_storage_config.use_crc32c_checksum ? "true" : "false");
+
     return properties_map;
 }
 
@@ -272,7 +281,8 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config) {
                           config.gcp_credential_json.c_str(),
                           false,  // this field does not exist in StorageConfig
                           config.max_connections,
-                          config.tls_min_version.c_str()};
+                          config.tls_min_version.c_str(),
+                          config.use_crc32c_checksum};
 }
 
 std::shared_ptr<milvus_storage::api::Manifest>
