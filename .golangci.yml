@@ -26,27 +26,27 @@ linters:
         main:
           deny:
             - pkg: errors
-              desc: not allowed, use github.com/cockroachdb/errors
+              desc: not allowed
             - pkg: github.com/pkg/errors
-              desc: not allowed, use github.com/cockroachdb/errors
+              desc: not allowed
             - pkg: github.com/pingcap/errors
-              desc: not allowed, use github.com/cockroachdb/errors
+              desc: not allowed
             - pkg: golang.org/x/xerrors
-              desc: not allowed, use github.com/cockroachdb/errors
+              desc: not allowed
             - pkg: github.com/go-errors/errors
-              desc: not allowed, use github.com/cockroachdb/errors
+              desc: not allowed
             - pkg: io/ioutil
-              desc: ioutil is deprecated after 1.16, 1.17, use os and io package instead
+              desc: deprecated
             - pkg: github.com/tikv/client-go/rawkv
-              desc: not allowed, use github.com/tikv/client-go/v2/txnkv
+              desc: not allowed
             - pkg: github.com/tikv/client-go/v2/rawkv
-              desc: not allowed, use github.com/tikv/client-go/v2/txnkv
+              desc: not allowed
             - pkg: github.com/gogo/protobuf
-              desc: not allowed, gogo protobuf is deprecated
+              desc: deprecated
             - pkg: github.com/golang/protobuf/proto
-              desc: not allowed, protobuf v1 is deprecated, use google.golang.org/protobuf/proto instead
+              desc: deprecated
             - pkg: github.com/pingcap/log
-              desc: not allowed, use github.com/milvus-io/milvus/pkg/v2/log
+              desc: not allowed
     forbidigo:
       forbid:
         - pattern: ^time\.Tick$
@@ -72,7 +72,6 @@ linters:
       enable:
         - nilness
       disable:
-        # TODO: re-enable printf after investigating false positives with Go 1.25 + golangci-lint v2
         - printf
     misspell:
       locale: US
@@ -122,19 +121,7 @@ linters:
         path: .+_test\.go
       - path: mocks\/(.)+mock_(.+)\.go
         text: don't use an underscore in package name
-      # TODO: cleanup in follow-up PR — v2 linters are stricter than v1 on existing code
-      - linters:
-          - misspell
-          - ineffassign
-          - unconvert
-          - depguard
-          - whitespace
-          - revive
-          - gocritic
-        path: ^internal/(datacoord|datanode)/
-      - linters:
-          - unconvert
-        path: ^(cmd/tools|internal/util|tests/integration)/
+      # Keep existing v1 exclusions
       - path: (.+)\.go$
         text: should have a package comment
       - path: (.+)\.go$
@@ -205,97 +192,6 @@ linters:
         text: unslice
       - path: (.+)\.go$
         text: G115
-      # TODO: cleanup following exclusions, added on golangci-lint v2 upgrade
-      # staticcheck quick-fix suggestions (QF)
-      - path: (.+)\.go$
-        text: QF1001
-      - path: (.+)\.go$
-        text: QF1003
-      - path: (.+)\.go$
-        text: QF1005
-      - path: (.+)\.go$
-        text: QF1006
-      - path: (.+)\.go$
-        text: QF1007
-      - path: (.+)\.go$
-        text: QF1008
-      - path: (.+)\.go$
-        text: QF1011
-      - path: (.+)\.go$
-        text: QF1012
-      # staticcheck style checks (ST)
-      - path: (.+)\.go$
-        text: ST1005
-      - path: (.+)\.go$
-        text: ST1008
-      - path: (.+)\.go$
-        text: ST1011
-      - path: (.+)\.go$
-        text: ST1023
-      # TODO: cleanup v2-stricter-than-v1 exclusions in follow-up PR
-      # staticcheck checks not enforced in v1
-      - path: (.+)\.go$
-        text: S1005
-      - path: (.+)\.go$
-        text: S1008
-      - path: (.+)\.go$
-        text: S1021
-      - path: (.+)\.go$
-        text: S1025
-      - path: (.+)\.go$
-        text: S1031
-      - path: (.+)\.go$
-        text: S1034
-      - path: (.+)\.go$
-        text: S1039
-      - path: (.+)\.go$
-        text: SA3001
-      - path: (.+)\.go$
-        text: SA4003
-      - path: (.+)\.go$
-        text: SA4010
-      - path: (.+)\.go$
-        text: SA4011
-      - path: (.+)\.go$
-        text: ST1019
-      # gosec rules not enforced in v1
-      - path: (.+)\.go$
-        text: G306
-      # gocritic checks not enforced in v1
-      - path: (.+)\.go$
-        text: unlambda
-      - path: (.+)\.go$
-        text: underef
-      # gosec rules not enforced in v1 (G602 slice bounds, G101 hardcoded credentials)
-      - path: (.+)\.go$
-        text: G602
-      - path: (.+)\.go$
-        text: G101
-      # staticcheck SA4006 (assigned value never used) — not enforced in v1
-      - path: (.+)\.go$
-        text: SA4006
-      # whitespace trailing newline — not enforced strictly in v1
-      - path: (.+)\.go$
-        linters:
-          - whitespace
-        text: unnecessary trailing newline
-      # gosec new rules (introduced in gosec v2.23+, not present in golangci-lint v1)
-      - path: (.+)\.go$
-        text: G117
-      - path: (.+)\.go$
-        text: G118
-      - path: (.+)\.go$
-        text: G120
-      - path: (.+)\.go$
-        text: G702
-      - path: (.+)\.go$
-        text: G703
-      - path: (.+)\.go$
-        text: G705
-      - path: (.+)\.go$
-        text: G704
-      - path: (.+)\.go$
-        text: G706
     paths:
       - (^|/)partial_search_test\.go$
       - ^build/
