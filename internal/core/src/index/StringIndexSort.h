@@ -353,7 +353,7 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
 
     // Check if value matches pattern based on op type
     bool
-    MatchValue(const std::string& value,
+    MatchValue(std::string_view value,
                const std::string& pattern,
                proto::plan::OpType op) const;
 
@@ -488,7 +488,7 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
 
     // Check if value matches pattern based on op type
     bool
-    MatchValue(const std::string& value,
+    MatchValue(std::string_view value,
                const std::string& pattern,
                proto::plan::OpType op) const;
 
