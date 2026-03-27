@@ -1055,7 +1055,9 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 
 func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, error) {
 	pb := &commonpb.PlaceholderGroup{}
-	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
+	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
+		return 0, err
+	}
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
 		return 0, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search")
@@ -1122,7 +1124,9 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 
 func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest) error {
 	pb := &commonpb.PlaceholderGroup{}
-	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
+	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
+		return err
+	}
 
 	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
 		return merr.WrapErrParameterInvalidMsg("please provide varchar/text for MinHash Function based search")

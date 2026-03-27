@@ -393,6 +393,7 @@ func (t *SearchTask) combinePlaceHolderGroups() error {
 		}
 		ret.Placeholders[0].Values = append(ret.Placeholders[0].Values, x.Placeholders[0].Values...)
 	}
-	t.placeholderGroup, _ = proto.Marshal(ret)
-	return nil
+	var err error
+	t.placeholderGroup, err = proto.Marshal(ret)
+	return err
 }
