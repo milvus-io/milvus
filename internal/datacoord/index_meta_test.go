@@ -816,6 +816,35 @@ func TestMeta_GetIndexedSegment(t *testing.T) {
 		segments := m.GetIndexedSegments(collID+1, []int64{segID}, []int64{fieldID})
 		assert.Len(t, segments, 0)
 	})
+
+	t.Run("with deleted index entries", func(t *testing.T) {
+		// Simulate drop+create index cycles: add deleted index entries for the same field.
+		// Previously, deleted entries inflated len(targetIndices), causing the indexed check
+		// to always fail (indexedFields=1 != len(targetIndices)=N).
+		deletedIndexID1 := indexID + 100
+		deletedIndexID2 := indexID + 200
+		m.indexes[collID][deletedIndexID1] = &model.Index{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexID:      deletedIndexID1,
+			IndexName:    "old_idx_1",
+			IsDeleted:    true,
+		}
+		m.indexes[collID][deletedIndexID2] = &model.Index{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexID:      deletedIndexID2,
+			IndexName:    "old_idx_2",
+			IsDeleted:    true,
+		}
+
+		segments := m.GetIndexedSegments(collID, []int64{segID}, []int64{fieldID})
+		assert.Len(t, segments, 1, "segment should be indexed even with deleted index entries")
+
+		// Cleanup
+		delete(m.indexes[collID], deletedIndexID1)
+		delete(m.indexes[collID], deletedIndexID2)
+	})
 }
 
 func TestMeta_MarkIndexAsDeleted(t *testing.T) {
