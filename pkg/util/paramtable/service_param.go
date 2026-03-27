@@ -1630,7 +1630,7 @@ Leave it empty if you want to use AWS default endpoint`,
 	p.UseCRC32C = ParamItem{
 		Key:          "minio.ssl.useCRC32C",
 		Version:      "2.6.11",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		Doc:          "Whether to use CRC32C checksum for data integrity validation on MinIO/S3 PutObject requests.",
 		Export:       true,
 	}
