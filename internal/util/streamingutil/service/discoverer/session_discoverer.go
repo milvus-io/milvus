@@ -172,6 +172,10 @@ func (sw *sessionDiscoverer) initDiscover(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Clear stale sessions before re-populating.
+	// On retry (e.g. after etcd watch compaction), sessions deleted during the
+	// watch gap would otherwise persist forever because initDiscover only adds entries.
+	sw.peerSessions = make(map[string]*sessionutil.SessionRaw, len(resp.Kvs))
 	for _, kv := range resp.Kvs {
 		logger := sw.Logger().With(zap.String("sessionKey", string(kv.Key)), zap.String("sessionValue", string(kv.Value)))
 		session, err := sw.parseSession(kv.Value)
