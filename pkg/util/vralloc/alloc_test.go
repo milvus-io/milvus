@@ -20,8 +20,10 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -112,11 +114,13 @@ func TestWait(t *testing.T) {
 	assert.False(t, allocated)
 	close(waitCh) // start release a1
 
-	for !allocated {
-		a.Wait() // alloc after wait
+	// Use polling instead of cond.Wait() to avoid missed-signal race:
+	// all Broadcast() calls from Reallocate can complete before Wait()
+	// is called, causing Wait() to block forever.
+	require.Eventually(t, func() bool {
 		allocated, _ = a.Allocate("a2", &Resource{100, 100, 100})
-	}
-	assert.True(t, allocated)
+		return allocated
+	}, 5*time.Second, 10*time.Millisecond)
 }
 
 func TestPhysicalAwareFixedSizeAllocator(t *testing.T) {
