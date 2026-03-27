@@ -1011,7 +1011,7 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 	}
 	for fieldID, stats := range jsonKeyIndexInfo {
 		if _, ok := jsonBasePaths[fieldID]; !ok {
-			jsonBasePaths[fieldID] = metautil.BuildJsonKeyStatsPrefix(rootPath, stats.GetJsonKeyStatsDataFormat(),
+			jsonBasePaths[fieldID] = metautil.BuildJSONKeyStatsPrefix(rootPath, stats.GetJsonKeyStatsDataFormat(),
 				stats.GetBuildID(), stats.GetVersion(),
 				loadInfo.GetCollectionID(), loadInfo.GetPartitionID(), loadInfo.GetSegmentID(), fieldID)
 		}
@@ -2407,7 +2407,7 @@ func (loader *segmentLoader) LoadJSONIndex(ctx context.Context,
 	rootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
 	for fieldID, stats := range jsonKeyIndexInfo {
 		if _, ok := jsonBasePaths[fieldID]; !ok {
-			jsonBasePaths[fieldID] = metautil.BuildJsonKeyStatsPrefix(rootPath, stats.GetJsonKeyStatsDataFormat(),
+			jsonBasePaths[fieldID] = metautil.BuildJSONKeyStatsPrefix(rootPath, stats.GetJsonKeyStatsDataFormat(),
 				stats.GetBuildID(), stats.GetVersion(),
 				loadInfo.GetCollectionID(), loadInfo.GetPartitionID(), loadInfo.GetSegmentID(), fieldID)
 		}

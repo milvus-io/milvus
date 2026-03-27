@@ -130,9 +130,9 @@ func BuildTextIndexPrefix(rootPath string, buildID, version, collectionID, parti
 		strconv.FormatInt(segmentID, 10), strconv.FormatInt(fieldID, 10))
 }
 
-// BuildJsonKeyStatsPrefix returns the remote base path for JSON key stats files.
+// BuildJSONKeyStatsPrefix returns the remote base path for JSON key stats files.
 // Format: {rootPath}/json_stats/{dataFormat}/{buildID}/{version}/{collID}/{partID}/{segID}/{fieldID}
-func BuildJsonKeyStatsPrefix(rootPath string, dataFormat, buildID, version, collectionID, partitionID, segmentID, fieldID int64) string {
+func BuildJSONKeyStatsPrefix(rootPath string, dataFormat, buildID, version, collectionID, partitionID, segmentID, fieldID int64) string {
 	return path.Join(rootPath, common.JSONStatsPath,
 		strconv.FormatInt(dataFormat, 10),
 		strconv.FormatInt(buildID, 10), strconv.FormatInt(version, 10),

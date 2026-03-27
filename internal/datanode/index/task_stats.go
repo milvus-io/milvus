@@ -838,7 +838,7 @@ func computeStatsBasePath(req *workerpb.CreateStatsRequest, manifestPath string,
 			req.GetTaskID(), req.GetTaskVersion(),
 			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil
 	case "json_key_index":
-		return metautil.BuildJsonKeyStatsPrefix(rootPath, common.JSONStatsDataFormatVersion,
+		return metautil.BuildJSONKeyStatsPrefix(rootPath, common.JSONStatsDataFormatVersion,
 			req.GetTaskID(), req.GetTaskVersion(),
 			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil
 	}

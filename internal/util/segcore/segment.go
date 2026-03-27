@@ -436,7 +436,7 @@ func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo) (
 
 	jsonBasePaths := make(map[int64]string, len(jsonStats))
 	for fieldID, stats := range jsonStats {
-		jsonBasePaths[fieldID] = metautil.BuildJsonKeyStatsPrefix(rootPath, stats.GetJsonKeyStatsDataFormat(),
+		jsonBasePaths[fieldID] = metautil.BuildJSONKeyStatsPrefix(rootPath, stats.GetJsonKeyStatsDataFormat(),
 			stats.GetBuildID(), stats.GetVersion(),
 			src.GetCollectionID(), src.GetPartitionID(), src.GetSegmentID(), fieldID)
 	}
