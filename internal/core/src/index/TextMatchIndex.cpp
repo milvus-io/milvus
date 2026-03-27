@@ -142,8 +142,22 @@ TextMatchIndex::Load(const Config& config) {
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load text log index");
+
+    // Detect V3 format: single file ending with ".v3"
+    auto& files_value = index_files.value();
+    if (files_value.size() == 1) {
+        const auto& file = files_value[0];
+        auto filename = file.substr(file.find_last_of('/') + 1);
+        if (filename.size() > 3 &&
+            filename.substr(filename.size() - 3) == ".v3") {
+            LOG_INFO("TextMatchIndex::Load V3 format detected: {}", file);
+            InvertedIndexTantivy<std::string>::LoadV3(config);
+            return;
+        }
+    }
+
+    // V2: existing multi-file load path
     auto prefix = disk_file_manager_->GetLocalTextIndexPrefix();
-    auto files_value = index_files.value();
     auto it = std::find_if(
         files_value.begin(), files_value.end(), [](const std::string& file) {
             return file.substr(file.find_last_of('/') + 1) ==
