@@ -250,6 +250,49 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigNonRGNotFoundE
 	require.False(t, errors.Is(err, merr.ErrResourceGroupNotFound))
 }
 
+func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFound(t *testing.T) {
+	ctx := context.Background()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
+
+	mixc := imocks.NewMixCoord(t)
+	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(
+		merr.Status(merr.WrapErrResourceGroupNotFound("rg_not_exist")),
+		nil,
+	)
+
+	c := newTestCore(
+		withMeta(meta),
+		withMixCoord(mixc),
+		withValidProxyManager(),
+		withBroker(&mockBroker{}),
+	)
+	cb := &DDLCallback{Core: c}
+
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
+					ReplicaNumber:  1,
+					ResourceGroups: []string{"rg_not_exist"},
+				},
+			},
+		}).
+		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
+		MustBuildBroadcast()
+	msg := message.MustAsBroadcastAlterCollectionMessageV2(raw)
+
+	err := cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+		Message: msg,
+		Results: map[string]*message.AppendResult{},
+	})
+	require.NoError(t, err)
+}
+
 func TestDDLCallbacksAlterCollectionV2AckCallback_BroadcastAlteredCollectionError(t *testing.T) {
 	ctx := context.Background()
 

@@ -247,6 +247,53 @@ func TestDDLCallbacksAlterDatabaseV1AckCallback_UpdateLoadConfigNonRGNotFoundErr
 	require.False(t, errors.Is(err, merr.ErrResourceGroupNotFound))
 }
 
+func TestDDLCallbacksAlterDatabaseV1AckCallback_StopRetryOnResourceGroupNotFound(t *testing.T) {
+	ctx := context.Background()
+	controlChannel := funcutil.GetControlChannel("test")
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().AlterDatabase(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	mixc := imocks.NewMixCoord(t)
+	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(
+		merr.Status(merr.WrapErrResourceGroupNotFound("rg_not_exist")),
+		nil,
+	)
+
+	c := newTestCore(
+		withMeta(meta),
+		withMixCoord(mixc),
+		withValidProxyManager(),
+		withBroker(&mockBroker{}),
+	)
+	cb := &DDLCallback{Core: c}
+
+	raw := message.NewAlterDatabaseMessageBuilderV2().
+		WithHeader(&messagespb.AlterDatabaseMessageHeader{
+			DbName: "db",
+			DbId:   1,
+		}).
+		WithBody(&messagespb.AlterDatabaseMessageBody{
+			Properties: []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
+			AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterDatabase{
+				CollectionIds:  []int64{1},
+				ReplicaNumber:  1,
+				ResourceGroups: []string{"rg_not_exist"},
+			},
+		}).
+		WithBroadcast([]string{controlChannel}).
+		MustBuildBroadcast()
+	msg := message.MustAsBroadcastAlterDatabaseMessageV2(raw)
+
+	err := cb.alterDatabaseV1AckCallback(ctx, message.BroadcastResultAlterDatabaseMessageV2{
+		Message: msg,
+		Results: map[string]*message.AppendResult{
+			controlChannel: {TimeTick: 1},
+		},
+	})
+	require.NoError(t, err)
+}
+
 func assertDatabaseReplicaNumber(t *testing.T, ctx context.Context, core *Core, dbName string, replicaNumber int64) {
 	db, err := core.meta.GetDatabaseByName(ctx, dbName, typeutil.MaxTimestamp)
 	require.NoError(t, err)
