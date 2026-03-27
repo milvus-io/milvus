@@ -86,6 +86,7 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 			use_custom_part_upload: true,
 			max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
 			tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
+			use_crc32c_checksum:    C.bool(storageConfig.GetUseCrc32CChecksum()),
 		}
 		defer C.free(unsafe.Pointer(cStorageConfig.address))
 		defer C.free(unsafe.Pointer(cStorageConfig.bucket_name))
@@ -209,7 +210,7 @@ func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig
 	defer C.free(unsafe.Pointer(cBasePath))
 
 	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), 1, &cTransactionHandle)
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	err = HandleLoonFFIResult(result)
 	if err != nil {
 		return cManifestHandle, err

@@ -52,6 +52,7 @@ StorageV2FSCache::Get(const Key& key) {
     if (!key.tls_min_version.empty() && key.tls_min_version != "default") {
         props[PROPERTY_FS_TLS_MIN_VERSION] = key.tls_min_version;
     }
+    props[PROPERTY_FS_USE_CRC32C_CHECKSUM] = key.use_crc32c_checksum;
 
     LOG_INFO(
         "StorageV2FSCache::Get: address={}, bucket={}, root_path={}, "

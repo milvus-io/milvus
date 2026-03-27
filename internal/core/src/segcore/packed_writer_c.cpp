@@ -84,6 +84,7 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
             c_storage_config.tls_min_version != nullptr
                 ? std::string(c_storage_config.tls_min_version)
                 : "",
+            c_storage_config.use_crc32c_checksum,
         });
         if (!trueFs) {
             return milvus::FailureCStatus(
@@ -341,6 +342,7 @@ GetFileSizeWithStorageConfig(const char* path,
             c_storage_config.tls_min_version != nullptr
                 ? std::string(c_storage_config.tls_min_version)
                 : "",
+            c_storage_config.use_crc32c_checksum,
         });
 
         if (!trueFs) {
