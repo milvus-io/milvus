@@ -3,7 +3,7 @@
 ## Summary
 
 - The authoritative x86 host at `/data/work` is suitable for stage-1 build work, but it is missing several Milvus prerequisites out of the box
-- Confirmed missing tools on `knowhere-x86-hk-proxy` as of 2026-03-27:
+- Confirmed missing tools on the HannsDB reference host `ecs-knowledgebase-3d6e` (`189.1.218.159`) as of 2026-03-27:
   - `conan`
   - `go`
   - `docker`
@@ -20,10 +20,12 @@
 - Remote tool probe returned paths for `make`, `gcc`, `g++`, `cmake`, and `python3`
 - The same probe returned empty results for `conan`, `go`, `docker`, and `docker-compose`
 - Remote host details confirmed during probe:
-  - `Linux ecs-knowledgebase-473c 6.8.0-87-generic x86_64`
+  - `Linux ecs-knowledgebase-3d6e 6.8.0-87-generic x86_64`
   - `Python 3.12.3`
   - `gcc 13.3.0`
   - `cmake 3.28.3`
+- Installing `conan` with `python3 -m pip install conan==1.64.1` failed because the host enforces PEP 668 (`externally-managed-environment`)
+  - Stage-1 provisioning must therefore install `conan` into a dedicated virtual environment under `/data/work`, not into the system Python
 
 ## Stage 1 Policy
 
