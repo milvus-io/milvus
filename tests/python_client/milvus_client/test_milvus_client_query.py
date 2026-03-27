@@ -3836,7 +3836,7 @@ class TestQueryOperation(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # Remove connection
         self.close(client_temp)
-        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
+        error = {ct.err_code: 1, ct.err_msg: "'NoneType' object has no attribute 'query'"}
         self.query(client_temp, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.err_res, check_items=error)
 

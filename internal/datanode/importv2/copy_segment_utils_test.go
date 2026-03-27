@@ -499,14 +499,14 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 		indexInfos, textIndexInfos, jsonKeyIndexInfos, err := buildIndexInfoFromSource(source, target, mappings)
 		assert.NoError(t, err)
 
-		// Verify vector/scalar index info
+		// Verify vector/scalar index info (keyed by buildID, not fieldID)
 		assert.Equal(t, 1, len(indexInfos))
-		assert.NotNil(t, indexInfos[100])
-		assert.Equal(t, int64(100), indexInfos[100].FieldId)
-		assert.Equal(t, int64(1001), indexInfos[100].IndexId)
-		assert.Equal(t, int64(1002), indexInfos[100].BuildId)
-		assert.Equal(t, int64(5000), indexInfos[100].IndexSize)
-		assert.Equal(t, "files/index_files/1002/1/555/666/index1", indexInfos[100].IndexFilePaths[0])
+		assert.NotNil(t, indexInfos[1002])
+		assert.Equal(t, int64(100), indexInfos[1002].FieldId)
+		assert.Equal(t, int64(1001), indexInfos[1002].IndexId)
+		assert.Equal(t, int64(1002), indexInfos[1002].BuildId)
+		assert.Equal(t, int64(5000), indexInfos[1002].IndexSize)
+		assert.Equal(t, "files/index_files/1002/1/555/666/index1", indexInfos[1002].IndexFilePaths[0])
 
 		// Verify text index info
 		assert.Equal(t, 1, len(textIndexInfos))
@@ -803,6 +803,70 @@ func TestGenerateSegmentInfoFromSource_EmptySource(t *testing.T) {
 	assert.Equal(t, 0, len(segmentInfo.Statslogs))
 	assert.Equal(t, 0, len(segmentInfo.Deltalogs))
 	assert.Equal(t, 0, len(segmentInfo.Bm25Logs))
+}
+
+// TestBuildIndexInfoFromSource_MultipleIndexesPerField verifies that multiple indexes
+// on the same field (e.g., JSON path indexes) are all preserved in the result map.
+// This is the core scenario for the fix: using buildID as map key instead of fieldID.
+func TestBuildIndexInfoFromSource_MultipleIndexesPerField(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+		IndexFiles: []*indexpb.IndexFilePathInfo{
+			{
+				FieldID:        100, // Same field
+				IndexID:        1001,
+				BuildID:        2001,
+				IndexName:      "idx_category",
+				IndexFilePaths: []string{"files/index_files/2001/1/222/333/index1"},
+				SerializedSize: 3000,
+			},
+			{
+				FieldID:        100, // Same field, different path index
+				IndexID:        1002,
+				BuildID:        2002,
+				IndexName:      "idx_price",
+				IndexFilePaths: []string{"files/index_files/2002/1/222/333/index2"},
+				SerializedSize: 4000,
+			},
+		},
+	}
+
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+		NewBuildIds: map[int64]int64{
+			2001: 3001, // old buildID -> new buildID
+			2002: 3002,
+		},
+	}
+
+	mappings := map[string]string{
+		"files/index_files/2001/1/222/333/index1": "files/index_files/3001/1/555/666/index1",
+		"files/index_files/2002/1/222/333/index2": "files/index_files/3002/1/555/666/index2",
+	}
+
+	indexInfos, _, _, err := buildIndexInfoFromSource(source, target, mappings)
+	assert.NoError(t, err)
+
+	// Both indexes should be present (keyed by new buildID)
+	assert.Equal(t, 2, len(indexInfos), "Both JSON path indexes should be in the result")
+
+	// Verify first index (idx_category)
+	assert.NotNil(t, indexInfos[3001])
+	assert.Equal(t, int64(100), indexInfos[3001].FieldId)
+	assert.Equal(t, int64(1001), indexInfos[3001].IndexId)
+	assert.Equal(t, int64(3001), indexInfos[3001].BuildId)
+	assert.Equal(t, "idx_category", indexInfos[3001].IndexName)
+
+	// Verify second index (idx_price)
+	assert.NotNil(t, indexInfos[3002])
+	assert.Equal(t, int64(100), indexInfos[3002].FieldId)
+	assert.Equal(t, int64(1002), indexInfos[3002].IndexId)
+	assert.Equal(t, int64(3002), indexInfos[3002].BuildId)
+	assert.Equal(t, "idx_price", indexInfos[3002].IndexName)
 }
 
 func TestBuildIndexInfoFromSource_EmptySource(t *testing.T) {

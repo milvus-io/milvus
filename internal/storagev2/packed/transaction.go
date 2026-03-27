@@ -24,13 +24,31 @@ import "C"
 
 import (
 	"fmt"
+	"math"
 	"unsafe"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+// getRetryLimit returns the configured manifest transaction retry limit.
+// Multiple stats tasks (text index, JSON key, BM25) can write to the same
+// segment's manifest concurrently, causing optimistic transaction conflicts.
+// The retry mechanism re-reads the latest manifest version and re-applies
+// the changes on each attempt.
+func getRetryLimit() C.uint32_t {
+	val := paramtable.Get().CommonCfg.ManifestTransactionRetryLimit.GetAsInt64()
+	if val <= 0 {
+		val = 10
+	}
+	if val > math.MaxUint32 {
+		val = math.MaxUint32
+	}
+	return C.uint32_t(val)
+}
 
 // DeltaLogEntry represents a delta log to be added to the manifest
 type DeltaLogEntry struct {
@@ -74,7 +92,7 @@ func AddDeltaLogsToManifest(
 
 	// Start transaction
 	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), 1, &transactionHandle)
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), getRetryLimit(), &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -203,7 +221,7 @@ func AddStatsToManifest(
 	defer C.free(unsafe.Pointer(cBasePath))
 
 	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), 1, &transactionHandle)
+	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), getRetryLimit(), &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}

@@ -162,10 +162,13 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 }
 
 func (node *QueryNode) initSession() error {
-	minimalIndexVersion, currentIndexVersion := getIndexEngineVersion()
+	minimalIndexVersion, currentIndexVersion, maximumIndexVersion := getIndexEngineVersion()
 	node.session = sessionutil.NewSession(node.ctx,
-		sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion),
-		sessionutil.WithScalarIndexEngineVersion(common.MinimalScalarIndexEngineVersion, common.CurrentScalarIndexEngineVersion),
+		sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion, maximumIndexVersion),
+		sessionutil.WithScalarIndexEngineVersion(
+			common.MinimalScalarIndexEngineVersion,
+			common.CurrentScalarIndexEngineVersion,
+			common.MaximumScalarIndexEngineVersion),
 		sessionutil.WithIndexNonEncoding())
 	if node.session == nil {
 		return errors.New("session is nil, the etcd client connection may have failed")
@@ -270,9 +273,9 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.diskWriteRateLimiter.lowPriorityRatio", node.ReconfigDiskFileWriterParams))
 }
 
-func getIndexEngineVersion() (minimal, current int32) {
-	cMinimal, cCurrent := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion()
-	return int32(cMinimal), int32(cCurrent)
+func getIndexEngineVersion() (minimal, current, maximum int32) {
+	cMinimal, cCurrent, cMaximum := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion(), C.GetMaximumIndexVersion()
+	return int32(cMinimal), int32(cCurrent), int32(cMaximum)
 }
 
 func (node *QueryNode) GetNodeID() int64 {

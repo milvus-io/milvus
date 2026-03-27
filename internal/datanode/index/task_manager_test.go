@@ -78,6 +78,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
 			[]*datapb.FieldBinlog{},
+			"test_manifest_path",
 		)
 	})
 
@@ -91,7 +92,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 					LogSize:    1024,
 					MemorySize: 1024,
 				},
-			})
+			}, "test_manifest_path")
 	})
 
 	s.Run("storeStatsJsonIndexResult", func() {
@@ -105,7 +106,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 					MemorySize:             1024,
 					JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
 				},
-			})
+			}, "test_manifest_path")
 	})
 
 	s.Run("getStatsTaskInfo", func() {

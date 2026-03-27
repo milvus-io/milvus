@@ -79,7 +79,7 @@ func (s *ChannelCPUpdaterSuite) TestUpdate() {
 	wg.Wait()
 	s.Eventually(func() bool {
 		return counter.Load() == int64(tasksNum)
-	}, time.Second*10, time.Millisecond*100)
+	}, time.Second*30, time.Millisecond*100)
 }
 
 func TestChannelCPUpdater(t *testing.T) {

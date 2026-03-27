@@ -1888,3 +1888,335 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFilledFieldBecomesReplace) {
         EXPECT_NE(fid.get(), 101);
     }
 }
+
+// ==================== Raw Data Lifecycle Tests ====================
+// Tests for field_data_to_drop generation and ComputeDiffReloadFields behavior
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffNewIndexWithRawDataNoFieldDrop) {
+    // Test 1.1: When a new index has raw data (ASCENDING_SORT for scalar),
+    // field_data_to_drop should NOT include that field.
+    // Raw-data indexes no longer trigger field drop; field data is kept
+    // (binlog mode) or lazified (column groups mode).
+    // Scenario: current has no index -> new has ASCENDING_SORT index (raw=true)
+
+    // Current: only binlog for field 108 (INT64, extra_field1)
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(108);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_108");
+    cur_log->set_entries_num(1000);
+
+    // New: same binlog + ASCENDING_SORT index for field 108 (has raw data)
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(108);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/binlog_108");
+    new_log->set_entries_num(1000);
+
+    auto* index_info = new_proto.add_index_infos();
+    index_info->set_fieldid(108);
+    index_info->set_indexid(5001);
+    index_info->add_index_file_paths("/path/to/sort_index");
+    auto* param = index_info->add_index_params();
+    param->set_key("index_type");
+    param->set_value(milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    // Initialize default fields
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "New index with raw data diff: " << diff.ToString() << "\n";
+
+    // Index should be in indexes_to_load
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(108)) > 0);
+    // field_data_to_drop should NOT include field 108
+    // (raw-data index no longer triggers drop)
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(108)) == 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffReplaceIndexWithRawDataNoFieldDrop) {
+    // Test 1.2: When replacing an index and the new one has raw data,
+    // field_data_to_drop should NOT include that field.
+    // Raw-data indexes no longer trigger field drop.
+    // Scenario: current has INVERTED index -> new has ASCENDING_SORT index
+
+    // Current: field 108 has INVERTED index (no raw data)
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(108);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_108");
+    cur_log->set_entries_num(1000);
+    auto* cur_index = current_proto.add_index_infos();
+    cur_index->set_fieldid(108);
+    cur_index->set_indexid(5001);
+    cur_index->add_index_file_paths("/path/to/inverted_index");
+    auto* cur_param = cur_index->add_index_params();
+    cur_param->set_key("index_type");
+    cur_param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    // New: field 108 has ASCENDING_SORT index (has raw data), different index_id
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(108);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/binlog_108");
+    new_log->set_entries_num(1000);
+    auto* new_index = new_proto.add_index_infos();
+    new_index->set_fieldid(108);
+    new_index->set_indexid(5002);
+    new_index->add_index_file_paths("/path/to/sort_index");
+    auto* new_param = new_index->add_index_params();
+    new_param->set_key("index_type");
+    new_param->set_value(milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "Replace index with raw data diff: " << diff.ToString()
+              << "\n";
+
+    // Index should be in indexes_to_replace
+    EXPECT_TRUE(diff.indexes_to_replace.count(FieldId(108)) > 0);
+    // field_data_to_drop should NOT include field 108
+    // (raw-data index no longer triggers drop)
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(108)) == 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffNewIndexNoRawDataNoFieldDrop) {
+    // Test 1.3: When a new index has no raw data (INVERTED_INDEX_TYPE),
+    // field_data_to_drop should NOT include that field.
+
+    // Current: only binlog for field 108
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(108);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_108");
+    cur_log->set_entries_num(1000);
+
+    // New: same binlog + INVERTED index for field 108 (no raw data)
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(108);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/binlog_108");
+    new_log->set_entries_num(1000);
+    auto* index_info = new_proto.add_index_infos();
+    index_info->set_fieldid(108);
+    index_info->set_indexid(5001);
+    index_info->add_index_file_paths("/path/to/inverted_index");
+    auto* param = index_info->add_index_params();
+    param->set_key("index_type");
+    param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "New index no raw data diff: " << diff.ToString() << "\n";
+
+    // Index should be in indexes_to_load
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(108)) > 0);
+    // field_data_to_drop should NOT include field 108 (no raw data)
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(108)) == 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffUnchangedIndexNoFieldDrop) {
+    // Test 1.4: When the index is unchanged (same index_id),
+    // field_data_to_drop should be empty.
+
+    // Both current and new: field 108 has ASCENDING_SORT index with same id
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(108);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/binlog_108");
+    log->set_entries_num(1000);
+    auto* index_info = proto.add_index_infos();
+    index_info->set_fieldid(108);
+    index_info->set_indexid(5001);
+    index_info->add_index_file_paths("/path/to/sort_index");
+    auto* param = index_info->add_index_params();
+    param->set_key("index_type");
+    param->set_value(milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo current_info(proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // No index changes
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.indexes_to_replace.empty());
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
+    // field_data_to_drop should be empty (no change)
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffReloadFieldRawToNoRaw) {
+    // Test 1.5: When index changes from raw=true to raw=false,
+    // binlogs_to_replace should include the field's binlog.
+    // Scenario: current has ASCENDING_SORT (raw=true) -> new has INVERTED (raw=false)
+
+    // Current: field 108 with ASCENDING_SORT index + binlog
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(108);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_108");
+    cur_log->set_entries_num(1000);
+    auto* cur_index = current_proto.add_index_infos();
+    cur_index->set_fieldid(108);
+    cur_index->set_indexid(5001);
+    cur_index->add_index_file_paths("/path/to/sort_index");
+    auto* cur_param = cur_index->add_index_params();
+    cur_param->set_key("index_type");
+    cur_param->set_value(milvus::index::ASCENDING_SORT);
+
+    // New: field 108 with INVERTED index (no raw) + same binlog
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(108);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/binlog_108");
+    new_log->set_entries_num(1000);
+    auto* new_index = new_proto.add_index_infos();
+    new_index->set_fieldid(108);
+    new_index->set_indexid(5002);
+    new_index->add_index_file_paths("/path/to/inverted_index");
+    auto* new_param = new_index->add_index_params();
+    new_param->set_key("index_type");
+    new_param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "Raw->NoRaw reload diff: " << diff.ToString() << "\n";
+
+    // Index should be replaced
+    EXPECT_TRUE(diff.indexes_to_replace.count(FieldId(108)) > 0);
+
+    // binlogs_to_replace should include field 108 (need to reload raw data)
+    bool found_108_in_replace = false;
+    for (const auto& [field_ids, binlog] : diff.binlogs_to_replace) {
+        for (const auto& fid : field_ids) {
+            if (fid.get() == 108) {
+                found_108_in_replace = true;
+            }
+        }
+    }
+    EXPECT_TRUE(found_108_in_replace);
+
+    // fields_to_reload should be empty (new path uses binlogs_to_replace)
+    EXPECT_TRUE(diff.fields_to_reload.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffReloadFieldIndexDropped) {
+    // Test 1.6: When an index is dropped and it had raw data,
+    // binlogs_to_replace should include the field's binlog.
+    // Scenario: current has ASCENDING_SORT (raw=true) -> new has no index
+
+    // Current: field 108 with ASCENDING_SORT index + binlog
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* cur_binlog = current_proto.add_binlog_paths();
+    cur_binlog->set_fieldid(108);
+    auto* cur_log = cur_binlog->add_binlogs();
+    cur_log->set_log_path("/path/to/binlog_108");
+    cur_log->set_entries_num(1000);
+    auto* cur_index = current_proto.add_index_infos();
+    cur_index->set_fieldid(108);
+    cur_index->set_indexid(5001);
+    cur_index->add_index_file_paths("/path/to/sort_index");
+    auto* cur_param = cur_index->add_index_params();
+    cur_param->set_key("index_type");
+    cur_param->set_value(milvus::index::ASCENDING_SORT);
+
+    // New: field 108 with binlog only (no index)
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog = new_proto.add_binlog_paths();
+    new_binlog->set_fieldid(108);
+    auto* new_log = new_binlog->add_binlogs();
+    new_log->set_log_path("/path/to/binlog_108");
+    new_log->set_entries_num(1000);
+
+    SegmentLoadInfo current_info(current_proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(new_proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "Index dropped reload diff: " << diff.ToString() << "\n";
+
+    // Index should be dropped
+    EXPECT_TRUE(diff.indexes_to_drop.count(FieldId(108)) > 0);
+
+    // binlogs_to_replace should include field 108
+    bool found_108_in_replace = false;
+    for (const auto& [field_ids, binlog] : diff.binlogs_to_replace) {
+        for (const auto& fid : field_ids) {
+            if (fid.get() == 108) {
+                found_108_in_replace = true;
+            }
+        }
+    }
+    EXPECT_TRUE(found_108_in_replace);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffNoReloadWhenIndexStaysRaw) {
+    // Test 1.7: When index stays raw=true (same index_id),
+    // no reload should happen.
+
+    // Both: field 108 with same ASCENDING_SORT index
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(108);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/binlog_108");
+    log->set_entries_num(1000);
+    auto* index_info = proto.add_index_infos();
+    index_info->set_fieldid(108);
+    index_info->set_indexid(5001);
+    index_info->add_index_file_paths("/path/to/sort_index");
+    auto* param = index_info->add_index_params();
+    param->set_key("index_type");
+    param->set_value(milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo current_info(proto, schema_);
+    (void)current_info.GetLoadDiff();
+    SegmentLoadInfo new_info(proto, schema_);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    // No changes at all
+    EXPECT_FALSE(diff.HasChanges());
+    EXPECT_TRUE(diff.binlogs_to_replace.empty());
+    EXPECT_TRUE(diff.fields_to_reload.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}

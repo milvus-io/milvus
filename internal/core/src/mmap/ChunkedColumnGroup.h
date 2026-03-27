@@ -195,6 +195,11 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         CancelWarmup();
     }
 
+    bool
+    IsInMultiFieldColumnGroup() const override {
+        return group_->NumFieldsInGroup() > 1;
+    }
+
     void
     ManualEvictCache() const override {
         if (group_->NumFieldsInGroup() == 1) {
