@@ -10,3 +10,13 @@
 # See: https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer#suppressions
 
 leak:__cxa_allocate_exception
+
+# gRPC global singletons (e.g. AuditLoggerRegistry) are intentionally
+# never destroyed to avoid the static destruction order fiasco.
+# When gRPC is dynamically linked (libgrpc.so), LSAN cannot scan the
+# .bss segment of uninstrumented shared libraries, so these reachable
+# pointers appear as leaks. This is a known gRPC design choice, not a bug.
+# See: https://github.com/grpc/grpc/issues/40389
+#      https://github.com/grpc/grpc/issues/24488
+leak:_GLOBAL__sub_I_audit_logging.cc
+leak:grpc_core::experimental::AuditLoggerRegistry
