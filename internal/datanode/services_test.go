@@ -261,6 +261,9 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
+		jsonParams, err := compaction.GenerateJSONParams()
+		s.Require().NoError(err)
+
 		req := &datapb.CompactionPlan{
 			PlanID:  1000,
 			Channel: dmChannelName,
@@ -272,6 +275,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 			BeginLogID:             100,
 			PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 100, End: 200},
 			PreAllocatedLogIDs:     &datapb.IDRange{Begin: 200, End: 2000},
+			JsonParams:             jsonParams,
 		}
 
 		resp, err := node.CompactionV2(ctx, req)
@@ -308,6 +312,9 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
+		jsonParams, err := compaction.GenerateJSONParams()
+		s.Require().NoError(err)
+
 		req := &datapb.CompactionPlan{
 			PlanID:  1000,
 			Channel: dmChannelName,
@@ -319,6 +326,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 			BeginLogID:             100,
 			PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 0, End: 0},
 			PreAllocatedLogIDs:     &datapb.IDRange{Begin: 200, End: 2000},
+			JsonParams:             jsonParams,
 		}
 
 		resp, err := node.CompactionV2(ctx, req)
