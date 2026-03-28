@@ -1275,7 +1275,7 @@ func TestGetVecDataIdx(t *testing.T) {
 	// With compact indices
 	compactIdx := [][]int{
 		{0, -1, 1}, // result 0: row0=0, row1=null, row2=1
-		nil,         // result 1: non-nullable
+		nil,        // result 1: non-nullable
 	}
 	assert.Equal(t, 0, getVecDataIdx(compactIdx, rowRef{resultIdx: 0, rowIdx: 0}))
 	assert.Equal(t, -1, getVecDataIdx(compactIdx, rowRef{resultIdx: 0, rowIdx: 1}))
@@ -1775,8 +1775,8 @@ func TestCompareValues(t *testing.T) {
 
 func TestRangeSliceScalarField_AllTypes(t *testing.T) {
 	tests := []struct {
-		name string
-		sf   *schemapb.ScalarField
+		name  string
+		sf    *schemapb.ScalarField
 		check func(t *testing.T, sf *schemapb.ScalarField)
 	}{
 		{
@@ -2165,7 +2165,7 @@ func TestSliceVectorField_NullableCompact(t *testing.T) {
 
 func TestSliceVectorField_NullableCompact_BinaryVector(t *testing.T) {
 	vf := &schemapb.VectorField{
-		Dim:  16, // 2 bytes per row
+		Dim:  16,                                                                               // 2 bytes per row
 		Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0xAA, 0xBB, 0xCC, 0xDD}}, // 2 valid rows
 	}
 	validData := []bool{true, false, true}
