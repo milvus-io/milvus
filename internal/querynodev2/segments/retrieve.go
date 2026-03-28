@@ -46,7 +46,7 @@ type RetrieveSegmentResult struct {
 func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, error) {
 	resultCh := make(chan RetrieveSegmentResult, len(segments))
 
-	plan.SetIgnoreNonPk(len(segments) > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && plan.ShouldIgnoreNonPk())
+	plan.SetIgnoreNonPk(shouldEnableIgnoreNonPk(req, len(segments), plan.ShouldIgnoreNonPk()))
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
@@ -100,6 +100,17 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		results = append(results, r)
 	}
 	return results, nil
+}
+
+// shouldEnableIgnoreNonPk determines whether to use two-phase retrieval
+// (first fetch PKs only, then fetch full field data for selected rows).
+//
+// Note: ORDER BY queries are excluded at the C++ layer — ShouldIgnoreNonPk()
+// in plan_c.cpp returns false when has_order_by_=true, so planShouldIgnoreNonPk
+// is already false for ORDER BY. No explicit !hasOrderBy check is needed here.
+func shouldEnableIgnoreNonPk(req *querypb.QueryRequest, segmentNum int, planShouldIgnoreNonPk bool) bool {
+	hasGroupBy := len(req.GetReq().GetGroupByFieldIds()) > 0 || len(req.GetReq().GetAggregates()) > 0
+	return !hasGroupBy && segmentNum > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && planShouldIgnoreNonPk
 }
 
 func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {

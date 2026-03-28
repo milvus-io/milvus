@@ -209,6 +209,9 @@ message RetrieveRequest {
   repeated int64 group_by_field_ids = 21;
   repeated plan.Aggregate aggregates = 22;
   uint64 entity_ttl_physical_time = 23;
+  // ORDER BY fields — populated by proxy, consumed by QN/Delegator
+  // to avoid re-parsing serialized_expr_plan on the hot path.
+  repeated plan.OrderByField order_by_fields = 24;
 }
 
 // Element indices for element-level query results
