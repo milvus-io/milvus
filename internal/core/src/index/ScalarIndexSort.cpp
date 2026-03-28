@@ -415,18 +415,166 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
-               "index file paths is empty when load disk ann index");
+               "index file paths is empty when load scalar index sort");
     auto load_priority =
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
-    auto index_datas = this->file_manager_->LoadIndexToMemory(
-        index_files.value(), load_priority);
-    BinarySet binary_set;
-    AssembleIndexDatas(index_datas, binary_set);
-    // clear index_datas to free memory early
+
+    auto enable_mmap =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+
+    if (enable_mmap && disk_file_manager_ != nullptr) {
+        LoadWithStreamingToDisk(
+            index_files.value(), config, load_priority);
+    } else {
+        auto index_datas = file_manager_->LoadIndexToMemory(
+            index_files.value(), load_priority);
+        BinarySet binary_set;
+        AssembleIndexDatas(index_datas, binary_set);
+        // clear index_datas to free memory early
+        index_datas.clear();
+        LoadWithoutAssemble(binary_set, config);
+    }
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::LoadWithStreamingToDisk(
+    const std::vector<std::string>& index_files,
+    const Config& config,
+    milvus::proto::common::LoadPriority load_priority) {
+    std::vector<std::string> data_files;
+    std::vector<std::string> meta_files;
+
+    for (auto& file : index_files) {
+        auto file_name = file.substr(file.find_last_of('/') + 1);
+        if (file_name.rfind("index_data", 0) == 0) {
+            data_files.push_back(file);
+        } else {
+            meta_files.push_back(file);
+        }
+    }
+
+    std::sort(data_files.begin(), data_files.end(),
+              [](const std::string& a, const std::string& b) {
+                  auto a_pos = a.find_last_of('_');
+                  auto b_pos = b.find_last_of('_');
+                  return std::stoi(a.substr(a_pos + 1)) <
+                         std::stoi(b.substr(b_pos + 1));
+              });
+
+    is_mmap_ = true;
+    mmap_filepath_ = disk_file_manager_->GetLocalIndexObjectPrefix() +
+                     STLSORT_INDEX_FILE_NAME;
+    std::filesystem::create_directories(
+        std::filesystem::path(mmap_filepath_).parent_path());
+
+    int64_t total_data_size = 0;
+    {
+        auto file_writer = storage::FileWriter(
+            mmap_filepath_,
+            storage::io::GetPriorityFromLoadPriority(load_priority));
+
+        auto parallel_degree = static_cast<uint64_t>(
+            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE.load());
+        std::vector<std::string> batch;
+
+        auto flushBatch = [&]() {
+            auto futures = storage::GetObjectData(
+                file_manager_->GetChunkManager().get(),
+                batch,
+                milvus::PriorityForLoad(load_priority));
+            auto codecs =
+                storage::WaitAllFutures(std::move(futures));
+            for (auto& codec : codecs) {
+                file_writer.Write(codec->PayloadData(),
+                                  codec->PayloadSize());
+                total_data_size += codec->PayloadSize();
+            }
+            batch.clear();
+        };
+
+        for (auto& file : data_files) {
+            batch.push_back(file);
+            if (batch.size() >= parallel_degree) {
+                flushBatch();
+            }
+        }
+        if (!batch.empty()) {
+            flushBatch();
+        }
+
+        auto aligned_size =
+            ((total_data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+        if (aligned_size > total_data_size) {
+            std::vector<uint8_t> padding(aligned_size - total_data_size, 0);
+            file_writer.Write(padding.data(), padding.size());
+        }
+        std::vector<uint8_t> mmap_padding(MMAP_INDEX_PADDING, 0);
+        file_writer.Write(mmap_padding.data(), mmap_padding.size());
+        file_writer.Finish();
+
+        data_size_ = total_data_size;
+        mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
+    }
+
+    auto file = File::Open(mmap_filepath_, O_RDONLY);
+    mmap_data_ = static_cast<char*>(mmap(NULL,
+                                         mmap_size_,
+                                         PROT_READ,
+                                         MAP_PRIVATE,
+                                         file.Descriptor(),
+                                         0));
+    if (mmap_data_ == MAP_FAILED) {
+        file.Close();
+        remove(mmap_filepath_.c_str());
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "failed to mmap: {}",
+                  strerror(errno));
+    }
+    file.Close();
+
+    auto index_datas =
+        file_manager_->LoadIndexToMemory(meta_files, load_priority);
+    BinarySet meta_binary;
+    AssembleIndexDatas(index_datas, meta_binary);
     index_datas.clear();
-    LoadWithoutAssemble(binary_set, config);
+    milvus::Assemble(meta_binary);
+
+    auto index_length = meta_binary.GetByName("index_length");
+    size_t index_size = data_size_ / sizeof(IndexStructure<T>);
+    if (index_length) {
+        memcpy(&index_size, index_length->data.get(), sizeof(size_t));
+    }
+
+    auto index_num_rows = meta_binary.GetByName("index_num_rows");
+    if (index_num_rows) {
+        memcpy(&total_num_rows_,
+               index_num_rows->data.get(),
+               sizeof(size_t));
+    } else {
+        total_num_rows_ = index_size;
+    }
+
+    setup_data_pointers();
+
+    idx_to_offsets_.resize(total_num_rows_);
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    for (size_t i = 0; i < Size(); ++i) {
+        const auto& item = operator[](i);
+        idx_to_offsets_[item.idx_] = i;
+        valid_bitset_.set(item.idx_);
+    }
+
+    is_built_ = true;
+    ComputeByteSize();
+
+    LOG_INFO(
+        "load ScalarIndexSort done (streaming to disk), field_id: {}, "
+        "data_size: {}",
+        field_id_,
+        data_size_);
 }
 
 template <typename T>

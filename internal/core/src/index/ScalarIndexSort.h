@@ -193,6 +193,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
     LoadEntries(storage::IndexEntryReader& reader,
                 const Config& config) override;
 
+    void
+    LoadWithStreamingToDisk(
+        const std::vector<std::string>& index_files,
+        const Config& config,
+        milvus::proto::common::LoadPriority load_priority);
+
  public:
     // zero-cost data acess api
     ALWAYS_INLINE const IndexStructure<T>&

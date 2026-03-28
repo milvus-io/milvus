@@ -356,10 +356,17 @@ IndexFactory::ScalarIndexLoadResource(
     request.has_raw_data = false;
 
     if (index_type == milvus::index::ASCENDING_SORT) {
-        request.final_memory_cost = index_size_in_bytes;
-        request.final_disk_cost = 0;
-        request.max_memory_cost = 2 * index_size_in_bytes;
-        request.max_disk_cost = 0;
+        if (mmap_enable) {
+            request.final_memory_cost = 0;
+            request.final_disk_cost = index_size_in_bytes;
+            request.max_memory_cost = index_size_in_bytes;
+            request.max_disk_cost = index_size_in_bytes;
+        } else {
+            request.final_memory_cost = index_size_in_bytes;
+            request.final_disk_cost = 0;
+            request.max_memory_cost = 2 * index_size_in_bytes;
+            request.max_disk_cost = 0;
+        }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::MARISA_TRIE ||
                index_type == milvus::index::MARISA_TRIE_UPPER) {
@@ -399,10 +406,17 @@ IndexFactory::ScalarIndexLoadResource(
 
         request.has_raw_data = false;
     } else if (index_type == milvus::index::HYBRID_INDEX_TYPE) {
-        request.final_memory_cost = index_size_in_bytes;
-        request.final_disk_cost = index_size_in_bytes;
-        request.max_memory_cost = 2 * index_size_in_bytes;
-        request.max_disk_cost = index_size_in_bytes;
+        if (mmap_enable) {
+            request.final_memory_cost = 0;
+            request.final_disk_cost = index_size_in_bytes;
+            request.max_memory_cost = index_size_in_bytes;
+            request.max_disk_cost = index_size_in_bytes;
+        } else {
+            request.final_memory_cost = index_size_in_bytes;
+            request.final_disk_cost = 0;
+            request.max_memory_cost = 2 * index_size_in_bytes;
+            request.max_disk_cost = 0;
+        }
         request.has_raw_data = false;
     } else {
         LOG_ERROR(
