@@ -340,11 +340,15 @@ func (r *StatsResultWithErr) Err() error {
 }
 
 // stripBasePathPrefix strips the basePath prefix from absolute paths to get relative paths.
+// Paths that don't match the expected prefix are filtered out (e.g., management files
+// at a parent directory level that don't belong to this stat entry).
 func stripBasePathPrefix(paths []string, basePath string) []string {
 	prefix := basePath + "/"
-	result := make([]string, len(paths))
-	for i, p := range paths {
-		result[i] = strings.TrimPrefix(p, prefix)
+	result := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if strings.HasPrefix(p, prefix) {
+			result = append(result, p[len(prefix):])
+		}
 	}
 	return result
 }

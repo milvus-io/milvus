@@ -276,6 +276,10 @@ CreateIndex(CIndex* res_index,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
+        if (!build_index_info->stats_base_path().empty()) {
+            fileManagerContext.set_stats_base_path(
+                build_index_info->stats_base_path());
+        }
         if (build_index_info->manifest() != "") {
             auto loon_properties = MakeInternalPropertiesFromStorageConfig(
                 ToCStorageConfig(storage_config));
