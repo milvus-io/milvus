@@ -16,8 +16,10 @@
 
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
+#include <filesystem>
 #include <optional>
 #include <sys/errno.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <yaml-cpp/yaml.h>
 
@@ -56,8 +58,9 @@ BitmapIndex<T>::BitmapIndex(
     if (file_manager_context.Valid()) {
         this->file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
-        AssertInfo(this->file_manager_ != nullptr,
-                   "create file manager failed!");
+        AssertInfo(file_manager_ != nullptr, "create file manager failed!");
+        disk_file_manager_ = std::make_shared<storage::DiskFileManagerImpl>(
+            file_manager_context);
     }
 }
 
@@ -600,12 +603,105 @@ BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
-    auto index_datas = this->file_manager_->LoadIndexToMemory(
-        index_files.value(), load_priority);
+
+    if (disk_file_manager_ != nullptr) {
+        LoadWithStreaming(index_files.value(), config, load_priority);
+    } else {
+        auto index_datas = file_manager_->LoadIndexToMemory(index_files.value(),
+                                                            load_priority);
+        BinarySet binary_set;
+        AssembleIndexDatas(index_datas, binary_set);
+        index_datas.clear();
+        LoadWithoutAssemble(binary_set, config);
+    }
+}
+
+template <typename T>
+void
+BitmapIndex<T>::LoadWithStreaming(
+    const std::vector<std::string>& index_files,
+    const Config& config,
+    milvus::proto::common::LoadPriority load_priority) {
+    std::vector<std::string> data_files;
+    std::vector<std::string> meta_files;
+
+    for (auto& file : index_files) {
+        auto file_name = file.substr(file.find_last_of('/') + 1);
+        if (file_name.rfind(BITMAP_INDEX_DATA, 0) == 0) {
+            data_files.push_back(file);
+        } else if (file_name != INDEX_FILE_SLICE_META) {
+            meta_files.push_back(file);
+        }
+    }
+
+    if (data_files.size() > 1) {
+        std::sort(data_files.begin(),
+                  data_files.end(),
+                  [](const std::string& a, const std::string& b) {
+                      return std::stoi(a.substr(a.find_last_of('_') + 1)) <
+                             std::stoi(b.substr(b.find_last_of('_') + 1));
+                  });
+    }
+
+    auto data_path =
+        disk_file_manager_->GetLocalIndexObjectPrefix() + "bitmap-index-data";
+    int64_t data_size = 0;
+    {
+        std::filesystem::create_directories(
+            std::filesystem::path(data_path).parent_path());
+        auto file_writer = storage::FileWriter(
+            data_path, storage::io::GetPriorityFromLoadPriority(load_priority));
+
+        auto parallel_degree = static_cast<uint64_t>(
+            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE.load());
+        std::vector<std::string> batch;
+        auto flushBatch = [&]() {
+            auto futures =
+                storage::GetObjectData(file_manager_->GetChunkManager().get(),
+                                       batch,
+                                       milvus::PriorityForLoad(load_priority));
+            auto codecs = storage::WaitAllFutures(std::move(futures));
+            for (auto& codec : codecs) {
+                file_writer.Write(codec->PayloadData(), codec->PayloadSize());
+                data_size += codec->PayloadSize();
+            }
+            batch.clear();
+        };
+
+        for (auto& file : data_files) {
+            batch.push_back(file);
+            if (batch.size() >= parallel_degree) {
+                flushBatch();
+            }
+        }
+        if (!batch.empty()) {
+            flushBatch();
+        }
+        file_writer.Finish();
+    }
+
+    auto meta_datas =
+        file_manager_->LoadIndexToMemory(meta_files, load_priority);
     BinarySet binary_set;
-    AssembleIndexDatas(index_datas, binary_set);
-    // clear index_datas to free memory early
-    index_datas.clear();
+    AssembleIndexDatas(meta_datas, binary_set);
+    meta_datas.clear();
+
+    // mmap the data file into BinarySet with a custom deleter that
+    // cleans up the mmap and temp file when the BinarySet is released.
+    auto fd = open(data_path.c_str(), O_RDONLY);
+    AssertInfo(fd >= 0, "failed to open bitmap data file");
+    auto mapped = mmap(NULL, data_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    AssertInfo(mapped != MAP_FAILED, "failed to mmap bitmap data file");
+
+    auto data_ptr = std::shared_ptr<uint8_t[]>(
+        static_cast<uint8_t*>(mapped),
+        [sz = data_size, path = data_path](uint8_t* p) {
+            munmap(p, sz);
+            unlink(path.c_str());
+        });
+    binary_set.Append(BITMAP_INDEX_DATA, data_ptr, data_size);
+
     LoadWithoutAssemble(binary_set, config);
 }
 

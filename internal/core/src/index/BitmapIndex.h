@@ -26,6 +26,7 @@
 #include "pb/common.pb.h"
 #include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/DiskFileManagerImpl.h"
 
 namespace milvus {
 namespace index {
@@ -191,6 +192,11 @@ class BitmapIndex : public ScalarIndex<T> {
     void
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
+
+    void
+    LoadWithStreaming(const std::vector<std::string>& index_files,
+                      const Config& config,
+                      milvus::proto::common::LoadPriority load_priority);
 
     const TargetBitmap
     Query(const DatasetPtr& dataset) override;
@@ -380,6 +386,8 @@ class BitmapIndex : public ScalarIndex<T> {
         bitsets_offsets_cache_;
     std::vector<typename std::map<T, roaring::Roaring>::iterator>
         mmap_offsets_cache_;
+    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
+    std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;
 
     // generate valid_bitset to speed up NotIn and IsNull and IsNotNull operate
     TargetBitmap valid_bitset_;
