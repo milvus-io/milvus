@@ -23,6 +23,7 @@
 #include <map>
 #include <memory>
 #include "storage/MemFileManagerImpl.h"
+#include "storage/DiskFileManagerImpl.h"
 
 namespace milvus::index {
 
@@ -138,6 +139,17 @@ class StringIndexMarisa : public StringIndex {
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
 
+    void
+    LoadWithStreaming(const std::vector<std::string>& index_files,
+                      const Config& config,
+                      milvus::proto::common::LoadPriority load_priority);
+
+    int64_t
+    StreamFilesToDisk(const std::vector<std::string>& files,
+                      const std::string& local_path,
+                      milvus::proto::common::LoadPriority load_priority,
+                      uint64_t parallel_degree);
+
     int64_t
     CalculateTotalSize() const;
 
@@ -154,6 +166,8 @@ class StringIndexMarisa : public StringIndex {
     std::vector<int64_t> str_ids_;  // used to retrieve.
     std::map<size_t, std::vector<size_t>> str_ids_to_offsets_;
     bool built_ = false;
+    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
+    std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;
     int64_t total_size_ = 0;  // Cached total size to avoid runtime calculation
 };
 
