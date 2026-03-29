@@ -168,15 +168,28 @@ TextMatchIndex::Load(const Config& config) {
         }
     }
 
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    // V2: existing multi-file load path
+    auto prefix = disk_file_manager_->GetLocalTextIndexPrefix();
+    // Files are relative paths; prepend base_path to construct absolute remote paths.
+    // This must happen before extracting index_null_offset so all files have full paths.
+    auto base_path =
+        GetValueFromConfig<std::string>(config, STATS_BASE_PATH_KEY)
+            .value_or("");
+    AssertInfo(!base_path.empty(),
+               "stats_base_path is required for loading text index");
+    for (auto& f : files_value) {
+        f = base_path + "/" + f;
+    }
+
     auto it = std::find_if(
         files_value.begin(), files_value.end(), [](const std::string& file) {
             return file.substr(file.find_last_of('/') + 1) ==
                    "index_null_offset";
         });
-    auto load_priority =
-        GetValueFromConfig<milvus::proto::common::LoadPriority>(
-            config, milvus::LOAD_PRIORITY)
-            .value_or(milvus::proto::common::LoadPriority::HIGH);
     if (it != files_value.end()) {
         std::vector<std::string> file;
         file.push_back(*it);
@@ -192,17 +205,6 @@ TextMatchIndex::Load(const Config& config) {
         memcpy(null_offset_.data(),
                index_valid_data->data.get(),
                (size_t)index_valid_data->size);
-    }
-    // V2: existing multi-file load path
-    auto prefix = disk_file_manager_->GetLocalTextIndexPrefix();
-    // Files are relative paths; prepend base_path to construct absolute remote paths.
-    auto base_path =
-        GetValueFromConfig<std::string>(config, STATS_BASE_PATH_KEY)
-            .value_or("");
-    AssertInfo(!base_path.empty(),
-               "stats_base_path is required for loading text index");
-    for (auto& f : files_value) {
-        f = base_path + "/" + f;
     }
     disk_file_manager_->CacheTextLogToDisk(files_value, load_priority);
     AssertInfo(
