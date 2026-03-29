@@ -194,10 +194,20 @@ class ScalarIndexSort : public ScalarIndex<T> {
                 const Config& config) override;
 
     void
-    LoadWithStreamingToDisk(
-        const std::vector<std::string>& index_files,
-        const Config& config,
-        milvus::proto::common::LoadPriority load_priority);
+    LoadWithStreaming(const std::vector<std::string>& index_files,
+                      const Config& config,
+                      milvus::proto::common::LoadPriority load_priority);
+
+    void
+    StreamDataToDisk(const std::vector<std::string>& data_files,
+                     milvus::proto::common::LoadPriority load_priority,
+                     uint64_t parallel_degree);
+
+    void
+    StreamDataToMemory(const std::vector<std::string>& data_files,
+                       milvus::proto::common::LoadPriority load_priority,
+                       uint64_t parallel_degree,
+                       size_t index_size);
 
  public:
     // zero-cost data acess api

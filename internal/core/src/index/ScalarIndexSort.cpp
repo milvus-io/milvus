@@ -421,18 +421,14 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
 
-    auto enable_mmap =
-        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
-
-    if (enable_mmap && disk_file_manager_ != nullptr) {
-        LoadWithStreamingToDisk(
-            index_files.value(), config, load_priority);
+    if (file_manager_ != nullptr) {
+        LoadWithStreaming(index_files.value(), config, load_priority);
     } else {
-        auto index_datas = file_manager_->LoadIndexToMemory(
-            index_files.value(), load_priority);
+        // Fallback for unit tests without valid file_manager_context
+        auto index_datas = file_manager_->LoadIndexToMemory(index_files.value(),
+                                                            load_priority);
         BinarySet binary_set;
         AssembleIndexDatas(index_datas, binary_set);
-        // clear index_datas to free memory early
         index_datas.clear();
         LoadWithoutAssemble(binary_set, config);
     }
@@ -440,10 +436,13 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
 
 template <typename T>
 void
-ScalarIndexSort<T>::LoadWithStreamingToDisk(
+ScalarIndexSort<T>::LoadWithStreaming(
     const std::vector<std::string>& index_files,
     const Config& config,
     milvus::proto::common::LoadPriority load_priority) {
+    // Separate files into data slices (large) and metadata files (tiny).
+    // Skip SLICE_META: data slices are streamed directly and concatenated
+    // in order by numeric suffix, so the slice metadata is not needed.
     std::vector<std::string> data_files;
     std::vector<std::string> meta_files;
 
@@ -451,12 +450,13 @@ ScalarIndexSort<T>::LoadWithStreamingToDisk(
         auto file_name = file.substr(file.find_last_of('/') + 1);
         if (file_name.rfind("index_data", 0) == 0) {
             data_files.push_back(file);
-        } else {
+        } else if (file_name != INDEX_FILE_SLICE_META) {
             meta_files.push_back(file);
         }
     }
 
-    std::sort(data_files.begin(), data_files.end(),
+    std::sort(data_files.begin(),
+              data_files.end(),
               [](const std::string& a, const std::string& b) {
                   auto a_pos = a.find_last_of('_');
                   auto b_pos = b.find_last_of('_');
@@ -464,7 +464,76 @@ ScalarIndexSort<T>::LoadWithStreamingToDisk(
                          std::stoi(b.substr(b_pos + 1));
               });
 
-    is_mmap_ = true;
+    // Load metadata first (tiny: index_length, index_num_rows)
+    auto index_datas =
+        file_manager_->LoadIndexToMemory(meta_files, load_priority);
+    BinarySet meta_binary;
+    AssembleIndexDatas(index_datas, meta_binary);
+    index_datas.clear();
+
+    auto index_length_bin = meta_binary.GetByName("index_length");
+    size_t index_size = 0;
+    if (index_length_bin) {
+        memcpy(&index_size, index_length_bin->data.get(), sizeof(size_t));
+    }
+
+    auto index_num_rows_bin = meta_binary.GetByName("index_num_rows");
+    if (index_num_rows_bin) {
+        memcpy(
+            &total_num_rows_, index_num_rows_bin->data.get(), sizeof(size_t));
+    } else {
+        total_num_rows_ = index_size;
+    }
+
+    auto is_nested_index = meta_binary.GetByName("is_nested_index");
+    if (is_nested_index) {
+        memcpy(&is_nested_index_,
+               is_nested_index->data.get(),
+               (size_t)is_nested_index->size);
+    }
+
+    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true) &&
+               disk_file_manager_ != nullptr;
+
+    // Stream data slices in batches
+    auto parallel_degree = static_cast<uint64_t>(
+        DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE.load());
+
+    if (is_mmap_) {
+        StreamDataToDisk(data_files, load_priority, parallel_degree);
+    } else {
+        StreamDataToMemory(
+            data_files, load_priority, parallel_degree, index_size);
+    }
+
+    setup_data_pointers();
+
+    idx_to_offsets_.resize(total_num_rows_);
+    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    for (size_t i = 0; i < Size(); ++i) {
+        const auto& item = operator[](i);
+        idx_to_offsets_[item.idx_] = i;
+        valid_bitset_.set(item.idx_);
+    }
+
+    is_built_ = true;
+    ComputeByteSize();
+
+    LOG_INFO(
+        "load ScalarIndexSort done (streaming), field_id: {}, "
+        "is_mmap: {}, data_size: {}",
+        field_id_,
+        is_mmap_,
+        is_mmap_ ? data_size_
+                 : (int64_t)(data_.size() * sizeof(IndexStructure<T>)));
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::StreamDataToDisk(
+    const std::vector<std::string>& data_files,
+    milvus::proto::common::LoadPriority load_priority,
+    uint64_t parallel_degree) {
     mmap_filepath_ = disk_file_manager_->GetLocalIndexObjectPrefix() +
                      STLSORT_INDEX_FILE_NAME;
     std::filesystem::create_directories(
@@ -476,20 +545,15 @@ ScalarIndexSort<T>::LoadWithStreamingToDisk(
             mmap_filepath_,
             storage::io::GetPriorityFromLoadPriority(load_priority));
 
-        auto parallel_degree = static_cast<uint64_t>(
-            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE.load());
         std::vector<std::string> batch;
-
         auto flushBatch = [&]() {
-            auto futures = storage::GetObjectData(
-                file_manager_->GetChunkManager().get(),
-                batch,
-                milvus::PriorityForLoad(load_priority));
-            auto codecs =
-                storage::WaitAllFutures(std::move(futures));
+            auto futures =
+                storage::GetObjectData(file_manager_->GetChunkManager().get(),
+                                       batch,
+                                       milvus::PriorityForLoad(load_priority));
+            auto codecs = storage::WaitAllFutures(std::move(futures));
             for (auto& codec : codecs) {
-                file_writer.Write(codec->PayloadData(),
-                                  codec->PayloadSize());
+                file_writer.Write(codec->PayloadData(), codec->PayloadSize());
                 total_data_size += codec->PayloadSize();
             }
             batch.clear();
@@ -520,61 +584,52 @@ ScalarIndexSort<T>::LoadWithStreamingToDisk(
     }
 
     auto file = File::Open(mmap_filepath_, O_RDONLY);
-    mmap_data_ = static_cast<char*>(mmap(NULL,
-                                         mmap_size_,
-                                         PROT_READ,
-                                         MAP_PRIVATE,
-                                         file.Descriptor(),
-                                         0));
+    mmap_data_ = static_cast<char*>(
+        mmap(NULL, mmap_size_, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
     if (mmap_data_ == MAP_FAILED) {
         file.Close();
         remove(mmap_filepath_.c_str());
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "failed to mmap: {}",
-                  strerror(errno));
+        ThrowInfo(
+            ErrorCode::UnexpectedError, "failed to mmap: {}", strerror(errno));
     }
     file.Close();
+}
 
-    auto index_datas =
-        file_manager_->LoadIndexToMemory(meta_files, load_priority);
-    BinarySet meta_binary;
-    AssembleIndexDatas(index_datas, meta_binary);
-    index_datas.clear();
-    milvus::Assemble(meta_binary);
+template <typename T>
+void
+ScalarIndexSort<T>::StreamDataToMemory(
+    const std::vector<std::string>& data_files,
+    milvus::proto::common::LoadPriority load_priority,
+    uint64_t parallel_degree,
+    size_t index_size) {
+    data_.resize(index_size);
+    size_t write_offset = 0;
 
-    auto index_length = meta_binary.GetByName("index_length");
-    size_t index_size = data_size_ / sizeof(IndexStructure<T>);
-    if (index_length) {
-        memcpy(&index_size, index_length->data.get(), sizeof(size_t));
+    std::vector<std::string> batch;
+    auto flushBatch = [&]() {
+        auto futures =
+            storage::GetObjectData(file_manager_->GetChunkManager().get(),
+                                   batch,
+                                   milvus::PriorityForLoad(load_priority));
+        auto codecs = storage::WaitAllFutures(std::move(futures));
+        for (auto& codec : codecs) {
+            memcpy(reinterpret_cast<uint8_t*>(data_.data()) + write_offset,
+                   codec->PayloadData(),
+                   codec->PayloadSize());
+            write_offset += codec->PayloadSize();
+        }
+        batch.clear();
+    };
+
+    for (auto& file : data_files) {
+        batch.push_back(file);
+        if (batch.size() >= parallel_degree) {
+            flushBatch();
+        }
     }
-
-    auto index_num_rows = meta_binary.GetByName("index_num_rows");
-    if (index_num_rows) {
-        memcpy(&total_num_rows_,
-               index_num_rows->data.get(),
-               sizeof(size_t));
-    } else {
-        total_num_rows_ = index_size;
+    if (!batch.empty()) {
+        flushBatch();
     }
-
-    setup_data_pointers();
-
-    idx_to_offsets_.resize(total_num_rows_);
-    valid_bitset_ = TargetBitmap(total_num_rows_, false);
-    for (size_t i = 0; i < Size(); ++i) {
-        const auto& item = operator[](i);
-        idx_to_offsets_[item.idx_] = i;
-        valid_bitset_.set(item.idx_);
-    }
-
-    is_built_ = true;
-    ComputeByteSize();
-
-    LOG_INFO(
-        "load ScalarIndexSort done (streaming to disk), field_id: {}, "
-        "data_size: {}",
-        field_id_,
-        data_size_);
 }
 
 template <typename T>
