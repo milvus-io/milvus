@@ -79,9 +79,10 @@ func (r *CacheEvictRecord) Finish(err error) {
 }
 
 // NewQuerySegmentAccessRecord creates a new QuerySegmentMetricRecorder.
-func NewQuerySegmentAccessRecord(label SegmentLabel) QuerySegmentAccessRecord {
+func NewQuerySegmentAccessRecord(label SegmentLabel, queryLabel string) QuerySegmentAccessRecord {
 	return QuerySegmentAccessRecord{
 		segmentAccessRecord: newSegmentAccessRecord(label),
+		queryLabel:          queryLabel,
 	}
 }
 
@@ -95,6 +96,7 @@ func NewSearchSegmentAccessRecord(label SegmentLabel) SearchSegmentAccessRecord 
 // QuerySegmentAccessRecord records the metrics of a query segment.
 type QuerySegmentAccessRecord struct {
 	*segmentAccessRecord
+	queryLabel string
 }
 
 func (r QuerySegmentAccessRecord) Finish(err error) {

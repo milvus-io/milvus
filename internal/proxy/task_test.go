@@ -4592,7 +4592,8 @@ func TestPartitionKey(t *testing.T) {
 		queryTask := &queryTask{
 			ctx: ctx,
 			RetrieveRequest: &internalpb.RetrieveRequest{
-				Base: &commonpb.MsgBase{},
+				QueryLabel: "query",
+				Base:       &commonpb.MsgBase{},
 			},
 			request: &milvuspb.QueryRequest{
 				CollectionName: collectionName,

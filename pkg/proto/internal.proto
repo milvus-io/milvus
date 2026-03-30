@@ -212,6 +212,7 @@ message RetrieveRequest {
   // ORDER BY fields — populated by proxy, consumed by QN/Delegator
   // to avoid re-parsing serialized_expr_plan on the hot path.
   repeated plan.OrderByField order_by_fields = 24;
+  string query_label = 25; // "query" or "upsert_query", used for metrics differentiation
 }
 
 // Element indices for element-level query results

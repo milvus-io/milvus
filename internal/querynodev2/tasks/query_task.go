@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -75,9 +76,10 @@ func (t *QueryTask) PreExecute() error {
 	inQueueDurationMS := inQueueDuration.Seconds() * 1000
 
 	// Update in queue metric for prometheus.
+	queryLabel := contextutil.GetQueryLabel(t.ctx)
 	metrics.QueryNodeSQLatencyInQueue.WithLabelValues(
 		nodeID,
-		metrics.QueryLabel,
+		queryLabel,
 		t.collection.GetDBName(),
 		t.collection.GetResourceGroup(), // TODO: resource group and db name may be removed at runtime.
 		// should be refactor into metricsutil.observer in the future.
@@ -86,7 +88,7 @@ func (t *QueryTask) PreExecute() error {
 	username := t.Username()
 	metrics.QueryNodeSQPerUserLatencyInQueue.WithLabelValues(
 		nodeID,
-		metrics.QueryLabel,
+		queryLabel,
 		username).
 		Observe(inQueueDurationMS)
 
@@ -144,7 +146,7 @@ func (t *QueryTask) Execute() error {
 
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		paramtable.GetStringNodeID(),
-		metrics.QueryLabel,
+		contextutil.GetQueryLabel(t.ctx),
 		metrics.ReduceSegments,
 		metrics.BatchReduce).Observe(float64(time.Since(beforeReduce).Milliseconds()))
 	if err != nil {

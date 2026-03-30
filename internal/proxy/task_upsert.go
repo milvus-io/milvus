@@ -216,6 +216,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 			ReqID:            paramtable.GetNodeID(),
 			PartitionIDs:     partitionIDs,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+			QueryLabel:       metrics.UpsertQueryLabel,
 		},
 		request:        queryReq,
 		plan:           plan,

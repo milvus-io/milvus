@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -85,7 +86,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			s,
 		}
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(paramtable.GetStringNodeID(),
-			metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
+			contextutil.GetQueryLabel(ctx), label).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil
 	}
 
@@ -159,7 +160,7 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 
 			errs[i] = nil
 			metrics.QueryNodeSQSegmentLatency.WithLabelValues(paramtable.GetStringNodeID(),
-				metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
+				contextutil.GetQueryLabel(ctx), label).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		}(segment, i)
 	}
 	wg.Wait()
