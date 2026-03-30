@@ -38,16 +38,14 @@ goZapLogExt(int severity,
 
 // Go export function.
 // will be implemented in github.com/milvus-io/milvus/internal/util/cgo/logging
-// macOS linker requires weak_import to allow unresolved symbols.
-extern "C" void
-goZapLogExt(int severity,
-            const char* file,
-            int file_len,
-            int line,
-            const char* msg,
-            int msg_len) {
+// Use weak attribute so Go's //export goZapLogExt can override this stub.
+extern "C" void __attribute__((weak)) goZapLogExt(int severity,
+                                                  const char* file,
+                                                  int file_len,
+                                                  int line,
+                                                  const char* msg,
+                                                  int msg_len) {
 }
-__attribute__((weak_import));
 
 #else
 

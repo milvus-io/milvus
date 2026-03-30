@@ -259,9 +259,6 @@ func (m *ExternalCollectionManager) SubmitTask(
 		}
 		failReason := resp.GetFailReason()
 		kept := resp.GetKeptSegments()
-		if len(kept) == 0 {
-			kept = info.KeptSegments
-		}
 		m.UpdateResult(clusterID, taskID, state, failReason, kept, resp.GetUpdatedSegments())
 		log.Info("external collection task completed",
 			zap.Int64("taskID", taskID))

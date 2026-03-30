@@ -23,15 +23,15 @@ import (
 
 // ExternalSpec represents the parsed external collection specification
 type ExternalSpec struct {
-	Format  string   `json:"format"`  // e.g., "parquet", "csv"
+	Format  string   `json:"format"`  // e.g., "parquet", "vortex", "lance-table"
 	Columns []string `json:"columns"` // optional: specific columns to load
 }
 
 // supportedFormats lists the file formats supported for external collections
 var supportedFormats = map[string]bool{
-	"parquet": true,
-	"csv":     true,
-	"json":    true,
+	"parquet":     true,
+	"lance-table": true,
+	"vortex":      true,
 }
 
 // ParseExternalSpec parses the JSON external spec string
@@ -50,7 +50,7 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 	}
 
 	if !supportedFormats[spec.Format] {
-		return nil, fmt.Errorf("unsupported format %q, supported formats: parquet, csv, json", spec.Format)
+		return nil, fmt.Errorf("unsupported format %q, supported formats: parquet, lance-table, vortex", spec.Format)
 	}
 
 	return &spec, nil

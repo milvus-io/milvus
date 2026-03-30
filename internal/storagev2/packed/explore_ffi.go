@@ -19,6 +19,7 @@ package packed
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/ffi_exttable_c.h"
+#include "milvus-storage/ffi_filesystem_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
 */
@@ -28,6 +29,9 @@ import (
 	"fmt"
 	"unsafe"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
 
@@ -37,16 +41,18 @@ type FileInfo struct {
 	NumRows  int64
 }
 
-// ExploreFiles scans an external directory and returns a list of file paths.
+// ExploreFiles scans an external directory and returns file information.
 // It internally calls exttable_explore to find files, then reads the manifest
-// to extract column group and file information.
+// to extract column group, file path, and row count information.
+// For lance-table format, row counts come from the manifest (via BlockingDataset).
+// For other formats, row counts are set to 0 and must be fetched separately via GetFileInfo.
 func ExploreFiles(
 	columns []string,
 	format string,
 	baseDir string,
 	exploreDir string,
 	storageConfig *indexpb.StorageConfig,
-) ([]string, error) {
+) ([]FileInfo, error) {
 	// Create C string arrays for columns
 	cColumns := make([]*C.char, len(columns))
 	for i, col := range columns {
@@ -117,8 +123,8 @@ func ExploreFiles(
 	// Ensure we destroy the manifest when done (this also frees column_groups)
 	defer C.loon_manifest_destroy(manifest)
 
-	// Step 3: Extract file paths from manifest's column groups
-	var filePaths []string
+	// Step 3: Extract file paths and row counts from manifest's column groups
+	var fileInfos []FileInfo
 	cgroups := &manifest.column_groups
 
 	// Validate column groups structure before accessing
@@ -146,11 +152,14 @@ func ExploreFiles(
 			if fileArray[j].path == nil {
 				return nil, fmt.Errorf("file path is nil in column group %d, file %d (possible FFI data corruption)", i, j)
 			}
-			filePaths = append(filePaths, C.GoString(fileArray[j].path))
+			fileInfos = append(fileInfos, FileInfo{
+				FilePath: C.GoString(fileArray[j].path),
+				NumRows:  int64(fileArray[j].end_index),
+			})
 		}
 	}
 
-	return filePaths, nil
+	return fileInfos, nil
 }
 
 // GetFileInfo retrieves row count information for a single external file.
@@ -183,4 +192,65 @@ func GetFileInfo(
 		FilePath: filePath,
 		NumRows:  int64(numRows),
 	}, nil
+}
+
+// CleanupExploreTempDir removes all files created by ExploreFiles in the temp directory.
+// The loon_exttable_explore FFI writes manifest files to baseDir as a side effect.
+// This function cleans up those temp files after the explore results have been consumed.
+func CleanupExploreTempDir(tempDir string, storageConfig *indexpb.StorageConfig) {
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		log.Warn("failed to create properties for explore temp cleanup", zap.Error(err))
+		return
+	}
+	defer C.loon_properties_free(cProperties)
+
+	// Get filesystem handle
+	cPath := C.CString(tempDir)
+	defer C.free(unsafe.Pointer(cPath))
+	pathLen := C.uint32_t(len(tempDir))
+
+	var fsHandle C.FileSystemHandle
+	result := C.loon_filesystem_get(cProperties, cPath, pathLen, &fsHandle)
+	if err := HandleLoonFFIResult(result); err != nil {
+		log.Warn("failed to get filesystem for explore temp cleanup",
+			zap.String("tempDir", tempDir), zap.Error(err))
+		return
+	}
+	defer C.loon_filesystem_destroy(fsHandle)
+
+	// List all files in the temp directory
+	var fileInfoList C.LoonFileInfoList
+
+	result = C.loon_filesystem_list_dir(
+		fsHandle, cPath, pathLen, true, // recursive
+		&fileInfoList,
+	)
+	if err := HandleLoonFFIResult(result); err != nil {
+		log.Warn("failed to list explore temp dir for cleanup",
+			zap.String("tempDir", tempDir), zap.Error(err))
+		return
+	}
+	defer C.loon_filesystem_free_file_info_list(&fileInfoList)
+
+	count := int(fileInfoList.count)
+	if count == 0 {
+		return
+	}
+
+	// Convert C array to Go slice for safe access
+	entries := unsafe.Slice(fileInfoList.entries, count)
+
+	// Delete files first (not directories), in reverse order
+	for i := count - 1; i >= 0; i-- {
+		if entries[i].is_dir {
+			continue
+		}
+		delResult := C.loon_filesystem_delete_file(fsHandle, entries[i].path, entries[i].path_len)
+		if err := HandleLoonFFIResult(delResult); err != nil {
+			log.Warn("failed to delete explore temp file",
+				zap.String("file", C.GoStringN(entries[i].path, C.int(entries[i].path_len))),
+				zap.Error(err))
+		}
+	}
 }
