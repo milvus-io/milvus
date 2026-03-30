@@ -68,9 +68,7 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 		},
 	}
 	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, nil, plan, compaction.GenParams())
-	var err error
-	s.task.compactionParams, err = compaction.ParseParamsFromJSON("")
-	s.Require().NoError(err)
+	s.task.compactionParams = compaction.GenParams()
 
 	pk2ts := map[int64]uint64{
 		1: 20000,
