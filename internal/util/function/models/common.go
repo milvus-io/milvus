@@ -136,6 +136,12 @@ const (
 	GeminiAKEnvStr string = "MILVUS_GEMINI_API_KEY"
 )
 
+// ark (volcengine, e.g. doubao) embedding
+
+const (
+	ArkAKEnvStr string = "MILVUS_ARK_API_KEY"
+)
+
 // TEI and vllm
 
 const (
