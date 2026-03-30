@@ -762,8 +762,7 @@ func (_c *MockBalancer_WatchChannelAssignments_Call) RunAndReturn(run func(conte
 func NewMockBalancer(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockBalancer {
+}) *MockBalancer {
 	mock := &MockBalancer{}
 	mock.Mock.Test(t)
 
