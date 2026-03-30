@@ -80,8 +80,8 @@ func TestStreamingNodeManager(t *testing.T) {
 
 	// --- Test GetStreamingQueryNodeIDsByResourceGroup ---
 	// Return multiple nodes across multiple resource groups
-	b.EXPECT().GetAllStreamingNodes(mock.Anything).Unset()
-	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Unset()
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
 		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}, ResourceGroup: "rg1"},
 		2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"}, ResourceGroup: "rg1"},
 		3: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 3, Address: "localhost:3"}, ResourceGroup: "rg2"},
@@ -99,15 +99,15 @@ func TestStreamingNodeManager(t *testing.T) {
 	assert.Equal(t, 1, nodesByRG["rg3"].Len())
 
 	// Test empty nodes returns empty map
-	b.EXPECT().GetAllStreamingNodes(mock.Anything).Unset()
-	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{}, nil)
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Unset()
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{}, nil)
 	nodesByRG = m.GetStreamingQueryNodeIDsByResourceGroup()
 	assert.Len(t, nodesByRG, 0)
 
 	// --- Test fetchStreamingNodes error fallback (cache path) ---
 	// Populate the cache with known nodes
-	b.EXPECT().GetAllStreamingNodes(mock.Anything).Unset()
-	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Unset()
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
 		10: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 10, Address: "localhost:10"}, ResourceGroup: "cached_rg"},
 	}, nil)
 	nodesByRG = m.GetStreamingQueryNodeIDsByResourceGroup()
@@ -115,8 +115,8 @@ func TestStreamingNodeManager(t *testing.T) {
 	assert.True(t, nodesByRG["cached_rg"].Contain(10))
 
 	// Simulate error from balancer - should fall back to cached nodes
-	b.EXPECT().GetAllStreamingNodes(mock.Anything).Unset()
-	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(nil, errors.New("balancer shutting down"))
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Unset()
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(nil, errors.New("balancer shutting down"))
 	nodesByRG = m.GetStreamingQueryNodeIDsByResourceGroup()
 	assert.Len(t, nodesByRG, 1)
 	assert.True(t, nodesByRG["cached_rg"].Contain(10))
