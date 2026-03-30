@@ -3794,8 +3794,8 @@ class TestMinHashBulkImport(TestMilvusClientV2Base):
 
         assert result["state"] == "Failed", \
             f"Import should have failed when providing function output field, but got: {result['state']}"
-        assert "output by function" in result["reason"], \
-            f"Error should mention 'output by function', got: {result['reason']}"
+        assert "not allowed to provide data for function output field" in result["reason"], \
+            f"Error should mention 'not allowed to provide data for function output field', got: {result['reason']}"
         log.info(f"Import correctly failed: {result['reason']}")
 
 class TestMilvusClientMinHashHybridSearch(TestMilvusClientV2Base):
