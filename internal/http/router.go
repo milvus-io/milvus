@@ -85,6 +85,7 @@ const (
 	WALAlterPath = "/management/wal/alter"
 
 	ConfigAlterPath = "/management/config/alter"
+	ConfigGetPath   = "/management/config/get"
 
 	DataGCPath = "/management/data_gc"
 

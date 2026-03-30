@@ -58,6 +58,7 @@ func RegisterMgrRoute(s *mixCoordImpl) {
 			{management.WALAlterPath, s.HandleAlterWAL},
 			// config
 			{management.ConfigAlterPath, s.HandleAlterConfig},
+			{management.ConfigGetPath, s.HandleGetConfig},
 			// ops
 			{management.ReplicaLoadConfigCompliancePath, s.HandleReplicaLoadConfigCompliance},
 		}
@@ -1402,6 +1403,55 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		zap.Strings("deleted", keysToDelete))
 
 	writeJSONResponse(writer, http.StatusOK, map[string]string{"msg": "OK"})
+}
+
+// HandleGetConfig handles GET requests to retrieve paramtable configuration.
+//
+// Query parameters:
+//   - keys: comma-separated config keys to retrieve (required)
+//
+// Response: ordered list matching the input keys order.
+//
+//	{"configs": [{"key": "k1", "value": "v1", "source": "EtcdSource"}, {"key": "k2", "error": "key not found"}]}
+func (s *mixCoordImpl) HandleGetConfig(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writeJSONError(writer, "Method not allowed, use GET", http.StatusMethodNotAllowed)
+		return
+	}
+
+	keysParam := request.URL.Query().Get("keys")
+	if keysParam == "" {
+		writeJSONError(writer, "query parameter 'keys' is required", http.StatusBadRequest)
+		return
+	}
+
+	paramMgr := paramtable.GetBaseTable().Manager()
+
+	type configResult struct {
+		Key    string `json:"key"`
+		Value  string `json:"value,omitempty"`
+		Source string `json:"source,omitempty"`
+		Error  string `json:"error,omitempty"`
+	}
+
+	keys := strings.Split(keysParam, ",")
+	results := make([]configResult, 0, len(keys))
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		source, value, err := paramMgr.GetConfig(key)
+		if err != nil {
+			results = append(results, configResult{Key: key, Error: err.Error()})
+		} else {
+			results = append(results, configResult{Key: key, Value: value, Source: source})
+		}
+	}
+
+	writeJSONResponse(writer, http.StatusOK, map[string]interface{}{
+		"configs": results,
+	})
 }
 
 // writeJSONError writes a JSON error response with proper escaping.
