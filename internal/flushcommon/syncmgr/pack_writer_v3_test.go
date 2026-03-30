@@ -142,7 +142,7 @@ func (s *PackWriterV3Suite) TestPackWriterV3_Write() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
@@ -188,7 +188,7 @@ func (s *PackWriterV3Suite) TestWriteEmptyInsertData() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName)
 	bw := NewBulkPackWriterV3(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, s.currentSplit, manifestPath)
@@ -212,7 +212,7 @@ func (s *PackWriterV3Suite) TestNoPkField() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
 	mc := metacache.NewMockMetaCache(s.T())
@@ -240,7 +240,7 @@ func (s *PackWriterV3Suite) TestWriteInsertDataError() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
@@ -289,7 +289,7 @@ func (s *PackWriterV3Suite) TestWriteWithDeleteData() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
@@ -334,7 +334,7 @@ func (s *PackWriterV3Suite) TestV3InheritsV2Fields() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	mc := metacache.NewMockMetaCache(s.T())
 
@@ -395,7 +395,7 @@ func (s *PackWriterV3Suite) TestMultiBatchStatsAccumulation() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
@@ -481,7 +481,7 @@ func (s *PackWriterV3Suite) TestMultiBatchBM25StatsAccumulation() {
 
 	k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 	basePath := path.Join(common.SegmentInsertLogPath, k)
-	manifestPath := packed.MarshalManifestPath(basePath, -1)
+	manifestPath := packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 		ManifestPath: manifestPath,
