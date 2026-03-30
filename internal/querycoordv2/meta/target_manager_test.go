@@ -31,6 +31,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
@@ -644,6 +645,68 @@ func (suite *TargetManagerSuite) TestRecover() {
 	targets, err := suite.catalog.GetCollectionTargets(ctx)
 	suite.NoError(err)
 	suite.Len(targets, 0)
+}
+
+func TestRecoverGetTargetsFail(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	broker := NewMockBroker(t)
+	meta := NewMeta(RandomIncrementIDAllocator(), nil, session.NewNodeManager())
+	mgr := NewTargetManager(broker, meta)
+
+	mockCatalog := catalogmocks.NewQueryCoordCatalog(t)
+	mockCatalog.EXPECT().GetCollectionTargets(mock.Anything).Return(nil, errors.New("mock error"))
+
+	err := mgr.Recover(ctx, mockCatalog)
+	assert.Error(t, err)
+}
+
+func TestRecoverRemoveTargetsFail(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	broker := NewMockBroker(t)
+	meta := NewMeta(RandomIncrementIDAllocator(), nil, session.NewNodeManager())
+	mgr := NewTargetManager(broker, meta)
+
+	collectionID := int64(2001)
+	mockCatalog := catalogmocks.NewQueryCoordCatalog(t)
+	mockCatalog.EXPECT().GetCollectionTargets(mock.Anything).Return(map[int64]*querypb.CollectionTarget{
+		collectionID: {
+			CollectionID: collectionID,
+			Version:      1,
+			ChannelTargets: []*querypb.ChannelTarget{
+				{
+					ChannelName: "channel-1",
+				},
+			},
+		},
+	}, nil)
+	mockCatalog.EXPECT().RemoveCollectionTargets(mock.Anything).Return(errors.New("mock error"))
+
+	// Recover should succeed even if RemoveCollectionTargets fails (it only logs a warning)
+	err := mgr.Recover(ctx, mockCatalog)
+	assert.NoError(t, err)
+
+	// Target should still be recovered in memory
+	target := mgr.current.getCollectionTarget(collectionID)
+	assert.NotNil(t, target)
+	assert.Len(t, target.GetAllDmChannelNames(), 1)
+}
+
+func TestRecoverEmptyTargets(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	broker := NewMockBroker(t)
+	meta := NewMeta(RandomIncrementIDAllocator(), nil, session.NewNodeManager())
+	mgr := NewTargetManager(broker, meta)
+
+	mockCatalog := catalogmocks.NewQueryCoordCatalog(t)
+	mockCatalog.EXPECT().GetCollectionTargets(mock.Anything).Return(map[int64]*querypb.CollectionTarget{}, nil)
+	// RemoveCollectionTargets should NOT be called when targets are empty
+
+	err := mgr.Recover(ctx, mockCatalog)
+	assert.NoError(t, err)
+	mockCatalog.AssertNotCalled(t, "RemoveCollectionTargets", mock.Anything)
 }
 
 func (suite *TargetManagerSuite) TestGetTargetJSON() {
