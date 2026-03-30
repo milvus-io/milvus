@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strings"
@@ -396,6 +397,9 @@ func TestNullableDefault(t *testing.T) {
 	// create collection
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(schema.CollectionName))
+	})
 
 	// describe collection and check nullable fields
 	descCollection, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
@@ -464,6 +468,9 @@ func TestDefaultValueDefault(t *testing.T) {
 	// create collection with strong consistency to ensure inserted data is immediately visible
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(schema.CollectionName))
+	})
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
 	common.CheckFieldsDefaultValue(t, map[string]interface{}{
 		defaultBoolField.Name:    true,
@@ -1104,6 +1111,9 @@ func TestNullableAutoScalarIndex(t *testing.T) {
 	// create collection
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(schema.CollectionName))
+	})
 
 	// describe collection and check nullable fields
 	descCollection, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(schema.CollectionName))
@@ -1270,6 +1280,9 @@ func TestNullableRowsAllScalarTypes(t *testing.T) {
 
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// Create index and load
 	idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, common.DefaultFloatVecFieldName, index.NewAutoIndex(entity.L2)))
@@ -1413,6 +1426,9 @@ func TestNullableVectorAllTypes(t *testing.T) {
 
 				err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 				common.CheckErr(t, err, true)
+				t.Cleanup(func() {
+					_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+				})
 
 				nb := 500
 				validData := make([]bool, nb)
@@ -1796,6 +1812,9 @@ func TestNullableVectorDelete(t *testing.T) {
 
 				err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 				common.CheckErr(t, err, true)
+				t.Cleanup(func() {
+					_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+				})
 
 				nb := 100
 				testData := GenerateNullableVectorTestData(t, vt, nb, nullPercent, "vector")
@@ -1892,6 +1911,9 @@ func TestNullableVectorUpsert(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			// Insert initial data: 100 rows
 			// Rows 0 to nullPercent-1: valid vector, scalar = i*10
@@ -2198,6 +2220,9 @@ func TestNullableVectorAllNull(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			// Generate test data with 100% null (nullPercent = 100)
 			nb := 10000
@@ -2318,6 +2343,9 @@ func TestNullableVectorMultiFields(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			// generate data: vec1 has 70% valid (first 30 per 100 are invalid), vec2 has 30% valid (first 70 per 100 are invalid)
 			nb := 100
@@ -2521,6 +2549,9 @@ func TestNullableVectorMultiPartitions(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			// create partitions
 			partitions := []string{"partition_a", "partition_b", "partition_c"}
@@ -2717,6 +2748,9 @@ func TestNullableVectorCompaction(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			// insert data in multiple batches to create multiple segments
 			nb := 200
@@ -2899,6 +2933,9 @@ func TestNullableVectorAddField(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			nb := 100
 			pkData1 := make([]int64, nb)
@@ -3061,6 +3098,9 @@ func TestNullableVectorRangeSearch(t *testing.T) {
 
 			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
 
 			// generate data with 30% null
 			nb := 500
@@ -3222,6 +3262,9 @@ func TestNullableVectorDifferentIndexTypes(t *testing.T) {
 
 						err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 						common.CheckErr(t, err, true)
+						t.Cleanup(func() {
+							_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+						})
 
 						nb := 10000
 						validData := make([]bool, nb)
@@ -3417,6 +3460,9 @@ func TestNullableVectorGroupBy(t *testing.T) {
 
 				err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
 				common.CheckErr(t, err, true)
+				t.Cleanup(func() {
+					_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+				})
 
 				nb := 500
 				numGroups := 50
