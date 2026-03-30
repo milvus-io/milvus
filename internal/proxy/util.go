@@ -1958,8 +1958,13 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 // and then flattens the data so that data node and query node have not to handle the struct array field data.
 func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
 	structSchemaMap := make(map[string]*schemapb.StructArrayFieldSchema, len(schema.GetStructArrayFields()))
+	flattenedStructFieldMap := make(map[string]struct{})
 	for _, structField := range schema.GetStructArrayFields() {
 		structSchemaMap[structField.Name] = structField
+		for _, subField := range structField.GetFields() {
+			flattenedStructFieldMap[subField.GetName()] = struct{}{}
+			flattenedStructFieldMap[typeutil.ConcatStructFieldName(structField.Name, subField.GetName())] = struct{}{}
+		}
 	}
 
 	fieldSchemaMap := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
@@ -1972,6 +1977,10 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 
 	for _, fieldData := range insertMsg.GetFieldsData() {
 		if _, ok := fieldSchemaMap[fieldData.FieldName]; ok {
+			flattenedFields = append(flattenedFields, fieldData)
+			continue
+		}
+		if _, ok := flattenedStructFieldMap[fieldData.FieldName]; ok {
 			flattenedFields = append(flattenedFields, fieldData)
 			continue
 		}
@@ -2039,7 +2048,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 		}
 	}
 
-	if len(schema.GetStructArrayFields()) != structFieldCount {
+	if structFieldCount > 0 && len(schema.GetStructArrayFields()) != structFieldCount {
 		return fmt.Errorf("the number of struct array fields is not the same as needed, expected: %d, actual: %d",
 			len(schema.GetStructArrayFields()), structFieldCount)
 	}

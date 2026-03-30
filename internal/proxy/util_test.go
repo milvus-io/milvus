@@ -3785,6 +3785,49 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 		assert.Contains(t, fieldNames, "metadata[tags]")
 	})
 
+	t.Run("success - already flattened struct fields are preserved", func(t *testing.T) {
+		structField := &schemapb.StructArrayFieldSchema{
+			Name: "user_info",
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:        "age_array",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Int32,
+				},
+				{
+					Name:        "score_array",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Float,
+				},
+			},
+		}
+		schema := createTestSchema("test_collection", []*schemapb.StructArrayFieldSchema{structField}, nil)
+
+		ageArrayData := createScalarArrayFieldData("age_array", []*schemapb.ScalarField{
+			{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{20, 25}}}},
+		})
+		scoreArrayData := createScalarArrayFieldData("score_array", []*schemapb.ScalarField{
+			{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{85.5, 90.0}}}},
+		})
+		structFieldData := createStructArrayFieldData("user_info", []*schemapb.FieldData{
+			ageArrayData, scoreArrayData,
+		})
+
+		assert.NoError(t, transformStructFieldNames(schema))
+
+		insertMsg := createTestInsertMsg("test_collection", []*schemapb.FieldData{structFieldData})
+		err := checkAndFlattenStructFieldData(schema, insertMsg)
+		assert.NoError(t, err)
+
+		fieldNames := []string{insertMsg.FieldsData[0].FieldName, insertMsg.FieldsData[1].FieldName}
+
+		err = checkAndFlattenStructFieldData(schema, insertMsg)
+		assert.NoError(t, err)
+		assert.Len(t, insertMsg.FieldsData, 2)
+		assert.Equal(t, fieldNames[0], insertMsg.FieldsData[0].FieldName)
+		assert.Equal(t, fieldNames[1], insertMsg.FieldsData[1].FieldName)
+	})
+
 	t.Run("success - empty struct array fields", func(t *testing.T) {
 		normalField := &schemapb.FieldSchema{
 			Name:     "normal_field",

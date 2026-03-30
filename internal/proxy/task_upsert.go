@@ -291,6 +291,13 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		zap.Int("resultNum", typeutil.GetSizeOfIDs(existIDs)),
 		zap.Int64("latency", tr.ElapseSpan().Milliseconds()))
 
+	// Partial update merge works on flattened struct-array subfields.
+	// Flatten before field-ID lookup so schemaHelper can resolve struct members.
+	if err := checkAndFlattenStructFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg); err != nil {
+		log.Info("check and flatten struct field data failed", zap.Error(err))
+		return err
+	}
+
 	// set field id for user passed field data, prepare for merge logic
 	if len(it.upsertMsg.InsertMsg.GetFieldsData()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("upsert field data is empty")
