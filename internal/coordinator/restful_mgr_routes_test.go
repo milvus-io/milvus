@@ -298,3 +298,122 @@ func TestHandleAlterConfig(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "Invalid request body")
 	})
 }
+
+func TestHandleGetConfig(t *testing.T) {
+	paramtable.Init()
+	mgr := paramtable.GetBaseTable().Manager()
+
+	coord := &mixCoordImpl{}
+
+	// Seed configs directly via Manager.SetConfig (no etcd needed).
+	mgr.SetConfig("test.getconfig.key1", "val1")
+	mgr.SetConfig("test.getconfig.key2", "val2")
+	mgr.SetConfig("test.getconfig.key3", "val3")
+
+	type configResult struct {
+		Key    string `json:"key"`
+		Value  string `json:"value,omitempty"`
+		Source string `json:"source,omitempty"`
+		Error  string `json:"error,omitempty"`
+	}
+
+	parseResponse := func(t *testing.T, w *httptest.ResponseRecorder) []configResult {
+		var resp struct {
+			Configs []configResult `json:"configs"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		return resp.Configs
+	}
+
+	t.Run("get single key", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=test.getconfig.key1", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		configs := parseResponse(t, w)
+		require.Len(t, configs, 1)
+		assert.Equal(t, "test.getconfig.key1", configs[0].Key)
+		assert.Equal(t, "val1", configs[0].Value)
+		assert.NotEmpty(t, configs[0].Source)
+		assert.Empty(t, configs[0].Error)
+	})
+
+	t.Run("get multiple keys preserves order", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=test.getconfig.key3,test.getconfig.key1,test.getconfig.key2", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		configs := parseResponse(t, w)
+		require.Len(t, configs, 3)
+		assert.Equal(t, "test.getconfig.key3", configs[0].Key)
+		assert.Equal(t, "val3", configs[0].Value)
+		assert.Equal(t, "test.getconfig.key1", configs[1].Key)
+		assert.Equal(t, "val1", configs[1].Value)
+		assert.Equal(t, "test.getconfig.key2", configs[2].Key)
+		assert.Equal(t, "val2", configs[2].Value)
+	})
+
+	t.Run("nonexistent key returns error field", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=test.getconfig.nonexistent", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		configs := parseResponse(t, w)
+		require.Len(t, configs, 1)
+		assert.Equal(t, "test.getconfig.nonexistent", configs[0].Key)
+		assert.NotEmpty(t, configs[0].Error)
+		assert.Empty(t, configs[0].Value)
+		assert.Empty(t, configs[0].Source)
+	})
+
+	t.Run("mix of existing and nonexistent keys", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=test.getconfig.key1,test.getconfig.missing,test.getconfig.key2", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		configs := parseResponse(t, w)
+		require.Len(t, configs, 3)
+		assert.Equal(t, "test.getconfig.key1", configs[0].Key)
+		assert.Equal(t, "val1", configs[0].Value)
+		assert.Empty(t, configs[0].Error)
+		assert.Equal(t, "test.getconfig.missing", configs[1].Key)
+		assert.NotEmpty(t, configs[1].Error)
+		assert.Equal(t, "test.getconfig.key2", configs[2].Key)
+		assert.Equal(t, "val2", configs[2].Value)
+		assert.Empty(t, configs[2].Error)
+	})
+
+	t.Run("empty keys with spaces and commas are skipped", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get?keys=test.getconfig.key1,,+,test.getconfig.key2", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		configs := parseResponse(t, w)
+		require.Len(t, configs, 2)
+		assert.Equal(t, "test.getconfig.key1", configs[0].Key)
+		assert.Equal(t, "test.getconfig.key2", configs[1].Key)
+	})
+
+	t.Run("missing keys parameter should fail", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/management/config/get", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "keys")
+	})
+
+	t.Run("wrong HTTP method should fail", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/management/config/get?keys=test.getconfig.key1", nil)
+		w := httptest.NewRecorder()
+		coord.HandleGetConfig(w, req)
+
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+		assert.Contains(t, w.Body.String(), "Method not allowed")
+	})
+}
