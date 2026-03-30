@@ -72,7 +72,7 @@ type searchTask struct {
 	schema                 *schemaInfo
 	needRequery            bool
 	partitionKeyMode       bool
-	bigTopKOptimization    bool
+	largeTopKEnabled       bool
 	enableMaterializedView bool
 	mustUsePartitionKey    bool
 	resultSizeInsufficient bool
@@ -167,7 +167,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID), zap.Error(err2))
 		return err2
 	}
-	t.bigTopKOptimization = collectionInfo.bigTopKOptimization
+	t.largeTopKEnabled = collectionInfo.queryMode == common.QueryModeLargeTopK
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
@@ -415,7 +415,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
 
-	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema, t.bigTopKOptimization); err != nil {
+	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema, t.largeTopKEnabled); err != nil {
 		log.Error("parseRankParams failed", zap.Error(err))
 		return err
 	}
@@ -778,7 +778,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		}
 		annsFieldName = vecFields[0].Name
 	}
-	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams, t.bigTopKOptimization)
+	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams, t.largeTopKEnabled)
 	if err != nil {
 		return nil, nil, 0, false, err
 	}

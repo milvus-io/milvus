@@ -264,8 +264,10 @@ const (
 	AllowInsertAutoIDKey    = "allow_insert_auto_id"
 	DisableFuncRuntimeCheck = "disable_func_runtime_check"
 
-	// BigTopK optimization
-	BigTopKOptimizationEnabledKey = "bigtopk_optimization.enabled"
+	// query mode
+	QueryModeKey       = "query_mode"
+	QueryModeLargeTopK = "large_topk"
+	ValidQueryModes    = QueryModeLargeTopK // comma-separated if more modes added later
 
 	// warmup related
 	WarmupKey            = "warmup"
@@ -477,17 +479,45 @@ func IsPartitionKeyIsolationKvEnabled(kvs ...*commonpb.KeyValuePair) (bool, erro
 	return false, nil
 }
 
-func IsBigTopKOptimizationEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
+// IsQueryModeKeyExists checks if the query_mode key exists in the key-value pairs.
+func IsQueryModeKeyExists(kvs ...*commonpb.KeyValuePair) bool {
 	for _, kv := range kvs {
-		if kv.Key == BigTopKOptimizationEnabledKey {
-			val, err := strconv.ParseBool(strings.ToLower(kv.Value))
-			if err != nil {
-				return false, errors.Wrap(err, "failed to parse bigTopK Optimization")
-			}
-			return val, nil
+		if kv.Key == QueryModeKey {
+			return true
 		}
 	}
-	return false, nil
+	return false
+}
+
+// GetQueryMode extracts the query_mode value from properties.
+// Returns empty string if not set.
+func GetQueryMode(kvs ...*commonpb.KeyValuePair) string {
+	for _, kv := range kvs {
+		if kv.Key == QueryModeKey {
+			return strings.ToLower(strings.TrimSpace(kv.Value))
+		}
+	}
+	return ""
+}
+
+// ValidateQueryMode validates the query_mode value. Returns nil if the value
+// is valid or if query_mode is not set.
+func ValidateQueryMode(kvs ...*commonpb.KeyValuePair) error {
+	for _, kv := range kvs {
+		if kv.Key == QueryModeKey {
+			mode := strings.ToLower(strings.TrimSpace(kv.Value))
+			if mode != QueryModeLargeTopK {
+				return fmt.Errorf("invalid query_mode value %q, valid values: [%s]", kv.Value, ValidQueryModes)
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// IsQueryModeLargeTopK checks if query_mode is set to "large_topk".
+func IsQueryModeLargeTopK(kvs ...*commonpb.KeyValuePair) bool {
+	return GetQueryMode(kvs...) == QueryModeLargeTopK
 }
 
 func IsDisableFuncRuntimeCheck(kvs ...*commonpb.KeyValuePair) (bool, error) {

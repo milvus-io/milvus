@@ -1484,16 +1484,16 @@ func Test_parseIndexParams_AutoIndex_WithType(t *testing.T) {
 	})
 }
 
-func Test_parseIndexParams_BigTopKOptimization(t *testing.T) {
+func Test_parseIndexParams_LargeTopKQueryMode(t *testing.T) {
 	paramtable.Init()
 
-	t.Run("cloud autoindex with BigTopK enabled selects IVF_FLAT", func(t *testing.T) {
+	t.Run("cloud autoindex with large_topk query mode selects IVF_FLAT", func(t *testing.T) {
 		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
 		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
-		Params.Save(Params.AutoIndexConfig.BigTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		Params.Save(Params.AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
 		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
 		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
-		defer Params.Reset(Params.AutoIndexConfig.BigTopKIndexParams.Key)
+		defer Params.Reset(Params.AutoIndexConfig.LargeTopKIndexParams.Key)
 
 		task := &createIndexTask{
 			fieldSchema: &schemapb.FieldSchema{
@@ -1503,7 +1503,7 @@ func Test_parseIndexParams_BigTopKOptimization(t *testing.T) {
 				},
 			},
 			collectionProperties: []*commonpb.KeyValuePair{
-				{Key: common.BigTopKOptimizationEnabledKey, Value: "true"},
+				{Key: common.QueryModeKey, Value: common.QueryModeLargeTopK},
 			},
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
@@ -1514,7 +1514,7 @@ func Test_parseIndexParams_BigTopKOptimization(t *testing.T) {
 		err := task.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		assert.True(t, task.userAutoIndexMetricTypeSpecified)
-		// Should use IVF_FLAT from BigTopK config, with user metric type overriding
+		// Should use IVF_FLAT from LargeTopK config, with user metric type overriding
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
 			{Key: common.MetricTypeKey, Value: "L2"},
@@ -1522,13 +1522,13 @@ func Test_parseIndexParams_BigTopKOptimization(t *testing.T) {
 		}, task.newIndexParams)
 	})
 
-	t.Run("cloud autoindex without BigTopK uses default HNSW", func(t *testing.T) {
+	t.Run("cloud autoindex without large_topk uses default HNSW", func(t *testing.T) {
 		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
 		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
-		Params.Save(Params.AutoIndexConfig.BigTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		Params.Save(Params.AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
 		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
 		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
-		defer Params.Reset(Params.AutoIndexConfig.BigTopKIndexParams.Key)
+		defer Params.Reset(Params.AutoIndexConfig.LargeTopKIndexParams.Key)
 
 		task := &createIndexTask{
 			fieldSchema: &schemapb.FieldSchema{
@@ -1556,13 +1556,13 @@ func Test_parseIndexParams_BigTopKOptimization(t *testing.T) {
 		}, task.newIndexParams)
 	})
 
-	t.Run("non-cloud autoindex with BigTopK enabled selects IVF_FLAT", func(t *testing.T) {
+	t.Run("non-cloud autoindex with large_topk query mode uses default HNSW", func(t *testing.T) {
 		Params.Save(Params.AutoIndexConfig.Enable.Key, "false")
 		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW", "metric_type": "IP"}`)
-		Params.Save(Params.AutoIndexConfig.BigTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		Params.Save(Params.AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
 		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
 		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
-		defer Params.Reset(Params.AutoIndexConfig.BigTopKIndexParams.Key)
+		defer Params.Reset(Params.AutoIndexConfig.LargeTopKIndexParams.Key)
 
 		task := &createIndexTask{
 			fieldSchema: &schemapb.FieldSchema{
@@ -1572,7 +1572,7 @@ func Test_parseIndexParams_BigTopKOptimization(t *testing.T) {
 				},
 			},
 			collectionProperties: []*commonpb.KeyValuePair{
-				{Key: common.BigTopKOptimizationEnabledKey, Value: "true"},
+				{Key: common.QueryModeKey, Value: common.QueryModeLargeTopK},
 			},
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: make([]*commonpb.KeyValuePair, 0),
@@ -1580,24 +1580,24 @@ func Test_parseIndexParams_BigTopKOptimization(t *testing.T) {
 		}
 		err := task.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
-		// Should use IVF_FLAT from BigTopK config
+		// non-cloud mode does not support LargeTopK override, should use default HNSW
 		found := false
 		for _, kv := range task.newIndexParams {
 			if kv.Key == common.IndexTypeKey {
-				assert.Equal(t, "IVF_FLAT", kv.Value)
+				assert.Equal(t, "HNSW", kv.Value)
 				found = true
 			}
 		}
-		assert.True(t, found, "index_type should be set to IVF_FLAT")
+		assert.True(t, found, "index_type should be set to HNSW")
 	})
 
-	t.Run("BigTopK property set to false uses default", func(t *testing.T) {
+	t.Run("no query_mode property uses default", func(t *testing.T) {
 		Params.Save(Params.AutoIndexConfig.Enable.Key, "true")
 		Params.Save(Params.AutoIndexConfig.IndexParams.Key, `{"M": 30,"efConstruction": 360,"index_type": "HNSW"}`)
-		Params.Save(Params.AutoIndexConfig.BigTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
+		Params.Save(Params.AutoIndexConfig.LargeTopKIndexParams.Key, `{"nlist": 128, "index_type": "IVF_FLAT", "metric_type": "COSINE"}`)
 		defer Params.Reset(Params.AutoIndexConfig.Enable.Key)
 		defer Params.Reset(Params.AutoIndexConfig.IndexParams.Key)
-		defer Params.Reset(Params.AutoIndexConfig.BigTopKIndexParams.Key)
+		defer Params.Reset(Params.AutoIndexConfig.LargeTopKIndexParams.Key)
 
 		task := &createIndexTask{
 			fieldSchema: &schemapb.FieldSchema{
@@ -1606,9 +1606,7 @@ func Test_parseIndexParams_BigTopKOptimization(t *testing.T) {
 					{Key: common.DimKey, Value: "128"},
 				},
 			},
-			collectionProperties: []*commonpb.KeyValuePair{
-				{Key: common.BigTopKOptimizationEnabledKey, Value: "false"},
-			},
+			collectionProperties: []*commonpb.KeyValuePair{},
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.MetricTypeKey, Value: "L2"},
