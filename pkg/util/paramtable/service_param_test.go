@@ -73,10 +73,11 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, "etcdadmin", Params.EtcdAuthPassword.GetValue())
 		assert.True(t, Params.EtcdEnableAuth.GetAsBool())
 
-		// test UseEmbedEtcd
+		// test UseEmbedEtcd with auth enabled — should auto-disable auth, not panic
 		t.Setenv("etcd.use.embed", "true")
-		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)
-		assert.Panics(t, func() {
+		t.Setenv("etcd.auth.enabled", "true")
+		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+		assert.NotPanics(t, func() {
 			NewBaseTable()
 		})
 

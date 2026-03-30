@@ -41,6 +41,7 @@ func TestEmbedEtcd(te *testing.T) {
 	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 	param := new(paramtable.ComponentParam)
 	te.Setenv("etcd.use.embed", "true")
+	te.Setenv("etcd.auth.enabled", "false") // embedded etcd does not support auth
 	te.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 
 	dir := te.TempDir()
@@ -847,6 +848,7 @@ func (s *EmbedEtcdKVSuite) SetupSuite() {
 	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 	param := new(paramtable.ComponentParam)
 	te.Setenv("etcd.use.embed", "true")
+	te.Setenv("etcd.auth.enabled", "false") // embedded etcd does not support auth
 	te.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 
 	dir := te.TempDir()

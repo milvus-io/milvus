@@ -318,7 +318,8 @@ We recommend using version 1.2 and above.`,
 	p.EtcdEnableAuth.Init(base.mgr)
 
 	if p.UseEmbedEtcd.GetAsBool() && p.EtcdEnableAuth.GetAsBool() {
-		panic("embedded etcd can not enable auth")
+		log.Warn("embedded etcd does not support auth, disabling etcd auth automatically")
+		p.EtcdEnableAuth.SwapTempValue("false")
 	}
 
 	p.EtcdAuthUserName = ParamItem{
