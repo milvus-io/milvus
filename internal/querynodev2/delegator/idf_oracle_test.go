@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -121,7 +122,7 @@ func (suite *IDFOracleSuite) registerSealed(segID int64, start uint32, end uint3
 	}}
 
 	diskBefore := suite.idfOracle.sealedDiskSize.Load()
-	err = suite.idfOracle.LoadSealed(context.Background(), segID, bm25Logs, cm)
+	err = suite.idfOracle.LoadSealed(context.Background(), segID, &querypb.SegmentLoadInfo{Bm25Logs: bm25Logs}, cm)
 	suite.Require().NoError(err)
 	return suite.idfOracle.sealedDiskSize.Load() - diskBefore
 }
@@ -378,12 +379,12 @@ func (suite *IDFOracleSuite) TestLoadSealedIdempotent() {
 func (suite *IDFOracleSuite) TestLoadSealedEmptyBm25Logs() {
 	cm := mocks.NewChunkManager(suite.T())
 	// nil bm25Logs
-	err := suite.idfOracle.LoadSealed(context.Background(), 1, nil, cm)
+	err := suite.idfOracle.LoadSealed(context.Background(), 1, &querypb.SegmentLoadInfo{}, cm)
 	suite.NoError(err)
 	suite.False(suite.idfOracle.sealed.Contain(1))
 
 	// empty bm25Logs
-	err = suite.idfOracle.LoadSealed(context.Background(), 2, []*datapb.FieldBinlog{}, cm)
+	err = suite.idfOracle.LoadSealed(context.Background(), 2, &querypb.SegmentLoadInfo{Bm25Logs: []*datapb.FieldBinlog{}}, cm)
 	suite.NoError(err)
 	suite.False(suite.idfOracle.sealed.Contain(2))
 }
@@ -407,7 +408,7 @@ func (suite *IDFOracleSuite) TestLoadSealedNoParse() {
 		Binlogs: []*datapb.Binlog{{LogPath: remotePath}},
 	}}
 
-	err = suite.idfOracle.LoadSealed(context.Background(), 1, bm25Logs, cm)
+	err = suite.idfOracle.LoadSealed(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25Logs}, cm)
 	suite.NoError(err)
 
 	// segment registered but NOT preloaded (current stays 0)
@@ -440,7 +441,7 @@ func (suite *IDFOracleSuite) TestLoadSealedFailureCleanup() {
 		Binlogs: []*datapb.Binlog{{LogPath: remotePath}},
 	}}
 
-	err := suite.idfOracle.LoadSealed(context.Background(), 1, bm25Logs, cm)
+	err := suite.idfOracle.LoadSealed(context.Background(), 1, &querypb.SegmentLoadInfo{Bm25Logs: bm25Logs}, cm)
 	suite.Error(err)
 
 	// segment should NOT be registered

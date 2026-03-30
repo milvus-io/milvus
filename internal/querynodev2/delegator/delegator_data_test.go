@@ -959,7 +959,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 			Binlogs: []*datapb.Binlog{{LogPath: remotePath}},
 		}}
 
-		err = oracle.LoadSealed(context.Background(), segID, bm25Logs, cm)
+		err = oracle.LoadSealed(context.Background(), segID, &querypb.SegmentLoadInfo{Bm25Logs: bm25Logs}, cm)
 		s.Require().NoError(err)
 	}
 
