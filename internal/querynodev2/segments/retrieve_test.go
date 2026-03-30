@@ -130,7 +130,7 @@ func (suite *RetrieveSuite) SetupTest() {
 
 	bfs, err := loader.loadSingleBloomFilterSet(suite.ctx, suite.collectionID, &sealLoadInfo, SegmentTypeSealed)
 	suite.Require().NoError(err)
-	suite.sealed.SetBloomFilter(bfs)
+	suite.sealed.SetPKCandidate(bfs)
 
 	for _, binlog := range binlogs {
 		err = suite.sealed.(*LocalSegment).LoadFieldData(suite.ctx, binlog.FieldID, int64(msgLength), binlog)
@@ -171,7 +171,7 @@ func (suite *RetrieveSuite) SetupTest() {
 
 	bfs, err = loader.loadSingleBloomFilterSet(suite.ctx, suite.collectionID, &growingLoadInfo, SegmentTypeGrowing)
 	suite.Require().NoError(err)
-	suite.growing.SetBloomFilter(bfs)
+	suite.growing.SetPKCandidate(bfs)
 
 	insertMsg, err := mock_segcore.GenInsertMsg(suite.collection.GetCCollection(), suite.partitionID, suite.growing.ID(), msgLength)
 	suite.Require().NoError(err)
@@ -310,7 +310,7 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 			bfs, err := loader.loadSingleBloomFilterSet(suite.ctx, suite.collectionID,
 				&sealLoadInfo, SegmentTypeSealed)
 			suite.Require().NoError(err)
-			sealseg.SetBloomFilter(bfs)
+			sealseg.SetPKCandidate(bfs)
 
 			suite.manager.Segment.Put(suite.ctx, SegmentTypeSealed, sealseg)
 		}
@@ -486,7 +486,7 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilter() {
 
 		bfs, err := loader.loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
 		suite.Require().NoError(err)
-		seg.SetBloomFilter(bfs)
+		seg.SetPKCandidate(bfs)
 
 		for _, binlog := range binlogs {
 			err = seg.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLen), binlog)

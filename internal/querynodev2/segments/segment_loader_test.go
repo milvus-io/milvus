@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -41,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type SegmentLoaderSuite struct {
@@ -244,9 +246,9 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
 			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			exist := segment.BloomFilterExist()
-			suite.Require().True(exist)
-			exist = segment.MayPkExist(lc)
+			pkReady := segment.PkCandidateExist()
+			suite.Require().True(pkReady)
+			exist := segment.MayPkExist(lc)
 			suite.Require().True(exist)
 		}
 	}
@@ -281,9 +283,9 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
 			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			exist := segment.BloomFilterExist()
-			suite.True(exist)
-			exist = segment.MayPkExist(lc)
+			pkReady := segment.PkCandidateExist()
+			suite.True(pkReady)
+			exist := segment.MayPkExist(lc)
 			suite.True(exist)
 		}
 	}
@@ -1324,6 +1326,298 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_ExpansionF
 	suite.NoError(err)
 	expected := uint64(float64(textIndexSize) * expansionFactor)
 	suite.EqualValues(expected, usage.MemorySize)
+}
+
+func TestSeparateLoadInfoV2_ExternalFieldIndexNotSkipped(t *testing.T) {
+	// Verifies that indexes on external fields are NOT skipped in separateLoadInfoV2.
+	// Previously, external field indexes were filtered out, preventing index loading for external tables.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "__virtual_pk__", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{Name: "embedding", FieldID: 102, DataType: schemapb.DataType_FloatVector, ExternalField: "embedding"},
+		},
+	}
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		StorageVersion: storage.StorageV3,
+		IndexInfos: []*querypb.FieldIndexInfo{
+			{
+				FieldID:        101,
+				IndexID:        1001,
+				IndexFilePaths: []string{"index/101/file1", "index/101/file2"},
+			},
+			{
+				FieldID:        102,
+				IndexID:        1002,
+				IndexFilePaths: []string{"index/102/file1"},
+			},
+		},
+		// External segments have no BinlogPaths — data is loaded from manifest
+		BinlogPaths: []*datapb.FieldBinlog{},
+	}
+
+	indexedFieldInfos, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+
+	// External field indexes should be included (not skipped)
+	assert.Len(t, indexedFieldInfos, 0, "no binlog paths means no indexed field infos via binlog matching")
+	assert.Len(t, fieldBinlogs, 0, "no binlog paths for external segments")
+
+	// The key point: fieldID2IndexInfo should contain external field indexes.
+	// Even though indexedFieldInfos is empty (no binlog to match), the indexes are
+	// still available in loadInfo.IndexInfos for the C++ managed loading path.
+	// This test ensures the code doesn't filter them out from IndexInfos.
+	assert.Len(t, loadInfo.IndexInfos, 2, "IndexInfos should still contain all external field indexes")
+}
+
+func TestSeparateLoadInfoV2_MixedExternalAndNormalFields(t *testing.T) {
+	// Verify that normal field indexes are matched while external field binlogs are skipped.
+	// Index info for both external and normal fields should remain in IndexInfos.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "__virtual_pk__", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{Name: "normal_field", FieldID: 103, DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		StorageVersion: storage.StorageV3,
+		IndexInfos: []*querypb.FieldIndexInfo{
+			{
+				FieldID:        101,
+				IndexID:        1001,
+				IndexFilePaths: []string{"index/101/file1"},
+			},
+			{
+				FieldID:        103,
+				IndexID:        1003,
+				IndexFilePaths: []string{"index/103/file1"},
+			},
+		},
+		BinlogPaths: []*datapb.FieldBinlog{
+			// Normal field has binlog; external field 101 does not
+			{FieldID: 103, Binlogs: []*datapb.Binlog{{LogPath: "binlog/103"}}},
+		},
+	}
+
+	indexedFieldInfos, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+
+	// Normal field 103 has binlog + index → indexed
+	assert.Len(t, indexedFieldInfos, 1)
+	assert.Contains(t, indexedFieldInfos, int64(1003))
+	assert.Len(t, fieldBinlogs, 0)
+	// IndexInfos still contains both external and normal field indexes
+	assert.Len(t, loadInfo.IndexInfos, 2)
+}
+
+func TestSeparateLoadInfoV2_ExternalFieldInShortColumnGroupV3(t *testing.T) {
+	// Verify that external fields within a short column group (FieldID=0) are skipped
+	// when matching indexes, but the short column group binlog entry itself is kept.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "__virtual_pk__", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "ext_id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{Name: "normal_ts", FieldID: 103, DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		StorageVersion: storage.StorageV3,
+		IndexInfos: []*querypb.FieldIndexInfo{
+			// Index on external field 101 — should NOT be matched via short column group
+			{FieldID: 101, IndexID: 1001, IndexFilePaths: []string{"index/101/file1"}},
+			// Index on normal field 103 — should be matched
+			{FieldID: 103, IndexID: 1003, IndexFilePaths: []string{"index/103/file1"}},
+		},
+		BinlogPaths: []*datapb.FieldBinlog{
+			// Short column group (FieldID=0) contains all fields
+			{FieldID: 0, Binlogs: []*datapb.Binlog{{LogPath: "binlog/short_group"}}},
+		},
+	}
+
+	indexedFieldInfos, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+
+	// Normal field 103 should be matched via short column group iteration
+	assert.Contains(t, indexedFieldInfos, int64(1003))
+	// External field 101 should NOT be matched (skipped by externalFieldIDs check)
+	assert.NotContains(t, indexedFieldInfos, int64(1001))
+	// Short column group binlog should still be in fieldBinlogs
+	assert.Len(t, fieldBinlogs, 1)
+	assert.Equal(t, int64(0), fieldBinlogs[0].FieldID)
+}
+
+func TestSeparateLoadInfoV2_ExternalFieldBinlogsSkippedV3(t *testing.T) {
+	// Verify that BinlogPaths entries for external fields are skipped in the V3 path.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "__virtual_pk__", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "ext_id", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "id"},
+			{Name: "ext_vec", FieldID: 102, DataType: schemapb.DataType_FloatVector, ExternalField: "vec"},
+			{Name: "normal_ts", FieldID: 103, DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		StorageVersion: storage.StorageV3,
+		BinlogPaths: []*datapb.FieldBinlog{
+			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "binlog/100"}}},
+			{FieldID: 101, Binlogs: []*datapb.Binlog{{LogPath: "binlog/101"}}}, // external, should skip
+			{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "binlog/102"}}}, // external, should skip
+			{FieldID: 103, Binlogs: []*datapb.Binlog{{LogPath: "binlog/103"}}},
+		},
+	}
+
+	_, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+
+	// Only non-external fields (100 and 103) should remain in fieldBinlogs
+	assert.Len(t, fieldBinlogs, 2)
+	fieldIDs := make([]int64, len(fieldBinlogs))
+	for i, fb := range fieldBinlogs {
+		fieldIDs[i] = fb.FieldID
+	}
+	assert.Contains(t, fieldIDs, int64(100))
+	assert.Contains(t, fieldIDs, int64(103))
+	assert.NotContains(t, fieldIDs, int64(101))
+	assert.NotContains(t, fieldIDs, int64(102))
+}
+
+func TestSeparateLoadInfoV2_ExternalFieldBinlogsSkippedLegacy(t *testing.T) {
+	// Verify that BinlogPaths entries for external fields are skipped in the legacy (non-V2/V3) path.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "__virtual_pk__", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "ext_field", FieldID: 101, DataType: schemapb.DataType_Int64, ExternalField: "col1"},
+			{Name: "normal_field", FieldID: 102, DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		StorageVersion: 0, // legacy, not V2 or V3
+		BinlogPaths: []*datapb.FieldBinlog{
+			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "binlog/100"}}},
+			{FieldID: 101, Binlogs: []*datapb.Binlog{{LogPath: "binlog/101"}}}, // external, should skip
+			{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "binlog/102"}}},
+		},
+	}
+
+	_, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+
+	// Only non-external fields (100 and 102) should remain
+	assert.Len(t, fieldBinlogs, 2)
+	fieldIDs := make([]int64, len(fieldBinlogs))
+	for i, fb := range fieldBinlogs {
+		fieldIDs[i] = fb.FieldID
+	}
+	assert.Contains(t, fieldIDs, int64(100))
+	assert.Contains(t, fieldIDs, int64(102))
+	assert.NotContains(t, fieldIDs, int64(101))
+}
+
+func TestSeparateLoadInfoV2_NonExternalCollectionUnaffected(t *testing.T) {
+	// Verify that non-external collections are unaffected by external field filtering.
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "field1", FieldID: 101, DataType: schemapb.DataType_Int64},
+			{Name: "field2", FieldID: 102, DataType: schemapb.DataType_FloatVector},
+		},
+	}
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		StorageVersion: storage.StorageV3,
+		BinlogPaths: []*datapb.FieldBinlog{
+			{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "binlog/100"}}},
+			{FieldID: 101, Binlogs: []*datapb.Binlog{{LogPath: "binlog/101"}}},
+			{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: "binlog/102"}}},
+		},
+	}
+
+	_, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+
+	// All fields should be included (no external fields to skip)
+	assert.Len(t, fieldBinlogs, 3)
+}
+
+func TestDetectVirtualPKCollisions(t *testing.T) {
+	t.Run("NoCollision", func(t *testing.T) {
+		infos := []*querypb.SegmentLoadInfo{
+			{SegmentID: 1},
+			{SegmentID: 2},
+			{SegmentID: 3},
+		}
+		collisions := detectVirtualPKCollisions(1, infos)
+		assert.Empty(t, collisions)
+	})
+
+	t.Run("CollisionWithTruncatedID", func(t *testing.T) {
+		// Two segment IDs with same lower 32 bits but different upper bits
+		segID1 := int64(0x100000001) // lower 32 = 1
+		segID2 := int64(0x200000001) // lower 32 = 1
+		infos := []*querypb.SegmentLoadInfo{
+			{SegmentID: segID1},
+			{SegmentID: segID2},
+			{SegmentID: 3},
+		}
+		collisions := detectVirtualPKCollisions(segID1, infos)
+		assert.Equal(t, []int64{segID2}, collisions)
+	})
+
+	t.Run("SelfNotIncluded", func(t *testing.T) {
+		infos := []*querypb.SegmentLoadInfo{
+			{SegmentID: 100},
+		}
+		collisions := detectVirtualPKCollisions(100, infos)
+		assert.Empty(t, collisions)
+	})
+
+	t.Run("MultipleCollisions", func(t *testing.T) {
+		segID1 := int64(0x100000005)
+		segID2 := int64(0x200000005)
+		segID3 := int64(0x300000005)
+		infos := []*querypb.SegmentLoadInfo{
+			{SegmentID: segID1},
+			{SegmentID: segID2},
+			{SegmentID: segID3},
+		}
+		collisions := detectVirtualPKCollisions(segID1, infos)
+		assert.Len(t, collisions, 2)
+		assert.Contains(t, collisions, segID2)
+		assert.Contains(t, collisions, segID3)
+	})
+
+	t.Run("EmptyInfos", func(t *testing.T) {
+		collisions := detectVirtualPKCollisions(100, nil)
+		assert.Empty(t, collisions)
+	})
+}
+
+func TestExternalCollectionSkipsDeltaLogs(t *testing.T) {
+	// Verify that IsExternalCollection correctly identifies external schemas,
+	// which is the condition used to skip delta log loading in the segment loader.
+	externalSchema := &schemapb.CollectionSchema{
+		ExternalSource: "s3://bucket/data",
+		Fields: []*schemapb.FieldSchema{
+			{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "embedding"},
+		},
+	}
+	assert.True(t, typeutil.IsExternalCollection(externalSchema))
+
+	normalSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+	assert.False(t, typeutil.IsExternalCollection(normalSchema))
+
+	// Empty ExternalSource is not external
+	emptySourceSchema := &schemapb.CollectionSchema{
+		ExternalSource: "",
+		Fields: []*schemapb.FieldSchema{
+			{Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+	assert.False(t, typeutil.IsExternalCollection(emptySourceSchema))
 }
 
 func TestSegmentLoader(t *testing.T) {

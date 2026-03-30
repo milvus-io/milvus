@@ -84,6 +84,16 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 }
 
 func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
+	// Handle NOT(TermExpr) before visiting child, so we can split not in → != and
+	if expr.GetOp() == planpb.UnaryExpr_Not {
+		if te := expr.GetChild().GetTermExpr(); te != nil {
+			sortTermValues(te)
+			if !shouldUseInExprWithPK(te.GetColumnInfo().GetDataType(), len(te.GetValues()), te.GetColumnInfo().GetIsPrimaryKey()) {
+				return splitTermToAndNotEquals(te)
+			}
+		}
+	}
+
 	child := v.visitExpr(expr.GetChild()).(*planpb.Expr)
 
 	// Optimize double negation: NOT (NOT AlwaysTrue) → AlwaysTrue
@@ -105,6 +115,12 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 
 func (v *visitor) visitTermExpr(expr *planpb.TermExpr) interface{} {
 	sortTermValues(expr)
+
+	// Split in → == or when shouldUseInExpr returns false
+	if !shouldUseInExprWithPK(expr.GetColumnInfo().GetDataType(), len(expr.GetValues()), expr.GetColumnInfo().GetIsPrimaryKey()) {
+		return splitTermToOrEquals(expr)
+	}
+
 	return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: expr}}
 }
 

@@ -1,0 +1,7 @@
+# Python dependencies for external table E2E test data generation.
+# Requires Python >= 3.11 (for vortex-data >= 0.56.0).
+# Install: pip install -r requirements.txt
+pyarrow==23.0.1
+lance==1.2.1
+vortex-data==0.56.0
+obstore==0.9.1

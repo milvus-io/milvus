@@ -4758,7 +4758,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		task := s.getSearchTask()
 		task.enableMaterializedView = true
 		task.IsAdvanced = isAdvanced
-		task.request.Dsl = testVarCharField + " in [\"a\", \"b\"]"
+		task.request.Dsl = testVarCharField + " in [\"a\", \"b\", \"c\"]"
 		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 		schemaInfo := newSchemaInfo(schema)
 		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
@@ -4772,7 +4772,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		task := s.getSearchTask()
 		task.enableMaterializedView = true
 		task.IsAdvanced = isAdvanced
-		task.request.Dsl = testVarCharField + " == \"a\" || " + testVarCharField + "  == \"b\""
+		task.request.Dsl = testVarCharField + " == \"a\" || " + testVarCharField + "  == \"b\" || " + testVarCharField + " == \"c\""
 		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 		schemaInfo := newSchemaInfo(schema)
 		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)

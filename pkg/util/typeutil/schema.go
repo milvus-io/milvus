@@ -2199,8 +2199,9 @@ func ValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
 	}
 
 	for _, field := range schema.GetFields() {
-		// Skip system fields (RowID and Timestamp)
-		if field.GetName() == common.RowIDFieldName || field.GetName() == common.TimeStampFieldName {
+		// Skip system fields (RowID, Timestamp) and virtual PK (injected by proxy)
+		if field.GetName() == common.RowIDFieldName || field.GetName() == common.TimeStampFieldName ||
+			field.GetName() == common.VirtualPKFieldName {
 			continue
 		}
 

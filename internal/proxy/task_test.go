@@ -1827,6 +1827,33 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("virtual PK injected after PreExecute", func(t *testing.T) {
+		schema := buildExternalSchema()
+		freshTask := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				CollectionName: collectionName,
+				Schema:         marshal(schema),
+				ShardsNum:      common.DefaultShardsNum,
+			},
+			ctx:      ctx,
+			mixCoord: mix,
+		}
+		err := freshTask.OnEnqueue()
+		require.NoError(t, err)
+		err = freshTask.PreExecute(ctx)
+		require.NoError(t, err)
+
+		// After PreExecute, schema should have virtual PK prepended
+		assert.Equal(t, common.VirtualPKFieldName, freshTask.schema.Fields[0].Name)
+		assert.True(t, freshTask.schema.Fields[0].IsPrimaryKey)
+		assert.True(t, freshTask.schema.Fields[0].AutoID)
+		assert.Equal(t, schemapb.DataType_Int64, freshTask.schema.Fields[0].DataType)
+		// Original fields should follow
+		assert.Equal(t, "text_field", freshTask.schema.Fields[1].Name)
+		assert.Equal(t, "vec_field", freshTask.schema.Fields[2].Name)
+	})
+
 	t.Run("functions forbidden", func(t *testing.T) {
 		schema := buildExternalSchema()
 		schema.Functions = []*schemapb.FunctionSchema{{Name: "test_func"}}

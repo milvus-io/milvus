@@ -79,7 +79,7 @@ func TestParsePartitionKeys(t *testing.T) {
 		},
 		{
 			name:                 "binary_expr_and with partition key in range",
-			expr:                 "partition_key_field in [7, 8] && partition_key_field > 9",
+			expr:                 "partition_key_field in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] && partition_key_field > 11",
 			expected:             0,
 			validPartitionKeys:   []int64{},
 			invalidPartitionKeys: []int64{},
@@ -249,17 +249,17 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 		},
 		{
 			name:                "partition key isolation term",
-			expr:                "key_field in [10]",
+			expr:                "key_field in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]",
 			expectedErrorString: "partition key isolation does not support IN",
 		},
 		{
 			name:                "partition key isolation term multiple",
-			expr:                "key_field in [10, 20]",
+			expr:                "key_field in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]",
 			expectedErrorString: "partition key isolation does not support IN",
 		},
 		{
 			name:                "partition key isolation NOT term",
-			expr:                "key_field not in [10]",
+			expr:                "key_field not in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]",
 			expectedErrorString: "partition key isolation does not support IN",
 		},
 		{
