@@ -23,6 +23,10 @@ int
 main() {
     static_assert(std::is_same_v<knowhere::int8, int8_t>,
                   "knowhere::int8 must match upstream int8_t alias");
+    static_assert(sizeof(knowhere::fp16) == 2,
+                  "knowhere::fp16 must preserve 2-byte half storage");
+    static_assert(sizeof(knowhere::bf16) == 2,
+                  "knowhere::bf16 must preserve 2-byte bfloat16 storage");
 
     LOG_KNOWHERE_INFO_ << "compile-surface";
     knowhere::expected<knowhere::Resource> resource_expected;
@@ -99,16 +103,58 @@ main() {
             1,
             knowhere::Json::object(),
             config_check_message);
+    auto hnsw_has_raw_data =
+        knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
+            knowhere::IndexEnum::INDEX_HNSW, 1, knowhere::Json::object());
+    auto ivf_flat_has_raw_data =
+        knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
+            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+            1,
+            knowhere::Json::object());
+    auto binary_ivf_flat_has_raw_data =
+        knowhere::IndexStaticFaced<knowhere::bin1>::HasRawData(
+            knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+            1,
+            knowhere::Json::object());
     auto index_features = knowhere::IndexFactory::Instance().GetIndexFeatures();
     constexpr uint64_t kBinaryFlag = 1ULL << 0;
     constexpr uint64_t kFloat32Flag = 1ULL << 1;
+    constexpr uint64_t kFloat16Flag = 1ULL << 2;
+    constexpr uint64_t kBFloat16Flag = 1ULL << 3;
     constexpr uint64_t kSparseFloat32Flag = 1ULL << 4;
     constexpr uint64_t kInt8Flag = 1ULL << 5;
     auto hnsw_features = index_features.find(knowhere::IndexEnum::INDEX_HNSW);
     if (hnsw_features == index_features.end() ||
-        (hnsw_features->second & (kFloat32Flag | kInt8Flag)) !=
-            (kFloat32Flag | kInt8Flag)) {
+        (hnsw_features->second &
+         (kBinaryFlag | kFloat32Flag | kFloat16Flag | kBFloat16Flag |
+          kInt8Flag)) !=
+            (kBinaryFlag | kFloat32Flag | kFloat16Flag | kBFloat16Flag |
+             kInt8Flag)) {
         return 11;
+    }
+    auto flat_features =
+        index_features.find(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
+    if (flat_features == index_features.end() ||
+        (flat_features->second & (kFloat32Flag | kFloat16Flag |
+                                  kBFloat16Flag)) !=
+            (kFloat32Flag | kFloat16Flag | kBFloat16Flag)) {
+        return 15;
+    }
+    auto ivf_flat_features =
+        index_features.find(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
+    if (ivf_flat_features == index_features.end() ||
+        (ivf_flat_features->second & (kFloat32Flag | kFloat16Flag |
+                                      kBFloat16Flag)) !=
+            (kFloat32Flag | kFloat16Flag | kBFloat16Flag)) {
+        return 16;
+    }
+    auto ivf_pq_features =
+        index_features.find(knowhere::IndexEnum::INDEX_FAISS_IVFPQ);
+    if (ivf_pq_features == index_features.end() ||
+        (ivf_pq_features->second & (kFloat32Flag | kFloat16Flag |
+                                    kBFloat16Flag)) !=
+            (kFloat32Flag | kFloat16Flag | kBFloat16Flag)) {
+        return 17;
     }
     auto binary_features =
         index_features.find(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
@@ -122,10 +168,25 @@ main() {
         (sparse_features->second & kSparseFloat32Flag) != kSparseFloat32Flag) {
         return 13;
     }
+    auto sparse_wand_features =
+        index_features.find(knowhere::IndexEnum::INDEX_SPARSE_WAND);
+    if (sparse_wand_features == index_features.end() ||
+        (sparse_wand_features->second & kSparseFloat32Flag) != kSparseFloat32Flag) {
+        return 21;
+    }
     auto deduplicate_features = index_features.find("MINHASH_LSH");
     if (deduplicate_features == index_features.end() ||
         (deduplicate_features->second & kBinaryFlag) != kBinaryFlag) {
         return 14;
+    }
+    if (!hnsw_has_raw_data) {
+        return 18;
+    }
+    if (!ivf_flat_has_raw_data) {
+        return 19;
+    }
+    if (!binary_ivf_flat_has_raw_data) {
+        return 20;
     }
     std::vector<int64_t> brute_force_ids(1, -1);
     std::vector<float> brute_force_distances(1, 0.0F);
@@ -218,6 +279,9 @@ main() {
     (void)index_type_ok;
     (void)index_static_config;
     (void)index_static_config_status;
+    (void)hnsw_has_raw_data;
+    (void)ivf_flat_has_raw_data;
+    (void)binary_ivf_flat_has_raw_data;
     (void)index_features;
     (void)brute_force_status;
     (void)brute_force_sparse_status;

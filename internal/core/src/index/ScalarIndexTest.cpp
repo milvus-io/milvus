@@ -17,6 +17,7 @@
 #include "index/IndexFactory.h"
 #include "index/BitmapIndex.h"
 #include "index/InvertedIndexTantivy.h"
+#include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "common/CDataType.h"
 #include "common/Types.h"
@@ -65,6 +66,33 @@ GetTempFileManagerCtx(CDataType data_type) {
         static_cast<milvus::proto::schema::DataType>(data_type));
     return ctx;
 }
+
+auto
+GetGeometryTempFileManagerCtx() {
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = "/tmp/local/";
+    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
+    auto ctx = milvus::storage::FileManagerContext(chunk_manager);
+    ctx.fieldDataMeta.field_schema.set_data_type(
+        milvus::proto::schema::DataType::Geometry);
+    return ctx;
+}
+
+#ifdef MILVUS_USE_KNOWHERE_RS_SHIM
+TEST(ScalarIndexShim, GeometryIndexUnsupported) {
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = milvus::DataType::GEOMETRY;
+    create_index_info.index_type = milvus::index::RTREE_INDEX_TYPE;
+
+    EXPECT_ANY_THROW({
+        auto index =
+            milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
+                create_index_info, GetGeometryTempFileManagerCtx());
+        (void)index;
+    });
+}
+#endif
 
 TYPED_TEST_P(TypedScalarIndexTest, Constructor) {
     using T = TypeParam;

@@ -16,23 +16,57 @@ enum class RefineType {
     UINT8_QUANT = 3,
 };
 
-struct fp32 {};
-struct fp16 {};
-struct bf16 {};
+struct fp32 {
+    float value = 0.0f;
+
+    constexpr fp32() = default;
+    constexpr fp32(float v) : value(v) {
+    }
+
+    constexpr operator float() const {
+        return value;
+    }
+};
+struct fp16 {
+    uint16_t bits = 0;
+
+    constexpr fp16() = default;
+    constexpr fp16(uint16_t value) : bits(value) {
+    }
+
+    constexpr operator uint16_t() const {
+        return bits;
+    }
+};
+struct bf16 {
+    uint16_t bits = 0;
+
+    constexpr bf16() = default;
+    constexpr bf16(uint16_t value) : bits(value) {
+    }
+
+    constexpr operator uint16_t() const {
+        return bits;
+    }
+};
 struct bin1 {};
 struct sparse_u32_f32 {
     using ValueType = float;
 };
 using int8 = int8_t;
 
+static_assert(sizeof(fp32) == sizeof(float));
+
 namespace IndexEnum {
 inline constexpr const char* INVALID = "";
 inline constexpr const char* INDEX_HNSW = "HNSW";
+inline constexpr const char* INDEX_HNSW_SQ = "HNSW_SQ";
 inline constexpr const char* INDEX_DISKANN = "DISKANN";
 inline constexpr const char* INDEX_FAISS_IDMAP = "FLAT";
 inline constexpr const char* INDEX_FAISS_IVFFLAT = "IVF_FLAT";
 inline constexpr const char* INDEX_FAISS_IVFFLAT_CC = "IVF_FLAT_CC";
 inline constexpr const char* INDEX_FAISS_IVFPQ = "IVF_PQ";
+inline constexpr const char* INDEX_FAISS_IVF_RABITQ = "IVF_RABITQ";
 inline constexpr const char* INDEX_FAISS_IVFSQ8 = "IVF_SQ8";
 inline constexpr const char* INDEX_FAISS_IVFSQ = "IVF_SQ8";
 inline constexpr const char* INDEX_FAISS_BIN_IDMAP = "BIN_FLAT";
@@ -97,14 +131,19 @@ namespace indexparam {
 inline constexpr const char* EF = "ef";
 inline constexpr const char* EFCONSTRUCTION = "efConstruction";
 inline constexpr const char* INVERTED_INDEX_ALGO = "inverted_index_algo";
+inline constexpr const char* IVFM = "m";
 inline constexpr const char* M = "M";
+inline constexpr const char* NBITS = "nbits";
 inline constexpr const char* NLIST = "nlist";
 inline constexpr const char* NPROBE = "nprobe";
+inline constexpr const char* REFINE = "refine";
+inline constexpr const char* REFINE_K = "refine_k";
 inline constexpr const char* REFINE_RATIO = "refine_ratio";
 inline constexpr const char* REFINE_TYPE = "refine_type";
 inline constexpr const char* REFINE_WITH_QUANT = "refine_with_quant";
 inline constexpr const char* SSIZE = "ssize";
 inline constexpr const char* SUB_DIM = "sub_dim";
+inline constexpr const char* SQ_TYPE = "sq_type";
 }  // namespace indexparam
 
 }  // namespace knowhere

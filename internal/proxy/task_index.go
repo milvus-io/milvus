@@ -463,8 +463,12 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "only BM25 Function output field support BM25 metric type")
 			}
 		} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
-			if !funcutil.SliceContain(indexparamcheck.BinaryVectorMetrics, metricType) {
-				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "binary vector index does not support metric type: "+metricType)
+			allowedBinaryMetrics := indexparamcheck.BinaryVectorMetrics
+			if indexType == "BIN_IVF_FLAT" {
+				allowedBinaryMetrics = indexparamcheck.BinIvfMetrics
+			}
+			if !funcutil.SliceContain(allowedBinaryMetrics, metricType) {
+				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "binary vector index does not support metric type: "+metricType+"; not supported")
 			}
 		} else if typeutil.IsIntVectorType(cit.fieldSchema.DataType) {
 			if !funcutil.SliceContain(indexparamcheck.IntVectorMetrics, metricType) {
@@ -582,6 +586,9 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 	if typeutil.IsVectorType(field.DataType) && indexType != indexparamcheck.AutoIndex {
 		exist := CheckVecIndexWithDataTypeExist(indexType, field.DataType, field.ElementType)
 		if !exist {
+			if shouldUseUpstreamInvalidParamText(indexType, field.DataType) {
+				return fmt.Errorf("can't build with this index %s: invalid parameter", indexType)
+			}
 			return fmt.Errorf("data type %s can't build with this index %s", schemapb.DataType_name[int32(field.GetDataType())], indexType)
 		}
 	}
@@ -596,6 +603,9 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 
 	if err := checker.CheckValidDataType(indexType, field); err != nil {
 		log.Ctx(ctx).Info("create index with invalid data type", zap.Error(err), zap.String("data_type", field.GetDataType().String()))
+		if shouldUseUpstreamInvalidParamText(indexType, field.DataType) {
+			return fmt.Errorf("can't build with this index %s: invalid parameter", indexType)
+		}
 		return err
 	}
 
@@ -605,6 +615,17 @@ func checkTrain(ctx context.Context, field *schemapb.FieldSchema, indexParams ma
 	}
 
 	return nil
+}
+
+func shouldUseUpstreamInvalidParamText(indexType string, dataType schemapb.DataType) bool {
+	switch indexType {
+	case "DISKANN", "HNSW_SQ", "IVF_RABITQ":
+		return true
+	case "HNSW":
+		return typeutil.IsSparseFloatVectorType(dataType)
+	default:
+		return false
+	}
 }
 
 func (cit *createIndexTask) PreExecute(ctx context.Context) error {

@@ -46,6 +46,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/resource_c.h"
+#include "exec/operator/Utils.h"
 #include "folly/Synchronized.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
@@ -847,11 +848,43 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
     AssertInfo(is_system_field_ready(), "System field is not ready");
     auto field_id = search_info.field_id_;
     auto& field_meta = schema_->operator[](field_id);
+    const bool use_iterator = milvus::exec::UseVectorIterator(search_info);
+    const bool has_binlog_index = get_bit(binlog_index_bitset_, field_id);
+    const bool has_index = get_bit(index_ready_bitset_, field_id);
+    const bool has_field_data = get_bit(field_data_ready_bitset_, field_id);
+
+    if (search_info.search_params_.contains("search_list_size") ||
+        search_info.search_params_.contains("search_list")) {
+        LOG_INFO(
+            "Sealed vector_search DISKANN-like params field_id:{} index_ready:{} "
+            "binlog_index_ready:{} field_data_ready:{} search_params:{}",
+            field_id.get(),
+            has_index,
+            has_binlog_index,
+            has_field_data,
+            search_info.search_params_.dump());
+    }
 
     AssertInfo(field_meta.is_vector(),
                "The meta type of vector field is not vector type");
 
-    if (get_bit(binlog_index_bitset_, field_id)) {
+    if (use_iterator) {
+        LOG_INFO(
+            "Sealed vector_search iterator lane segment:{} field_id:{} "
+            "data_type:{} dim:{} index_ready:{} binlog_index_ready:{} "
+            "field_data_ready:{}",
+            id_,
+            field_id.get(),
+            static_cast<int>(field_meta.get_data_type()),
+            field_meta.get_data_type() == DataType::VECTOR_SPARSE_U32_F32
+                ? 0
+                : field_meta.get_dim(),
+            has_index,
+            has_binlog_index,
+            has_field_data);
+    }
+
+    if (has_binlog_index) {
         AssertInfo(
             vec_binlog_config_.find(field_id) != vec_binlog_config_.end(),
             "The binlog params is not generate.");
@@ -872,7 +905,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    output);
         milvus::tracer::AddEvent(
             "finish_searching_vector_temperate_binlog_index");
-    } else if (get_bit(index_ready_bitset_, field_id)) {
+    } else if (has_index) {
         AssertInfo(vector_indexings_.is_ready(field_id),
                    "vector indexes isn't ready for field " +
                        std::to_string(field_id.get()));

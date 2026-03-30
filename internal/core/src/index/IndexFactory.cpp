@@ -38,7 +38,9 @@
 #include "index/BoolIndex.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/HybridScalarIndex.h"
+#ifndef MILVUS_USE_KNOWHERE_RS_SHIM
 #include "index/RTreeIndex.h"
+#endif
 #include "knowhere/comp/knowhere_check.h"
 #include "log/Log.h"
 #include "pb/schema.pb.h"
@@ -530,7 +532,14 @@ IndexFactory::CreateGeometryIndex(
     const storage::FileManagerContext& file_manager_context) {
     AssertInfo(index_type == RTREE_INDEX_TYPE,
                "Invalid index type for geometry index");
+#ifdef MILVUS_USE_KNOWHERE_RS_SHIM
+    (void)file_manager_context;
+    ThrowInfo(Unsupported,
+              "geometry indexes are unavailable when Milvus is built "
+              "against the knowhere-rs shim");
+#else
     return std::make_unique<RTreeIndex<std::string>>(file_manager_context);
+#endif
 }
 
 IndexBasePtr

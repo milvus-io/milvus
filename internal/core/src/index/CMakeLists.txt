@@ -10,4 +10,9 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
 add_source_at_current_directory_recursively()
+
+if (MILVUS_USE_KNOWHERE_RS_SHIM)
+    add_definitions(-DMILVUS_USE_KNOWHERE_RS_SHIM)
+endif()
+
 add_library(milvus_index OBJECT ${SOURCE_FILES})

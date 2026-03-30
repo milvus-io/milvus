@@ -107,6 +107,60 @@ create_chunk(const FixedVector<std::string>& data) {
     return create_chunk(field_meta, array_vec);
 }
 
+arrow::ArrayVector
+create_array_vector(const FixedVector<int64_t>& data) {
+    auto field_data = milvus::storage::CreateFieldData(storage::DataType::INT64,
+                                                       DataType::NONE);
+    field_data->FillFieldData(data.data(), data.size());
+    storage::InsertEventData event_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
+    auto ser_data = event_data.Serialize();
+    auto buffer = std::make_shared<arrow::io::BufferReader>(
+        ser_data.data() + 2 * sizeof(milvus::Timestamp),
+        ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    auto s = reader_builder.Open(buffer);
+    EXPECT_TRUE(s.ok());
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    s = reader_builder.Build(&arrow_reader);
+    EXPECT_TRUE(s.ok());
+
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    s = arrow_reader->GetRecordBatchReader(&rb_reader);
+    EXPECT_TRUE(s.ok());
+    return read_single_column_batches(rb_reader);
+}
+
+arrow::ArrayVector
+create_array_vector(const FixedVector<float>& data, int64_t dim) {
+    auto field_data = milvus::storage::CreateFieldData(
+        storage::DataType::VECTOR_FLOAT, DataType::NONE, false, dim);
+    field_data->FillFieldData(data.data(), data.size() / dim);
+    storage::InsertEventData event_data;
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
+    auto ser_data = event_data.Serialize();
+    auto buffer = std::make_shared<arrow::io::BufferReader>(
+        ser_data.data() + 2 * sizeof(milvus::Timestamp),
+        ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    auto s = reader_builder.Open(buffer);
+    EXPECT_TRUE(s.ok());
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    s = reader_builder.Build(&arrow_reader);
+    EXPECT_TRUE(s.ok());
+
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    s = arrow_reader->GetRecordBatchReader(&rb_reader);
+    EXPECT_TRUE(s.ok());
+    return read_single_column_batches(rb_reader);
+}
+
 // Test fixture for chunk tests
 class ChunkedColumnGroupTest : public ::testing::Test {
  protected:
@@ -279,4 +333,55 @@ TEST_F(ChunkedColumnGroupTest, ProxyChunkColumn) {
     EXPECT_EQ(proxy_string->NumRows(), 5);
     EXPECT_EQ(proxy_string->num_chunks(), 1);
     EXPECT_FALSE(proxy_string->IsNullable());
+}
+
+TEST(ChunkedColumnGroupVectorTest, CreateGroupChunkPreservesDenseVectorBytes) {
+    constexpr int64_t dim = 128;
+    constexpr int64_t rows = 5;
+
+    FixedVector<float> vector_data(rows * dim);
+    for (int64_t i = 0; i < rows * dim; ++i) {
+        vector_data[i] = static_cast<float>(i);
+    }
+    FixedVector<int64_t> scalar_data = {1, 2, 3, 4, 5};
+
+    const auto vector_arrays = create_array_vector(vector_data, dim);
+    const auto scalar_arrays = create_array_vector(scalar_data);
+
+    std::vector<FieldId> field_ids = {FieldId(100), FieldId(101)};
+    std::vector<FieldMeta> field_metas = {
+        FieldMeta(FieldName("float_vec"),
+                  FieldId(100),
+                  DataType::VECTOR_FLOAT,
+                  dim,
+                  knowhere::metric::L2),
+        FieldMeta(FieldName("int64_field"),
+                  FieldId(101),
+                  DataType::INT64,
+                  false,
+                  std::nullopt),
+    };
+    std::vector<arrow::ArrayVector> array_vecs = {vector_arrays, scalar_arrays};
+
+    auto chunks = create_group_chunk(field_ids, field_metas, array_vecs);
+    ASSERT_EQ(chunks.size(), 2);
+
+    auto vector_chunk = chunks.at(FieldId(100));
+    auto fixed_chunk = dynamic_cast<FixedWidthChunk*>(vector_chunk.get());
+    ASSERT_NE(fixed_chunk, nullptr);
+    EXPECT_EQ(vector_chunk->RowNums(), rows);
+    EXPECT_EQ(vector_chunk->Size(),
+              static_cast<uint64_t>(rows * dim * sizeof(float)));
+
+    auto span = fixed_chunk->Span();
+    EXPECT_EQ(span.row_count(), rows);
+    EXPECT_EQ(span.element_sizeof(),
+              static_cast<size_t>(dim * sizeof(float)));
+}
+
+TEST(ChunkedColumnGroupVectorTest, OperandTypeSizesMatchDenseVectorStorage) {
+    EXPECT_EQ(sizeof(knowhere::fp32), sizeof(float));
+    EXPECT_EQ(sizeof(knowhere::fp16), sizeof(uint16_t));
+    EXPECT_EQ(sizeof(knowhere::bf16), sizeof(uint16_t));
+    EXPECT_EQ(sizeof(knowhere::bin1), sizeof(uint8_t));
 }

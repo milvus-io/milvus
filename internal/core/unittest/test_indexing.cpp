@@ -849,6 +849,18 @@ TEST(Indexing, SearchDiskAnnWithInvalidParam) {
     EXPECT_THROW(
         vec_index->Query(xq_dataset, search_info, nullptr, nullptr, result),
         std::runtime_error);
+
+    // search disk index with the python-client alias search_list_size == limit
+    milvus::SearchInfo alias_search_info;
+    alias_search_info.topk_ = K;
+    alias_search_info.metric_type_ = metric_type;
+    alias_search_info.search_params_ = milvus::Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {milvus::index::DISK_ANN_SEARCH_LIST_SIZE, K - 1},
+    };
+    EXPECT_THROW(vec_index->Query(
+                     xq_dataset, alias_search_info, nullptr, nullptr, result),
+                 std::runtime_error);
 }
 
 TEST(Indexing, SearchDiskAnnWithFloat16) {

@@ -28,6 +28,42 @@ func TestVecIndexChecker_StaticCheck(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:     "Valid HNSW_SQ index",
+			dataType: schemapb.DataType_FloatVector,
+			params: map[string]string{
+				"index_type":     "HNSW_SQ",
+				"metric_type":    "L2",
+				"dim":            "128",
+				"M":              "16",
+				"efConstruction": "200",
+			},
+			wantErr: false,
+		},
+		{
+			name:     "Valid IVF_RABITQ index",
+			dataType: schemapb.DataType_FloatVector,
+			params: map[string]string{
+				"index_type":  "IVF_RABITQ",
+				"metric_type": "L2",
+				"dim":         "128",
+				"nlist":       "128",
+			},
+			wantErr: false,
+		},
+		{
+			name:     "Invalid IVF_PQ m does not divide dim",
+			dataType: schemapb.DataType_FloatVector,
+			params: map[string]string{
+				"index_type":  "IVF_PQ",
+				"metric_type": "L2",
+				"dim":         "128",
+				"nlist":       "128",
+				"m":           "7",
+				"nbits":       "8",
+			},
+			wantErr: true,
+		},
+		{
 			name:     "Invalid index type",
 			dataType: schemapb.DataType_FloatVector,
 			params: map[string]string{

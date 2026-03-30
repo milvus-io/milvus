@@ -3,12 +3,14 @@ package base
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -30,7 +32,7 @@ func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
 	}
 
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		const maxLogLength = 300
+		const maxLogLength = 10000
 		_method := strings.Split(method, "/")
 		_methodShortName := _method[len(_method)-1]
 
@@ -58,6 +60,22 @@ func LoggingUnaryInterceptor() grpc.UnaryClientInterceptor {
 
 		// Marshal response
 		respStr := marshalWithFallback(reply, "could not marshal response")
+		if _methodShortName == "Search" {
+			if searchResp, ok := reply.(*milvuspb.SearchResults); ok && searchResp.GetResults() != nil {
+				results := searchResp.GetResults()
+				respStr = fmt.Sprintf(
+					"summary num_queries=%d top_k=%d topks=%v ids_int_len=%d ids_str_len=%d scores_len=%d fields=%d all_search_count=%d",
+					results.GetNumQueries(),
+					results.GetTopK(),
+					results.GetTopks(),
+					len(results.GetIds().GetIntId().GetData()),
+					len(results.GetIds().GetStrId().GetData()),
+					len(results.GetScores()),
+					len(results.GetFieldsData()),
+					results.GetAllSearchCount(),
+				)
+			}
+		}
 		logWithRateLimit(_methodShortName, log.Info, log.RatedInfo, "Response", zap.String("method", _methodShortName), zap.String("resp", respStr))
 		logWithRateLimit(_methodShortName, log.Debug, log.RatedDebug, "Cost", zap.String("method", _methodShortName), zap.Duration("cost", cost))
 

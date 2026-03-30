@@ -476,6 +476,34 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     auto num_vectors = dataset->GetRows();
     knowhere::Json search_conf = PrepareSearchParams(search_info);
     auto topk = search_info.topk_;
+    if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+        if (CheckKeyInConfig(search_info.search_params_,
+                             DISK_ANN_SEARCH_LIST_SIZE)) {
+            search_conf[DISK_ANN_SEARCH_LIST_SIZE] =
+                search_info.search_params_[DISK_ANN_SEARCH_LIST_SIZE];
+        } else if (CheckKeyInConfig(search_info.search_params_,
+                                    DISK_ANN_QUERY_LIST)) {
+            search_conf[DISK_ANN_SEARCH_LIST_SIZE] =
+                search_info.search_params_[DISK_ANN_QUERY_LIST];
+        }
+
+        std::string validation_message;
+        if (const auto status =
+                knowhere::ValidateDiskannSearchConfig(search_conf, validation_message);
+            status != knowhere::Status::success) {
+            ThrowInfo(ErrorCode::UnexpectedError, validation_message);
+        }
+    }
+
+    if (GetIndexType() == knowhere::IndexEnum::INDEX_HNSW) {
+        std::fprintf(stderr,
+                     "[knowhere-rs-shim][vector-mem-query] index=%s metric=%s "
+                     "topk=%lld search_conf=%s\n",
+                     GetIndexType().c_str(),
+                     GetMetricType().c_str(),
+                     static_cast<long long>(topk),
+                     search_conf.dump().c_str());
+    }
     // TODO :: check dim of search data
     auto final = [&] {
         auto index_type = GetIndexType();

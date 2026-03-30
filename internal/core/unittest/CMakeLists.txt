@@ -29,6 +29,10 @@ link_directories(${PLANPARSER_LIB_DIR})
 
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/test_utils/test_segcore.yaml")
 
+if (MILVUS_USE_KNOWHERE_RS_SHIM)
+    add_definitions(-DMILVUS_USE_KNOWHERE_RS_SHIM)
+endif()
+
 # Collect test files from source directories using glob pattern
 file(GLOB_RECURSE SOURCE_TEST_FILES
     "${CMAKE_HOME_DIRECTORY}/src/**/*Test.cpp"
@@ -93,6 +97,11 @@ if (ENABLE_GCP_NATIVE)
     add_definitions(-DENABLE_GCP_NATIVE)
 else()
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "GcpNativeChunkManagerTest\\.cpp$")
+endif()
+
+if (MILVUS_USE_KNOWHERE_RS_SHIM)
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "RTreeIndexTest\\.cpp$")
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "RTreeIndexWrapperTest\\.cpp$")
 endif()
 
 if (LINUX)

@@ -8,6 +8,8 @@ extern "C" {
 enum class CIndexType : int32_t {
     Flat = 0,
     Hnsw = 1,
+    SparseInverted = 12,
+    SparseWand = 13,
 };
 
 enum class CMetricType : int32_t {

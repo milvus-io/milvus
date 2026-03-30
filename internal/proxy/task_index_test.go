@@ -309,6 +309,66 @@ func Test_sparse_parseIndexParams(t *testing.T) {
 	})
 }
 
+func Test_checkTrain_HNSWRejectsSparseWithUpstreamErrorText(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_SparseFloatVector,
+	}
+	params := map[string]string{
+		common.IndexTypeKey:  "HNSW",
+		common.MetricTypeKey: metric.IP,
+		"M":                  "16",
+		"efConstruction":     "200",
+	}
+
+	err := checkTrain(context.Background(), field, params)
+	assert.EqualError(t, err, "can't build with this index HNSW: invalid parameter")
+}
+
+func Test_checkTrain_DISKANNRejectsUnsupportedTypeWithUpstreamErrorText(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_BinaryVector,
+	}
+	params := map[string]string{
+		common.IndexTypeKey:  "DISKANN",
+		common.MetricTypeKey: metric.COSINE,
+	}
+
+	err := checkTrain(context.Background(), field, params)
+	assert.EqualError(t, err, "can't build with this index DISKANN: invalid parameter")
+}
+
+func Test_checkTrain_HNSWSQRejectsUnsupportedTypeWithUpstreamErrorText(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_BinaryVector,
+	}
+	params := map[string]string{
+		common.IndexTypeKey:  "HNSW_SQ",
+		common.MetricTypeKey: metric.HAMMING,
+		"M":                  "16",
+		"efConstruction":     "200",
+		"sq_type":            "SQ8",
+	}
+
+	err := checkTrain(context.Background(), field, params)
+	assert.EqualError(t, err, "can't build with this index HNSW_SQ: invalid parameter")
+}
+
+func Test_checkTrain_IVFRABITQRejectsUnsupportedTypeWithUpstreamErrorText(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_BinaryVector,
+	}
+	params := map[string]string{
+		common.IndexTypeKey:  "IVF_RABITQ",
+		common.MetricTypeKey: metric.HAMMING,
+		"nlist":              "128",
+		"refine":             "true",
+		"refine_type":        "SQ8",
+	}
+
+	err := checkTrain(context.Background(), field, params)
+	assert.EqualError(t, err, "can't build with this index IVF_RABITQ: invalid parameter")
+}
+
 func Test_deduplicate_parseIndexParams(t *testing.T) {
 	createTestIndexTask := func() *createIndexTask {
 		return &createIndexTask{
@@ -1593,6 +1653,22 @@ func Test_parseIndexParams_AutoIndex(t *testing.T) {
 			{Key: common.IndexTypeKey, Value: AutoIndexName},
 			{Key: common.MetricTypeKey, Value: "L2"},
 		}, task.newExtraParams)
+	})
+
+	t.Run("case 3b, binary autoindex rejects superstructure", func(t *testing.T) {
+		task := &createIndexTask{
+			fieldSchema: fieldSchemaBinary,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MetricTypeKey, Value: metric.SUPERSTRUCTURE},
+					{Key: common.IndexTypeKey, Value: AutoIndexName},
+				},
+			},
+		}
+		err := task.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not supported")
+		assert.Contains(t, err.Error(), metric.SUPERSTRUCTURE)
 	})
 
 	t.Run("case 4, duplicate and useless parameters passed", func(t *testing.T) {

@@ -1,13 +1,16 @@
 #pragma once
 
+#include <cstdio>
 #include <map>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
 #include "knowhere/index_node.h"
+#include "knowhere/index/raw_data_index_node.h"
 #include "knowhere/version.h"
 
 namespace milvus {
@@ -18,8 +21,17 @@ namespace knowhere {
 
 inline constexpr uint64_t kBinaryFlag = 1ULL << 0;
 inline constexpr uint64_t kFloat32Flag = 1ULL << 1;
+inline constexpr uint64_t kFloat16Flag = 1ULL << 2;
+inline constexpr uint64_t kBFloat16Flag = 1ULL << 3;
 inline constexpr uint64_t kSparseFloat32Flag = 1ULL << 4;
 inline constexpr uint64_t kInt8Flag = 1ULL << 5;
+inline constexpr uint64_t kEmbeddingListFlag = 1ULL << 15;
+inline constexpr uint64_t kNoTrainFlag = 1ULL << 16;
+inline constexpr uint64_t kKnnFlag = 1ULL << 17;
+inline constexpr uint64_t kGpuFlag = 1ULL << 18;
+inline constexpr uint64_t kMmapFlag = 1ULL << 19;
+inline constexpr uint64_t kMvFlag = 1ULL << 20;
+inline constexpr uint64_t kDiskFlag = 1ULL << 21;
 
 template <typename T>
 class Index {
@@ -243,6 +255,9 @@ class UnsupportedIndexNode : public IndexNode {
 
     expected<DataSetPtr>
     GetVectorByIds(const DataSet&) const override {
+        std::fprintf(stderr,
+                     "[knowhere-rs-shim][get-vector] node=unsupported index=%s\n",
+                     index_type_.c_str());
         return Status::not_implemented;
     }
 
@@ -303,6 +318,9 @@ class UnsupportedIndexNode : public IndexNode {
 std::shared_ptr<IndexNode>
 MakeHnswRustNode();
 
+std::shared_ptr<IndexNode>
+MakeSparseRustNode(const std::string& name);
+
 class IndexFactory {
  public:
     using FeatureMap = std::map<std::string, uint64_t>;
@@ -316,8 +334,59 @@ class IndexFactory {
     template <typename T, typename... Args>
     expected<Index<IndexNode>>
     Create(const std::string& name, Args&&...) const {
-        if (name == IndexEnum::INDEX_HNSW) {
+        if (name == IndexEnum::INDEX_HNSW ||
+            name == IndexEnum::INDEX_HNSW_SQ) {
+            if constexpr (std::is_same_v<T, bin1>) {
+                return Index<IndexNode>(
+                    MakeRawDataIndexNode(name, RawDataKind::Binary));
+            }
+            if constexpr (std::is_same_v<T, int8>) {
+                return Index<IndexNode>(
+                    MakeRawDataIndexNode(name, RawDataKind::Int8));
+            }
+            if constexpr (std::is_same_v<T, fp16>) {
+                return Index<IndexNode>(
+                    MakeRawDataIndexNode(name, RawDataKind::Float16));
+            }
+            if constexpr (std::is_same_v<T, bf16>) {
+                return Index<IndexNode>(
+                    MakeRawDataIndexNode(name, RawDataKind::BFloat16));
+            }
             return Index<IndexNode>(MakeHnswRustNode());
+        }
+        if (name == IndexEnum::INDEX_FAISS_BIN_IDMAP ||
+            name == IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
+            return Index<IndexNode>(
+                MakeRawDataIndexNode(name, RawDataKind::Binary));
+        }
+        if (name == IndexEnum::INDEX_FAISS_IDMAP ||
+            name == IndexEnum::INDEX_FAISS_IVFFLAT ||
+            name == IndexEnum::INDEX_FAISS_IVFFLAT_CC ||
+            name == IndexEnum::INDEX_FAISS_IVFPQ ||
+            name == IndexEnum::INDEX_FAISS_IVF_RABITQ ||
+            name == IndexEnum::INDEX_FAISS_IVFSQ8 ||
+            name == IndexEnum::INDEX_FAISS_IVFSQ ||
+            name == IndexEnum::INDEX_FAISS_SCANN_DVR ||
+            name == IndexEnum::INDEX_DISKANN) {
+            if constexpr (std::is_same_v<T, float>) {
+                return Index<IndexNode>(
+                    MakeRawDataIndexNode(name, RawDataKind::Float32));
+            }
+            if constexpr (std::is_same_v<T, fp16>) {
+                return Index<IndexNode>(
+                    MakeRawDataIndexNode(name, RawDataKind::Float16));
+            }
+            if constexpr (std::is_same_v<T, bf16>) {
+                return Index<IndexNode>(
+                    MakeRawDataIndexNode(name, RawDataKind::BFloat16));
+            }
+        }
+        if (name == IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
+            name == IndexEnum::INDEX_SPARSE_WAND) {
+            if constexpr (std::is_same_v<T, float> ||
+                          std::is_same_v<T, sparse_u32_f32>) {
+                return Index<IndexNode>(MakeSparseRustNode(name));
+            }
         }
         return Index<IndexNode>(
             std::make_shared<UnsupportedIndexNode>(name));
@@ -331,9 +400,35 @@ class IndexFactory {
     static const FeatureMap&
     GetIndexFeatures() {
         static const FeatureMap features = {
-            {IndexEnum::INDEX_HNSW, kFloat32Flag | kInt8Flag},
+            {IndexEnum::INDEX_HNSW,
+             kBinaryFlag | kFloat32Flag | kFloat16Flag | kBFloat16Flag |
+                 kInt8Flag | kMvFlag},
+            {IndexEnum::INDEX_HNSW_SQ,
+             kFloat32Flag | kFloat16Flag | kBFloat16Flag | kInt8Flag |
+                 kMvFlag},
+            {IndexEnum::INDEX_FAISS_IDMAP,
+             kFloat32Flag | kFloat16Flag | kBFloat16Flag | kNoTrainFlag |
+                 kKnnFlag},
+            {IndexEnum::INDEX_FAISS_IVFFLAT,
+             kFloat32Flag | kFloat16Flag | kBFloat16Flag},
+            {IndexEnum::INDEX_FAISS_IVFFLAT_CC,
+             kFloat32Flag | kFloat16Flag | kBFloat16Flag},
+            {IndexEnum::INDEX_FAISS_IVFPQ,
+             kFloat32Flag | kFloat16Flag | kBFloat16Flag},
+            {IndexEnum::INDEX_FAISS_IVF_RABITQ,
+             kFloat32Flag | kFloat16Flag | kBFloat16Flag},
+            {IndexEnum::INDEX_FAISS_IVFSQ8,
+             kFloat32Flag | kFloat16Flag | kBFloat16Flag},
+            {IndexEnum::INDEX_FAISS_IVFSQ,
+             kFloat32Flag | kFloat16Flag | kBFloat16Flag},
+            {IndexEnum::INDEX_FAISS_SCANN_DVR,
+             kFloat32Flag | kFloat16Flag | kBFloat16Flag},
+            {IndexEnum::INDEX_DISKANN,
+             kFloat32Flag | kFloat16Flag | kBFloat16Flag | kDiskFlag},
+            {IndexEnum::INDEX_FAISS_BIN_IDMAP, kBinaryFlag | kNoTrainFlag | kKnnFlag},
             {IndexEnum::INDEX_FAISS_BIN_IVFFLAT, kBinaryFlag},
             {IndexEnum::INDEX_SPARSE_INVERTED_INDEX, kSparseFloat32Flag},
+            {IndexEnum::INDEX_SPARSE_WAND, kSparseFloat32Flag},
             {"MINHASH_LSH", kBinaryFlag},
         };
         return features;

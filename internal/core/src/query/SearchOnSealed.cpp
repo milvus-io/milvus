@@ -12,20 +12,77 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <vector>
 
 #include "bitset/detail/element_wise.h"
 #include "cachinglayer/Utils.h"
 #include "common/BitsetView.h"
+#include "common/Chunk.h"
 #include "common/QueryInfo.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "exec/operator/Utils.h"
+#include "log/Log.h"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "query/helper.h"
-#include "exec/operator/Utils.h"
 
 namespace milvus::query {
+
+namespace {
+
+int64_t
+BytesPerVector(DataType data_type, int64_t dim) {
+    switch (data_type) {
+        case DataType::VECTOR_FLOAT:
+            return dim * static_cast<int64_t>(sizeof(float));
+        case DataType::VECTOR_FLOAT16:
+        case DataType::VECTOR_BFLOAT16:
+            return dim * static_cast<int64_t>(sizeof(uint16_t));
+        case DataType::VECTOR_BINARY:
+            return (dim + 7) / 8;
+        case DataType::VECTOR_INT8:
+            return dim * static_cast<int64_t>(sizeof(int8_t));
+        default:
+            return 0;
+    }
+}
+
+const void*
+PrepareChunkVectorData(ChunkedColumnInterface* column,
+                       milvus::OpContext* op_context,
+                       DataType data_type,
+                       int64_t dim,
+                       int64_t begin_offset,
+                       int64_t chunk_rows,
+                       const milvus::Chunk* chunk,
+                       std::vector<char>& materialized_chunk) {
+    auto bytes_per_vector = BytesPerVector(data_type, dim);
+    if (bytes_per_vector <= 0 || chunk == nullptr) {
+        return chunk == nullptr ? nullptr : chunk->Data();
+    }
+
+    auto expected_bytes =
+        static_cast<uint64_t>(chunk_rows) * static_cast<uint64_t>(bytes_per_vector);
+    if (chunk->Size() >= expected_bytes) {
+        return chunk->Data();
+    }
+
+    std::vector<int64_t> offsets(static_cast<size_t>(chunk_rows));
+    for (int64_t row = 0; row < chunk_rows; ++row) {
+        offsets[static_cast<size_t>(row)] = begin_offset + row;
+    }
+    materialized_chunk.resize(expected_bytes);
+    column->BulkVectorValueAt(op_context,
+                              materialized_chunk.data(),
+                              offsets.data(),
+                              bytes_per_vector,
+                              chunk_rows);
+    return materialized_chunk.data();
+}
+
+}  // namespace
 
 void
 SearchOnSealedIndex(const Schema& schema,
@@ -72,6 +129,15 @@ SearchOnSealedIndex(const Schema& schema,
         SemiInlineGet(field_indexing->indexing_->PinCells(nullptr, {0}));
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
+
+    if (search_info.search_params_.contains("search_list_size") ||
+        search_info.search_params_.contains("search_list")) {
+        LOG_INFO("SearchOnSealedIndex DISKANN-like params vec_index_type:{} "
+                 "search_params:{}",
+                 vec_index == nullptr ? std::string("<null>")
+                                     : vec_index->GetIndexType(),
+                 search_info.search_params_.dump());
+    }
 
     if (search_info.iterator_v2_info_.has_value()) {
         CachedSearchIterator cached_iter(
@@ -156,8 +222,37 @@ SearchOnSealedColumn(const Schema& schema,
     auto vector_chunks = column->GetAllChunks(op_context);
     for (int i = 0; i < num_chunk; ++i) {
         auto pw = vector_chunks[i];
-        auto vec_data = pw.get()->Data();
         auto chunk_size = column->chunk_row_nums(i);
+        auto chunk_rows = pw.get()->RowNums();
+        if (milvus::exec::UseVectorIterator(search_info)) {
+            LOG_INFO(
+                "SearchOnSealedColumn iterator lane field_id:{} chunk_id:{} "
+                "data_type:{} dim:{} begin_offset:{} chunk_rows:{} "
+                "column_chunk_rows:{} chunk_bytes:{}",
+                field_id.get(),
+                i,
+                static_cast<int>(data_type),
+                dim,
+                offset,
+                chunk_rows,
+                chunk_size,
+                pw.get()->Size());
+        }
+        AssertInfo(chunk_rows == chunk_size,
+                   "chunk row mismatch for brute-force iterator path, chunk_id:{}, "
+                   "column_rows:{}, chunk_rows:{}",
+                   i,
+                   chunk_size,
+                   chunk_rows);
+        std::vector<char> materialized_chunk;
+        auto vec_data = PrepareChunkVectorData(column,
+                                              op_context,
+                                              data_type,
+                                              dim,
+                                              offset,
+                                              chunk_size,
+                                              pw.get(),
+                                              materialized_chunk);
         auto raw_dataset =
             query::dataset::RawDataset{offset, dim, chunk_size, vec_data};
 

@@ -84,6 +84,30 @@ class SparseRow {
         return data_[offset];
     }
 
+    void
+    set_at(size_t offset, uint32_t id, T value) {
+        data_[offset].id = id;
+        data_[offset].val = value;
+    }
+
+    T
+    dot(const SparseRow& other) const {
+        if (data_ == nullptr || other.data_ == nullptr || empty() || other.empty()) {
+            return T{};
+        }
+
+        T score{};
+        for (size_t left = 0; left < size_; ++left) {
+            for (size_t right = 0; right < other.size_; ++right) {
+                if (data_[left].id != other.data_[right].id) {
+                    continue;
+                }
+                score += data_[left].val * other.data_[right].val;
+            }
+        }
+        return score;
+    }
+
     static constexpr size_t
     element_size() {
         return sizeof(Element);

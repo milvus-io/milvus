@@ -320,10 +320,27 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
     knowhere::Json search_config = PrepareSearchParams(search_info);
 
     if (GetIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
-        // set search list size
-        if (CheckKeyInConfig(search_info.search_params_, DISK_ANN_QUERY_LIST)) {
+        // Accept both the legacy query key and the newer python-client alias.
+        if (CheckKeyInConfig(search_info.search_params_,
+                             DISK_ANN_SEARCH_LIST_SIZE)) {
+            search_config[DISK_ANN_SEARCH_LIST_SIZE] =
+                search_info.search_params_[DISK_ANN_SEARCH_LIST_SIZE];
+        } else if (CheckKeyInConfig(search_info.search_params_,
+                                    DISK_ANN_QUERY_LIST)) {
             search_config[DISK_ANN_SEARCH_LIST_SIZE] =
                 search_info.search_params_[DISK_ANN_QUERY_LIST];
+        }
+
+        LOG_INFO(
+            "DISKANN query config raw_search_params={} effective_search_config={}",
+            search_info.search_params_.dump(),
+            search_config.dump());
+
+        std::string validation_message;
+        if (const auto status =
+                knowhere::ValidateDiskannSearchConfig(search_config, validation_message);
+            status != knowhere::Status::success) {
+            ThrowInfo(ErrorCode::UnexpectedError, validation_message);
         }
         // set beamwidth
         search_config[DISK_ANN_QUERY_BEAMWIDTH] = int(search_beamwidth_);

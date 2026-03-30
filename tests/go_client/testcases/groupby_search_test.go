@@ -161,6 +161,44 @@ func TestSearchGroupByFloatDefault(t *testing.T) {
 	wg.Wait()
 }
 
+func TestSearchGroupByFloatFilteredSearchNonEmptyPerIndex(t *testing.T) {
+	for _, idx := range genGroupByVectorIndex(entity.L2) {
+		t.Run(fmt.Sprintf("%s_%s", idx.Name(), idx.IndexType()), func(t *testing.T) {
+			mc, ctx, collName := prepareDataForGroupBySearch(t, 100, 200, idx, false)
+			queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+			supportedGroupByFields := []string{
+				common.DefaultInt64FieldName, common.DefaultInt8FieldName,
+				common.DefaultInt16FieldName, common.DefaultInt32FieldName, common.DefaultVarcharFieldName, common.DefaultBoolFieldName,
+			}
+			for _, groupByField := range supportedGroupByFields {
+				resGroupBy, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, queryVec).WithANNSField(common.DefaultFloatVecFieldName).
+					WithGroupByField(groupByField).WithOutputFields(common.DefaultInt64FieldName, groupByField))
+				common.CheckErr(t, err, true)
+
+				for i := 0; i < common.DefaultNq; i++ {
+					for j := 0; j < resGroupBy[i].ResultCount; j++ {
+						groupByValue, _ := resGroupBy[i].GroupByValue.Get(j)
+						var expr string
+						if groupByField == common.DefaultVarcharFieldName {
+							expr = fmt.Sprintf("%s == '%v' ", groupByField, groupByValue)
+						} else {
+							expr = fmt.Sprintf("%s == %v", groupByField, groupByValue)
+						}
+
+						resFilter, err := mc.Search(ctx, client.NewSearchOption(collName, 1, queryVec[:1]).WithANNSField(common.DefaultFloatVecFieldName).
+							WithGroupByField(groupByField).WithFilter(expr).WithOutputFields(common.DefaultInt64FieldName, groupByField))
+						common.CheckErr(t, err, true)
+						if len(resFilter) == 0 || resFilter[0].ResultCount == 0 {
+							t.Fatalf("index=%s group_by=%s query=%d group_value=%v returned empty filtered group-by search",
+								idx.IndexType(), groupByField, i, groupByValue)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestSearchGroupByFloatDefaultCosine(t *testing.T) {
 	t.Parallel()
 	concurrency := 10
