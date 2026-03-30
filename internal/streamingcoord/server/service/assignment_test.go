@@ -346,10 +346,14 @@ func TestForcePromoteSuccess(t *testing.T) {
 
 	as := NewAssignmentService()
 
-	// Force promote with empty config (configuration is auto-constructed)
+	// Force promote with config specifying only the current cluster (no topology)
 	resp, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
-		Configuration: &commonpb.ReplicateConfiguration{},
-		ForcePromote:  true,
+		Configuration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev"},
+			},
+		},
+		ForcePromote: true,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
@@ -407,10 +411,14 @@ func TestForcePromoteIdempotent(t *testing.T) {
 
 	as := NewAssignmentService()
 
-	// Force promote with empty config - auto-constructed config matches existing
+	// Force promote with config specifying only the current cluster (no topology)
 	resp, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
-		Configuration: &commonpb.ReplicateConfiguration{},
-		ForcePromote:  true,
+		Configuration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev"},
+			},
+		},
+		ForcePromote: true,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
@@ -609,10 +617,14 @@ func TestForcePromoteBroadcastAppendError(t *testing.T) {
 	broadcast.Register(mb)
 
 	as := NewAssignmentService()
-	// Force promote with empty config
+	// Force promote with config specifying only the current cluster (no topology)
 	_, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
-		Configuration: &commonpb.ReplicateConfiguration{},
-		ForcePromote:  true,
+		Configuration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev"},
+			},
+		},
+		ForcePromote: true,
 	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "broadcast append failed")
@@ -994,10 +1006,14 @@ func TestHandleForcePromoteGetAssignmentError(t *testing.T) {
 	broadcast.Register(mb)
 
 	as := NewAssignmentService()
-	// Force promote with empty config
+	// Force promote with config specifying only the current cluster (no topology)
 	_, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
-		Configuration: &commonpb.ReplicateConfiguration{},
-		ForcePromote:  true,
+		Configuration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev"},
+			},
+		},
+		ForcePromote: true,
 	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "assignment error")
@@ -1058,10 +1074,14 @@ func TestHandleForcePromoteSameConfigAfterBroadcasterCheck(t *testing.T) {
 	broadcast.Register(mb)
 
 	as := NewAssignmentService()
-	// Force promote with empty config
+	// Force promote with config specifying only the current cluster (no topology)
 	resp, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
-		Configuration: &commonpb.ReplicateConfiguration{},
-		ForcePromote:  true,
+		Configuration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev"},
+			},
+		},
+		ForcePromote: true,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
@@ -1117,10 +1137,14 @@ func TestHandleForcePromoteValidatorError(t *testing.T) {
 	broadcast.Register(mb)
 
 	as := NewAssignmentService()
-	// Force promote with empty config
+	// Force promote with config specifying only the current cluster (no topology)
 	_, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
-		Configuration: &commonpb.ReplicateConfiguration{},
-		ForcePromote:  true,
+		Configuration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev"},
+			},
+		},
+		ForcePromote: true,
 	})
 	assert.Error(t, err)
 }
@@ -1165,8 +1189,12 @@ func TestHandleForcePromoteNoCurrentConfig(t *testing.T) {
 
 	as := NewAssignmentService()
 	_, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
-		Configuration: &commonpb.ReplicateConfiguration{},
-		ForcePromote:  true,
+		Configuration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev"},
+			},
+		},
+		ForcePromote: true,
 	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "force promote requires existing replicate configuration")
@@ -1216,8 +1244,12 @@ func TestHandleForcePromoteClusterNotFound(t *testing.T) {
 
 	as := NewAssignmentService()
 	_, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
-		Configuration: &commonpb.ReplicateConfiguration{},
-		ForcePromote:  true,
+		Configuration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev"},
+			},
+		},
+		ForcePromote: true,
 	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "force promote requires current cluster in existing configuration")
@@ -1384,10 +1416,14 @@ func TestForcePromoteMultiplePChannels(t *testing.T) {
 	broadcast.Register(mb)
 
 	as := NewAssignmentService()
-	// Force promote with empty config - config auto-constructed from meta with all pchannels
+	// Force promote with config specifying only the current cluster (no topology)
 	resp, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
-		Configuration: &commonpb.ReplicateConfiguration{},
-		ForcePromote:  true,
+		Configuration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{
+				{ClusterId: "by-dev"},
+			},
+		},
+		ForcePromote: true,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
