@@ -100,10 +100,13 @@ func (b *balancerImpl) ReplicateRole() replicateutil.Role {
 	return b.channelMetaManager.ReplicateRole()
 }
 
-// GetAllStreamingNodes fetches all streaming node info.
-// Filter out frozen nodes to prevent downstream consumers (e.g., ReplicaObserver)
-// from treating frozen nodes as available.
+// GetAllStreamingNodes fetches all streaming node info (including frozen nodes).
 func (b *balancerImpl) GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
+	return resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
+}
+
+// GetAvailableStreamingNodes fetches streaming node info excluding frozen nodes.
+func (b *balancerImpl) GetAvailableStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
 	nodes, err := resource.Resource().StreamingNodeManagerClient().GetAllStreamingNodes(ctx)
 	if err != nil {
 		return nil, err
