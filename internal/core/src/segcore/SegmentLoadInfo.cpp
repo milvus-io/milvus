@@ -651,17 +651,30 @@ SegmentLoadInfo::GetLoadDiff() {
     // - manifest -> manifest
     // Cross-category changes are not supported.
     if (HasManifestPath()) {
-        // set mock path for null check
-        empty_info.info_.set_manifest_path("mocked manifest path");
-        empty_info.column_groups_ =
-            std::make_shared<milvus_storage::api::ColumnGroups>();
-        empty_info.ComputeDiffColumnGroups(diff, *this);
+        if (schema_->is_external_collection()) {
+            // External collections use parquet field names (e.g., "id",
+            // "value") as column group column names, not numeric field IDs.
+            // ComputeDiffColumnGroups calls std::stoll which would crash.
+            // Flag for direct manifest loading in ApplyLoadDiff.
+            diff.load_external_manifest = true;
+        } else {
+            // set mock path for null check
+            empty_info.info_.set_manifest_path("mocked manifest path");
+            empty_info.column_groups_ =
+                std::make_shared<milvus_storage::api::ColumnGroups>();
+            empty_info.ComputeDiffColumnGroups(diff, *this);
+        }
     } else {
         empty_info.ComputeDiffBinlogs(diff, *this);
     }
 
     // Compute fields that need default value filling (schema evolution)
-    empty_info.ComputeDiffDefaultFields(diff, *this);
+    // Skip for external collections: collect_data_fields() calls std::stoll
+    // on column group names, and external collections don't need default fills
+    // (all fields are either external or virtual PK).
+    if (!schema_->is_external_collection()) {
+        empty_info.ComputeDiffDefaultFields(diff, *this);
+    }
 
     return diff;
 }

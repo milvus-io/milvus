@@ -215,7 +215,7 @@ func (suite *SearchSuite) TestSearchWithFilter() {
 
 		bfs, err := loader.loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
 		suite.Require().NoError(err)
-		seg.SetBloomFilter(bfs)
+		seg.SetPKCandidate(bfs)
 
 		for _, binlog := range binlogs {
 			err = seg.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLen), binlog)

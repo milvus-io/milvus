@@ -89,10 +89,15 @@ type Segment interface {
 	Release(ctx context.Context, opts ...releaseOption)
 	Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error
 
-	// Bloom filter related
-	SetBloomFilter(bf *pkoracle.BloomFilterSet)
-	BloomFilterExist() bool
-	UpdateBloomFilter(pks []storage.PrimaryKey)
+	// PK candidate related (BloomFilterSet for regular segments, ExternalSegmentCandidate for external)
+	// Segment implements pkoracle.Candidate: MayPkExist, BatchPkExist, ID, Partition, Type,
+	// PkCandidateExist, UpdatePkCandidate, Stats, Charge, Refund — with protective guards (e.g. skipGrowingBF).
+	SetPKCandidate(candidate pkoracle.Candidate)
+	PkCandidateExist() bool
+	UpdatePkCandidate(pks []storage.PrimaryKey)
+	Stats() *storage.PkStatistics
+	Charge()
+	Refund()
 	MayPkExist(lc *storage.LocationsCache) bool
 	BatchPkExist(lc *storage.BatchLocationsCache) []bool
 

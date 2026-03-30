@@ -1522,7 +1522,7 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	s.ElementsMatch(rawPks, []storage.PrimaryKey{partitionDeleteData.DeletePks().Get(0), allPartitionDeleteData.DeletePks().Get(0)})
 
 	bfs := pkoracle.NewBloomFilterSet(3, l0.Partition(), commonpb.SegmentState_Sealed)
-	bfs.UpdateBloomFilter([]storage.PrimaryKey{allPartitionDeleteData.DeletePks().Get(0)})
+	bfs.UpdatePkCandidate([]storage.PrimaryKey{allPartitionDeleteData.DeletePks().Get(0)})
 
 	pks, _ = delegator.GetLevel0Deletions(partitionID, bfs)
 	// bf filtered segment

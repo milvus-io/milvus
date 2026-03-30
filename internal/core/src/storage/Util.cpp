@@ -1510,13 +1510,22 @@ GetFieldDatasFromManifest(
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
 
+    // Determine the column name to use: external fields use their external name,
+    // internal fields use the numeric field ID string.
+    std::string column_name;
+    const auto& ext_field = field_meta.field_schema.external_field();
+    if (!ext_field.empty()) {
+        column_name = ext_field;
+    } else {
+        column_name = std::to_string(field_meta.field_id);
+    }
+
     // TODO remove manual check after loon support read null for non-exists field
     bool field_exists = false;
-    const auto field_id_to_find = std::to_string(field_meta.field_id);
     for (size_t i = 0; i < column_groups->size() && !field_exists; i++) {
         auto column_group = column_groups->at(i);
         for (const auto& column : column_group->columns) {
-            if (column == field_id_to_find) {
+            if (column == column_name) {
                 field_exists = true;
                 break;
             }
@@ -1526,8 +1535,7 @@ GetFieldDatasFromManifest(
         return {};
     }
 
-    std::string field_id_str = std::to_string(field_meta.field_id);
-    std::vector<std::string> needed_columns = {field_id_str};
+    std::vector<std::string> needed_columns = {column_name};
 
     // Create arrow schema from field meta
     std::shared_ptr<arrow::Schema> arrow_schema;
@@ -1553,8 +1561,7 @@ GetFieldDatasFromManifest(
     }
 
     auto updated_schema = std::make_shared<arrow::Schema>(
-        arrow::Schema({arrow_schema->field(0)->WithName(
-            std::to_string((field_meta.field_id)))}));
+        arrow::Schema({arrow_schema->field(0)->WithName(column_name)}));
 
     auto reader = milvus_storage::api::Reader::create(
         column_groups,
@@ -1589,8 +1596,61 @@ GetFieldDatasFromManifest(
             continue;
         }
 
-        auto chunked_array = std::make_shared<arrow::ChunkedArray>(
-            batch->GetColumnByName(field_id_str));
+        auto column = batch->GetColumnByName(column_name);
+
+        // External parquet files store vectors as List<float> or
+        // FixedSizeList<float>, but Milvus expects FixedSizeBinary.
+        // Normalize here so that FillFieldData sees the right Arrow type.
+        if (!field_meta.field_schema.external_field().empty() &&
+            IsVectorDataType(data_type.value()) &&
+            !IsSparseFloatVectorDataType(data_type.value()) &&
+            column->type_id() != arrow::Type::FIXED_SIZE_BINARY) {
+            int byte_width = GetDataTypeSize(data_type.value(), dim);
+            auto fsb_type = arrow::fixed_size_binary(byte_width);
+            int64_t n = column->length();
+
+            auto buf_res = arrow::AllocateBuffer(n * byte_width);
+            AssertInfo(buf_res.ok(),
+                       "Failed to allocate buffer for vector normalization");
+            auto buffer = std::move(*buf_res);
+            auto dst = buffer->mutable_data();
+
+            if (column->type_id() == arrow::Type::LIST) {
+                auto list_arr =
+                    std::static_pointer_cast<arrow::ListArray>(column);
+                auto values = list_arr->values();
+                int elem_bytes = values->type()->bit_width() / 8;
+                auto raw = reinterpret_cast<const uint8_t*>(
+                    values->data()->buffers[1]->data());
+                for (int64_t i = 0; i < n; i++) {
+                    memcpy(dst + i * byte_width,
+                           raw + list_arr->value_offset(i) * elem_bytes,
+                           byte_width);
+                }
+            } else if (column->type_id() == arrow::Type::FIXED_SIZE_LIST) {
+                auto fsl_arr =
+                    std::static_pointer_cast<arrow::FixedSizeListArray>(column);
+                auto values = fsl_arr->values();
+                int elem_bytes = values->type()->bit_width() / 8;
+                auto raw = reinterpret_cast<const uint8_t*>(
+                    values->data()->buffers[1]->data());
+                for (int64_t i = 0; i < n; i++) {
+                    memcpy(dst + i * byte_width,
+                           raw + fsl_arr->value_offset(i) * elem_bytes,
+                           byte_width);
+                }
+            } else {
+                ThrowInfo(Unsupported,
+                          "Unsupported arrow type for external vector "
+                          "normalization: {}",
+                          column->type()->ToString());
+            }
+
+            column = std::make_shared<arrow::FixedSizeBinaryArray>(
+                fsb_type, n, std::move(buffer));
+        }
+
+        auto chunked_array = std::make_shared<arrow::ChunkedArray>(column);
         auto field_data = CreateFieldData(data_type.value(),
                                           element_type.value(),
                                           batch->schema()->field(0)->nullable(),

@@ -5410,3 +5410,74 @@ func TestMinHashFunction(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestInjectVirtualPKForExternalCollection(t *testing.T) {
+	t.Run("NoPKExists_InjectsVirtualPK", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:           "test_ext_coll",
+			ExternalSource: "s3://bucket/data",
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text_col"},
+				{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec_col"},
+			},
+		}
+
+		err := injectVirtualPKForExternalCollection(schema)
+		assert.NoError(t, err)
+
+		// Virtual PK should be prepended as first field
+		assert.Len(t, schema.Fields, 3)
+		vpk := schema.Fields[0]
+		assert.Equal(t, common.VirtualPKFieldName, vpk.Name)
+		assert.Equal(t, schemapb.DataType_Int64, vpk.DataType)
+		assert.True(t, vpk.IsPrimaryKey)
+		assert.True(t, vpk.AutoID)
+
+		// Original fields remain unchanged
+		assert.Equal(t, "text", schema.Fields[1].Name)
+		assert.Equal(t, "vec", schema.Fields[2].Name)
+	})
+
+	t.Run("PKAlreadyExists_NoInjection", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "my_pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
+		}
+
+		err := injectVirtualPKForExternalCollection(schema)
+		assert.NoError(t, err)
+
+		// No virtual PK injected — only 2 fields remain
+		assert.Len(t, schema.Fields, 2)
+		assert.Equal(t, "my_pk", schema.Fields[0].Name)
+	})
+
+	t.Run("EmptyFields_InjectsVirtualPK", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{},
+		}
+
+		err := injectVirtualPKForExternalCollection(schema)
+		assert.NoError(t, err)
+
+		assert.Len(t, schema.Fields, 1)
+		assert.Equal(t, common.VirtualPKFieldName, schema.Fields[0].Name)
+		assert.True(t, schema.Fields[0].IsPrimaryKey)
+	})
+
+	t.Run("VirtualPKFieldID_IsZero", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec_col"},
+			},
+		}
+
+		err := injectVirtualPKForExternalCollection(schema)
+		assert.NoError(t, err)
+
+		// FieldID should be 0 (assigned by RootCoord later)
+		assert.Equal(t, int64(0), schema.Fields[0].FieldID)
+	})
+}
