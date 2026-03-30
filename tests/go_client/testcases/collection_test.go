@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"testing"
@@ -29,6 +30,9 @@ func TestCreateCollection(t *testing.T) {
 		schema := hp.GenSchema(hp.TNewSchemaOption().TWithFields(fields))
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(schema.CollectionName))
+		})
 
 		// has collections and verify
 		has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -52,6 +56,9 @@ func TestCreateCollectionFast(t *testing.T) {
 	collName := common.GenRandomString("alter", 6)
 	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify collection option
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -85,6 +92,9 @@ func TestCreateCollectionFastOption(t *testing.T) {
 	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim).WithDynamicSchema(true).
 		WithConsistencyLevel(entity.ClStrong).WithIndexOptions(indexOption).WithVarcharPK(true, 10))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify collection option
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -123,6 +133,9 @@ func TestCreateAutoIdCollectionField(t *testing.T) {
 		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// verify field name
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -150,6 +163,9 @@ func TestCreateCollectionShards(t *testing.T) {
 		schema := entity.NewSchema().WithName(collName).WithField(int64Field).WithField(vecField)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithShardNum(shard))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// verify field name
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -176,6 +192,9 @@ func TestCreateAutoIdCollectionSchema(t *testing.T) {
 		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithAutoID(true)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// verify field name
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -205,6 +224,9 @@ func TestCreateAutoIdCollection(t *testing.T) {
 		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithAutoID(true)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithAutoID(true))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// verify field name
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -232,6 +254,9 @@ func TestCreateJsonCollection(t *testing.T) {
 	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField).WithField(jsonField)
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify field name
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -260,6 +285,9 @@ func TestCreateArrayCollections(t *testing.T) {
 	// pk field with name
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify field name
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -282,6 +310,9 @@ func TestCreateCollectionPartitionKey(t *testing.T) {
 
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 		common.CheckErr(t, err, true)
@@ -316,6 +347,9 @@ func TestCreateCollectionPartitionKeyNumPartition(t *testing.T) {
 
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// verify partitions num
 		partitions, err := mc.ListPartitions(ctx, client.NewListPartitionOption(collName))
@@ -336,6 +370,9 @@ func TestCreateCollectionDynamicSchema(t *testing.T) {
 	// pk field with name
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify field name
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -368,6 +405,9 @@ func TestCreateCollectionDynamic(t *testing.T) {
 	// pk field with name
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithDynamicSchema(true))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify field name
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -404,6 +444,9 @@ func TestCreateCollectionAllFields(t *testing.T) {
 	// pk field with name
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify field name
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -423,6 +466,9 @@ func TestCreateCollectionSparseVector(t *testing.T) {
 	// pk field with name
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithDynamicSchema(true))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// verify field name
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(schema.CollectionName))
@@ -446,6 +492,9 @@ func TestCreateCollectionWithValidFieldName(t *testing.T) {
 		schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// verify field name
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -722,6 +771,9 @@ func TestCreateCollectionInconsistentAutoId(t *testing.T) {
 		// create collection
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 		common.CheckErr(t, err, true)
+		t.Cleanup(func() {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+		})
 
 		// describe collection
 		coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -751,6 +803,9 @@ func TestCreateCollectionDescription(t *testing.T) {
 
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 	common.CheckErr(t, err, true)
@@ -1049,6 +1104,10 @@ func TestRenameCollectionDb(t *testing.T) {
 	// create collection
 	collectionName := common.GenRandomString("re", 6)
 	mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collectionName, common.DefaultDim))
+	t.Cleanup(func() {
+		mc.UseDatabase(context.Background(), client.NewUseDatabaseOption(common.DefaultDb))
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collectionName))
+	})
 
 	// create a database and use database
 	dbName := common.GenRandomString("db", 4)
@@ -1060,6 +1119,10 @@ func TestRenameCollectionDb(t *testing.T) {
 	newName := common.GenRandomString("new", 6)
 	err := mc.RenameCollection(ctx, client.NewRenameCollectionOption(collectionName, newName))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		mc.UseDatabase(context.Background(), client.NewUseDatabaseOption(dbName))
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(newName))
+	})
 
 	collections, _ := mc.ListCollections(ctx, client.NewListCollectionOption())
 	require.Contains(t, collections, newName)
@@ -1080,6 +1143,9 @@ func TestRenameCollectionInvalidName(t *testing.T) {
 	// create collection
 	collectionName := common.GenRandomString("re", 6)
 	mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collectionName, common.DefaultDim))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collectionName))
+	})
 
 	// rename collection with invalid name
 	for _, invalidName := range common.GenInvalidNames() {
@@ -1102,7 +1168,13 @@ func TestRenameCollectionAdvanced(t *testing.T) {
 	name1 := common.GenRandomString("name1", 6)
 	name2 := common.GenRandomString("name2", 6)
 	mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(name1, common.DefaultDim))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(name1))
+	})
 	mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(name2, common.DefaultDim))
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(name2))
+	})
 
 	// rename: old name same with new name
 	err := mc.RenameCollection(ctx, client.NewRenameCollectionOption(name1, name1))
@@ -1224,6 +1296,9 @@ func TestCollectionFakeProperties(t *testing.T) {
 	collName := common.GenRandomString("alter", 6)
 	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim).WithProperty("1", "bbb"))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 	coll, _ := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
 	require.Subset(t, coll.Properties, map[string]string{"1": "bbb"})
 
