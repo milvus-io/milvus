@@ -119,7 +119,7 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	collName := common.GenRandomString(snapshotPrefix, 6)
 	schema := client.SimpleCreateCollectionOptions(collName, common.DefaultDim)
 	schema.WithAutoID(false)
-	schema.WithShardNum(10)
+	schema.WithShardNum(4)
 	err := mc.CreateCollection(ctx, schema)
 	common.CheckErr(t, err, true)
 	collectionsToClean := []string{collName}
@@ -194,9 +194,9 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	require.Equal(t, snapshotName, snapshotInfo.GetName())
 	log.Info("check snapshot info", zap.Any("info", snapshotInfo))
 
-	// Step 3: Continue inserting more records and delete 1000 records
-	// Insert more records
-	for i := 0; i < numOfBatch; i++ {
+	// Step 3: Continue inserting more records after snapshot to verify point-in-time restore
+	postSnapshotBatches := 2
+	for i := 0; i < postSnapshotBatches; i++ {
 		pkStart := insertBatchSize * (numOfBatch + i)
 		insertOpt2 := hp.TNewDataOption().TWithNb(insertBatchSize).TWithStart(pkStart)
 		_, insertRes2 := hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema), insertOpt2)
@@ -207,7 +207,7 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	queryRes3, err := mc.Query(ctx, client.NewQueryOption(collName).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	count, _ = queryRes3.Fields[0].GetAsInt64(0)
-	require.Equal(t, int64(175000), count)
+	require.Equal(t, int64(115000), count)
 
 	// Step 4: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
@@ -230,8 +230,6 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	common.CheckErr(t, err, true)
 	err = loadTask.Await(ctx)
 	common.CheckErr(t, err, true)
-
-	time.Sleep(3 * time.Second)
 
 	// Verify restored partition data count
 	queryRes5, err := mc.Query(ctx,
