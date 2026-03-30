@@ -621,7 +621,7 @@ func (env *benchEnv) setupExternalCollectionWithOptions(t *testing.T, numFiles i
 		data, err := generateParquetBytesWithDim(rowsPerFile, int64(i)*rowsPerFile, dim)
 		require.NoError(t, err, "generate parquet file %d", i)
 		objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, i)
-		uploadParquetToMinIO(t, env.ctx, env.minioClient, env.minioCfg.bucket, objectKey, data)
+		uploadParquetToMinIO(env.ctx, t, env.minioClient, env.minioCfg.bucket, objectKey, data)
 	}
 	t.Logf("Upload complete: %v", time.Since(uploadStart))
 
@@ -735,7 +735,7 @@ func testBenchmarkExternalRefresh(t *testing.T, env *benchEnv) {
 		data, err := generateParquetBytesWithDim(env.cfg.RowsPerFile, int64(i)*env.cfg.RowsPerFile, env.cfg.VecDim)
 		require.NoError(t, err)
 		objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, i)
-		uploadParquetToMinIO(t, env.ctx, env.minioClient, env.minioCfg.bucket, objectKey, data)
+		uploadParquetToMinIO(env.ctx, t, env.minioClient, env.minioCfg.bucket, objectKey, data)
 	}
 
 	t.Cleanup(func() {
@@ -792,7 +792,7 @@ func benchIncrementalRefresh(t *testing.T, env *benchEnv) {
 		data, err := generateParquetBytesWithDim(env.cfg.RowsPerFile, int64(i)*env.cfg.RowsPerFile, env.cfg.VecDim)
 		require.NoError(t, err)
 		objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, i)
-		uploadParquetToMinIO(t, env.ctx, env.minioClient, env.minioCfg.bucket, objectKey, data)
+		uploadParquetToMinIO(env.ctx, t, env.minioClient, env.minioCfg.bucket, objectKey, data)
 	}
 
 	t.Cleanup(func() {
@@ -825,7 +825,7 @@ func benchIncrementalRefresh(t *testing.T, env *benchEnv) {
 	data, err := generateParquetBytesWithDim(env.cfg.RowsPerFile, int64(newFileIdx)*env.cfg.RowsPerFile, env.cfg.VecDim)
 	require.NoError(t, err)
 	objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, newFileIdx)
-	uploadParquetToMinIO(t, env.ctx, env.minioClient, env.minioCfg.bucket, objectKey, data)
+	uploadParquetToMinIO(env.ctx, t, env.minioClient, env.minioCfg.bucket, objectKey, data)
 
 	// Incremental refresh (add file)
 	start = time.Now()
@@ -861,7 +861,7 @@ func benchIndexBuilding(t *testing.T, env *benchEnv) {
 		data, err := generateParquetBytesWithDim(env.cfg.RowsPerFile, int64(i)*env.cfg.RowsPerFile, env.cfg.VecDim)
 		require.NoError(t, err)
 		objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, i)
-		uploadParquetToMinIO(t, env.ctx, env.minioClient, env.minioCfg.bucket, objectKey, data)
+		uploadParquetToMinIO(env.ctx, t, env.minioClient, env.minioCfg.bucket, objectKey, data)
 	}
 
 	t.Cleanup(func() {
@@ -936,7 +936,7 @@ func benchLoadCollection(t *testing.T, env *benchEnv) {
 		data, err := generateParquetBytesWithDim(env.cfg.RowsPerFile, int64(i)*env.cfg.RowsPerFile, env.cfg.VecDim)
 		require.NoError(t, err)
 		objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, i)
-		uploadParquetToMinIO(t, env.ctx, env.minioClient, env.minioCfg.bucket, objectKey, data)
+		uploadParquetToMinIO(env.ctx, t, env.minioClient, env.minioCfg.bucket, objectKey, data)
 	}
 
 	t.Cleanup(func() {
@@ -1423,7 +1423,7 @@ func benchManyFiles(t *testing.T, env *benchEnv) {
 		data, err := generateParquetBytesWithDim(rowsPerFile, int64(i)*rowsPerFile, env.cfg.VecDim)
 		require.NoError(t, err)
 		objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, i)
-		uploadParquetToMinIO(t, env.ctx, env.minioClient, env.minioCfg.bucket, objectKey, data)
+		uploadParquetToMinIO(env.ctx, t, env.minioClient, env.minioCfg.bucket, objectKey, data)
 	}
 
 	t.Cleanup(func() {
@@ -1473,7 +1473,7 @@ func benchLargeSingleFile(t *testing.T, env *benchEnv) {
 	data, err := generateParquetBytesWithDim(totalRows, 0, env.cfg.VecDim)
 	require.NoError(t, err)
 	objectKey := fmt.Sprintf("%s/data.parquet", extPath)
-	uploadParquetToMinIO(t, env.ctx, env.minioClient, env.minioCfg.bucket, objectKey, data)
+	uploadParquetToMinIO(env.ctx, t, env.minioClient, env.minioCfg.bucket, objectKey, data)
 
 	t.Cleanup(func() {
 		cleanupMinIOPrefix(context.Background(), env.minioClient, env.minioCfg.bucket, extPath+"/")
@@ -1609,7 +1609,7 @@ func benchIdempotentRefresh(t *testing.T, env *benchEnv) {
 		data, err := generateParquetBytesWithDim(rowsPerFile, int64(i)*rowsPerFile, env.cfg.VecDim)
 		require.NoError(t, err)
 		objectKey := fmt.Sprintf("%s/data%d.parquet", extPath, i)
-		uploadParquetToMinIO(t, env.ctx, env.minioClient, env.minioCfg.bucket, objectKey, data)
+		uploadParquetToMinIO(env.ctx, t, env.minioClient, env.minioCfg.bucket, objectKey, data)
 	}
 
 	t.Cleanup(func() {
@@ -1683,7 +1683,7 @@ func benchMultiDataTypes(t *testing.T, env *benchEnv) {
 	data, err := generateMultiTypeParquetBytes(numRows, 0)
 	require.NoError(t, err)
 	objectKey := fmt.Sprintf("%s/data.parquet", extPath)
-	uploadParquetToMinIO(t, env.ctx, env.minioClient, env.minioCfg.bucket, objectKey, data)
+	uploadParquetToMinIO(env.ctx, t, env.minioClient, env.minioCfg.bucket, objectKey, data)
 
 	t.Cleanup(func() {
 		cleanupMinIOPrefix(context.Background(), env.minioClient, env.minioCfg.bucket, extPath+"/")

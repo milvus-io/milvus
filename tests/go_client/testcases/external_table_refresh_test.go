@@ -1760,7 +1760,7 @@ func TestExternalCollectionFloat32ListVector(t *testing.T) {
 			})
 
 			// Step 3: Refresh and wait
-			refreshAndWait(t, mc, ctx, collName)
+			refreshAndWait(ctx, t, mc, collName)
 
 			// Verify row count via stats
 			stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(collName))
@@ -1774,7 +1774,7 @@ func TestExternalCollectionFloat32ListVector(t *testing.T) {
 			t.Logf("Refresh complete: row_count=%d", rowCount)
 
 			// Step 4: Index + Load
-			indexAndLoadCollectionWithScalarAndVector(t, mc, ctx, collName, int64(numRows))
+			indexAndLoadCollectionWithScalarAndVector(ctx, t, mc, collName, int64(numRows))
 
 			// Step 5: Query count(*)
 			countRes, err := mc.Query(ctx, client.NewQueryOption(collName).
