@@ -28,7 +28,7 @@ func UnmarshalMessageID(data string) (message.MessageID, error) {
 
 // unmashalMessageID unmarshal the message id.
 func unmarshalMessageID(data string) (rmqID, error) {
-	v, err := message.DecodeUint64(data)
+	v, err := message.DecodeInt64(data)
 	if err != nil {
 		return 0, errors.Wrapf(message.ErrInvalidMessageID, "decode rmqID fail with err: %s, id: %s", err.Error(), data)
 	}

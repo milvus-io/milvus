@@ -66,6 +66,7 @@ const (
 	MessageTypeAlterIndex           MessageType = MessageType(messagespb.MessageType_AlterIndex)
 	MessageTypeDropIndex            MessageType = MessageType(messagespb.MessageType_DropIndex)
 	MessageTypeFlushAll             MessageType = MessageType(messagespb.MessageType_FlushAll)
+	MessageTypeAlterWAL             MessageType = MessageType(messagespb.MessageType_AlterWAL)
 )
 
 // Export extra message type
@@ -170,6 +171,8 @@ type (
 	DropIndexMessageBody              = messagespb.DropIndexMessageBody
 	FlushAllMessageHeader             = messagespb.FlushAllMessageHeader
 	FlushAllMessageBody               = messagespb.FlushAllMessageBody
+	AlterWALMessageHeader             = messagespb.AlterWALMessageHeader
+	AlterWALMessageBody               = messagespb.AlterWALMessageBody
 )
 
 // Type aliases for TimeTickMessageV1
@@ -1921,6 +1924,7 @@ type (
 	ImmutableFlushAllMessageV2       = SpecializedImmutableMessage[*FlushAllMessageHeader, *FlushAllMessageBody]
 	BroadcastFlushAllMessageV2       = SpecializedBroadcastMessage[*FlushAllMessageHeader, *FlushAllMessageBody]
 	BroadcastResultFlushAllMessageV2 = BroadcastResult[*FlushAllMessageHeader, *FlushAllMessageBody]
+	AckResultFlushAllMessageV2       = AckResult[*FlushAllMessageHeader, *FlushAllMessageBody]
 )
 
 // MessageTypeWithVersion for FlushAllMessageV2
@@ -1956,6 +1960,48 @@ var MustAsBroadcastFlushAllMessageV2 = MustAsSpecializedBroadcastMessage[*FlushA
 // NewFlushAllMessageBuilderV2 creates a new message builder for FlushAllMessageV2
 var NewFlushAllMessageBuilderV2 = newMutableMessageBuilder[*FlushAllMessageHeader, *FlushAllMessageBody]
 
+// Type aliases for AlterWALMessageV2
+type (
+	MutableAlterWALMessageV2         = specializedMutableMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+	ImmutableAlterWALMessageV2       = SpecializedImmutableMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+	BroadcastAlterWALMessageV2       = SpecializedBroadcastMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+	BroadcastResultAlterWALMessageV2 = BroadcastResult[*AlterWALMessageHeader, *AlterWALMessageBody]
+	AckResultAlterWALMessageV2       = AckResult[*AlterWALMessageHeader, *AlterWALMessageBody]
+)
+
+// MessageTypeWithVersion for AlterWALMessageV2
+var MessageTypeAlterWALV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterWAL,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for AlterWALMessageV2
+var SpecializedTypeAlterWALV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterWALMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterWALMessageHeader)(nil)),
+}
+
+// AsMutableAlterWALMessageV2 converts a BasicMessage to MutableAlterWALMessageV2
+var AsMutableAlterWALMessageV2 = asSpecializedMutableMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+
+// MustAsMutableAlterWALMessageV2 converts a BasicMessage to MutableAlterWALMessageV2, panics on error
+var MustAsMutableAlterWALMessageV2 = mustAsSpecializedMutableMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+
+// AsImmutableAlterWALMessageV2 converts an ImmutableMessage to ImmutableAlterWALMessageV2
+var AsImmutableAlterWALMessageV2 = asSpecializedImmutableMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+
+// MustAsImmutableAlterWALMessageV2 converts an ImmutableMessage to ImmutableAlterWALMessageV2, panics on error
+var MustAsImmutableAlterWALMessageV2 = MustAsSpecializedImmutableMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+
+// AsBroadcastAlterWALMessageV2 converts a BasicMessage to BroadcastAlterWALMessageV2
+var AsBroadcastAlterWALMessageV2 = asSpecializedBroadcastMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+
+// MustAsBroadcastAlterWALMessageV2 converts a BasicMessage to BroadcastAlterWALMessageV2, panics on error
+var MustAsBroadcastAlterWALMessageV2 = MustAsSpecializedBroadcastMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+
+// NewAlterWALMessageBuilderV2 creates a new message builder for AlterWALMessageV2
+var NewAlterWALMessageBuilderV2 = newMutableMessageBuilder[*AlterWALMessageHeader, *AlterWALMessageBody]
+
 // messageTypeMap make the contriants that one header type can only be used for one message type.
 var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.AlterAliasMessageHeader{}):           MessageTypeAlterAlias,
@@ -1970,6 +2016,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.AlterRoleMessageHeader{}):            MessageTypeAlterRole,
 	reflect.TypeOf(&messagespb.AlterUserMessageHeader{}):            MessageTypeAlterUser,
 	reflect.TypeOf(&messagespb.AlterUserRoleMessageHeader{}):        MessageTypeAlterUserRole,
+	reflect.TypeOf(&messagespb.AlterWALMessageHeader{}):             MessageTypeAlterWAL,
 	reflect.TypeOf(&messagespb.BeginTxnMessageHeader{}):             MessageTypeBeginTxn,
 	reflect.TypeOf(&messagespb.CommitTxnMessageHeader{}):            MessageTypeCommitTxn,
 	reflect.TypeOf(&messagespb.CreateCollectionMessageHeader{}):     MessageTypeCreateCollection,
@@ -2033,6 +2080,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeAlterRoleV2:            SpecializedTypeAlterRoleV2,
 	MessageTypeAlterUserRoleV2:        SpecializedTypeAlterUserRoleV2,
 	MessageTypeAlterUserV2:            SpecializedTypeAlterUserV2,
+	MessageTypeAlterWALV2:             SpecializedTypeAlterWALV2,
 	MessageTypeBeginTxnV2:             SpecializedTypeBeginTxnV2,
 	MessageTypeCommitTxnV2:            SpecializedTypeCommitTxnV2,
 	MessageTypeCreateCollectionV1:     SpecializedTypeCreateCollectionV1,
@@ -2080,6 +2128,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeAlterRoleV2:            MessageTypeAlterRoleV2,
 	SpecializedTypeAlterUserRoleV2:        MessageTypeAlterUserRoleV2,
 	SpecializedTypeAlterUserV2:            MessageTypeAlterUserV2,
+	SpecializedTypeAlterWALV2:             MessageTypeAlterWALV2,
 	SpecializedTypeBeginTxnV2:             MessageTypeBeginTxnV2,
 	SpecializedTypeCommitTxnV2:            MessageTypeCommitTxnV2,
 	SpecializedTypeCreateCollectionV1:     MessageTypeCreateCollectionV1,

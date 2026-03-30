@@ -98,6 +98,9 @@ type RecoveryStorage interface {
 	// TODO: should be removed in future, after merge the flusher logic into recovery storage.
 	UpdateFlusherCheckpoint(vchannel string, checkpoint *WALCheckpoint)
 
+	// GetFlusherCheckpointByTimeTick returns the minimum flush checkpoint among all vchannels based on time tick.
+	GetFlusherCheckpointByTimeTick(ctx context.Context) *WALCheckpoint
+
 	// Close closes the recovery storage.
 	Close()
 }

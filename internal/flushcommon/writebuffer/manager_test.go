@@ -117,6 +117,29 @@ func (s *ManagerSuite) TestFlushSegments() {
 	})
 }
 
+func (s *ManagerSuite) TestFlushAllSegments() {
+	manager := s.manager
+	s.Run("channel_not_found", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := manager.SealAllSegments(ctx, s.channelName)
+		s.Error(err, "SealAllSegments shall return error when channel not found")
+	})
+
+	s.Run("normal_flush_all", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		wb := NewMockWriteBuffer(s.T())
+		s.manager.buffers.Insert(s.channelName, wb)
+
+		wb.EXPECT().SealAllSegments(mock.Anything).Return()
+
+		err := manager.SealAllSegments(ctx, s.channelName)
+		s.NoError(err)
+	})
+}
+
 func (s *ManagerSuite) TestCreateNewGrowingSegment() {
 	manager := s.manager
 	err := manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1)
