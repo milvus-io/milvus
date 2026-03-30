@@ -113,7 +113,7 @@ func TestPendingQueue(t *testing.T) {
 	pq.Evict()
 	assert.Equal(t, pq.CurrentOffset(), 1)
 	assert.Len(t, pq.buf, 2)
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	pq.Evict()
 	// the last message should never be evicted.
 	assert.Len(t, pq.buf, 1)
