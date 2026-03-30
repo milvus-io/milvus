@@ -1,0 +1,136 @@
+[
+  {
+    "suite": "go_client",
+    "runner": "go_test",
+    "working_dir": "tests/go_client",
+    "file": "tests/go_client/testcases/hybrid_search_test.go",
+    "path_kinds": [
+      "hybrid_search",
+      "range_search",
+      "groupby_search",
+      "sparse_search"
+    ],
+    "index_families": [
+      "HNSW",
+      "mixed_multivector",
+      "SPARSE_INVERTED_INDEX",
+      "SPARSE_WAND"
+    ],
+    "cases": [
+      "TestHybridSearchSparseVector"
+    ],
+    "selection_reason": "Hybrid search cases cover multivector retrieval, reranking entry points, sparse search, and vector-side filtering under standalone."
+  },
+  {
+    "suite": "go_client",
+    "runner": "go_test",
+    "working_dir": "tests/go_client",
+    "file": "tests/go_client/testcases/index_test.go",
+    "path_kinds": [
+      "index_build",
+      "index_describe",
+      "index_param_validation"
+    ],
+    "index_families": [
+      "FLAT",
+      "IVF_FLAT",
+      "IVF_SQ8",
+      "IVF_PQ",
+      "HNSW",
+      "SCANN",
+      "DISKANN",
+      "BIN_FLAT",
+      "BIN_IVF_FLAT",
+      "AUTO_INDEX",
+      "SPARSE_INVERTED_INDEX",
+      "SPARSE_WAND"
+    ],
+    "cases": [
+      "TestIndexAutoSparseVector",
+      "TestCreateIndexSparseVectorGeneric",
+      "TestCreateIndexSparseVector"
+    ],
+    "selection_reason": "These are the dedicated standalone vector-index build and describe cases across float, binary, sparse, and auto-index families."
+  },
+  {
+    "suite": "go_client",
+    "runner": "go_test",
+    "working_dir": "tests/go_client",
+    "file": "tests/go_client/testcases/load_release_test.go",
+    "path_kinds": [
+      "load_release",
+      "hybrid_search"
+    ],
+    "index_families": [
+      "HNSW",
+      "mixed_multivector",
+      "SPARSE_INVERTED_INDEX",
+      "SPARSE_WAND"
+    ],
+    "cases": [
+      "TestLoadCollectionSparse"
+    ],
+    "selection_reason": "Selected load/release cases only when they depend on a built vector index or on partial-load semantics that affect vector retrieval."
+  },
+  {
+    "suite": "go_client",
+    "runner": "go_test",
+    "working_dir": "tests/go_client",
+    "file": "tests/go_client/testcases/search_test.go",
+    "path_kinds": [
+      "sealed_search",
+      "growing_search",
+      "sparse_search",
+      "range_search",
+      "multivector_search",
+      "predicate_search"
+    ],
+    "index_families": [
+      "HNSW",
+      "BIN_IVF_FLAT",
+      "SCANN",
+      "SPARSE_INVERTED_INDEX",
+      "SPARSE_WAND",
+      "mixed_multivector"
+    ],
+    "cases": [
+      "TestSearchEmptySparseCollection",
+      "TestSearchOutputSparse",
+      "TestSearchSparseVector",
+      "TestSearchWithEmptySparseVector",
+      "TestSearchFromEmptySparseVector",
+      "TestSearchSparseVectorPagination",
+      "TestSearchSparseVectorNotSupported",
+      "TestRangeSearchSparseVector"
+    ],
+    "selection_reason": "This file contains the core standalone vector-search product surface, including growing fallback, predicates, sparse, SCANN, and multivector cases."
+  },
+  {
+    "suite": "restful_client_v2",
+    "runner": "pytest",
+    "working_dir": "tests/restful_client_v2",
+    "file": "tests/restful_client_v2/testcases/test_vector_operations.py",
+    "path_kinds": [
+      "sealed_search",
+      "sparse_search",
+      "binary_search",
+      "range_search",
+      "growing_search",
+      "hybrid_search",
+      "advanced_search",
+      "metric_validation"
+    ],
+    "index_families": [
+      "HNSW",
+      "BIN_FLAT",
+      "BIN_IVF_FLAT",
+      "SPARSE_INVERTED_INDEX",
+      "SPARSE_WAND",
+      "mixed_multivector"
+    ],
+    "cases": [
+      "TestSearchVector::test_search_vector_with_sparse_float_vector_datatype"
+    ],
+    "selection_reason": "The v2 vector-operation suite is the densest RESTful standalone ANN coverage, including binary, sparse, advanced, hybrid, and ignore-growing behavior."
+  }
+]

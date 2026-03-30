@@ -12,11 +12,15 @@ GO_WORK_ROOT="${MILVUS_RS_GO_WORK_ROOT:-${INTEG_ROOT}/go-work}"
 OPENBLAS_ROOT_DEFAULT="${MILVUS_RS_OPENBLAS_ROOT:-${INTEG_ROOT}/openblas}"
 MILVUS_RS_VAR_ROOT_DEFAULT="${MILVUS_RS_VAR_ROOT:-${INTEG_ROOT}/milvus-var}"
 MILVUS_RS_PYTHON_SITE_DEFAULT="${MILVUS_RS_PYTHON_SITE:-${INTEG_ROOT}/python-site}"
+MILVUS_RS_CI_LOG_PATH_DEFAULT="${MILVUS_RS_CI_LOG_PATH:-${MILVUS_RS_VAR_ROOT_DEFAULT}/ci-logs}"
 MILVUS_RS_STANDALONE_SUBSET_ROOT_DEFAULT="${MILVUS_RS_STANDALONE_SUBSET_ROOT:-${INTEG_ROOT}/artifacts/standalone-subset}"
 
 export PATH="${INTEG_ROOT}/bin:/root/.cargo/bin:${PATH}"
 export HOME="${INTEG_ROOT}/home"
 export TMPDIR="${INTEG_ROOT}/tmp"
+export CARGO_HOME="${CARGO_HOME:-${HOME}/.cargo}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${INTEG_ROOT}/cargo-target}"
+export RUSTUP_HOME="${RUSTUP_HOME:-${INTEG_ROOT}/rustup-home}"
 export KNOWHERE_RS_LIB_DIR="${KNOWHERE_RS_LIB_DIR:-${INTEG_ROOT}/knowhere-rs-target/release}"
 export GOPATH="${GOPATH:-${GO_WORK_ROOT}}"
 export GOCACHE="${GOCACHE:-${GO_WORK_ROOT}/cache}"
@@ -72,6 +76,13 @@ prepend_library_dir() {
     prepend_flag_var CGO_LDFLAGS "-L${library_dir}"
 }
 
+is_script_file() {
+    local file_path="$1"
+
+    [[ -f "${file_path}" ]] || return 1
+    [[ "$(head -c 2 "${file_path}" 2>/dev/null || true)" == "#!" ]]
+}
+
 if [[ -x "${GO_ROOT_DEFAULT}/bin/go" ]]; then
     export GOROOT="${GOROOT:-${GO_ROOT_DEFAULT}}"
     export PATH="${GO_ROOT_DEFAULT}/bin:${PATH}"
@@ -106,10 +117,44 @@ for pkg_dir in \
     fi
 done
 
-mkdir -p "${HOME}" "${HOME}/.cargo/bin" "${TMPDIR}" "${GOPATH}" "${GOCACHE}" "${GOMODCACHE}"
+mkdir -p "${HOME}" "${CARGO_HOME}/bin" "${CARGO_TARGET_DIR}" "${RUSTUP_HOME}" "${TMPDIR}" "${GOPATH}" "${GOCACHE}" "${GOMODCACHE}"
 mkdir -p "${MILVUS_RS_PYTHON_SITE_DEFAULT}"
+export CI_LOG_PATH="${CI_LOG_PATH:-${MILVUS_RS_CI_LOG_PATH_DEFAULT}}"
+mkdir -p "${CI_LOG_PATH}"
 
 prepend_path_var PYTHONPATH "${MILVUS_RS_PYTHON_SITE_DEFAULT}"
+
+root_toolchain_bin=""
+for candidate in "${RUSTUP_HOME}"/toolchains/*/bin /root/.rustup/toolchains/*/bin; do
+    if [[ -x "${candidate}/cargo" && -x "${candidate}/rustc" ]] &&
+        ! is_script_file "${candidate}/cargo"; then
+        root_toolchain_bin="${candidate}"
+        break
+    fi
+done
+
+if [[ -n "${root_toolchain_bin}" ]]; then
+    for tool in "${root_toolchain_bin}"/*; do
+        [[ -e "${tool}" ]] || continue
+        if [[ "$(basename "${tool}")" == "cargo" ]]; then
+            continue
+        fi
+        ln -snf "${tool}" "${CARGO_HOME}/bin/$(basename "${tool}")"
+    done
+
+    rm -f "${CARGO_HOME}/bin/cargo"
+    cat >"${CARGO_HOME}/bin/cargo" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "\${1:-}" == +* ]]; then
+    shift
+fi
+
+exec "${root_toolchain_bin}/cargo" "\$@"
+EOF
+    chmod +x "${CARGO_HOME}/bin/cargo"
+fi
 
 if [[ -f /root/.cargo/env ]]; then
     # shellcheck disable=SC1091
@@ -119,11 +164,13 @@ fi
 if [[ -d /root/.cargo/bin ]]; then
     for tool in /root/.cargo/bin/*; do
         [[ -e "${tool}" ]] || continue
-        ln -snf "${tool}" "${HOME}/.cargo/bin/$(basename "${tool}")"
+        target_path="${CARGO_HOME}/bin/$(basename "${tool}")"
+        [[ -e "${target_path}" ]] && continue
+        ln -snf "${tool}" "${target_path}"
     done
 fi
 
-export PATH="${HOME}/.cargo/bin:${PATH}"
+export PATH="${CARGO_HOME}/bin:${PATH}"
 
 # Keep all writable Milvus runtime state off the full rootfs.
 export ETCD_DATA_DIR="${ETCD_DATA_DIR:-${MILVUS_RS_VAR_ROOT_DEFAULT}/etcd}"
@@ -132,9 +179,12 @@ export MILVUS_CONF_ROCKSMQ_PATH="${MILVUS_CONF_ROCKSMQ_PATH:-${MILVUS_RS_VAR_ROO
 export MILVUS_CONF_FUNCTION_ANALYZER_LOCAL_RESOURCE_PATH="${MILVUS_CONF_FUNCTION_ANALYZER_LOCAL_RESOURCE_PATH:-${MILVUS_RS_VAR_ROOT_DEFAULT}/analyzer}"
 export MILVUS_CONF_PROFILE_PPROF_PATH="${MILVUS_CONF_PROFILE_PPROF_PATH:-${MILVUS_RS_VAR_ROOT_DEFAULT}/pprof}"
 
-# Stage-1 only implements the explicit float/HNSW path. Override Milvus'
-# unsupported no-CUDA auto-index default so standalone can start cleanly.
-export MILVUS_CONF_AUTOINDEX_PARAMS_BUILD="${MILVUS_CONF_AUTOINDEX_PARAMS_BUILD:-{\"M\":18,\"efConstruction\":240,\"index_type\":\"HNSW\",\"metric_type\":\"COSINE\"}}"
+# Stage-1 uses an HNSW-only shim for float vectors. Keep Milvus' standalone
+# auto-index default on the same path, and do it idempotently because this
+# environment file is sourced both by wrapper shells and by runtime scripts.
+if [[ -z "${MILVUS_CONF_AUTOINDEX_PARAMS_BUILD:-}" ]]; then
+    export MILVUS_CONF_AUTOINDEX_PARAMS_BUILD='{"M":18,"efConstruction":240,"index_type":"HNSW","metric_type":"COSINE"}'
+fi
 
 shim_cmake_args="-DMILVUS_USE_KNOWHERE_RS_SHIM=ON -DKNOWHERE_RS_ROOT=${KNOWHERE_RS_ROOT_DEFAULT}"
 if [[ -n "${CMAKE_EXTRA_ARGS:-}" ]]; then

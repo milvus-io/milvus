@@ -1,8 +1,10 @@
 import importlib.util
 import json
+import os
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -74,13 +76,14 @@ class StandaloneSubsetLibTest(unittest.TestCase):
             and item["case"] == "TestE2e::test_milvus_default"
         )
 
-        command = self.lib.build_case_command(
-            case,
-            root_dir=ROOT,
-            endpoint="http://127.0.0.1:19530",
-            token="root:Milvus",
-            minio_host="127.0.0.1",
-        )
+        with mock.patch.dict(os.environ, {"CI_LOG_PATH": "/tmp/standalone-ci"}, clear=False):
+            command = self.lib.build_case_command(
+                case,
+                root_dir=ROOT,
+                endpoint="http://127.0.0.1:19530",
+                token="root:Milvus",
+                minio_host="127.0.0.1",
+            )
 
         self.assertEqual(command["cwd"], str(ROOT / "tests/python_client"))
         self.assertEqual(
@@ -93,7 +96,11 @@ class StandaloneSubsetLibTest(unittest.TestCase):
                 "pytest",
                 "-q",
                 "-s",
-                "testcases/test_e2e.py::TestE2e::test_milvus_default",
+                "-o",
+                "addopts=--html=/tmp/standalone-ci/report.html --self-contained-html -v",
+                "testcases/test_e2e.py",
+                "-k",
+                "TestE2e and test_milvus_default",
                 "--host",
                 "127.0.0.1",
                 "--port",

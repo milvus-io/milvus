@@ -50,6 +50,21 @@ def selector_for_case(case: dict) -> str:
     return f"{relative_file}::{case['case']}"
 
 
+def relative_pytest_file(case: dict) -> str:
+    relative_file = os.path.relpath(case["file"], start=case["working_dir"])
+    return relative_file.replace(os.sep, "/")
+
+
+def pytest_case_filter(case_name: str) -> str:
+    return " and ".join(part for part in case_name.split("::") if part)
+
+
+def pytest_addopts_arg() -> str:
+    ci_log_path = os.environ.get("CI_LOG_PATH", "/tmp/ci_logs")
+    report_path = os.path.join(ci_log_path, "report.html")
+    return f"addopts=--html={report_path} --self-contained-html -v"
+
+
 def slug_for_case(case: dict) -> str:
     raw = f"{case['suite']}__{pathlib.Path(case['file']).stem}__{case['case']}"
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("_")
@@ -102,7 +117,11 @@ def build_case_command(
             "pytest",
             "-q",
             "-s",
-            selector,
+            "-o",
+            pytest_addopts_arg(),
+            relative_pytest_file(case),
+            "-k",
+            pytest_case_filter(case["case"]),
             "--host",
             host,
             "--port",
@@ -119,6 +138,8 @@ def build_case_command(
             "pytest",
             "-q",
             "-s",
+            "-o",
+            pytest_addopts_arg(),
             selector,
             "--endpoint",
             endpoint,
@@ -132,6 +153,8 @@ def build_case_command(
             "pytest",
             "-q",
             "-s",
+            "-o",
+            pytest_addopts_arg(),
             selector,
             "--endpoint",
             endpoint,

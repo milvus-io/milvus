@@ -10,17 +10,68 @@ source "${SCRIPT_DIR}/remote_env.sh"
 VAR_ROOT="${MILVUS_RS_VAR_ROOT:-${MILVUS_RS_INTEG_ROOT:-/data/work/milvus-rs-integ}/milvus-var}"
 LOG_PATH="${MILVUS_RS_STANDALONE_LOG:-${VAR_ROOT}/logs/standalone-stage1.log}"
 WAIT_SECONDS="${MILVUS_RS_STANDALONE_WAIT_SECONDS:-90}"
+SHUTDOWN_WAIT_SECONDS="${MILVUS_RS_STANDALONE_SHUTDOWN_WAIT_SECONDS:-30}"
+RESET_RUNTIME_STATE="${MILVUS_RS_RESET_RUNTIME_STATE:-true}"
+HEALTH_URL="${MILVUS_RS_STANDALONE_HEALTH_URL:-http://127.0.0.1:9091/healthz}"
+MILVUS_CMD_PATTERN="${ROOT_DIR}/bin/milvus run standalone"
+
+wait_for_standalone_exit() {
+    local attempt
+    for attempt in $(seq 1 "${SHUTDOWN_WAIT_SECONDS}"); do
+        if ! pgrep -f "${MILVUS_CMD_PATTERN}" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+reset_runtime_state() {
+    local runtime_dir
+
+    for runtime_dir in \
+        data \
+        etcd \
+        meta \
+        wal \
+        rdb_data \
+        rdb_data_meta_kv \
+        analyzer \
+        pprof \
+        tmp; do
+        rm -rf "${VAR_ROOT}/${runtime_dir}"
+    done
+}
 
 mkdir -p \
-    "${VAR_ROOT}/logs" \
+    "${VAR_ROOT}/logs"
+
+pkill -f "${MILVUS_CMD_PATTERN}" || true
+if ! wait_for_standalone_exit; then
+    pkill -9 -f "${MILVUS_CMD_PATTERN}" || true
+    sleep 1
+fi
+
+if pgrep -f "${MILVUS_CMD_PATTERN}" >/dev/null 2>&1; then
+    echo "FAILED_TO_STOP_OLD_PROCESS"
+    exit 1
+fi
+
+if [[ "${RESET_RUNTIME_STATE}" == "true" ]]; then
+    reset_runtime_state
+fi
+
+mkdir -p \
     "${VAR_ROOT}/data" \
     "${VAR_ROOT}/etcd" \
+    "${VAR_ROOT}/meta" \
+    "${VAR_ROOT}/wal" \
+    "${VAR_ROOT}/tmp" \
     "${VAR_ROOT}/rdb_data" \
+    "${VAR_ROOT}/rdb_data_meta_kv" \
     "${VAR_ROOT}/analyzer" \
     "${VAR_ROOT}/pprof"
 
-pkill -f "bin/milvus run standalone" || true
-sleep 2
 rm -f "${LOG_PATH}"
 
 export ETCD_USE_EMBED="${ETCD_USE_EMBED:-true}"
@@ -41,7 +92,7 @@ for _ in $(seq 1 "${WAIT_SECONDS}"); do
         tail -n 120 "${LOG_PATH}" || true
         exit 1
     fi
-    if curl -fsS http://127.0.0.1:9091/healthz >/dev/null 2>&1; then
+    if curl -fsS "${HEALTH_URL}" >/dev/null 2>&1; then
         echo "HEALTHY"
         exit 0
     fi
