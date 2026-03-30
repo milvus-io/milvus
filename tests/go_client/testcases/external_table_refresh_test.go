@@ -1668,3 +1668,176 @@ func TestExternalCollectionVortexFormat(t *testing.T) {
 
 	t.Log("Vortex format external collection test passed!")
 }
+
+// TestExternalCollectionFloat32ListVector verifies that external collections
+// whose files store vectors as FixedSizeList<Float32, dim> (native float list)
+// can be refreshed, indexed, loaded, and queried correctly.
+// Currently only Parquet is tested because Parquet readers return native Arrow
+// types regardless of the output schema.  Vortex and Lance require schema-level
+// changes to support float32 list vectors (tracked separately).
+func TestExternalCollectionFloat32ListVector(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*600)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// Connect to MinIO
+	minioCfg := getMinIOConfig()
+	minioClient, err := newMinIOClient(minioCfg)
+	if err != nil {
+		t.Skipf("Failed to create MinIO client, skipping: %v", err)
+	}
+	exists, err := minioClient.BucketExists(ctx, minioCfg.bucket)
+	if err != nil || !exists {
+		t.Skipf("MinIO bucket %q not accessible, skipping", minioCfg.bucket)
+	}
+
+	const numRows = 2000
+
+	type formatCase struct {
+		name      string
+		specJSON  string
+		setupData func(t *testing.T, extPath string)
+		cleanup   func(extPath string)
+	}
+
+	formats := []formatCase{
+		{
+			name:     "parquet",
+			specJSON: `{"format":"parquet"}`,
+			setupData: func(t *testing.T, extPath string) {
+				t.Helper()
+				data, genErr := generateParquetBytes(numRows, 0)
+				require.NoError(t, genErr, "generate parquet")
+				objectKey := fmt.Sprintf("%s/data.parquet", extPath)
+				_, putErr := minioClient.PutObject(ctx, minioCfg.bucket, objectKey,
+					bytes.NewReader(data), int64(len(data)),
+					miniogo.PutObjectOptions{ContentType: "application/octet-stream"})
+				require.NoError(t, putErr, "upload parquet to MinIO")
+				t.Logf("Uploaded %s/%s (%d bytes, %d rows)", minioCfg.bucket, objectKey, len(data), numRows)
+			},
+			cleanup: func(extPath string) {
+				cleanupMinIOPrefix(context.Background(), minioClient, minioCfg.bucket, extPath+"/")
+			},
+		},
+	}
+
+	for _, fc := range formats {
+		fc := fc // capture for subtest closure
+		t.Run(fc.name, func(t *testing.T) {
+			// Replace hyphens with underscores for valid collection names
+			safePrefix := strings.ReplaceAll(fc.name, "-", "_")
+			collName := common.GenRandomString("ext_f32_"+safePrefix, 6)
+			extPath := fmt.Sprintf("external-e2e-test/%s", collName)
+
+			// Step 1: Generate and upload data
+			fc.setupData(t, extPath)
+			t.Cleanup(func() { fc.cleanup(extPath) })
+
+			// Step 2: Create external collection
+			schema := entity.NewSchema().
+				WithName(collName).
+				WithExternalSource(extPath).
+				WithExternalSpec(fc.specJSON).
+				WithField(entity.NewField().
+					WithName("id").
+					WithDataType(entity.FieldTypeInt64).
+					WithExternalField("id")).
+				WithField(entity.NewField().
+					WithName("value").
+					WithDataType(entity.FieldTypeFloat).
+					WithExternalField("value")).
+				WithField(entity.NewField().
+					WithName("embedding").
+					WithDataType(entity.FieldTypeFloatVector).
+					WithDim(testVecDim).
+					WithExternalField("embedding"))
+
+			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+			common.CheckErr(t, err, true)
+			t.Logf("Created external collection [%s]: %s", fc.name, collName)
+
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
+
+			// Step 3: Refresh and wait
+			refreshAndWait(t, mc, ctx, collName)
+
+			// Verify row count via stats
+			stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(collName))
+			common.CheckErr(t, err, true)
+			rowCountStr, ok := stats["row_count"]
+			require.True(t, ok, "stats should contain row_count")
+			rowCount, err := strconv.ParseInt(rowCountStr, 10, 64)
+			require.NoError(t, err)
+			require.Equal(t, int64(numRows), rowCount,
+				"row_count should match uploaded data")
+			t.Logf("Refresh complete: row_count=%d", rowCount)
+
+			// Step 4: Index + Load
+			indexAndLoadCollectionWithScalarAndVector(t, mc, ctx, collName, int64(numRows))
+
+			// Step 5: Query count(*)
+			countRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+				WithConsistencyLevel(entity.ClStrong).
+				WithOutputFields(common.QueryCountFieldName))
+			common.CheckErr(t, err, true)
+			count, err := countRes.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
+			require.NoError(t, err)
+			require.Equal(t, int64(numRows), count,
+				"count(*) should match uploaded rows")
+			t.Logf("count(*) = %d", count)
+
+			// Step 6: Query with filter + output fields
+			filterRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+				WithConsistencyLevel(entity.ClStrong).
+				WithFilter("id < 100").
+				WithOutputFields("id", "value"))
+			common.CheckErr(t, err, true)
+			require.Equal(t, 100, filterRes.GetColumn("id").Len(),
+				"filter id < 100 should return 100 rows")
+			t.Logf("Query with filter returned %d rows", filterRes.GetColumn("id").Len())
+
+			// Verify a specific value (id=42 → value=42*1.5=63.0)
+			val42, err := filterRes.GetColumn("value").GetAsDouble(42)
+			require.NoError(t, err)
+			require.InDelta(t, float64(42)*1.5, val42, 0.01,
+				"value for id=42 should be 63.0")
+
+			// Step 7: Vector search
+			vec := make([]float32, testVecDim)
+			for i := range vec {
+				vec[i] = float32(i) * 0.1 // matches id=0's embedding
+			}
+			searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, 5,
+				[]entity.Vector{entity.FloatVector(vec)}).
+				WithConsistencyLevel(entity.ClStrong).
+				WithANNSField("embedding").
+				WithOutputFields("id", "value"))
+			common.CheckErr(t, err, true)
+			require.Equal(t, 1, len(searchRes), "1 result set for 1 query vector")
+			require.Greater(t, searchRes[0].ResultCount, 0, "search should return results")
+			nearestID, _ := searchRes[0].GetColumn("id").GetAsInt64(0)
+			t.Logf("Search nearest: id=%d", nearestID)
+
+			// Step 8: Hybrid search (vector + filter)
+			hybridRes, err := mc.Search(ctx, client.NewSearchOption(collName, 5,
+				[]entity.Vector{entity.FloatVector(vec)}).
+				WithConsistencyLevel(entity.ClStrong).
+				WithANNSField("embedding").
+				WithFilter("id >= 500 && id < 1500").
+				WithOutputFields("id"))
+			common.CheckErr(t, err, true)
+			require.Equal(t, 1, len(hybridRes))
+			require.Greater(t, hybridRes[0].ResultCount, 0, "hybrid search should return results")
+			hybridIDCol := hybridRes[0].GetColumn("id")
+			for i := 0; i < hybridIDCol.Len(); i++ {
+				val, _ := hybridIDCol.GetAsInt64(i)
+				require.GreaterOrEqual(t, val, int64(500), "id should be >= 500")
+				require.Less(t, val, int64(1500), "id should be < 1500")
+			}
+			t.Logf("Hybrid search (id in [500,1500)) returned %d results", hybridRes[0].ResultCount)
+
+			t.Logf("[%s] All checks passed!", fc.name)
+		})
+	}
+}
