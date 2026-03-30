@@ -1190,3 +1190,8 @@ func (s *Server) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicat
 func (s *Server) CreateReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) error {
 	return s.proxy.CreateReplicateStream(stream)
 }
+
+// DumpMessages streams messages from a WAL range for data salvage.
+func (s *Server) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvuspb.MilvusService_DumpMessagesServer) error {
+	return s.proxy.DumpMessages(req, stream)
+}

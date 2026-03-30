@@ -97,6 +97,11 @@ type recoveryStorageImpl struct {
 	truncator              walimpls.WALImpls
 	metrics                *recoveryMetrics
 	pendingPersistSnapshot *RecoverySnapshot
+	// used to mark switch MQ msg found
+	alterWALInfo *AlterWALInfo
+	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
+	// Set under r.mu; consumed and persisted by the background task to avoid holding the lock.
+	pendingSalvageCheckpoint *utility.ReplicateCheckpoint
 }
 
 // Metrics gets the metrics of the wal.
@@ -179,7 +184,7 @@ func (r *recoveryStorageImpl) notifyPersist() {
 func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.dirtyCounter == 0 {
+	if r.dirtyCounter == 0 && r.pendingSalvageCheckpoint == nil {
 		return nil
 	}
 
@@ -203,12 +208,17 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 			vchannels[vchannel.meta.Vchannel] = dirtySnapshot
 		}
 	}
+	// Atomically capture the salvage checkpoint alongside other dirty state.
+	// Clearing it here (under r.mu) ensures it is only consumed once.
+	salvageCP := r.pendingSalvageCheckpoint
+	r.pendingSalvageCheckpoint = nil
 	// clear the dirty counter.
 	r.dirtyCounter = 0
 	return &RecoverySnapshot{
 		VChannels:          vchannels,
 		SegmentAssignments: segments,
 		Checkpoint:         r.checkpoint.Clone(),
+		SalvageCheckpoint:  salvageCP,
 	}
 }
 
@@ -255,6 +265,11 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 			clusterRole := replicateutil.MustNewConfigHelper(r.currentClusterID, header.ReplicateConfiguration).GetCurrentCluster()
 			switch clusterRole.Role() {
 			case replicateutil.RolePrimary:
+				if header.GetForcePromote() && r.checkpoint.ReplicateCheckpoint != nil {
+					// Store for background task to persist; never call etcd while holding r.mu.
+					r.pendingSalvageCheckpoint = r.checkpoint.ReplicateCheckpoint
+					r.notifyPersist()
+				}
 				r.checkpoint.ReplicateCheckpoint = nil
 			case replicateutil.RoleSecondary:
 				// Update the replicate checkpoint if the cluster role is secondary.

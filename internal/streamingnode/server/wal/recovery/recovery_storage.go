@@ -3,6 +3,7 @@ package recovery
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -21,6 +22,19 @@ type RecoverySnapshot struct {
 	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
 	Checkpoint         *WALCheckpoint
 	TxnBuffer          *utility.TxnBuffer
+	// Used during WAL alteration process
+	AlterWALInfo *AlterWALInfo
+	// SalvageCheckpoint captures the replicate checkpoint at force-promote time.
+	// It must be persisted before the consume checkpoint so that the ordering guarantee holds.
+	SalvageCheckpoint *utility.ReplicateCheckpoint
+}
+
+// AlterWALInfo contains information about WAL alteration process.
+type AlterWALInfo struct {
+	FoundAlterWALMsg bool
+	TargetWALName    commonpb.WALName
+	AlterWALConfig   map[string]string
+	AlterWALTs       uint64
 }
 
 type BuildRecoveryStreamParam struct {
