@@ -1426,7 +1426,8 @@ func getProperAvroSchema() string {
 								{"name": "index_version", "type": "long"},
 								{"name": "num_rows", "type": "long"},
 								{"name": "current_index_version", "type": "int"},
-								{"name": "mem_size", "type": "long"}
+								{"name": "mem_size", "type": "long"},
+								{"name": "current_scalar_index_version", "type": "int", "default": 0}
 							]
 						}
 					}
