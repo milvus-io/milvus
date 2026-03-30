@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
@@ -883,6 +884,8 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 	map[int64]*datapb.TextIndexStats, // text indexed info
 	map[int64]struct{}, // unindexed text fields
 	map[int64]*datapb.JsonKeyStats, // json key stats info
+	map[int64]string, // text index base paths
+	map[int64]string, // json key stats base paths
 ) {
 	storageVersion := loadInfo.GetStorageVersion()
 
@@ -975,23 +978,42 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 		}
 	}
 
-	textIndexedInfo := make(map[int64]*datapb.TextIndexStats, len(loadInfo.GetTextStatsLogs()))
-	for _, fieldStatsLog := range loadInfo.GetTextStatsLogs() {
-		textLog, ok := textIndexedInfo[fieldStatsLog.FieldID]
-		if !ok {
-			textIndexedInfo[fieldStatsLog.FieldID] = fieldStatsLog
-		} else if fieldStatsLog.GetVersion() > textLog.GetVersion() {
-			textIndexedInfo[fieldStatsLog.FieldID] = fieldStatsLog
-		}
+	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).TextAndJSONIndexStatsWithBasePaths()
+	textIndexedInfo := statsResult.TextIndexStats
+	jsonKeyIndexInfo := statsResult.JSONKeyStats
+	textBasePaths := statsResult.TextBasePaths
+	jsonBasePaths := statsResult.JSONBasePaths
+	if statsResult.Err() != nil {
+		log.Warn("failed to load text/json stats from manifest",
+			zap.String("manifestPath", loadInfo.GetManifestPath()), zap.Error(statsResult.Err()))
+		textIndexedInfo = make(map[int64]*datapb.TextIndexStats)
+		jsonKeyIndexInfo = make(map[int64]*datapb.JsonKeyStats)
+		textBasePaths = make(map[int64]string)
+		jsonBasePaths = make(map[int64]string)
 	}
 
-	jsonKeyIndexInfo := make(map[int64]*datapb.JsonKeyStats, len(loadInfo.GetJsonKeyStatsLogs()))
-	for _, fieldStatsLog := range loadInfo.GetJsonKeyStatsLogs() {
-		jsonKeyLog, ok := jsonKeyIndexInfo[fieldStatsLog.FieldID]
-		if !ok {
-			jsonKeyIndexInfo[fieldStatsLog.FieldID] = fieldStatsLog
-		} else if fieldStatsLog.GetVersion() > jsonKeyLog.GetVersion() {
-			jsonKeyIndexInfo[fieldStatsLog.FieldID] = fieldStatsLog
+	if textBasePaths == nil {
+		textBasePaths = make(map[int64]string)
+	}
+	if jsonBasePaths == nil {
+		jsonBasePaths = make(map[int64]string)
+	}
+
+	// For V2 (non-manifest) segments, compute basePaths from metadata.
+	// The resolver returns empty basePaths for V2; we compute them here.
+	rootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
+	for fieldID, stats := range textIndexedInfo {
+		if _, ok := textBasePaths[fieldID]; !ok {
+			textBasePaths[fieldID] = metautil.BuildTextIndexPrefix(rootPath,
+				stats.GetBuildID(), stats.GetVersion(),
+				loadInfo.GetCollectionID(), loadInfo.GetPartitionID(), loadInfo.GetSegmentID(), fieldID)
+		}
+	}
+	for fieldID, stats := range jsonKeyIndexInfo {
+		if _, ok := jsonBasePaths[fieldID]; !ok {
+			jsonBasePaths[fieldID] = metautil.BuildJSONKeyStatsPrefix(rootPath, stats.GetJsonKeyStatsDataFormat(),
+				stats.GetBuildID(), stats.GetVersion(),
+				loadInfo.GetCollectionID(), loadInfo.GetPartitionID(), loadInfo.GetSegmentID(), fieldID)
 		}
 	}
 
@@ -1005,7 +1027,7 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 		}
 	}
 
-	return indexedFieldInfos, fieldBinlogs, textIndexedInfo, unindexedTextFields, jsonKeyIndexInfo
+	return indexedFieldInfos, fieldBinlogs, textIndexedInfo, unindexedTextFields, jsonKeyIndexInfo, textBasePaths, jsonBasePaths
 }
 
 func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *querypb.SegmentLoadInfo, segment *LocalSegment) (err error) {
@@ -1029,7 +1051,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 
 	collection := segment.GetCollection()
 	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
-	indexedFieldInfos, _, textIndexes, unindexedTextFields, jsonKeyStats := separateLoadInfoV2(loadInfo, collection.Schema())
+	indexedFieldInfos, _, textIndexes, unindexedTextFields, jsonKeyStats, _, jsonBasePaths := separateLoadInfoV2(loadInfo, collection.Schema())
 
 	log := log.Ctx(ctx).With(zap.Int64("segmentID", segment.ID()))
 	tr := timerecord.NewTimeRecorder("segmentLoader.loadSealedSegment")
@@ -1060,8 +1082,8 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		})
 	}
 
-	for _, info := range jsonKeyStats {
-		if err := segment.LoadJSONKeyIndex(ctx, info, schemaHelper); err != nil {
+	for fieldID, info := range jsonKeyStats {
+		if err := segment.LoadJSONKeyIndex(ctx, info, schemaHelper, jsonBasePaths[fieldID]); err != nil {
 			return err
 		}
 	}
@@ -2368,24 +2390,34 @@ func (loader *segmentLoader) LoadJSONIndex(ctx context.Context,
 		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
 	}
 
-	if len(loadInfo.GetJsonKeyStatsLogs()) == 0 {
+	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).TextAndJSONIndexStatsWithBasePaths()
+	if statsResult.Err() != nil {
+		return statsResult.Err()
+	}
+	jsonKeyIndexInfo := statsResult.JSONKeyStats
+	jsonBasePaths := statsResult.JSONBasePaths
+	if len(jsonKeyIndexInfo) == 0 {
 		return nil
+	}
+	if jsonBasePaths == nil {
+		jsonBasePaths = make(map[int64]string)
+	}
+
+	// Compute V2 basePaths for non-manifest segments
+	rootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
+	for fieldID, stats := range jsonKeyIndexInfo {
+		if _, ok := jsonBasePaths[fieldID]; !ok {
+			jsonBasePaths[fieldID] = metautil.BuildJSONKeyStatsPrefix(rootPath, stats.GetJsonKeyStatsDataFormat(),
+				stats.GetBuildID(), stats.GetVersion(),
+				loadInfo.GetCollectionID(), loadInfo.GetPartitionID(), loadInfo.GetSegmentID(), fieldID)
+		}
 	}
 
 	collection := segment.GetCollection()
 	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
 
-	jsonKeyIndexInfo := make(map[int64]*datapb.JsonKeyStats, len(loadInfo.GetJsonKeyStatsLogs()))
-	for _, fieldStatsLog := range loadInfo.GetJsonKeyStatsLogs() {
-		jsonKeyLog, ok := jsonKeyIndexInfo[fieldStatsLog.FieldID]
-		if !ok {
-			jsonKeyIndexInfo[fieldStatsLog.FieldID] = fieldStatsLog
-		} else if fieldStatsLog.GetVersion() > jsonKeyLog.GetVersion() {
-			jsonKeyIndexInfo[fieldStatsLog.FieldID] = fieldStatsLog
-		}
-	}
-	for _, info := range jsonKeyIndexInfo {
-		if err := segment.LoadJSONKeyIndex(ctx, info, schemaHelper); err != nil {
+	for fieldID, info := range jsonKeyIndexInfo {
+		if err := segment.LoadJSONKeyIndex(ctx, info, schemaHelper, jsonBasePaths[fieldID]); err != nil {
 			return err
 		}
 	}

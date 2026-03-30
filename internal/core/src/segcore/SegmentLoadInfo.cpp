@@ -189,6 +189,11 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
         info->set_warmup_policy(field_warmup_policy);
     }
 
+    // Propagate base_path for unified (basePath + relativeFiles) model
+    if (!text_index_stats.base_path().empty()) {
+        info->set_base_path(text_index_stats.base_path());
+    }
+
     return info;
 }
 

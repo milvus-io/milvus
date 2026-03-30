@@ -122,14 +122,26 @@ TextMatchIndex::Upload(const Config& config) {
     auto remote_mem_path_to_size =
         this->file_manager_->GetRemotePathsToFileSize();
 
+    // Strip the remote basePath prefix to return relative file paths.
+    // This makes the returned paths consistent with JsonKeyStats::Upload()
+    // which also returns relative paths.
+    auto base_prefix = disk_file_manager_->GetRemoteTextLogPrefix() + "/";
+    auto strip_prefix = [&base_prefix](const std::string& path) -> std::string {
+        if (path.size() > base_prefix.size() &&
+            path.compare(0, base_prefix.size(), base_prefix) == 0) {
+            return path.substr(base_prefix.size());
+        }
+        return path;
+    };
+
     std::vector<SerializedIndexFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size() +
                         remote_mem_path_to_size.size());
     for (auto& file : remote_paths_to_size) {
-        index_files.emplace_back(file.first, file.second);
+        index_files.emplace_back(strip_prefix(file.first), file.second);
     }
     for (auto& file : remote_mem_path_to_size) {
-        index_files.emplace_back(file.first, file.second);
+        index_files.emplace_back(strip_prefix(file.first), file.second);
     }
     return IndexStats::New(this->file_manager_->GetAddedTotalMemSize() +
                                disk_file_manager_->GetAddedTotalFileSize(),
@@ -156,17 +168,28 @@ TextMatchIndex::Load(const Config& config) {
         }
     }
 
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
     // V2: existing multi-file load path
     auto prefix = disk_file_manager_->GetLocalTextIndexPrefix();
+    // Files are relative paths; prepend base_path to construct absolute remote paths.
+    // This must happen before extracting index_null_offset so all files have full paths.
+    auto base_path =
+        GetValueFromConfig<std::string>(config, STATS_BASE_PATH_KEY)
+            .value_or("");
+    AssertInfo(!base_path.empty(),
+               "stats_base_path is required for loading text index");
+    for (auto& f : files_value) {
+        f = base_path + "/" + f;
+    }
+
     auto it = std::find_if(
         files_value.begin(), files_value.end(), [](const std::string& file) {
             return file.substr(file.find_last_of('/') + 1) ==
                    "index_null_offset";
         });
-    auto load_priority =
-        GetValueFromConfig<milvus::proto::common::LoadPriority>(
-            config, milvus::LOAD_PRIORITY)
-            .value_or(milvus::proto::common::LoadPriority::HIGH);
     if (it != files_value.end()) {
         std::vector<std::string> file;
         file.push_back(*it);

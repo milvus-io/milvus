@@ -76,6 +76,7 @@ DiskFileManagerImpl::DiskFileManagerImpl(
     fs_ = fileManagerContext.fs;
     plugin_context_ = fileManagerContext.plugin_context;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
+    stats_base_path_ = fileManagerContext.stats_base_path;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
@@ -446,17 +447,14 @@ DiskFileManagerImpl::CacheJsonStatsMetaToDisk(
         local_chunk_manager->CreateDir(parent_path.string());
     }
 
-    auto remote_prefix = GetRemoteJsonStatsLogPrefix();
-    auto full_remote_path =
-        (std::filesystem::path(remote_prefix) / remote_file).string();
-
-    auto file_size = rcm_->Size(full_remote_path);
+    // remote_file is an absolute remote path (basePath already prepended by caller)
+    auto file_size = rcm_->Size(remote_file);
     auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[file_size]);
-    rcm_->Read(full_remote_path, buf.get(), file_size);
+    rcm_->Read(remote_file, buf.get(), file_size);
     local_chunk_manager->Write(local_file, buf.get(), file_size);
 
     LOG_INFO("Cached json stats meta file from {} to {}, size: {}",
-             full_remote_path,
+             remote_file,
              local_file,
              file_size);
 
@@ -1271,6 +1269,9 @@ DiskFileManagerImpl::GetLocalTempNgramIndexPrefix() {
 
 std::string
 DiskFileManagerImpl::GetRemoteJsonStatsLogPrefix() {
+    if (!stats_base_path_.empty()) {
+        return stats_base_path_;
+    }
     return GenRemoteJsonStatsPathPrefix(rcm_,
                                         index_meta_.build_id,
                                         index_meta_.index_version,

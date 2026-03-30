@@ -1357,7 +1357,7 @@ func TestSeparateLoadInfoV2_ExternalFieldIndexNotSkipped(t *testing.T) {
 		BinlogPaths: []*datapb.FieldBinlog{},
 	}
 
-	indexedFieldInfos, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+	indexedFieldInfos, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(loadInfo, schema)
 
 	// External field indexes should be included (not skipped)
 	assert.Len(t, indexedFieldInfos, 0, "no binlog paths means no indexed field infos via binlog matching")
@@ -1401,7 +1401,7 @@ func TestSeparateLoadInfoV2_MixedExternalAndNormalFields(t *testing.T) {
 		},
 	}
 
-	indexedFieldInfos, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+	indexedFieldInfos, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(loadInfo, schema)
 
 	// Normal field 103 has binlog + index → indexed
 	assert.Len(t, indexedFieldInfos, 1)
@@ -1436,7 +1436,7 @@ func TestSeparateLoadInfoV2_ExternalFieldInShortColumnGroupV3(t *testing.T) {
 		},
 	}
 
-	indexedFieldInfos, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+	indexedFieldInfos, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(loadInfo, schema)
 
 	// Normal field 103 should be matched via short column group iteration
 	assert.Contains(t, indexedFieldInfos, int64(1003))
@@ -1468,7 +1468,7 @@ func TestSeparateLoadInfoV2_ExternalFieldBinlogsSkippedV3(t *testing.T) {
 		},
 	}
 
-	_, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+	_, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(loadInfo, schema)
 
 	// Only non-external fields (100 and 103) should remain in fieldBinlogs
 	assert.Len(t, fieldBinlogs, 2)
@@ -1501,7 +1501,7 @@ func TestSeparateLoadInfoV2_ExternalFieldBinlogsSkippedLegacy(t *testing.T) {
 		},
 	}
 
-	_, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+	_, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(loadInfo, schema)
 
 	// Only non-external fields (100 and 102) should remain
 	assert.Len(t, fieldBinlogs, 2)
@@ -1533,7 +1533,7 @@ func TestSeparateLoadInfoV2_NonExternalCollectionUnaffected(t *testing.T) {
 		},
 	}
 
-	_, fieldBinlogs, _, _, _ := separateLoadInfoV2(loadInfo, schema)
+	_, fieldBinlogs, _, _, _, _, _ := separateLoadInfoV2(loadInfo, schema)
 
 	// All fields should be included (no external fields to skip)
 	assert.Len(t, fieldBinlogs, 3)

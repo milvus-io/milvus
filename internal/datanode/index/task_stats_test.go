@@ -204,7 +204,7 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 			JsonStatsShreddingRatio:      0.3,
 			JsonStatsWriteBatchSize:      81920,
 		}
-		params := buildIndexParams(req, []string{"file1", "file2"}, nil, &indexcgopb.StorageConfig{}, options)
+		params := buildIndexParams(req, []string{"file1", "file2"}, nil, &indexcgopb.StorageConfig{}, options, "")
 
 		s.Equal(storage.StorageV2, params.StorageVersion)
 		s.NotNil(params.SegmentInsertFiles)
