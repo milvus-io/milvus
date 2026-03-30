@@ -1,5 +1,6 @@
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
+from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_log import test_log as log
 import time
@@ -303,10 +304,11 @@ class TestPartitionKeyIsolation(TestMilvusClientV2Base):
         tt = time.time() - t0
         log.info(f"create index cost time {tt}")
         # try set isolation=true after index exists → expect failure
-        res, check = self.alter_collection_properties(client, collection_name,
-                                                      {"partitionkey.isolation": "true"},
-                                                      check_task=CheckTasks.check_nothing)
-        assert check is False
+        error = {ct.err_code: 702,
+                 ct.err_msg: "can not alter partition key isolation mode if the collection already has a vector index"}
+        self.alter_collection_properties(client, collection_name,
+                                         {"partitionkey.isolation": "true"},
+                                         check_task=CheckTasks.err_res, check_items=error)
         # drop index, then set isolation=true → expect success
         for index_name in index_list:
             self.drop_index(client, collection_name, index_name)
