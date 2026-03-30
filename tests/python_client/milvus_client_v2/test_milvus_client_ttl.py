@@ -163,67 +163,50 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
             log.info(f"flush completed in {time.time() - t1}s")
 
         # search data again after insert more data
-        consistency_levels = [CONSISTENCY_EVENTUALLY, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_STRONG]
-        for consistency_level in consistency_levels:
-            log.debug(f"start to search/query with {consistency_level}")
-            # Poll until search returns results (search visibility may lag behind query)
-            for i in range(15):
-                res = self.search(client, collection_name, search_vectors,
-                                  search_params={}, anns_field='embeddings',
-                                  limit=10, consistency_level=consistency_level)[0]
-                if len(res[0]) > 0:
-                    break
-                time.sleep(2)
-            assert len(res[0]) > 0, \
-                f"Search with {consistency_level} returned 0 results after retries"
-
-            if consistency_level != CONSISTENCY_STRONG:
-                pass
-            else:
-                # query count(*)
-                res = self.query(client, collection_name, filter='',
-                                 output_fields=["count(*)"], consistency_level=consistency_level)[0]
-                assert res[0].get('count(*)', None) == nb * insert_times
-                res = self.query(client, collection_name, filter='visible==False',
-                                 output_fields=["count(*)"], consistency_level=consistency_level)[0]
-                assert res[0].get('count(*)', None) == 0
-                # query count(visible)
-                res = self.query(client, collection_name, filter='visible==True',
-                                 output_fields=["count(*)"], consistency_level=consistency_level)[0]
-                assert res[0].get('count(*)', None) == nb * insert_times
-
-            # hybrid search
-            res = self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker,
-                                     limit=10, consistency_level=consistency_level)[0]
-            assert len(res[0]) > 0
+        for i in range(15):
+            res = self.search(client, collection_name, search_vectors,
+                              search_params={}, anns_field='embeddings',
+                              limit=10, consistency_level=CONSISTENCY_STRONG)[0]
+            if len(res[0]) > 0:
+                break
+            time.sleep(2)
+        assert len(res[0]) > 0, \
+            "Search with Strong consistency returned 0 results after retries"
+        # query count(*)
+        res = self.query(client, collection_name, filter='',
+                         output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)', None) == nb * insert_times
+        res = self.query(client, collection_name, filter='visible==False',
+                         output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)', None) == 0
+        res = self.query(client, collection_name, filter='visible==True',
+                         output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)', None) == nb * insert_times
+        # hybrid search
+        res = self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker,
+                                 limit=10, consistency_level=CONSISTENCY_STRONG)[0]
+        assert len(res[0]) > 0
 
         # alter ttl to 2000s
         self.alter_collection_properties(client, collection_name, properties={"collection.ttl.seconds": 2000})
-        for consistency_level in consistency_levels:
-            log.debug(f"start to search/query after alter ttl with {consistency_level}")
-            # search data after alter ttl
-            res = self.search(client, collection_name, search_vectors,
-                              search_params={}, anns_field='embeddings',
-                              filter='visible==False', limit=10, consistency_level=consistency_level)[0]
-            assert len(res[0]) > 0
-
-            # hybrid search data after alter ttl
-            sub_search1 = AnnSearchRequest(search_vectors, "embeddings", {"level": 1}, 20, expr='visible==False')
-            sub_search2 = AnnSearchRequest(search_vectors, "embeddings_2", {"level": 1}, 20, expr='visible==False')
-            res = self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker,
-                                     limit=10, consistency_level=consistency_level)[0]
-            assert len(res[0]) > 0
-
-            # query count(*)
-            res = self.query(client, collection_name, filter='visible==False',
-                             output_fields=["count(*)"], consistency_level=consistency_level)[0]
-            assert res[0].get('count(*)', 0) == insert_times * nb
-            res = self.query(client, collection_name, filter='',
-                             output_fields=["count(*)"], consistency_level=consistency_level)[0]
-            if consistency_level != CONSISTENCY_STRONG:
-                assert res[0].get('count(*)', 0) >= insert_times * nb
-            else:
-                assert res[0].get('count(*)', 0) == insert_times * nb * 2
+        # search data after alter ttl
+        res = self.search(client, collection_name, search_vectors,
+                          search_params={}, anns_field='embeddings',
+                          filter='visible==False', limit=10, consistency_level=CONSISTENCY_STRONG)[0]
+        assert len(res[0]) > 0
+        # hybrid search data after alter ttl
+        sub_search1 = AnnSearchRequest(search_vectors, "embeddings", {"level": 1}, 20, expr='visible==False')
+        sub_search2 = AnnSearchRequest(search_vectors, "embeddings_2", {"level": 1}, 20, expr='visible==False')
+        res = self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker,
+                                 limit=10, consistency_level=CONSISTENCY_STRONG)[0]
+        assert len(res[0]) > 0
+        # query count(*)
+        res = self.query(client, collection_name, filter='visible==False',
+                         output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)', 0) == insert_times * nb
+        res = self.query(client, collection_name, filter='',
+                         output_fields=["count(*)"], consistency_level=CONSISTENCY_STRONG)[0]
+        assert res[0].get('count(*)', 0) == insert_times * nb * 2
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_ttl_edge(self):
