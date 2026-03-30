@@ -1783,8 +1783,7 @@ ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
         case arrow::Type::BOOL: {
             auto typed = std::static_pointer_cast<arrow::BooleanArray>(values);
             auto* d = sf.mutable_bool_data();
-            for (int64_t j = start; j < end; j++)
-                d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
             break;
         }
         case arrow::Type::INT8: {
@@ -1804,29 +1803,25 @@ ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
         case arrow::Type::INT32: {
             auto typed = std::static_pointer_cast<arrow::Int32Array>(values);
             auto* d = sf.mutable_int_data();
-            for (int64_t j = start; j < end; j++)
-                d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
             break;
         }
         case arrow::Type::INT64: {
             auto typed = std::static_pointer_cast<arrow::Int64Array>(values);
             auto* d = sf.mutable_long_data();
-            for (int64_t j = start; j < end; j++)
-                d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
             break;
         }
         case arrow::Type::FLOAT: {
             auto typed = std::static_pointer_cast<arrow::FloatArray>(values);
             auto* d = sf.mutable_float_data();
-            for (int64_t j = start; j < end; j++)
-                d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
             break;
         }
         case arrow::Type::DOUBLE: {
             auto typed = std::static_pointer_cast<arrow::DoubleArray>(values);
             auto* d = sf.mutable_double_data();
-            for (int64_t j = start; j < end; j++)
-                d->add_data(typed->Value(j));
+            for (int64_t j = start; j < end; j++) d->add_data(typed->Value(j));
             break;
         }
         case arrow::Type::STRING: {
@@ -1837,9 +1832,10 @@ ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
             break;
         }
         default:
-            ThrowInfo(ErrorCode::Unsupported,
-                      "Unsupported element type for ArrowListToScalarFieldProto: {}",
-                      values->type()->ToString());
+            ThrowInfo(
+                ErrorCode::Unsupported,
+                "Unsupported element type for ArrowListToScalarFieldProto: {}",
+                values->type()->ToString());
     }
     return sf;
 }
