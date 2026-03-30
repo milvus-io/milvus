@@ -1629,9 +1629,10 @@ aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/lates
 		Key:          "minio.cloudProvider",
 		DefaultValue: DefaultMinioCloudProvider,
 		Version:      "2.4.1",
-		Doc: `Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
+		Doc: `Cloud Provider of S3. Supports: "aws", "gcp", "aliyun", "rustfs".
 Cloud Provider of Google Cloud Storage. Supports: "gcpnative".
 You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
+You can use "rustfs" for RustFS high-performance S3-compatible storage (2.3x faster than MinIO for 4KB objects)
 You can use "gcp" for other cloud provider supports S3 API with signature v2
 You can use "aliyun" for other cloud provider uses virtual host style bucket
 You can use "gcpnative" for the Google Cloud Platform provider. Uses service account credentials
