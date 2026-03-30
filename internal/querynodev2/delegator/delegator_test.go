@@ -2044,6 +2044,85 @@ func TestNewRowCountBasedEvaluator_PartialResultAcceptance(t *testing.T) {
 	})
 }
 
+func TestNewRowCountBasedEvaluator_ZeroRatioBoundary(t *testing.T) {
+	mockey.PatchConvey("TestNewRowCountBasedEvaluator_ZeroRatioBoundary", t, func() {
+		sealedRowCount := map[int64]int64{
+			1: 1000,
+			2: 2000,
+			3: 3000,
+			4: 4000,
+		}
+		// Total: 10000 rows
+
+		// Mock ratio=0.0: search should never fail, even with empty results
+		mockParamTable := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(0.0).Build()
+		defer mockParamTable.UnPatch()
+
+		evaluator := NewRowCountBasedEvaluator(sealedRowCount)
+
+		// All segments failed (accessedDataRatio=0.0, ratio=0.0)
+		// 0.0 >= 0.0 should return true
+		successSegments := typeutil.NewSet[int64]()
+		failureSegments := []int64{1, 2, 3, 4}
+		testErrors := []error{
+			errors.New("node 1 failed"),
+			errors.New("node 2 failed"),
+			errors.New("node 3 failed"),
+			errors.New("node 4 failed"),
+		}
+
+		shouldReturn, accessedRatio := evaluator("Search", successSegments, failureSegments, testErrors)
+		assert.True(t, shouldReturn, "ratio=0.0 with all segments failed should still return partial result")
+		assert.Equal(t, 0.0, accessedRatio)
+
+		// Some segments succeeded (accessedDataRatio=0.3 > 0.0)
+		successSegments = typeutil.NewSet[int64]()
+		successSegments.Insert(1, 2) // 3000/10000 = 0.3
+		failureSegments = []int64{3, 4}
+		testErrors = []error{errors.New("node 3 failed"), errors.New("node 4 failed")}
+
+		shouldReturn, accessedRatio = evaluator("Search", successSegments, failureSegments, testErrors)
+		assert.True(t, shouldReturn)
+		assert.Equal(t, 0.3, accessedRatio)
+
+		// Query task with ratio=0.0 and all failed
+		successSegments = typeutil.NewSet[int64]()
+		failureSegments = []int64{1, 2, 3, 4}
+		testErrors = []error{errors.New("all failed")}
+
+		shouldReturn, accessedRatio = evaluator("Query", successSegments, failureSegments, testErrors)
+		assert.True(t, shouldReturn, "ratio=0.0 with all segments failed should return partial for Query too")
+		assert.Equal(t, 0.0, accessedRatio)
+	})
+}
+
+func TestNewRowCountBasedEvaluator_ExactRatioBoundary(t *testing.T) {
+	mockey.PatchConvey("TestNewRowCountBasedEvaluator_ExactRatioBoundary", t, func() {
+		sealedRowCount := map[int64]int64{
+			1: 5000,
+			2: 5000,
+		}
+		// Total: 10000 rows
+
+		// Mock ratio=0.5: exactly 50% available should pass
+		mockParamTable := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(0.5).Build()
+		defer mockParamTable.UnPatch()
+
+		evaluator := NewRowCountBasedEvaluator(sealedRowCount)
+
+		// Exactly 50% data available (accessedDataRatio=0.5, ratio=0.5)
+		// 0.5 >= 0.5 should return true
+		successSegments := typeutil.NewSet[int64]()
+		successSegments.Insert(1) // 5000/10000 = 0.5
+		failureSegments := []int64{2}
+		testErrors := []error{errors.New("segment 2 failed")}
+
+		shouldReturn, accessedRatio := evaluator("Search", successSegments, failureSegments, testErrors)
+		assert.True(t, shouldReturn, "exact ratio boundary (0.5 >= 0.5) should return partial result")
+		assert.Equal(t, 0.5, accessedRatio)
+	})
+}
+
 func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 	paramtable.Init()
 

@@ -1455,6 +1455,6 @@ func NewRowCountBasedEvaluator(sealedRowCount map[int64]int64) PartialResultEval
 		}
 
 		accessedDataRatio := float64(successRowCount) / float64(totalRowCount)
-		return accessedDataRatio > partialResultRequiredDataRatio, accessedDataRatio
+		return accessedDataRatio >= partialResultRequiredDataRatio, accessedDataRatio
 	}
 }
