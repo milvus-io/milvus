@@ -1168,7 +1168,7 @@ func generateLanceDataOnMinIO(t *testing.T, s3URI string, numRows, startID int) 
 // runShellCommand runs a shell command and returns its combined output.
 func runShellCommand(t *testing.T, cmd string) (string, error) {
 	t.Helper()
-	c := exec.Command("bash", "-c", cmd)
+	c := exec.Command("bash", "-c", cmd) //nolint:gosec
 	output, err := c.CombinedOutput()
 	return string(output), err
 }
