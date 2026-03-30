@@ -280,6 +280,16 @@ func buildInt64Array(values []int64) *array.Int64 {
 	return builder.NewInt64Array()
 }
 
+// buildStringArray creates an arrow String array from a slice.
+func buildStringArray(values []string) *array.String {
+	builder := array.NewStringBuilder(memory.DefaultAllocator)
+	defer builder.Release()
+	for _, v := range values {
+		builder.Append(v)
+	}
+	return builder.NewStringArray()
+}
+
 // makeRecord creates a Record with two Int64 fields (fieldA=100, fieldB=101).
 func makeRecord(fieldA, fieldB []int64) Record {
 	arrA := buildInt64Array(fieldA)
@@ -292,6 +302,25 @@ func makeRecord(fieldA, fieldB []int64) Record {
 	rec := array.NewRecord(arrow.NewSchema(fields, nil), []arrow.Array{arrA, arrB}, nRows)
 	return NewSimpleArrowRecord(rec, map[FieldID]int{100: 0, 101: 1})
 }
+
+// makeStringRecord creates a Record with an Int64 field (100) and a String field (101).
+func makeStringRecord(fieldA []int64, fieldB []string) Record {
+	arrA := buildInt64Array(fieldA)
+	arrB := buildStringArray(fieldB)
+	nRows := int64(len(fieldA))
+	fields := []arrow.Field{
+		{Name: "fieldA", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "fieldB", Type: &arrow.StringType{}},
+	}
+	rec := array.NewRecord(arrow.NewSchema(fields, nil), []arrow.Array{arrA, arrB}, nRows)
+	return NewSimpleArrowRecord(rec, map[FieldID]int{100: 0, 101: 1})
+}
+
+// errorRecordReader is a RecordReader that always returns an error.
+type errorRecordReader struct{}
+
+func (r *errorRecordReader) Next() (Record, error) { return nil, fmt.Errorf("read error") }
+func (r *errorRecordReader) Close() error           { return nil }
 
 // sliceRecordReader is a RecordReader that returns pre-built records in order.
 type sliceRecordReader struct {
@@ -421,4 +450,320 @@ func TestMergeSortBatchNotSortedWithPredicate(t *testing.T) {
 	sort.Slice(outputRows, func(i, j int) bool { return outputRows[i] < outputRows[j] })
 	expected := []int64{1, 5, 10, 20, 25, 40}
 	assert.Equal(t, expected, outputRows)
+}
+
+func TestMergeSortEmptyReaders(t *testing.T) {
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+	numRows, err := MergeSort(64*1024*1024, generateTestSchema(), []RecordReader{}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.NoError(t, err)
+	assert.Equal(t, 0, numRows)
+}
+
+func TestMergeSortReaderInitError(t *testing.T) {
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+	numRows, err := MergeSort(64*1024*1024, generateTestSchema(), []RecordReader{&errorRecordReader{}}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.Error(t, err)
+	assert.Equal(t, 0, numRows)
+}
+
+func TestMergeSortOneReaderEmpty(t *testing.T) {
+	const fieldA FieldID = 100
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: fieldA, Name: "fieldA", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	emptyReader := &sliceRecordReader{records: nil}
+	dataReader := &sliceRecordReader{records: []Record{
+		func() Record {
+			arr := buildInt64Array([]int64{1, 2, 3})
+			rec := array.NewRecord(
+				arrow.NewSchema([]arrow.Field{{Name: "fieldA", Type: arrow.PrimitiveTypes.Int64}}, nil),
+				[]arrow.Array{arr}, 3)
+			return NewSimpleArrowRecord(rec, map[FieldID]int{fieldA: 0})
+		}(),
+	}}
+
+	var outputRows []int64
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			col := r.Column(fieldA).(*array.Int64)
+			for i := 0; i < col.Len(); i++ {
+				outputRows = append(outputRows, col.Value(i))
+			}
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	numRows, err := MergeSort(64*1024*1024, schema, []RecordReader{dataReader, emptyReader}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{fieldA})
+	assert.NoError(t, err)
+	assert.Equal(t, 3, numRows)
+	assert.Equal(t, []int64{1, 2, 3}, outputRows)
+}
+
+func TestMergeSortAllRowsFiltered(t *testing.T) {
+	const fieldA FieldID = 100
+	const fieldB FieldID = 101
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: fieldA, Name: "fieldA", DataType: schemapb.DataType_Int64},
+			{FieldID: fieldB, Name: "fieldB", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	// Batch 1: all rows filtered. Batch 2: has valid rows.
+	// This exercises the recursive enqueueAll path (count == 0 → advance → retry).
+	reader := &sliceRecordReader{records: []Record{
+		makeRecord([]int64{1, 2, 3}, []int64{100, 200, 300}),
+		makeRecord([]int64{4, 5}, []int64{10, 20}),
+	}}
+
+	var outputRows []int64
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			col := r.Column(fieldB).(*array.Int64)
+			for i := 0; i < col.Len(); i++ {
+				outputRows = append(outputRows, col.Value(i))
+			}
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	// Filter: only fieldB < 50
+	numRows, err := MergeSort(64*1024*1024, schema, []RecordReader{reader}, rw, func(r Record, ri, i int) bool {
+		return r.Column(fieldB).(*array.Int64).Value(i) < 50
+	}, []int64{fieldB})
+
+	assert.NoError(t, err)
+	assert.Equal(t, 2, numRows)
+	assert.Equal(t, []int64{10, 20}, outputRows)
+}
+
+func TestMergeSortStringKey(t *testing.T) {
+	const fieldA FieldID = 100
+	const fieldB FieldID = 101
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: fieldA, Name: "fieldA", DataType: schemapb.DataType_Int64},
+			{FieldID: fieldB, Name: "fieldB", DataType: schemapb.DataType_VarChar},
+		},
+	}
+
+	reader0 := &sliceRecordReader{records: []Record{
+		makeStringRecord([]int64{1, 2, 3}, []string{"apple", "cherry", "grape"}),
+	}}
+	reader1 := &sliceRecordReader{records: []Record{
+		makeStringRecord([]int64{4, 5}, []string{"banana", "fig"}),
+	}}
+
+	var outputRows []string
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			col := r.Column(fieldB).(*array.String)
+			for i := 0; i < col.Len(); i++ {
+				outputRows = append(outputRows, col.Value(i))
+			}
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	numRows, err := MergeSort(64*1024*1024, schema, []RecordReader{reader0, reader1}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{fieldB})
+
+	assert.NoError(t, err)
+	assert.Equal(t, 5, numRows)
+	assert.Equal(t, []string{"apple", "banana", "cherry", "fig", "grape"}, outputRows)
+}
+
+func TestMergeSortStringKeyUnsorted(t *testing.T) {
+	const fieldA FieldID = 100
+	const fieldB FieldID = 101
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: fieldA, Name: "fieldA", DataType: schemapb.DataType_Int64},
+			{FieldID: fieldB, Name: "fieldB", DataType: schemapb.DataType_VarChar},
+		},
+	}
+
+	// String data NOT sorted — should trigger error log, but no panic.
+	reader := &sliceRecordReader{records: []Record{
+		makeStringRecord([]int64{1, 2, 3}, []string{"cherry", "apple", "banana"}),
+	}}
+
+	var outputRows []string
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			col := r.Column(fieldB).(*array.String)
+			for i := 0; i < col.Len(); i++ {
+				outputRows = append(outputRows, col.Value(i))
+			}
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	numRows, err := MergeSort(64*1024*1024, schema, []RecordReader{reader}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{fieldB})
+
+	assert.NoError(t, err)
+	assert.Equal(t, 3, numRows)
+	sort.Strings(outputRows)
+	assert.Equal(t, []string{"apple", "banana", "cherry"}, outputRows)
+}
+
+func TestMergeSortWriteError(t *testing.T) {
+	const fieldA FieldID = 100
+	const fieldB FieldID = 101
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: fieldA, Name: "fieldA", DataType: schemapb.DataType_Int64},
+			{FieldID: fieldB, Name: "fieldB", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	reader := &sliceRecordReader{records: []Record{
+		makeRecord([]int64{1, 2, 3}, []int64{10, 20, 30}),
+	}}
+
+	// Small batchSize to trigger mid-loop write error
+	errWriter := &MockRecordWriter{
+		writefn: func(r Record) error { return fmt.Errorf("write error") },
+		closefn: func() error { return nil },
+	}
+
+	_, err := MergeSort(1, schema, []RecordReader{reader}, errWriter, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{fieldB})
+	assert.Error(t, err)
+}
+
+func TestMergeSortFinalWriteError(t *testing.T) {
+	const fieldA FieldID = 100
+	const fieldB FieldID = 101
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: fieldA, Name: "fieldA", DataType: schemapb.DataType_Int64},
+			{FieldID: fieldB, Name: "fieldB", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	reader := &sliceRecordReader{records: []Record{
+		makeRecord([]int64{1, 2}, []int64{10, 20}),
+	}}
+
+	// Large batchSize — all data fits in one batch, error on final write
+	errWriter := &MockRecordWriter{
+		writefn: func(r Record) error { return fmt.Errorf("write error") },
+		closefn: func() error { return nil },
+	}
+
+	_, err := MergeSort(64*1024*1024, schema, []RecordReader{reader}, errWriter, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{fieldB})
+	assert.Error(t, err)
+}
+
+func TestMergeSortAdvanceRecordErrorDuringDequeue(t *testing.T) {
+	const fieldA FieldID = 100
+	const fieldB FieldID = 101
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: fieldA, Name: "fieldA", DataType: schemapb.DataType_Int64},
+			{FieldID: fieldB, Name: "fieldB", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	// Reader returns one valid batch, then an error (not EOF) on the next Next() call.
+	reader := &sliceRecordReader{records: []Record{
+		makeRecord([]int64{1}, []int64{10}),
+	}}
+	// Override Next to return error after first record
+	wrappedReader := &errorAfterNReader{inner: reader, errorAfter: 1}
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	_, err := MergeSort(64*1024*1024, schema, []RecordReader{wrappedReader}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{fieldB})
+	assert.Error(t, err)
+}
+
+// errorAfterNReader wraps a RecordReader and returns an error after N successful reads.
+type errorAfterNReader struct {
+	inner      RecordReader
+	errorAfter int
+	count      int
+}
+
+func (r *errorAfterNReader) Next() (Record, error) {
+	if r.count >= r.errorAfter {
+		return nil, fmt.Errorf("simulated read error")
+	}
+	rec, err := r.inner.Next()
+	if err == nil {
+		r.count++
+	}
+	return rec, err
+}
+
+func (r *errorAfterNReader) Close() error { return r.inner.Close() }
+
+func TestMergeSortSmallBatchSize(t *testing.T) {
+	const fieldA FieldID = 100
+	const fieldB FieldID = 101
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: fieldA, Name: "fieldA", DataType: schemapb.DataType_Int64},
+			{FieldID: fieldB, Name: "fieldB", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	reader0 := &sliceRecordReader{records: []Record{
+		makeRecord([]int64{1, 3, 5}, []int64{10, 30, 50}),
+	}}
+	reader1 := &sliceRecordReader{records: []Record{
+		makeRecord([]int64{2, 4}, []int64{20, 40}),
+	}}
+
+	var outputRows []int64
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			col := r.Column(fieldB).(*array.Int64)
+			for i := 0; i < col.Len(); i++ {
+				outputRows = append(outputRows, col.Value(i))
+			}
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	// batchSize=1 forces a write after every row
+	numRows, err := MergeSort(1, schema, []RecordReader{reader0, reader1}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{fieldB})
+
+	assert.NoError(t, err)
+	assert.Equal(t, 5, numRows)
+	assert.Equal(t, []int64{10, 20, 30, 40, 50}, outputRows)
 }

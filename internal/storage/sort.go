@@ -339,7 +339,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			case *array.Int64:
 				for j := 1; j < r.Len(); j++ {
 					if col.Value(j) < col.Value(j-1) {
-						log.Warn("MergeSort: batch not sorted by sort key, output order may be incorrect",
+						log.Error("MergeSort: batch not sorted by sort key, output order may be incorrect",
 							zap.Int("ri", ri), zap.Int("row", j),
 							zap.Int64("prev", col.Value(j-1)), zap.Int64("curr", col.Value(j)),
 							zap.Int("batchLen", r.Len()))
@@ -349,7 +349,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			case *array.String:
 				for j := 1; j < r.Len(); j++ {
 					if col.Value(j) < col.Value(j-1) {
-						log.Warn("MergeSort: batch not sorted by sort key, output order may be incorrect",
+						log.Error("MergeSort: batch not sorted by sort key, output order may be incorrect",
 							zap.Int("ri", ri), zap.Int("row", j),
 							zap.String("prev", col.Value(j-1)), zap.String("curr", col.Value(j)),
 							zap.Int("batchLen", r.Len()))
