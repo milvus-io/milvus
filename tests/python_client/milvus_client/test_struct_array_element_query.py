@@ -2985,14 +2985,14 @@ class TestStructArrayLargeScale(TestMilvusClientV2Base):
         self.create_collection(client, col_no, schema=schema, index_params=idx_no)
         self.create_collection(client, col_yes, schema=schema, index_params=idx_yes)
 
-        # Insert same data into both
-        batch_size = 1000
+        # Insert same data into both (small batch to avoid gRPC message size limit)
+        batch_size = 200
         for start in range(0, len(data), batch_size):
             batch = data[start:start + batch_size]
             self.insert(client, col_no, batch)
             self.insert(client, col_yes, batch)
-            self.flush(client, col_no)
-            self.flush(client, col_yes)
+        self.flush(client, col_no)
+        self.flush(client, col_yes)
 
         self.load_collection(client, col_no)
         self.load_collection(client, col_yes)
