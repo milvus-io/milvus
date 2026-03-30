@@ -66,6 +66,9 @@ func TestCreateSnapshot(t *testing.T) {
 	collName := common.GenRandomString(snapshotPrefix, 6)
 	err := mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim))
 	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+	})
 
 	// Get collection schema and insert data
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -119,6 +122,12 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	schema.WithShardNum(10)
 	err := mc.CreateCollection(ctx, schema)
 	common.CheckErr(t, err, true)
+	collectionsToClean := []string{collName}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
 
 	// Get collection schema
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -202,6 +211,7 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 
 	// Step 4: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
 	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
@@ -253,6 +263,12 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	schema.WithShardNum(3)
 	err := mc.CreateCollection(ctx, schema)
 	common.CheckErr(t, err, true)
+	collectionsToClean := []string{collName}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
 
 	partitions := make([]string, 0)
 	for i := 0; i < 10; i++ {
@@ -340,6 +356,7 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 
 	// Step 4: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
 	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
@@ -426,6 +443,12 @@ func TestSnapshotRestoreWithMultiFields(t *testing.T) {
 	createOpt := client.NewCreateCollectionOption(collName, schema).WithShardNum(5)
 	err := mc.CreateCollection(ctx, createOpt)
 	common.CheckErr(t, err, true)
+	collectionsToClean := []string{collName}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
 
 	// Get collection schema for data insertion
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
@@ -532,6 +555,7 @@ func TestSnapshotRestoreWithMultiFields(t *testing.T) {
 
 	// Step 6: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
 	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
@@ -619,6 +643,12 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 	createOpt := client.NewCreateCollectionOption(collName, schema).WithShardNum(3)
 	err := mc.CreateCollection(ctx, createOpt)
 	common.CheckErr(t, err, true)
+	collectionsToClean := []string{collName}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
 
 	// Step 2: Create partitions
 	partitions := make([]string, 0)
@@ -687,6 +717,7 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 
 	// Step 8: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
 	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
@@ -901,6 +932,12 @@ func TestSnapshotRestoreWithJSONStats(t *testing.T) {
 		WithIndexOptions(vecIndexOpt, varcharIndexOpt, jsonIndexOpt)
 	err := mc.CreateCollection(ctx, createOpt)
 	common.CheckErr(t, err, true)
+	collectionsToClean := []string{collName}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
 
 	// Step 3: Load collection
 	log.Info("Loading collection")
@@ -991,6 +1028,7 @@ func TestSnapshotRestoreWithJSONStats(t *testing.T) {
 
 	// Step 8: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
 	log.Info("Restoring snapshot", zap.String("target_collection", restoredCollName))
 	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
@@ -1044,6 +1082,12 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 	schema.WithShardNum(3)
 	err := mc.CreateCollection(ctx, schema)
 	common.CheckErr(t, err, true)
+	collectionsToClean := []string{collName}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
 
 	// Create 3 partitions
 	partitions := []string{"part_0", "part_1", "part_2"}
@@ -1124,6 +1168,7 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 
 	// Restore snapshot to new collection (v1)
 	restoredCollNameV1 := fmt.Sprintf("restored_v1_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollNameV1)
 	restoreOptV1 := client.NewRestoreSnapshotOption(snapshotName, restoredCollNameV1)
 	log.Info("Restoring snapshot after partition drop", zap.String("target", restoredCollNameV1))
 	jobIDV1, err := mc.RestoreSnapshot(ctx, restoreOptV1)
@@ -1186,6 +1231,7 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 
 	// Restore snapshot to new collection (v2)
 	restoredCollNameV2 := fmt.Sprintf("restored_v2_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollNameV2)
 	restoreOptV2 := client.NewRestoreSnapshotOption(snapshotName, restoredCollNameV2)
 	log.Info("Restoring snapshot after collection drop", zap.String("target", restoredCollNameV2))
 	jobIDV2, err := mc.RestoreSnapshot(ctx, restoreOptV2)
@@ -1257,6 +1303,12 @@ func TestSnapshotRestoreDropAndRestoreAgain(t *testing.T) {
 	schema.WithAutoID(false)
 	err := mc.CreateCollection(ctx, schema)
 	common.CheckErr(t, err, true)
+	collectionsToClean := []string{collNameA}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
 
 	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collNameA))
 	common.CheckErr(t, err, true)
@@ -1286,6 +1338,7 @@ func TestSnapshotRestoreDropAndRestoreAgain(t *testing.T) {
 
 	// Step 3: Restore A1 to collection B
 	collNameB := fmt.Sprintf("restored_B_%s", collNameA)
+	collectionsToClean = append(collectionsToClean, collNameB)
 	restoreOptB := client.NewRestoreSnapshotOption(snapshotName, collNameB)
 	jobIDB, err := mc.RestoreSnapshot(ctx, restoreOptB)
 	common.CheckErr(t, err, true)
@@ -1337,6 +1390,7 @@ func TestSnapshotRestoreDropAndRestoreAgain(t *testing.T) {
 
 	// Step 6: Restore A1 again to collection C
 	collNameC := fmt.Sprintf("restored_C_%s", collNameA)
+	collectionsToClean = append(collectionsToClean, collNameC)
 	restoreOptC := client.NewRestoreSnapshotOption(snapshotName, collNameC)
 	jobIDC, err := mc.RestoreSnapshot(ctx, restoreOptC)
 	common.CheckErr(t, err, true)
@@ -1441,6 +1495,12 @@ func TestSnapshotRestoreWithMultipleJSONPathIndexes(t *testing.T) {
 		WithIndexOptions(vecIndexOpt, jsonIndexOpt1, jsonIndexOpt2)
 	err := mc.CreateCollection(ctx, createOpt)
 	common.CheckErr(t, err, true)
+	collectionsToClean := []string{collName}
+	t.Cleanup(func() {
+		for _, c := range collectionsToClean {
+			_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(c))
+		}
+	})
 
 	// Step 3: Insert data with JSON containing both keys
 	// Build insert columns manually to include JSON data
@@ -1503,6 +1563,7 @@ func TestSnapshotRestoreWithMultipleJSONPathIndexes(t *testing.T) {
 
 	// Step 6: Restore to new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
+	collectionsToClean = append(collectionsToClean, restoredCollName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
 	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
