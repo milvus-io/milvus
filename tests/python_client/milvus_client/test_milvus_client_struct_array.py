@@ -33,6 +33,51 @@ default_capacity = 100
 METRICS = ["MAX_SIM", "MAX_SIM_IP", "MAX_SIM_COSINE", "MAX_SIM_L2"]
 INDEX_PARAMS = {"M": 16, "efConstruction": 200}
 
+# EmbList index type configs: {index_type: {build_params, search_params}}
+EMB_LIST_INDEX_CONFIGS = {
+    "HNSW_SQ": {
+        "build_params": {"M": 16, "efConstruction": 200, "sq_type": "SQ8"},
+        "search_params": {"ef": 64},
+    },
+    "HNSW_PQ": {
+        "build_params": {"M": 16, "efConstruction": 200},
+        "search_params": {"ef": 64},
+    },
+    "HNSW_PRQ": {
+        "build_params": {"M": 16, "efConstruction": 200},
+        "search_params": {"ef": 64},
+    },
+    "IVF_FLAT_CC": {
+        "build_params": {"nlist": 128},
+        "search_params": {"nprobe": 10},
+    },
+    "DISKANN": {
+        "build_params": {},
+        "search_params": {"search_list": 30},
+    },
+}
+EMB_LIST_INDEX_TYPES = list(EMB_LIST_INDEX_CONFIGS.keys())
+
+# Supported vector types per emb list index type (for MaxSim metrics)
+EMB_LIST_VECTOR_TYPES = {
+    "HNSW": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
+             DataType.INT8_VECTOR, DataType.BINARY_VECTOR],
+    "HNSW_SQ": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
+                DataType.INT8_VECTOR],
+    "HNSW_PQ": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
+                DataType.INT8_VECTOR],
+    "HNSW_PRQ": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
+                 DataType.INT8_VECTOR],
+    "IVF_FLAT": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR],
+    "IVF_FLAT_CC": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR],
+    "DISKANN": [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR],
+}
+
+# Metric type for binary vectors vs float vectors
+BINARY_METRIC = "MAX_SIM_HAMMING"
+FLOAT_METRIC = "MAX_SIM_COSINE"
+INT8_METRIC = "MAX_SIM_COSINE"
+
 
 class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
     """Test case of struct array basic functionality"""
@@ -1420,6 +1465,296 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_emb_list_hnsw_sq_index(self):
+        """
+        target: test create HNSW_SQ index on struct array vector field
+        method: create HNSW_SQ index with MAX_SIM_COSINE metric
+        expected: index creation successful
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_index_hnsw_sq")
+        client = self._client()
+        self.create_collection_with_data(client, collection_name)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        index_params.add_index(
+            field_name="clips[clip_embedding1]",
+            index_name="struct_vector_index_hnsw_sq",
+            index_type="HNSW_SQ",
+            metric_type="MAX_SIM_COSINE",
+            params=EMB_LIST_INDEX_CONFIGS["HNSW_SQ"]["build_params"],
+        )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_emb_list_hnsw_pq_index(self):
+        """
+        target: test create HNSW_PQ index on struct array vector field
+        method: create HNSW_PQ index with MAX_SIM_COSINE metric
+        expected: index creation successful
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_index_hnsw_pq")
+        client = self._client()
+        self.create_collection_with_data(client, collection_name)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        index_params.add_index(
+            field_name="clips[clip_embedding1]",
+            index_name="struct_vector_index_hnsw_pq",
+            index_type="HNSW_PQ",
+            metric_type="MAX_SIM_COSINE",
+            params=EMB_LIST_INDEX_CONFIGS["HNSW_PQ"]["build_params"],
+        )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_emb_list_hnsw_prq_index(self):
+        """
+        target: test create HNSW_PRQ index on struct array vector field
+        method: create HNSW_PRQ index with MAX_SIM_COSINE metric
+        expected: index creation successful
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_index_hnsw_prq")
+        client = self._client()
+        self.create_collection_with_data(client, collection_name)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        index_params.add_index(
+            field_name="clips[clip_embedding1]",
+            index_name="struct_vector_index_hnsw_prq",
+            index_type="HNSW_PRQ",
+            metric_type="MAX_SIM_COSINE",
+            params=EMB_LIST_INDEX_CONFIGS["HNSW_PRQ"]["build_params"],
+        )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_emb_list_ivf_flat_cc_index(self):
+        """
+        target: test create IVF_FLAT_CC index on struct array vector field
+        method: create IVF_FLAT_CC index with MAX_SIM_COSINE metric
+        expected: index creation successful
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_index_ivf_flat_cc")
+        client = self._client()
+        self.create_collection_with_data(client, collection_name)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        index_params.add_index(
+            field_name="clips[clip_embedding1]",
+            index_name="struct_vector_index_ivf_flat_cc",
+            index_type="IVF_FLAT_CC",
+            metric_type="MAX_SIM_COSINE",
+            params=EMB_LIST_INDEX_CONFIGS["IVF_FLAT_CC"]["build_params"],
+        )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_emb_list_diskann_index(self):
+        """
+        target: test create DISKANN index on struct array vector field
+        method: create DISKANN index with MAX_SIM_COSINE metric
+        expected: index creation successful
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_index_diskann")
+        client = self._client()
+        self.create_collection_with_data(client, collection_name)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        index_params.add_index(
+            field_name="clips[clip_embedding1]",
+            index_name="struct_vector_index_diskann",
+            index_type="DISKANN",
+            metric_type="MAX_SIM_COSINE",
+            params=EMB_LIST_INDEX_CONFIGS["DISKANN"]["build_params"],
+        )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index_type", EMB_LIST_INDEX_TYPES)
+    @pytest.mark.parametrize("metric_type", METRICS)
+    def test_emb_list_index_different_types_and_metrics(self, index_type, metric_type):
+        """
+        target: test different emb list index types with different metric types
+        method: create index with various index type and metric combinations
+        expected: index creation successful for all supported combinations
+        """
+        collection_name = cf.gen_unique_str(
+            f"{prefix}_idx_{index_type.lower()}_{metric_type.lower()}"
+        )
+        client = self._client()
+        self.create_collection_with_data(client, collection_name)
+
+        build_params = EMB_LIST_INDEX_CONFIGS[index_type]["build_params"]
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        index_params.add_index(
+            field_name="clips[clip_embedding1]",
+            index_name=f"struct_index_{index_type.lower()}_{metric_type.lower()}",
+            index_type=index_type,
+            metric_type=metric_type,
+            params=build_params,
+        )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+    def _create_collection_with_vector_type(
+        self, client, collection_name, vector_type, dim=default_dim, nb=default_nb
+    ):
+        """Create collection with struct array using specified vector type"""
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(
+            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim
+        )
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("clip_embedding1", vector_type, dim=dim)
+        struct_schema.add_field("scalar_field", DataType.INT64)
+
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=100,
+        )
+
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        # Generate and insert data with the specified vector type
+        data = []
+        for i in range(nb):
+            array_length = random.randint(1, 10)
+            struct_array = []
+            for j in range(array_length):
+                vec = cf.gen_vectors(1, dim, vector_type)[0]
+                struct_element = {
+                    "clip_embedding1": vec,
+                    "scalar_field": i * 10 + j,
+                }
+                struct_array.append(struct_element)
+
+            row = {
+                "id": i,
+                "normal_vector": [random.random() for _ in range(dim)],
+                "clips": struct_array,
+            }
+            data.append(row)
+
+        res, check = self.insert(client, collection_name, data)
+        assert check
+        return data
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index_type", list(EMB_LIST_VECTOR_TYPES.keys()))
+    def test_emb_list_index_with_different_vector_types(self, index_type):
+        """
+        target: test emb list index creation with different vector data types
+        method: create index on struct array vector field with float16/bfloat16/int8/binary types
+        expected: index creation successful for all supported vector types per index
+        """
+        client = self._client()
+        supported_types = EMB_LIST_VECTOR_TYPES[index_type]
+
+        # Get build params
+        if index_type in EMB_LIST_INDEX_CONFIGS:
+            build_params = EMB_LIST_INDEX_CONFIGS[index_type]["build_params"]
+        elif index_type == "HNSW":
+            build_params = INDEX_PARAMS
+        elif index_type == "IVF_FLAT":
+            build_params = {"nlist": 128}
+        else:
+            build_params = {}
+
+        for vector_type in supported_types:
+            # Skip FLOAT_VECTOR since it is already tested
+            if vector_type == DataType.FLOAT_VECTOR:
+                continue
+
+            type_name = vector_type.name.lower()
+            collection_name = cf.gen_unique_str(
+                f"{prefix}_vtype_{index_type.lower()}_{type_name}"
+            )
+
+            self._create_collection_with_vector_type(
+                client, collection_name, vector_type
+            )
+
+            # Choose metric based on vector type
+            if vector_type == DataType.BINARY_VECTOR:
+                metric_type = BINARY_METRIC
+            else:
+                metric_type = FLOAT_METRIC
+
+            index_params = client.prepare_index_params()
+            index_params.add_index(
+                field_name="normal_vector",
+                index_type="IVF_FLAT",
+                metric_type="L2",
+                params={"nlist": 128},
+            )
+            index_params.add_index(
+                field_name="clips[clip_embedding1]",
+                index_name=f"struct_idx_{type_name}",
+                index_type=index_type,
+                metric_type=metric_type,
+                params=build_params,
+            )
+
+            res, check = self.create_index(client, collection_name, index_params)
+            assert check, (
+                f"Failed to create {index_type} index with {type_name} vector type"
+            )
+
 
 class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
     """Test case of struct array search functionality"""
@@ -1518,6 +1853,99 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             vector = [random.random() for _ in range(dim)]
             embedding_list.add(vector)
         return embedding_list
+
+    def create_collection_with_configurable_index(
+        self,
+        client: MilvusClient,
+        collection_name: str,
+        index_type: str = "HNSW",
+        metric_type: str = "MAX_SIM_COSINE",
+        build_params: dict = None,
+        dim: int = default_dim,
+        nb: int = default_nb,
+    ):
+        """Create collection with struct array, insert data and create configurable index"""
+        # Create schema
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(
+            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim
+        )
+
+        # Create struct schema
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=dim)
+        struct_schema.add_field("scalar_field", DataType.INT64)
+        struct_schema.add_field("category", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=100,
+        )
+
+        schema.add_field("scalar_field", datatype=DataType.INT64)
+        schema.add_field("category", datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field("score", datatype=DataType.FLOAT)
+        # Create collection
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        # Insert data
+        data = []
+        for i in range(nb):
+            array_length = random.randint(1, 5)
+            struct_array = []
+            for j in range(array_length):
+                struct_element = {
+                    "clip_embedding1": [random.random() for _ in range(dim)],
+                    "scalar_field": i * 10 + j,
+                    "category": f"cat_{i % 5}",
+                }
+                struct_array.append(struct_element)
+
+            row = {
+                "id": i,
+                "normal_vector": [random.random() for _ in range(dim)],
+                "clips": struct_array,
+                "scalar_field": i * 10 + j,
+                "category": f"cat_{i % 5}",
+                "score": random.uniform(0.1, 10.0),
+            }
+            data.append(row)
+
+        res, check = self.insert(client, collection_name, data)
+        assert check
+
+        # Create indexes
+        if build_params is None:
+            build_params = INDEX_PARAMS
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        index_params.add_index(
+            field_name="clips[clip_embedding1]",
+            index_name="struct_vector_index",
+            index_type=index_type,
+            metric_type=metric_type,
+            params=build_params,
+        )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+        # Load collection
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        return data
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_struct_array_vector_single(self):
@@ -2113,6 +2541,154 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                 assert recall >= 0.8, \
                     f"Recall should be >= 0.8 when retrieval_ann_ratio >= 3, " \
                     f"but ratio {ratio} has recall {recall}"
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("index_type", EMB_LIST_INDEX_TYPES)
+    def test_search_emb_list_with_different_index_types(self, index_type):
+        """
+        target: test search with different emb list index types
+        method: create collection with configurable index type, search with EmbeddingList
+        expected: search returns non-empty results for all supported index types
+        """
+        collection_name = cf.gen_unique_str(
+            f"{prefix}_search_{index_type.lower()}"
+        )
+        client = self._client()
+
+        config = EMB_LIST_INDEX_CONFIGS[index_type]
+        self.create_collection_with_configurable_index(
+            client,
+            collection_name,
+            index_type=index_type,
+            metric_type="MAX_SIM_COSINE",
+            build_params=config["build_params"],
+        )
+
+        # Create EmbeddingList with multiple vectors
+        embedding_list = self.create_embedding_list(default_dim, 3)
+
+        # Search using EmbeddingList
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[embedding_list],
+            anns_field="clips[clip_embedding1]",
+            search_params={
+                "metric_type": "MAX_SIM_COSINE",
+                "params": config["search_params"],
+            },
+            limit=10,
+        )
+        assert check
+        assert len(results[0]) > 0
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize(
+        "vector_type",
+        [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR],
+    )
+    def test_search_emb_list_with_different_vector_types(self, vector_type):
+        """
+        target: test search with different vector data types in struct array
+        method: create collection with float16/bfloat16/int8 vectors, build HNSW index, search
+        expected: search returns non-empty results
+        """
+        type_name = vector_type.name.lower()
+        collection_name = cf.gen_unique_str(f"{prefix}_search_vtype_{type_name}")
+        client = self._client()
+
+        # Create schema with specified vector type
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(
+            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
+        )
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("clip_embedding1", vector_type, dim=default_dim)
+        struct_schema.add_field("scalar_field", DataType.INT64)
+        struct_schema.add_field("category", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=100,
+        )
+
+        schema.add_field("scalar_field", datatype=DataType.INT64)
+        schema.add_field("category", datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field("score", datatype=DataType.FLOAT)
+
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        # Insert data
+        data = []
+        for i in range(default_nb):
+            array_length = random.randint(1, 5)
+            struct_array = []
+            for j in range(array_length):
+                vec = cf.gen_vectors(1, default_dim, vector_type)[0]
+                struct_element = {
+                    "clip_embedding1": vec,
+                    "scalar_field": i * 10 + j,
+                    "category": f"cat_{i % 5}",
+                }
+                struct_array.append(struct_element)
+
+            row = {
+                "id": i,
+                "normal_vector": [random.random() for _ in range(default_dim)],
+                "clips": struct_array,
+                "scalar_field": i * 10 + j,
+                "category": f"cat_{i % 5}",
+                "score": random.uniform(0.1, 10.0),
+            }
+            data.append(row)
+
+        res, check = self.insert(client, collection_name, data)
+        assert check
+
+        # Create HNSW index with MAX_SIM_COSINE (works for float16/bfloat16/int8)
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        index_params.add_index(
+            field_name="clips[clip_embedding1]",
+            index_name="struct_vector_index",
+            index_type="HNSW",
+            metric_type="MAX_SIM_COSINE",
+            params=INDEX_PARAMS,
+        )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        # Search with EmbeddingList using the same vector type
+        search_vecs = cf.gen_vectors(3, default_dim, vector_type)
+        embedding_list = EmbeddingList(
+            [np.array(v) if not isinstance(v, np.ndarray) else v for v in search_vecs]
+        )
+
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[embedding_list],
+            anns_field="clips[clip_embedding1]",
+            search_params={"metric_type": "MAX_SIM_COSINE"},
+            limit=10,
+        )
+        assert check
+        assert len(results[0]) > 0
 
 
 class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
