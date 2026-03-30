@@ -2124,12 +2124,12 @@ func Test_TopKLimit(t *testing.T) {
 	assert.Error(t, validateLimit(0, false))
 }
 
-func Test_BigTopKLimit(t *testing.T) {
+func Test_LargeTopKLimit(t *testing.T) {
 	paramtable.Init()
 	Params.Save(Params.QuotaConfig.TopKLimit.Key, "100")
-	Params.Save(Params.QuotaConfig.BigTopKLimit.Key, "200")
+	Params.Save(Params.QuotaConfig.LargeTopKLimit.Key, "200")
 	defer Params.Reset(Params.QuotaConfig.TopKLimit.Key)
-	defer Params.Reset(Params.QuotaConfig.BigTopKLimit.Key)
+	defer Params.Reset(Params.QuotaConfig.LargeTopKLimit.Key)
 
 	assert.Nil(t, validateLimit(100, false))
 	assert.Error(t, validateLimit(101, false))
@@ -2148,8 +2148,8 @@ func Test_MaxQueryResultWindow(t *testing.T) {
 	assert.Error(t, validateMaxQueryResultWindow(0, 0, false))
 	assert.Error(t, validateMaxQueryResultWindow(1, 0, false))
 
-	Params.Save(Params.QuotaConfig.BigMaxQueryResultWindow.Key, "1000000")
-	defer Params.Reset(Params.QuotaConfig.BigMaxQueryResultWindow.Key)
+	Params.Save(Params.QuotaConfig.LargeMaxQueryResultWindow.Key, "1000000")
+	defer Params.Reset(Params.QuotaConfig.LargeMaxQueryResultWindow.Key)
 	assert.Nil(t, validateMaxQueryResultWindow(0, 16385, true))
 	assert.Nil(t, validateMaxQueryResultWindow(0, 1000000, true))
 	assert.Error(t, validateMaxQueryResultWindow(0, 1000001, true))

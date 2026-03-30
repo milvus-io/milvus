@@ -323,7 +323,7 @@ func isSortableFieldType(dataType schemapb.DataType) bool {
 	}
 }
 
-func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupByFieldId int64, isIterator bool, offset int64, queryTopK *int64, bigTopKEnabled bool) (*planpb.SearchIteratorV2Info, error) {
+func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupByFieldId int64, isIterator bool, offset int64, queryTopK *int64, largeTopKEnabled bool) (*planpb.SearchIteratorV2Info, error) {
 	isIteratorV2Str, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterV2Key, searchParamsPair)
 	isIteratorV2, _ := strconv.ParseBool(isIteratorV2Str)
 	if !isIteratorV2 {
@@ -373,7 +373,7 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 		return nil, fmt.Errorf("batch size is invalid, %w", err)
 	}
 	// use the same validation logic as topk
-	if err := validateLimit(batchSize, bigTopKEnabled); err != nil {
+	if err := validateLimit(batchSize, largeTopKEnabled); err != nil {
 		return nil, fmt.Errorf("batch size is invalid, %w", err)
 	}
 	*queryTopK = batchSize // for compatibility
@@ -399,7 +399,7 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 }
 
 // parseSearchInfo returns QueryInfo and offset
-func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams, bigTopKEnabled bool) (*SearchInfo, error) {
+func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams, largeTopKEnabled bool) (*SearchInfo, error) {
 	var topK int64
 	isAdvanced := rankParams != nil
 	externalLimit := rankParams.GetLimit() + rankParams.GetOffset()
@@ -427,12 +427,12 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	collectionIDStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(CollectionID, searchParamsPair)
 	collectionId, _ := strconv.ParseInt(collectionIDStr, 0, 64)
 
-	if err := validateLimit(topK, bigTopKEnabled); err != nil {
+	if err := validateLimit(topK, largeTopKEnabled); err != nil {
 		if isIterator {
 			// 1. if the request is from iterator, we set topK to QuotaLimit as the iterator can resolve too large topK problem
 			// 2. GetAsInt64 has cached inside, no need to worry about cpu cost for parsing here
-			if bigTopKEnabled {
-				topK = Params.QuotaConfig.BigTopKLimit.GetAsInt64()
+			if largeTopKEnabled {
+				topK = Params.QuotaConfig.LargeTopKLimit.GetAsInt64()
 			} else {
 				topK = Params.QuotaConfig.TopKLimit.GetAsInt64()
 			}
@@ -452,7 +452,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			}
 
 			if offset != 0 {
-				if err := validateLimit(offset, bigTopKEnabled); err != nil {
+				if err := validateLimit(offset, largeTopKEnabled); err != nil {
 					return nil, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
 				}
 			}
@@ -460,7 +460,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	}
 
 	queryTopK := topK + offset
-	if err := validateLimit(queryTopK, bigTopKEnabled); err != nil {
+	if err := validateLimit(queryTopK, largeTopKEnabled); err != nil {
 		return nil, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
 	}
 
@@ -529,7 +529,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			"Not allowed to do range-search when doing search-group-by")
 	}
 
-	planSearchIteratorV2Info, err := parseSearchIteratorV2Info(searchParamsPair, groupByFieldId, isIterator, offset, &queryTopK, bigTopKEnabled)
+	planSearchIteratorV2Info, err := parseSearchIteratorV2Info(searchParamsPair, groupByFieldId, isIterator, offset, &queryTopK, largeTopKEnabled)
 	if err != nil {
 		return nil, fmt.Errorf("parse iterator v2 info failed: %w", err)
 	}
@@ -883,7 +883,7 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 }
 
 // parseRankParams get limit and offset from rankParams, both are optional.
-func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, bigTopKEnabled bool) (*rankParams, error) {
+func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, largeTopKEnabled bool) (*rankParams, error) {
 	var (
 		limit        int64
 		offset       int64
@@ -909,7 +909,7 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 	}
 
 	// validate max result window.
-	if err = validateMaxQueryResultWindow(offset, limit, bigTopKEnabled); err != nil {
+	if err = validateMaxQueryResultWindow(offset, limit, largeTopKEnabled); err != nil {
 		return nil, fmt.Errorf("invalid max query result window, %w", err)
 	}
 

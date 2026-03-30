@@ -5506,12 +5506,12 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 	})
 }
 
-func TestAlterCollectionBigTopKOptimization(t *testing.T) {
+func TestAlterCollectionQueryMode(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
 	err := InitMetaCache(ctx, qc)
 	assert.NoError(t, err)
-	prefix := "TestBigTopKOptimization"
+	prefix := "TestQueryMode"
 
 	getSchema := func(colName string) *schemapb.CollectionSchema {
 		fieldName2Type := make(map[string]schemapb.DataType)
@@ -5520,13 +5520,13 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 		return constructCollectionSchemaByDataType(colName, fieldName2Type, "int64_field", false)
 	}
 
-	createCollection := func(colName string, bigTopKEnabled bool) {
+	createCollection := func(colName string, largeTopKEnabled bool) {
 		schema := getSchema(colName)
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 		props := []*commonpb.KeyValuePair{}
-		if bigTopKEnabled {
-			props = append(props, &commonpb.KeyValuePair{Key: common.BigTopKOptimizationEnabledKey, Value: "true"})
+		if largeTopKEnabled {
+			props = append(props, &commonpb.KeyValuePair{Key: common.QueryModeKey, Value: common.QueryModeLargeTopK})
 		}
 		createColReq := &milvuspb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
@@ -5545,14 +5545,14 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, stats.ErrorCode)
 	}
 
-	t.Run("alter bigTopK from false to true without vector index", func(t *testing.T) {
+	t.Run("set query_mode to large_topk without vector index", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, false)
 		alterTask := &alterCollectionTask{
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.BigTopKOptimizationEnabledKey, Value: "true"}},
+				Properties:     []*commonpb.KeyValuePair{{Key: common.QueryModeKey, Value: common.QueryModeLargeTopK}},
 			},
 			mixCoord: qc,
 		}
@@ -5560,14 +5560,14 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("alter bigTopK from true to false without vector index", func(t *testing.T) {
+	t.Run("delete query_mode from collection without vector index", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, true)
 		alterTask := &alterCollectionTask{
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.BigTopKOptimizationEnabledKey, Value: "false"}},
+				DeleteKeys:     []string{common.QueryModeKey},
 			},
 			mixCoord: qc,
 		}
@@ -5575,7 +5575,7 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("alter bigTopK from false to true with vector index should fail", func(t *testing.T) {
+	t.Run("set query_mode to large_topk with vector index should fail", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, false)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
@@ -5583,16 +5583,16 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.BigTopKOptimizationEnabledKey, Value: "true"}},
+				Properties:     []*commonpb.KeyValuePair{{Key: common.QueryModeKey, Value: common.QueryModeLargeTopK}},
 			},
 			mixCoord: qc,
 		}
 		err = alterTask.PreExecute(ctx)
 		assert.ErrorContains(t, err,
-			"can not alter bigtopk_optimization.enabled if the collection already has a vector index. Please drop the index first")
+			"can not alter query_mode if the collection already has a vector index. Please drop the index first")
 	})
 
-	t.Run("alter bigTopK from true to false with vector index should fail", func(t *testing.T) {
+	t.Run("delete query_mode with vector index should fail", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, true)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
@@ -5600,40 +5600,23 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.BigTopKOptimizationEnabledKey, Value: "false"}},
+				DeleteKeys:     []string{common.QueryModeKey},
 			},
 			mixCoord: qc,
 		}
 		err = alterTask.PreExecute(ctx)
 		assert.ErrorContains(t, err,
-			"can not alter bigtopk_optimization.enabled if the collection already has a vector index. Please drop the index first")
+			"can not alter query_mode if the collection already has a vector index. Please drop the index first")
 	})
 
-	t.Run("delete bigTopK property with vector index should fail", func(t *testing.T) {
-		colName := prefix + funcutil.GenRandomStr()
-		createCollection(colName, true)
-		mockVectorIndexForCollection(t, ctx, qc, colName)
-		alterTask := &alterCollectionTask{
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				Base:           &commonpb.MsgBase{},
-				CollectionName: colName,
-				DeleteKeys:     []string{common.BigTopKOptimizationEnabledKey},
-			},
-			mixCoord: qc,
-		}
-		err = alterTask.PreExecute(ctx)
-		assert.ErrorContains(t, err,
-			"can not alter bigtopk_optimization.enabled if the collection already has a vector index. Please drop the index first")
-	})
-
-	t.Run("delete bigTopK property without vector index should succeed", func(t *testing.T) {
+	t.Run("delete query_mode property without vector index should succeed", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, true)
 		alterTask := &alterCollectionTask{
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
-				DeleteKeys:     []string{common.BigTopKOptimizationEnabledKey},
+				DeleteKeys:     []string{common.QueryModeKey},
 			},
 			mixCoord: qc,
 		}
@@ -5641,7 +5624,7 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("alter unrelated property with bigTopK enabled should not check index", func(t *testing.T) {
+	t.Run("alter unrelated property with large_topk query mode should not check index", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, true)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
