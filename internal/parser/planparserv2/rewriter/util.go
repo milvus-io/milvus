@@ -92,13 +92,28 @@ func isNumericType(dt schemapb.DataType) bool {
 	return typeutil.IsArithmetic(dt)
 }
 
-const defaultConvertOrToInNumericLimit = 150
+// shouldUseInExpr determines whether a multi-value equality match should use
+// TermExpr (IN) or individual UnaryRangeExpr (== or).
+// Used bidirectionally:
+//   - combineOrEqualsToIn: merge == or → in when returns true
+//   - combineAndNotEqualsToNotIn: merge != and → not in when returns true
+//   - visitTermExpr: split in → == or when returns false
+func shouldUseInExpr(dt schemapb.DataType, count int) bool {
+	return shouldUseInExprWithPK(dt, count, false)
+}
 
-func shouldMergeToIn(dt schemapb.DataType, count int) bool {
-	if isNumericType(dt) {
-		return count > defaultConvertOrToInNumericLimit
+func shouldUseInExprWithPK(dt schemapb.DataType, count int, isPrimaryKey bool) bool {
+	if isPrimaryKey {
+		return true
 	}
-	return count > 1
+	switch {
+	case typeutil.IsIntegerType(dt):
+		return count >= 10
+	case typeutil.IsFloatingType(dt):
+		return count >= 15
+	default:
+		return count >= 3
+	}
 }
 
 func sortTermValues(term *planpb.TermExpr) {

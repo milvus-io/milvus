@@ -422,22 +422,32 @@ TEST_F(ExprMaterializedViewTest, TestUnaryRangeCompareExpr) {
     }
 }
 
-// Test numeric and varchar expr: F in [A, B, C]
+// Test numeric and varchar expr: F in [v0, v1, ..., v14]
+// Use >= 15 values to stay above all type-specific IN thresholds
+// (integer >= 10, float >= 15, default >= 3) so the expression
+// remains as TermExpr and is not split into OR equals.
 TEST_F(ExprMaterializedViewTest, TestInMultipleExpr) {
+    constexpr int kNumValues = 15;
     for (const auto& data_type : GetNumericAndVarcharScalarDataTypes()) {
+        // Skip BOOL: only 2 unique values (true/false), always below
+        // the IN threshold so it gets split into OR equals.
+        if (data_type == DataType::BOOL)
+            continue;
         std::string field_name = GetFieldName(data_type);
-        std::string val0 = GetTestValue(data_type, 0);
-        std::string val1 = GetTestValue(data_type, 1);
-        // F in [A, B]
-        std::string expr =
-            fmt::format("{} in [{}, {}]", field_name, val0, val1);
+        std::string vals;
+        for (int i = 0; i < kNumValues; i++) {
+            if (i > 0)
+                vals += ", ";
+            vals += GetTestValue(data_type, i);
+        }
+        std::string expr = fmt::format("{} in [{}]", field_name, vals);
         auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
         ASSERT_EQ(mv.field_id_to_touched_categories_cnt.size(), 1);
         auto field_id = GetFieldID(data_type);
         ASSERT_TRUE(mv.field_id_to_touched_categories_cnt.find(field_id) !=
                     mv.field_id_to_touched_categories_cnt.end());
-        EXPECT_EQ(mv.field_id_to_touched_categories_cnt[field_id], 2);
+        EXPECT_EQ(mv.field_id_to_touched_categories_cnt[field_id], kNumValues);
         EXPECT_EQ(mv.has_not, false);
         EXPECT_EQ(mv.is_pure_and, true);
     }
@@ -486,19 +496,26 @@ TEST_F(ExprMaterializedViewTest, TestEqualAndEqualExpr) {
     EXPECT_EQ(mv.is_pure_and, true);
 }
 
-// Test expr: F0 == A && F1 in [A, B]
+// Test expr: F0 == A && F1 in [v0, v1, ..., v9]
+// Use >= 10 values for INT32 to stay above the integer IN threshold
+// so the expression remains as TermExpr and is not split into OR equals.
 TEST_F(ExprMaterializedViewTest, TestEqualAndInExpr) {
     const DataType c0_data_type = DataType::VARCHAR;
     const DataType c1_data_type = DataType::INT32;
+    constexpr int kNumInValues = 10;
 
     std::string f0 = GetFieldName(c0_data_type);
     std::string f1 = GetFieldName(c1_data_type);
     std::string val0 = GetTestValue(c0_data_type, 1);
-    std::string val1 = GetTestValue(c1_data_type, 1);
-    std::string val2 = GetTestValue(c1_data_type, 2);
-    // F0 == A && F1 in [A, B]
+    std::string in_vals;
+    for (int i = 0; i < kNumInValues; i++) {
+        if (i > 0)
+            in_vals += ", ";
+        in_vals += GetTestValue(c1_data_type, i);
+    }
+    // F0 == A && F1 in [v0, v1, ..., v9]
     std::string expr =
-        fmt::format("{} == {} && {} in [{}, {}]", f0, val0, f1, val1, val2);
+        fmt::format("{} == {} && {} in [{}]", f0, val0, f1, in_vals);
 
     auto mv = TranslateThenExecuteWhenMvInvolved(expr);
 
@@ -506,7 +523,7 @@ TEST_F(ExprMaterializedViewTest, TestEqualAndInExpr) {
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c0_data_type)],
               1);
     EXPECT_EQ(mv.field_id_to_touched_categories_cnt[GetFieldID(c1_data_type)],
-              2);
+              kNumInValues);
     EXPECT_EQ(mv.has_not, false);
     EXPECT_EQ(mv.is_pure_and, true);
 }
