@@ -142,7 +142,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 
 	p.LargeTopKIndexParams = ParamItem{
 		Key:          "autoIndex.params.largeTopK.build",
-		Version:      "2.6.13",
+		Version:      "2.6.14",
 		DefaultValue: `{"nlist": 128, "index_type": "IVF_SQ8", "metric_type": "COSINE"}`,
 		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.largeTopK.build"),
 		Export:       true,

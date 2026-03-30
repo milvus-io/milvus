@@ -4875,7 +4875,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("alter query_mode from false to true with vector index should fail", func(t *testing.T) {
+	t.Run("set query_mode to large_topk with vector index should fail", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, false)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
