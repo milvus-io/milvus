@@ -18,15 +18,20 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/cgo"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
@@ -364,6 +369,11 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.Se
 		return nil
 	}
 
+	// Resolve text/json stats with basePaths.
+	// V2: stats come from src proto fields, basePaths computed from metadata + rootPath.
+	// V3: stats resolved from manifest (src proto fields are empty), basePaths from manifest paths.
+	textStats, jsonStats, textBasePaths, jsonBasePaths := resolveStatsWithBasePaths(src)
+
 	return &segcorepb.SegmentLoadInfo{
 		SegmentID:        src.GetSegmentID(),
 		PartitionID:      src.GetPartitionID(),
@@ -381,12 +391,57 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.Se
 		ReadableVersion:  src.GetReadableVersion(),
 		StorageVersion:   src.GetStorageVersion(),
 		IsSorted:         src.GetIsSorted(),
-		TextStatsLogs:    convertTextIndexStats(src.GetTextStatsLogs()),
+		TextStatsLogs:    convertTextIndexStats(textStats, textBasePaths),
 		Bm25Logs:         convertFieldBinlogs(src.GetBm25Logs()),
-		JsonKeyStatsLogs: convertJSONKeyStats(src.GetJsonKeyStatsLogs()),
+		JsonKeyStatsLogs: convertJSONKeyStats(jsonStats, jsonBasePaths),
 		Priority:         src.GetPriority(),
 		ManifestPath:     src.GetManifestPath(),
 	}
+}
+
+// resolveStatsWithBasePaths resolves text/json stats and computes basePaths.
+// V2: stats from src proto fields, basePaths computed from rootPath + metadata.
+// V3: stats resolved from manifest via StatsResolver, basePaths extracted from manifest paths.
+func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo) (
+	map[int64]*datapb.TextIndexStats,
+	map[int64]*datapb.JsonKeyStats,
+	map[int64]string, // textBasePaths
+	map[int64]string, // jsonBasePaths
+) {
+	textStats := src.GetTextStatsLogs()
+	jsonStats := src.GetJsonKeyStatsLogs()
+
+	// For V3 (manifest-based): resolve stats from manifest if proto fields are empty.
+	if src.GetStorageVersion() == storage.StorageV3 {
+		result := packed.NewStatsResolverFromLoadInfo(src).TextAndJSONIndexStatsWithBasePaths()
+		if result.Err() != nil {
+			log.Warn("failed to resolve stats from manifest for segcore load info",
+				zap.Int64("segmentID", src.GetSegmentID()),
+				zap.String("manifestPath", src.GetManifestPath()),
+				zap.Error(result.Err()))
+		} else {
+			return result.TextIndexStats, result.JSONKeyStats, result.TextBasePaths, result.JSONBasePaths
+		}
+	}
+
+	// V2: compute basePaths from rootPath + stats metadata.
+	rootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
+
+	textBasePaths := make(map[int64]string, len(textStats))
+	for fieldID, stats := range textStats {
+		textBasePaths[fieldID] = metautil.BuildTextIndexPrefix(rootPath,
+			stats.GetBuildID(), stats.GetVersion(),
+			src.GetCollectionID(), src.GetPartitionID(), src.GetSegmentID(), fieldID)
+	}
+
+	jsonBasePaths := make(map[int64]string, len(jsonStats))
+	for fieldID, stats := range jsonStats {
+		jsonBasePaths[fieldID] = metautil.BuildJSONKeyStatsPrefix(rootPath, stats.GetJsonKeyStatsDataFormat(),
+			stats.GetBuildID(), stats.GetVersion(),
+			src.GetCollectionID(), src.GetPartitionID(), src.GetSegmentID(), fieldID)
+	}
+
+	return textStats, jsonStats, textBasePaths, jsonBasePaths
 }
 
 // convertFieldBinlogs converts datapb.FieldBinlog to segcorepb.FieldBinlog.
@@ -466,7 +521,7 @@ func convertFieldIndexInfos(src []*querypb.FieldIndexInfo) []*segcorepb.FieldInd
 }
 
 // convertTextIndexStats converts datapb.TextIndexStats to segcorepb.TextIndexStats.
-func convertTextIndexStats(src map[int64]*datapb.TextIndexStats) map[int64]*segcorepb.TextIndexStats {
+func convertTextIndexStats(src map[int64]*datapb.TextIndexStats, basePaths map[int64]string) map[int64]*segcorepb.TextIndexStats {
 	if src == nil {
 		return nil
 	}
@@ -484,13 +539,14 @@ func convertTextIndexStats(src map[int64]*datapb.TextIndexStats) map[int64]*segc
 			LogSize:    v.GetLogSize(),
 			MemorySize: v.GetMemorySize(),
 			BuildID:    v.GetBuildID(),
+			BasePath:   basePaths[k],
 		}
 	}
 	return result
 }
 
 // convertJSONKeyStats converts datapb.JsonKeyStats to segcorepb.JsonKeyStats.
-func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats) map[int64]*segcorepb.JsonKeyStats {
+func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats, basePaths map[int64]string) map[int64]*segcorepb.JsonKeyStats {
 	if src == nil {
 		return nil
 	}
@@ -509,6 +565,7 @@ func convertJSONKeyStats(src map[int64]*datapb.JsonKeyStats) map[int64]*segcorep
 			MemorySize:             v.GetMemorySize(),
 			BuildID:                v.GetBuildID(),
 			JsonKeyStatsDataFormat: v.GetJsonKeyStatsDataFormat(),
+			BasePath:               basePaths[k],
 		}
 	}
 	return result

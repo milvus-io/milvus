@@ -932,13 +932,15 @@ JsonKeyStats::GetCommonMetaFromParquet(const std::string& file) {
 
 void
 JsonKeyStats::LoadShreddingMeta(
-    std::vector<std::pair<int64_t, std::vector<int64_t>>> sorted_files) {
+    std::vector<std::pair<int64_t, std::vector<int64_t>>> sorted_files,
+    const std::string& override_prefix) {
     if (sorted_files.empty()) {
         return;
     }
 
-    auto remote_prefix =
-        disk_file_manager_->GetRemoteJsonStatsShreddingPrefix();
+    AssertInfo(!override_prefix.empty(),
+               "shredding prefix is required for loading json stats");
+    const auto& remote_prefix = override_prefix;
 
     // load common meta from parquet only if key_field_map_ is not already populated
     // (for backward compatibility with old data that doesn't have separate meta file)
@@ -965,14 +967,14 @@ JsonKeyStats::LoadShreddingMeta(
 void
 JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
                               const std::vector<int64_t>& file_ids,
-                              const std::string& warmup_policy) {
+                              const std::string& warmup_policy,
+                              const std::string& override_prefix) {
     if (file_ids.empty()) {
         return;
     }
     int64_t num_rows = 0;
 
-    auto remote_prefix =
-        disk_file_manager_->GetRemoteJsonStatsShreddingPrefix();
+    const auto& remote_prefix = override_prefix;
 
     std::vector<std::string> files;
     for (const auto& file_id : file_ids) {
@@ -1081,12 +1083,25 @@ JsonKeyStats::LoadShreddingData(const std::vector<std::string>& index_files,
     // sort files by column group id and file id
     auto sorted_files = SortByParquetPath(index_files);
 
+    // Extract the shredding prefix from the first file path.
+    // Files are absolute paths like: basePath/shredding_data/0/0
+    // The prefix is everything up to and including "shredding_data".
+    std::string shredding_prefix;
+    if (!index_files.empty()) {
+        auto pos = index_files[0].find(JSON_STATS_SHREDDING_DATA_PATH);
+        if (pos != std::string::npos) {
+            shredding_prefix = index_files[0].substr(
+                0, pos + strlen(JSON_STATS_SHREDDING_DATA_PATH));
+        }
+    }
+
     // load shredding meta
-    LoadShreddingMeta(sorted_files);
+    LoadShreddingMeta(sorted_files, shredding_prefix);
 
     // load shredding data
     for (const auto& [column_group_id, file_ids] : sorted_files) {
-        LoadColumnGroup(column_group_id, file_ids, warmup_policy);
+        LoadColumnGroup(
+            column_group_id, file_ids, warmup_policy, shredding_prefix);
     }
 }
 
@@ -1096,6 +1111,7 @@ JsonKeyStats::LoadSharedKeyIndex(
     bool enable_mmap,
     int64_t index_size,
     const std::string& warmup_policy) {
+    // shared_key_index_files are absolute remote paths (basePath already prepended)
     segcore::storagev1translator::BsonInvertedIndexLoadInfo load_info;
     load_info.enable_mmap = enable_mmap;
     load_info.segment_id = segment_id_;
@@ -1145,20 +1161,29 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
                "index file paths is empty when load json stats for segment {}",
                segment_id_);
 
-    // split index_files into meta, shared_key_index, and shredding_data
+    auto base_path =
+        GetValueFromConfig<std::string>(config, STATS_BASE_PATH_KEY)
+            .value_or("");
+    AssertInfo(!base_path.empty(),
+               "stats_base_path is required for loading json stats, segment {}",
+               segment_id_);
+
+    // Split index_files into meta, shared_key_index, and shredding_data.
+    // Files are relative paths; prepend base_path to get absolute remote paths.
     // Note: Check directory paths (shared_key_index, shredding_data) BEFORE meta.json,
     // because shared_key_index/meta.json_0 contains "meta.json" but is not the meta file.
     std::vector<std::string> meta_files;
     std::vector<std::string> shared_key_index_files;
     std::vector<std::string> shredding_data_files;
     for (const auto& file : index_files.value()) {
+        auto abs_path = base_path + "/" + file;
         if (file.find(JSON_STATS_SHARED_INDEX_PATH) != std::string::npos) {
-            shared_key_index_files.emplace_back(file);
+            shared_key_index_files.emplace_back(abs_path);
         } else if (file.find(JSON_STATS_SHREDDING_DATA_PATH) !=
                    std::string::npos) {
-            shredding_data_files.emplace_back(file);
+            shredding_data_files.emplace_back(abs_path);
         } else if (file.find(JSON_STATS_META_FILE_NAME) != std::string::npos) {
-            meta_files.emplace_back(file);
+            meta_files.emplace_back(abs_path);
         } else {
             ThrowInfo(ErrorCode::UnexpectedError,
                       "unknown file path: {} for segment {}",
@@ -1175,23 +1200,19 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             meta_files.size(),
             segment_id_,
             field_id_);
-        // cache meta file to local disk
         auto local_meta_file = disk_file_manager_->CacheJsonStatsMetaToDisk(
             meta_files[0], load_priority_);
         LoadMetaFile(local_meta_file);
     }
 
-    // load shredding data
+    // load shredding data (files are already absolute paths)
     LoadShreddingData(shredding_data_files,
                       config.contains(WARMUP) ? config.at(WARMUP) : "");
 
-    // get all index files size as shared key index size,
-    // no accurate way to get the shared key index size,
-    // so we use the total size of all index files as the shared key index size
     auto index_size =
         GetValueFromConfig<int64_t>(config, milvus::index::INDEX_SIZE)
             .value_or(0);
-    // load shared key index
+    // load shared key index (files are already absolute paths)
     LoadSharedKeyIndex(shared_key_index_files,
                        enable_mmap,
                        index_size,

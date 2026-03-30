@@ -117,17 +117,8 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
                              milvus::proto::common::LoadPriority priority,
                              bool load_in_mmap) {
     if (is_load_) {
-        // convert shared_key_index/... to remote_prefix/shared_key_index/...
-        std::vector<std::string> remote_files;
-        remote_files.reserve(index_files.size());
-        auto remote_prefix = disk_file_manager_->GetRemoteJsonStatsLogPrefix();
-        for (const auto& file : index_files) {
-            boost::filesystem::path full_path =
-                boost::filesystem::path(remote_prefix) / file;
-            remote_files.emplace_back(full_path.string());
-        }
-        // cache shared_key_index/... to disk
-        disk_file_manager_->CacheJsonStatsSharedIndexToDisk(remote_files,
+        // index_files are absolute remote paths (basePath already prepended by caller)
+        disk_file_manager_->CacheJsonStatsSharedIndexToDisk(index_files,
                                                             priority);
         AssertInfo(tantivy_index_exist(path_.c_str()),
                    "index dir not exist: {}",
