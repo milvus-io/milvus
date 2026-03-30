@@ -2173,6 +2173,9 @@ ChunkedSegmentSealedImpl::LoadTextIndex(
     }
     milvus::storage::FileManagerContext file_ctx(
         field_data_meta, index_meta, remote_chunk_manager, fs);
+    if (!info_proto->base_path().empty()) {
+        file_ctx.set_stats_base_path(info_proto->base_path());
+    }
 
     auto field_id = milvus::FieldId(info_proto->fieldid());
     // const auto& field_meta = schema_->operator[](field_id);
