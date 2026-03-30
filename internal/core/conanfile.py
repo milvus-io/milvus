@@ -76,6 +76,8 @@ class MilvusConan(ConanFile):
         "arrow:with_s3": True,
         "arrow:encryption": True,
         "protobuf:shared": True,
+        "grpc:shared": True,
+        "grpc:secure": True,
         "aws-sdk-cpp:config": True,
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,
