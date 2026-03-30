@@ -4088,7 +4088,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		}
 		err := ValidateFieldsInStruct(field, schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Fields in StructArrayField can only be array or array of struct")
+		assert.Contains(t, err.Error(), "fields in StructArrayField can only be array or array of struct")
 	})
 
 	t.Run("JSON not supported in struct", func(t *testing.T) {

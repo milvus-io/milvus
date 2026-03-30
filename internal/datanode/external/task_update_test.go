@@ -197,7 +197,7 @@ func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_SingleFragment(
 	s.NoError(err)
 	s.Len(result, 1)
 	s.Equal(int64(500), result[0].GetNumOfRows())
-	s.Equal(int64(storage.StorageV3), result[0].GetStorageVersion(),
+	s.Equal(storage.StorageV3, result[0].GetStorageVersion(),
 		"external segments should have StorageVersion=V3")
 }
 
@@ -236,7 +236,7 @@ func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_MultipleFragmen
 
 	// Verify all segments have StorageVersion=V3
 	for i, seg := range result {
-		s.Equal(int64(storage.StorageV3), seg.GetStorageVersion(),
+		s.Equal(storage.StorageV3, seg.GetStorageVersion(),
 			"segment %d should have StorageVersion=V3", i)
 	}
 

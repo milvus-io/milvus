@@ -529,9 +529,9 @@ func (t *queryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	t.plan.GetQuery().OrderByFields = orderByFields
 	// Also populate on RetrieveRequest so QN/Delegator can read directly
 	// without re-parsing serialized_expr_plan.
-	t.RetrieveRequest.OrderByFields = orderByFields
+	t.OrderByFields = orderByFields
 
-	hasAgg := len(t.RetrieveRequest.GroupByFieldIds) > 0 || len(t.RetrieveRequest.Aggregates) > 0
+	hasAgg := len(t.GroupByFieldIds) > 0 || len(t.Aggregates) > 0
 	// parse output field ids
 	if hasAgg {
 		emptyOutputFields := make([]UniqueID, 0)
@@ -694,7 +694,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("ORDER BY with iterator is not supported"))
 	}
 
-	t.RetrieveRequest.Limit = queryParams.limit + queryParams.offset
+	t.Limit = queryParams.limit + queryParams.offset
 
 	if t.ids != nil {
 		pkField := ""
@@ -921,10 +921,10 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		t.queryParams.offset,
 		t.queryParams.reduceType,
 		orderByFields,
-		t.RetrieveRequest.GetGroupByFieldIds(),
-		t.RetrieveRequest.GetAggregates(),
+		t.GetGroupByFieldIds(),
+		t.GetAggregates(),
 		t.aggregationFieldMap,
-		filterSystemFields(t.RetrieveRequest.GetOutputFieldsId()),
+		filterSystemFields(t.GetOutputFieldsId()),
 	)
 	if err != nil {
 		log.Warn("fail to create query pipeline", zap.Error(err))
