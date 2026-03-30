@@ -17,16 +17,17 @@ package rootcoord
 
 import (
 	"context"
-	"errors"
 	"testing"
 
-	imocks "github.com/milvus-io/milvus/internal/mocks"
-	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	imocks "github.com/milvus-io/milvus/internal/mocks"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -292,6 +293,94 @@ func TestDDLCallbacksAlterDatabaseV1AckCallback_StopRetryOnResourceGroupNotFound
 		},
 	})
 	require.NoError(t, err)
+}
+
+func TestMergeProperties(t *testing.T) {
+	props := MergeProperties(
+		[]*commonpb.KeyValuePair{
+			{Key: "k1", Value: "v1"},
+			{Key: "k2", Value: "v2"},
+		},
+		[]*commonpb.KeyValuePair{
+			{Key: "k2", Value: "v2b"},
+			{Key: "k3", Value: "v3"},
+		},
+	)
+
+	m := make(map[string]string, len(props))
+	for _, kv := range props {
+		m[kv.Key] = kv.Value
+	}
+	require.Equal(t, map[string]string{"k1": "v1", "k2": "v2b", "k3": "v3"}, m)
+}
+
+func TestCore_getAlterLoadConfigOfAlterDatabase(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("list collections error", func(t *testing.T) {
+		core := newTestCore(withMeta(&mockMetaTable{
+			ListCollectionsFunc: func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+				return nil, errors.New("meta error")
+			},
+		}))
+
+		_, err := core.getAlterLoadConfigOfAlterDatabase(ctx, "db",
+			[]*commonpb.KeyValuePair{
+				{Key: common.DatabaseReplicaNumber, Value: "1"},
+				{Key: common.DatabaseResourceGroups, Value: "rg1"},
+			},
+			[]*commonpb.KeyValuePair{
+				{Key: common.DatabaseReplicaNumber, Value: "2"},
+				{Key: common.DatabaseResourceGroups, Value: "rg1"},
+			},
+		)
+		require.Error(t, err)
+	})
+
+	t.Run("empty collections", func(t *testing.T) {
+		core := newTestCore(withMeta(&mockMetaTable{
+			ListCollectionsFunc: func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+				return []*model.Collection{}, nil
+			},
+		}))
+
+		cfg, err := core.getAlterLoadConfigOfAlterDatabase(ctx, "db",
+			[]*commonpb.KeyValuePair{
+				{Key: common.DatabaseReplicaNumber, Value: "1"},
+				{Key: common.DatabaseResourceGroups, Value: "rg1"},
+			},
+			[]*commonpb.KeyValuePair{
+				{Key: common.DatabaseReplicaNumber, Value: "2"},
+				{Key: common.DatabaseResourceGroups, Value: "rg1"},
+			},
+		)
+		require.NoError(t, err)
+		require.Nil(t, cfg)
+	})
+
+	t.Run("build alter load config", func(t *testing.T) {
+		core := newTestCore(withMeta(&mockMetaTable{
+			ListCollectionsFunc: func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+				return []*model.Collection{{CollectionID: 10}}, nil
+			},
+		}))
+
+		cfg, err := core.getAlterLoadConfigOfAlterDatabase(ctx, "db",
+			[]*commonpb.KeyValuePair{
+				{Key: common.DatabaseReplicaNumber, Value: "1"},
+				{Key: common.DatabaseResourceGroups, Value: "rg1"},
+			},
+			[]*commonpb.KeyValuePair{
+				{Key: common.DatabaseReplicaNumber, Value: "2"},
+				{Key: common.DatabaseResourceGroups, Value: "rg1"},
+			},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		require.Equal(t, []int64{10}, cfg.CollectionIds)
+		require.Equal(t, int32(2), cfg.ReplicaNumber)
+		require.Equal(t, []string{"rg1"}, cfg.ResourceGroups)
+	})
 }
 
 func assertDatabaseReplicaNumber(t *testing.T, ctx context.Context, core *Core, dbName string, replicaNumber int64) {

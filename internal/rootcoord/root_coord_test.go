@@ -267,6 +267,28 @@ func TestRootCoord_AlterDatabase(t *testing.T) {
 	})
 }
 
+func TestCore_validateResourceGroups(t *testing.T) {
+	t.Run("invalid level", func(t *testing.T) {
+		c := newTestCore(withHealthyCode())
+		err := c.validateResourceGroups(context.Background(), nil, "invalid")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid level")
+	})
+
+	t.Run("broker error", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withBroker(&mockBroker{
+			ShowResourceGroupsFunc: func(ctx context.Context) ([]string, error) {
+				return nil, errors.New("broker error")
+			},
+		}))
+
+		err := c.validateResourceGroups(context.Background(), []*commonpb.KeyValuePair{
+			{Key: common.CollectionResourceGroups, Value: "rg1"},
+		}, "collection")
+		require.Error(t, err)
+	})
+}
+
 func TestRootCoord_CreateCollection(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())

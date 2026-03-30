@@ -17,11 +17,9 @@ package rootcoord
 
 import (
 	"context"
-	"errors"
 	"testing"
 
-	imocks "github.com/milvus-io/milvus/internal/mocks"
-	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -29,6 +27,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	imocks "github.com/milvus-io/milvus/internal/mocks"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -291,6 +291,56 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFou
 		Results: map[string]*message.AppendResult{},
 	})
 	require.NoError(t, err)
+}
+
+func TestCore_getAlterLoadConfigOfAlterCollection(t *testing.T) {
+	core := &Core{}
+
+	t.Run("no changes", func(t *testing.T) {
+		cfg := core.getAlterLoadConfigOfAlterCollection(
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+		)
+		require.Nil(t, cfg)
+	})
+
+	t.Run("replica changed", func(t *testing.T) {
+		cfg := core.getAlterLoadConfigOfAlterCollection(
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "2"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+		)
+		require.NotNil(t, cfg)
+		require.Equal(t, int32(2), cfg.ReplicaNumber)
+		require.Equal(t, []string{"rg1"}, cfg.ResourceGroups)
+	})
+
+	t.Run("rg changed", func(t *testing.T) {
+		cfg := core.getAlterLoadConfigOfAlterCollection(
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg2"},
+			},
+		)
+		require.NotNil(t, cfg)
+		require.Equal(t, int32(1), cfg.ReplicaNumber)
+		require.Equal(t, []string{"rg2"}, cfg.ResourceGroups)
+	})
 }
 
 func TestDDLCallbacksAlterCollectionV2AckCallback_BroadcastAlteredCollectionError(t *testing.T) {
