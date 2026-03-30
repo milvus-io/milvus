@@ -4119,7 +4119,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 			}
 			err := ValidateFieldsInStruct(field, schema)
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "Nested array is not supported")
+			assert.Contains(t, err.Error(), "nested array is not supported")
 		}
 	})
 
