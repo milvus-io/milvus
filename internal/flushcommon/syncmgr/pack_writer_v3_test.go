@@ -70,7 +70,8 @@ type PackWriterV3Suite struct {
 func (s *PackWriterV3Suite) SetupTest() {
 	s.ctx = context.Background()
 	s.logIDAlloc = allocator.NewLocalAllocator(1, math.MaxInt64)
-	s.rootPath = "/tmp"
+	s.rootPath = s.T().TempDir()
+	initcore.CleanArrowFileSystemSingleton()
 	initcore.InitLocalArrowFileSystem(s.rootPath)
 	paramtable.Get().Init(paramtable.NewBaseTable())
 	paramtable.Get().Save(paramtable.Get().MinioCfg.RootPath.Key, "/tmp")
