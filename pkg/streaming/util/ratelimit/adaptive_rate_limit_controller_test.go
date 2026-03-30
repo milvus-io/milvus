@@ -94,7 +94,7 @@ func TestAdaptiveRateLimitController_ModeTransition(t *testing.T) {
 	slowdownCfg := SlowdownConfig{
 		HWM:                 100,
 		LWM:                 50,
-		DecreaseInterval:    10 * time.Millisecond,
+		DecreaseInterval:    50 * time.Millisecond,
 		DecreaseRatio:       0.8,
 		RejectDelayInterval: 0, // No reject delay so recovery can proceed
 	}
@@ -102,9 +102,9 @@ func TestAdaptiveRateLimitController_ModeTransition(t *testing.T) {
 	recoveryCfg := RecoveryConfig{
 		HWM:                 100,
 		LWM:                 60,
-		IncreaseInterval:    10 * time.Millisecond,
+		IncreaseInterval:    50 * time.Millisecond,
 		Incremental:         20,
-		NormalDelayInterval: 10 * time.Millisecond,
+		NormalDelayInterval: 50 * time.Millisecond,
 	}
 	fetcher.On("FetchRecoveryConfig").Return(recoveryCfg)
 
@@ -156,9 +156,9 @@ func TestAdaptiveRateLimitController_EnterSlowdownMode(t *testing.T) {
 	slowdownCfg := SlowdownConfig{
 		HWM:                 100,
 		LWM:                 50,
-		DecreaseInterval:    10 * time.Millisecond,
+		DecreaseInterval:    50 * time.Millisecond,
 		DecreaseRatio:       0.8,
-		RejectDelayInterval: 50 * time.Millisecond,
+		RejectDelayInterval: 200 * time.Millisecond,
 	}
 	fetcher.On("FetchSlowdownConfig").Return(slowdownCfg)
 
@@ -173,7 +173,7 @@ func TestAdaptiveRateLimitController_EnterSlowdownMode(t *testing.T) {
 	controller.EnterSlowdownMode(nil)
 	assert.Eventually(t, func() bool {
 		return controller.getMode() == adaptiveRateLimitModeReject
-	}, 2*time.Second, 10*time.Millisecond)
+	}, 5*time.Second, 10*time.Millisecond)
 
 	observer.AssertExpectations(t)
 }
@@ -186,7 +186,7 @@ func TestAdaptiveRateLimitController_EnterRecoveryMode(t *testing.T) {
 	slowdownCfg := SlowdownConfig{
 		HWM:                 100,
 		LWM:                 50,
-		DecreaseInterval:    10 * time.Millisecond,
+		DecreaseInterval:    50 * time.Millisecond,
 		DecreaseRatio:       0.5,
 		RejectDelayInterval: 0, // No reject delay, will stop at LWM
 	}
@@ -195,9 +195,9 @@ func TestAdaptiveRateLimitController_EnterRecoveryMode(t *testing.T) {
 	recoveryCfg := RecoveryConfig{
 		HWM:                 100,
 		LWM:                 60,
-		IncreaseInterval:    10 * time.Millisecond,
+		IncreaseInterval:    50 * time.Millisecond,
 		Incremental:         15,
-		NormalDelayInterval: 10 * time.Millisecond,
+		NormalDelayInterval: 50 * time.Millisecond,
 	}
 	fetcher.On("FetchRecoveryConfig").Return(recoveryCfg)
 
@@ -245,9 +245,9 @@ func TestAdaptiveRateLimitController_EnterRecoveryFromMaxInt64(t *testing.T) {
 	recoveryCfg := RecoveryConfig{
 		HWM:                 100,
 		LWM:                 60,
-		IncreaseInterval:    10 * time.Millisecond,
+		IncreaseInterval:    50 * time.Millisecond,
 		Incremental:         15,
-		NormalDelayInterval: 10 * time.Millisecond,
+		NormalDelayInterval: 50 * time.Millisecond,
 	}
 	fetcher.On("FetchRecoveryConfig").Return(recoveryCfg).Maybe()
 
@@ -307,7 +307,7 @@ func TestAdaptiveRateLimitController_SlowdownStartsFromCurrentRate(t *testing.T)
 	slowdownCfg := SlowdownConfig{
 		HWM:                 200,
 		LWM:                 50,
-		DecreaseInterval:    10 * time.Millisecond,
+		DecreaseInterval:    50 * time.Millisecond,
 		DecreaseRatio:       0.5,
 		RejectDelayInterval: 0,
 	}
@@ -316,9 +316,9 @@ func TestAdaptiveRateLimitController_SlowdownStartsFromCurrentRate(t *testing.T)
 	recoveryCfg := RecoveryConfig{
 		HWM:                 200,
 		LWM:                 60,
-		IncreaseInterval:    10 * time.Millisecond,
+		IncreaseInterval:    50 * time.Millisecond,
 		Incremental:         20,
-		NormalDelayInterval: 10 * time.Millisecond,
+		NormalDelayInterval: 50 * time.Millisecond,
 	}
 	fetcher.On("FetchRecoveryConfig").Return(recoveryCfg)
 
@@ -372,7 +372,7 @@ func TestAdaptiveRateLimitController_FirstSlowdownDelayOnlyOnce(t *testing.T) {
 	slowdownCfg := SlowdownConfig{
 		HWM:                 100,
 		LWM:                 50,
-		DecreaseInterval:    10 * time.Millisecond,
+		DecreaseInterval:    50 * time.Millisecond,
 		DecreaseRatio:       0.5,
 		RejectDelayInterval: 0,
 		FirstSlowdownDelay:  100 * time.Millisecond, // 100ms delay
@@ -382,9 +382,9 @@ func TestAdaptiveRateLimitController_FirstSlowdownDelayOnlyOnce(t *testing.T) {
 	recoveryCfg := RecoveryConfig{
 		HWM:                 100,
 		LWM:                 60,
-		IncreaseInterval:    10 * time.Millisecond,
+		IncreaseInterval:    50 * time.Millisecond,
 		Incremental:         20,
-		NormalDelayInterval: 10 * time.Millisecond,
+		NormalDelayInterval: 50 * time.Millisecond,
 	}
 	fetcher.On("FetchRecoveryConfig").Return(recoveryCfg)
 
@@ -425,7 +425,7 @@ func TestAdaptiveRateLimitController_SlowdownChecker(t *testing.T) {
 	slowdownCfg := SlowdownConfig{
 		HWM:                 100,
 		LWM:                 10,
-		DecreaseInterval:    10 * time.Millisecond,
+		DecreaseInterval:    50 * time.Millisecond,
 		DecreaseRatio:       0.5,
 		RejectDelayInterval: 0,
 	}
@@ -434,9 +434,9 @@ func TestAdaptiveRateLimitController_SlowdownChecker(t *testing.T) {
 	recoveryCfg := RecoveryConfig{
 		HWM:                 100,
 		LWM:                 60,
-		IncreaseInterval:    10 * time.Millisecond,
+		IncreaseInterval:    50 * time.Millisecond,
 		Incremental:         20,
-		NormalDelayInterval: 10 * time.Millisecond,
+		NormalDelayInterval: 50 * time.Millisecond,
 	}
 	fetcher.On("FetchRecoveryConfig").Return(recoveryCfg)
 

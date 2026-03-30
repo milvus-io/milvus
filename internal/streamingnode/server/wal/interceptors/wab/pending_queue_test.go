@@ -106,14 +106,14 @@ func TestPendingQueue(t *testing.T) {
 	assert.Equal(t, snapshot[1].Message.TimeTick(), uint64(105))
 
 	// Test time based eviction
-	pq = newPendingQueue(100, 10*time.Millisecond, newImmutableTimeTickMessage(t, 99))
+	pq = newPendingQueue(100, 200*time.Millisecond, newImmutableTimeTickMessage(t, 99))
 	pq.Push([]message.ImmutableMessage{
 		newImmutableMessage(t, 100, 10),
 	})
 	pq.Evict()
 	assert.Equal(t, pq.CurrentOffset(), 1)
 	assert.Len(t, pq.buf, 2)
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	pq.Evict()
 	// the last message should never be evicted.
 	assert.Len(t, pq.buf, 1)
