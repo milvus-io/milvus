@@ -378,10 +378,9 @@ func (s *BalanceTestSuit) TestConcurrentBalanceChannelAndSegment() {
 
 func (s *BalanceTestSuit) TestMultiTargetBalancePolicy() {
 	// Set balance policy to MultipleTargetBalancer
-	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
-		paramtable.Get().QueryCoordCfg.Balancer.Key: "MultipleTargetBalancer",
-	})
-	defer revertGuard()
+	key := paramtable.Get().QueryCoordCfg.Balancer.Key
+	paramtable.Get().Save(key, "MultipleTargetBalancer")
+	defer paramtable.Get().Reset(key)
 
 	testBalanceOnSingleReplica(s)
 }
