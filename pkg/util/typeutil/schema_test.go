@@ -4663,7 +4663,7 @@ func TestGetNeedProcessFunctions(t *testing.T) {
 	{
 		fs := []*schemapb.FunctionSchema{{Name: "test_func", Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{1}}}
 		_, err := GetNeedProcessFunctions([]int64{1}, fs, true, false)
-		assert.ErrorContains(t, err, "Attempt to insert bm25 function output field")
+		assert.ErrorContains(t, err, "attempt to insert bm25 function output field")
 	}
 	{
 		fs := []*schemapb.FunctionSchema{

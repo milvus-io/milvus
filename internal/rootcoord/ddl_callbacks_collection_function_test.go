@@ -412,7 +412,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestAlterFunctionGenNewCol
 
 	err := alterFunctionGenNewCollection(context.Background(), fSchema, coll)
 	suite.Error(err)
-	suite.Contains(err.Error(), "Old version function's output field non_existent_output not exists")
+	suite.Contains(err.Error(), "old version function's output field non_existent_output not exists")
 }
 
 // Test with empty collections and functions
