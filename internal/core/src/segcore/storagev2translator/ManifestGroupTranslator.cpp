@@ -50,7 +50,12 @@
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/Util.h"
 
+#include <atomic>
+
 namespace milvus::segcore::storagev2translator {
+
+// See GroupChunkTranslator.cpp for explanation of g_mmap_path_generation.
+static std::atomic<uint64_t> g_mmap_path_generation{0};
 
 // Convert LIST or FIXED_SIZE_LIST arrays to FixedSizeBinary.
 // External parquet files store vectors in list format; Milvus expects
@@ -465,26 +470,31 @@ ManifestGroupTranslator::load_group_chunk(
         chunks = create_group_chunk(
             field_ids, field_metas, array_vecs, mmap_populate_);
     } else {
-        // Mmap mode
+        // Mmap mode — use unique generation suffix to avoid truncating files
+        // that old MAP_SHARED mmaps still reference (see #48658).
+        auto gen =
+            g_mmap_path_generation.fetch_add(1, std::memory_order_relaxed);
         std::filesystem::path filepath;
         switch (group_chunk_type_) {
             case GroupChunkType::DEFAULT:
                 filepath = std::filesystem::path(mmap_dir_path_) /
-                           fmt::format("seg_{}_cg_{}_{}",
+                           fmt::format("seg_{}_cg_{}_{}_{}",
                                        segment_id_,
                                        column_group_index_,
-                                       cid);
+                                       cid,
+                                       gen);
                 break;
             case GroupChunkType::JSON_KEY_STATS:
                 filepath =
                     std::filesystem::path(mmap_dir_path_) /
                     fmt::format(
-                        "seg_{}_jks_{}_cg_{}_{}",
+                        "seg_{}_jks_{}_cg_{}_{}_{}",
                         segment_id_,
                         // NOTE: here we assume the first field is the main field for json key stats group chunk
                         std::to_string(field_metas[0].get_main_field_id()),
                         column_group_index_,
-                        cid);
+                        cid,
+                        gen);
                 break;
             default:
                 ThrowInfo(ErrorCode::UnexpectedError,

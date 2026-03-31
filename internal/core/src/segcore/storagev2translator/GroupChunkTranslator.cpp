@@ -17,6 +17,7 @@
 
 #include <assert.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -53,6 +54,13 @@
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
+
+// Monotonic counter to generate unique mmap file paths across translator
+// instances. When a column group is replaced (e.g., via ApplyLoadDiff), the new
+// translator must write to a different file path than the old one. Otherwise the
+// FileWriter's O_TRUNC truncates the file while the old translator's MAP_SHARED
+// mmap is still active, causing SIGBUS on concurrent reads.
+static std::atomic<uint64_t> g_mmap_path_generation{0};
 
 GroupChunkTranslator::GroupChunkTranslator(
     int64_t segment_id,
@@ -464,24 +472,32 @@ GroupChunkTranslator::load_group_chunk(
         chunks = create_group_chunk(
             field_ids, field_metas, array_vecs, mmap_populate_);
     } else {
+        // Use a unique generation suffix to avoid file path collision when a
+        // column group is replaced.  Without this, the new FileWriter would
+        // O_TRUNC the same file that the old translator's MAP_SHARED mmap
+        // still references, causing SIGBUS on concurrent reads.
+        auto gen =
+            g_mmap_path_generation.fetch_add(1, std::memory_order_relaxed);
         std::filesystem::path filepath;
         switch (group_chunk_type_) {
             case GroupChunkType::DEFAULT:
                 filepath =
                     std::filesystem::path(column_group_info_.mmap_dir_path) /
-                    fmt::format("seg_{}_cg_{}_{}",
+                    fmt::format("seg_{}_cg_{}_{}_{}",
                                 segment_id_,
                                 column_group_info_.field_id,
-                                cid);
+                                cid,
+                                gen);
                 break;
             case GroupChunkType::JSON_KEY_STATS:
                 filepath =
                     std::filesystem::path(column_group_info_.mmap_dir_path) /
-                    fmt::format("seg_{}_jks_{}_cg_{}_{}",
+                    fmt::format("seg_{}_jks_{}_cg_{}_{}_{}",
                                 segment_id_,
                                 column_group_info_.main_field_id,
                                 column_group_info_.field_id,
-                                cid);
+                                cid,
+                                gen);
                 break;
             default:
                 ThrowInfo(ErrorCode::UnexpectedError,

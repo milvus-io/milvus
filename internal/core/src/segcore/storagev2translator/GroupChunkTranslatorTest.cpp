@@ -200,25 +200,18 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     EXPECT_EQ(meta->chunk_memory_size_.size(), num_cells);
     EXPECT_EQ(expected_total_size, chunked_column_group->memory_size());
 
-    // Verify the mmap files for all cells are created
-    std::vector<std::string> mmap_paths;
-    for (size_t i = 0; i < num_cells; ++i) {
-        mmap_paths.push_back(
-            (temp_dir / ("seg_0_cg_0_" + std::to_string(i))).string());
-    }
-    // Verify mmap directory and files if in mmap mode
+    // Verify mmap files are created (file names include a generation suffix)
     if (use_mmap) {
-        for (const auto& mmap_path : mmap_paths) {
-            EXPECT_TRUE(std::filesystem::exists(mmap_path));
+        size_t mmap_file_count = 0;
+        for (const auto& entry :
+             std::filesystem::directory_iterator(temp_dir)) {
+            auto name = entry.path().filename().string();
+            if (name.rfind("seg_0_cg_0_", 0) == 0) {
+                mmap_file_count++;
+            }
         }
-    }
-
-    // Clean up mmap files
-    if (use_mmap) {
-        for (const auto& mmap_path : mmap_paths) {
-            std::filesystem::remove(mmap_path);
-        }
-        std::filesystem::remove(temp_dir);
+        EXPECT_EQ(mmap_file_count, num_cells);
+        std::filesystem::remove_all(temp_dir);
     }
 }
 
