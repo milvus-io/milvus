@@ -407,7 +407,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         # 2. Search with pagination 
         topK=16384
         offset = topK - limit
-        search_param = {"nprobe": 10, "offset": offset}
+        search_param = {"metric_type": "COSINE", "nprobe": 128, "offset": offset}
         vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
         self.search(client, collection_name, vectors_to_search[:default_nq], anns_field=self.float_vector_field_name,
                     search_params=search_param, limit=limit, check_task=CheckTasks.check_search_results,

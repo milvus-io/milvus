@@ -713,27 +713,43 @@ class TestGroupSearch(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("grpby_nonexist_field", ["nonexist_field", 21])
-    def test_search_group_by_nonexistent_field_on_dynamic_enabled_collection(self, grpby_nonexist_field):
+    def test_search_group_by_nonexistent_field_on_dynamic_enabled_collection(self):
         """
-        target: test search group by with the non existing field against dynamic field enabled collection
+        target: test search group by with a non-existing field against dynamic field enabled collection
         method: 1. create a collection with dynamic field enabled
-                2. create index
-                3. search with group by the unsupported fields
-                verify: success
+                2. search with group by a nonexistent dynamic field
+                verify: returns 1 result (all rows have null value for the field, grouped into one group)
         """
         client = self._client()
         nq = 2
         search_vectors = cf.gen_vectors(nq, dim=self.float_vector_dim,
                                         vector_data_type=DataType.FLOAT_VECTOR)
         search_params = {"metric_type": self.float_vector_metric}
-        limit = 100
         self.search(client, self.collection_name, data=search_vectors,
                     anns_field=self.float_vector_field_name,
-                    search_params=search_params, limit=limit,
-                    group_by_field=grpby_nonexist_field,
+                    search_params=search_params, limit=100,
+                    group_by_field="nonexist_field",
                     check_task=CheckTasks.check_search_results,
-                    check_items={"nq": nq, "limit": limit})
+                    check_items={"nq": nq, "limit": 1})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_group_by_invalid_field_type(self):
+        """
+        target: test search group by with an integer (invalid type) as field name
+        method: search with group_by_field=21
+        verify: server returns error
+        """
+        client = self._client()
+        search_vectors = cf.gen_vectors(1, dim=self.float_vector_dim,
+                                        vector_data_type=DataType.FLOAT_VECTOR)
+        search_params = {"metric_type": self.float_vector_metric}
+        error = {ct.err_code: 65535,
+                 ct.err_msg: "cannot parse identifier"}
+        self.search(client, self.collection_name, data=search_vectors,
+                    anns_field=self.float_vector_field_name,
+                    search_params=search_params, limit=100,
+                    group_by_field=21,
+                    check_task=CheckTasks.err_res, check_items=error)
 
 
 @pytest.mark.xdist_group("TestGroupSearchInvalid")
