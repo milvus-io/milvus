@@ -194,8 +194,8 @@ func (s *SyncTaskSuite) createSegment(storageVersion int64) *metacache.SegmentIn
 	if storageVersion == storage.StorageV3 {
 		k := fmt.Sprintf("%d/%d/%d", s.collectionID, s.partitionID, s.segmentID)
 		basePath := fmt.Sprintf("insert_log/%s", k)
-		// Use JSON format for manifest path: {"ver": -1, "base_path": "..."}
-		segInfo.ManifestPath = packed.MarshalManifestPath(basePath, -1)
+		// Use JSON format for manifest path: {"ver": 0, "base_path": "..."}
+		segInfo.ManifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 	}
 
 	seg := metacache.NewSegmentInfo(segInfo, bfs, nil)

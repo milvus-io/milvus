@@ -81,8 +81,8 @@ func NewSyncTask(ctx context.Context,
 		if useLoonFFI {
 			k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 			basePath := path.Join(storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
-			// -1 for first write
-			segment.ManifestPath = packed.MarshalManifestPath(basePath, -1)
+			// ManifestEarliest for first write
+			segment.ManifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 		}
 		metaCache.AddSegment(segment, func(info *datapb.SegmentInfo) pkoracle.PkStat {
 			bfs := pkoracle.NewBloomFilterSet()
