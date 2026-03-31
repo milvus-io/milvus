@@ -7,6 +7,8 @@ use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 /// not segmenting CJK text (no dictionary model loaded), keeping it Thai-focused.
 /// Unlike the generic IcuTokenizer, this also filters out whitespace and punctuation,
 /// returning only meaningful word tokens — matching ES Thai tokenizer behavior.
+/// Positions are character-based (Unicode scalar values) from the start of the input,
+/// including skipped segments, consistent with IcuTokenizer and Jieba.
 pub struct ThaiTokenizer {
     segmenter: WordSegmenter,
 }
@@ -74,9 +76,11 @@ impl ThaiTokenizer {
             let start = pair[0];
             let end = pair[1];
             let segment = &text[start..end];
+            let char_len = segment.chars().count();
 
-            // Skip whitespace, punctuation, and empty segments
+            // Skip whitespace, punctuation, and empty segments (still advance position)
             if !is_word_segment(segment) {
+                position += char_len;
                 continue;
             }
 
@@ -85,9 +89,9 @@ impl ThaiTokenizer {
                 offset_from: start,
                 offset_to: end,
                 position,
-                position_length: 1,
+                position_length: char_len,
             });
-            position += 1;
+            position += char_len;
         }
 
         tokens
@@ -168,6 +172,39 @@ mod tests {
                 .all(|t| t.chars().any(|c| c.is_alphanumeric())),
             "Should not contain punctuation-only tokens: {:?}",
             results
+        );
+    }
+
+    #[test]
+    fn test_thai_tokenizer_char_based_position() {
+        let mut tokenizer = super::ThaiTokenizer::new();
+        let text = "สวัสดี ครับ";
+        let mut stream = tokenizer.token_stream(text);
+
+        let mut positions = Vec::new();
+        while stream.advance() {
+            let t = stream.token();
+            assert_eq!(
+                t.position_length,
+                t.text.chars().count(),
+                "position_length should match Unicode scalar count"
+            );
+            positions.push((t.position, t.text.clone()));
+        }
+
+        assert!(
+            positions.len() >= 2,
+            "expected at least two word tokens, got {:?}",
+            positions
+        );
+        // Second word starts after first word + skipped space (one char)
+        let (p0, w0) = &positions[0];
+        let (p1, _) = &positions[1];
+        assert_eq!(
+            *p1,
+            p0 + w0.chars().count() + 1,
+            "position should include skipped space between words: {:?}",
+            positions
         );
     }
 }
