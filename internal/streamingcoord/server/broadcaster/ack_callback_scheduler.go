@@ -361,7 +361,7 @@ func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Conte
 	})
 }
 
-// retryUntilDone retries fn with exponential backoff until it succeeds or ctx is cancelled.
+// retryUntilDone retries fn with exponential backoff until it succeeds or ctx is canceled.
 func (s *ackCallbackScheduler) retryUntilDone(ctx context.Context, fn func() error) error {
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 10 * time.Millisecond
