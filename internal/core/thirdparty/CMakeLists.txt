@@ -26,12 +26,112 @@ include(FetchContent)
 set(FETCHCONTENT_BASE_DIR  ${MILVUS_BINARY_DIR}/3rdparty_download)
 set(FETCHCONTENT_QUIET     OFF)
 
+function(add_milvus_common)
+    milvus_add_pkg_config("milvus-common")
+    set( milvus_common_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/milvus-common )
+
+    if ( NOT EXISTS "${milvus_common_SOURCE_DIR}/CMakeLists.txt" )
+        message(FATAL_ERROR "The milvus-common submodule is not initialized. Please run:\n"
+                            "  git submodule update --init internal/core/thirdparty/milvus-common")
+    endif()
+
+    set(WITH_JAEGER ON CACHE BOOL "" FORCE )
+    set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
+
+    add_subdirectory( ${milvus_common_SOURCE_DIR}
+                      ${CMAKE_CURRENT_BINARY_DIR}/milvus-common-build )
+
+    set( MILVUS_COMMON_INCLUDE_DIR ${milvus_common_SOURCE_DIR}/include CACHE INTERNAL "Path to milvus-common include directory" )
+
+    # Mark as populated so knowhere's FetchContent_GetProperties skips its own milvus-common.
+    # CMake 3.28 FetchContent checks DEFINED (via define_property), not just the value.
+    set(__prefix "_FetchContent_milvus-common")
+    define_property(GLOBAL PROPERTY ${__prefix}_sourceDir)
+    set_property(GLOBAL PROPERTY ${__prefix}_sourceDir "${milvus_common_SOURCE_DIR}")
+    define_property(GLOBAL PROPERTY ${__prefix}_binaryDir)
+    set_property(GLOBAL PROPERTY ${__prefix}_binaryDir "${CMAKE_CURRENT_BINARY_DIR}/milvus-common-build")
+    define_property(GLOBAL PROPERTY ${__prefix}_populated)
+    set_property(GLOBAL PROPERTY ${__prefix}_populated TRUE)
+endfunction()
+
+function(add_knowhere)
+    milvus_add_pkg_config("knowhere")
+    set( knowhere_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/knowhere )
+
+    if ( NOT EXISTS "${knowhere_SOURCE_DIR}/CMakeLists.txt" )
+        message(FATAL_ERROR "The knowhere submodule is not initialized. Please run:\n"
+                            "  git submodule update --init internal/core/thirdparty/knowhere")
+    endif()
+
+    if ( BUILD_DISK_ANN STREQUAL "ON" )
+        set(WITH_DISKANN ON CACHE BOOL "" FORCE )
+    else ()
+        set(WITH_DISKANN OFF CACHE BOOL "" FORCE )
+    endif ()
+
+    if ( INDEX_ENGINE STREQUAL "cardinal" )
+        set(WITH_CARDINAL ON CACHE BOOL "" FORCE )
+    else ()
+        set(WITH_CARDINAL OFF CACHE BOOL "" FORCE )
+    endif()
+
+    if ( MILVUS_GPU_VERSION STREQUAL "ON" )
+        set(WITH_CUVS ON CACHE BOOL "" FORCE )
+        set(raft_DIR "${FETCHCONTENT_BASE_DIR}/raft-build" CACHE PATH "Path to raft build directory" FORCE)
+        set(rmm_DIR "${FETCHCONTENT_BASE_DIR}/rmm-build" CACHE PATH "Path to rmm build directory" FORCE)
+    endif ()
+
+    if ( WITH_SVS STREQUAL "ON" )
+        set(WITH_SVS ON CACHE BOOL "" FORCE )
+    else ()
+        set(WITH_SVS OFF CACHE BOOL "" FORCE )
+    endif()
+
+    set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
+    add_subdirectory( ${knowhere_SOURCE_DIR}
+                      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-build )
+
+    if ( WITH_SVS STREQUAL "ON" )
+        set( _SVS_LIB_DIR "${FETCHCONTENT_BASE_DIR}/svs-src/lib" )
+        if ( EXISTS "${_SVS_LIB_DIR}" )
+            install(DIRECTORY ${_SVS_LIB_DIR}/
+                    DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
+                    FILES_MATCHING PATTERN "libsvs_runtime.so*")
+        else()
+            message(WARNING "SVS enabled but ${_SVS_LIB_DIR} not found - libsvs_runtime.so will not be installed")
+        endif()
+    endif()
+
+    if ( WITH_CUVS STREQUAL "ON" )
+        set( _RMM_LIB_DIR "${FETCHCONTENT_BASE_DIR}/rmm-build" )
+        if ( EXISTS "${_RMM_LIB_DIR}" )
+            install(DIRECTORY ${_RMM_LIB_DIR}/
+                    DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
+                    FILES_MATCHING PATTERN "librmm.so*")
+        else()
+            message(WARNING "cuVS enabled but ${_RMM_LIB_DIR} not found - librmm.so will not be installed")
+        endif()
+
+        set( _RAPIDS_LOGGER_LIB_DIR "${FETCHCONTENT_BASE_DIR}/rapids_logger-build" )
+        if ( EXISTS "${_RAPIDS_LOGGER_LIB_DIR}" )
+            install(DIRECTORY ${_RAPIDS_LOGGER_LIB_DIR}/
+                    DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
+                    FILES_MATCHING PATTERN "librapids_logger.so*")
+        else()
+            message(WARNING "cuVS enabled but ${_RAPIDS_LOGGER_LIB_DIR} not found - librapids_logger.so will not be installed")
+        endif()
+    endif()
+
+    get_property( var DIRECTORY "${knowhere_SOURCE_DIR}" PROPERTY COMPILE_OPTIONS )
+    message( STATUS "knowhere src compile options: ${var}" )
+    set( KNOWHERE_INCLUDE_DIR ${knowhere_SOURCE_DIR}/include CACHE INTERNAL "Path to knowhere include directory" )
+endfunction()
+
 # Find pthreads
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
-add_subdirectory(milvus-common)
-
-add_subdirectory(knowhere)
+add_milvus_common()
+add_knowhere()
 
 add_subdirectory(boost_ext)
 add_subdirectory(rocksdb)
@@ -48,4 +148,3 @@ if (LINUX)
 endif()
 
 add_subdirectory(milvus-storage)
-
