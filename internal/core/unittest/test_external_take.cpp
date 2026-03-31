@@ -213,9 +213,7 @@ class MockTakeReader : public milvus_storage::api::Reader {
                 auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
                 arrow::BinaryBuilder b;
                 for (auto idx : indices) {
-                    auto val = typed->Value(idx);
-                    auto len = typed->value_length(idx);
-                    ARROW_RETURN_NOT_OK(b.Append(val, len));
+                    ARROW_RETURN_NOT_OK(b.Append(typed->Value(idx)));
                 }
                 std::shared_ptr<arrow::Array> out;
                 ARROW_RETURN_NOT_OK(b.Finish(&out));
