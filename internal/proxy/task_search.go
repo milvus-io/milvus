@@ -838,10 +838,10 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		log.Ctx(t.ctx).Warn("failed to create query plan", zap.Error(planErr),
 			zap.String("dsl", dsl), // may be very large if large term passed.
 			zap.String("anns field", annsFieldName), zap.Any("query info", searchInfo.planInfo))
-		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.FailLabel).Observe(float64(time.Since(start).Milliseconds()))
+		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 		return nil, nil, 0, false, nil, merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", planErr)
 	}
-	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Milliseconds()))
+	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	log.Ctx(t.ctx).Debug("create query plan",
 		zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
 		zap.String("anns field", annsFieldName), zap.Any("query info", searchInfo.planInfo))
@@ -1030,7 +1030,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		t.result.SessionTs = getMaxMvccTsFromChannels(t.queryChannelsTs, t.BeginTs())
 	}
 
-	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
+	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Microseconds()) / 1000.0)
 
 	timeFields := parseTimeFields(t.request.SearchParams)
 	if timeFields != nil {

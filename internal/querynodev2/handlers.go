@@ -478,7 +478,7 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.
 		WithLabelValues(nodeIDStr, metrics.SearchLabel, metrics.ReduceShards, metrics.BatchReduce).
-		Observe(float64(reduceLatency.Milliseconds()))
+		Observe(float64(reduceLatency.Microseconds()) / 1000.0)
 
 	if err != nil {
 		return nil, err

@@ -65,7 +65,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "apply_bf_latency",
 			Help:      "apply bf cost in ms",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			functionLabelName,
 			nodeIDLabelName,
@@ -77,7 +77,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "forward_delete_latency",
 			Help:      "forward delete cost in ms",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			functionLabelName,
 			nodeIDLabelName,
@@ -194,7 +194,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_queue_latency",
 			Help:      "latency of search or query in queue",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
@@ -208,7 +208,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_queue_user_latency",
 			Help:      "latency per user of search or query in queue",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
@@ -222,7 +222,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_segment_latency",
 			Help:      "latency of search or query per segment",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
@@ -235,7 +235,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_core_latency",
 			Help:      "latency of search or query latency in segcore",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
@@ -247,7 +247,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_reduce_latency",
 			Help:      "latency of reduce search or query result",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
@@ -516,7 +516,7 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "segment_latency_per_vector",
 			Help:      "one vector's search latency per segment",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
