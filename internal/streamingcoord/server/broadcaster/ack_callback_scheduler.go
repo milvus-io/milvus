@@ -276,12 +276,23 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 		supplementCount++
 	}
 
-	s.Logger().Info("Completed fixing incomplete broadcasts for force promote",
+	s.Logger().Info("Supplemented incomplete broadcast messages",
 		zap.Int("supplementCount", supplementCount),
 		zap.Int("failureCount", failureCount),
 		zap.Int("totalPending", len(pendingMessages)))
 
-	return lastResultErr
+	if lastResultErr != nil {
+		return lastResultErr
+	}
+
+	// Wait for all incomplete tasks to be fully acked before returning.
+	for _, task := range incompleteTasks {
+		if err := task.BlockUntilAllAck(ctx); err != nil {
+			return errors.Wrapf(err, "waiting for incomplete task %d to be fully acked", task.Header().BroadcastID)
+		}
+	}
+	s.Logger().Info("All incomplete broadcasts fully acked")
+	return nil
 }
 
 // doAckCallback executes the ack callback.
