@@ -37,6 +37,9 @@ function milvus_ci_release_name(){
     elif [[ "${MILVUS_SERVER_TYPE:-}" == "distributed-woodpecker" ]]; then
         # Distributed woodpecker mode
        name+="dw"
+    elif [[ "${MILVUS_SERVER_TYPE:-}" == "distributed-woodpecker-service" ]]; then
+        # Distributed woodpecker service mode
+       name+="dws"
     elif [[ "${MILVUS_SERVER_TYPE:-}" == "standalone-kafka-mmap" ]]; then
         # Standalone kafka mode
         name+="skm" 
