@@ -200,6 +200,17 @@ func newBoolConstExpr(v bool) *planpb.Expr {
 	}
 }
 
+func newNullExpr(col *planpb.ColumnInfo, op planpb.NullExpr_NullOp) *planpb.Expr {
+	return &planpb.Expr{
+		Expr: &planpb.Expr_NullExpr{
+			NullExpr: &planpb.NullExpr{
+				ColumnInfo: col,
+				Op:         op,
+			},
+		},
+	}
+}
+
 func newAlwaysTrueExpr() *planpb.Expr {
 	return &planpb.Expr{
 		Expr: &planpb.Expr_AlwaysTrueExpr{
