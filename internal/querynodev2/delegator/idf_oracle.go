@@ -306,7 +306,10 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *q
 		result, err := o.streamLoad(ctx, segmentID, logpaths, cm, needParse)
 		if err != nil {
 			// cleanup on failure
-			os.RemoveAll(path.Join(o.dirPath, fmt.Sprintf("%d", segmentID)))
+			cleanupPath := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID))
+			if rmErr := os.RemoveAll(cleanupPath); rmErr != nil {
+				log.Warn("failed to cleanup bm25 stats dir on load failure", zap.Error(rmErr), zap.String("path", cleanupPath))
+			}
 			return nil, err
 		}
 
@@ -434,25 +437,6 @@ func streamOneFile(ctx context.Context, cm storage.ChunkManager, remotePath, loc
 		return 0, err
 	}
 	return written, nil
-}
-
-// filterBM25Logs extracts binlog paths from FieldBinlog, grouped by fieldID.
-func filterBM25Logs(fieldBinlogs []*datapb.FieldBinlog) map[int64][]string {
-	result := make(map[int64][]string)
-	for _, fieldBinlog := range fieldBinlogs {
-		logpaths := []string{}
-		for _, binlog := range fieldBinlog.GetBinlogs() {
-			_, logidx := path.Split(binlog.GetLogPath())
-			if logidx == storage.CompoundStatsType.LogIdx() {
-				logpaths = []string{binlog.GetLogPath()}
-				break
-			} else {
-				logpaths = append(logpaths, binlog.GetLogPath())
-			}
-		}
-		result[fieldBinlog.FieldID] = logpaths
-	}
-	return result
 }
 
 func (o *idfOracle) UpdateGrowing(segmentID int64, stats bm25Stats) {
@@ -588,7 +572,9 @@ func (o *idfOracle) Close() {
 	}
 	o.resourceMu.Unlock()
 
-	os.RemoveAll(o.dirPath)
+	if err := os.RemoveAll(o.dirPath); err != nil {
+		log.Warn("failed to remove bm25 stats dir on close", zap.Error(err), zap.String("path", o.dirPath))
+	}
 }
 
 func (o *idfOracle) SetNext(snapshot *snapshot) {
