@@ -1126,7 +1126,7 @@ func TestAllocNewGrowingSegment_ManifestPath(t *testing.T) {
 		basePath, ver, unmarshalErr := packed.UnmarshalManifestPath(segment.ManifestPath)
 		assert.NoError(t, unmarshalErr)
 		assert.NotEmpty(t, basePath)
-		assert.Equal(t, int64(packed.ManifestEarliest), ver)
+		assert.Equal(t, packed.ManifestEarliest, ver)
 	})
 
 	t.Run("StorageV2 segment has no manifest path", func(t *testing.T) {

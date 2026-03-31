@@ -242,7 +242,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// searches with small result size could no longer need requery.
 	traceVal, _ := funcutil.GetAttrByKeyFromRepeatedKV(PipelineTraceKey, t.request.GetSearchParams())
 	t.traceEnabled = strings.EqualFold(traceVal, "true")
-	if t.SearchRequest.GetIsAdvanced() {
+	if t.GetIsAdvanced() {
 		err = t.initAdvancedSearchRequest(ctx)
 	} else {
 		err = t.initSearchRequest(ctx)

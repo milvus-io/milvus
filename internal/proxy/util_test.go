@@ -5308,7 +5308,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown token_level")
+		assert.Contains(t, err.Error(), "unknown token_level")
 	})
 
 	t.Run("invalid token_level empty value", func(t *testing.T) {
@@ -5333,7 +5333,7 @@ func TestMinHashFunction(t *testing.T) {
 		}
 		err := validateFunction(schema, "", false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown token_level")
+		assert.Contains(t, err.Error(), "unknown token_level")
 	})
 
 	t.Run("invalid seed string value", func(t *testing.T) {
