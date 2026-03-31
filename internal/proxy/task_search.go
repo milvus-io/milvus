@@ -110,7 +110,8 @@ type searchTask struct {
 	// if the user explicitly set pk field in output fields, we add it back to the result.
 	userRequestedPkFieldExplicitly bool
 
-	storageCost segcore.StorageCost
+	storageCost  segcore.StorageCost
+	traceEnabled bool
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -238,6 +239,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	// Currently, we get vectors by requery. Once we support getting vectors from search,
 	// searches with small result size could no longer need requery.
+	traceVal, _ := funcutil.GetAttrByKeyFromRepeatedKV(PipelineTraceKey, t.request.GetSearchParams())
+	t.traceEnabled = strings.EqualFold(traceVal, "true")
 	if t.SearchRequest.GetIsAdvanced() {
 		err = t.initAdvancedSearchRequest(ctx)
 	} else {
