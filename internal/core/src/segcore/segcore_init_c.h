@@ -125,7 +125,17 @@ ConfigureTieredStorage(
     const float loading_resource_factor,
     const float max_disk_usage_percentage,
     const char* disk_path,
-    const int64_t loading_timeout_ms);
+    const int64_t loading_timeout_ms,
+    const int64_t warmup_loading_timeout_ms);
+
+void
+UpdateTieredStorageConfig(const int64_t loading_timeout_ms,
+                          const int64_t warmup_loading_timeout_ms,
+                          const bool storage_usage_tracking_enabled,
+                          const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
+                          const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
+                          const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
+                          const CacheWarmupPolicy vectorIndexCacheWarmupPolicy);
 
 #ifdef __cplusplus
 }
