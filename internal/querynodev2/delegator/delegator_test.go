@@ -2123,6 +2123,37 @@ func TestNewRowCountBasedEvaluator_ExactRatioBoundary(t *testing.T) {
 	})
 }
 
+func TestNewRowCountBasedEvaluator_QueryStreamDisablesPartialResult(t *testing.T) {
+	mockey.PatchConvey("TestNewRowCountBasedEvaluator_QueryStreamDisablesPartialResult", t, func() {
+		sealedRowCount := map[int64]int64{
+			1: 5000,
+			2: 5000,
+		}
+		// Total: 10000 rows
+
+		// Even with ratio=0.0, QueryStream should NOT return partial results
+		mockParamTable := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(0.0).Build()
+		defer mockParamTable.UnPatch()
+
+		evaluator := NewRowCountBasedEvaluator(sealedRowCount)
+
+		// 50% data available, ratio=0.0, but taskType=QueryStream
+		// QueryStream must NOT allow partial results (used by delete-by-expr)
+		successSegments := typeutil.NewSet[int64]()
+		successSegments.Insert(1) // 5000/10000 = 0.5
+		failureSegments := []int64{2}
+		testErrors := []error{errors.New("segment 2 failed")}
+
+		shouldReturn, _ := evaluator("QueryStream", successSegments, failureSegments, testErrors)
+		assert.False(t, shouldReturn, "QueryStream should never return partial results, even with ratio=0.0")
+
+		// Verify Query with same setup DOES allow partial results
+		shouldReturn, accessedRatio := evaluator("Query", successSegments, failureSegments, testErrors)
+		assert.True(t, shouldReturn, "Query should allow partial results with ratio=0.0")
+		assert.Equal(t, 0.5, accessedRatio)
+	})
+}
+
 func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 	paramtable.Init()
 

@@ -618,13 +618,13 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
 		}
 		return nil, err
-	}, "Query", log)
+	}, "QueryStream", log)
 	if err != nil {
-		log.Warn("Delegator query failed", zap.Error(err))
+		log.Warn("Delegator query stream failed", zap.Error(err))
 		return err
 	}
 
-	log.Info("Delegator Query done")
+	log.Info("Delegator QueryStream done")
 
 	return nil
 }
