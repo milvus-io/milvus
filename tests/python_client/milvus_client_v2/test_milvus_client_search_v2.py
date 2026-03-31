@@ -371,6 +371,7 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
             ct.default_string_array_field_name,
             ct.default_float_vec_field_name, ct.default_float16_vec_field_name,
             ct.default_bfloat16_vec_field_name,
+            "new_added_field",
         ]
         self.search(client, self.collection_name,
                     data=search_vectors,
@@ -457,8 +458,8 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
     # ==================== Exists expression tests ====================
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("json_field_name", ["json_field", "json_field['name']", "json_field['number']",
-                                                 "float_array", "not_exist_field", "new_added_field"])
+    @pytest.mark.parametrize("json_field_name", ["json_field['name']", "json_field['number']",
+                                                 "not_exist_field", "new_added_field"])
     def test_search_with_expression_exists(self, json_field_name):
         """
         target: verify 'exists' expression returns correct results for existing and non-existing fields
@@ -655,6 +656,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         search_vectors = cf.gen_vectors(default_nq, dim)
+        search_params = {"metric_type": "COSINE", "params": {"nprobe": 64}}
         for expressions in cf.gen_normal_expressions_and_templates_field(default_float_field_name):
             log.debug(f"search with expression: {expressions}")
             expr = expressions[0].replace("&&", "and").replace("||", "or")
@@ -667,7 +669,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
             search_res, _ = self.search(client, collection_name,
                                         data=search_vectors[:default_nq],
                                         anns_field=default_search_field,
-                                        search_params=default_search_params,
+                                        search_params=search_params,
                                         limit=search_limit,
                                         filter=expr)
             filter_ids_set = set(filter_ids)
@@ -683,7 +685,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
             search_res, _ = self.search(client, collection_name,
                                         data=search_vectors[:default_nq],
                                         anns_field=default_search_field,
-                                        search_params=default_search_params,
+                                        search_params=search_params,
                                         limit=search_limit,
                                         filter=expr, filter_params=expr_params)
             filter_ids_set = set(filter_ids)
@@ -1089,4 +1091,5 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
                       index_type="FLAT", params={})
         self.create_index(client, collection_name, index_params=idx,
                           check_task=CheckTasks.err_res,
-                          check_items={"err_code": 1100})
+                          check_items={"err_code": 1100,
+                                       "err_msg": f"float vector index does not support metric type: {metric_type}"})

@@ -164,7 +164,8 @@ class TestSparseSearchShared(TestMilvusClientV2Base):
                     limit=default_limit,
                     check_task=CheckTasks.err_res,
                     check_items={ct.err_code: 1100,
-                                 ct.err_msg: "only IP is supported"})
+                                 ct.err_msg: f"metric type not match: invalid parameter"
+                                             f"[expected=IP][actual={metric_type}]"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("nq", [1, 100])
