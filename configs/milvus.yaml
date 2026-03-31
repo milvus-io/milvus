@@ -49,7 +49,7 @@ etcd:
     tlsKey: /path/to/etcd-client-key.pem # path to your key file
     tlsCACert: /path/to/ca.pem # path to your CACert file
     # TLS min version
-    # Optional values: 1.0, 1.1, 1.2, 1.3。
+    # Optional values: 1.0, 1.1, 1.2, 1.3.
     # We recommend using version 1.2 and above.
     tlsMinVersion: 1.3
   requestTimeout: 10000 # Etcd operation timeout in milliseconds
@@ -144,9 +144,10 @@ minio:
   # aliyun (ack): https://www.alibabacloud.com/help/en/container-service-for-kubernetes/latest/use-rrsa-to-enforce-access-control
   # aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/latest/attach-an-instance-ram-role
   useIAM: false
-  # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
+  # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun", "rustfs".
   # Cloud Provider of Google Cloud Storage. Supports: "gcpnative".
   # You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
+  # You can use "rustfs" for RustFS high-performance S3-compatible storage (2.3x faster than MinIO for 4KB objects)
   # You can use "gcp" for other cloud provider supports S3 API with signature v2
   # You can use "aliyun" for other cloud provider uses virtual host style bucket
   # You can use "gcpnative" for the Google Cloud Platform provider. Uses service account credentials
