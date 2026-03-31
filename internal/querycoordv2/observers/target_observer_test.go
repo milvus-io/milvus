@@ -29,7 +29,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -258,22 +257,25 @@ func (suite *TargetObserverSuite) TestIncrementalUpdate_WithNewSegment() {
 		InsertChannel: "channel-1",
 	})
 
-	// Setup mocks for the new segment discovery phase.
-	// Use explicit UpdateNextTarget to avoid depending on ticker/TTL timing in test.
+	// Setup mocks for the new segment discovery phase
+	// These mocks will be used by the background goroutine when it polls for updates
 	suite.broker.EXPECT().
 		GetRecoveryInfoV2(mock.Anything, mock.Anything).
 		Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
-	// Explicitly refresh NextTarget and capture ready notifier for CurrentTarget update.
-	ready, err := suite.observer.UpdateNextTarget(suite.collectionID)
-	suite.NoError(err)
+	// Wait for observer to automatically discover the new segment
+	// The background goroutine should detect segment 13 and update NextTarget
 	suite.Eventually(func() bool {
 		return len(suite.targetMgr.GetSealedSegmentsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 3 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 2
-	}, 5*time.Second, 200*time.Millisecond)
+	}, 7*time.Second, 1*time.Second)
 	suite.broker.AssertExpectations(suite.T())
+
+	// Manually trigger update to ensure NextTarget is ready
+	ready, err := suite.observer.UpdateNextTarget(suite.collectionID)
+	suite.NoError(err)
 
 	// Simulate nodes loading the new segment 13
 	suite.distMgr.ChannelDistManager.Update(2, &meta.DmChannel{
@@ -338,7 +340,6 @@ func (suite *TargetObserverSuite) TestIncrementalUpdate_WithNewSegment() {
 	)
 
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
-	suite.observer.TriggerUpdateCurrentTarget(suite.collectionID)
 
 	// Verify that CurrentTarget is updated to include all 3 segments
 	// Since CurrentTarget is not empty, the update should proceed successfully
@@ -352,7 +353,7 @@ func (suite *TargetObserverSuite) TestIncrementalUpdate_WithNewSegment() {
 		return isReady &&
 			len(suite.targetMgr.GetSealedSegmentsByCollection(ctx, suite.collectionID, meta.CurrentTarget)) == 3 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.CurrentTarget)) == 2
-	}, 7*time.Second, 200*time.Millisecond)
+	}, 7*time.Second, 1*time.Second)
 
 	// Verify sync action contains correct checkpoint information
 	ch1View := suite.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel("channel-1"))[0].View
