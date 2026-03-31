@@ -148,15 +148,12 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 		}
 
 		if task.IsForcePromoteMessage() {
-			// Force promote: fix incomplete broadcasts in background (BlockUntilAllAck → fix).
+			// Force promote: fix incomplete broadcasts, then run normal ack callback.
 			// Launch goroutine only after FastLock succeeds to prevent duplicate processing.
+			// doAckCallback handles g.Unlock() internally via its defer.
 			go func() {
-				defer func() {
-					s.rkLockerMu.Lock()
-					g.Unlock()
-					s.rkLockerMu.Unlock()
-				}()
 				s.doForcePromoteFixIncompleteBroadcasts(task)
+				s.doAckCallback(task, g)
 			}()
 			continue
 		}
@@ -168,7 +165,7 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 }
 
 // doForcePromoteFixIncompleteBroadcasts waits for all acks, then fixes incomplete broadcasts.
-// The actual ack callback is handled by the normal doAckCallback path.
+// After this returns, the caller must invoke doAckCallback to close the done channel and unblock the RPC.
 func (s *ackCallbackScheduler) doForcePromoteFixIncompleteBroadcasts(bt *broadcastTask) {
 	logger := s.Logger().With(zap.Uint64("broadcastID", bt.Header().BroadcastID))
 

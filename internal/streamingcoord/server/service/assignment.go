@@ -241,8 +241,14 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 	}
 	defer broadcaster.Close()
 
-	// Validate and construct force promote configuration
-	forcePromoteConfig, pchannels, err := s.validateForcePromoteConfiguration(ctx)
+	// Validate the caller-supplied config.
+	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	if err := validateForcePromoteConfiguration(config, currentClusterID); err != nil {
+		return nil, err
+	}
+
+	// Derive and construct the actual force-promote config from current etcd state.
+	forcePromoteConfig, pchannels, err := s.buildForcePromoteConfiguration(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -281,9 +287,9 @@ func (s *assignmentServiceImpl) handleForcePromote(ctx context.Context, config *
 	return &streamingpb.UpdateReplicateConfigurationResponse{}, nil
 }
 
-// validateForcePromoteConfiguration validates the current cluster state and constructs
+// buildForcePromoteConfiguration reads the current cluster state from etcd and constructs
 // the force promote configuration. It returns the new config and the list of pchannels.
-func (s *assignmentServiceImpl) validateForcePromoteConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, []string, error) {
+func (s *assignmentServiceImpl) buildForcePromoteConfiguration(ctx context.Context) (*commonpb.ReplicateConfiguration, []string, error) {
 	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return nil, nil, err
