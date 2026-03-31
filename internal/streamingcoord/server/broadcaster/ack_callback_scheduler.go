@@ -135,9 +135,11 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 	pendingTasks := make([]*broadcastTask, 0, len(s.pendingAckedTasks))
 	for _, task := range s.pendingAckedTasks {
 		if task.IsForcePromoteMessage() {
-			// Force promote: fix incomplete broadcasts in background (BlockUntilAllAck → fix).
-			// The task still goes through normal FastLock → doAckCallback below.
+			// Force promote: handle fix + ack callback entirely in background goroutine.
+			// No FastLock needed upfront — fix doesn't require resource key lock,
+			// and the goroutine acquires the lock itself before running ack callback.
 			go s.doForcePromoteFixIncompleteBroadcasts(task)
+			continue
 		}
 
 		g, err := s.rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
@@ -147,38 +149,41 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 			continue
 		}
 
-		if task.IsForcePromoteMessage() {
-			// Force promote: fix incomplete broadcasts, then run normal ack callback.
-			// Launch goroutine only after FastLock succeeds to prevent duplicate processing.
-			// doAckCallback handles g.Unlock() internally via its defer.
-			go func() {
-				s.doForcePromoteFixIncompleteBroadcasts(task)
-				s.doAckCallback(task, g)
-			}()
-			continue
-		}
-
 		// Execute the ack callback in background.
 		go s.doAckCallback(task, g)
 	}
 	s.pendingAckedTasks = pendingTasks
 }
 
-// doForcePromoteFixIncompleteBroadcasts waits for all acks, then fixes incomplete broadcasts.
-// After this returns, the caller must invoke doAckCallback to close the done channel and unblock the RPC.
+// doForcePromoteFixIncompleteBroadcasts handles the full force promote lifecycle:
+// 1. Wait for all vchannels to ack the force promote message (replicate messages are fenced after this)
+// 2. Fix incomplete broadcasts with infinite retry (supplement messages to remaining vchannels)
+// 3. Acquire resource key lock and execute ack callback (close done channel → unblock RPC)
 func (s *ackCallbackScheduler) doForcePromoteFixIncompleteBroadcasts(bt *broadcastTask) {
 	logger := s.Logger().With(zap.Uint64("broadcastID", bt.Header().BroadcastID))
+	ctx := s.notifier.Context()
 
-	if err := bt.BlockUntilAllAck(s.notifier.Context()); err != nil {
+	if err := bt.BlockUntilAllAck(ctx); err != nil {
 		logger.Warn("force promote BlockUntilAllAck failed", zap.Error(err))
 		return
 	}
 
-	if err := s.fixIncompleteBroadcastsForForcePromote(s.notifier.Context()); err != nil {
-		logger.Warn("failed to fix incomplete broadcasts for force promote", zap.Error(err))
+	// Fix incomplete broadcasts with infinite retry until success or context cancellation.
+	if err := s.retryUntilDone(ctx, func() error {
+		return s.fixIncompleteBroadcastsForForcePromote(ctx)
+	}); err != nil {
+		logger.Warn("force promote fix incomplete broadcasts aborted", zap.Error(err))
 		return
 	}
 	logger.Info("completed fixing incomplete broadcasts for force promote")
+
+	// Acquire resource key lock before executing ack callback.
+	g, err := s.acquireResourceKeyLockUntilDone(ctx, bt.Header().ResourceKeys.Collect()...)
+	if err != nil {
+		logger.Warn("force promote acquire lock aborted", zap.Error(err))
+		return
+	}
+	s.doAckCallback(bt, g)
 }
 
 // fixIncompleteBroadcastsForForcePromote fixes incomplete broadcasts for force promote.
@@ -325,8 +330,28 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 	return nil
 }
 
+// acquireResourceKeyLockUntilDone acquires the resource key lock with infinite retry.
+func (s *ackCallbackScheduler) acquireResourceKeyLockUntilDone(ctx context.Context, resourceKeys ...message.ResourceKey) (*lockGuards, error) {
+	var g *lockGuards
+	err := s.retryUntilDone(ctx, func() error {
+		s.rkLockerMu.Lock()
+		defer s.rkLockerMu.Unlock()
+		var err error
+		g, err = s.rkLocker.FastLock(resourceKeys...)
+		return err
+	})
+	return g, err
+}
+
 // callMessageAckCallbackUntilDone calls the message ack callback until done.
 func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Context, msg message.BroadcastMutableMessage, result map[string]*message.AppendResult) error {
+	return s.retryUntilDone(ctx, func() error {
+		return registry.CallMessageAckCallback(ctx, msg, result)
+	})
+}
+
+// retryUntilDone retries fn with exponential backoff until it succeeds or ctx is cancelled.
+func (s *ackCallbackScheduler) retryUntilDone(ctx context.Context, fn func() error) error {
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 10 * time.Millisecond
 	backoff.MaxInterval = 10 * time.Second
@@ -334,13 +359,12 @@ func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Conte
 	backoff.Reset()
 
 	for {
-		err := registry.CallMessageAckCallback(ctx, msg, result)
+		err := fn()
 		if err == nil {
 			return nil
 		}
 		nextInterval := backoff.NextBackOff()
-		s.Logger().Warn("failed to call message ack callback, wait for retry...",
-			log.FieldMessage(msg),
+		s.Logger().Warn("operation failed, retrying...",
 			zap.Duration("nextInterval", nextInterval),
 			zap.Error(err))
 		select {
