@@ -34,7 +34,7 @@ func TestShallowCopySearchRequest_EntityTtlPhysicalTime(t *testing.T) {
 		MvccTimestamp:           100000,
 		GuaranteeTimestamp:      99999,
 		CollectionTtlTimestamps: 50000,
-		EntityTtlPhysicalTime:  1773682085500000,
+		EntityTtlPhysicalTime:   1773682085500000,
 	}
 
 	copied := sd.shallowCopySearchRequest(req, 2)
