@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/base"
@@ -343,14 +344,29 @@ func TestDatabasePropertiesRgReplicas(t *testing.T) {
 	err := mc.CreateDatabase(ctx, client.NewCreateDatabaseOption(dbName))
 	common.CheckErr(t, err, true)
 
+	rgName := common.GenRandomString("rg", 4)
+	err = mc.CreateResourceGroup(ctx, client.NewCreateResourceGroupOption(rgName))
+	common.CheckErr(t, err, true)
+	t.Cleanup(func() {
+		_ = mc.UpdateResourceGroup(ctx, client.NewUpdateResourceGroupOption(rgName, &entity.ResourceGroupConfig{
+			Requests: entity.ResourceGroupLimit{NodeNum: 0},
+			Limits:   entity.ResourceGroupLimit{NodeNum: 0},
+		}))
+		_ = mc.DropResourceGroup(ctx, client.NewDropResourceGroupOption(rgName))
+	})
+	require.Eventually(t, func() bool {
+		_, err := mc.DescribeResourceGroup(ctx, client.NewDescribeResourceGroupOption(rgName))
+		return err == nil
+	}, 5*time.Second, 200*time.Millisecond)
+
 	// alter database properties
 	err = mc.AlterDatabaseProperties(ctx, client.NewAlterDatabasePropertiesOption(dbName).
-		WithProperty(common.DatabaseResourceGroups, "rg1").WithProperty(common.DatabaseReplicaNumber, 2))
+		WithProperty(common.DatabaseResourceGroups, rgName).WithProperty(common.DatabaseReplicaNumber, 2))
 	common.CheckErr(t, err, true)
 
 	// describe database
 	db, _ := mc.DescribeDatabase(ctx, client.NewDescribeDatabaseOption(dbName))
-	require.Equal(t, map[string]string{common.DatabaseResourceGroups: "rg1", common.DatabaseReplicaNumber: "2"}, db.Properties)
+	require.Equal(t, map[string]string{common.DatabaseResourceGroups: rgName, common.DatabaseReplicaNumber: "2"}, db.Properties)
 
 	mc.UseDatabase(ctx, client.NewUseDatabaseOption(dbName))
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
@@ -360,7 +376,7 @@ func TestDatabasePropertiesRgReplicas(t *testing.T) {
 
 	// When load does not specify parameters, rg and replica Properties take effect
 	_, errLoad := mc.LoadCollection(ctx, client.NewLoadCollectionOption(schema.CollectionName))
-	common.CheckErr(t, errLoad, false, "resource group not found", "service resource insufficient")
+	common.CheckErr(t, errLoad, false, "resource group not found", "service resource insufficient", "resource group node not enough")
 
 	// actually load with default rg, rg1 not existed
 	taskLoad, errLoad := mc.LoadCollection(ctx, client.NewLoadCollectionOption(schema.CollectionName).WithReplica(1))
