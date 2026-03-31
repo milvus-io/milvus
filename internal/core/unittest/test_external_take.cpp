@@ -236,8 +236,8 @@ class MockTakeReader : public milvus_storage::api::Reader {
                 auto typed = std::static_pointer_cast<arrow::ListArray>(arr);
                 auto list_type =
                     std::static_pointer_cast<arrow::ListType>(type);
-                auto value_builder_result = arrow::MakeBuilder(
-                    arrow::default_memory_pool(), list_type->value_type());
+                auto value_builder_result =
+                    arrow::MakeBuilder(list_type->value_type());
                 ARROW_RETURN_NOT_OK(value_builder_result.status());
                 auto value_builder = std::move(*value_builder_result);
                 arrow::Int32Builder offset_builder;
