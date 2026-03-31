@@ -320,7 +320,7 @@ func makeStringRecord(fieldA []int64, fieldB []string) Record {
 type errorRecordReader struct{}
 
 func (r *errorRecordReader) Next() (Record, error) { return nil, fmt.Errorf("read error") }
-func (r *errorRecordReader) Close() error           { return nil }
+func (r *errorRecordReader) Close() error          { return nil }
 
 // sliceRecordReader is a RecordReader that returns pre-built records in order.
 type sliceRecordReader struct {
