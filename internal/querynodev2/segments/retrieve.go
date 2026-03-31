@@ -95,7 +95,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			s,
 		}
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			contextutil.GetQueryLabel(ctx), label).Observe(float64(tr.ElapseSpan().Milliseconds()))
+			contextutil.GetQueryLabel(ctx), label).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 		return nil
 	}
 
@@ -158,7 +158,7 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 
 			errs[i] = nil
 			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-				contextutil.GetQueryLabel(ctx), label).Observe(float64(tr.ElapseSpan().Milliseconds()))
+				contextutil.GetQueryLabel(ctx), label).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 		}(segment, i)
 	}
 	wg.Wait()

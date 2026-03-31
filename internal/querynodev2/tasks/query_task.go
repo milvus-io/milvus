@@ -150,7 +150,7 @@ func (t *QueryTask) Execute() error {
 		fmt.Sprint(paramtable.GetNodeID()),
 		contextutil.GetQueryLabel(t.ctx),
 		metrics.ReduceSegments,
-		metrics.BatchReduce).Observe(float64(time.Since(beforeReduce).Milliseconds()))
+		metrics.BatchReduce).Observe(float64(time.Since(beforeReduce).Microseconds()) / 1000.0)
 	if err != nil {
 		return err
 	}

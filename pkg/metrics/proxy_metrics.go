@@ -126,7 +126,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "sq_reduce_result_latency",
 			Help:      "latency that proxy reduces search result",
-			Buckets:   buckets, // unit: ms
+			Buckets:   subMsBuckets, // unit: ms
 		}, []string{nodeIDLabelName, queryTypeLabelName})
 
 	// ProxyDecodeResultLatency record the time that the proxy decodes the search result.
@@ -213,7 +213,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "apply_pk_latency",
 			Help:      "latency that apply primary key",
-			Buckets:   buckets, // unit: ms
+			Buckets:   subMsBuckets, // unit: ms
 		}, []string{nodeIDLabelName})
 
 	// ProxyApplyTimestampLatency record the latency that proxy apply timestamp.
@@ -223,7 +223,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "apply_timestamp_latency",
 			Help:      "latency that proxy apply timestamp",
-			Buckets:   buckets, // unit: ms
+			Buckets:   subMsBuckets, // unit: ms
 		}, []string{nodeIDLabelName})
 
 	// ProxyFunctionCall records the number of times the function of the DDL operation was executed, like `CreateCollection`.
@@ -389,7 +389,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "req_in_queue_latency",
 			Help:      "latency which request waits in the queue",
-			Buckets:   buckets, // unit: ms
+			Buckets:   subMsBuckets, // unit: ms
 		}, []string{nodeIDLabelName, functionLabelName})
 
 	MaxInsertRate = prometheus.NewGaugeVec(
@@ -453,7 +453,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "parse_expr_latency",
 			Help:      "the latency of parse expression",
-			Buckets:   buckets,
+			Buckets:   subMsBuckets,
 		}, []string{nodeIDLabelName, functionLabelName, statusLabelName})
 	// ProxyFunctionlatency records the latency of function
 	ProxyFunctionlatency = prometheus.NewHistogramVec(

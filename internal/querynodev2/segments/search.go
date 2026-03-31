@@ -52,11 +52,11 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 		}
 		resultCh <- searchResult
 		// update metrics
-		elapsed := tr.ElapseSpan().Milliseconds()
+		elapsed := float64(tr.ElapseSpan().Microseconds()) / 1000.0
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
+			metrics.SearchLabel, searchLabel).Observe(elapsed)
 		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.GetNumOfQuery()))
+			metrics.SearchLabel, searchLabel).Observe(elapsed / float64(searchReq.GetNumOfQuery()))
 		return nil
 	}
 
@@ -132,7 +132,7 @@ func searchSegmentsStreamly(ctx context.Context,
 		// record search time
 		tr := timerecord.NewTimeRecorder("searchOnSegments")
 		searchResult, searchErr := seg.Search(ctx, searchReq)
-		searchDuration := tr.RecordSpan().Milliseconds()
+		searchDuration := float64(tr.RecordSpan().Microseconds()) / 1000.0
 		if searchErr != nil {
 			return searchErr
 		}
@@ -147,9 +147,9 @@ func searchSegmentsStreamly(ctx context.Context,
 		sumReduceDuration.Add(reduceDuration)
 		// update metrics
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			metrics.SearchLabel, searchLabel).Observe(float64(searchDuration))
+			metrics.SearchLabel, searchLabel).Observe(searchDuration)
 		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			metrics.SearchLabel, searchLabel).Observe(float64(searchDuration) / float64(searchReq.GetNumOfQuery()))
+			metrics.SearchLabel, searchLabel).Observe(searchDuration / float64(searchReq.GetNumOfQuery()))
 		return nil
 	}
 
@@ -195,7 +195,7 @@ func searchSegmentsStreamly(ctx context.Context,
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 		metrics.SearchLabel,
 		metrics.ReduceSegments,
-		metrics.StreamReduce).Observe(float64(sumReduceDuration.Load().Milliseconds()))
+		metrics.StreamReduce).Observe(float64(sumReduceDuration.Load().Microseconds()) / 1000.0)
 	log.Debug("stream reduce sum duration:", zap.Duration("duration", sumReduceDuration.Load()))
 	return nil
 }
