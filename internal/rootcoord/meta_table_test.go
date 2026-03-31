@@ -51,7 +51,7 @@ func generateMetaTable(_ *testing.T) *MetaTable {
 	kv, _ := kvfactory.GetEtcdAndPath()
 	path := funcutil.RandomString(10)
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
-	return &MetaTable{catalog: rootcoord.NewCatalog(catalogKV, nil)}
+	return &MetaTable{catalog: rootcoord.NewCatalog(catalogKV)}
 }
 
 func buildAlterUserMessage(credInfo *internalpb.CredentialInfo, timetick uint64) message.BroadcastResultAlterUserMessageV2 {
@@ -2537,9 +2537,7 @@ func TestMetaTable_TruncateCollection(t *testing.T) {
 	kv, _ := kvfactory.GetEtcdAndPath()
 	path := funcutil.RandomString(10) + "/meta"
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
-	ss, err := rootcoord.NewSuffixSnapshot(catalogKV, rootcoord.SnapshotsSep, path, rootcoord.SnapshotPrefix)
-	require.NoError(t, err)
-	catalog := rootcoord.NewCatalog(catalogKV, ss)
+	catalog := rootcoord.NewCatalog(catalogKV)
 
 	allocator := mocktso.NewAllocator(t)
 	allocator.EXPECT().GenerateTSO(mock.Anything).Return(1000, nil)
