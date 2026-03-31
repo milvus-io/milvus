@@ -296,7 +296,10 @@ func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, bm25Logs []
 		result, err := o.streamLoad(ctx, segmentID, binlogPaths, cm, needParse)
 		if err != nil {
 			// cleanup on failure
-			os.RemoveAll(path.Join(o.dirPath, fmt.Sprintf("%d", segmentID)))
+			cleanupPath := path.Join(o.dirPath, fmt.Sprintf("%d", segmentID))
+			if rmErr := os.RemoveAll(cleanupPath); rmErr != nil {
+				log.Warn("failed to cleanup bm25 stats dir on load failure", zap.Error(rmErr), zap.String("path", cleanupPath))
+			}
 			return nil, err
 		}
 
@@ -578,7 +581,9 @@ func (o *idfOracle) Close() {
 	}
 	o.resourceMu.Unlock()
 
-	os.RemoveAll(o.dirPath)
+	if err := os.RemoveAll(o.dirPath); err != nil {
+		log.Warn("failed to remove bm25 stats dir on close", zap.Error(err), zap.String("path", o.dirPath))
+	}
 }
 
 func (o *idfOracle) SetNext(snapshot *snapshot) {
