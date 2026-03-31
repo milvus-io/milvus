@@ -2862,9 +2862,10 @@ func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	return uint64(ttl)
 }
 
-// reconstructStructFieldDataCommon reconstructs struct fields from flattened sub-fields
-// It works with both QueryResults and SearchResults by operating on the common data structures
-func reconstructStructFieldDataCommon(
+// reconstructStructFieldData regroups flattened sub-fields (named "structName[fieldName]")
+// back into StructArrayField entries, restoring original field names for the user-facing response.
+// It modifies sub-field FieldName in place; callers must not reuse the input slice afterwards.
+func reconstructStructFieldData(
 	fieldsData []*schemapb.FieldData,
 	outputFields []string,
 	schema *schemapb.CollectionSchema,
@@ -2909,40 +2910,33 @@ func reconstructStructFieldDataCommon(
 	}
 
 	for structFieldID, fields := range groupedStructFields {
-		// Create deep copies of fields to avoid modifying original data
-		// and restore original field names for user-facing response
-		copiedFields := make([]*schemapb.FieldData, len(fields))
-		for i, field := range fields {
-			copiedFields[i] = proto.Clone(field).(*schemapb.FieldData)
-			// Extract original field name from structName[fieldName] format
-			originalName, err := extractOriginalFieldName(copiedFields[i].FieldName)
+		// Restore original field names (from "structName[fieldName]" to "fieldName")
+		// for the user-facing response.
+		for _, field := range fields {
+			originalName, err := extractOriginalFieldName(field.FieldName)
 			if err != nil {
-				// This should not happen in normal operation - indicates a bug
 				log.Error("failed to extract original field name from struct field",
-					zap.String("fieldName", copiedFields[i].FieldName),
+					zap.String("fieldName", field.FieldName),
 					zap.Error(err))
-				// Keep the transformed name to avoid data corruption
 			} else {
-				copiedFields[i].FieldName = originalName
+				field.FieldName = originalName
 			}
 		}
 
-		fieldData := &schemapb.FieldData{
+		newFieldsData = append(newFieldsData, &schemapb.FieldData{
 			FieldName: structFieldNames[structFieldID],
 			FieldId:   structFieldID,
 			Type:      schemapb.DataType_ArrayOfStruct,
-			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: copiedFields}},
-		}
-		newFieldsData = append(newFieldsData, fieldData)
+			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: fields}},
+		})
 		reconstructedOutputFields = append(reconstructedOutputFields, structFieldNames[structFieldID])
 	}
 
 	return newFieldsData, reconstructedOutputFields
 }
 
-// Wrapper for QueryResults
 func reconstructStructFieldDataForQuery(results *milvuspb.QueryResults, schema *schemapb.CollectionSchema) {
-	fieldsData, outputFields := reconstructStructFieldDataCommon(
+	fieldsData, outputFields := reconstructStructFieldData(
 		results.FieldsData,
 		results.OutputFields,
 		schema,
@@ -2951,12 +2945,11 @@ func reconstructStructFieldDataForQuery(results *milvuspb.QueryResults, schema *
 	results.OutputFields = outputFields
 }
 
-// New wrapper for SearchResults
 func reconstructStructFieldDataForSearch(results *milvuspb.SearchResults, schema *schemapb.CollectionSchema) {
 	if results.Results == nil {
 		return
 	}
-	fieldsData, outputFields := reconstructStructFieldDataCommon(
+	fieldsData, outputFields := reconstructStructFieldData(
 		results.Results.FieldsData,
 		results.Results.OutputFields,
 		schema,

@@ -4283,7 +4283,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 	})
 }
 
-func Test_reconstructStructFieldDataCommon(t *testing.T) {
+func Test_reconstructStructFieldData(t *testing.T) {
 	t.Run("count(*) query - should return early", func(t *testing.T) {
 		fieldsData := []*schemapb.FieldData{
 			{
@@ -4316,7 +4316,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		originalOutputFields := make([]string, len(outputFields))
 		copy(originalOutputFields, outputFields)
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Should not modify anything for count(*) query
 		assert.Equal(t, originalFieldsData, resultFieldsData)
@@ -4366,7 +4366,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 			},
 		}
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Should reconstruct the struct field with the restored field name
 		assert.Len(t, resultFieldsData, 1)
@@ -4407,7 +4407,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		originalOutputFields := make([]string, len(outputFields))
 		copy(originalOutputFields, outputFields)
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Should not modify anything when no struct array fields
 		assert.Equal(t, originalFieldsData, resultFieldsData)
@@ -4494,7 +4494,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 			},
 		}
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Check result
 		assert.Len(t, resultFieldsData, 1, "Should only have one reconstructed struct field")
@@ -4594,7 +4594,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 			},
 		}
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Check result: should have 2 fields (1 regular + 1 reconstructed struct)
 		assert.Len(t, resultFieldsData, 2)
@@ -4713,7 +4713,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 			},
 		}
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Check result: should have 2 struct fields
 		assert.Len(t, resultFieldsData, 2)
@@ -4815,7 +4815,7 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 			},
 		}
 
-		resultFieldsData, resultOutputFields := reconstructStructFieldDataCommon(fieldsData, outputFields, schema)
+		resultFieldsData, resultOutputFields := reconstructStructFieldData(fieldsData, outputFields, schema)
 
 		// Check result
 		assert.Len(t, resultFieldsData, 1, "Should have one reconstructed struct field")

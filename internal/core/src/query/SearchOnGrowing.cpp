@@ -234,6 +234,12 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             embedding_search = true;
         }
 
+        // Track cumulative element offset for embedding search.
+        // For embedding_search, begin_id must be the cumulative element
+        // count (not row offset), because ArrayOffsets maps global
+        // element IDs to row IDs.
+        int64_t cumulative_element_offset = 0;
+
         for (int chunk_id = current_chunk_id; chunk_id < max_chunk;
              ++chunk_id) {
             auto chunk_data = vec_ptr->get_chunk_data(chunk_id);
@@ -271,7 +277,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                         count += vec_ptr[i].length();
                     }
                     sub_data = query::dataset::RawDataset{
-                        row_begin, dim, count, buf.get()};
+                        cumulative_element_offset, dim, count, buf.get()};
+                    cumulative_element_offset += count;
                 } else {
                     offsets.reserve(size_per_chunk + 1);
                     offsets.push_back(0);

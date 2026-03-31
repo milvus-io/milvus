@@ -2639,3 +2639,234 @@ TEST(ElementFilterGroupBy, DeduplicateRowsInGroup) {
     ASSERT_LE(group_counts.size(), static_cast<size_t>(topK))
         << "Should have at most topK distinct groups";
 }
+
+TEST(ElementFilter, SearchWithNestedScalarIndex) {
+    auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+
+    int dim = 4;
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
+                                                    DataType::VECTOR_FLOAT,
+                                                    dim,
+                                                    knowhere::metric::L2);
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    size_t N = 200;
+    int array_len = 3;
+
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Customize int_array data: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+            for (size_t row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+                for (int elem = 0; elem < array_len; elem++) {
+                    int value = row * array_len + elem + 1;
+                    array_data->mutable_int_data()->mutable_data()->Add(value);
+                }
+            }
+            break;
+        }
+    }
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    // Load vector index
+    auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
+    std::vector<float> vector_data(dim * N * array_len);
+    for (size_t i = 0; i < N; i++) {
+        const auto& float_vec = array_vec_values[i].float_vector().data();
+        for (int j = 0; j < array_len * dim; j++) {
+            vector_data[i * array_len * dim + j] = float_vec[j];
+        }
+    }
+    auto indexing = GenVecIndexing(N * array_len,
+                                   dim,
+                                   vector_data.data(),
+                                   knowhere::IndexEnum::INDEX_HNSW);
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = vec_fid.get();
+    load_index_info.index_params = GenIndexParams(indexing.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index_params["metric_type"] = knowhere::metric::L2;
+    load_index_info.field_type = DataType::VECTOR_ARRAY;
+    load_index_info.element_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(load_index_info);
+
+    // Build nested scalar index with is_nested=true (the correct behavior
+    // after the fix sets field_name so IndexFactory routes to CreateNestedIndex).
+    std::vector<int32_t> all_elements;
+    all_elements.reserve(N * array_len);
+    for (size_t row = 0; row < N; row++) {
+        for (int elem = 0; elem < array_len; elem++) {
+            all_elements.push_back(row * array_len + elem + 1);
+        }
+    }
+
+    auto stl_index = std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
+        storage::FileManagerContext(),
+        true /* is_nested=true: correct after fix */);
+    stl_index->Build(all_elements.size(), all_elements.data(), nullptr);
+
+    LoadIndexInfo nested_load_info;
+    nested_load_info.field_id = int_array_fid.get();
+    nested_load_info.field_type = DataType::ARRAY;
+    nested_load_info.element_type = DataType::INT32;
+    nested_load_info.index_params["index_type"] = milvus::index::ASCENDING_SORT;
+    nested_load_info.cache_index =
+        CreateTestCacheIndex("nested_test", std::move(stl_index));
+    segment->LoadIndex(nested_load_info);
+
+    // Build query plan: element_filter with nested index in full mode
+    int topK = 5;
+    ScopedSchemaHandle handle(*schema);
+    std::string search_params = R"({"ef": 50})";
+    // High selectivity (~50%) forces full mode evaluation
+    std::string expr =
+        "id % 2 == 0 && element_filter(structA, 2000 > $[price_array] > 100)";
+    auto plan_bytes = handle.ParseSearch(expr,
+                                         "structA[array_float_vec]",
+                                         topK,
+                                         knowhere::metric::L2,
+                                         search_params,
+                                         3);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto num_queries = 1;
+    auto seed = 1024;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed, true);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    // With is_nested=true, the index correctly returns element-level results
+    // matching the element_filter expression's expectations.
+    auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    ASSERT_NE(search_result, nullptr);
+    ASSERT_TRUE(search_result->element_level_);
+
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+}
+
+// Regression test for element-level search with multiple chunks in growing
+// segments. The bug was that begin_id was set to row_begin (row offset)
+// instead of the cumulative element offset, causing wrong row IDs to be
+// returned for chunks after the first one.
+// See: https://github.com/milvus-io/milvus/issues/48617
+TEST(ElementFilter, GrowingMultiChunkElementSearch) {
+    int dim = 4;
+    int array_len = 3;
+    size_t N = 200;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugVectorArrayField(
+        "structA[array_vec]", DataType::VECTOR_FLOAT, dim, "L2");
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, false);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
+
+    // Customize int_array: doc i has elements [i*3+1, i*3+2, i*3+3]
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); i++) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() == int_array_fid.get()) {
+            field_data->mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data()
+                ->Clear();
+            for (size_t row = 0; row < N; row++) {
+                auto* array_data = field_data->mutable_scalars()
+                                       ->mutable_array_data()
+                                       ->mutable_data()
+                                       ->Add();
+                for (int elem = 0; elem < array_len; elem++) {
+                    array_data->mutable_int_data()->mutable_data()->Add(
+                        row * array_len + elem + 1);
+                }
+            }
+            break;
+        }
+    }
+
+    // Use small chunk_rows=32 to force multiple chunks (200 rows / 32 = 7
+    // chunks). The bug only manifests with multiple chunks.
+    SegcoreConfig config;
+    config.set_chunk_rows(32);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+
+    // Verify ArrayOffsets
+    auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing_impl, nullptr);
+    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    ASSERT_NE(offsets, nullptr);
+    ASSERT_EQ(offsets->GetRowCount(), N);
+    ASSERT_EQ(offsets->GetTotalElementCount(), N * array_len);
+
+    // Element-level search with element_filter that selects elements from
+    // rows in later chunks (value > 300 means row >= 100, which is beyond
+    // chunk 0-2).
+    int topK = 5;
+    ScopedSchemaHandle handle(*schema);
+    std::string expr =
+        "element_filter(structA, $[price_array] > 300 && $[price_array] < 400)";
+    auto plan_bytes = handle.ParseSearch(
+        expr, "structA[array_vec]", topK, "L2", R"({"ef": 50})", 3);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_bytes.data(), plan_bytes.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto ph_group_raw = CreatePlaceholderGroup(1, dim, 1024, true);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    ASSERT_NE(search_result, nullptr);
+    ASSERT_TRUE(search_result->element_level_);
+
+    for (size_t i = 0; i < search_result->seg_offsets_.size(); i++) {
+        int64_t doc_id = search_result->seg_offsets_[i];
+        int32_t elem_idx = search_result->element_indices_[i];
+        if (doc_id == INVALID_SEG_OFFSET) {
+            continue;
+        }
+
+        ASSERT_GE(doc_id, 0);
+        ASSERT_LT(doc_id, static_cast<int64_t>(N))
+            << "doc_id should be a valid row index";
+        ASSERT_GE(elem_idx, 0);
+        ASSERT_LT(elem_idx, array_len);
+
+        // Verify the element satisfies the filter: value in (300, 400)
+        int element_value = doc_id * array_len + elem_idx + 1;
+        ASSERT_GT(element_value, 300)
+            << "doc_id=" << doc_id << " elem_idx=" << elem_idx
+            << " element_value=" << element_value << " should be > 300";
+        ASSERT_LT(element_value, 400)
+            << "doc_id=" << doc_id << " elem_idx=" << elem_idx
+            << " element_value=" << element_value << " should be < 400";
+    }
+}
