@@ -17,10 +17,6 @@
 namespace knowhere {
 namespace {
 
-constexpr const char* kShimRawVectorsKey = "shim_raw_vectors";
-constexpr const char* kShimRawIdsKey = "shim_raw_ids";
-constexpr const char* kShimRawMetaKey = "shim_raw_meta";
-
 std::optional<size_t>
 GetOptionalSizeT(const Config& config, const char* key) {
     if (!config.contains(key)) {
@@ -34,6 +30,77 @@ GetOptionalSizeT(const Config& config, const char* key) {
         auto v = value.get<int64_t>();
         if (v >= 0) {
             return static_cast<size_t>(v);
+        }
+        return std::nullopt;
+    }
+    if (value.is_string()) {
+        const auto& str = value.get_ref<const std::string&>();
+        if (str.empty()) {
+            return std::nullopt;
+        }
+        return static_cast<size_t>(std::stoull(str));
+    }
+    return std::nullopt;
+}
+
+struct SerializedHnswHeader {
+    int64_t dim = 0;
+    std::string metric_type = metric::L2;
+};
+
+std::optional<SerializedHnswHeader>
+LoadSerializedHnswHeader(const BinarySet& binary_set) {
+    auto binary = binary_set.GetByName("index_data");
+    if (binary == nullptr || binary->data == nullptr || binary->size < 37) {
+        return std::nullopt;
+    }
+
+    const auto* bytes = binary->data.get();
+    if (std::memcmp(bytes, "HNSW", 4) != 0) {
+        return std::nullopt;
+    }
+
+    uint32_t version = 0;
+    std::memcpy(&version, bytes + 4, sizeof(version));
+    if (version != 3 && version != 4 && version != 5) {
+        return std::nullopt;
+    }
+
+    uint32_t dim = 0;
+    std::memcpy(&dim, bytes + 8, sizeof(dim));
+    const auto metric_code = *(bytes + 36);
+
+    SerializedHnswHeader header;
+    header.dim = static_cast<int64_t>(dim);
+    switch (metric_code) {
+        case 1:
+            header.metric_type = metric::IP;
+            break;
+        case 2:
+            header.metric_type = metric::COSINE;
+            break;
+        default:
+            header.metric_type = metric::L2;
+            break;
+    }
+    return header;
+}
+
+std::optional<size_t>
+GetOptionalSearchSizeT(const Config& config, const char* key) {
+    const auto* value_ptr = FindSearchParamValue(config, key);
+    if (value_ptr == nullptr) {
+        return std::nullopt;
+    }
+
+    const auto& value = *value_ptr;
+    if (value.is_number_unsigned()) {
+        return value.get<size_t>();
+    }
+    if (value.is_number_integer()) {
+        const auto parsed = value.get<int64_t>();
+        if (parsed >= 0) {
+            return static_cast<size_t>(parsed);
         }
         return std::nullopt;
     }
@@ -137,21 +204,12 @@ class HnswRustNode : public IndexNode {
                                              "hnsw index is not initialized");
         }
 
-        std::fprintf(stderr,
-                     "[knowhere-rs-shim][hnsw-validate] mode=search top_level_ef=%d "
-                     "nested_params=%d config=%s\n",
-                     config.contains(indexparam::EF) ? 1 : 0,
-                     config.contains("params") ? 1 : 0,
-                     config.dump().c_str());
-
         std::string validation_message;
         if (const auto status =
                 ValidateHnswSearchConfig(config, validation_message);
             status != Status::success) {
             return ErrorExpected<DataSetPtr>(status, validation_message);
         }
-
-        const auto config_metric = GetString(config, meta::METRIC_TYPE, "<missing>");
 
         const auto* query = static_cast<const float*>(dataset.GetTensor());
         const auto topk = GetOptionalSizeT(config, meta::TOPK).value_or(10);
@@ -170,6 +228,15 @@ class HnswRustNode : public IndexNode {
         std::vector<uint64_t> bitset_words;
         CBitset cbitset{};
         CSearchResult* raw = nullptr;
+        if (const auto search_ef = GetOptionalSearchSizeT(config, indexparam::EF);
+            search_ef.has_value()) {
+            const auto update_status =
+                ToStatus(knowhere_set_ef_search(handle_, search_ef.value()));
+            if (update_status != Status::success) {
+                return ErrorExpected<DataSetPtr>(
+                    update_status, "failed to set hnsw search ef in rust ffi");
+            }
+        }
         if (bitset.empty()) {
             raw = knowhere_search(handle_,
                                   ffi_query,
@@ -198,18 +265,6 @@ class HnswRustNode : public IndexNode {
         std::unique_ptr<CSearchResult, void (*)(CSearchResult*)> result(
             raw, knowhere_free_result);
 
-        std::fprintf(stderr,
-                     "[knowhere-rs-shim][hnsw-search] config_metric=%s node_metric=%s "
-                     "topk=%zu nq=%lld dim=%lld raw_rows=%lld results=%zu bitset=%zu\n",
-                     config_metric.c_str(),
-                     metric_type_.c_str(),
-                     topk,
-                     static_cast<long long>(dataset.GetRows()),
-                     static_cast<long long>(dataset.GetDim()),
-                     static_cast<long long>(raw_rows_),
-                     static_cast<size_t>(result->num_results),
-                     static_cast<size_t>(bitset.size()));
-
         if (HasRawDataset() &&
             SearchResultIsShort(*result, dataset.GetRows(), topk, bitset)) {
             return FallbackSearch(dataset, config, bitset);
@@ -222,13 +277,6 @@ class HnswRustNode : public IndexNode {
     AnnIterator(const DataSet& dataset,
                 const Config& config,
                 const BitsetView& bitset) const override {
-        std::fprintf(stderr,
-                     "[knowhere-rs-shim][hnsw-validate] mode=iterator top_level_ef=%d "
-                     "nested_params=%d config=%s\n",
-                     config.contains(indexparam::EF) ? 1 : 0,
-                     config.contains("params") ? 1 : 0,
-                     config.dump().c_str());
-
         std::string validation_message;
         if (const auto status =
                 ValidateHnswSearchConfig(config, validation_message);
@@ -268,11 +316,6 @@ class HnswRustNode : public IndexNode {
 
     expected<DataSetPtr>
     GetVectorByIds(const DataSet& dataset) const override {
-        if (!HasRawDataset()) {
-            return ErrorExpected<DataSetPtr>(
-                Status::empty_index, "raw vectors are not available for hnsw index");
-        }
-
         const auto count = dataset.GetRows();
         const auto* requested_ids = dataset.GetIds();
         if (count < 0 || requested_ids == nullptr) {
@@ -280,25 +323,55 @@ class HnswRustNode : public IndexNode {
                                              "vector ids dataset is invalid");
         }
 
-        std::fprintf(stderr,
-                     "[knowhere-rs-shim][get-vector] node=hnsw index=%s rows=%lld "
-                     "dim=%lld req=%lld\n",
-                     Type().c_str(),
-                     static_cast<long long>(raw_rows_),
-                     static_cast<long long>(dim_),
-                     static_cast<long long>(count));
+        if (handle_ != nullptr) {
+            std::unique_ptr<CGetVectorResult, void (*)(CGetVectorResult*)> ffi_result(
+                knowhere_get_vector_by_ids(handle_,
+                                           requested_ids,
+                                           static_cast<size_t>(count),
+                                           static_cast<size_t>(dim_)),
+                knowhere_free_get_vector_result);
+            if (ffi_result != nullptr && ffi_result->vectors != nullptr &&
+                ffi_result->ids != nullptr &&
+                ffi_result->num_ids == static_cast<size_t>(count) &&
+                ffi_result->dim == static_cast<size_t>(dim_)) {
+                auto result = std::make_shared<DataSet>();
+                result->SetRows(count);
+                result->SetDim(dim_);
+                if (count == 0) {
+                    result->SetIsOwner(true);
+                    return result;
+                }
 
-        auto result = std::make_shared<DataSet>();
-        result->SetRows(count);
-        result->SetDim(dim_);
-        if (count == 0) {
-            result->SetIsOwner(true);
-            return result;
+                const auto row_bytes =
+                    static_cast<size_t>(dim_) * sizeof(*ffi_result->vectors);
+                const auto total_bytes = static_cast<size_t>(count) * row_bytes;
+                auto* copied_ids = new int64_t[static_cast<size_t>(count)];
+                auto* copied_tensor = new char[total_bytes];
+                std::memcpy(copied_ids,
+                            ffi_result->ids,
+                            static_cast<size_t>(count) * sizeof(int64_t));
+                std::memcpy(copied_tensor,
+                            ffi_result->vectors,
+                            total_bytes);
+                result->SetIds(copied_ids);
+                result->SetTensor(copied_tensor);
+                result->SetTensorBeginId(copied_ids[0]);
+                result->SetIsOwner(true);
+                return result;
+            }
+        }
+
+        if (!HasRawDataset()) {
+            return ErrorExpected<DataSetPtr>(
+                Status::empty_index, "raw vectors are not available for hnsw index");
         }
 
         const auto row_bytes =
             static_cast<size_t>(dim_) * sizeof(raw_vectors_.front());
         const auto total_bytes = static_cast<size_t>(count) * row_bytes;
+        auto result = std::make_shared<DataSet>();
+        result->SetRows(count);
+        result->SetDim(dim_);
         auto* copied_ids = new int64_t[static_cast<size_t>(count)];
         auto* copied_tensor = new char[total_bytes];
 
@@ -360,33 +433,6 @@ class HnswRustNode : public IndexNode {
             binary_set.Append(key, owned, binary.size);
         }
 
-        if (HasRawDataset()) {
-            const auto raw_bytes =
-                static_cast<size_t>(raw_rows_) * static_cast<size_t>(dim_) * sizeof(float);
-            auto raw_owned = std::shared_ptr<uint8_t[]>(new uint8_t[raw_bytes]);
-            std::memcpy(raw_owned.get(), raw_vectors_.data(), raw_bytes);
-            binary_set.Append(
-                kShimRawVectorsKey, std::move(raw_owned), static_cast<int64_t>(raw_bytes));
-
-            const auto ids_bytes = raw_ids_.size() * sizeof(int64_t);
-            auto ids_owned = std::shared_ptr<uint8_t[]>(new uint8_t[ids_bytes]);
-            std::memcpy(ids_owned.get(), raw_ids_.data(), ids_bytes);
-            binary_set.Append(
-                kShimRawIdsKey, std::move(ids_owned), static_cast<int64_t>(ids_bytes));
-
-            Json meta_json = {
-                {"rows", raw_rows_},
-                {"dim", dim_},
-                {"metric_type", metric_type_},
-            };
-            const auto meta_text = meta_json.dump();
-            auto meta_owned = std::shared_ptr<uint8_t[]>(new uint8_t[meta_text.size()]);
-            std::memcpy(meta_owned.get(), meta_text.data(), meta_text.size());
-            binary_set.Append(
-                kShimRawMetaKey,
-                std::move(meta_owned),
-                static_cast<int64_t>(meta_text.size()));
-        }
         return Status::success;
     }
 
@@ -395,6 +441,7 @@ class HnswRustNode : public IndexNode {
         Config deserialize_config = config;
         RETURN_IF_ERROR(MergeSerializedMetaIntoConfig(binary_set, deserialize_config));
         RETURN_IF_ERROR(EnsureIndex(dim_ > 0 ? dim_ : 0, deserialize_config));
+        ClearRawDataset();
 
         auto binary = binary_set.GetByNames({"index_data"});
         if (binary == nullptr || binary->data == nullptr || binary->size <= 0) {
@@ -414,7 +461,6 @@ class HnswRustNode : public IndexNode {
         };
         const auto status = ToStatus(knowhere_deserialize_index(handle_, &ffi_set));
         if (status == Status::success) {
-            RETURN_IF_ERROR(RestoreRawDataset(binary_set));
             RefreshStats();
         }
         return status;
@@ -423,6 +469,7 @@ class HnswRustNode : public IndexNode {
     Status
     DeserializeFromFile(const std::string& filename, const Config& config) override {
         RETURN_IF_ERROR(EnsureIndex(dim_ > 0 ? dim_ : 0, config));
+        ClearRawDataset();
         const auto status = ToStatus(knowhere_load_index(handle_, filename.c_str()));
         if (status == Status::success) {
             RefreshStats();
@@ -470,14 +517,6 @@ class HnswRustNode : public IndexNode {
 
         metric_type_ = GetString(config, meta::METRIC_TYPE, metric::L2);
         dim_ = static_cast<int64_t>(configured_dim);
-
-        std::fprintf(stderr,
-                     "[knowhere-rs-shim][hnsw-ensure] config_metric=%s "
-                     "resolved_metric=%s dim=%zu existing_handle=%d\n",
-                     GetString(config, meta::METRIC_TYPE, "<missing>").c_str(),
-                     metric_type_.c_str(),
-                     configured_dim,
-                     handle_ != nullptr ? 1 : 0);
 
         CIndexConfig ffi_config{};
         ffi_config.index_type = CIndexType::Hnsw;
@@ -564,6 +603,13 @@ class HnswRustNode : public IndexNode {
                raw_vectors_.size() ==
                    static_cast<size_t>(raw_rows_) * static_cast<size_t>(dim_) &&
                raw_ids_.size() == static_cast<size_t>(raw_rows_);
+    }
+
+    void
+    ClearRawDataset() {
+        raw_vectors_.clear();
+        raw_ids_.clear();
+        raw_rows_ = 0;
     }
 
     size_t
@@ -692,80 +738,24 @@ class HnswRustNode : public IndexNode {
     }
 
     Status
-    RestoreRawDataset(const BinarySet& binary_set) {
-        raw_vectors_.clear();
-        raw_ids_.clear();
-        raw_rows_ = 0;
-
-        auto meta_json = LoadSerializedMeta(binary_set);
-        if (!meta_json.has_value()) {
-            return Status::success;
-        }
-
-        auto raw = binary_set.GetByName(kShimRawVectorsKey);
-        auto ids = binary_set.GetByName(kShimRawIdsKey);
-        if (raw == nullptr || ids == nullptr || raw->data == nullptr || ids->data == nullptr) {
-            return Status::invalid_binary_set;
-        }
-
-        raw_rows_ = meta_json->value("rows", int64_t{0});
-        const auto serialized_dim = meta_json->value("dim", int64_t{0});
-        if (raw_rows_ <= 0 || serialized_dim <= 0 || serialized_dim != dim_) {
-            return Status::invalid_binary_set;
-        }
-
-        const auto vector_count = static_cast<size_t>(raw_rows_) * static_cast<size_t>(dim_);
-        if (raw->size != static_cast<int64_t>(vector_count * sizeof(float)) ||
-            ids->size != static_cast<int64_t>(static_cast<size_t>(raw_rows_) * sizeof(int64_t))) {
-            return Status::invalid_binary_set;
-        }
-
-        raw_vectors_.resize(vector_count);
-        std::memcpy(raw_vectors_.data(), raw->data.get(), static_cast<size_t>(raw->size));
-        raw_ids_.resize(static_cast<size_t>(raw_rows_));
-        std::memcpy(raw_ids_.data(), ids->data.get(), static_cast<size_t>(ids->size));
-        return Status::success;
-    }
-
-    std::optional<Json>
-    LoadSerializedMeta(const BinarySet& binary_set) const {
-        auto meta = binary_set.GetByName(kShimRawMetaKey);
-        if (meta == nullptr || meta->data == nullptr || meta->size <= 0) {
-            return std::nullopt;
-        }
-
-        const auto meta_text = std::string(
-            reinterpret_cast<const char*>(meta->data.get()),
-            static_cast<size_t>(meta->size));
-        const auto meta_json = Json::parse(meta_text, nullptr, false);
-        if (meta_json.is_discarded()) {
-            return std::nullopt;
-        }
-        return meta_json;
-    }
-
-    Status
     MergeSerializedMetaIntoConfig(const BinarySet& binary_set, Config& config) const {
-        auto meta_json = LoadSerializedMeta(binary_set);
-        if (!meta_json.has_value()) {
-            return Status::success;
+        auto header = LoadSerializedHnswHeader(binary_set);
+        if (!header.has_value()) {
+            return Status::invalid_binary_set;
         }
 
         if (!config.contains(meta::DIM)) {
-            const auto serialized_dim = meta_json->value("dim", int64_t{0});
-            if (serialized_dim <= 0) {
+            if (header->dim <= 0) {
                 return Status::invalid_binary_set;
             }
-            config[meta::DIM] = serialized_dim;
+            config[meta::DIM] = header->dim;
         }
 
         if (!config.contains(meta::METRIC_TYPE)) {
-            const auto serialized_metric =
-                meta_json->value("metric_type", std::string{});
-            if (serialized_metric.empty()) {
+            if (header->metric_type.empty()) {
                 return Status::invalid_binary_set;
             }
-            config[meta::METRIC_TYPE] = serialized_metric;
+            config[meta::METRIC_TYPE] = header->metric_type;
         }
 
         return Status::success;
@@ -784,9 +774,7 @@ class HnswRustNode : public IndexNode {
             knowhere_free_index(handle_);
             handle_ = nullptr;
         }
-        raw_vectors_.clear();
-        raw_ids_.clear();
-        raw_rows_ = 0;
+        ClearRawDataset();
     }
 
     void* handle_ = nullptr;

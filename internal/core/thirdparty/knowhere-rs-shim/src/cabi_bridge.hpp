@@ -43,6 +43,13 @@ struct CSearchResult {
     float elapsed_ms;
 };
 
+struct CGetVectorResult {
+    const float* vectors;
+    size_t num_ids;
+    size_t dim;
+    int64_t* ids;
+};
+
 struct CBinary {
     uint8_t* data;
     int64_t size;
@@ -82,6 +89,12 @@ CSearchResult* knowhere_search_with_bitset(const void* index,
                                            size_t top_k,
                                            size_t dim,
                                            const CBitset* bitset);
+int32_t knowhere_set_ef_search(void* index, size_t ef_search);
+CGetVectorResult* knowhere_get_vector_by_ids(const void* index,
+                                             const int64_t* ids,
+                                             size_t num_ids,
+                                             size_t dim);
+void knowhere_free_get_vector_result(CGetVectorResult* result);
 void knowhere_free_result(CSearchResult* result);
 size_t knowhere_get_index_count(const void* index);
 size_t knowhere_get_index_dim(const void* index);

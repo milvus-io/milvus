@@ -11,6 +11,23 @@
 
 namespace {
 
+uint32_t
+ReadSerializedHnswEfSearch(const knowhere::BinarySet& binary_set) {
+    auto binary = binary_set.GetByName("index_data");
+    if (binary == nullptr || binary->data == nullptr || binary->size < 24) {
+        return 0;
+    }
+
+    const auto* bytes = binary->data.get();
+    if (std::memcmp(bytes, "HNSW", 4) != 0) {
+        return 0;
+    }
+
+    uint32_t ef_search = 0;
+    std::memcpy(&ef_search, bytes + 20, sizeof(ef_search));
+    return ef_search;
+}
+
 template <typename JsonValue>
 int
 ExpectInvalidSearch(const knowhere::Index<knowhere::IndexNode>& index,
@@ -61,7 +78,7 @@ main() {
         build_cfg[knowhere::meta::DIM] = 4;
         build_cfg[knowhere::indexparam::M] = 16;
         build_cfg[knowhere::indexparam::EFCONSTRUCTION] = 64;
-        build_cfg[knowhere::indexparam::EF] = 32;
+        build_cfg[knowhere::indexparam::EF] = 16;
 
         auto base_ds = knowhere::GenDataSet(4, 4, base.data());
         auto query_ds = knowhere::GenDataSet(1, 4, query.data());
@@ -141,7 +158,7 @@ main() {
         knowhere::Config search_cfg;
         search_cfg[knowhere::meta::METRIC_TYPE] = knowhere::metric::L2;
         search_cfg[knowhere::meta::TOPK] = 2;
-        search_cfg[knowhere::indexparam::EF] = 32;
+        search_cfg[knowhere::indexparam::EF] = 48;
 
         auto search = index.Search(*query_ds, search_cfg, knowhere::BitsetView{});
         if (!search.has_value() || search.value() == nullptr ||
@@ -167,6 +184,10 @@ main() {
             !binary_set.Contains("index_data")) {
             std::cerr << "failed to serialize hnsw index\n";
             return 4;
+        }
+        if (ReadSerializedHnswEfSearch(binary_set) != 48) {
+            std::cerr << "search-time ef was not persisted into serialized hnsw state\n";
+            return 29;
         }
 
         auto restored_created = knowhere::IndexFactory::Instance().Create<float>(

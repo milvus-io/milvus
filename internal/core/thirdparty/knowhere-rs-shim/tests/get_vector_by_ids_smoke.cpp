@@ -83,6 +83,12 @@ CheckHnswGetVectorByIds() {
         std::cerr << "failed to serialize hnsw index\n";
         return 5;
     }
+    if (binary_set.GetByName("shim_raw_vectors") != nullptr ||
+        binary_set.GetByName("shim_raw_ids") != nullptr ||
+        binary_set.GetByName("shim_raw_meta") != nullptr) {
+        std::cerr << "float hnsw serialize should not emit shim_raw_* payloads\n";
+        return 17;
+    }
 
     auto restored_created = knowhere::IndexFactory::Instance().Create<float>(
         knowhere::IndexEnum::INDEX_HNSW,
