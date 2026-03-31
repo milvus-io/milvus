@@ -762,7 +762,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
+	t.RetrieveRequest.PkFilter = checkSegmentFilter(t.plan)
 	// Set username for this query request,
 	if username, _ := GetCurUserFromContext(ctx); username != "" {
 		t.RetrieveRequest.Username = username

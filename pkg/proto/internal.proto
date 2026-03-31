@@ -136,6 +136,9 @@ message SearchRequest {
   string analyzer_name = 29;
   uint64 collection_ttl_timestamps = 30;
   uint64 entity_ttl_physical_time = 31;
+  // PK filter from proxy: 0 = not checked (backward compat), 1 = has optimizable PK predicate, 2 = no PK predicate.
+  // When 2, delegator can skip plan unmarshal for segment filter optimization.
+  int32 pk_filter = 32;
 }
 
 message SubSearchResults {
@@ -216,7 +219,9 @@ message RetrieveRequest {
   // ORDER BY fields — populated by proxy, consumed by QN/Delegator
   // to avoid re-parsing serialized_expr_plan on the hot path.
   repeated plan.OrderByField order_by_fields = 24;
-  string query_label = 25; // "query" or "upsert_query", used for metrics differentiation
+  // PK filter from proxy: 0 = not checked (backward compat), 1 = has optimizable PK predicate, 2 = no PK predicate.
+  // When 2, delegator can skip plan unmarshal for segment filter optimization.
+  int32 pk_filter = 25;
 }
 
 // Element indices for element-level query results

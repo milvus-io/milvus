@@ -1696,6 +1696,8 @@ func (m *mockCandidate) Type() commonpb.SegmentState {
 func (m *mockCandidate) PkCandidateExist() bool                   { return true }
 func (m *mockCandidate) UpdatePkCandidate(_ []storage.PrimaryKey) {}
 func (m *mockCandidate) Stats() *storage.PkStatistics             { return nil }
+func (m *mockCandidate) GetMinPk() *storage.PrimaryKey            { return nil }
+func (m *mockCandidate) GetMaxPk() *storage.PrimaryKey            { return nil }
 func (m *mockCandidate) Charge()                                  {}
 func (m *mockCandidate) Refund()                                  {}
 

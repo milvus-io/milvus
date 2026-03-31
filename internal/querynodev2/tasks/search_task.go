@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -43,7 +42,6 @@ type SearchTask struct {
 	collection       *segments.Collection
 	segmentManager   *segments.Manager
 	req              *querypb.SearchRequest
-	plan             *planpb.PlanNode
 	result           *internalpb.SearchResults
 	merged           bool
 	groupSize        int64
@@ -72,7 +70,6 @@ func NewSearchTask(ctx context.Context,
 		collection:       collection,
 		segmentManager:   manager,
 		req:              req,
-		plan:             &planpb.PlanNode{},
 		merged:           false,
 		groupSize:        1,
 		topk:             req.GetReq().GetTopk(),
@@ -132,11 +129,6 @@ func (t *SearchTask) PreExecute() error {
 		}
 	}
 
-	// Unmarshal the plan for segment filtering
-	if err := proto.Unmarshal(t.req.GetReq().GetSerializedExprPlan(), t.plan); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -174,7 +166,6 @@ func (t *SearchTask) Execute() error {
 			req.GetReq().GetCollectionID(),
 			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
-			t.plan,
 		)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
 		results, searchedSegments, err = segments.SearchStreaming(
@@ -184,7 +175,6 @@ func (t *SearchTask) Execute() error {
 			req.GetReq().GetCollectionID(),
 			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
-			t.plan,
 		)
 	}
 	defer t.segmentManager.Segment.Unpin(searchedSegments)

@@ -106,6 +106,12 @@ func (c *ExternalSegmentCandidate) Stats() *storage.PkStatistics {
 	return nil
 }
 
+// GetMinPk returns nil — external candidates have no PK range statistics.
+func (c *ExternalSegmentCandidate) GetMinPk() *storage.PrimaryKey { return nil }
+
+// GetMaxPk returns nil — external candidates have no PK range statistics.
+func (c *ExternalSegmentCandidate) GetMaxPk() *storage.PrimaryKey { return nil }
+
 // Charge is a no-op for external candidates (no bloom filter memory to track).
 func (c *ExternalSegmentCandidate) Charge() {}
 

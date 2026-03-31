@@ -147,6 +147,44 @@ func IntersectKeys(l []*planpb.GenericValue, r []*planpb.GenericValue) []*planpb
 	return nil
 }
 
+// HasOptimizablePkPredicate checks whether the expression tree contains a PK predicate
+// that can be optimized by bloom filter or min/max pruning.
+//
+// Rules:
+//   - TermExpr on PK:           optimizable (BF + min/max)
+//   - UnaryRangeExpr on PK:     optimizable (min/max pruning; Equal also enables BF)
+//   - AND(left, right):         either side having PK is sufficient
+//   - OR(left, right):          both sides must have PK — otherwise one side is unconstrained
+//   - NOT(inner):               not optimizable (negation cannot narrow segment set)
+func HasOptimizablePkPredicate(expr *planpb.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	switch e := expr.GetExpr().(type) {
+	case *planpb.Expr_TermExpr:
+		return e.TermExpr.GetColumnInfo().GetIsPrimaryKey()
+	case *planpb.Expr_UnaryRangeExpr:
+		return e.UnaryRangeExpr.GetColumnInfo().GetIsPrimaryKey()
+	case *planpb.Expr_BinaryRangeExpr:
+		return e.BinaryRangeExpr.GetColumnInfo().GetIsPrimaryKey()
+	case *planpb.Expr_BinaryExpr:
+		left := HasOptimizablePkPredicate(e.BinaryExpr.GetLeft())
+		right := HasOptimizablePkPredicate(e.BinaryExpr.GetRight())
+		switch e.BinaryExpr.GetOp() {
+		case planpb.BinaryExpr_LogicalAnd:
+			return left || right
+		case planpb.BinaryExpr_LogicalOr:
+			return left && right
+		default:
+			return false
+		}
+	case *planpb.Expr_UnaryExpr:
+		return false
+	default:
+		return false
+	}
+}
+
 func ParseKeys(expr *planpb.Expr, kType KeyType) []*planpb.GenericValue {
 	res, prunable := ParseKeysFromExpr(expr, kType)
 	if !prunable {

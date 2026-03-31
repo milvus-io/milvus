@@ -386,6 +386,45 @@ var (
 			queryTypeLabelName,
 		})
 
+	QueryNodeSegmentFilterHitSegmentNum = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_filter_hit_segment_num",
+			Help:      "the number of segments with bloom filter hits",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			queryTypeLabelName,
+		})
+
+	QueryNodeSegmentFilterSkippedSegmentNum = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_filter_skipped_segment_num",
+			Help:      "the number of segments skipped by segment filter optimization",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			queryTypeLabelName,
+		})
+
+	QueryNodeSegmentFilterTotalSegmentNum = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_filter_total_segment_num",
+			Help:      "the total number of segments considered by segment filter optimization",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			queryTypeLabelName,
+		})
+
 	QueryNodeSegmentPruneRatio = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -894,6 +933,9 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeApplyBFCost)
 	registry.MustRegister(QueryNodeForwardDeleteCost)
 	registry.MustRegister(QueryNodeSearchHitSegmentNum)
+	registry.MustRegister(QueryNodeSegmentFilterHitSegmentNum)
+	registry.MustRegister(QueryNodeSegmentFilterSkippedSegmentNum)
+	registry.MustRegister(QueryNodeSegmentFilterTotalSegmentNum)
 	registry.MustRegister(QueryNodeDeleteBufferSize)
 	registry.MustRegister(QueryNodeDeleteBufferRowNum)
 	registry.MustRegister(QueryNodeCGOCallLatency)
@@ -906,7 +948,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
-	// Reuse a single labels map to avoid 13+ allocations; DeletePartialMatch does not mutate it.
+	// Reuse a single labels map to avoid allocations; DeletePartialMatch does not mutate it.
 	labels := prometheus.Labels{
 		nodeIDLabelName:       fmt.Sprint(nodeID),
 		collectionIDLabelName: fmt.Sprint(collectionID),
@@ -919,6 +961,9 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 	QueryNodeSQCount.DeletePartialMatch(labels)
 	QueryNodePartialResultCount.DeletePartialMatch(labels)
 	QueryNodeSearchHitSegmentNum.DeletePartialMatch(labels)
+	QueryNodeSegmentFilterHitSegmentNum.DeletePartialMatch(labels)
+	QueryNodeSegmentFilterSkippedSegmentNum.DeletePartialMatch(labels)
+	QueryNodeSegmentFilterTotalSegmentNum.DeletePartialMatch(labels)
 	QueryNodeSegmentPruneRatio.DeletePartialMatch(labels)
 	QueryNodeSegmentPruneBias.DeletePartialMatch(labels)
 	QueryNodeSegmentPruneLatency.DeletePartialMatch(labels)
