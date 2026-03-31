@@ -127,7 +127,7 @@ The volume path inside the container uses the pattern: `/data/volume{1..4}`
 ### Check RustFS Health
 
 ```bash
-curl http://localhost:9000/minio/health/live
+curl http://localhost:9000/health
 ```
 
 ### Check Milvus Health
@@ -150,7 +150,7 @@ docker-compose logs -f standalone
 ## References
 
 - [RustFS GitHub](https://github.com/rustfs/rustfs)
-- [RustFS Documentation](https://rustfs.com/docss)
+- [RustFS Documentation](https://rustfs.com/docs)
 - [Milvus Documentation](https://milvus.io/docs)
 - [Milvus Configuration](https://milvus.io/docs/configure)
 
