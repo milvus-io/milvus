@@ -762,7 +762,7 @@ func TestReconstructArrayForStructArray_InconsistentFields(t *testing.T) {
 	}
 	_, err := reconstructArrayForStructArray(raw, subFields)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "inconsistent fields in StructArray")
+	assert.Contains(t, err.Error(), "inconsistent field count in StructArray")
 
 	// Element with an extra field should produce an error
 	raw = []any{
@@ -770,7 +770,7 @@ func TestReconstructArrayForStructArray_InconsistentFields(t *testing.T) {
 	}
 	_, err = reconstructArrayForStructArray(raw, subFields)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "inconsistent fields in StructArray")
+	assert.Contains(t, err.Error(), "inconsistent field count in StructArray")
 
 	// Consistent fields should succeed
 	raw = []any{
