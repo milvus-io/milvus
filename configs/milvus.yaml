@@ -66,9 +66,6 @@ etcd:
 
 metastore:
   type: etcd # Default value: etcd, Valid values: [etcd, tikv]
-  snapshot:
-    ttl: 86400 # snapshot ttl in seconds
-    reserveTime: 3600 # snapshot reserve time in seconds
   maxEtcdTxnNum: 64 # maximum number of operations in a single etcd transaction
 
 # Related configuration of tikv, used to store Milvus metadata.
