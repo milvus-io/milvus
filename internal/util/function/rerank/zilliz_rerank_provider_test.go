@@ -511,5 +511,5 @@ func TestZillizProviderIntegration(t *testing.T) {
 	// This will test the integration through the main NewModelProvider function
 	_, err := NewModelProvider(params, extraInfo)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "Zilliz client config error")
+	assert.Contains(t, err.Error(), "zilliz client config error")
 }
