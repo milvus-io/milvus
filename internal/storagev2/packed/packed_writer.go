@@ -175,3 +175,15 @@ func (pw *PackedWriter) Close() error {
 	}
 	return nil
 }
+
+func (pw *PackedWriter) CloseAndTell(numGroups int) ([]int64, error) {
+	if numGroups <= 0 {
+		return nil, errors.New("numGroups must be greater than 0")
+	}
+	sizes := make([]int64, numGroups)
+	status := C.CloseAndTell(pw.cPackedWriter, (*C.int64_t)(unsafe.Pointer(&sizes[0])), C.size_t(numGroups))
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, err
+	}
+	return sizes, nil
+}

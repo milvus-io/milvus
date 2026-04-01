@@ -172,6 +172,7 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 		s.Equal(len(columnGroup.Binlogs), 1)
 		s.Equal(columnGroup.Binlogs[0].EntriesNum, int64(rows))
 		s.Positive(columnGroup.Binlogs[0].MemorySize)
+		s.Positive(columnGroup.Binlogs[0].LogSize, "compressed LogSize should be populated by CloseAndTell")
 	}
 
 	s.Equal(len(statsLog.Binlogs), 1)
