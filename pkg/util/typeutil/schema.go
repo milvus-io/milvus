@@ -2089,6 +2089,8 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				} else {
 					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data...)
 				}
+			case nil:
+				// nullable vector field where all rows are null — no vector data to merge
 			default:
 				return errors.New("unsupported data type: " + srcFieldData.Type.String())
 			}
