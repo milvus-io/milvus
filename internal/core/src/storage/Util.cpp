@@ -1594,18 +1594,6 @@ GetFieldDatasFromManifest(
         }
 
         auto raw_column = batch->GetColumnByName(column_name);
-        // External files may store vectors as List<Float32> or
-        // FixedSizeList<Float32, dim>. Normalize to FixedSizeBinary
-        // before FillFieldData which expects that format.
-        if (IsVectorDataType(data_type.value()) &&
-            !IsSparseFloatVectorDataType(data_type.value()) &&
-            !IsVectorArrayDataType(data_type.value()) &&
-            raw_column->type_id() != arrow::Type::FIXED_SIZE_BINARY) {
-            arrow::ArrayVector normalized =
-                NormalizeVectorArraysToFixedSizeBinary(
-                    {raw_column}, data_type.value(), dim);
-            raw_column = normalized[0];
-        }
         auto chunked_array = std::make_shared<arrow::ChunkedArray>(raw_column);
         auto field_data = CreateFieldData(data_type.value(),
                                           element_type.value(),
