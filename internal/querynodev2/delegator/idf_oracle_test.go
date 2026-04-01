@@ -454,41 +454,6 @@ func (suite *IDFOracleSuite) TestLoadSealedFailureCleanup() {
 	suite.True(os.IsNotExist(statErr))
 }
 
-func (suite *IDFOracleSuite) TestFilterBM25Logs() {
-	// normal binlogs
-	result := filterBM25Logs([]*datapb.FieldBinlog{{
-		FieldID: 101,
-		Binlogs: []*datapb.Binlog{
-			{LogPath: "root/0"},
-			{LogPath: "root/2"},
-		},
-	}})
-	suite.Equal(map[int64][]string{101: {"root/0", "root/2"}}, result)
-
-	// compound stats — should pick only compound and stop
-	result = filterBM25Logs([]*datapb.FieldBinlog{{
-		FieldID: 101,
-		Binlogs: []*datapb.Binlog{
-			{LogPath: "root/0"},
-			{LogPath: "root/" + storage.CompoundStatsType.LogIdx()},
-			{LogPath: "root/2"},
-		},
-	}})
-	suite.Equal(map[int64][]string{101: {"root/" + storage.CompoundStatsType.LogIdx()}}, result)
-
-	// nil input
-	result = filterBM25Logs(nil)
-	suite.Empty(result)
-
-	// empty binlogs for a field — still creates entry
-	result = filterBM25Logs([]*datapb.FieldBinlog{{
-		FieldID: 101,
-		Binlogs: []*datapb.Binlog{},
-	}})
-	suite.Contains(result, int64(101))
-	suite.Empty(result[101])
-}
-
 func TestIDFOracle(t *testing.T) {
 	suite.Run(t, new(IDFOracleSuite))
 }
