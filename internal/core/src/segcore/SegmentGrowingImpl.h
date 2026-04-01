@@ -221,6 +221,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return deleted_record_.size();
     }
 
+    Timestamp
+    get_max_timestamp() const override {
+        return insert_record_.timestamp_index_.get_max_timestamp();
+    }
+
     int64_t
     get_active_count(Timestamp ts) const override;
 

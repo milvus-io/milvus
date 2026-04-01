@@ -139,6 +139,9 @@ class SegmentInterface {
     virtual int64_t
     get_deleted_count() const = 0;
 
+    virtual Timestamp
+    get_max_timestamp() const = 0;
+
     virtual int64_t
     get_real_count() const = 0;
 

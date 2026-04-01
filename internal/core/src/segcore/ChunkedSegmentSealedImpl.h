@@ -219,6 +219,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     int64_t
     get_deleted_count() const override;
 
+    Timestamp
+    get_max_timestamp() const override {
+        return insert_record_.timestamp_index_.get_max_timestamp();
+    }
+
     const Schema&
     get_schema() const override;
 
