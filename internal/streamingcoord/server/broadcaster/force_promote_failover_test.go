@@ -328,16 +328,32 @@ func (env *forcePromoteTestEnv) countCatalogStateTransitions(broadcastID uint64,
 
 // --- Helper functions for creating recovery tasks ---
 
+// buildBitmapFromAckedVChannels builds a bitmap aligned to the actual vchannel order in the broadcast header.
+// WithBroadcast may reorder vchannels (due to Set deduplication), so bitmaps must be built
+// from the header's actual order, not the caller's input order.
+func buildBitmapFromAckedVChannels(msg message.BroadcastMutableMessage, ackedVChannels []string) []byte {
+	headerVChannels := msg.BroadcastHeader().VChannels
+	ackedSet := typeutil.NewSet(ackedVChannels...)
+	bitmap := make([]byte, len(headerVChannels))
+	for i, vc := range headerVChannels {
+		if ackedSet.Contain(vc) {
+			bitmap[i] = 1
+		}
+	}
+	return bitmap
+}
+
 // createReplicatedDropCollectionTask creates a REPLICATED DropCollection task.
-func createReplicatedDropCollectionTask(broadcastID uint64, vchannels []string, ackedBitmap []byte) *streamingpb.BroadcastTask {
+func createReplicatedDropCollectionTask(broadcastID uint64, vchannels []string, ackedVChannels []string) *streamingpb.BroadcastTask {
 	msg := createNewBroadcastMsg(vchannels).WithBroadcastID(broadcastID)
+	bitmap := buildBitmapFromAckedVChannels(msg, ackedVChannels)
 	return createNewWaitAckBroadcastTaskFromMessage(msg,
 		streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED,
-		ackedBitmap)
+		bitmap)
 }
 
 // createReplicatedCreateCollectionTask creates a REPLICATED CreateCollection task.
-func createReplicatedCreateCollectionTask(broadcastID uint64, vchannels []string, ackedBitmap []byte) *streamingpb.BroadcastTask {
+func createReplicatedCreateCollectionTask(broadcastID uint64, vchannels []string, ackedVChannels []string) *streamingpb.BroadcastTask {
 	msg, err := message.NewCreateCollectionMessageBuilderV1().
 		WithHeader(&message.CreateCollectionMessageHeader{}).
 		WithBody(&msgpb.CreateCollectionRequest{}).
@@ -346,14 +362,15 @@ func createReplicatedCreateCollectionTask(broadcastID uint64, vchannels []string
 	if err != nil {
 		panic(err)
 	}
+	bitmap := buildBitmapFromAckedVChannels(msg, ackedVChannels)
 	return createNewWaitAckBroadcastTaskFromMessage(
 		msg.WithBroadcastID(broadcastID),
 		streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED,
-		ackedBitmap)
+		bitmap)
 }
 
 // createReplicatedCreatePartitionTask creates a REPLICATED CreatePartition task.
-func createReplicatedCreatePartitionTask(broadcastID uint64, vchannels []string, ackedBitmap []byte) *streamingpb.BroadcastTask {
+func createReplicatedCreatePartitionTask(broadcastID uint64, vchannels []string, ackedVChannels []string) *streamingpb.BroadcastTask {
 	msg, err := message.NewCreatePartitionMessageBuilderV1().
 		WithHeader(&message.CreatePartitionMessageHeader{}).
 		WithBody(&msgpb.CreatePartitionRequest{}).
@@ -362,14 +379,15 @@ func createReplicatedCreatePartitionTask(broadcastID uint64, vchannels []string,
 	if err != nil {
 		panic(err)
 	}
+	bitmap := buildBitmapFromAckedVChannels(msg, ackedVChannels)
 	return createNewWaitAckBroadcastTaskFromMessage(
 		msg.WithBroadcastID(broadcastID),
 		streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED,
-		ackedBitmap)
+		bitmap)
 }
 
 // createReplicatedDropPartitionTask creates a REPLICATED DropPartition task.
-func createReplicatedDropPartitionTask(broadcastID uint64, vchannels []string, ackedBitmap []byte) *streamingpb.BroadcastTask {
+func createReplicatedDropPartitionTask(broadcastID uint64, vchannels []string, ackedVChannels []string) *streamingpb.BroadcastTask {
 	msg, err := message.NewDropPartitionMessageBuilderV1().
 		WithHeader(&message.DropPartitionMessageHeader{}).
 		WithBody(&msgpb.DropPartitionRequest{}).
@@ -378,39 +396,43 @@ func createReplicatedDropPartitionTask(broadcastID uint64, vchannels []string, a
 	if err != nil {
 		panic(err)
 	}
+	bitmap := buildBitmapFromAckedVChannels(msg, ackedVChannels)
 	return createNewWaitAckBroadcastTaskFromMessage(
 		msg.WithBroadcastID(broadcastID),
 		streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED,
-		ackedBitmap)
+		bitmap)
 }
 
 // createReplicatedAlterReplicateConfigTask creates a REPLICATED AlterReplicateConfig task.
-func createReplicatedAlterReplicateConfigTask(broadcastID uint64, vchannels []string, ackedBitmap []byte) *streamingpb.BroadcastTask {
+func createReplicatedAlterReplicateConfigTask(broadcastID uint64, vchannels []string, ackedVChannels []string) *streamingpb.BroadcastTask {
 	msg := createAlterReplicateConfigBroadcastMsg(vchannels, false).WithBroadcastID(broadcastID)
+	bitmap := buildBitmapFromAckedVChannels(msg, ackedVChannels)
 	return createNewWaitAckBroadcastTaskFromMessage(msg,
 		streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED,
-		ackedBitmap)
+		bitmap)
 }
 
 // createReplicatedForcePromoteTask creates a REPLICATED force promote task.
-func createReplicatedForcePromoteTask(broadcastID uint64, vchannels []string, ackedBitmap []byte) *streamingpb.BroadcastTask {
+func createReplicatedForcePromoteTask(broadcastID uint64, vchannels []string, ackedVChannels []string) *streamingpb.BroadcastTask {
 	msg := createAlterReplicateConfigBroadcastMsg(vchannels, true).WithBroadcastID(broadcastID)
+	bitmap := buildBitmapFromAckedVChannels(msg, ackedVChannels)
 	return createNewWaitAckBroadcastTaskFromMessage(msg,
 		streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED,
-		ackedBitmap)
+		bitmap)
 }
 
 // createPendingForcePromoteTask creates a PENDING force promote task (not yet broadcast).
 func createPendingForcePromoteTask(broadcastID uint64, vchannels []string) *streamingpb.BroadcastTask {
 	msg := createAlterReplicateConfigBroadcastMsg(vchannels, true).WithBroadcastID(broadcastID)
 	pb := msg.IntoMessageProto()
+	headerVChannels := msg.BroadcastHeader().VChannels
 	return &streamingpb.BroadcastTask{
 		Message: &messagespb.Message{
 			Payload:    pb.Payload,
 			Properties: pb.Properties,
 		},
 		State:               streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
-		AckedVchannelBitmap: make([]byte, len(vchannels)),
+		AckedVchannelBitmap: make([]byte, len(headerVChannels)),
 	}
 }
 
@@ -425,7 +447,7 @@ func TestForcePromoteFailover(t *testing.T) {
 	t.Run("no_incomplete_tasks", func(t *testing.T) {
 		env := setupForcePromoteTest(t,
 			[]*streamingpb.BroadcastTask{
-				createReplicatedForcePromoteTask(100, vchannels, []byte{0x01, 0x01, 0x01}),
+				createReplicatedForcePromoteTask(100, vchannels, vchannels), // all acked
 			},
 			nil,
 		)
@@ -445,8 +467,8 @@ func TestForcePromoteFailover(t *testing.T) {
 	t.Run("fix_incomplete_drop_collection", func(t *testing.T) {
 		env := setupForcePromoteTest(t,
 			[]*streamingpb.BroadcastTask{
-				createReplicatedDropCollectionTask(10, vchannels, []byte{0x01, 0x00, 0x00}), // cc acked, v1/v2 pending
-				createReplicatedForcePromoteTask(100, vchannels, []byte{0x01, 0x01, 0x01}),  // all acked
+				createReplicatedDropCollectionTask(10, vchannels, []string{"cc_vcchan"}), // cc acked, v1/v2 pending
+				createReplicatedForcePromoteTask(100, vchannels, vchannels),              // all acked
 			},
 			nil,
 		)
@@ -478,9 +500,9 @@ func TestForcePromoteFailover(t *testing.T) {
 	t.Run("fix_alter_replicate_config_with_ignore", func(t *testing.T) {
 		env := setupForcePromoteTest(t,
 			[]*streamingpb.BroadcastTask{
-				createReplicatedAlterReplicateConfigTask(10, vchannels, []byte{0x01, 0x01, 0x00}), // cc,v1 acked, v2 pending
-				createReplicatedDropCollectionTask(20, vchannels, []byte{0x01, 0x00, 0x00}),       // cc acked, v1/v2 pending
-				createReplicatedForcePromoteTask(100, vchannels, []byte{0x01, 0x01, 0x01}),        // all acked
+				createReplicatedAlterReplicateConfigTask(10, vchannels, []string{"cc_vcchan", "v1"}), // cc,v1 acked, v2 pending
+				createReplicatedDropCollectionTask(20, vchannels, []string{"cc_vcchan"}),             // cc acked, v1/v2 pending
+				createReplicatedForcePromoteTask(100, vchannels, vchannels),                          // all acked
 			},
 			nil,
 		)
@@ -518,8 +540,8 @@ func TestForcePromoteFailover(t *testing.T) {
 		callCount := atomic.NewInt32(0)
 		env := setupForcePromoteTest(t,
 			[]*streamingpb.BroadcastTask{
-				createReplicatedDropCollectionTask(10, vchannels, []byte{0x01, 0x00, 0x00}),
-				createReplicatedForcePromoteTask(100, vchannels, []byte{0x01, 0x01, 0x01}),
+				createReplicatedDropCollectionTask(10, vchannels, []string{"cc_vcchan"}),
+				createReplicatedForcePromoteTask(100, vchannels, vchannels),
 			},
 			[]appendBehavior{
 				{
@@ -546,7 +568,7 @@ func TestForcePromoteFailover(t *testing.T) {
 	t.Run("pending_force_promote_broadcast_then_fix", func(t *testing.T) {
 		env := setupForcePromoteTest(t,
 			[]*streamingpb.BroadcastTask{
-				createReplicatedDropCollectionTask(10, vchannels, []byte{0x00, 0x00, 0x00}),
+				createReplicatedDropCollectionTask(10, vchannels, nil), // none acked
 				createPendingForcePromoteTask(100, vchannels),
 			},
 			nil,
@@ -567,8 +589,8 @@ func TestForcePromoteFailover(t *testing.T) {
 		blockCh := make(chan struct{})
 		env := setupForcePromoteTest(t,
 			[]*streamingpb.BroadcastTask{
-				createReplicatedDropCollectionTask(10, vchannels, []byte{0x00, 0x00, 0x00}),
-				createReplicatedForcePromoteTask(100, vchannels, []byte{0x01, 0x01, 0x01}),
+				createReplicatedDropCollectionTask(10, vchannels, nil),      // none acked
+				createReplicatedForcePromoteTask(100, vchannels, vchannels), // all acked
 			},
 			[]appendBehavior{
 				{
@@ -604,10 +626,10 @@ func TestForcePromoteFailover(t *testing.T) {
 	t.Run("mixed_incomplete_tasks_ordering", func(t *testing.T) {
 		env := setupForcePromoteTest(t,
 			[]*streamingpb.BroadcastTask{
-				createReplicatedAlterReplicateConfigTask(10, vchannels, []byte{0x01, 0x01, 0x00}), // cc,v1 acked, v2 pending
-				createReplicatedDropCollectionTask(20, vchannels, []byte{0x01, 0x00, 0x00}),       // cc acked, v1/v2 pending
-				createReplicatedDropCollectionTask(30, vchannels, []byte{0x01, 0x00, 0x00}),       // cc acked, v1/v2 pending
-				createReplicatedForcePromoteTask(100, vchannels, []byte{0x01, 0x01, 0x01}),        // all acked
+				createReplicatedAlterReplicateConfigTask(10, vchannels, []string{"cc_vcchan", "v1"}), // cc,v1 acked, v2 pending
+				createReplicatedDropCollectionTask(20, vchannels, []string{"cc_vcchan"}),             // cc acked, v1/v2 pending
+				createReplicatedDropCollectionTask(30, vchannels, []string{"cc_vcchan"}),             // cc acked, v1/v2 pending
+				createReplicatedForcePromoteTask(100, vchannels, vchannels),                          // all acked
 			},
 			nil,
 		)
@@ -635,12 +657,12 @@ func TestForcePromoteFailover(t *testing.T) {
 		//   v2: Task 10/15 acked, Task 20/25 pending → valid (watermark between 15 and 20)
 		env := setupForcePromoteTest(t,
 			[]*streamingpb.BroadcastTask{
-				createReplicatedAlterReplicateConfigTask(10, vchannels, []byte{0x01, 0x01, 0x01}), // cc,v1,v2 all acked → not incomplete
-				createReplicatedCreateCollectionTask(15, vchannels, []byte{0x01, 0x00, 0x01}),     // cc,v2 acked, v1 pending
-				createReplicatedDropCollectionTask(20, vchannels, []byte{0x01, 0x00, 0x00}),       // cc acked, v1/v2 pending
-				createReplicatedCreatePartitionTask(25, vchannels, []byte{0x01, 0x00, 0x00}),      // cc acked, v1/v2 pending
-				createReplicatedDropPartitionTask(30, vchannels, []byte{0x01, 0x00, 0x00}),        // cc acked, v1/v2 pending
-				createReplicatedForcePromoteTask(100, vchannels, []byte{0x01, 0x01, 0x01}),        // all acked
+				createReplicatedAlterReplicateConfigTask(10, vchannels, vchannels),               // cc,v1,v2 all acked → not incomplete
+				createReplicatedCreateCollectionTask(15, vchannels, []string{"cc_vcchan", "v2"}), // cc,v2 acked, v1 pending
+				createReplicatedDropCollectionTask(20, vchannels, []string{"cc_vcchan"}),         // cc acked, v1/v2 pending
+				createReplicatedCreatePartitionTask(25, vchannels, []string{"cc_vcchan"}),        // cc acked, v1/v2 pending
+				createReplicatedDropPartitionTask(30, vchannels, []string{"cc_vcchan"}),          // cc acked, v1/v2 pending
+				createReplicatedForcePromoteTask(100, vchannels, vchannels),                      // all acked
 			},
 			nil,
 		)
@@ -702,11 +724,11 @@ func TestForcePromoteFailover(t *testing.T) {
 		//   v2: Task 10 acked, Task 12/20 pending → valid
 		env := setupForcePromoteTest(t,
 			[]*streamingpb.BroadcastTask{
-				createReplicatedAlterReplicateConfigTask(10, vchannels, []byte{0x01, 0x01, 0x01}), // fully acked → not incomplete
-				createReplicatedAlterReplicateConfigTask(12, vchannels, []byte{0x01, 0x00, 0x00}), // cc acked, v1/v2 pending
-				createReplicatedCreateCollectionTask(20, vchannels, []byte{0x01, 0x00, 0x00}),     // cc acked, v1/v2 pending
-				createReplicatedDropPartitionTask(25, vchannels, []byte{0x01, 0x00, 0x00}),        // cc acked, v1/v2 pending
-				createReplicatedForcePromoteTask(100, vchannels, []byte{0x01, 0x01, 0x01}),        // all acked
+				createReplicatedAlterReplicateConfigTask(10, vchannels, vchannels),             // fully acked → not incomplete
+				createReplicatedAlterReplicateConfigTask(12, vchannels, []string{"cc_vcchan"}), // cc acked, v1/v2 pending
+				createReplicatedCreateCollectionTask(20, vchannels, []string{"cc_vcchan"}),     // cc acked, v1/v2 pending
+				createReplicatedDropPartitionTask(25, vchannels, []string{"cc_vcchan"}),        // cc acked, v1/v2 pending
+				createReplicatedForcePromoteTask(100, vchannels, vchannels),                    // all acked
 			},
 			nil,
 		)
