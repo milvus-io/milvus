@@ -860,7 +860,7 @@ func TestDeltaLogListing_RetryOnTransientError(t *testing.T) {
 		retryAttempts:  5,
 	}
 
-	err := r.init([]string{insertPrefix, deltaPrefix}, 0, math.MaxUint64)
+	err := r.init([]string{insertPrefix, deltaPrefix}, 0, math.MaxUint64, nil, "")
 	assert.NoError(t, err)
 	assert.Equal(t, 2, deltaCallCount, "delta log WalkWithPrefix should have retried on transient error")
 }
@@ -897,7 +897,7 @@ func TestDeltaLogListing_NonRetryableErrorFailsFast(t *testing.T) {
 		retryAttempts:  5,
 	}
 
-	err := r.init([]string{insertPrefix, deltaPrefix}, 0, math.MaxUint64)
+	err := r.init([]string{insertPrefix, deltaPrefix}, 0, math.MaxUint64, nil, "")
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, merr.ErrIoPermissionDenied))
 	assert.Equal(t, 1, deltaCallCount, "non-retryable error should not retry")
