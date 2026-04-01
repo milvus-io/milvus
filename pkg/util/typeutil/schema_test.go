@@ -2124,6 +2124,46 @@ func TestMergeFieldData(t *testing.T) {
 		err := MergeFieldData([]*schemapb.FieldData{emptyField}, []*schemapb.FieldData{emptyField})
 		assert.Error(t, err)
 	})
+
+	t.Run("nullable float vector - all null src", func(t *testing.T) {
+		dim := int64(4)
+		dstFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vec",
+				FieldId:   200,
+				ValidData: []bool{true},
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: dim,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{1, 2, 3, 4},
+							},
+						},
+					},
+				},
+			},
+		}
+		// src: all rows are null -> VectorField.Data = nil
+		srcFields := []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "nullable_vec",
+				FieldId:   200,
+				ValidData: []bool{false},
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim:  dim,
+						Data: nil, // all null -> no FloatVector oneof set
+					},
+				},
+			},
+		}
+
+		err := MergeFieldData(dstFields, srcFields)
+		assert.NoError(t, err, "MergeFieldData should handle nullable FloatVector with nil VectorField.Data")
+	})
 }
 
 type FieldDataSuite struct {
