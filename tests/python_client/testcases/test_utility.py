@@ -1563,7 +1563,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # load balance
         self.utility_wrap.load_balance(collection_w.name, invalid_src_node_id, dst_node_ids, sealed_segment_ids,
                                        check_task=CheckTasks.err_res,
-                                       check_items={ct.err_code: 1, ct.err_msg: "source node not found in any replica"})
+                                       check_items={"err_code": 901, "err_msg": "source node not found in any replica: node not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_balance_with_all_dst_node_not_exist(self):
@@ -1600,7 +1600,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # load balance
         self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
                                        check_task=CheckTasks.err_res,
-                                       check_items={ct.err_code: 1, ct.err_msg: "destination node not found in the same replica"})
+                                       check_items={"err_code": 901, "err_msg": "destination node not found in the same replica: node not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_balance_with_one_sealed_segment_id_not_exist(self):
