@@ -230,6 +230,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     Reopen(
+        milvus::OpContext* op_ctx,
         const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
@@ -1139,14 +1140,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      * updating the segment's loaded fields and indexes accordingly. It handles
      * incremental updates during segment reopen operations.
      *
+     * @param op_ctx The operation context
      * @param segment_load_info The segment load information to be updated
      * @param load_diff The differences to apply, containing fields and indexes to add/remove
-     * @param op_ctx The operation context
      */
     void
-    ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
-                  LoadDiff& load_diff,
-                  milvus::OpContext* op_ctx = nullptr);
+    ApplyLoadDiff(milvus::OpContext* op_ctx,
+                  SegmentLoadInfo& segment_load_info,
+                  LoadDiff& load_diff);
 
     void
     load_field_data_common(

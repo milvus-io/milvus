@@ -3268,6 +3268,7 @@ ChunkedSegmentSealedImpl::Reopen(SchemaPtr sch) {
 
 void
 ChunkedSegmentSealedImpl::Reopen(
+    milvus::OpContext* op_ctx,
     const milvus::proto::segcore::SegmentLoadInfo& new_load_info) {
     SegmentLoadInfo new_seg_load_info(new_load_info, schema_);
 
@@ -3279,15 +3280,15 @@ ChunkedSegmentSealedImpl::Reopen(
     // compute load diff
     auto diff = current.ComputeDiff(new_seg_load_info);
     LOG_INFO("Reopen segment {} with diff {}", id_, diff.ToString());
-    ApplyLoadDiff(new_seg_load_info, diff);
+    ApplyLoadDiff(op_ctx, new_seg_load_info, diff);
 
     LOG_INFO("Reopen segment {} done", id_);
 }
 
 void
-ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
-                                        LoadDiff& diff,
-                                        milvus::OpContext* op_ctx) {
+ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
+                                        SegmentLoadInfo& segment_load_info,
+                                        LoadDiff& diff) {
     // TODO: pass trace_ctx separately when needed
     milvus::tracer::TraceContext trace_ctx;
 
@@ -3963,7 +3964,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
     auto diff = segment_load_info_.GetLoadDiff();
     LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
-    ApplyLoadDiff(segment_load_info_, diff, op_ctx);
+    ApplyLoadDiff(op_ctx, segment_load_info_, diff);
 
     LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
 }

@@ -315,14 +315,18 @@ func (s *cSegmentImpl) Load(ctx context.Context) error {
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 
-	// Create cancellation guard for this load operation
-	guard := NewCancellationGuard(ctx)
-	defer guard.Close()
-
-	// Perform the load with cancellation support
-	status := C.SegmentLoad(traceCtx.ctx, s.ptr, (C.CLoadCancellationSource)(guard.Source()))
-
-	return ConsumeCStatusIntoError(&status)
+	future := cgo.Async(ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncSegmentLoad(
+				traceCtx.ctx,
+				s.ptr,
+			))
+		},
+		cgo.WithName("segment-load"),
+	)
+	defer future.Release()
+	_, err := future.BlockAndLeakyGet()
+	return err
 }
 
 func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
@@ -336,8 +340,20 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 		return err
 	}
 
-	status := C.ReopenSegment(traceCtx.ctx, s.ptr, (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
-	return ConsumeCStatusIntoError(&status)
+	future := cgo.Async(ctx,
+		func() cgo.CFuturePtr {
+			return (cgo.CFuturePtr)(C.AsyncReopenSegment(
+				traceCtx.ctx,
+				s.ptr,
+				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])),
+				C.int64_t(len(loadInfoBlob)),
+			))
+		},
+		cgo.WithName("segment-reopen"),
+	)
+	defer future.Release()
+	_, err = future.BlockAndLeakyGet()
+	return err
 }
 
 func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {

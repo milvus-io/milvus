@@ -163,27 +163,29 @@ NewSegmentWithLoadInfo(CCollection collection,
     }
 }
 
-CStatus
-ReopenSegment(CTraceContext c_trace,
-              CSegmentInterface c_segment,
-              const uint8_t* load_info_blob,
-              const int64_t load_info_length) {
-    SCOPE_CGO_CALL_METRIC();
+CFuture*
+AsyncReopenSegment(CTraceContext c_trace,
+                   CSegmentInterface c_segment,
+                   const uint8_t* load_info_blob,
+                   const int64_t load_info_length) {
+    AssertInfo(load_info_blob, "load info is null");
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    auto suc = load_info.ParseFromArray(load_info_blob, load_info_length);
+    AssertInfo(suc, "unmarshal load info failed");
 
-    try {
-        AssertInfo(load_info_blob, "load info is null");
-        milvus::proto::segcore::SegmentLoadInfo load_info;
-        auto suc = load_info.ParseFromArray(load_info_blob, load_info_length);
-        AssertInfo(suc, "unmarshal load info failed");
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
 
-        auto segment =
-            static_cast<milvus::segcore::SegmentInterface*>(c_segment);
-
-        segment->Reopen(load_info);
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
+    auto future = milvus::futures::Future<bool>::async(
+        milvus::futures::getLoadCPUExecutor(),
+        milvus::futures::ExecutePriority::NORMAL,
+        [c_trace, segment, load_info = std::move(load_info)](
+            folly::CancellationToken cancel_token) -> bool* {
+            milvus::OpContext op_ctx(cancel_token);
+            segment->Reopen(&op_ctx, load_info);
+            return nullptr;
+        });
+    return static_cast<CFuture*>(static_cast<void*>(
+        static_cast<milvus::futures::IFuture*>(future.release())));
 }
 
 CLoadCancellationSource
@@ -232,6 +234,26 @@ SegmentLoad(CTraceContext c_trace,
     }
 }
 
+CFuture*
+AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment) {
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+
+    auto future = milvus::futures::Future<bool>::async(
+        milvus::futures::getLoadCPUExecutor(),
+        milvus::futures::ExecutePriority::NORMAL,
+        [c_trace, segment](folly::CancellationToken cancel_token) -> bool* {
+            auto trace_ctx = milvus::tracer::TraceContext{
+                c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+
+            milvus::OpContext op_ctx(cancel_token);
+            segment->Load(trace_ctx, &op_ctx);
+
+            return nullptr;
+        });
+    return static_cast<CFuture*>(static_cast<void*>(
+        static_cast<milvus::futures::IFuture*>(future.release())));
+}
+
 void
 DeleteSegment(CSegmentInterface c_segment) {
     SCOPE_CGO_CALL_METRIC();
@@ -271,7 +293,7 @@ AsyncSearch(CTraceContext c_trace,
         c_placeholder_group);
 
     auto future = milvus::futures::Future<milvus::SearchResult>::async(
-        milvus::futures::getGlobalCPUExecutor(),
+        milvus::futures::getSearchCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
         [c_trace,
          segment,
@@ -353,7 +375,7 @@ AsyncRetrieve(CTraceContext c_trace,
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
     auto future = milvus::futures::Future<CRetrieveResult>::async(
-        milvus::futures::getGlobalCPUExecutor(),
+        milvus::futures::getSearchCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
         [c_trace,
          segment,
@@ -398,7 +420,7 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
     auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
 
     auto future = milvus::futures::Future<CRetrieveResult>::async(
-        milvus::futures::getGlobalCPUExecutor(),
+        milvus::futures::getSearchCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
         [c_trace, segment, plan, offsets, len](
             folly::CancellationToken cancel_token) {
