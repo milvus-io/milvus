@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <atomic>
 #include <chrono>
 #include <aws/core/auth/AWSCredentialsProvider.h>
 #include <memory>
@@ -38,9 +39,6 @@ class HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider
  private:
     void
     RefreshIfExpired();
-    Aws::String
-    CalculateQueryString() const;
-
     Aws::UniquePtr<Aws::Internal::HuaweiCloudSTSCredentialsClient> m_client;
     Aws::Auth::AWSCredentials m_credentials;
     Aws::String m_region;
@@ -54,6 +52,8 @@ class HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider
     std::chrono::steady_clock::time_point m_lastFailedReloadTime;
     static constexpr int RELOAD_COOLDOWN_SECONDS = 30;
     static constexpr int RELOAD_COOLDOWN_SECONDS_URGENT = 5;
+    std::atomic<uint64_t> m_stsSuccessCount{0};
+    std::atomic<uint64_t> m_stsFailureCount{0};
 
     bool
     ExpiresSoon() const;
