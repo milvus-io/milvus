@@ -589,8 +589,9 @@ func TestForcePromoteFailover(t *testing.T) {
 		blockCh := make(chan struct{})
 		env := setupForcePromoteTest(t,
 			[]*streamingpb.BroadcastTask{
-				createReplicatedDropCollectionTask(10, vchannels, nil),      // none acked
-				createReplicatedForcePromoteTask(100, vchannels, vchannels), // all acked
+				// Force promote in PENDING state: WAL append blocks, then Close() cancels context.
+				// No incomplete tasks — tests that Close() doesn't hang when WAL is blocked.
+				createPendingForcePromoteTask(100, vchannels),
 			},
 			[]appendBehavior{
 				{

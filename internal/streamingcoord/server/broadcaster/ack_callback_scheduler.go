@@ -10,7 +10,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -157,7 +156,7 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 
 // doForcePromoteFixIncompleteBroadcasts handles the full force promote lifecycle:
 // 1. Wait for all vchannels to ack the force promote message (replicate messages are fenced after this)
-// 2. Fix incomplete broadcasts with infinite retry (supplement messages to remaining vchannels)
+// 2. Fix incomplete broadcasts by delegating to broadcastScheduler (WAL append + ack + callback + tombstone)
 // 3. Acquire resource key lock and execute ack callback (close done channel → unblock RPC)
 func (s *ackCallbackScheduler) doForcePromoteFixIncompleteBroadcasts(bt *broadcastTask) {
 	logger := s.Logger().With(zap.Uint64("broadcastID", bt.Header().BroadcastID))
@@ -168,10 +167,7 @@ func (s *ackCallbackScheduler) doForcePromoteFixIncompleteBroadcasts(bt *broadca
 		return
 	}
 
-	// Fix incomplete broadcasts with infinite retry until success or context cancellation.
-	if err := s.retryUntilDone(ctx, func() error {
-		return s.fixIncompleteBroadcastsForForcePromote(ctx)
-	}); err != nil {
+	if err := s.fixIncompleteBroadcastsForForcePromote(ctx); err != nil {
 		logger.Warn("force promote fix incomplete broadcasts aborted", zap.Error(err))
 		return
 	}
@@ -187,8 +183,8 @@ func (s *ackCallbackScheduler) doForcePromoteFixIncompleteBroadcasts(bt *broadca
 }
 
 // fixIncompleteBroadcastsForForcePromote fixes incomplete broadcasts for force promote.
-// It marks incomplete AlterReplicateConfig messages with ignore=true before supplementing
-// all incomplete messages to remaining vchannels.
+// It marks incomplete AlterReplicateConfig messages with ignore=true, then delegates
+// all incomplete tasks to broadcastScheduler for WAL append, ack, callback, and tombstone.
 func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx context.Context) error {
 	incompleteTasks := s.bm.getIncompleteBroadcastTasks()
 
@@ -197,101 +193,46 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 		return incompleteTasks[i].Header().BroadcastID < incompleteTasks[j].Header().BroadcastID
 	})
 
-	// Separate AlterReplicateConfig from other broadcast messages
-	var alterReplicateConfigTasks []*broadcastTask
-	var otherBroadcastTasks []*broadcastTask
-	for _, task := range incompleteTasks {
-		if task.IsAlterReplicateConfigMessage() {
-			alterReplicateConfigTasks = append(alterReplicateConfigTasks, task)
-		} else {
-			otherBroadcastTasks = append(otherBroadcastTasks, task)
-		}
-	}
-
-	totalTasks := len(alterReplicateConfigTasks) + len(otherBroadcastTasks)
-	if totalTasks == 0 {
+	if len(incompleteTasks) == 0 {
 		s.Logger().Info("No incomplete broadcasts to fix for force promote")
 		return nil
 	}
 
 	s.Logger().Info("Fixing incomplete broadcasts for force promote",
-		zap.Int("alterReplicateConfigTasks", len(alterReplicateConfigTasks)),
-		zap.Int("otherBroadcastTasks", len(otherBroadcastTasks)))
+		zap.Int("incompleteTasks", len(incompleteTasks)))
 
 	// Mark AlterReplicateConfig tasks with ignore=true (to prevent old config overwriting force promote config)
-	for _, task := range alterReplicateConfigTasks {
+	for _, task := range incompleteTasks {
+		if !task.IsAlterReplicateConfigMessage() {
+			continue
+		}
 		s.Logger().Info("Marking AlterReplicateConfig task with ignore=true",
 			zap.Uint64("broadcastID", task.Header().BroadcastID))
 
-		if err := task.MarkIgnoreAndSave(ctx); err != nil {
-			s.Logger().Error("Failed to mark task with ignore",
-				zap.Uint64("broadcastID", task.Header().BroadcastID),
-				zap.Error(err))
+		if err := s.retryUntilDone(ctx, func() error {
+			return task.MarkIgnoreAndSave(ctx)
+		}); err != nil {
 			return errors.Wrapf(err, "failed to mark task %d with ignore", task.Header().BroadcastID)
 		}
 	}
 
-	// Collect pending messages from ALL incomplete tasks for supplementation
-	var pendingMessages []message.MutableMessage
-	for _, task := range alterReplicateConfigTasks {
-		msgs := task.PendingBroadcastMessages()
-		if len(msgs) > 0 {
-			s.Logger().Info("Supplementing AlterReplicateConfig messages to remaining vchannels",
-				zap.Uint64("broadcastID", task.Header().BroadcastID),
-				zap.Int("pendingVChannels", len(msgs)))
-			pendingMessages = append(pendingMessages, msgs...)
-		}
-	}
-	for _, task := range otherBroadcastTasks {
-		msgs := task.PendingBroadcastMessages()
-		if len(msgs) > 0 {
-			s.Logger().Info("Supplementing broadcast messages to remaining vchannels",
-				zap.Uint64("broadcastID", task.Header().BroadcastID),
-				zap.String("messageType", task.msg.MessageType().String()),
-				zap.Int("pendingVChannels", len(msgs)))
-			pendingMessages = append(pendingMessages, msgs...)
-		}
-	}
-
-	if len(pendingMessages) == 0 {
-		s.Logger().Info("No pending messages to supplement")
-		return nil
-	}
-
-	// Append pending messages to their respective vchannels
-	appendResults := streaming.WAL().AppendMessages(ctx, pendingMessages...)
-
-	var lastResultErr error
-	supplementCount := 0
-	failureCount := 0
-	for i, result := range appendResults.Responses {
-		if result.Error != nil {
-			s.Logger().Warn("Failed to supplement message",
-				zap.String("vchannel", pendingMessages[i].VChannel()),
-				zap.Error(result.Error))
-			failureCount++
-			lastResultErr = result.Error
-			continue
-		}
-		supplementCount++
-	}
-
-	s.Logger().Info("Supplemented incomplete broadcast messages",
-		zap.Int("supplementCount", supplementCount),
-		zap.Int("failureCount", failureCount),
-		zap.Int("totalPending", len(pendingMessages)))
-
-	if lastResultErr != nil {
-		return lastResultErr
-	}
-
-	// Wait for all incomplete tasks to be fully acked before returning.
+	// Delegate all incomplete tasks to broadcastScheduler for supplement.
+	// broadcastScheduler handles WAL append with retry; AddTask blocks until the task
+	// reaches tombstone (broadcast → ack → callback → tombstone).
 	for _, task := range incompleteTasks {
-		if err := task.BlockUntilAllAck(ctx); err != nil {
-			return errors.Wrapf(err, "waiting for incomplete task %d to be fully acked", task.Header().BroadcastID)
+		pending := newPendingBroadcastTask(task)
+		if pending == nil {
+			continue // no pending messages for this task
+		}
+		s.Logger().Info("Delegating incomplete task to broadcastScheduler",
+			zap.Uint64("broadcastID", task.Header().BroadcastID),
+			zap.String("messageType", task.msg.MessageType().String()),
+			zap.Int("pendingVChannels", len(pending.pendingMessages)))
+		if _, err := s.bm.broadcastScheduler.AddTask(ctx, pending); err != nil {
+			return errors.Wrapf(err, "failed to supplement task %d via broadcastScheduler", task.Header().BroadcastID)
 		}
 	}
-	s.Logger().Info("All incomplete broadcasts fully acked")
+	s.Logger().Info("All incomplete broadcasts fixed and tombstoned")
 	return nil
 }
 
@@ -377,7 +318,8 @@ func (s *ackCallbackScheduler) retryUntilDone(ctx context.Context, fn func() err
 		nextInterval := backoff.NextBackOff()
 		s.Logger().Warn("operation failed, retrying...",
 			zap.Duration("nextInterval", nextInterval),
-			zap.Error(err))
+			zap.Error(err),
+			zap.Stack("stack"))
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
