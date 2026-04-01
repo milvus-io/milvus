@@ -463,7 +463,7 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 
 		for _, field := range schema.GetFields() {
 			if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
-				msg := fmt.Sprintf("Fields in StructArrayField can only be array or array of vector, but field %s is %s", field.Name, field.DataType.String())
+				msg := fmt.Sprintf("fields in StructArrayField can only be array or array of vector, but field %s is %s", field.Name, field.DataType.String())
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}
 
