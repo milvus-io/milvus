@@ -153,7 +153,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
 
-	InitLocalChunkManager(localDataRootPath)
+	if err := InitLocalChunkManager(localDataRootPath); err != nil {
+		return err
+	}
 
 	err := InitRemoteChunkManager(paramtable.Get())
 	if err != nil {
