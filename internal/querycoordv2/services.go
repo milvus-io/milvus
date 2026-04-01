@@ -641,9 +641,9 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 	srcNode := req.GetSourceNodeIDs()[0]
 	replica := s.meta.ReplicaManager.GetByCollectionAndNode(ctx, req.GetCollectionID(), srcNode)
 	if replica == nil {
-		err := merr.WrapErrNodeNotFound(srcNode, fmt.Sprintf("source node not found in any replica of collection %d", req.GetCollectionID()))
 		msg := "source node not found in any replica"
-		log.Warn(msg)
+		err := merr.WrapErrNodeNotFound(srcNode, msg)
+		log.Warn(msg, zap.Int64("srcNodeID", srcNode), zap.Int64("collectionID", req.GetCollectionID()))
 		return merr.Status(err), nil
 	}
 	if err := s.isStoppingNode(ctx, srcNode); err != nil {
