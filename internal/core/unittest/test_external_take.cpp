@@ -16,6 +16,7 @@
 
 #include <arrow/array.h>
 #include <arrow/builder.h>
+#include <arrow/compute/api.h>
 #include <arrow/table.h>
 #include <arrow/type.h>
 #include <cstdint>
@@ -100,174 +101,20 @@ class MockTakeReader : public milvus_storage::api::Reader {
     }
 
  private:
-    // Select rows from table at given indices
+    // Select rows from table at given indices using arrow::compute::Take.
     static arrow::Result<std::shared_ptr<arrow::Table>>
     SelectRows(const std::shared_ptr<arrow::Table>& table,
                const std::vector<int64_t>& indices) {
         if (indices.empty()) {
             return table->Slice(0, 0);
         }
-        // Build a take indices array
         arrow::Int64Builder idx_builder;
         ARROW_RETURN_NOT_OK(idx_builder.AppendValues(indices));
         std::shared_ptr<arrow::Array> idx_arr;
         ARROW_RETURN_NOT_OK(idx_builder.Finish(&idx_arr));
-
-        std::vector<std::shared_ptr<arrow::ChunkedArray>> result_columns;
-        for (int i = 0; i < table->num_columns(); i++) {
-            auto chunked = table->column(i);
-            // Combine chunks for simplicity
-            auto combined = arrow::Concatenate(chunked->chunks());
-            if (!combined.ok()) {
-                return combined.status();
-            }
-            auto arr = *combined;
-            // Manual take: select values at indices
-            auto type = arr->type();
-            if (type->Equals(arrow::boolean())) {
-                auto typed = std::static_pointer_cast<arrow::BooleanArray>(arr);
-                arrow::BooleanBuilder b;
-                for (auto idx : indices)
-                    ARROW_RETURN_NOT_OK(b.Append(typed->Value(idx)));
-                std::shared_ptr<arrow::Array> out;
-                ARROW_RETURN_NOT_OK(b.Finish(&out));
-                result_columns.push_back(
-                    std::make_shared<arrow::ChunkedArray>(out));
-            } else if (type->Equals(arrow::int8())) {
-                auto typed = std::static_pointer_cast<arrow::Int8Array>(arr);
-                arrow::Int8Builder b;
-                for (auto idx : indices)
-                    ARROW_RETURN_NOT_OK(b.Append(typed->Value(idx)));
-                std::shared_ptr<arrow::Array> out;
-                ARROW_RETURN_NOT_OK(b.Finish(&out));
-                result_columns.push_back(
-                    std::make_shared<arrow::ChunkedArray>(out));
-            } else if (type->Equals(arrow::int16())) {
-                auto typed = std::static_pointer_cast<arrow::Int16Array>(arr);
-                arrow::Int16Builder b;
-                for (auto idx : indices)
-                    ARROW_RETURN_NOT_OK(b.Append(typed->Value(idx)));
-                std::shared_ptr<arrow::Array> out;
-                ARROW_RETURN_NOT_OK(b.Finish(&out));
-                result_columns.push_back(
-                    std::make_shared<arrow::ChunkedArray>(out));
-            } else if (type->Equals(arrow::int32())) {
-                auto typed = std::static_pointer_cast<arrow::Int32Array>(arr);
-                arrow::Int32Builder b;
-                for (auto idx : indices)
-                    ARROW_RETURN_NOT_OK(b.Append(typed->Value(idx)));
-                std::shared_ptr<arrow::Array> out;
-                ARROW_RETURN_NOT_OK(b.Finish(&out));
-                result_columns.push_back(
-                    std::make_shared<arrow::ChunkedArray>(out));
-            } else if (type->Equals(arrow::int64())) {
-                auto typed = std::static_pointer_cast<arrow::Int64Array>(arr);
-                arrow::Int64Builder b;
-                for (auto idx : indices)
-                    ARROW_RETURN_NOT_OK(b.Append(typed->Value(idx)));
-                std::shared_ptr<arrow::Array> out;
-                ARROW_RETURN_NOT_OK(b.Finish(&out));
-                result_columns.push_back(
-                    std::make_shared<arrow::ChunkedArray>(out));
-            } else if (type->Equals(arrow::float32())) {
-                auto typed = std::static_pointer_cast<arrow::FloatArray>(arr);
-                arrow::FloatBuilder b;
-                for (auto idx : indices)
-                    ARROW_RETURN_NOT_OK(b.Append(typed->Value(idx)));
-                std::shared_ptr<arrow::Array> out;
-                ARROW_RETURN_NOT_OK(b.Finish(&out));
-                result_columns.push_back(
-                    std::make_shared<arrow::ChunkedArray>(out));
-            } else if (type->Equals(arrow::float64())) {
-                auto typed = std::static_pointer_cast<arrow::DoubleArray>(arr);
-                arrow::DoubleBuilder b;
-                for (auto idx : indices)
-                    ARROW_RETURN_NOT_OK(b.Append(typed->Value(idx)));
-                std::shared_ptr<arrow::Array> out;
-                ARROW_RETURN_NOT_OK(b.Finish(&out));
-                result_columns.push_back(
-                    std::make_shared<arrow::ChunkedArray>(out));
-            } else if (type->Equals(arrow::utf8())) {
-                auto typed = std::static_pointer_cast<arrow::StringArray>(arr);
-                arrow::StringBuilder b;
-                for (auto idx : indices)
-                    ARROW_RETURN_NOT_OK(b.Append(typed->GetString(idx)));
-                std::shared_ptr<arrow::Array> out;
-                ARROW_RETURN_NOT_OK(b.Finish(&out));
-                result_columns.push_back(
-                    std::make_shared<arrow::ChunkedArray>(out));
-            } else if (type->id() == arrow::Type::TIMESTAMP) {
-                auto typed =
-                    std::static_pointer_cast<arrow::TimestampArray>(arr);
-                auto ts_type =
-                    std::static_pointer_cast<arrow::TimestampType>(type);
-                arrow::TimestampBuilder b(ts_type,
-                                          arrow::default_memory_pool());
-                for (auto idx : indices)
-                    ARROW_RETURN_NOT_OK(b.Append(typed->Value(idx)));
-                std::shared_ptr<arrow::Array> out;
-                ARROW_RETURN_NOT_OK(b.Finish(&out));
-                result_columns.push_back(
-                    std::make_shared<arrow::ChunkedArray>(out));
-            } else if (type->id() == arrow::Type::BINARY) {
-                auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
-                arrow::BinaryBuilder b;
-                for (auto idx : indices) {
-                    ARROW_RETURN_NOT_OK(b.Append(typed->Value(idx)));
-                }
-                std::shared_ptr<arrow::Array> out;
-                ARROW_RETURN_NOT_OK(b.Finish(&out));
-                result_columns.push_back(
-                    std::make_shared<arrow::ChunkedArray>(out));
-            } else if (type->id() == arrow::Type::FIXED_SIZE_BINARY) {
-                auto typed =
-                    std::static_pointer_cast<arrow::FixedSizeBinaryArray>(arr);
-                auto fsb_type =
-                    std::static_pointer_cast<arrow::FixedSizeBinaryType>(type);
-                arrow::FixedSizeBinaryBuilder b(fsb_type);
-                for (auto idx : indices)
-                    ARROW_RETURN_NOT_OK(b.Append(typed->Value(idx)));
-                std::shared_ptr<arrow::Array> out;
-                ARROW_RETURN_NOT_OK(b.Finish(&out));
-                result_columns.push_back(
-                    std::make_shared<arrow::ChunkedArray>(out));
-            } else if (type->id() == arrow::Type::LIST) {
-                // List<T> — rebuild by selecting rows from the original.
-                auto typed = std::static_pointer_cast<arrow::ListArray>(arr);
-                auto list_type =
-                    std::static_pointer_cast<arrow::ListType>(type);
-                auto value_builder_result =
-                    arrow::MakeBuilder(list_type->value_type());
-                ARROW_RETURN_NOT_OK(value_builder_result.status());
-                auto value_builder = std::move(*value_builder_result);
-                arrow::Int32Builder offset_builder;
-                ARROW_RETURN_NOT_OK(offset_builder.Append(0));
-                int32_t current_offset = 0;
-                for (auto idx : indices) {
-                    auto slice_start = typed->value_offset(idx);
-                    auto slice_len = typed->value_length(idx);
-                    auto slice = typed->values()->Slice(slice_start, slice_len);
-                    ARROW_RETURN_NOT_OK(value_builder->AppendArraySlice(
-                        *slice->data(), 0, slice_len));
-                    current_offset += slice_len;
-                    ARROW_RETURN_NOT_OK(offset_builder.Append(current_offset));
-                }
-                std::shared_ptr<arrow::Array> values_out, offsets_out;
-                ARROW_RETURN_NOT_OK(value_builder->Finish(&values_out));
-                ARROW_RETURN_NOT_OK(offset_builder.Finish(&offsets_out));
-                auto list_result =
-                    arrow::ListArray::FromArrays(*offsets_out, *values_out);
-                ARROW_RETURN_NOT_OK(list_result.status());
-                result_columns.push_back(
-                    std::make_shared<arrow::ChunkedArray>(*list_result));
-            } else {
-                return arrow::Status::NotImplemented(
-                    "MockTakeReader: unsupported Arrow type ",
-                    type->ToString());
-            }
-        }
-        auto schema = table->schema();
-        return arrow::Table::Make(schema, result_columns);
+        ARROW_ASSIGN_OR_RAISE(auto result,
+                              arrow::compute::Take(table, idx_arr));
+        return result.table();
     }
 };
 
