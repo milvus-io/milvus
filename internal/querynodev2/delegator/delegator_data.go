@@ -529,7 +529,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 
-	refundCandidatesOnErr := func(err error) error {
+	releaseCandidatesOnErr := func(err error) error {
 		for _, c := range candidates {
 			c.Refund()
 		}
@@ -540,7 +540,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	err = sd.loadBM25Stats(ctx, infos, req)
 	if err != nil {
 		log.Warn("failed to load BM25 stats", zap.Error(err))
-		return refundCandidatesOnErr(err)
+		return releaseCandidatesOnErr(err)
 	}
 
 	// Build a map from segmentID to BloomFilterSet
