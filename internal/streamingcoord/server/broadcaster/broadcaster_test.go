@@ -1072,11 +1072,13 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 
 		// No incomplete tasks in the bm
 		bm := &broadcastTaskManager{
-			mu:    &sync.Mutex{},
-			tasks: map[uint64]*broadcastTask{400: fpTask},
+			lifetime: typeutil.NewLifetime(),
+			mu:       &sync.Mutex{},
+			tasks:    map[uint64]*broadcastTask{400: fpTask},
 		}
 		ackScheduler.bm = bm
 		ackScheduler.Initialize(nil, nil, bm)
+		defer ackScheduler.Close()
 
 		// doForcePromoteFixIncompleteBroadcasts should complete the full lifecycle:
 		// BlockUntilAllAck → fix (no-op) → acquire lock → doAckCallback → close(done)
