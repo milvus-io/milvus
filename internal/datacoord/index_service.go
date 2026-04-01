@@ -74,7 +74,7 @@ func (s *Server) defaultIndexNameByID(schema *schemapb.CollectionSchema, fieldID
 
 func (s *Server) getSchema(ctx context.Context, collID int64) (*schemapb.CollectionSchema, error) {
 	resp, err := s.broker.DescribeCollectionInternal(ctx, collID)
-	if err := merr.CheckRPCCall(resp.Status, err); err != nil {
+	if err := merr.CheckRPCCall(resp, err); err != nil {
 		return nil, err
 	}
 	return resp.GetSchema(), nil
@@ -151,7 +151,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	defer broadcaster.Close()
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionID())
-	if err := merr.CheckRPCCall(coll.Status, err); err != nil {
+	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return merr.Status(err), nil
 	}
 	schema := coll.GetSchema()
