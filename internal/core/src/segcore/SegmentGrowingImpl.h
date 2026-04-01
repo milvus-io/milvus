@@ -106,6 +106,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     Reopen(
+        milvus::OpContext* op_ctx,
         const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
