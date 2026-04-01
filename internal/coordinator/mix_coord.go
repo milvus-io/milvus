@@ -867,7 +867,7 @@ func (s *mixCoordImpl) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRe
 			queryCoordTopologyNode.Connected = append(queryCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
 				ConnectedIdentifier: identifier,
 				Type:                metricsinfo.CoordConnectToNode,
-				TargetType:          typeutil.QueryNodeRole,
+				TargetType:          node.Type,
 			})
 		}
 
