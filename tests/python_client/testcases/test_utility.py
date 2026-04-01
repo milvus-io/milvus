@@ -1554,9 +1554,9 @@ class TestUtilityAdvanced(TestcaseBase):
         all_querynodes = sorted(all_querynodes,
                                 key=lambda x: len(segment_distribution[x]["sealed"])
                                 if x in segment_distribution else 0, reverse=True)
-        # add node id greater than all querynodes, which is not exist for querynode, to src_node_ids
-        max_query_node_id = max(all_querynodes)
-        invalid_src_node_id = max_query_node_id + 1
+        # use a node id greater than all nodes (not just querynodes) to ensure it truly does not exist
+        all_node_ids = [node["identifier"] for node in ms.nodes]
+        invalid_src_node_id = max(all_node_ids) + 1
         src_node_id = all_querynodes[0]
         dst_node_ids = all_querynodes[1:]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
@@ -1593,9 +1593,10 @@ class TestUtilityAdvanced(TestcaseBase):
                                 key=lambda x: len(segment_distribution[x]["sealed"])
                                 if x in segment_distribution else 0, reverse=True)
         src_node_id = all_querynodes[0]
-        # add node id greater than all querynodes, which is not exist for querynode, to dst_node_ids
-        max_query_node_id = max(all_querynodes)
-        dst_node_ids = [id for id in range(max_query_node_id + 1, max_query_node_id + 3)]
+        # use node ids greater than all nodes (not just querynodes) to ensure they truly do not exist
+        all_node_ids = [node["identifier"] for node in ms.nodes]
+        max_node_id = max(all_node_ids)
+        dst_node_ids = [max_node_id + 1, max_node_id + 2]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
         # load balance
         self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
