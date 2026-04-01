@@ -28,6 +28,7 @@
 #include <unistd.h>
 
 #include "common/File.h"
+#include "common/RegexQuery.h"
 #include "common/Types.h"
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
@@ -487,6 +488,62 @@ StringIndexMarisa::PrefixMatch(std::string_view prefix) {
         auto offsets = str_ids_to_offsets_[str_id];
         for (auto offset : offsets) {
             bitset[offset] = true;
+        }
+    }
+    return bitset;
+}
+
+const TargetBitmap
+StringIndexMarisa::PatternMatch(const std::string& pattern,
+                                proto::plan::OpType op) {
+    if (op == proto::plan::OpType::PrefixMatch) {
+        return PrefixMatch(pattern);
+    }
+
+    if (op != proto::plan::OpType::Match &&
+        op != proto::plan::OpType::PostfixMatch &&
+        op != proto::plan::OpType::InnerMatch) {
+        ThrowInfo(Unsupported,
+                  "StringIndexMarisa::PatternMatch only supports Match, "
+                  "PrefixMatch, PostfixMatch, InnerMatch, got op: {}",
+                  static_cast<int>(op));
+    }
+
+    // For Match/PostfixMatch/InnerMatch, iterate over unique trie keys
+    // instead of all rows to avoid redundant matching on duplicate values.
+    TargetBitmap bitset(str_ids_.size());
+
+    auto match_fn = [&](const std::string& val) -> bool {
+        switch (op) {
+            case proto::plan::OpType::PostfixMatch:
+                return PostfixMatch(val, pattern);
+            case proto::plan::OpType::InnerMatch:
+                return InnerMatch(val, pattern);
+            default:
+                return false;
+        }
+    };
+
+    if (op == proto::plan::OpType::Match) {
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(pattern);
+        RegexMatcher matcher(regex_pattern);
+        for (const auto& [str_id, offsets] : str_ids_to_offsets_) {
+            auto val = Reverse_Lookup(offsets[0]);
+            if (val.has_value() && matcher(val.value())) {
+                for (auto offset : offsets) {
+                    bitset[offset] = true;
+                }
+            }
+        }
+    } else {
+        for (const auto& [str_id, offsets] : str_ids_to_offsets_) {
+            auto val = Reverse_Lookup(offsets[0]);
+            if (val.has_value() && match_fn(val.value())) {
+                for (auto offset : offsets) {
+                    bitset[offset] = true;
+                }
+            }
         }
     }
     return bitset;

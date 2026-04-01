@@ -89,6 +89,14 @@ class StringIndexMarisa : public StringIndex {
     const TargetBitmap
     PrefixMatch(const std::string_view prefix) override;
 
+    bool
+    SupportPatternMatch() const override {
+        return true;
+    }
+
+    const TargetBitmap
+    PatternMatch(const std::string& pattern, proto::plan::OpType op) override;
+
     std::optional<std::string>
     Reverse_Lookup(size_t offset) const override;
 
