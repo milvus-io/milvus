@@ -66,7 +66,7 @@ ifeq ($(MILVUS_FIPS_ENABLED),ON)
 	GOEXPERIMENT_FLAG := GOEXPERIMENT=boringcrypto
 endif
 # golangci-lint
-GOLANGCI_LINT_VERSION := 1.64.7
+GOLANGCI_LINT_VERSION := 2.11.3
 GOLANGCI_LINT_OUTPUT := $(shell $(INSTALL_PATH)/golangci-lint --version 2>/dev/null)
 INSTALL_GOLANGCI_LINT := $(findstring $(GOLANGCI_LINT_VERSION), $(GOLANGCI_LINT_OUTPUT))
 # mockery
@@ -82,7 +82,7 @@ GOFUMPT_VERSION := 0.5.0
 GOFUMPT_OUTPUT := $(shell $(INSTALL_PATH)/gofumpt --version 2>/dev/null)
 INSTALL_GOFUMPT := $(findstring $(GOFUMPT_VERSION),$(GOFUMPT_OUTPUT))
 # gotestsum
-GOTESTSUM_VERSION := 1.11.0
+GOTESTSUM_VERSION := 1.13.0
 GOTESTSUM_OUTPUT := $(shell $(INSTALL_PATH)/gotestsum --version 2>/dev/null)
 INSTALL_GOTESTSUM := $(findstring $(GOTESTSUM_VERSION),$(GOTESTSUM_OUTPUT))
 # protoc-gen-go
@@ -419,7 +419,7 @@ plan-parser-so:
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(PWD)/internal/core/output/lib $(PWD)/internal/core/output/include && \
 		go env -w CGO_ENABLED="1" && \
-		GO111MODULE=on $(GO) build -buildmode=c-shared -o $(PWD)/internal/core/output/lib/libmilvus-planparser.so $(PWD)/internal/parser/planparserv2/cwrapper/wrapper.go && \
+		GO111MODULE=on $(GO) build -buildmode=c-shared -o $(PWD)/internal/core/output/lib/libmilvus-planparser.so $(PWD)/internal/parser/planparserv2/cwrapper && \
 		mv $(PWD)/internal/core/output/lib/libmilvus-planparser.h $(PWD)/internal/core/output/include/libmilvus-planparser.h && \
 		cp $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.h $(PWD)/internal/core/output/include/ && \
 		$${CXX:-g++} -std=c++17 -shared -fPIC -o $(PWD)/internal/core/output/lib/libmilvus-planparser-cpp.so $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.cpp \
