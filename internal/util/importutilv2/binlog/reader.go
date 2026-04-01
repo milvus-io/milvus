@@ -28,8 +28,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -38,9 +40,10 @@ type reader struct {
 	cm     storage.ChunkManager
 	schema *schemapb.CollectionSchema
 
-	fileSize   *atomic.Int64
-	deleteData map[any]typeutil.Timestamp // pk2ts
-	insertLogs map[int64][]string         // fieldID -> binlogs
+	fileSize      *atomic.Int64
+	retryAttempts uint
+	deleteData    map[any]typeutil.Timestamp // pk2ts
+	insertLogs    map[int64][]string         // fieldID -> binlogs
 
 	readIdx int
 	filters []Filter
@@ -55,10 +58,11 @@ func NewReader(ctx context.Context,
 ) (*reader, error) {
 	schema = typeutil.AppendSystemFields(schema)
 	r := &reader{
-		ctx:      ctx,
-		cm:       cm,
-		schema:   schema,
-		fileSize: atomic.NewInt64(0),
+		ctx:           ctx,
+		cm:            cm,
+		schema:        schema,
+		fileSize:      atomic.NewInt64(0),
+		retryAttempts: paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(),
 	}
 	err := r.init(paths, tsStart, tsEnd)
 	if err != nil {
@@ -78,7 +82,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		return merr.WrapErrImportFailed(fmt.Sprintf("too many input paths for binlog import. "+
 			"Valid paths length should be one or two, but got paths:%s", paths))
 	}
-	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0])
+	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0], r.retryAttempts)
 	if err != nil {
 		return err
 	}
@@ -91,7 +95,15 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if len(paths) < 2 {
 		return nil
 	}
-	deltaLogs, _, err := storage.ListAllChunkWithPrefix(context.Background(), r.cm, paths[1], true)
+	var deltaLogs []string
+	err = importcommon.WalkWithPrefixRetry(r.ctx, r.cm, paths[1], true, r.retryAttempts,
+		func() {
+			deltaLogs = nil
+		},
+		func(chunkInfo *storage.ChunkObjectInfo) bool {
+			deltaLogs = append(deltaLogs, chunkInfo.FilePath)
+			return true
+		})
 	if err != nil {
 		return err
 	}
