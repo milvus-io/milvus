@@ -220,3 +220,51 @@ func TestRetryableReader_DenylistRetry_EOFHandling(t *testing.T) {
 	assert.Equal(t, 0, n)
 	assert.Equal(t, 1, mockReader.callCount, "EOF should not be retried")
 }
+
+func TestRetryableReader_ContextCanceled(t *testing.T) {
+	ctx := context.Background()
+
+	mockReader := &customMockReader{
+		readFunc: func(p []byte) (int, error) {
+			return 0, context.Canceled
+		},
+	}
+
+	reader := &retryableReader{
+		FileReader:    mockReader,
+		ctx:           ctx,
+		path:          "test/path",
+		retryAttempts: 10,
+	}
+
+	buf := make([]byte, 10)
+	n, err := reader.Read(buf)
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 0, n)
+	assert.Equal(t, 1, mockReader.callCount, "context.Canceled should not be retried")
+}
+
+func TestRetryableReader_ContextDeadlineExceeded(t *testing.T) {
+	ctx := context.Background()
+
+	mockReader := &customMockReader{
+		readFunc: func(p []byte) (int, error) {
+			return 0, context.DeadlineExceeded
+		},
+	}
+
+	reader := &retryableReader{
+		FileReader:    mockReader,
+		ctx:           ctx,
+		path:          "test/path",
+		retryAttempts: 10,
+	}
+
+	buf := make([]byte, 10)
+	n, err := reader.Read(buf)
+
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Equal(t, 0, n)
+	assert.Equal(t, 1, mockReader.callCount, "context.DeadlineExceeded should not be retried")
+}

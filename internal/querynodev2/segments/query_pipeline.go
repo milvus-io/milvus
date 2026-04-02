@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
@@ -329,7 +330,21 @@ func convertSegcoreElementIndicesToInternal(src []*segcorepb.ElementIndices) []*
 }
 
 // emptySegcoreResult creates an empty result with proper field schema.
+// For aggregation queries (GROUP BY / count(*) / sum / etc.), it generates
+// a semantically correct empty aggregation result (e.g., count=0) via
+// GroupAggReducer.EmptyAggResult, because FillRetrieveResultIfEmpty relies
+// on OutputFieldsId which is intentionally empty for aggregation queries.
 func emptySegcoreResult(req *querypb.QueryRequest, schema *schemapb.CollectionSchema) (*segcorepb.RetrieveResults, error) {
+	hasAggregation := len(req.GetReq().GetGroupByFieldIds()) > 0 || len(req.GetReq().GetAggregates()) > 0
+	if hasAggregation {
+		reducer := agg.NewGroupAggReducer(req.GetReq().GetGroupByFieldIds(), req.GetReq().GetAggregates(), -1, schema)
+		emptyAgg, err := reducer.EmptyAggResult()
+		if err != nil {
+			return nil, err
+		}
+		return agg.AggResult2segcoreResult(emptyAgg), nil
+	}
+
 	empty := &segcorepb.RetrieveResults{}
 	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewSegcoreResults(empty), req.GetReq().GetOutputFieldsId(), schema); err != nil {
 		return nil, err

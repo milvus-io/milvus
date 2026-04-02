@@ -1366,6 +1366,7 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
 
     milvus::index::CreateIndexInfo index_info;
     index_info.field_type = load_index_info->field_type;
+    index_info.field_name = load_index_info->schema.name();
     index_info.index_engine_version = engine_version;
 
     auto config = milvus::index::ParseConfigFromIndexParams(

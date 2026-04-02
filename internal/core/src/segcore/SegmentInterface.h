@@ -251,7 +251,8 @@ class SegmentInterface {
     Reopen(SchemaPtr sch) = 0;
 
     virtual void
-    Reopen(const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
+    Reopen(milvus::OpContext* op_ctx,
+           const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
 
     virtual void
     SetLoadInfo(const milvus::proto::segcore::SegmentLoadInfo& load_info) = 0;

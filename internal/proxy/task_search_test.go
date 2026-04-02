@@ -3374,11 +3374,11 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		assert.Equal(t, Params.QuotaConfig.TopKLimit.GetAsInt64(), searchInfo.planInfo.GetTopk())
 	})
 
-	t.Run("check bigTopK uses dedicated topK limit", func(t *testing.T) {
+	t.Run("check largeTopK uses dedicated topK limit", func(t *testing.T) {
 		Params.Save(Params.QuotaConfig.TopKLimit.Key, "100")
-		Params.Save(Params.QuotaConfig.BigTopKLimit.Key, "200")
+		Params.Save(Params.QuotaConfig.LargeTopKLimit.Key, "200")
 		defer Params.Reset(Params.QuotaConfig.TopKLimit.Key)
-		defer Params.Reset(Params.QuotaConfig.BigTopKLimit.Key)
+		defer Params.Reset(Params.QuotaConfig.LargeTopKLimit.Key)
 
 		param := getValidSearchParams()
 		resetSearchParamsValue(param, TopKKey, `150`)
@@ -3391,11 +3391,11 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		assert.Equal(t, int64(150), searchInfo.planInfo.GetTopk())
 	})
 
-	t.Run("check iterator uses bigTopK limit fallback", func(t *testing.T) {
+	t.Run("check iterator uses largeTopK limit fallback", func(t *testing.T) {
 		Params.Save(Params.QuotaConfig.TopKLimit.Key, "100")
-		Params.Save(Params.QuotaConfig.BigTopKLimit.Key, "200")
+		Params.Save(Params.QuotaConfig.LargeTopKLimit.Key, "200")
 		defer Params.Reset(Params.QuotaConfig.TopKLimit.Key)
-		defer Params.Reset(Params.QuotaConfig.BigTopKLimit.Key)
+		defer Params.Reset(Params.QuotaConfig.LargeTopKLimit.Key)
 
 		param := getValidSearchParams()
 		param = append(param, &commonpb.KeyValuePair{
@@ -3576,11 +3576,11 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			assert.ErrorContains(t, err, "batch size is invalid")
 		})
 
-		t.Run("iteratorV2 batch size uses bigTopK limit", func(t *testing.T) {
+		t.Run("iteratorV2 batch size uses largeTopK limit", func(t *testing.T) {
 			Params.Save(Params.QuotaConfig.TopKLimit.Key, "100")
-			Params.Save(Params.QuotaConfig.BigTopKLimit.Key, "200")
+			Params.Save(Params.QuotaConfig.LargeTopKLimit.Key, "200")
 			defer Params.Reset(Params.QuotaConfig.TopKLimit.Key)
-			defer Params.Reset(Params.QuotaConfig.BigTopKLimit.Key)
+			defer Params.Reset(Params.QuotaConfig.LargeTopKLimit.Key)
 
 			param := generateValidParamsForSearchIteratorV2()
 			resetSearchParamsValue(param, SearchIterBatchSizeKey, "150")

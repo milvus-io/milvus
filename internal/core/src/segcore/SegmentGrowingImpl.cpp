@@ -1921,6 +1921,7 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
 
 void
 SegmentGrowingImpl::Reopen(
+    milvus::OpContext* op_ctx,
     const milvus::proto::segcore::SegmentLoadInfo& new_load_info) {
     ThrowInfo(milvus::UnexpectedError,
               "Unexpected reopening growing segment {} with load info",

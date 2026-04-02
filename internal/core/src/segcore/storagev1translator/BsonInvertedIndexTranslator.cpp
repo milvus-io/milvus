@@ -108,7 +108,7 @@ BsonInvertedIndexTranslator::get_cells(
             milvus::ScopedTimer::LogLevel::Info);
 
         // Load the index using the files from load_info_
-        // Cast uint32_t to LoadPriority enum
+        // Files are absolute remote paths (basePath already prepended by caller)
         index->LoadIndex(load_info_.index_files,
                          static_cast<milvus::proto::common::LoadPriority>(
                              load_info_.load_priority),

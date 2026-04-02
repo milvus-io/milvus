@@ -648,11 +648,13 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     void
     LoadColumnGroup(int64_t column_group_id,
                     const std::vector<int64_t>& file_ids,
-                    const std::string& warmup_policy = "");
+                    const std::string& warmup_policy = "",
+                    const std::string& override_prefix = "");
 
     void
     LoadShreddingMeta(
-        std::vector<std::pair<int64_t, std::vector<int64_t>>> sorted_files);
+        std::vector<std::pair<int64_t, std::vector<int64_t>>> sorted_files,
+        const std::string& override_prefix = "");
 
     std::string
     AddBucketName(const std::string& remote_prefix);

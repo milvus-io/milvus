@@ -73,7 +73,7 @@ type searchTask struct {
 	schema                 *schemaInfo
 	needRequery            bool
 	partitionKeyMode       bool
-	bigTopKOptimization    bool
+	largeTopKEnabled       bool
 	enableMaterializedView bool
 	mustUsePartitionKey    bool
 	resultSizeInsufficient bool
@@ -110,7 +110,8 @@ type searchTask struct {
 	// if the user explicitly set pk field in output fields, we add it back to the result.
 	userRequestedPkFieldExplicitly bool
 
-	storageCost segcore.StorageCost
+	storageCost  segcore.StorageCost
+	traceEnabled bool
 }
 
 func (t *searchTask) CanSkipAllocTimestamp() bool {
@@ -171,7 +172,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID), zap.Error(err2))
 		return err2
 	}
-	t.bigTopKOptimization = collectionInfo.bigTopKOptimization
+	t.largeTopKEnabled = collectionInfo.queryMode == common.QueryModeLargeTopK
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
@@ -238,6 +239,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	// Currently, we get vectors by requery. Once we support getting vectors from search,
 	// searches with small result size could no longer need requery.
+	traceVal, _ := funcutil.GetAttrByKeyFromRepeatedKV(PipelineTraceKey, t.request.GetSearchParams())
+	t.traceEnabled = strings.EqualFold(traceVal, "true")
 	if t.SearchRequest.GetIsAdvanced() {
 		err = t.initAdvancedSearchRequest(ctx)
 	} else {
@@ -431,7 +434,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
 
-	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema, t.bigTopKOptimization); err != nil {
+	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema, t.largeTopKEnabled); err != nil {
 		log.Error("parseRankParams failed", zap.Error(err))
 		return err
 	}
@@ -814,7 +817,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		}
 		annsFieldName = vecFields[0].Name
 	}
-	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams, t.bigTopKOptimization)
+	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams, t.largeTopKEnabled)
 	if err != nil {
 		return nil, nil, 0, false, nil, err
 	}

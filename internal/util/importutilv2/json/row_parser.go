@@ -160,19 +160,33 @@ func (r *rowParser) wrapArrayValueTypeError(v any, eleType schemapb.DataType) er
 // we reconstruct it to be handled by handleField as:
 //
 //	{"sub-field1": [1, 2], "sub-field2": [[1.0, 2.0], [3.0, 4.0]]}
-func reconstructArrayForStructArray(raw any) (map[string]any, error) {
+func reconstructArrayForStructArray(raw any, subFieldNames []string) (map[string]any, error) {
 	rows, ok := raw.([]any)
 	if !ok {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid StructArray format in JSON, each row should be a key-value map, but got type %T", raw))
 	}
 
+	expectedFields := make(map[string]struct{}, len(subFieldNames))
+	for _, name := range subFieldNames {
+		expectedFields[name] = struct{}{}
+	}
+
 	buf := make(map[string][]any)
-	for _, elem := range rows {
+	for i, elem := range rows {
 		row, ok := elem.(map[string]any)
 		if !ok {
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("invalid element in StructArray, expect map[string]any but got type %T", elem))
 		}
+		if len(row) != len(subFieldNames) {
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("inconsistent field count in StructArray element: position=%d, actual=%d, expected=%d",
+					i, len(row), len(subFieldNames)))
+		}
 		for key, value := range row {
+			if _, ok := expectedFields[key]; !ok {
+				return nil, merr.WrapErrImportFailed(
+					fmt.Sprintf("unexpected field in StructArray element: field=%s, position=%d, expected fields=%v", key, i, subFieldNames))
+			}
 			buf[key] = append(buf[key], value)
 		}
 	}
@@ -240,7 +254,7 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 	// read values from json file
 	for key, value := range stringMap {
 		if subFieldNames, ok := r.structArrays[key]; ok {
-			values, err := reconstructArrayForStructArray(value)
+			values, err := reconstructArrayForStructArray(value, subFieldNames)
 			if err != nil {
 				return nil, err
 			}
@@ -788,10 +802,14 @@ func (r *rowParser) arrayOfVectorToFieldData(vectors []any, field *schemapb.Fiel
 	case schemapb.DataType_FloatVector:
 		values := make([]float32, 0, len(vectors)*10)
 		dim := r.id2Dim[fieldID]
-		for _, vectorAny := range vectors {
+		for i, vectorAny := range vectors {
 			vector, ok := vectorAny.([]any)
 			if !ok {
 				return nil, merr.WrapErrImportFailed(fmt.Sprintf("expected slice as vector, but got %T", vectorAny))
+			}
+			if len(vector) != dim {
+				return nil, merr.WrapErrImportFailed(
+					fmt.Sprintf("vector at index %d has dimension %d, expected %d", i, len(vector), dim))
 			}
 			for _, v := range vector {
 				value, ok := v.(json.Number)

@@ -82,7 +82,9 @@ func InitSegcore(nodeID int64) error {
 	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereThreadPoolSize)
 
 	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, nodeID)
-	initcore.InitLocalChunkManager(localDataRootPath)
+	if err := initcore.InitLocalChunkManager(localDataRootPath); err != nil {
+		return err
+	}
 	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)

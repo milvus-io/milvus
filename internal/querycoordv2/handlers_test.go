@@ -23,12 +23,15 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/tidwall/gjson"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestGetChannelsFromQueryNode(t *testing.T) {
@@ -178,5 +181,136 @@ func TestServer_getSegmentsJSON(t *testing.T) {
 		result, err := server.getSegmentsJSON(ctx, req, jsonReq)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, result)
+	})
+}
+
+func TestFillMetricsWithNodes_StreamingNodeRelabel(t *testing.T) {
+	makeMetricResp := func(nodeID int64, nodeType string) *metricResp {
+		infos := metricsinfo.QueryNodeInfos{
+			BaseComponentInfos: metricsinfo.BaseComponentInfos{
+				Name: metricsinfo.ConstructComponentName(nodeType, nodeID),
+				Type: nodeType,
+				ID:   nodeID,
+			},
+		}
+		resp, _ := metricsinfo.MarshalComponentInfos(infos)
+		return &metricResp{
+			resp: &milvuspb.GetMetricsResponse{
+				Status:   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				Response: resp,
+			},
+		}
+	}
+
+	t.Run("regular query node keeps querynode type", func(t *testing.T) {
+		nodeManager := session.NewNodeManager()
+		nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID: 1,
+			Labels: map[string]string{},
+		}))
+		server := &Server{nodeMgr: nodeManager}
+
+		topo := &metricsinfo.QueryClusterTopology{
+			ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),
+		}
+		server.fillMetricsWithNodes(topo, []*metricResp{makeMetricResp(1, typeutil.QueryNodeRole)})
+
+		assert.Len(t, topo.ConnectedNodes, 1)
+		assert.Equal(t, typeutil.QueryNodeRole, topo.ConnectedNodes[0].Type)
+		assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, 1), topo.ConnectedNodes[0].Name)
+	})
+
+	t.Run("embedded streaming node relabeled to streamingnode", func(t *testing.T) {
+		nodeManager := session.NewNodeManager()
+		nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID: 2,
+			Labels: map[string]string{
+				sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1",
+			},
+		}))
+		server := &Server{nodeMgr: nodeManager}
+
+		topo := &metricsinfo.QueryClusterTopology{
+			ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),
+		}
+		server.fillMetricsWithNodes(topo, []*metricResp{makeMetricResp(2, typeutil.QueryNodeRole)})
+
+		assert.Len(t, topo.ConnectedNodes, 1)
+		assert.Equal(t, typeutil.StreamingNodeRole, topo.ConnectedNodes[0].Type)
+		assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.StreamingNodeRole, 2), topo.ConnectedNodes[0].Name)
+	})
+
+	t.Run("legacy label also relabeled", func(t *testing.T) {
+		nodeManager := session.NewNodeManager()
+		nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID: 3,
+			Labels: map[string]string{
+				sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode: "1",
+			},
+		}))
+		server := &Server{nodeMgr: nodeManager}
+
+		topo := &metricsinfo.QueryClusterTopology{
+			ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),
+		}
+		server.fillMetricsWithNodes(topo, []*metricResp{makeMetricResp(3, typeutil.QueryNodeRole)})
+
+		assert.Len(t, topo.ConnectedNodes, 1)
+		assert.Equal(t, typeutil.StreamingNodeRole, topo.ConnectedNodes[0].Type)
+	})
+
+	t.Run("mixed nodes correctly separated", func(t *testing.T) {
+		nodeManager := session.NewNodeManager()
+		// Node 10: regular query node
+		nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID: 10,
+			Labels: map[string]string{},
+		}))
+		// Node 11: streaming node
+		nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID: 11,
+			Labels: map[string]string{
+				sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1",
+			},
+		}))
+		// Node 12: regular query node
+		nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID: 12,
+			Labels: map[string]string{},
+		}))
+		server := &Server{nodeMgr: nodeManager}
+
+		topo := &metricsinfo.QueryClusterTopology{
+			ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),
+		}
+		server.fillMetricsWithNodes(topo, []*metricResp{
+			makeMetricResp(10, typeutil.QueryNodeRole),
+			makeMetricResp(11, typeutil.QueryNodeRole),
+			makeMetricResp(12, typeutil.QueryNodeRole),
+		})
+
+		assert.Len(t, topo.ConnectedNodes, 3)
+		// Build a map for easy lookup
+		typeByID := make(map[int64]string)
+		for _, node := range topo.ConnectedNodes {
+			typeByID[node.ID] = node.Type
+		}
+		assert.Equal(t, typeutil.QueryNodeRole, typeByID[10])
+		assert.Equal(t, typeutil.StreamingNodeRole, typeByID[11])
+		assert.Equal(t, typeutil.QueryNodeRole, typeByID[12])
+	})
+
+	t.Run("node not in nodeMgr keeps original type", func(t *testing.T) {
+		nodeManager := session.NewNodeManager()
+		// Don't add node 99 to the manager
+		server := &Server{nodeMgr: nodeManager}
+
+		topo := &metricsinfo.QueryClusterTopology{
+			ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),
+		}
+		server.fillMetricsWithNodes(topo, []*metricResp{makeMetricResp(99, typeutil.QueryNodeRole)})
+
+		assert.Len(t, topo.ConnectedNodes, 1)
+		assert.Equal(t, typeutil.QueryNodeRole, topo.ConnectedNodes[0].Type)
 	})
 }

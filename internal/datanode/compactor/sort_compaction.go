@@ -204,6 +204,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
 		log.Warn("load deletePKs failed", zap.Error(err))
+		srw.Close()
 		return nil, err
 	}
 	loadDeltaCost := time.Since(phaseStart)
@@ -262,6 +263,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	}
 	if err != nil {
 		log.Warn("error creating insert binlog reader", zap.Error(err))
+		srw.Close()
 		return nil, err
 	}
 	defer rr.Close()
@@ -271,6 +273,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, t.plan.GetSchema(), rrs, srw, predicate, t.sortByFieldIDs)
 	if err != nil {
 		log.Warn("sort failed", zap.Error(err))
+		srw.Close()
 		return nil, err
 	}
 	if sortTimings == nil {
@@ -446,8 +449,25 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 				State:  datapb.CompactionTaskState_failed,
 			}, nil
 		}
-		// For V3 segments, register text index stats in manifest
+		// For V3 segments, register text index stats in manifest.
+		// C++ Upload() returns relative file names; convert to absolute
+		// by prepending statsBasePath before registering with manifest.
 		if resultSegment.GetManifest() != "" && len(textStatsLogs) > 0 {
+			basePath, _, bErr := packed.UnmarshalManifestPath(resultSegment.GetManifest())
+			if bErr != nil {
+				log.Warn("failed to unmarshal manifest path for text index stats",
+					zap.Int64("targetSegmentID", targetSegemntID), zap.Error(bErr))
+				return &datapb.CompactionPlanResult{
+					PlanID: t.GetPlanID(),
+					State:  datapb.CompactionTaskState_failed,
+				}, nil
+			}
+			for _, stats := range textStatsLogs {
+				prefix := fmt.Sprintf("%s/_stats/text_index.%d", basePath, stats.GetFieldID())
+				for i, f := range stats.GetFiles() {
+					stats.Files[i] = prefix + "/" + f
+				}
+			}
 			statEntries := packed.TextIndexStatEntries(textStatsLogs, t.plan.GetCurrentScalarIndexVersion())
 			newManifest, mErr := packed.AddStatsToManifest(
 				resultSegment.GetManifest(), t.compactionParams.StorageConfig, statEntries)
@@ -587,6 +607,16 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				return err
 			}
 
+			// Compute statsBasePath so C++ uploads text index to manifest-compatible location.
+			var statsBasePath string
+			if segment.GetManifest() != "" {
+				basePath, _, err := packed.UnmarshalManifestPath(segment.GetManifest())
+				if err != nil {
+					return fmt.Errorf("failed to unmarshal manifest path for text_index basePath: %w", err)
+				}
+				statsBasePath = fmt.Sprintf("%s/_stats/text_index.%d", basePath, field.GetFieldID())
+			}
+
 			buildIndexParams := &indexcgopb.BuildIndexInfo{
 				BuildID:                   t.GetPlanID(),
 				CollectionID:              collectionID,
@@ -599,6 +629,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				CurrentScalarIndexVersion: common.ClampScalarIndexVersion(t.plan.GetCurrentScalarIndexVersion()),
 				StorageVersion:            t.storageVersion,
 				Manifest:                  segment.GetManifest(),
+				StatsBasePath:             statsBasePath,
 				IndexParams: []*commonpb.KeyValuePair{
 					{Key: "index_type", Value: "INVERTED"},
 					{Key: "is_text_match", Value: "true"},

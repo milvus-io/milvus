@@ -211,22 +211,47 @@ func (r *StatsResolver) BM25StatsPaths() (map[int64][]string, error) {
 	return result, nil
 }
 
+// StatsResult holds stats info together with the base paths for each field.
+type StatsResult struct {
+	TextIndexStats map[int64]*datapb.TextIndexStats
+	JSONKeyStats   map[int64]*datapb.JsonKeyStats
+	TextBasePaths  map[int64]string // fieldID -> basePath for text index
+	JSONBasePaths  map[int64]string // fieldID -> basePath for json key stats
+}
+
 // TextAndJSONIndexStats returns text index and JSON key stats.
 // For manifest: parsed from manifest metadata (highest version wins per field).
 // For legacy: returns the WithTextStatsLogs/WithJSONKeyStats maps directly.
 func (r *StatsResolver) TextAndJSONIndexStats() (
 	map[int64]*datapb.TextIndexStats, map[int64]*datapb.JsonKeyStats, error,
 ) {
+	result := r.TextAndJSONIndexStatsWithBasePaths()
+	return result.TextIndexStats, result.JSONKeyStats, result.err
+}
+
+// TextAndJSONIndexStatsWithBasePaths returns stats with base path information.
+// For V3 (manifest): basePaths are extracted from the manifest stat paths.
+// For V2 (legacy): basePaths are empty (backward compat).
+func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr {
 	if !r.isManifest() {
-		return r.textStatsLogs, r.jsonKeyStats, nil
+		return &StatsResultWithErr{
+			StatsResult: StatsResult{
+				TextIndexStats: r.textStatsLogs,
+				JSONKeyStats:   r.jsonKeyStats,
+			},
+		}
 	}
 
 	if err := r.loadManifest(); err != nil {
-		return nil, nil, err
+		return &StatsResultWithErr{err: err}
 	}
 
 	textIndexedInfo := make(map[int64]*datapb.TextIndexStats)
 	jsonKeyIndexInfo := make(map[int64]*datapb.JsonKeyStats)
+	textBasePaths := make(map[int64]string)
+	jsonBasePaths := make(map[int64]string)
+
+	basePath, _, _ := UnmarshalManifestPath(r.manifestPath)
 
 	for key, stat := range r.manifestStats {
 		prefix, fieldID, ok := ParseStatKey(key)
@@ -236,7 +261,11 @@ func (r *StatsResolver) TextAndJSONIndexStats() (
 
 		switch prefix {
 		case "text_index":
+			// For V3: extract basePath and convert to relative paths
+			statBasePath := basePath + "/_stats/" + key
 			resolvedPaths := r.resolveStatPaths(stat.Paths)
+			relativeFiles := stripBasePathPrefix(resolvedPaths, statBasePath)
+
 			version, _ := strconv.ParseInt(stat.Metadata["version"], 10, 64)
 			buildID, _ := strconv.ParseInt(stat.Metadata["build_id"], 10, 64)
 			logSize, _ := strconv.ParseInt(stat.Metadata["log_size"], 10, 64)
@@ -247,7 +276,7 @@ func (r *StatsResolver) TextAndJSONIndexStats() (
 				FieldID:                   fieldID,
 				Version:                   version,
 				BuildID:                   buildID,
-				Files:                     resolvedPaths,
+				Files:                     relativeFiles,
 				LogSize:                   logSize,
 				MemorySize:                memorySize,
 				CurrentScalarIndexVersion: int32(scalarVer),
@@ -256,15 +285,15 @@ func (r *StatsResolver) TextAndJSONIndexStats() (
 			existing, ok := textIndexedInfo[fieldID]
 			if !ok || version > existing.GetVersion() {
 				textIndexedInfo[fieldID] = textStats
+				textBasePaths[fieldID] = statBasePath
 			}
 
 		case "json_key_index":
-			// JSON key index files are stored under a separate json_stats/ prefix,
-			// not under basePath/_stats/. The C++ loading code (BsonInvertedIndex::LoadIndex,
-			// CacheJsonStatsMetaToDisk) reconstructs full paths by prepending
-			// GetRemoteJsonStatsLogPrefix(). So we must strip the basePath/_stats/
-			// prefix that the manifest FFI adds, to recover the original relative paths.
-			resolvedPaths := r.relativeStatPaths(stat.Paths)
+			// For V3: extract basePath and convert to relative paths
+			statBasePath := basePath + "/_stats/" + key
+			resolvedPaths := r.resolveStatPaths(stat.Paths)
+			relativeFiles := stripBasePathPrefix(resolvedPaths, statBasePath)
+
 			version, _ := strconv.ParseInt(stat.Metadata["version"], 10, 64)
 			buildID, _ := strconv.ParseInt(stat.Metadata["build_id"], 10, 64)
 			logSize, _ := strconv.ParseInt(stat.Metadata["log_size"], 10, 64)
@@ -275,7 +304,7 @@ func (r *StatsResolver) TextAndJSONIndexStats() (
 				FieldID:                fieldID,
 				Version:                version,
 				BuildID:                buildID,
-				Files:                  resolvedPaths,
+				Files:                  relativeFiles,
 				LogSize:                logSize,
 				MemorySize:             memorySize,
 				JsonKeyStatsDataFormat: dataFormat,
@@ -284,11 +313,46 @@ func (r *StatsResolver) TextAndJSONIndexStats() (
 			existing, ok := jsonKeyIndexInfo[fieldID]
 			if !ok || version > existing.GetVersion() {
 				jsonKeyIndexInfo[fieldID] = jsonStats
+				jsonBasePaths[fieldID] = statBasePath
 			}
 		}
 	}
 
-	return textIndexedInfo, jsonKeyIndexInfo, nil
+	return &StatsResultWithErr{
+		StatsResult: StatsResult{
+			TextIndexStats: textIndexedInfo,
+			JSONKeyStats:   jsonKeyIndexInfo,
+			TextBasePaths:  textBasePaths,
+			JSONBasePaths:  jsonBasePaths,
+		},
+	}
+}
+
+// StatsResultWithErr wraps StatsResult with an error.
+type StatsResultWithErr struct {
+	StatsResult
+	err error
+}
+
+// Err returns the error from loading stats.
+func (r *StatsResultWithErr) Err() error {
+	return r.err
+}
+
+// stripBasePathPrefix strips the basePath prefix from absolute paths to get relative paths.
+// Paths that don't match the expected prefix are left unchanged.
+// at a parent directory level that don't belong to this stat entry).
+func stripBasePathPrefix(paths []string, basePath string) []string {
+	prefix := basePath + "/"
+	result := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if strings.HasPrefix(p, prefix) {
+			result = append(result, p[len(prefix):])
+		} else {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 // loadManifest lazily loads and caches the manifest stats via FFI.
@@ -312,28 +376,6 @@ func (r *StatsResolver) loadManifest() error {
 // by prepending basePath/_stats/, so the paths are ready to use as-is.
 func (r *StatsResolver) resolveStatPaths(paths []string) []string {
 	return paths
-}
-
-// relativeStatPaths strips the basePath/_stats/ prefix that the C++ loon FFI
-// adds via ToAbsolutePaths(), recovering the original relative paths stored
-// in the manifest. This is needed for stat types (e.g. json_key_index) whose
-// files are stored under a different remote prefix (e.g. json_stats/), not
-// under basePath/_stats/. The C++ loading code will reconstruct the correct
-// absolute path using its own prefix (GetRemoteJsonStatsLogPrefix).
-func (r *StatsResolver) relativeStatPaths(paths []string) []string {
-	if !r.isManifest() {
-		return paths
-	}
-	basePath, _, err := UnmarshalManifestPath(r.manifestPath)
-	if err != nil {
-		return paths
-	}
-	prefix := basePath + "/_stats/"
-	result := make([]string, len(paths))
-	for i, p := range paths {
-		result[i] = strings.TrimPrefix(p, prefix)
-	}
-	return result
 }
 
 // ParseStatKey parses a "type.fieldID" stat key into its type prefix and field ID.
