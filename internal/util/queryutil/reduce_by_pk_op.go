@@ -41,13 +41,16 @@ import (
 // (IReduceInOrder/IReduceInOrderForBest) stop early to maintain page boundaries.
 type ReduceByPKOperator struct {
 	reduceType reduce.IReduceType
+	schema     *schemapb.CollectionSchema
 }
 
 // NewSortAndCheckPKOperator creates a reduce-by-PK operator for proxy level.
 // It sorts by PK ASC and returns an error if duplicate PKs are detected
 // across shards (indicating a data integrity issue).
-func NewSortAndCheckPKOperator(reduceType reduce.IReduceType) *ReduceByPKOperator {
-	return &ReduceByPKOperator{reduceType: reduceType}
+// schema is used to determine per-field nullable flags for correct merge semantics.
+// Pass nil to treat all fields as non-nullable (QN-side / schema-unaware callers).
+func NewSortAndCheckPKOperator(reduceType reduce.IReduceType, schema *schemapb.CollectionSchema) *ReduceByPKOperator {
+	return &ReduceByPKOperator{reduceType: reduceType, schema: schema}
 }
 
 func (op *ReduceByPKOperator) Name() string {
@@ -129,8 +132,11 @@ func (op *ReduceByPKOperator) mergeByPK(results []*internalpb.RetrieveResults, h
 		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult}, nil
 	}
 
+	// Build nullable flag array from schema once, before merging
+	nullableFields := buildNullableFieldMap(op.schema)
+
 	// Build merged result
-	merged, err := buildMergedRetrieveResults(results, selectedRows)
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nullableFields)
 	if err != nil {
 		return nil, err
 	}
@@ -156,16 +162,19 @@ type ReduceByPKWithTimestampOperator struct {
 	reduceType    reduce.IReduceType
 	maxOutputSize int64
 	limit         int64
+	schema        *schemapb.CollectionSchema
 }
 
 // NewReduceByPKWithTimestampOperator creates an operator with timestamp-based deduplication.
 // maxOutputSize: maximum allowed output size in bytes; <= 0 disables the check.
 // limit: maximum rows/elements to keep; <= 0 means unlimited.
-func NewReduceByPKWithTimestampOperator(reduceType reduce.IReduceType, maxOutputSize int64, limit int64) *ReduceByPKWithTimestampOperator {
+// schema is used to determine per-field nullable flags. Pass nil for QN-side callers.
+func NewReduceByPKWithTimestampOperator(reduceType reduce.IReduceType, maxOutputSize int64, limit int64, schema *schemapb.CollectionSchema) *ReduceByPKWithTimestampOperator {
 	return &ReduceByPKWithTimestampOperator{
 		reduceType:    reduceType,
 		maxOutputSize: maxOutputSize,
 		limit:         limit,
+		schema:        schema,
 	}
 }
 
@@ -305,7 +314,10 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 		origResults[i] = tr.result
 	}
 
-	merged, err := buildMergedRetrieveResults(origResults, selectedRows)
+	// Build nullable flag array from schema once, before merging
+	nullableFields := buildNullableFieldMap(op.schema)
+
+	merged, err := buildMergedRetrieveResults(origResults, selectedRows, nullableFields)
 	if err != nil {
 		return nil, err
 	}

@@ -56,8 +56,28 @@ func comparePK(a, b any) int {
 	return 0
 }
 
+// buildNullableFieldMap builds a fieldID→nullable map from schema.
+// Returns nil if schema is nil (all fields treated as non-nullable by callers).
+// Callers pass the returned map to buildMergedRetrieveResults; field lookup
+// uses FieldID so it is robust to FieldsData ordering differences across results.
+func buildNullableFieldMap(schema *schemapb.CollectionSchema) map[int64]bool {
+	if schema == nil {
+		return nil
+	}
+	m := make(map[int64]bool)
+	for _, f := range schema.GetFields() {
+		if f.GetNullable() {
+			m[f.GetFieldID()] = true
+		}
+	}
+	return m
+}
+
 // buildMergedRetrieveResults builds merged result from selected rows.
-func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedRows []rowRef) (*internalpb.RetrieveResults, error) {
+// nullableFields maps fieldID→true for nullable fields (from schema).
+// Pass nil to treat all fields as non-nullable (QN-side / non-schema-aware callers).
+// Reading a nil map in Go returns the zero value (false), so nil is safe.
+func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedRows []rowRef, nullableFields map[int64]bool) (*internalpb.RetrieveResults, error) {
 	if len(selectedRows) == 0 || len(results) == 0 {
 		return &internalpb.RetrieveResults{}, nil
 	}
@@ -94,7 +114,9 @@ func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedR
 
 	// Build merged field data
 	for fieldIdx := 0; fieldIdx < numFields; fieldIdx++ {
-		merged.FieldsData[fieldIdx] = buildMergedFieldData(results, selectedRows, fieldIdx)
+		fieldID := template.GetFieldsData()[fieldIdx].GetFieldId()
+		isNullable := nullableFields[fieldID] // false for nil map or absent fieldID
+		merged.FieldsData[fieldIdx] = buildMergedFieldData(results, selectedRows, fieldIdx, isNullable)
 	}
 
 	// Propagate element-level metadata
@@ -177,7 +199,9 @@ func buildMergedIDs(results []*internalpb.RetrieveResults, selectedRows []rowRef
 }
 
 // buildMergedFieldData builds merged field data from selected rows.
-func buildMergedFieldData(results []*internalpb.RetrieveResults, selectedRows []rowRef, fieldIdx int) *schemapb.FieldData {
+// isNullable indicates whether this field is nullable (from schema).
+// When isNullable=true, absent ValidData in a result means all rows in that result are null.
+func buildMergedFieldData(results []*internalpb.RetrieveResults, selectedRows []rowRef, fieldIdx int, isNullable bool) *schemapb.FieldData {
 	template := results[selectedRows[0].resultIdx].GetFieldsData()[fieldIdx]
 
 	newFd := &schemapb.FieldData{
@@ -194,7 +218,7 @@ func buildMergedFieldData(results []*internalpb.RetrieveResults, selectedRows []
 		}
 	case *schemapb.FieldData_Vectors:
 		newFd.Field = &schemapb.FieldData_Vectors{
-			Vectors: buildMergedVectorField(results, selectedRows, fieldIdx),
+			Vectors: buildMergedVectorField(results, selectedRows, fieldIdx, isNullable),
 		}
 		// Note: FieldData_StructArrays is intentionally not handled here.
 		// Segcore returns struct sub-fields as flat, independent FieldData entries.
@@ -203,18 +227,15 @@ func buildMergedFieldData(results []*internalpb.RetrieveResults, selectedRows []
 	}
 
 	// Preserve ValidData (nullable bitmap) for nullable fields.
-	// Each source result may have its own ValidData; merge them by selectedRows.
-	if hasValidData(results, selectedRows, fieldIdx) {
+	// Use schema-based nullability: empty ValidData means all rows in that result are null.
+	if isNullable {
 		validData := make([]bool, len(selectedRows))
 		for i, ref := range selectedRows {
 			vd := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetValidData()
-			if len(vd) > int(ref.rowIdx) {
+			if len(vd) > 0 && int(ref.rowIdx) < len(vd) {
 				validData[i] = vd[ref.rowIdx]
-			} else {
-				// No ValidData means all values are valid (non-nullable field
-				// or source result that doesn't carry the bitmap).
-				validData[i] = true
 			}
+			// ValidData absent or rowIdx out of bounds: keep false (null semantics)
 		}
 		newFd.ValidData = validData
 	}
@@ -222,8 +243,10 @@ func buildMergedFieldData(results []*internalpb.RetrieveResults, selectedRows []
 	return newFd
 }
 
-// hasValidData checks if any source result has ValidData for the given field.
-func hasValidData(results []*internalpb.RetrieveResults, selectedRows []rowRef, fieldIdx int) bool {
+// hasAnyValidData checks if any source result has ValidData for the given field.
+// Used only for StructArray sub-field nullable detection as a conservative fallback.
+// For top-level fields, use schema-based isNullable instead.
+func hasAnyValidData(results []*internalpb.RetrieveResults, selectedRows []rowRef, fieldIdx int) bool {
 	for _, ref := range selectedRows {
 		fd := results[ref.resultIdx].GetFieldsData()[fieldIdx]
 		if len(fd.GetValidData()) > 0 {
@@ -268,15 +291,17 @@ func buildMergedStructArrayField(results []*internalpb.RetrieveResults, selected
 				Scalars: buildMergedScalarField(virtualResults, selectedRows, 0),
 			}
 		case *schemapb.FieldData_Vectors:
+			// Use hasAnyValidData as a conservative nullable check for StructArray sub-fields.
+			// Sub-field schema-aware nullable is deferred to a follow-up PR.
 			newSubFd.Field = &schemapb.FieldData_Vectors{
-				Vectors: buildMergedVectorField(virtualResults, selectedRows, 0),
+				Vectors: buildMergedVectorField(virtualResults, selectedRows, 0, hasAnyValidData(virtualResults, selectedRows, 0)),
 			}
 		}
 
 		// Preserve ValidData for sub-fields.
 		// Check the sub-field's own ValidData (not the parent StructArray's),
 		// since segcore returns sub-fields as flat FieldData with independent validity bitmaps.
-		if hasValidData(virtualResults, selectedRows, 0) {
+		if hasAnyValidData(virtualResults, selectedRows, 0) {
 			validData := make([]bool, len(selectedRows))
 			for i, ref := range selectedRows {
 				subFields := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetStructArrays().GetFields()
@@ -299,6 +324,9 @@ func buildMergedStructArrayField(results []*internalpb.RetrieveResults, selected
 }
 
 // buildMergedScalarField builds merged scalar field from selected rows.
+// Bounds-checks each row access: nullable fields with all-null results may have an empty
+// Data array (segcore omits the storage); out-of-bounds rows keep the Go zero value.
+// The corresponding ValidData entry will be false, so users never see zero-filled nulls.
 func buildMergedScalarField(results []*internalpb.RetrieveResults, selectedRows []rowRef, fieldIdx int) *schemapb.ScalarField {
 	template := results[selectedRows[0].resultIdx].GetFieldsData()[fieldIdx].GetScalars()
 	newSf := &schemapb.ScalarField{}
@@ -307,63 +335,81 @@ func buildMergedScalarField(results []*internalpb.RetrieveResults, selectedRows 
 	case *schemapb.ScalarField_BoolData:
 		data := make([]bool, len(selectedRows))
 		for i, ref := range selectedRows {
-			data[i] = results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetBoolData().GetData()[ref.rowIdx]
+			if src := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetBoolData().GetData(); int(ref.rowIdx) < len(src) {
+				data[i] = src[ref.rowIdx]
+			}
 		}
 		newSf.Data = &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: data}}
 
 	case *schemapb.ScalarField_IntData:
 		data := make([]int32, len(selectedRows))
 		for i, ref := range selectedRows {
-			data[i] = results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetIntData().GetData()[ref.rowIdx]
+			if src := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetIntData().GetData(); int(ref.rowIdx) < len(src) {
+				data[i] = src[ref.rowIdx]
+			}
 		}
 		newSf.Data = &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: data}}
 
 	case *schemapb.ScalarField_LongData:
 		data := make([]int64, len(selectedRows))
 		for i, ref := range selectedRows {
-			data[i] = results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetLongData().GetData()[ref.rowIdx]
+			if src := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetLongData().GetData(); int(ref.rowIdx) < len(src) {
+				data[i] = src[ref.rowIdx]
+			}
 		}
 		newSf.Data = &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: data}}
 
 	case *schemapb.ScalarField_FloatData:
 		data := make([]float32, len(selectedRows))
 		for i, ref := range selectedRows {
-			data[i] = results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetFloatData().GetData()[ref.rowIdx]
+			if src := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetFloatData().GetData(); int(ref.rowIdx) < len(src) {
+				data[i] = src[ref.rowIdx]
+			}
 		}
 		newSf.Data = &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: data}}
 
 	case *schemapb.ScalarField_DoubleData:
 		data := make([]float64, len(selectedRows))
 		for i, ref := range selectedRows {
-			data[i] = results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetDoubleData().GetData()[ref.rowIdx]
+			if src := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetDoubleData().GetData(); int(ref.rowIdx) < len(src) {
+				data[i] = src[ref.rowIdx]
+			}
 		}
 		newSf.Data = &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: data}}
 
 	case *schemapb.ScalarField_StringData:
 		data := make([]string, len(selectedRows))
 		for i, ref := range selectedRows {
-			data[i] = results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetStringData().GetData()[ref.rowIdx]
+			if src := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetStringData().GetData(); int(ref.rowIdx) < len(src) {
+				data[i] = src[ref.rowIdx]
+			}
 		}
 		newSf.Data = &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: data}}
 
 	case *schemapb.ScalarField_BytesData:
 		data := make([][]byte, len(selectedRows))
 		for i, ref := range selectedRows {
-			data[i] = results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetBytesData().GetData()[ref.rowIdx]
+			if src := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetBytesData().GetData(); int(ref.rowIdx) < len(src) {
+				data[i] = src[ref.rowIdx]
+			}
 		}
 		newSf.Data = &schemapb.ScalarField_BytesData{BytesData: &schemapb.BytesArray{Data: data}}
 
 	case *schemapb.ScalarField_JsonData:
 		data := make([][]byte, len(selectedRows))
 		for i, ref := range selectedRows {
-			data[i] = results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetJsonData().GetData()[ref.rowIdx]
+			if src := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetJsonData().GetData(); int(ref.rowIdx) < len(src) {
+				data[i] = src[ref.rowIdx]
+			}
 		}
 		newSf.Data = &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: data}}
 
 	case *schemapb.ScalarField_ArrayData:
 		data := make([]*schemapb.ScalarField, len(selectedRows))
 		for i, ref := range selectedRows {
-			data[i] = results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetArrayData().GetData()[ref.rowIdx]
+			if src := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetArrayData().GetData(); int(ref.rowIdx) < len(src) {
+				data[i] = src[ref.rowIdx]
+			}
 		}
 		newSf.Data = &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
 			Data:        data,
@@ -373,28 +419,36 @@ func buildMergedScalarField(results []*internalpb.RetrieveResults, selectedRows 
 	case *schemapb.ScalarField_GeometryData:
 		data := make([][]byte, len(selectedRows))
 		for i, ref := range selectedRows {
-			data[i] = results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetGeometryData().GetData()[ref.rowIdx]
+			if src := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetGeometryData().GetData(); int(ref.rowIdx) < len(src) {
+				data[i] = src[ref.rowIdx]
+			}
 		}
 		newSf.Data = &schemapb.ScalarField_GeometryData{GeometryData: &schemapb.GeometryArray{Data: data}}
 
 	case *schemapb.ScalarField_GeometryWktData:
 		data := make([]string, len(selectedRows))
 		for i, ref := range selectedRows {
-			data[i] = results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetGeometryWktData().GetData()[ref.rowIdx]
+			if src := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetGeometryWktData().GetData(); int(ref.rowIdx) < len(src) {
+				data[i] = src[ref.rowIdx]
+			}
 		}
 		newSf.Data = &schemapb.ScalarField_GeometryWktData{GeometryWktData: &schemapb.GeometryWktArray{Data: data}}
 
 	case *schemapb.ScalarField_TimestamptzData:
 		data := make([]int64, len(selectedRows))
 		for i, ref := range selectedRows {
-			data[i] = results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetTimestamptzData().GetData()[ref.rowIdx]
+			if src := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetTimestamptzData().GetData(); int(ref.rowIdx) < len(src) {
+				data[i] = src[ref.rowIdx]
+			}
 		}
 		newSf.Data = &schemapb.ScalarField_TimestamptzData{TimestamptzData: &schemapb.TimestamptzArray{Data: data}}
 
 	case *schemapb.ScalarField_MolData:
 		data := make([][]byte, len(selectedRows))
 		for i, ref := range selectedRows {
-			data[i] = results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetMolData().GetData()[ref.rowIdx]
+			if src := results[ref.resultIdx].GetFieldsData()[fieldIdx].GetScalars().GetMolData().GetData(); int(ref.rowIdx) < len(src) {
+				data[i] = src[ref.rowIdx]
+			}
 		}
 		newSf.Data = &schemapb.ScalarField_MolData{MolData: &schemapb.MolArray{Data: data}}
 	}
@@ -406,32 +460,38 @@ func buildMergedScalarField(results []*internalpb.RetrieveResults, selectedRows 
 // In compact mode (nullable vectors), the data array only contains entries for valid rows.
 // compactIdx[resultIdx][logicalRowIdx] = data array index, or -1 if null.
 // Returns nil for non-nullable fields (data index = row index).
-func buildCompactIndices(results []*internalpb.RetrieveResults, fieldIdx int) [][]int {
-	hasAny := false
-	for _, r := range results {
-		if len(r.GetFieldsData()[fieldIdx].GetValidData()) > 0 {
-			hasAny = true
-			break
-		}
-	}
-	if !hasAny {
+//
+// Key correctness rules:
+//   - Use isNullable (from schema) to decide whether to build compact mapping, NOT ValidData presence.
+//     Segcore may omit ValidData entirely for a nullable field when all rows are null.
+//   - Iterate numRows times (not len(vd)) to cover all logical rows. When len(vd) < numRows,
+//     the extra rows are null (keep idx[i] = -1). Using range vd would leave idx[len(vd):]
+//     at the Go zero value 0, which getVecDataIdx would misinterpret as valid dataIdx=0.
+func buildCompactIndices(results []*internalpb.RetrieveResults, fieldIdx int, isNullable bool) [][]int {
+	if !isNullable {
 		return nil // non-nullable field, no compact mapping needed
 	}
 
 	indices := make([][]int, len(results))
 	for ri, r := range results {
+		numRows := int(typeutil.GetSizeOfIDs(r.GetIds()))
 		vd := r.GetFieldsData()[fieldIdx].GetValidData()
+		idx := make([]int, numRows)
+
 		if len(vd) == 0 {
-			continue // this result is non-nullable, use rowIdx directly
-		}
-		idx := make([]int, len(vd))
-		dataIdx := 0
-		for i, valid := range vd {
-			if valid {
-				idx[i] = dataIdx
-				dataIdx++
-			} else {
+			// Empty ValidData for nullable field = all rows are null
+			for i := range idx {
 				idx[i] = -1
+			}
+		} else {
+			dataIdx := 0
+			for i := 0; i < numRows; i++ {
+				if i < len(vd) && vd[i] {
+					idx[i] = dataIdx
+					dataIdx++
+				} else {
+					idx[i] = -1
+				}
 			}
 		}
 		indices[ri] = idx
@@ -460,14 +520,15 @@ func getVecDataIdx(compactIndices [][]int, ref rowRef) int {
 // contains entries for valid (non-null) rows, and ValidData bitmap marks which
 // logical rows are null. Null rows don't occupy space in the data array.
 // buildCompactIndices/getVecDataIdx handle the logical→data index mapping.
-func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows []rowRef, fieldIdx int) *schemapb.VectorField {
+// isNullable must come from schema, not from ValidData presence in results.
+func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows []rowRef, fieldIdx int, isNullable bool) *schemapb.VectorField {
 	template := results[selectedRows[0].resultIdx].GetFieldsData()[fieldIdx].GetVectors()
 	dim := int(template.GetDim())
 
 	newVf := &schemapb.VectorField{Dim: template.GetDim()}
 
 	// Pre-compute compact index mapping for nullable vector fields (O(N) once).
-	compactIdx := buildCompactIndices(results, fieldIdx)
+	compactIdx := buildCompactIndices(results, fieldIdx, isNullable)
 
 	switch template.GetData().(type) {
 	case *schemapb.VectorField_FloatVector:

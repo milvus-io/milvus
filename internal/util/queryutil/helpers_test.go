@@ -18,6 +18,8 @@ package queryutil
 
 import (
 	"context"
+	"encoding/binary"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,7 +67,7 @@ func TestBuildMergedFieldData_ValidData(t *testing.T) {
 		{resultIdx: 1, rowIdx: 0}, // r2 row 0 (valid)
 	}
 
-	merged, err := buildMergedRetrieveResults(results, selectedRows)
+	merged, err := buildMergedRetrieveResults(results, selectedRows, map[int64]bool{100: true})
 	require.NoError(t, err)
 	require.Len(t, merged.FieldsData, 1)
 
@@ -75,7 +77,8 @@ func TestBuildMergedFieldData_ValidData(t *testing.T) {
 }
 
 func TestBuildMergedFieldData_ValidData_MixedNullable(t *testing.T) {
-	// r1 has ValidData (nullable), r2 does not (non-nullable)
+	// r1 has ValidData (nullable), r2 has explicit ValidData=[true] (all valid)
+	// This tests that explicit all-valid ValidData is preserved correctly.
 	r1 := &internalpb.RetrieveResults{
 		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
 		FieldsData: []*schemapb.FieldData{
@@ -96,7 +99,7 @@ func TestBuildMergedFieldData_ValidData_MixedNullable(t *testing.T) {
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{20}}},
 				}},
-				// No ValidData — non-nullable
+				ValidData: []bool{true}, // explicit valid (segcore always includes ValidData for nullable fields)
 			},
 		},
 	}
@@ -104,14 +107,13 @@ func TestBuildMergedFieldData_ValidData_MixedNullable(t *testing.T) {
 	results := []*internalpb.RetrieveResults{r1, r2}
 	selectedRows := []rowRef{
 		{resultIdx: 0, rowIdx: 0}, // r1 (null)
-		{resultIdx: 1, rowIdx: 0}, // r2 (no ValidData → valid=true)
+		{resultIdx: 1, rowIdx: 0}, // r2 (valid=true)
 	}
 
-	merged, err := buildMergedRetrieveResults(results, selectedRows)
+	merged, err := buildMergedRetrieveResults(results, selectedRows, map[int64]bool{100: true})
 	require.NoError(t, err)
 
 	fd := merged.FieldsData[0]
-	// r1 row is null, r2 row has no ValidData so defaults to true
 	assert.Equal(t, []bool{false, true}, fd.ValidData)
 }
 
@@ -141,7 +143,7 @@ func TestBuildMergedScalarField_ArrayElementType(t *testing.T) {
 	results := []*internalpb.RetrieveResults{r1}
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 0}, {resultIdx: 0, rowIdx: 1}}
 
-	merged, err := buildMergedRetrieveResults(results, selectedRows)
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nil)
 	require.NoError(t, err)
 
 	arrayField := merged.FieldsData[0].GetScalars().GetArrayData()
@@ -171,7 +173,7 @@ func TestBuildMergedScalarField_GeometryWktData(t *testing.T) {
 	results := []*internalpb.RetrieveResults{r1}
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 1}}
 
-	merged, err := buildMergedRetrieveResults(results, selectedRows)
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nil)
 	require.NoError(t, err)
 
 	wktData := merged.FieldsData[0].GetScalars().GetGeometryWktData().GetData()
@@ -196,7 +198,7 @@ func TestBuildMergedScalarField_GeometryData(t *testing.T) {
 	results := []*internalpb.RetrieveResults{r1}
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 0}}
 
-	merged, err := buildMergedRetrieveResults(results, selectedRows)
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nil)
 	require.NoError(t, err)
 
 	geoData := merged.FieldsData[0].GetScalars().GetGeometryData().GetData()
@@ -225,7 +227,7 @@ func TestBuildMergedScalarField_TimestamptzData(t *testing.T) {
 	results := []*internalpb.RetrieveResults{r1}
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 0}, {resultIdx: 0, rowIdx: 1}}
 
-	merged, err := buildMergedRetrieveResults(results, selectedRows)
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nil)
 	require.NoError(t, err)
 
 	tsData := merged.FieldsData[0].GetScalars().GetTimestamptzData().GetData()
@@ -250,7 +252,7 @@ func TestBuildMergedScalarField_MolData(t *testing.T) {
 	results := []*internalpb.RetrieveResults{r1}
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 0}}
 
-	merged, err := buildMergedRetrieveResults(results, selectedRows)
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nil)
 	require.NoError(t, err)
 
 	molData := merged.FieldsData[0].GetScalars().GetMolData().GetData()
@@ -279,7 +281,7 @@ func TestBuildMergedVectorField_Int8Vector(t *testing.T) {
 	results := []*internalpb.RetrieveResults{r1}
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 1}} // select row 1 only
 
-	merged, err := buildMergedRetrieveResults(results, selectedRows)
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nil)
 	require.NoError(t, err)
 
 	vecData := merged.FieldsData[0].GetVectors().GetInt8Vector()
@@ -439,7 +441,7 @@ func TestBuildMergedRetrieveResults_ElementIndices(t *testing.T) {
 	results := []*internalpb.RetrieveResults{r1}
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 1}, {resultIdx: 0, rowIdx: 0}}
 
-	merged, err := buildMergedRetrieveResults(results, selectedRows)
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nil)
 	require.NoError(t, err)
 
 	assert.True(t, merged.GetElementLevel())
@@ -484,7 +486,7 @@ func TestRangeSliceRetrieveResults_ElementIndices(t *testing.T) {
 // =========================================================================
 
 func TestConcatAndCheckPKOperator_NoDuplicate(t *testing.T) {
-	op := NewConcatAndCheckPKOperator()
+	op := NewConcatAndCheckPKOperator(nil)
 	ctx := context.Background()
 
 	r1 := &internalpb.RetrieveResults{
@@ -520,7 +522,7 @@ func TestConcatAndCheckPKOperator_NoDuplicate(t *testing.T) {
 }
 
 func TestConcatAndCheckPKOperator_DuplicateFails(t *testing.T) {
-	op := NewConcatAndCheckPKOperator()
+	op := NewConcatAndCheckPKOperator(nil)
 	ctx := context.Background()
 
 	r1 := &internalpb.RetrieveResults{
@@ -596,7 +598,7 @@ func TestBuildMergedFieldData_CommonScalarTypes(t *testing.T) {
 	}
 
 	selectedRows := []rowRef{{0, 0}, {1, 0}, {0, 1}} // r1[0], r2[0], r1[1]
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1, r2}, selectedRows)
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1, r2}, selectedRows, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, []int64{1, 3, 2}, merged.GetIds().GetIntId().GetData())
@@ -635,7 +637,7 @@ func TestBuildMergedFieldData_FloatVector(t *testing.T) {
 	}
 
 	selectedRows := []rowRef{{1, 0}, {0, 1}} // r2[0], r1[1]
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1, r2}, selectedRows)
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1, r2}, selectedRows, nil)
 	require.NoError(t, err)
 
 	vecData := merged.GetFieldsData()[0].GetVectors().GetFloatVector().GetData()
@@ -954,7 +956,7 @@ func TestBuildMergedVectorField_VectorArray(t *testing.T) {
 	results := []*internalpb.RetrieveResults{r1, r2}
 	selectedRows := []rowRef{{resultIdx: 1, rowIdx: 0}, {resultIdx: 0, rowIdx: 0}}
 
-	merged, err := buildMergedRetrieveResults(results, selectedRows)
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nil)
 	require.NoError(t, err)
 
 	va := merged.FieldsData[0].GetVectors().GetVectorArray()
@@ -1076,7 +1078,7 @@ func TestBuildMergedScalarField_BoolData(t *testing.T) {
 		}},
 	})
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 1}, {resultIdx: 0, rowIdx: 0}}
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows)
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []bool{false, true}, merged.FieldsData[0].GetScalars().GetBoolData().GetData())
 }
@@ -1089,7 +1091,7 @@ func TestBuildMergedScalarField_IntData(t *testing.T) {
 		}},
 	})
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 1}}
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows)
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []int32{20}, merged.FieldsData[0].GetScalars().GetIntData().GetData())
 }
@@ -1102,7 +1104,7 @@ func TestBuildMergedScalarField_FloatData(t *testing.T) {
 		}},
 	})
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 0}}
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows)
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []float32{1.5}, merged.FieldsData[0].GetScalars().GetFloatData().GetData())
 }
@@ -1115,7 +1117,7 @@ func TestBuildMergedScalarField_DoubleData(t *testing.T) {
 		}},
 	})
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 1}}
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows)
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []float64{2.71}, merged.FieldsData[0].GetScalars().GetDoubleData().GetData())
 }
@@ -1128,7 +1130,7 @@ func TestBuildMergedScalarField_BytesData(t *testing.T) {
 		}},
 	})
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 0}, {resultIdx: 0, rowIdx: 1}}
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows)
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows, nil)
 	require.NoError(t, err)
 	assert.Equal(t, [][]byte{{0x01}, {0x02}}, merged.FieldsData[0].GetScalars().GetBytesData().GetData())
 }
@@ -1141,7 +1143,7 @@ func TestBuildMergedScalarField_JsonData(t *testing.T) {
 		}},
 	})
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 1}}
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows)
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows, nil)
 	require.NoError(t, err)
 	assert.Equal(t, [][]byte{[]byte(`{"b":2}`)}, merged.FieldsData[0].GetScalars().GetJsonData().GetData())
 }
@@ -1158,7 +1160,7 @@ func TestBuildMergedIDs_StringPK(t *testing.T) {
 		},
 	}
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 1}, {resultIdx: 0, rowIdx: 0}}
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows)
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"b", "a"}, merged.GetIds().GetStrId().GetData())
 }
@@ -1177,7 +1179,7 @@ func TestBuildMergedVectorField_BinaryVector(t *testing.T) {
 		}},
 	})
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 1}}
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows)
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []byte{0xCC, 0xDD}, merged.FieldsData[0].GetVectors().GetBinaryVector())
 }
@@ -1192,7 +1194,7 @@ func TestBuildMergedVectorField_Float16Vector(t *testing.T) {
 		}},
 	})
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 1}}
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows)
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []byte{5, 6, 7, 8}, merged.FieldsData[0].GetVectors().GetFloat16Vector())
 }
@@ -1207,7 +1209,7 @@ func TestBuildMergedVectorField_BFloat16Vector(t *testing.T) {
 		}},
 	})
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 0}}
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows)
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []byte{10, 20, 30, 40}, merged.FieldsData[0].GetVectors().GetBfloat16Vector())
 }
@@ -1224,7 +1226,7 @@ func TestBuildMergedVectorField_SparseFloatVector(t *testing.T) {
 		}},
 	})
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 1}}
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows)
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows, nil)
 	require.NoError(t, err)
 	assert.Equal(t, [][]byte{{0x03, 0x04}}, merged.FieldsData[0].GetVectors().GetSparseFloatVector().GetContents())
 }
@@ -1235,6 +1237,7 @@ func TestBuildMergedVectorField_SparseFloatVector(t *testing.T) {
 
 func TestBuildCompactIndices_NullableVector(t *testing.T) {
 	r1 := &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
 		FieldsData: []*schemapb.FieldData{
 			{
 				Type: schemapb.DataType_FloatVector, FieldId: 100,
@@ -1246,7 +1249,7 @@ func TestBuildCompactIndices_NullableVector(t *testing.T) {
 			},
 		},
 	}
-	indices := buildCompactIndices([]*internalpb.RetrieveResults{r1}, 0)
+	indices := buildCompactIndices([]*internalpb.RetrieveResults{r1}, 0, true)
 	require.NotNil(t, indices)
 	assert.Equal(t, []int{0, -1, 1}, indices[0])
 }
@@ -1264,7 +1267,7 @@ func TestBuildCompactIndices_NonNullable(t *testing.T) {
 			},
 		},
 	}
-	indices := buildCompactIndices([]*internalpb.RetrieveResults{r1}, 0)
+	indices := buildCompactIndices([]*internalpb.RetrieveResults{r1}, 0, false)
 	assert.Nil(t, indices) // non-nullable → nil
 }
 
@@ -2363,7 +2366,8 @@ func TestBuildMergedVectorField_NullableCompact_FloatVector(t *testing.T) {
 		},
 	}
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 2}, {resultIdx: 0, rowIdx: 0}}
-	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows)
+	// fieldIdx 0 is nullable (ValidData present); pass correct nullable flag
+	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{r1}, selectedRows, map[int64]bool{100: true})
 	require.NoError(t, err)
 	assert.Equal(t, []float32{3, 4, 1, 2}, merged.FieldsData[0].GetVectors().GetFloatVector().GetData())
 }
@@ -2444,4 +2448,204 @@ func TestValidateElementLevelConsistency_LengthMismatch(t *testing.T) {
 	err := validateElementLevelConsistency([]*internalpb.RetrieveResults{r}, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "element_indices length")
+}
+
+// =========================================================================
+// Nullable vector / scalar merge correctness tests
+// =========================================================================
+
+// makeTestIntIDs is a helper to build IDs for test results.
+func makeTestIntIDs(ids ...int64) *schemapb.IDs {
+	return &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}}
+}
+
+// makeTestSparseVec builds a knowhere sparse vector binary: [dim uint32][val float32], little-endian.
+func makeTestSparseVec(dim uint32, val float32) []byte {
+	b := make([]byte, 8)
+	binary.LittleEndian.PutUint32(b[0:4], dim)
+	binary.LittleEndian.PutUint32(b[4:8], math.Float32bits(val))
+	return b
+}
+
+// TestBuildMergedVectorField_NullableSparseVector_AllNull_EmptyValidData validates Bug 1 fix:
+// when a nullable sparse vector field has empty ValidData + empty Contents, merge must not panic,
+// and the merged output must correctly mark those rows as null (ValidData=false).
+func TestBuildMergedVectorField_NullableSparseVector_AllNull_EmptyValidData(t *testing.T) {
+	nullableFields := map[int64]bool{100: true}
+
+	// rA: 1 row, has valid data
+	rA := &internalpb.RetrieveResults{
+		Ids: makeTestIntIDs(1),
+		FieldsData: []*schemapb.FieldData{{
+			FieldId: 100,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{
+						Contents: [][]byte{makeTestSparseVec(1, 0.5)},
+					},
+				},
+			}},
+			ValidData: []bool{true},
+		}},
+	}
+
+	// rB: 1 row, ValidData absent, Contents absent (segcore get_vector early return)
+	rB := &internalpb.RetrieveResults{
+		Ids: makeTestIntIDs(2),
+		FieldsData: []*schemapb.FieldData{{
+			FieldId: 100,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{Contents: nil},
+				},
+			}},
+			ValidData: nil,
+		}},
+	}
+
+	results := []*internalpb.RetrieveResults{rA, rB}
+	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 0}, {resultIdx: 1, rowIdx: 0}}
+
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nullableFields)
+	require.NoError(t, err)
+	require.Len(t, merged.FieldsData, 1)
+	assert.Equal(t, []bool{true, false}, merged.FieldsData[0].ValidData)
+	assert.Len(t, merged.FieldsData[0].GetVectors().GetSparseFloatVector().GetContents(), 1)
+}
+
+// TestBuildMergedVectorField_NullableSparseVector_MultipleRowsFromNullResult validates that
+// multiple rows selected from a null result are all marked null.
+func TestBuildMergedVectorField_NullableSparseVector_MultipleRowsFromNullResult(t *testing.T) {
+	nullableFields := map[int64]bool{100: true}
+
+	rA := &internalpb.RetrieveResults{
+		Ids: makeTestIntIDs(1),
+		FieldsData: []*schemapb.FieldData{{
+			FieldId: 100,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{
+						Contents: [][]byte{makeTestSparseVec(1, 0.1)},
+					},
+				},
+			}},
+			ValidData: []bool{true},
+		}},
+	}
+
+	rB := &internalpb.RetrieveResults{
+		Ids: makeTestIntIDs(2, 3),
+		FieldsData: []*schemapb.FieldData{{
+			FieldId: 100,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{Contents: nil},
+				},
+			}},
+			ValidData: nil,
+		}},
+	}
+
+	results := []*internalpb.RetrieveResults{rA, rB}
+	selectedRows := []rowRef{
+		{resultIdx: 0, rowIdx: 0},
+		{resultIdx: 1, rowIdx: 0},
+		{resultIdx: 1, rowIdx: 1},
+	}
+
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nullableFields)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true, false, false}, merged.FieldsData[0].ValidData)
+	assert.Len(t, merged.FieldsData[0].GetVectors().GetSparseFloatVector().GetContents(), 1)
+}
+
+// TestBuildMergedVectorField_NullableSparseVector_AllNullWithValidData validates compact path
+// when ValidData is present and all false (explicit all-null).
+func TestBuildMergedVectorField_NullableSparseVector_AllNullWithValidData(t *testing.T) {
+	nullableFields := map[int64]bool{100: true}
+	r := &internalpb.RetrieveResults{
+		Ids: makeTestIntIDs(1, 2),
+		FieldsData: []*schemapb.FieldData{{
+			FieldId: 100,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{Contents: nil},
+				},
+			}},
+			ValidData: []bool{false, false},
+		}},
+	}
+	results := []*internalpb.RetrieveResults{r}
+	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 0}, {resultIdx: 0, rowIdx: 1}}
+
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nullableFields)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{false, false}, merged.FieldsData[0].ValidData)
+	assert.Empty(t, merged.FieldsData[0].GetVectors().GetSparseFloatVector().GetContents())
+}
+
+// TestBuildMergedVectorField_NullableSparseVector_Mixed validates compact index mapping when
+// some rows are valid and some are null within the same result.
+func TestBuildMergedVectorField_NullableSparseVector_Mixed(t *testing.T) {
+	nullableFields := map[int64]bool{100: true}
+	// 3 rows: ValidData=[true,false,true], Contents=[vec0, vec2] (compact)
+	r := &internalpb.RetrieveResults{
+		Ids: makeTestIntIDs(1, 2, 3),
+		FieldsData: []*schemapb.FieldData{{
+			FieldId: 100,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{
+						Contents: [][]byte{makeTestSparseVec(1, 0.1), makeTestSparseVec(3, 0.3)},
+					},
+				},
+			}},
+			ValidData: []bool{true, false, true},
+		}},
+	}
+	results := []*internalpb.RetrieveResults{r}
+	// Select row 0 (valid) and row 1 (null)
+	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 0}, {resultIdx: 0, rowIdx: 1}}
+
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nullableFields)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true, false}, merged.FieldsData[0].ValidData)
+	// Only 1 non-null row in output
+	assert.Len(t, merged.FieldsData[0].GetVectors().GetSparseFloatVector().GetContents(), 1)
+}
+
+// TestBuildMergedFieldData_NullableScalar_EmptyValidData_TreatedAsNull validates Bug 2 fix:
+// for a nullable scalar field, absent ValidData must produce false (null), not true.
+func TestBuildMergedFieldData_NullableScalar_EmptyValidData_TreatedAsNull(t *testing.T) {
+	nullableFields := map[int64]bool{100: true}
+
+	rA := &internalpb.RetrieveResults{
+		Ids: makeTestIntIDs(1),
+		FieldsData: []*schemapb.FieldData{{
+			FieldId: 100,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}},
+			}},
+			ValidData: []bool{true},
+		}},
+	}
+	// rB: ValidData absent, Data empty (all null, segcore may omit both)
+	rB := &internalpb.RetrieveResults{
+		Ids: makeTestIntIDs(2),
+		FieldsData: []*schemapb.FieldData{{
+			FieldId: 100,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{}}},
+			}},
+			ValidData: nil,
+		}},
+	}
+
+	results := []*internalpb.RetrieveResults{rA, rB}
+	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 0}, {resultIdx: 1, rowIdx: 0}}
+
+	merged, err := buildMergedRetrieveResults(results, selectedRows, nullableFields)
+	require.NoError(t, err)
+	// rA valid=true, rB valid=false (empty ValidData → null, NOT true)
+	assert.Equal(t, []bool{true, false}, merged.FieldsData[0].ValidData)
 }

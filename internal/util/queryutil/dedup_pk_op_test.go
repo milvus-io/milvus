@@ -62,12 +62,12 @@ func makeDedupInt64Field(fieldID int64, name string, vals []int64) *schemapb.Fie
 }
 
 func TestDeduplicatePKOperator_Name(t *testing.T) {
-	op := NewDeduplicatePKOperator(0)
+	op := NewDeduplicatePKOperator(0, nil)
 	assert.Equal(t, OpDeduplicatePK, op.Name())
 }
 
 func TestDeduplicatePKOperator_EmptyInput(t *testing.T) {
-	op := NewDeduplicatePKOperator(0)
+	op := NewDeduplicatePKOperator(0, nil)
 	ctx := context.Background()
 
 	outputs, err := op.Run(ctx, nil, []*internalpb.RetrieveResults{})
@@ -77,7 +77,7 @@ func TestDeduplicatePKOperator_EmptyInput(t *testing.T) {
 }
 
 func TestDeduplicatePKOperator_NilResults(t *testing.T) {
-	op := NewDeduplicatePKOperator(0)
+	op := NewDeduplicatePKOperator(0, nil)
 	ctx := context.Background()
 
 	outputs, err := op.Run(ctx, nil, []*internalpb.RetrieveResults{nil, nil})
@@ -87,7 +87,7 @@ func TestDeduplicatePKOperator_NilResults(t *testing.T) {
 }
 
 func TestDeduplicatePKOperator_SingleResult(t *testing.T) {
-	op := NewDeduplicatePKOperator(0)
+	op := NewDeduplicatePKOperator(0, nil)
 	ctx := context.Background()
 
 	r := &internalpb.RetrieveResults{
@@ -102,7 +102,7 @@ func TestDeduplicatePKOperator_SingleResult(t *testing.T) {
 }
 
 func TestDeduplicatePKOperator_MultipleResults_NoDuplicates(t *testing.T) {
-	op := NewDeduplicatePKOperator(0)
+	op := NewDeduplicatePKOperator(0, nil)
 	ctx := context.Background()
 
 	r1 := &internalpb.RetrieveResults{
@@ -120,7 +120,7 @@ func TestDeduplicatePKOperator_MultipleResults_NoDuplicates(t *testing.T) {
 }
 
 func TestDeduplicatePKOperator_DuplicatePK_HigherTimestampWins(t *testing.T) {
-	op := NewDeduplicatePKOperator(0)
+	op := NewDeduplicatePKOperator(0, nil)
 	ctx := context.Background()
 
 	// r1: PK=1 with ts=100, val=10
@@ -147,7 +147,7 @@ func TestDeduplicatePKOperator_DuplicatePK_HigherTimestampWins(t *testing.T) {
 }
 
 func TestDeduplicatePKOperator_DuplicatePK_LowerTimestampLoses(t *testing.T) {
-	op := NewDeduplicatePKOperator(0)
+	op := NewDeduplicatePKOperator(0, nil)
 	ctx := context.Background()
 
 	// r1: PK=1 with ts=200, val=10 (should win)
@@ -174,7 +174,7 @@ func TestDeduplicatePKOperator_DuplicatePK_LowerTimestampLoses(t *testing.T) {
 }
 
 func TestDeduplicatePKOperator_DuplicateWithinSingleResult(t *testing.T) {
-	op := NewDeduplicatePKOperator(0)
+	op := NewDeduplicatePKOperator(0, nil)
 	ctx := context.Background()
 
 	// Single result with duplicate PK=1 (ts=100 then ts=200)
@@ -194,7 +194,7 @@ func TestDeduplicatePKOperator_DuplicateWithinSingleResult(t *testing.T) {
 
 func TestDeduplicatePKOperator_MaxOutputSize(t *testing.T) {
 	// Very small maxOutputSize should trigger error
-	op := NewDeduplicatePKOperator(1) // 1 byte limit
+	op := NewDeduplicatePKOperator(1, nil) // 1 byte limit
 	ctx := context.Background()
 
 	r := &internalpb.RetrieveResults{
@@ -207,7 +207,7 @@ func TestDeduplicatePKOperator_MaxOutputSize(t *testing.T) {
 }
 
 func TestDeduplicatePKOperator_HasMoreResult(t *testing.T) {
-	op := NewDeduplicatePKOperator(0)
+	op := NewDeduplicatePKOperator(0, nil)
 	ctx := context.Background()
 
 	r1 := &internalpb.RetrieveResults{
@@ -227,7 +227,7 @@ func TestDeduplicatePKOperator_HasMoreResult(t *testing.T) {
 }
 
 func TestDeduplicatePKOperator_StringPK(t *testing.T) {
-	op := NewDeduplicatePKOperator(0)
+	op := NewDeduplicatePKOperator(0, nil)
 	ctx := context.Background()
 
 	r1 := &internalpb.RetrieveResults{
@@ -250,7 +250,7 @@ func TestDeduplicatePKOperator_StringPK(t *testing.T) {
 // =========================================================================
 
 func TestConcatAndCheckPKOperator_DuplicatePK_ReturnsError(t *testing.T) {
-	op := NewConcatAndCheckPKOperator()
+	op := NewConcatAndCheckPKOperator(nil)
 	ctx := context.Background()
 
 	r1 := &internalpb.RetrieveResults{
@@ -267,7 +267,7 @@ func TestConcatAndCheckPKOperator_DuplicatePK_ReturnsError(t *testing.T) {
 }
 
 func TestConcatAndCheckPKOperator_SingleResult(t *testing.T) {
-	op := NewConcatAndCheckPKOperator()
+	op := NewConcatAndCheckPKOperator(nil)
 	ctx := context.Background()
 
 	r := &internalpb.RetrieveResults{
@@ -283,7 +283,7 @@ func TestConcatAndCheckPKOperator_SingleResult(t *testing.T) {
 // TestConcatAndCheckPKOperator_HasMoreResult_MultiResult verifies HasMoreResult is propagated
 // when multiple non-empty results are concatenated.
 func TestConcatAndCheckPKOperator_HasMoreResult_MultiResult(t *testing.T) {
-	op := NewConcatAndCheckPKOperator()
+	op := NewConcatAndCheckPKOperator(nil)
 	ctx := context.Background()
 
 	r1 := &internalpb.RetrieveResults{
@@ -305,7 +305,7 @@ func TestConcatAndCheckPKOperator_HasMoreResult_MultiResult(t *testing.T) {
 // TestConcatAndCheckPKOperator_HasMoreResult_EmptyResultPropagates verifies that HasMoreResult
 // from an empty (filtered-out) result is still propagated to the merged output.
 func TestConcatAndCheckPKOperator_HasMoreResult_EmptyResultPropagates(t *testing.T) {
-	op := NewConcatAndCheckPKOperator()
+	op := NewConcatAndCheckPKOperator(nil)
 	ctx := context.Background()
 
 	// r1 is empty (no rows) but has HasMoreResult=true
@@ -328,7 +328,7 @@ func TestConcatAndCheckPKOperator_HasMoreResult_EmptyResultPropagates(t *testing
 // TestConcatAndCheckPKOperator_HasMoreResult_AllEmpty verifies HasMoreResult is set on
 // the empty output when all inputs are empty.
 func TestConcatAndCheckPKOperator_HasMoreResult_AllEmpty(t *testing.T) {
-	op := NewConcatAndCheckPKOperator()
+	op := NewConcatAndCheckPKOperator(nil)
 	ctx := context.Background()
 
 	r1 := &internalpb.RetrieveResults{HasMoreResult: true}
@@ -347,7 +347,7 @@ func TestDeduplicatePKOperator_MaxOutputSize_ExactlyAtLimit(t *testing.T) {
 	const rowCount = 3
 	const exactLimit = rowSize * rowCount // 24 bytes
 
-	op := NewDeduplicatePKOperator(exactLimit)
+	op := NewDeduplicatePKOperator(exactLimit, nil)
 	ctx := context.Background()
 
 	r := &internalpb.RetrieveResults{
@@ -367,7 +367,7 @@ func TestDeduplicatePKOperator_MaxOutputSize_OneBelowLimit(t *testing.T) {
 	const rowCount = 3
 	const limitOneByte = rowSize*rowCount - 1 // 23 bytes — one below total
 
-	op := NewDeduplicatePKOperator(limitOneByte)
+	op := NewDeduplicatePKOperator(limitOneByte, nil)
 	ctx := context.Background()
 
 	r := &internalpb.RetrieveResults{

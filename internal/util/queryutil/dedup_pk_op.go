@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -44,10 +45,11 @@ import (
 // Output[0]: *internalpb.RetrieveResults (concatenated + deduplicated)
 type DeduplicatePKOperator struct {
 	maxOutputSize int64
+	schema        *schemapb.CollectionSchema
 }
 
-func NewDeduplicatePKOperator(maxOutputSize int64) *DeduplicatePKOperator {
-	return &DeduplicatePKOperator{maxOutputSize: maxOutputSize}
+func NewDeduplicatePKOperator(maxOutputSize int64, schema *schemapb.CollectionSchema) *DeduplicatePKOperator {
+	return &DeduplicatePKOperator{maxOutputSize: maxOutputSize, schema: schema}
 }
 
 func (op *DeduplicatePKOperator) Name() string {
@@ -130,7 +132,8 @@ func (op *DeduplicatePKOperator) Run(ctx context.Context, span trace.Span, input
 		return []any{&internalpb.RetrieveResults{HasMoreResult: hasMoreResult}}, nil
 	}
 
-	merged, err := buildMergedRetrieveResults(origResults, selectedRows)
+	nullableFields := buildNullableFieldMap(op.schema)
+	merged, err := buildMergedRetrieveResults(origResults, selectedRows, nullableFields)
 	if err != nil {
 		return nil, err
 	}
@@ -160,10 +163,12 @@ func extractTimestamps(r *internalpb.RetrieveResults) []int64 {
 //
 // Input[0]: []*internalpb.RetrieveResults
 // Output[0]: *internalpb.RetrieveResults (concatenated)
-type ConcatAndCheckPKOperator struct{}
+type ConcatAndCheckPKOperator struct {
+	schema *schemapb.CollectionSchema
+}
 
-func NewConcatAndCheckPKOperator() *ConcatAndCheckPKOperator {
-	return &ConcatAndCheckPKOperator{}
+func NewConcatAndCheckPKOperator(schema *schemapb.CollectionSchema) *ConcatAndCheckPKOperator {
+	return &ConcatAndCheckPKOperator{schema: schema}
 }
 
 func (op *ConcatAndCheckPKOperator) Name() string {
@@ -217,7 +222,8 @@ func (op *ConcatAndCheckPKOperator) Run(ctx context.Context, span trace.Span, in
 		}
 	}
 
-	merged, err := buildMergedRetrieveResults(validResults, selectedRows)
+	nullableFields := buildNullableFieldMap(op.schema)
+	merged, err := buildMergedRetrieveResults(validResults, selectedRows, nullableFields)
 	if err != nil {
 		return nil, err
 	}
