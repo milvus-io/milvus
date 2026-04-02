@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"testing"
 
+	cstorage "cloud.google.com/go/storage"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -401,9 +402,19 @@ func TestMapObjectStorageError_GCP_NewErrors(t *testing.T) {
 			expectedError: merr.ErrIoPermissionDenied,
 		},
 		{
+			name:          "Unauthorized",
+			statusCode:    http.StatusUnauthorized,
+			expectedError: merr.ErrIoInvalidCredentials,
+		},
+		{
 			name:          "BadRequest",
 			statusCode:    http.StatusBadRequest,
 			expectedError: merr.ErrIoInvalidArgument,
+		},
+		{
+			name:          "RangeNotSatisfiable",
+			statusCode:    http.StatusRequestedRangeNotSatisfiable,
+			expectedError: merr.ErrIoInvalidRange,
 		},
 		{
 			name:          "RequestEntityTooLarge",
@@ -419,4 +430,22 @@ func TestMapObjectStorageError_GCP_NewErrors(t *testing.T) {
 			assert.True(t, errors.Is(result, tt.expectedError))
 		})
 	}
+}
+
+func TestMapObjectStorageError_GCP_SentinelErrors(t *testing.T) {
+	t.Run("ErrObjectNotExist", func(t *testing.T) {
+		result := mapObjectStorageError("test/path", cstorage.ErrObjectNotExist)
+		assert.ErrorIs(t, result, merr.ErrIoKeyNotFound)
+	})
+
+	t.Run("ErrBucketNotExist", func(t *testing.T) {
+		result := mapObjectStorageError("test/path", cstorage.ErrBucketNotExist)
+		assert.ErrorIs(t, result, merr.ErrIoBucketNotFound)
+	})
+
+	t.Run("WrappedErrObjectNotExist", func(t *testing.T) {
+		wrappedErr := errors.Wrap(cstorage.ErrObjectNotExist, "get attrs failed")
+		result := mapObjectStorageError("test/path", wrappedErr)
+		assert.ErrorIs(t, result, merr.ErrIoKeyNotFound)
+	})
 }

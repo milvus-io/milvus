@@ -421,6 +421,11 @@ func TestMapObjectStorageError_Azure_NewErrors(t *testing.T) {
 			expectedError: merr.ErrIoPermissionDenied,
 		},
 		{
+			name:          "AuthorizationFailure",
+			inputError:    &azcore.ResponseError{ErrorCode: "AuthorizationFailure"},
+			expectedError: merr.ErrIoPermissionDenied,
+		},
+		{
 			name:          "ContainerNotFound",
 			inputError:    &azcore.ResponseError{ErrorCode: "ContainerNotFound"},
 			expectedError: merr.ErrIoBucketNotFound,
@@ -434,6 +439,11 @@ func TestMapObjectStorageError_Azure_NewErrors(t *testing.T) {
 			name:          "InvalidRange",
 			inputError:    &azcore.ResponseError{ErrorCode: "InvalidRange"},
 			expectedError: merr.ErrIoInvalidRange,
+		},
+		{
+			name:          "RequestBodyTooLarge",
+			inputError:    &azcore.ResponseError{ErrorCode: "RequestBodyTooLarge"},
+			expectedError: merr.ErrIoEntityTooLarge,
 		},
 	}
 

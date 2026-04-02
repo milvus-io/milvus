@@ -311,6 +311,17 @@ func TestMapObjectStorageError_MinIO_NewErrors(t *testing.T) {
 			inputError:    minio.ErrorResponse{Code: "MaxMessageLengthExceeded"},
 			expectedError: merr.ErrIoEntityTooLarge,
 		},
+		// Aliyun OSS specific error codes
+		{
+			name:          "AliyunSecurityTokenExpired",
+			inputError:    minio.ErrorResponse{Code: "SecurityTokenExpired"},
+			expectedError: merr.ErrIoInvalidCredentials,
+		},
+		{
+			name:          "AliyunInvalidAccessKeyIdInactive",
+			inputError:    minio.ErrorResponse{Code: "InvalidAccessKeyId.Inactive"},
+			expectedError: merr.ErrIoPermissionDenied,
+		},
 	}
 
 	for _, tt := range tests {
