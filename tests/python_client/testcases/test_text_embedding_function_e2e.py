@@ -181,7 +181,7 @@ class TestCreateCollectionWithTextEmbeddingNegative(TestcaseBase):
             check_task=CheckTasks.err_res,
             check_items={
                 "err_code": 65535,
-                "err_msg": f"The required embedding dim is [{dim}], but the embedding obtained from the model is [768]",
+                "err_msg": f"the required embedding dim is [{dim}], but the embedding obtained from the model is [768]",
             },
         )
 
