@@ -236,6 +236,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -253,6 +254,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -270,6 +272,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -288,6 +291,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -305,6 +309,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -321,6 +326,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -337,6 +343,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -354,6 +361,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -372,6 +380,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -390,6 +399,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -408,6 +418,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -433,6 +444,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -451,6 +463,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -469,6 +482,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -488,6 +502,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -507,6 +522,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -524,6 +540,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithUnrelatedField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -548,6 +565,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarStrField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -566,6 +584,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarStrField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -584,6 +603,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarStrField() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
@@ -769,6 +789,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
+				QueryLabel:         "query",
 				SerializedExprPlan: serializedPlan,
 			}
 			PruneSegments(context.TODO(), partitionStats, nil, queryReq, schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
@@ -785,6 +806,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
+				QueryLabel:         "query",
 				SerializedExprPlan: serializedPlan,
 			}
 			PruneSegments(context.TODO(), partitionStats, nil, queryReq, schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
@@ -801,6 +823,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
+				QueryLabel:         "query",
 				SerializedExprPlan: serializedPlan,
 			}
 			PruneSegments(context.TODO(), partitionStats, nil, queryReq, schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
@@ -918,6 +941,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
+				QueryLabel:         "query",
 				SerializedExprPlan: serializedPlan,
 			}
 			PruneSegments(context.TODO(), partitionStats, nil, queryReq, schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
@@ -934,6 +958,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
+				QueryLabel:         "query",
 				SerializedExprPlan: serializedPlan,
 			}
 			PruneSegments(context.TODO(), partitionStats, nil, queryReq, schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
@@ -949,6 +974,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
+				QueryLabel:         "query",
 				SerializedExprPlan: serializedPlan,
 			}
 			PruneSegments(context.TODO(), partitionStats, nil, queryReq, schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
@@ -1067,6 +1093,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
+				QueryLabel:         "query",
 				SerializedExprPlan: serializedPlan,
 			}
 			PruneSegments(context.TODO(), partitionStats, nil, queryReq, schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
@@ -1083,6 +1110,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
+				QueryLabel:         "query",
 				SerializedExprPlan: serializedPlan,
 			}
 			PruneSegments(context.TODO(), partitionStats, nil, queryReq, schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
@@ -1099,6 +1127,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
+				QueryLabel:         "query",
 				SerializedExprPlan: serializedPlan,
 			}
 			PruneSegments(context.TODO(), partitionStats, nil, queryReq, schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
@@ -1234,6 +1263,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsFloatTypes() {
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
+				QueryLabel:         "query",
 				SerializedExprPlan: serializedPlan,
 			}
 			PruneSegments(context.TODO(), partitionStats, nil, queryReq, schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
@@ -1351,6 +1381,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsFloatTypes() {
 			sps.NoError(err)
 			serializedPlan, _ := proto.Marshal(planNode)
 			queryReq := &internalpb.RetrieveRequest{
+				QueryLabel:         "query",
 				SerializedExprPlan: serializedPlan,
 			}
 			PruneSegments(context.TODO(), partitionStats, nil, queryReq, schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
@@ -1425,6 +1456,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithoutPartitionStats() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       []int64{1},
 		}
@@ -1445,6 +1477,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithoutPartitionStats() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       []int64{1},
 		}
@@ -1463,6 +1496,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithoutPartitionStats() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       []int64{1},
 		}
@@ -1541,6 +1575,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithoutPartitionStats() {
 		sps.NoError(err)
 		serializedPlan, _ := proto.Marshal(planNode)
 		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       []int64{targetPartition},
 		}

@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -647,7 +648,7 @@ func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan,
 		return nil, err
 	}
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		contextutil.GetQueryLabel(ctx)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return result, nil
 }
 
@@ -693,7 +694,7 @@ func (s *LocalSegment) retrieveByOffsets(ctx context.Context, plan *segcore.Retr
 		return nil, err
 	}
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		contextutil.GetQueryLabel(ctx)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return result, nil
 }
 

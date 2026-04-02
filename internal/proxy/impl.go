@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -3551,6 +3552,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			),
 			ReqID:            paramtable.GetNodeID(),
 			ConsistencyLevel: request.ConsistencyLevel,
+			QueryLabel:       metrics.QueryLabel,
 		},
 		request:             queryReq,
 		plan:                plan,
@@ -3711,6 +3713,10 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	request := qt.request
 	method := "Query"
+	queryLabel := qt.getQueryLabel()
+	if sp != nil {
+		sp.SetAttributes(attribute.String("queryLabel", queryLabel))
+	}
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.QueryResults{
@@ -3725,6 +3731,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		zap.Strings("partitions", request.PartitionNames),
 		zap.String("ConsistencyLevel", request.GetConsistencyLevel().String()),
 		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
+		zap.String("queryLabel", queryLabel),
 	)
 
 	log.Debug(
@@ -3755,13 +3762,15 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			if sp != nil {
 				traceID = sp.SpanContext().TraceID().String()
 			}
-			if node.slowQueries != nil {
+			if node.slowQueries != nil && queryLabel == metrics.QueryLabel {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithQueryRequest(request, user, span, traceID))
 			}
-			metrics.ProxySlowQueryCount.WithLabelValues(
-				strconv.FormatInt(paramtable.GetNodeID(), 10),
-				metrics.QueryLabel,
-			).Inc()
+			if queryLabel == metrics.QueryLabel {
+				metrics.ProxySlowQueryCount.WithLabelValues(
+					strconv.FormatInt(paramtable.GetNodeID(), 10),
+					queryLabel,
+				).Inc()
+			}
 		}
 	}()
 
@@ -3793,19 +3802,19 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		span := tr.CtxRecord(ctx, "wait query result")
 		metrics.ProxyWaitForSearchResultLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			metrics.QueryLabel,
+			queryLabel,
 		).Observe(float64(span.Milliseconds()))
 
 		metrics.ProxySQLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			metrics.QueryLabel,
+			queryLabel,
 			request.GetDbName(),
 			request.GetCollectionName(),
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 		metrics.ProxyCollectionSQLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			metrics.QueryLabel,
+			queryLabel,
 			request.DbName,
 			request.CollectionName,
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -3827,6 +3836,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			),
 			ReqID:            paramtable.GetNodeID(),
 			ConsistencyLevel: request.ConsistencyLevel,
+			QueryLabel:       metrics.QueryLabel,
 		},
 		request:             request,
 		mixCoord:            node.mixCoord,

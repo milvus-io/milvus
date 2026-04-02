@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -560,7 +561,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
 	tSafe, err := sd.waitTSafe(ctx, req.Req.GetGuaranteeTimestamp())
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
-		paramtable.GetStringNodeID(), metrics.QueryLabel).
+		fmt.Sprint(paramtable.GetNodeID()), contextutil.GetQueryLabel(ctx)).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 	if err != nil {
 		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
@@ -647,7 +648,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
+		fmt.Sprint(paramtable.GetNodeID()), contextutil.GetQueryLabel(ctx)).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
 	if err != nil {

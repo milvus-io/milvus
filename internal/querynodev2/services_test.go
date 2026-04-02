@@ -1544,6 +1544,7 @@ func (suite *ServiceSuite) genCQueryRequest(nq int64, indexType string, schema *
 	}
 
 	return &internalpb.RetrieveRequest{
+		QueryLabel: "query",
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_Retrieve,
 			MsgID:    rand.Int63(),
@@ -1615,6 +1616,7 @@ func (suite *ServiceSuite) TestQuerySegments_Failed() {
 
 	req := &querypb.QueryRequest{
 		Req: &internalpb.RetrieveRequest{
+			QueryLabel:   "query",
 			CollectionID: -1,
 		},
 

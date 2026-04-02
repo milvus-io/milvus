@@ -203,6 +203,7 @@ message RetrieveRequest {
   common.ConsistencyLevel consistency_level = 18;
   bool is_iterator = 19;
   uint64 collection_ttl_timestamps = 20;
+  string query_label = 25; // "query" or "upsert_query", used for metrics differentiation
 }
 
 

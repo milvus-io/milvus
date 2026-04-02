@@ -629,7 +629,8 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 	t.Run("query", func(t *testing.T) {
 		qt := &queryTask{
 			RetrieveRequest: &internalpb.RetrieveRequest{
-				Base: &commonpb.MsgBase{},
+				QueryLabel: "query",
+				Base:       &commonpb.MsgBase{},
 			},
 			request: &milvuspb.QueryRequest{
 				DbName:                dbName,
