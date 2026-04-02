@@ -69,11 +69,14 @@ if (MILVUS_USE_PCH)
         # STL headers included in 50+ .cpp files
         $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/../cmake/milvus_pch.hxx>
     )
+    # NOTE: milvus_bitset and milvus_minhash are excluded because they contain
+    # source files compiled with special target flags (-mavx512f, -march=armv8-a+sve)
+    # which are incompatible with PCH compiled under default target features.
     foreach(_target
         milvus_common milvus_config milvus_monitor milvus_storage milvus_index
         milvus_query milvus_segcore milvus_indexbuilder milvus_clustering
-        milvus_exec milvus_bitset milvus_futures milvus_rescores
-        milvus_plan milvus_minhash)
+        milvus_exec milvus_futures milvus_rescores
+        milvus_plan)
         target_precompile_headers(${_target} PRIVATE ${MILVUS_PCH_HEADERS})
     endforeach()
 endif()
