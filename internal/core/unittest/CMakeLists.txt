@@ -65,6 +65,7 @@ set(MILVUS_TEST_FILES
         test_determine_use_index.cpp
         test_virtual_pk.cpp
         test_mvcc_fast_path.cpp
+        test_external_take.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
@@ -116,7 +117,8 @@ if (LINUX)
 endif()
 
 add_compile_definitions(
-        MILVUS_CPPUT_OUTPUT_DIR="${CMAKE_INSTALL_PREFIX}/cpput_output")
+        MILVUS_CPPUT_OUTPUT_DIR="${CMAKE_INSTALL_PREFIX}/cpput_output"
+        MILVUS_UNIT_TEST)
 
 add_executable(all_tests
         ${MILVUS_TEST_FILES}

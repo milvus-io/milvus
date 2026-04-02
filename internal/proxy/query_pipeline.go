@@ -205,6 +205,13 @@ func (p *QueryPipeline) Execute(ctx context.Context, results []*internalpb.Retri
 		FieldsData: output.GetFieldsData(),
 	}
 
+	// Propagate element-level indices for element_filter queries
+	if output.GetElementLevel() {
+		for _, ei := range output.GetElementIndices() {
+			result.ElementIndices = append(result.ElementIndices, convertInternalElementIndicesToMilvus(ei))
+		}
+	}
+
 	// Fill empty field data when result has no rows, so pymilvus gets proper field schema.
 	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewMilvusResult(result), p.outputFieldIDs, p.schema); err != nil {
 		return nil, err

@@ -423,4 +423,35 @@ GetFieldIDList(FieldId column_group_id,
                const std::shared_ptr<arrow::Schema>& arrow_schema,
                milvus_storage::ArrowFileSystemPtr fs);
 
+// Convert LIST or FIXED_SIZE_LIST arrays to FixedSizeBinary.
+// External files store vectors in list format (e.g. List<Float32>);
+// Milvus expects FixedSizeBinary (raw bytes). Returns the input
+// unchanged if already FixedSizeBinary.
+arrow::ArrayVector
+NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
+                                       DataType data_type,
+                                       int dim);
+
+// Convert a single row of an Arrow ListArray to a protobuf ScalarField.
+proto::schema::ScalarField
+ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
+                            int64_t row_index);
+
+// Convert a timestamp value to microseconds based on its Arrow TimeUnit.
+inline int64_t
+ConvertToMicroseconds(int64_t value, arrow::TimeUnit::type unit) {
+    switch (unit) {
+        case arrow::TimeUnit::SECOND:
+            return value * 1000000;
+        case arrow::TimeUnit::MILLI:
+            return value * 1000;
+        case arrow::TimeUnit::MICRO:
+            return value;
+        case arrow::TimeUnit::NANO:
+            return value / 1000;
+        default:
+            return value;
+    }
+}
+
 }  // namespace milvus::storage
