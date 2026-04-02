@@ -25,13 +25,13 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // TextColumnConfig represents configuration for a TEXT column.
@@ -82,7 +82,7 @@ func NewFFISegmentWriter(
 	defer cdata.ReleaseCArrowSchema(&cas)
 
 	if storageConfig == nil {
-		return nil, fmt.Errorf("storageConfig must not be nil")
+		return nil, merr.WrapErrStorageMsg("storageConfig must not be nil")
 	}
 
 	// create properties

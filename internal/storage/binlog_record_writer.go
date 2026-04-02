@@ -331,7 +331,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 ) (*PackedBinlogRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 
 	writer := &PackedBinlogRecordWriter{
@@ -487,7 +487,7 @@ func (pw *PackedManifestRecordWriter) Close() error {
 func (pw *PackedManifestRecordWriter) writeStatsV3() error {
 	basePath, _, err := packed.UnmarshalManifestPath(pw.manifest)
 	if err != nil {
-		return fmt.Errorf("writeStatsV3: failed to parse manifest path: %w", err)
+		return merr.WrapErrStorage(err, "writeStatsV3: failed to parse manifest path")
 	}
 
 	// --- Bloom filter (PK) stats ---
@@ -502,7 +502,7 @@ func (pw *PackedManifestRecordWriter) writeStatsV3() error {
 		}
 		fullPath := path.Join(basePath, fmt.Sprintf("_stats/bloom_filter.%d/%d", pkFieldID, id))
 		if err := packed.WriteFile(pw.storageConfig, fullPath, statsBlob.Value); err != nil {
-			return fmt.Errorf("writeStatsV3: failed to write bloom filter stats: %w", err)
+			return merr.Wrap(err, "writeStatsV3: failed to write bloom filter stats")
 		}
 
 		newManifest, err := packed.AddStatsToManifest(pw.manifest, pw.storageConfig, []packed.StatEntry{
@@ -513,7 +513,7 @@ func (pw *PackedManifestRecordWriter) writeStatsV3() error {
 			},
 		})
 		if err != nil {
-			return fmt.Errorf("writeStatsV3: failed to add bloom filter stats to manifest: %w", err)
+			return merr.Wrap(err, "writeStatsV3: failed to add bloom filter stats to manifest")
 		}
 		pw.manifest = newManifest
 		// Stats are stored in the manifest; leave pw.statsLog nil.
@@ -533,7 +533,7 @@ func (pw *PackedManifestRecordWriter) writeStatsV3() error {
 			}
 			fullPath := path.Join(basePath, fmt.Sprintf("_stats/bm25.%d/%d", fieldID, id))
 			if err := packed.WriteFile(pw.storageConfig, fullPath, blob.Value); err != nil {
-				return fmt.Errorf("writeStatsV3: failed to write bm25 stats: %w", err)
+				return merr.Wrap(err, "writeStatsV3: failed to write bm25 stats")
 			}
 			statEntries = append(statEntries, packed.StatEntry{
 				Key:      fmt.Sprintf("bm25.%d", fieldID),
@@ -543,7 +543,7 @@ func (pw *PackedManifestRecordWriter) writeStatsV3() error {
 		}
 		newManifest, err := packed.AddStatsToManifest(pw.manifest, pw.storageConfig, statEntries)
 		if err != nil {
-			return fmt.Errorf("writeStatsV3: failed to add bm25 stats to manifest: %w", err)
+			return merr.Wrap(err, "writeStatsV3: failed to add bm25 stats to manifest")
 		}
 		pw.manifest = newManifest
 		// Stats are stored in the manifest; leave pw.bm25StatsLog nil.
@@ -559,7 +559,7 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 ) (*PackedManifestRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 
 	writer := &PackedManifestRecordWriter{
@@ -720,7 +720,7 @@ func NewPackedTextManifestRecordWriter(
 ) (*PackedTextManifestRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 
 	writer := &PackedTextManifestRecordWriter{

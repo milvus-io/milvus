@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Fragment represents a data fragment from an external data source.
@@ -55,20 +56,20 @@ func CreateManifestForSegment(
 	storageConfig *indexpb.StorageConfig,
 ) (string, error) {
 	if len(fragments) == 0 {
-		return "", fmt.Errorf("fragments cannot be empty")
+		return "", merr.WrapErrServiceInternalMsg("fragments cannot be empty")
 	}
 
 	// Create column groups from fragments
 	columnGroups, err := createColumnGroups(columns, format, fragments)
 	if err != nil {
-		return "", fmt.Errorf("failed to create column groups: %w", err)
+		return "", merr.Wrap(err, "failed to create column groups")
 	}
 	defer C.loon_column_groups_destroy(columnGroups)
 
 	// Create properties from storage config
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create properties: %w", err)
+		return "", merr.Wrap(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 
@@ -80,21 +81,21 @@ func CreateManifestForSegment(
 	var transactionHandle C.LoonTransactionHandle
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(0), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return "", fmt.Errorf("loon_transaction_begin failed: %w", err)
+		return "", merr.WrapErrStorage(err, "loon_transaction_begin failed")
 	}
 	defer C.loon_transaction_destroy(transactionHandle)
 
 	// Append files to transaction
 	result = C.loon_transaction_append_files(transactionHandle, columnGroups)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return "", fmt.Errorf("loon_transaction_append_files failed: %w", err)
+		return "", merr.WrapErrStorage(err, "loon_transaction_append_files failed")
 	}
 
 	// Commit transaction
 	var committedVersion C.int64_t
 	result = C.loon_transaction_commit(transactionHandle, &committedVersion)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return "", fmt.Errorf("loon_transaction_commit failed: %w", err)
+		return "", merr.WrapErrStorage(err, "loon_transaction_commit failed")
 	}
 
 	// Return manifest path using the helper function
@@ -168,7 +169,7 @@ func createColumnGroups(
 	)
 
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("loon_column_groups_create failed: %w", err)
+		return nil, merr.WrapErrStorage(err, "loon_column_groups_create failed")
 	}
 
 	return outColumnGroups, nil
@@ -186,7 +187,7 @@ func ReadFragmentsFromManifest(
 	// 1. Parse manifest path to get base path and version
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse manifest path: %w", err)
+		return nil, merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
 
 	// 2. Construct full manifest file path: base_path/_metadata/manifest-{version}.avro
@@ -196,7 +197,7 @@ func ReadFragmentsFromManifest(
 	// 3. Create properties from storage config
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create properties: %w", err)
+		return nil, merr.Wrap(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 
@@ -208,7 +209,7 @@ func ReadFragmentsFromManifest(
 	var manifest *C.LoonManifest
 	result := C.loon_exttable_read_manifest(cManifestFilePath, cProperties, &manifest)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, fmt.Errorf("loon_exttable_read_manifest failed: %w", err)
+		return nil, merr.WrapErrStorage(err, "loon_exttable_read_manifest failed")
 	}
 
 	// 5. Destroy manifest when done
@@ -222,7 +223,7 @@ func ReadFragmentsFromManifest(
 
 	// Validate column groups structure before accessing
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
-		return nil, fmt.Errorf("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
+		return nil, merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
 	}
 
 	cgArray := unsafe.Slice(cgroups.column_group_array, int(cgroups.num_of_column_groups))
