@@ -1778,7 +1778,7 @@ func TestCore_getMetastorePrivilegeName(t *testing.T) {
 
 	meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, "unknown").Return(false, nil)
 	_, err = c.getMetastorePrivilegeName(context.Background(), "unknown")
-	assert.Equal(t, err.Error(), "not found the privilege name [unknown] from metastore")
+	assert.ErrorContains(t, err, "not found the privilege name [unknown] from metastore")
 }
 
 func TestCore_expandPrivilegeGroup(t *testing.T) {

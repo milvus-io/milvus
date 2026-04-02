@@ -1122,8 +1122,8 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
                                consistency_level="Strong", index_params=index_params)
 
         # step 2: add field with default value for timestamptz field
-        error = {ct.err_code: 1100, 
-                 ct.err_msg: f"invalid default value of field, name: {default_timestamp_field_name}, err: %!w(*errors.errorString=&{{invalid timestamp string: '1234'. Does not match any known format}}): invalid parameter"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f"invalid default value of field, name: {default_timestamp_field_name}: invalid timestamp string: '1234'. Does not match any known format"}
         self.add_collection_field(client, collection_name, field_name=default_timestamp_field_name, data_type=DataType.TIMESTAMPTZ,
                                   nullable=True, default_value="1234", check_task=CheckTasks.err_res, check_items=error)
         

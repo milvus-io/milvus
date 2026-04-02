@@ -17,12 +17,11 @@
 package datacoord
 
 import (
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-var ErrIgnoredSegmentMetaOperation = errors.New("ignored segment meta operation")
+var ErrIgnoredSegmentMetaOperation = merr.WrapErrServiceInternalMsg("ignored segment meta operation")
 
 // reviseVChannelInfo will revise the datapb.VchannelInfo for upgrade compatibility from 2.0.2
 func reviseVChannelInfo(vChannel *datapb.VchannelInfo) {

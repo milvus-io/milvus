@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -459,7 +458,7 @@ func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	s.session = session
 	s.icSession = session
 	if s.session == nil {
-		return errors.New("session is nil, the etcd client connection may have failed")
+		return merr.WrapErrServiceInternalMsg("session is nil, the etcd client connection may have failed")
 	}
 	return nil
 }
@@ -615,7 +614,7 @@ func (s *Server) initKV() error {
 		s.kv = etcdkv.NewEtcdKV(s.etcdCli, s.metaRootPath,
 			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	default:
-		return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", metaType))
+		return retry.Unrecoverable(merr.WrapErrServiceInternalMsg("unsupported meta store: %s", metaType))
 	}
 	log.Info("data coordinator successfully connected to metadata store", zap.String("metaType", metaType))
 	return nil
@@ -1024,7 +1023,7 @@ func (s *Server) flushFlushingSegment(ctx context.Context, segmentID UniqueID) e
 				return ctx.Err()
 			}
 			// underlying etcd may return context canceled, so we need to return a error to retry.
-			return errors.New("flush segment complete failed")
+			return merr.WrapErrServiceInternalMsg("flush segment complete failed")
 		}
 		return nil
 	}, retry.AttemptAlways())
@@ -1114,7 +1113,7 @@ func (s *Server) CleanMeta() error {
 	err2 := s.watchClient.RemoveWithPrefix(s.ctx, "")
 	if err2 != nil {
 		if err != nil {
-			err = fmt.Errorf("failed to CleanMeta[metadata cleanup error: %w][watchdata cleanup error: %v]", err, err2)
+			err = merr.WrapErrServiceInternalErr(err, "failed to clean meta (watchdata cleanup error: %v)", err2)
 		} else {
 			err = err2
 		}

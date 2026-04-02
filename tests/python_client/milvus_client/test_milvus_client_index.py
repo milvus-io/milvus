@@ -204,7 +204,7 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="vector", index_type="IVF_FLAT", metric_type="L2")
         # 3. create another index
-        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
+        error = {ct.err_code: 1100, ct.err_msg: "at most one distinct index is allowed per field"}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
@@ -1076,7 +1076,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
                                index_type=supported_double_scalar_index,
                                params={"json_cast_type": "varchar", "json_path": f"{json_field_name}['a']"})
         # 5. create index
-        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
+        error = {ct.err_code: 1100, ct.err_msg: "at most one distinct index is allowed per field"}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
 
@@ -1165,7 +1165,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
                                params={"json_cast_type": supported_json_cast_type,
                                        "json_path": f"{json_field_name}"})
         # 4. create index
-        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
+        error = {ct.err_code: 1100, ct.err_msg: "at most one distinct index is allowed per field"}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)
 

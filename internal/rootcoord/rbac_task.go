@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -66,7 +67,7 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 			opType = int32(typeutil.CacheRevokePrivilege)
 		default:
 			log.Ctx(ctx).Warn("invalid operate type for the OperatePrivilege api", zap.Any("operate_type", operateType))
-			return errors.New("invalid operate type for the OperatePrivilege api")
+			return merr.WrapErrServiceInternalMsg("invalid operate type for the OperatePrivilege api")
 		}
 		grants := []*milvuspb.GrantEntity{entity}
 
@@ -148,7 +149,7 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 				newPrivs, _ := lo.Difference(v, in.Privileges)
 				newGroups[k] = newPrivs
 			default:
-				return errors.New("invalid operate type")
+				return merr.WrapErrServiceInternalMsg("invalid operate type")
 			}
 		}
 

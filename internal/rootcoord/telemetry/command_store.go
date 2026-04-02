@@ -21,7 +21,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -411,7 +410,7 @@ func (s *CommandStore) DeleteCommand(ctx context.Context, commandID string) erro
 
 	if configExists {
 		if err := s.kv.Delete(ctx, s.configPath+commandID); err != nil {
-			return merr.WrapErrIoFailed(commandID, fmt.Errorf("delete failed: %v", err))
+			return merr.WrapErrIoFailed(commandID, merr.WrapErrServiceInternalMsg("delete failed: %v", err))
 		}
 	}
 

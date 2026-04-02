@@ -44,8 +44,7 @@ func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.D
 	replicas := s.meta.GetByResourceGroup(ctx, req.GetResourceGroup())
 	if len(replicas) > 0 {
 		err := merr.WrapErrParameterInvalid("empty resource group", fmt.Sprintf("resource group %s has collection %d loaded", req.GetResourceGroup(), replicas[0].GetCollectionID()))
-		return errors.Wrap(err,
-			fmt.Sprintf("some replicas still loaded in resource group[%s], release it first", req.GetResourceGroup()))
+		return errors.Wrapf(err, "some replicas still loaded in resource group[%s], release it first", req.GetResourceGroup())
 	}
 	if err := s.meta.CheckIfResourceGroupDropable(ctx, req.GetResourceGroup()); err != nil {
 		return err

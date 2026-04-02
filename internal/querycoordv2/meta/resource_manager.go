@@ -804,7 +804,7 @@ func (rm *ResourceManager) recoverRedundantNodeRG(ctx context.Context, rgName st
 		if node == -1 {
 			log.Info("failed to select redundant recover target resource group, please check resource group configuration if as expected.",
 				zap.String("rgName", sourceRG.GetName()))
-			return errors.New("all resource group reach limits")
+			return merr.WrapErrServiceInternalMsg("all resource group reach limits")
 		}
 
 		if err := rm.transferNode(ctx, targetRG.GetName(), node); err != nil {
@@ -884,12 +884,12 @@ func (rm *ResourceManager) assignIncomingNodeWithNodeCheck(ctx context.Context, 
 	nodeInfo := rm.nodeMgr.Get(node)
 	if nodeInfo == nil {
 		rm.incomingNode.Remove(node)
-		return "", errors.New("node is not online")
+		return "", merr.WrapErrServiceInternalMsg("node is not online")
 	}
 
 	if nodeInfo.IsStoppingState() {
 		rm.incomingNode.Remove(node)
-		return "", errors.New("node has been stopped")
+		return "", merr.WrapErrServiceInternalMsg("node has been stopped")
 	}
 
 	rgName, err := rm.assignIncomingNode(ctx, nodeInfo)
@@ -1096,7 +1096,7 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 		return rg.GetName(), nil
 	}
 
-	return "", errors.Errorf("node %d not found in any resource group", node)
+	return "", merr.WrapErrServiceInternalMsg("node %d not found in any resource group", node)
 }
 
 // validateResourceGroupConfig validate resource group config.

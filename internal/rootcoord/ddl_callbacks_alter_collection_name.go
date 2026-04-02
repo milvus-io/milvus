@@ -2,8 +2,8 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -110,17 +110,17 @@ func (c *Core) validateEncryption(ctx context.Context, oldDBName string, newDBNa
 	// old and new DB names are filled in Prepare, shouldn't be empty here
 	originalDB, err := c.meta.GetDatabaseByName(ctx, oldDBName, typeutil.MaxTimestamp)
 	if err != nil {
-		return fmt.Errorf("failed to get original database: %w", err)
+		return errors.Wrap(err, "failed to get original database")
 	}
 
 	targetDB, err := c.meta.GetDatabaseByName(ctx, newDBName, typeutil.MaxTimestamp)
 	if err != nil {
-		return fmt.Errorf("target database %s not found: %w", newDBName, err)
+		return errors.Wrapf(err, "target database %s not found", newDBName)
 	}
 
 	// Check if either database has encryption enabled
 	if hookutil.IsDBEncrypted(originalDB.Properties) || hookutil.IsDBEncrypted(targetDB.Properties) {
-		return fmt.Errorf("deny to change collection databases due to at least one database enabled encryption, original DB: %s, target DB: %s", oldDBName, newDBName)
+		return merr.WrapErrServiceInternalMsg("deny to change collection databases due to at least one database enabled encryption, original DB: %s, target DB: %s", oldDBName, newDBName)
 	}
 
 	return nil
