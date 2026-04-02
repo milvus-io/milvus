@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/log"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -46,7 +47,7 @@ func (n NodeInfo) String() string {
 	return fmt.Sprintf("<NodeID: %d, serviceable: %v, address: %s>", n.NodeID, n.Serviceable, n.Address)
 }
 
-var errClosed = errors.New("client is closed")
+var errClosed = merr.WrapErrParameterInvalidMsg("client is closed")
 
 type shardClient struct {
 	sync.RWMutex
@@ -132,7 +133,7 @@ func (n *shardClient) roundRobinSelectClient() (types.QueryNodeClient, error) {
 	}
 
 	if len(n.clients) == 0 {
-		return nil, errors.New("no available clients")
+		return nil, merr.WrapErrParameterInvalidMsg("no available clients")
 	}
 
 	nextClientIndex := n.idx.Inc() % int64(len(n.clients))

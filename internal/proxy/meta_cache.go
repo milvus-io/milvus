@@ -978,7 +978,7 @@ func (m *MetaCache) showPartitions(ctx context.Context, dbName string, collectio
 	}
 
 	if len(partitions.PartitionIDs) != len(partitions.PartitionNames) {
-		return nil, fmt.Errorf("partition ids len: %d doesn't equal Partition name len %d",
+		return nil, merr.WrapErrParameterInvalidMsg("partition ids len: %d doesn't equal Partition name len %d",
 			len(partitions.PartitionIDs), len(partitions.PartitionNames))
 	}
 	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) ||

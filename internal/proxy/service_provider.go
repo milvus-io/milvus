@@ -58,7 +58,7 @@ func NewInterceptor[Req Request, Resp Response](proxy *Proxy, method string) (*I
 		}
 		return interface{}(interceptor).(*InterceptorImpl[Req, Resp]), nil
 	default:
-		return nil, fmt.Errorf("method %s not supported", method)
+		return nil, merr.WrapErrParameterInvalidMsg("method %s not supported", method)
 	}
 }
 
