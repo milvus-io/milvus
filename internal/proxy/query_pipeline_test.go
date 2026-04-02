@@ -318,6 +318,75 @@ func TestNewQueryPipeline_GroupByOrderBy(t *testing.T) {
 }
 
 // =========================================================================
+// Element-level (element_filter) pipeline
+// =========================================================================
+
+func TestNewQueryPipeline_Plain_ElementIndices(t *testing.T) {
+	schema := testSchema()
+	pipeline, err := NewQueryPipeline(
+		schema, 3, 0, reduce.IReduceNoOrder,
+		nil, nil, nil, nil,
+		[]int64{100, 101},
+	)
+	require.NoError(t, err)
+
+	// Simulate element_filter results: same PK appears multiple times with different offsets
+	r := &internalpb.RetrieveResults{
+		Ids: makeTestIntIDs([]int64{1, 1, 2}),
+		FieldsData: []*schemapb.FieldData{
+			makeTestInt64Field(100, "pk", []int64{1, 1, 2}),
+			makeTestInt64Field(101, "val", []int64{10, 10, 20}),
+			makeTestInt64Field(common.TimeStampField, "timestamp", []int64{100, 100, 100}),
+		},
+		ElementLevel: true,
+		ElementIndices: []*internalpb.ElementIndices{
+			{Indices: []int32{3}},
+			{Indices: []int32{5}},
+			{Indices: []int32{0}},
+		},
+	}
+
+	result, err := pipeline.Execute(context.Background(), []*internalpb.RetrieveResults{r})
+	require.NoError(t, err)
+
+	// ElementIndices should be propagated to the output
+	require.Len(t, result.GetElementIndices(), 3)
+	assert.Equal(t, []int64{3}, result.GetElementIndices()[0].GetIndices().GetData())
+	assert.Equal(t, []int64{5}, result.GetElementIndices()[1].GetIndices().GetData())
+	assert.Equal(t, []int64{0}, result.GetElementIndices()[2].GetIndices().GetData())
+
+	// Timestamp should still be dropped
+	for _, fd := range result.GetFieldsData() {
+		assert.NotEqual(t, int64(common.TimeStampField), fd.GetFieldId())
+	}
+}
+
+func TestNewQueryPipeline_Plain_NoElementLevel(t *testing.T) {
+	schema := testSchema()
+	pipeline, err := NewQueryPipeline(
+		schema, 3, 0, reduce.IReduceNoOrder,
+		nil, nil, nil, nil,
+		[]int64{100, 101},
+	)
+	require.NoError(t, err)
+
+	// Normal (non-element-level) results should have no ElementIndices
+	r := &internalpb.RetrieveResults{
+		Ids: makeTestIntIDs([]int64{1, 2}),
+		FieldsData: []*schemapb.FieldData{
+			makeTestInt64Field(100, "pk", []int64{1, 2}),
+			makeTestInt64Field(101, "val", []int64{10, 20}),
+			makeTestInt64Field(common.TimeStampField, "timestamp", []int64{100, 100}),
+		},
+		ElementLevel: false,
+	}
+
+	result, err := pipeline.Execute(context.Background(), []*internalpb.RetrieveResults{r})
+	require.NoError(t, err)
+	assert.Empty(t, result.GetElementIndices())
+}
+
+// =========================================================================
 // Error handling
 // =========================================================================
 
