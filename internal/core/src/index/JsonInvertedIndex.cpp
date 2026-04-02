@@ -125,18 +125,22 @@ JsonInvertedIndex<T>::LoadIndexMetas(
         return;
     }
     std::vector<std::string> non_exist_offset_files;
+    std::optional<std::string> slice_meta_file;
     for (auto& file : index_files) {
         auto file_name = boost::filesystem::path(file).filename().string();
         if (file_name.find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
             std::string::npos) {
             non_exist_offset_files.push_back(file);
         }
-        // add slice meta file for null offset file compact
         if (file_name == INDEX_FILE_SLICE_META) {
-            non_exist_offset_files.push_back(file);
+            slice_meta_file = file;
         }
     }
     if (non_exist_offset_files.size() > 0) {
+        // slice meta is only needed when there are non_exist_offset slices to compact.
+        if (slice_meta_file.has_value()) {
+            non_exist_offset_files.push_back(slice_meta_file.value());
+        }
         // null offset file is sliced
         auto index_datas = this->mem_file_manager_->LoadIndexToMemory(
             non_exist_offset_files, load_priority);
