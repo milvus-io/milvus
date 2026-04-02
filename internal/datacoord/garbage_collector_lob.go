@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"strings"
 	"sync"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -271,8 +271,7 @@ func (lobCtx *lobGCContext) collectLOBFilesFromSegment(ctx context.Context, segm
 
 	lobFiles, err := lobCtx.cache.Get(ctx, manifestPath, lobCtx.storageConfig)
 	if err != nil {
-		return fmt.Errorf("failed to get LOB files from manifest for segment %d (path=%s): %w",
-			segment.GetID(), manifestPath, err)
+		return merr.WrapErrServiceInternalErr(err, "failed to get LOB files from manifest for segment %d (path=%s)", segment.GetID(), manifestPath)
 	}
 
 	for _, lobFile := range lobFiles {

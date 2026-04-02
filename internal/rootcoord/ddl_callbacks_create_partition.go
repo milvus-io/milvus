@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cockroachdb/errors"
 
@@ -30,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -54,7 +54,7 @@ func (c *Core) broadcastCreatePartition(ctx context.Context, in *milvuspb.Create
 	cfgMaxPartitionNum := Params.RootCoordCfg.MaxPartitionNum.GetAsInt()
 	partitionNum := collMeta.GetPartitionNum(true)
 	if partitionNum >= cfgMaxPartitionNum {
-		return 0, fmt.Errorf("partition number (%d) exceeds max configuration (%d), collection: %s",
+		return 0, merr.WrapErrParameterInvalidMsg("partition number (%d) exceeds max configuration (%d), collection: %s",
 			partitionNum, cfgMaxPartitionNum, collMeta.Name)
 	}
 

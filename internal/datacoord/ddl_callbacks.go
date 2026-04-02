@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 
 	"go.uber.org/zap"
 
@@ -27,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // RegisterDDLCallbacks registers the ddl callbacks.
@@ -89,7 +89,7 @@ func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionI
 func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error) {
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
-		return nil, fmt.Errorf("collection %d does not exist: %w", collectionID, err)
+		return nil, merr.WrapErrServiceInternalErr(err, "collection %d does not exist", collectionID)
 	}
 	dbName := coll.GetDbName()
 	collectionName := coll.GetCollectionName()
@@ -161,15 +161,15 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 	sourceCollectionID := snapshotData.SnapshotInfo.GetCollectionId()
 	snapshot, err := s.meta.snapshotMeta.GetSnapshot(ctx, sourceCollectionID, snapshotData.SnapshotInfo.GetName())
 	if err != nil {
-		return fmt.Errorf("snapshot %s does not exist for collection %d: %w",
-			snapshotData.SnapshotInfo.GetName(), sourceCollectionID, err)
+		return merr.WrapErrServiceInternalErr(err, "snapshot %s does not exist for collection %d",
+			snapshotData.SnapshotInfo.GetName(), sourceCollectionID)
 	}
 	log.Info("snapshot validated", zap.String("snapshotName", snapshot.GetName()))
 
 	// ========== Validate Collection Exists ==========
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
-		return fmt.Errorf("collection %d does not exist: %w", collectionID, err)
+		return merr.WrapErrServiceInternalErr(err, "collection %d does not exist", collectionID)
 	}
 	dbName := coll.GetDbName()
 	collectionName := coll.GetCollectionName()
@@ -180,7 +180,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 	// ========== Validate Partitions Exist ==========
 	partitionsResp, err := s.broker.ShowPartitions(ctx, collectionID)
 	if err != nil {
-		return fmt.Errorf("failed to get partitions for collection %d: %w", collectionID, err)
+		return merr.WrapErrServiceInternalErr(err, "failed to get partitions for collection %d", collectionID)
 	}
 
 	// Build set of existing partition names
@@ -192,7 +192,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 	// Check all snapshot partitions exist
 	for partName := range snapshotData.Collection.GetPartitions() {
 		if !existingPartitions[partName] {
-			return fmt.Errorf("partition %s does not exist in collection %d",
+			return merr.WrapErrServiceInternalMsg("partition %s does not exist in collection %d",
 				partName, collectionID)
 		}
 	}
@@ -211,7 +211,7 @@ func (s *Server) validateRestoreSnapshotResources(ctx context.Context, collectio
 			}
 		}
 		if !indexFound {
-			return fmt.Errorf("index %s for field %d does not exist in collection %d",
+			return merr.WrapErrServiceInternalMsg("index %s for field %d does not exist in collection %d",
 				indexInfo.GetIndexName(), indexInfo.GetFieldID(), collectionID)
 		}
 	}

@@ -18,7 +18,6 @@ package session
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -33,13 +32,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-var ErrNodeNotFound = errors.New("NodeNotFound")
+var ErrNodeNotFound = merr.WrapErrServiceInternalMsg("node not found")
 
 func WrapErrNodeNotFound(nodeID int64) error {
-	return fmt.Errorf("%w(%v)", ErrNodeNotFound, nodeID)
+	return errors.Wrapf(ErrNodeNotFound, "node %v", nodeID)
 }
 
 type Cluster interface {

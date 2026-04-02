@@ -225,7 +225,7 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInf
 	defer cancel()
 	coll, err := t.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		return nil, fmt.Errorf("collection ID %d not found, err: %w", collectionID, err)
+		return nil, merr.WrapErrServiceInternalErr(err, "collection ID %d not found, err", collectionID)
 	}
 	return coll, nil
 }

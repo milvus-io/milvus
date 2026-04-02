@@ -233,7 +233,7 @@ class TestIndexOperation(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
-        error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
+        error = {ct.err_code: 1100, ct.err_msg: "at most one distinct index is allowed per field"}
         self.index_wrap.init_index(
             collection_w.collection,
             default_field_name,
@@ -1790,7 +1790,7 @@ class TestIndexString(TestcaseBase):
             default_index_params,
             index_name=index_name2,
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "CreateIndex failed"},
+            check_items={ct.err_code: 1100, ct.err_msg: "at most one distinct index is allowed per field"},
         )
 
     @pytest.mark.tags(CaseLabel.L1)

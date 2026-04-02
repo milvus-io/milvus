@@ -92,7 +92,7 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 	if err != nil {
 		msg := "failed to store partitions"
 		log.Warn(msg, zap.Error(err))
-		return errors.Wrap(err, msg)
+		return errors.Wrapf(err, "%s", msg)
 	}
 
 	return WaitUpdatePartition(job.ctx, job.targetObserver, job.req.GetCollectionID(), job.req.GetPartitionID())

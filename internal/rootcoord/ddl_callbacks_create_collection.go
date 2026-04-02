@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -228,7 +227,7 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 func mustConsumeConsistencyLevel(properties []*commonpb.KeyValuePair) (commonpb.ConsistencyLevel, []*commonpb.KeyValuePair) {
 	ok, consistencyLevel := getConsistencyLevel(properties...)
 	if !ok {
-		panic(fmt.Errorf("consistency level not found in properties"))
+		panic(merr.WrapErrServiceInternalMsg("consistency level not found in properties"))
 	}
 	newProperties := make([]*commonpb.KeyValuePair, 0, len(properties)-1)
 	for _, property := range properties {

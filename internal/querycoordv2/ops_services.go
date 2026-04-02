@@ -112,7 +112,7 @@ func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRe
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
 		return &querypb.ListQueryNodeResponse{
-			Status: merr.Status(errors.Wrap(err, errMsg)),
+			Status: merr.Status(errors.Wrapf(err, "%s", errMsg)),
 		}, nil
 	}
 
@@ -159,7 +159,7 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
 		return &querypb.GetQueryNodeDistributionResponse{
-			Status: merr.Status(errors.Wrap(err, errMsg)),
+			Status: merr.Status(errors.Wrapf(err, "%s", errMsg)),
 		}, nil
 	}
 
@@ -349,7 +349,7 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 	errMsg := "failed to resume query node"
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn(errMsg, zap.Error(err))
-		return merr.Status(errors.Wrap(err, errMsg)), nil
+		return merr.Status(errors.Wrapf(err, "%s", errMsg)), nil
 	}
 
 	info := s.nodeMgr.Get(req.GetNodeID())
@@ -383,7 +383,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load balance"
 		log.Warn(msg, zap.Error(err))
-		return merr.Status(errors.Wrap(err, msg)), nil
+		return merr.Status(errors.Wrapf(err, "%s", msg)), nil
 	}
 
 	// check whether srcNode is healthy
@@ -442,7 +442,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 		if err != nil {
 			msg := "failed to balance segments"
 			log.Warn(msg, zap.Error(err))
-			return merr.Status(errors.Wrap(err, msg)), nil
+			return merr.Status(errors.Wrapf(err, "%s", msg)), nil
 		}
 	}
 	return merr.Success(), nil
@@ -462,7 +462,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		msg := "failed to load balance"
 		log.Warn(msg, zap.Error(err))
-		return merr.Status(errors.Wrap(err, msg)), nil
+		return merr.Status(errors.Wrapf(err, "%s", msg)), nil
 	}
 
 	// check whether srcNode is healthy
@@ -516,7 +516,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		if err != nil {
 			msg := "failed to balance channels"
 			log.Warn(msg, zap.Error(err))
-			return merr.Status(errors.Wrap(err, msg)), nil
+			return merr.Status(errors.Wrapf(err, "%s", msg)), nil
 		}
 	}
 	return merr.Success(), nil

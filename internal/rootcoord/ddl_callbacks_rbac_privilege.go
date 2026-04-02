@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivilegeRequest) error {
@@ -79,7 +80,7 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	default:
-		return errors.New("invalid operate privilege type")
+		return merr.WrapErrServiceInternalMsg("invalid operate privilege type")
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -154,7 +155,7 @@ func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.
 			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	default:
-		return errors.New("invalid operate privilege group type")
+		return merr.WrapErrServiceInternalMsg("invalid operate privilege group type")
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

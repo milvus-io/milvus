@@ -816,7 +816,7 @@ func (m *meta) GetSegmentsChannels(segmentIDs []UniqueID) (map[int64]string, err
 	for _, segmentID := range segmentIDs {
 		segment := m.segments.GetSegment(segmentID)
 		if segment == nil {
-			return nil, errors.New(fmt.Sprintf("cannot find segment %d", segmentID))
+			return nil, merr.WrapErrServiceInternalMsg("cannot find segment %d", segmentID)
 		}
 		segChannels[segmentID] = segment.GetInsertChannel()
 	}
@@ -840,7 +840,7 @@ func (m *meta) SetState(ctx context.Context, segmentID UniqueID, targetState com
 		if targetState == commonpb.SegmentState_Dropped {
 			return nil
 		}
-		return fmt.Errorf("segment is not exist with ID = %d", segmentID)
+		return merr.WrapErrServiceInternalMsg("segment is not exist with ID = %d", segmentID)
 	}
 	// Persist segment updates first.
 	clonedSegment := curSegInfo.Clone()
@@ -941,12 +941,12 @@ func (p *updateSegmentPack) Validate() error {
 		segmentInMeta := p.meta.segments.GetSegment(segment.ID)
 		if segmentInMeta.State == commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Dropped {
 			// if the segment is flushed, we should not update the segment meta, ignore the operation directly.
-			return errors.Wrapf(ErrIgnoredSegmentMetaOperation,
+			return merr.WrapErrServiceInternalErr(ErrIgnoredSegmentMetaOperation,
 				"segment is flushed, segmentID: %d",
 				segment.ID)
 		}
 		if segment.GetDmlPosition().GetTimestamp() < segmentInMeta.GetDmlPosition().GetTimestamp() {
-			return errors.Wrapf(ErrIgnoredSegmentMetaOperation,
+			return merr.WrapErrServiceInternalErr(ErrIgnoredSegmentMetaOperation,
 				"dml time tick is less than the segment meta, segmentID: %d, new incoming time tick: %d, existing time tick: %d",
 				segment.ID,
 				segment.GetDmlPosition().GetTimestamp(),
@@ -2100,7 +2100,7 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	if curSegInfo == nil {
 		// TODO: Error handling.
 		log.Ctx(m.ctx).Error("meta update: add allocation failed - segment not found", zap.Int64("segmentID", segmentID))
-		return errors.New("meta update: add allocation failed - segment not found")
+		return merr.WrapErrServiceInternalMsg("meta update: add allocation failed - segment not found")
 	}
 	// As we use global segment lastExpire to guarantee data correctness after restart
 	// there is no need to persist allocation to meta store, only update allocation in-memory meta.
@@ -2661,7 +2661,7 @@ func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
 
 	for _, segID := range segIDs {
 		if _, ok := m.segments.segments[segID]; !ok {
-			return false, fmt.Errorf("segment is not exist with ID = %d", segID)
+			return false, merr.WrapErrServiceInternalMsg("segment is not exist with ID = %d", segID)
 		}
 	}
 	return true, nil
@@ -2747,7 +2747,7 @@ func (m *meta) collectionHasTextFields(collectionID int64) bool {
 // UpdateChannelCheckpoint updates and saves channel checkpoint.
 func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos *msgpb.MsgPosition) error {
 	if pos == nil || pos.GetMsgID() == nil {
-		return fmt.Errorf("channelCP is nil, vChannel=%s", vChannel)
+		return merr.WrapErrServiceInternalMsg("channelCP is nil, vChannel=%s", vChannel)
 	}
 
 	// Clamp checkpoint to not advance beyond min growing segment checkpoint.
@@ -3555,7 +3555,7 @@ func (m *meta) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*i
 		if resource, ok := m.resourceIDMap[id]; ok {
 			resources = append(resources, resource)
 		} else {
-			return nil, errors.Errorf("file resource %d not found", id)
+			return nil, merr.WrapErrServiceInternalMsg("file resource %d not found", id)
 		}
 	}
 	return resources, nil

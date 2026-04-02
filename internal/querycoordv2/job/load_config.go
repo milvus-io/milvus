@@ -20,7 +20,6 @@ import (
 	"context"
 	"sort"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
@@ -33,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-var ErrIgnoredAlterLoadConfig = errors.New("ignored alter load config")
+var ErrIgnoredAlterLoadConfig = merr.WrapErrServiceInternalMsg("ignored alter load config")
 
 type AlterLoadConfigRequest struct {
 	Meta           *meta.Meta
