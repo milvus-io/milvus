@@ -23,11 +23,11 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"strings"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // WriteFile writes raw bytes to a file using milvus-storage filesystem FFI.
@@ -39,7 +39,7 @@ func WriteFile(
 ) error {
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create properties: %w", err)
+		return merr.WrapErrStorage(err, "failed to create properties")
 	}
 	defer C.loon_properties_free(cProperties)
 
@@ -51,7 +51,7 @@ func WriteFile(
 	var fsHandle C.FileSystemHandle
 	result := C.loon_filesystem_get(cProperties, cPath, pathLen, &fsHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
-		return fmt.Errorf("failed to get filesystem: %w", err)
+		return merr.WrapErrStorage(err, "failed to get filesystem")
 	}
 	defer C.loon_filesystem_destroy(fsHandle)
 
@@ -64,7 +64,7 @@ func WriteFile(
 			defer C.free(unsafe.Pointer(cDir))
 			result = C.loon_filesystem_create_dir(fsHandle, cDir, C.uint32_t(len(dir)), true)
 			if err := HandleLoonFFIResult(result); err != nil {
-				return fmt.Errorf("failed to create parent directory %q: %w", dir, err)
+				return merr.WrapErrStorage(err, "failed to create parent directory %q", dir)
 			}
 		}
 	}

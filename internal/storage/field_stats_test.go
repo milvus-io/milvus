@@ -419,7 +419,7 @@ func TestDeserializeFieldStatsFailed(t *testing.T) {
 		}
 
 		_, err := DeserializeFieldStats(blob)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
 	})
 
 	t.Run("valid field stats", func(t *testing.T) {

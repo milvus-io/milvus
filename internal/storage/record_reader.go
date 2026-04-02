@@ -53,7 +53,7 @@ func newPackedRecordReader(
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 	field2Col := make(map[FieldID]int)
 	allFields := typeutil.GetAllFieldSchemas(schema)
@@ -97,7 +97,7 @@ func (ir *IterativeRecordReader) Close() error {
 func (ir *IterativeRecordReader) Next() (rec Record, err error) {
 	defer func() {
 		if x := recover(); x != nil {
-			rec, err = nil, fmt.Errorf("internal error recovered: %v", x)
+			rec, err = nil, merr.WrapErrServiceInternalMsg("internal error recovered: %v", x)
 		}
 	}()
 	if ir.cur == nil {
@@ -167,7 +167,7 @@ func NewManifestReaderFromBinlogs(fieldBinlogs []*datapb.FieldBinlog,
 ) (*ManifestReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, false)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
@@ -209,7 +209,7 @@ func NewManifestReader(manifest string,
 ) (*ManifestReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 
 	// Override TEXT fields to binary type — LOB references are binary encoded in manifest storage

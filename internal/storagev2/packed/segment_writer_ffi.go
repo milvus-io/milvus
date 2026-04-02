@@ -25,13 +25,13 @@ package packed
 import "C"
 
 import (
-	"fmt"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // TextColumnConfig represents configuration for a TEXT column.
@@ -73,7 +73,7 @@ func NewFFISegmentWriter(
 	defer cdata.ReleaseCArrowSchema(&cas)
 
 	if storageConfig == nil {
-		return nil, fmt.Errorf("storageConfig must not be nil")
+		return nil, merr.WrapErrStorageMsg("storageConfig must not be nil")
 	}
 
 	// create properties
@@ -158,14 +158,14 @@ func (f *SegmentOutput) applyTo(handle C.LoonTransactionHandle) error {
 	}
 	if f.cOutput.column_groups != nil {
 		if err := HandleLoonFFIResult(C.loon_transaction_append_files(handle, f.cOutput.column_groups)); err != nil {
-			return fmt.Errorf("commit manifest append_files (segment): %w", err)
+			return merr.Wrap(err, "commit manifest append_files (segment)")
 		}
 	}
 	if f.cOutput.num_lob_files > 0 && f.cOutput.lob_files != nil {
 		lob := unsafe.Slice(f.cOutput.lob_files, f.cOutput.num_lob_files)
 		for i := range lob {
 			if err := HandleLoonFFIResult(C.loon_transaction_add_lob_file(handle, &lob[i])); err != nil {
-				return fmt.Errorf("commit manifest add_lob_file: %w", err)
+				return merr.Wrap(err, "commit manifest add_lob_file")
 			}
 		}
 	}
@@ -183,7 +183,7 @@ func (f *SegmentOutput) applyTo(handle C.LoonTransactionHandle) error {
 // further Close or Write calls fail.
 func (w *FFISegmentWriter) Close() (WriterOutput, error) {
 	if w.closed {
-		return nil, fmt.Errorf("FFISegmentWriter already closed")
+		return nil, merr.WrapErrServiceInternal("FFISegmentWriter already closed")
 	}
 	w.closed = true
 	defer func() {
