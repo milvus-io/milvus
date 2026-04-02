@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"go.uber.org/zap"
 
@@ -77,7 +76,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		}
 		resp, err := t.mixCoord.Flush(ctx, flushReq)
 		if err = merr.CheckRPCCall(resp, err); err != nil {
-			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
+			return merr.WrapErrParameterInvalidMsg("failed to call flush to data coordinator: %s", err.Error())
 		}
 
 		// Remove the flushed segments from onFlushSegmentIDs

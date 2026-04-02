@@ -151,7 +151,7 @@ func translateGroupByFieldIds(groupByFieldNames []string, schema *schemapb.Colle
 		groupByField = strings.TrimSpace(groupByField)
 		fieldSchema, found := fieldNameToSchema[groupByField]
 		if !found {
-			return nil, fmt.Errorf("field %s not exist", groupByField)
+			return nil, merr.WrapErrParameterInvalidMsg("field %s not exist", groupByField)
 		}
 		if err := validateGroupByFieldSchema(fieldSchema); err != nil {
 			return nil, err
@@ -296,7 +296,7 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 			}
 
 			if !fieldFound {
-				return nil, fmt.Errorf("field %s not exist", reqField)
+				return nil, merr.WrapErrParameterInvalidMsg("field %s not exist", reqField)
 			}
 		}
 
@@ -384,7 +384,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 		isLimitProvided = true
 		limit, err = strconv.ParseInt(limitStr, 0, 64)
 		if err != nil {
-			return nil, fmt.Errorf("%s [%s] is invalid", LimitKey, limitStr)
+			return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", LimitKey, limitStr)
 		}
 	}
 	if isLimitProvided {
@@ -393,12 +393,12 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 		if err == nil {
 			offset, err = strconv.ParseInt(offsetStr, 0, 64)
 			if err != nil {
-				return nil, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+				return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", OffsetKey, offsetStr)
 			}
 		}
 		// validate max result window.
 		if err = validateMaxQueryResultWindow(offset, limit, largeTopKEnabled); err != nil {
-			return nil, fmt.Errorf("invalid max query result window, %w", err)
+			return nil, merr.WrapErrParameterInvalidMsg("invalid max query result window, %v", err)
 		}
 	}
 
@@ -1137,11 +1137,11 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		}
 		// Validate element-level consistency: if any result is element-level, all must be
 		if isElementLevel && !r.GetElementLevel() {
-			return nil, fmt.Errorf("inconsistent element-level flag: expected all results to be element-level")
+			return nil, merr.WrapErrParameterInvalidMsg("inconsistent element-level flag: expected all results to be element-level")
 		}
 		// Validate element_indices length matches ids length for element-level
 		if isElementLevel && len(r.GetElementIndices()) != size {
-			return nil, fmt.Errorf("element_indices length (%d) does not match ids length (%d)", len(r.GetElementIndices()), size)
+			return nil, merr.WrapErrParameterInvalidMsg("element_indices length (%d) does not match ids length (%d)", len(r.GetElementIndices()), size)
 		}
 		validRetrieveResults = append(validRetrieveResults, r)
 		loopEnd += size
@@ -1219,7 +1219,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 
 		cursors[sel]++

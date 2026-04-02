@@ -18,13 +18,13 @@ package proxy
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -69,7 +69,7 @@ func isVectorTypeMatch(placeholderType commonpb.PlaceholderType, fieldType schem
 func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema) ([]byte, commonpb.PlaceholderType, error) {
 	var phg commonpb.PlaceholderGroup
 	if err := proto.Unmarshal(phgBytes, &phg); err != nil {
-		return nil, 0, fmt.Errorf("failed to unmarshal placeholder group: %w", err)
+		return nil, 0, merr.WrapErrParameterInvalidMsg("failed to unmarshal placeholder group: %v", err)
 	}
 
 	if len(phg.Placeholders) == 0 {
@@ -100,7 +100,7 @@ func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema)
 
 	// Check if conversion is supported (fp32 -> fp16/bf16)
 	if placeholder.Type != commonpb.PlaceholderType_FloatVector {
-		return nil, phType, fmt.Errorf("vector type must be the same: field type %s, search type %s",
+		return nil, phType, merr.WrapErrParameterInvalidMsg("vector type must be the same: field type %s, search type %s",
 			fieldType.String(), placeholder.Type.String())
 	}
 
@@ -129,7 +129,7 @@ func convertPlaceholder(
 	for i, valueBytes := range placeholder.Values {
 		floats, err := bytesToFloat32Array(valueBytes)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse float32 vector at index %d: %w", i, err)
+			return nil, merr.WrapErrParameterInvalidMsg("failed to parse float32 vector at index %d: %v", i, err)
 		}
 
 		convertedValues[i], err = typeutil.ConvertFloat32ToFP16BF16Bytes(floats, fieldType)
@@ -182,7 +182,7 @@ func normalizeFP32ToFP16BF16VectorField(fieldData *schemapb.FieldData, fieldSche
 // bytesToFloat32Array converts byte slice to float32 array.
 func bytesToFloat32Array(data []byte) ([]float32, error) {
 	if len(data)%4 != 0 {
-		return nil, fmt.Errorf("invalid float32 vector data length: %d", len(data))
+		return nil, merr.WrapErrParameterInvalidMsg("invalid float32 vector data length: %d", len(data))
 	}
 
 	dim := len(data) / 4
