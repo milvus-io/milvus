@@ -631,6 +631,12 @@ func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection strin
 		databaseLabelName:  dbName,
 		collectionName:     collection,
 	})
+	ProxyCollectionSQLatency.Delete(prometheus.Labels{
+		nodeIDLabelName:    strconv.FormatInt(nodeID, 10),
+		queryTypeLabelName: UpsertQueryLabel,
+		databaseLabelName:  dbName,
+		collectionName:     collection,
+	})
 	ProxyCollectionMutationLatency.Delete(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		msgTypeLabelName:  InsertLabel,

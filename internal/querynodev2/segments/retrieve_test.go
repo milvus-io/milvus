@@ -198,6 +198,7 @@ func (suite *RetrieveSuite) TestRetrieveSealed() {
 
 	req := &querypb.QueryRequest{
 		Req: &internalpb.RetrieveRequest{
+			QueryLabel:   "query",
 			CollectionID: suite.collectionID,
 			PartitionIDs: []int64{suite.partitionID},
 		},
@@ -231,6 +232,7 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 
 		req := &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
+				QueryLabel:   "query",
 				CollectionID: suite.collectionID,
 				PartitionIDs: []int64{suite.partitionID},
 			},
@@ -252,6 +254,7 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 
 		req := &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
+				QueryLabel:   "query",
 				CollectionID: suite.collectionID,
 				PartitionIDs: []int64{suite.partitionID},
 			},
@@ -341,6 +344,7 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 
 		req := &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
+				QueryLabel:   "query",
 				CollectionID: suite.collectionID,
 				PartitionIDs: []int64{suite.partitionID},
 			},
@@ -378,6 +382,7 @@ func (suite *RetrieveSuite) TestRetrieveGrowing() {
 
 	req := &querypb.QueryRequest{
 		Req: &internalpb.RetrieveRequest{
+			QueryLabel:   "query",
 			CollectionID: suite.collectionID,
 			PartitionIDs: []int64{suite.partitionID},
 		},
@@ -404,6 +409,7 @@ func (suite *RetrieveSuite) TestRetrieveStreamSealed() {
 
 	req := &querypb.QueryRequest{
 		Req: &internalpb.RetrieveRequest{
+			QueryLabel:   "query",
 			CollectionID: suite.collectionID,
 			PartitionIDs: []int64{suite.partitionID},
 		},
@@ -507,6 +513,7 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilter() {
 
 		req := &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
+				QueryLabel:   "query",
 				CollectionID: suite.collectionID,
 				PartitionIDs: []int64{suite.partitionID},
 			},
@@ -549,6 +556,7 @@ func (suite *RetrieveSuite) TestRetrieveNonExistSegment() {
 
 	req := &querypb.QueryRequest{
 		Req: &internalpb.RetrieveRequest{
+			QueryLabel:   "query",
 			CollectionID: suite.collectionID,
 			PartitionIDs: []int64{suite.partitionID},
 		},
@@ -569,6 +577,7 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 	suite.sealed.Release(context.Background())
 	req := &querypb.QueryRequest{
 		Req: &internalpb.RetrieveRequest{
+			QueryLabel:   "query",
 			CollectionID: suite.collectionID,
 			PartitionIDs: []int64{suite.partitionID},
 		},

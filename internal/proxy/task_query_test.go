@@ -122,6 +122,7 @@ func TestQueryTask_all(t *testing.T) {
 		task := &queryTask{
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
+				QueryLabel: "query",
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: paramtable.GetNodeID(),
@@ -268,6 +269,7 @@ func TestQueryTask_all(t *testing.T) {
 		qt := &queryTask{
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
+				QueryLabel: "query",
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: paramtable.GetNodeID(),
@@ -319,6 +321,7 @@ func TestQueryTask_all(t *testing.T) {
 		qt = &queryTask{
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
+				QueryLabel: "query",
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: paramtable.GetNodeID(),
@@ -386,6 +389,7 @@ func TestQueryTask_all(t *testing.T) {
 			task := &queryTask{
 				Condition: NewTaskCondition(ctx),
 				RetrieveRequest: &internalpb.RetrieveRequest{
+					QueryLabel: "query",
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Retrieve,
 						SourceID: paramtable.GetNodeID(),

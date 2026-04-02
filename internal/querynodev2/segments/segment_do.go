@@ -6,6 +6,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 )
 
 type doOnSegmentFunc func(ctx context.Context, segment Segment) error
@@ -13,7 +14,7 @@ type doOnSegmentFunc func(ctx context.Context, segment Segment) error
 func doOnSegment(ctx context.Context, mgr *Manager, seg Segment, do doOnSegmentFunc) error {
 	// record search time and cache miss
 	var err error
-	accessRecord := metricsutil.NewQuerySegmentAccessRecord(getSegmentMetricLabel(seg))
+	accessRecord := metricsutil.NewQuerySegmentAccessRecord(getSegmentMetricLabel(seg), contextutil.GetQueryLabel(ctx))
 	defer func() {
 		accessRecord.Finish(err)
 	}()
