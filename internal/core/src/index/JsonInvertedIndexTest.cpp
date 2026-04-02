@@ -86,11 +86,8 @@ BuildAndLoadJsonInvertedIndexForOffsetRegression(
     constexpr int64_t index_build_id = 4000;
     constexpr int64_t index_version = 4000;
 
-    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
-                                                      partition_id,
-                                                      segment_id,
-                                                      field_id,
-                                                      DataType::JSON);
+    auto field_meta = milvus::segcore::gen_field_meta(
+        collection_id, partition_id, segment_id, field_id, DataType::JSON);
     auto index_meta =
         gen_index_meta(segment_id, field_id, index_build_id, index_version);
 
@@ -416,8 +413,8 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     cii.index_type = index::INVERTED_INDEX_TYPE;
     cii.json_cast_type = JsonCastType::FromString("DOUBLE");
     cii.json_path = "/a";
-    auto inv_index =
-        index::IndexFactory::GetInstance().CreateJsonIndex(cii, file_manager_ctx);
+    auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        cii, file_manager_ctx);
     auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
         static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
 
@@ -433,12 +430,10 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
             milvus::Json(simdjson::padded_string(R"({"a": null})")));
     }
     for (int i = 0; i < 20; i++) {
-        jsons.push_back(
-            milvus::Json(simdjson::padded_string(R"({"b": 1})")));
+        jsons.push_back(milvus::Json(simdjson::padded_string(R"({"b": 1})")));
     }
     for (int i = 0; i < 10; i++) {
-        jsons.push_back(
-            milvus::Json(simdjson::padded_string(R"({"a": 1.0})")));
+        jsons.push_back(milvus::Json(simdjson::padded_string(R"({"a": 1.0})")));
     }
 
     auto json_field =
@@ -500,7 +495,6 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         EXPECT_GT(result.codecs_.size(), 0);
         EXPECT_EQ(result.size_, 20 * sizeof(size_t));
     }
-
 }
 
 TEST(JsonIndexTest, TestLoadWithOnlySlicedNonExistOffsets) {
@@ -514,9 +508,8 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNonExistOffsets) {
         json_raw_data.emplace_back(R"({"a": 1.0})");
     }
 
-    EXPECT_EQ(
-        BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data),
-        json_raw_data.size());
+    EXPECT_EQ(BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data),
+              json_raw_data.size());
 }
 
 TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
@@ -530,7 +523,6 @@ TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
         json_raw_data.emplace_back(R"({"a": 1.0})");
     }
 
-    EXPECT_EQ(
-        BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data),
-        json_raw_data.size());
+    EXPECT_EQ(BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data),
+              json_raw_data.size());
 }
