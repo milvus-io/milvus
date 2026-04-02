@@ -208,7 +208,7 @@ func (mt *MetaTable) reload() error {
 	metrics.RootCoordNumOfDatabases.Set(0)
 
 	// recover databases.
-	dbs, err := mt.catalog.ListDatabases(mt.ctx, typeutil.MaxTimestamp)
+	dbs, err := mt.catalog.ListDatabases(mt.ctx)
 	if err != nil {
 		return err
 	}
@@ -243,7 +243,7 @@ func (mt *MetaTable) reload() error {
 
 		start := time.Now()
 		// TODO: async list collections to accelerate cases with multiple databases.
-		collections, err := mt.catalog.ListCollections(mt.ctx, db.ID, typeutil.MaxTimestamp)
+		collections, err := mt.catalog.ListCollections(mt.ctx, db.ID)
 		if err != nil {
 			return err
 		}
@@ -283,7 +283,7 @@ func (mt *MetaTable) reload() error {
 	// recover aliases from db namespace
 	for dbName, db := range mt.dbName2Meta {
 		mt.aliases.createDbIfNotExist(dbName)
-		aliases, err := mt.catalog.ListAliases(mt.ctx, db.ID, typeutil.MaxTimestamp)
+		aliases, err := mt.catalog.ListAliases(mt.ctx, db.ID)
 		if err != nil {
 			return err
 		}
@@ -322,7 +322,7 @@ func (mt *MetaTable) reload() error {
 func (mt *MetaTable) reloadWithNonDatabase() error {
 	collectionNum := int64(0)
 	partitionNum := int64(0)
-	oldCollections, err := mt.catalog.ListCollections(mt.ctx, util.NonDBID, typeutil.MaxTimestamp)
+	oldCollections, err := mt.catalog.ListCollections(mt.ctx, util.NonDBID)
 	if err != nil {
 		return err
 	}
@@ -345,7 +345,7 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 		log.Ctx(mt.ctx).Info("recover collections without db", zap.Int64("collection_num", collectionNum), zap.Int64("partition_num", partitionNum))
 	}
 
-	aliases, err := mt.catalog.ListAliases(mt.ctx, util.NonDBID, typeutil.MaxTimestamp)
+	aliases, err := mt.catalog.ListAliases(mt.ctx, util.NonDBID)
 	if err != nil {
 		return err
 	}
@@ -418,7 +418,7 @@ func (mt *MetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts 
 
 func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
 	dbName := db.Name
-	if err := mt.catalog.CreateDatabase(ctx, db, ts); err != nil {
+	if err := mt.catalog.CreateDatabase(ctx, db); err != nil {
 		return err
 	}
 
@@ -435,7 +435,7 @@ func (mt *MetaTable) AlterDatabase(ctx context.Context, newDB *model.Database, t
 	defer mt.ddLock.Unlock()
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.AlterDatabase(ctx1, newDB, ts); err != nil {
+	if err := mt.catalog.AlterDatabase(ctx1, newDB); err != nil {
 		return err
 	}
 	mt.dbName2Meta[newDB.Name] = newDB
@@ -476,7 +476,7 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 		log.Ctx(ctx).Warn("not found database", zap.String("db", dbName))
 		return nil
 	}
-	if err := mt.catalog.DropDatabase(ctx, db.ID, ts); err != nil {
+	if err := mt.catalog.DropDatabase(ctx, db.ID); err != nil {
 		return err
 	}
 
@@ -551,7 +551,7 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	}
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.CreateCollection(ctx1, coll, coll.CreateTime); err != nil {
+	if err := mt.catalog.CreateCollection(ctx1, coll); err != nil {
 		return err
 	}
 
@@ -593,7 +593,7 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	clone.UpdateTimestamp = ts
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.AlterCollection(ctx1, coll, clone, metastore.MODIFY, ts, false); err != nil {
+	if err := mt.catalog.AlterCollection(ctx1, coll, clone, metastore.MODIFY, false); err != nil {
 		return err
 	}
 	mt.collID2Meta[collectionID] = clone
@@ -702,7 +702,7 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		Aliases:           aliases,
 		DBID:              coll.DBID,
 	}
-	if err := mt.catalog.DropCollection(ctx1, newColl, ts); err != nil {
+	if err := mt.catalog.DropCollection(ctx1, newColl); err != nil {
 		return err
 	}
 
@@ -776,7 +776,7 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, dbName strin
 		if err != nil {
 			return nil, err
 		}
-		coll, err = mt.catalog.GetCollectionByID(ctx1, db.ID, ts, collectionID)
+		coll, err = mt.catalog.GetCollectionByID(ctx1, db.ID, collectionID)
 		if err != nil {
 			return nil, err
 		}
@@ -865,7 +865,7 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 
 	// travel meta information from catalog. No need to check time travel logic again, since catalog already did.
 	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	coll, err := mt.catalog.GetCollectionByName(ctx, db.ID, db.Name, collectionName, ts)
+	coll, err := mt.catalog.GetCollectionByName(ctx, db.ID, db.Name, collectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -952,7 +952,7 @@ func (mt *MetaTable) ListCollections(ctx context.Context, dbName string, ts Time
 
 	// list collections should always be loaded from catalog.
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	colls, err := mt.catalog.ListCollections(ctx1, db.ID, ts)
+	colls, err := mt.catalog.ListCollections(ctx1, db.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -1037,11 +1037,11 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if !dbChanged {
-		if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, fieldModify); err != nil {
+		if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, fieldModify); err != nil {
 			return err
 		}
 	} else {
-		if err := mt.catalog.AlterCollectionDB(ctx1, oldColl, newColl, newColl.UpdateTimestamp); err != nil {
+		if err := mt.catalog.AlterCollectionDB(ctx1, oldColl, newColl); err != nil {
 			return err
 		}
 	}
@@ -1092,7 +1092,7 @@ func (mt *MetaTable) BeginTruncateCollection(ctx context.Context, collectionID U
 	newColl.Properties = common.NewKeyValuePairs(newProperties)
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
+	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, false); err != nil {
 		return err
 	}
 	mt.collID2Meta[coll.CollectionID] = newColl
@@ -1123,7 +1123,7 @@ func (mt *MetaTable) TruncateCollection(ctx context.Context, result message.Broa
 		newColl.ShardInfos[vchannel].LastTruncateTimeTick = result.Results[vchannel].TimeTick
 	}
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
+	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, false); err != nil {
 		return err
 	}
 	mt.collID2Meta[coll.CollectionID] = newColl
@@ -1256,7 +1256,7 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 			return nil
 		}
 	}
-	if err := mt.catalog.CreatePartition(ctx, coll.DBID, partition, partition.PartitionCreatedTimestamp); err != nil {
+	if err := mt.catalog.CreatePartition(ctx, coll.DBID, partition); err != nil {
 		return err
 	}
 	mt.collID2Meta[partition.CollectionID].Partitions = append(mt.collID2Meta[partition.CollectionID].Partitions, partition.Clone())
@@ -1288,7 +1288,7 @@ func (mt *MetaTable) DropPartition(ctx context.Context, collectionID UniqueID, p
 			clone := part.Clone()
 			clone.State = pb.PartitionState_PartitionDropping
 			ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-			if err := mt.catalog.AlterPartition(ctx1, coll.DBID, part, clone, metastore.MODIFY, ts); err != nil {
+			if err := mt.catalog.AlterPartition(ctx1, coll.DBID, part, clone, metastore.MODIFY); err != nil {
 				return err
 			}
 			mt.collID2Meta[collectionID].Partitions[idx] = clone
@@ -1332,7 +1332,7 @@ func (mt *MetaTable) RemovePartition(ctx context.Context, collectionID UniqueID,
 	}
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.DropPartition(ctx1, coll.DBID, collectionID, partitionID, ts); err != nil {
+	if err := mt.catalog.DropPartition(ctx1, coll.DBID, collectionID, partitionID); err != nil {
 		return err
 	}
 	coll.Partitions = append(coll.Partitions[:loc], coll.Partitions[loc+1:]...)
@@ -1411,7 +1411,7 @@ func (mt *MetaTable) DropAlias(ctx context.Context, result message.BroadcastResu
 	header := result.Message.Header()
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.DropAlias(ctx1, header.DbId, header.Alias, result.GetControlChannelResult().TimeTick); err != nil {
+	if err := mt.catalog.DropAlias(ctx1, header.DbId, header.Alias); err != nil {
 		return err
 	}
 	mt.aliases.remove(header.DbName, header.Alias)
@@ -1435,7 +1435,7 @@ func (mt *MetaTable) AlterAlias(ctx context.Context, result message.BroadcastRes
 		CreatedTime:  result.GetControlChannelResult().TimeTick,
 		State:        pb.AliasState_AliasCreated,
 		DbID:         header.DbId,
-	}, result.GetControlChannelResult().TimeTick); err != nil {
+	}); err != nil {
 		return err
 	}
 

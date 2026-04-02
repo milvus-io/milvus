@@ -19,28 +19,28 @@ import (
 
 //go:generate mockery --name=RootCoordCatalog
 type RootCoordCatalog interface {
-	CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error
-	DropDatabase(ctx context.Context, dbID int64, ts typeutil.Timestamp) error
-	ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error)
-	AlterDatabase(ctx context.Context, newDB *model.Database, ts typeutil.Timestamp) error
+	CreateDatabase(ctx context.Context, db *model.Database) error
+	DropDatabase(ctx context.Context, dbID int64) error
+	ListDatabases(ctx context.Context) ([]*model.Database, error)
+	AlterDatabase(ctx context.Context, newDB *model.Database) error
 
-	CreateCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error
-	GetCollectionByID(ctx context.Context, dbID int64, ts typeutil.Timestamp, collectionID typeutil.UniqueID) (*model.Collection, error)
-	GetCollectionByName(ctx context.Context, dbID int64, dbName string, collectionName string, ts typeutil.Timestamp) (*model.Collection, error)
-	ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error)
-	CollectionExists(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool
-	DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error
-	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType AlterType, ts typeutil.Timestamp, fieldModify bool) error
-	AlterCollectionDB(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp) error
+	CreateCollection(ctx context.Context, collectionInfo *model.Collection) error
+	GetCollectionByID(ctx context.Context, dbID int64, collectionID typeutil.UniqueID) (*model.Collection, error)
+	GetCollectionByName(ctx context.Context, dbID int64, dbName string, collectionName string) (*model.Collection, error)
+	ListCollections(ctx context.Context, dbID int64) ([]*model.Collection, error)
+	CollectionExists(ctx context.Context, dbID int64, collectionID typeutil.UniqueID) bool
+	DropCollection(ctx context.Context, collectionInfo *model.Collection) error
+	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType AlterType, fieldModify bool) error
+	AlterCollectionDB(ctx context.Context, oldColl *model.Collection, newColl *model.Collection) error
 
-	CreatePartition(ctx context.Context, dbID int64, partition *model.Partition, ts typeutil.Timestamp) error
-	DropPartition(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error
-	AlterPartition(ctx context.Context, dbID int64, oldPart *model.Partition, newPart *model.Partition, alterType AlterType, ts typeutil.Timestamp) error
+	CreatePartition(ctx context.Context, dbID int64, partition *model.Partition) error
+	DropPartition(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, partitionID typeutil.UniqueID) error
+	AlterPartition(ctx context.Context, dbID int64, oldPart *model.Partition, newPart *model.Partition, alterType AlterType) error
 
-	CreateAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error
-	DropAlias(ctx context.Context, dbID int64, alias string, ts typeutil.Timestamp) error
-	AlterAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error
-	ListAliases(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Alias, error)
+	CreateAlias(ctx context.Context, alias *model.Alias) error
+	DropAlias(ctx context.Context, dbID int64, alias string) error
+	AlterAlias(ctx context.Context, alias *model.Alias) error
+	ListAliases(ctx context.Context, dbID int64) ([]*model.Alias, error)
 
 	// GetCredential gets the credential info for the username, returns error if no credential exists for this username.
 	GetCredential(ctx context.Context, username string) (*model.Credential, error)

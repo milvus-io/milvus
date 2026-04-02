@@ -40,15 +40,15 @@ import (
 // prefix/file_resource/resource_id             -> Resource
 
 type Catalog struct {
-	Txn      kv.TxnKV
-	Snapshot kv.SnapShotKV
-
+	Txn  kv.TxnKV
 	pool *conc.Pool[any]
 }
 
-func NewCatalog(metaKV kv.TxnKV, ss kv.SnapShotKV) metastore.RootCoordCatalog {
+func NewCatalog(metaKV kv.TxnKV) metastore.RootCoordCatalog {
 	ioPool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
-	return &Catalog{Txn: metaKV, Snapshot: ss, pool: ioPool}
+	kc := &Catalog{Txn: metaKV, pool: ioPool}
+	go kc.startLegacySnapshotGC(context.Background())
+	return kc
 }
 
 func BuildCollectionKey(dbID typeutil.UniqueID, collectionID typeutil.UniqueID) string {
@@ -113,48 +113,74 @@ func BuildAliasPrefixWithDB(dbID int64) string {
 	return fmt.Sprintf("%s/%s/%d/", DatabaseMetaPrefix, Aliases, dbID)
 }
 
-// since SnapshotKV may save both snapshot key and the original key if the original key is newest
-func batchMultiSaveAndRemove(ctx context.Context, snapshot kv.SnapShotKV, limit int, saves map[string]string, removals []string, ts typeutil.Timestamp) error {
-	saveFn := func(partialKvs map[string]string) error {
-		return snapshot.MultiSave(ctx, partialKvs, ts)
+// startLegacySnapshotGC scans the KV store and removes any orphaned snapshot
+// keys left behind by the old SuffixSnapshot mechanism. It runs in the background
+// and fires once per hour.
+func (kc *Catalog) startLegacySnapshotGC(ctx context.Context) {
+	log.Ctx(ctx).Info("legacy snapshot GC started")
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Ctx(ctx).Info("legacy snapshot GC stopped")
+			return
+		case <-ticker.C:
+			kc.runSnapshotGC(ctx)
+		}
 	}
-	if err := etcd.SaveByBatchWithLimit(saves, limit, saveFn); err != nil {
-		return err
-	}
-
-	removeFn := func(partialKeys []string) error {
-		return snapshot.MultiSaveAndRemove(ctx, nil, partialKeys, ts)
-	}
-	return etcd.RemoveByBatchWithLimit(removals, limit, removeFn)
 }
 
-func (kc *Catalog) CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
+func (kc *Catalog) runSnapshotGC(ctx context.Context) {
+	keys, _, err := kc.Txn.LoadWithPrefix(ctx, SnapshotPrefix)
+	if err != nil {
+		log.Ctx(ctx).Warn("legacy snapshot GC: failed to scan keys", zap.Error(err))
+		return
+	}
+	var toDelete []string
+	for _, k := range keys {
+		// snapshot keys contain the separator, e.g. "_ts123456"
+		if strings.Contains(k, SnapshotsSep) {
+			toDelete = append(toDelete, k)
+		}
+	}
+	if len(toDelete) == 0 {
+		return
+	}
+	if err := kc.Txn.MultiRemove(ctx, toDelete); err != nil {
+		log.Ctx(ctx).Warn("legacy snapshot GC: failed to delete keys", zap.Error(err))
+		return
+	}
+	log.Ctx(ctx).Info("legacy snapshot GC: cleaned up keys", zap.Int("count", len(toDelete)))
+}
+
+func (kc *Catalog) CreateDatabase(ctx context.Context, db *model.Database) error {
 	key := BuildDatabaseKey(db.ID)
 	dbInfo := model.MarshalDatabaseModel(db)
 	v, err := proto.Marshal(dbInfo)
 	if err != nil {
 		return err
 	}
-	return kc.Snapshot.Save(ctx, key, string(v), ts)
+	return kc.Txn.Save(ctx, key, string(v))
 }
 
-func (kc *Catalog) AlterDatabase(ctx context.Context, newColl *model.Database, ts typeutil.Timestamp) error {
+func (kc *Catalog) AlterDatabase(ctx context.Context, newColl *model.Database) error {
 	key := BuildDatabaseKey(newColl.ID)
 	dbInfo := model.MarshalDatabaseModel(newColl)
 	v, err := proto.Marshal(dbInfo)
 	if err != nil {
 		return err
 	}
-	return kc.Snapshot.Save(ctx, key, string(v), ts)
+	return kc.Txn.Save(ctx, key, string(v))
 }
 
-func (kc *Catalog) DropDatabase(ctx context.Context, dbID int64, ts typeutil.Timestamp) error {
+func (kc *Catalog) DropDatabase(ctx context.Context, dbID int64) error {
 	key := BuildDatabaseKey(dbID)
-	return kc.Snapshot.MultiSaveAndRemove(ctx, nil, []string{key}, ts)
+	return kc.Txn.MultiSaveAndRemove(ctx, nil, []string{key})
 }
 
-func (kc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error) {
-	_, vals, err := kc.Snapshot.LoadWithPrefix(ctx, DBInfoMetaPrefix+"/", ts)
+func (kc *Catalog) ListDatabases(ctx context.Context) ([]*model.Database, error) {
+	_, vals, err := kc.Txn.LoadWithPrefix(ctx, DBInfoMetaPrefix+"/")
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +197,7 @@ func (kc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]
 	return dbs, nil
 }
 
-func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection, ts typeutil.Timestamp) error {
+func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection) error {
 	if coll.State != pb.CollectionState_CollectionCreated {
 		return fmt.Errorf("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
 	}
@@ -240,18 +266,18 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 	// cause the idempotency check in AddCollection to short-circuit and skip saving fields.
 	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
 	if err := etcd.SaveByBatchWithLimit(kvs, maxTxnNum, func(partialKvs map[string]string) error {
-		return kc.Snapshot.MultiSave(ctx, partialKvs, ts)
+		return kc.Txn.MultiSave(ctx, partialKvs)
 	}); err != nil {
 		return err
 	}
 
 	// Save the collection key last — this is the "commit point" that makes the collection visible.
-	return kc.Snapshot.Save(ctx, k1, string(v1), ts)
+	return kc.Txn.Save(ctx, k1, string(v1))
 }
 
-func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
+func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collectionID typeutil.UniqueID) (*pb.CollectionInfo, error) {
 	collKey := BuildCollectionKey(dbID, collectionID)
-	collVal, err := kc.Snapshot.Load(ctx, collKey, ts)
+	collVal, err := kc.Txn.Load(ctx, collKey)
 	if err != nil {
 		return nil, merr.WrapErrCollectionNotFound(collectionID, err.Error())
 	}
@@ -261,7 +287,7 @@ func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collect
 	return collMeta, err
 }
 
-func (kc *Catalog) loadCollectionFromDefaultDb(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
+func (kc *Catalog) loadCollectionFromDefaultDb(ctx context.Context, collectionID typeutil.UniqueID) (*pb.CollectionInfo, error) {
 	if info, err := kc.loadCollectionFromDb(ctx, util.DefaultDBID, collectionID, ts); err == nil {
 		return info, nil
 	}
@@ -269,7 +295,7 @@ func (kc *Catalog) loadCollectionFromDefaultDb(ctx context.Context, collectionID
 	return kc.loadCollectionFromDb(ctx, util.NonDBID, collectionID, ts)
 }
 
-func (kc *Catalog) loadCollection(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
+func (kc *Catalog) loadCollection(ctx context.Context, dbID int64, collectionID typeutil.UniqueID) (*pb.CollectionInfo, error) {
 	if isDefaultDB(dbID) {
 		info, err := kc.loadCollectionFromDefaultDb(ctx, collectionID, ts)
 		if err != nil {
@@ -295,7 +321,7 @@ func partitionExistByName(collMeta *pb.CollectionInfo, partitionName string) boo
 	return funcutil.SliceContain(collMeta.GetPartitionNames(), partitionName)
 }
 
-func (kc *Catalog) CreatePartition(ctx context.Context, dbID int64, partition *model.Partition, ts typeutil.Timestamp) error {
+func (kc *Catalog) CreatePartition(ctx context.Context, dbID int64, partition *model.Partition) error {
 	collMeta, err := kc.loadCollection(ctx, dbID, partition.CollectionID, ts)
 	if err != nil {
 		return err
@@ -309,7 +335,7 @@ func (kc *Catalog) CreatePartition(ctx context.Context, dbID int64, partition *m
 		if err != nil {
 			return err
 		}
-		return kc.Snapshot.Save(ctx, k, string(v), ts)
+		return kc.Txn.Save(ctx, k, string(v))
 	}
 
 	if partitionExistByID(collMeta, partition.PartitionID) {
@@ -331,10 +357,10 @@ func (kc *Catalog) CreatePartition(ctx context.Context, dbID int64, partition *m
 	if err != nil {
 		return err
 	}
-	return kc.Snapshot.Save(ctx, k, string(v), ts)
+	return kc.Txn.Save(ctx, k, string(v))
 }
 
-func (kc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error {
+func (kc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias) error {
 	oldKBefore210 := BuildAliasKey210(alias.Name)
 	oldKeyWithoutDb := BuildAliasKey(alias.Name)
 	k := BuildAliasKeyWithDB(alias.DbID, alias.Name)
@@ -344,7 +370,7 @@ func (kc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeu
 		return err
 	}
 	kvs := map[string]string{k: string(v)}
-	return kc.Snapshot.MultiSaveAndRemove(ctx, kvs, []string{oldKBefore210, oldKeyWithoutDb}, ts)
+	return kc.Txn.MultiSaveAndRemove(ctx, kvs, []string{oldKBefore210)
 }
 
 func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
@@ -359,15 +385,15 @@ func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Creden
 
 	err = kc.Txn.Save(ctx, k, string(v))
 	if err != nil {
-		log.Ctx(ctx).Error("create credential persist meta fail", zap.String("key", k), zap.Error(err))
+		log.Ctx(ctx).Error("create credential persist meta fail"), zap.Error(err))
 		return err
 	}
 	return nil
 }
 
-func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Partition, error) {
+func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID typeutil.UniqueID) ([]*model.Partition, error) {
 	prefix := BuildPartitionPrefix(collectionID)
-	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, prefix, ts)
+	_, values, err := kc.Txn.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +410,7 @@ func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID type
 }
 
 func (kc *Catalog) batchListPartitionsAfter210(ctx context.Context, ts typeutil.Timestamp) (map[int64][]*model.Partition, error) {
-	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, PartitionMetaPrefix+"/", ts)
+	_, values, err := kc.Txn.LoadWithPrefix(ctx, PartitionMetaPrefix+"/")
 	if err != nil {
 		return nil, err
 	}
@@ -409,9 +435,9 @@ func fieldVersionAfter210(collMeta *pb.CollectionInfo) bool {
 	return len(collMeta.GetSchema().GetFields()) <= 0 && len(collMeta.GetSchema().GetStructArrayFields()) <= 0
 }
 
-func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Field, error) {
+func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil.UniqueID) ([]*model.Field, error) {
 	prefix := BuildFieldPrefix(collectionID)
-	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, prefix, ts)
+	_, values, err := kc.Txn.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +454,7 @@ func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil
 }
 
 func (kc *Catalog) batchListFieldsAfter210(ctx context.Context, ts typeutil.Timestamp) (map[int64][]*model.Field, error) {
-	keys, values, err := kc.Snapshot.LoadWithPrefix(ctx, FieldMetaPrefix+"/", ts)
+	keys, values, err := kc.Txn.LoadWithPrefix(ctx, FieldMetaPrefix+"/")
 	if err != nil {
 		return nil, err
 	}
@@ -453,9 +479,9 @@ func (kc *Catalog) batchListFieldsAfter210(ctx context.Context, ts typeutil.Time
 	return ret, nil
 }
 
-func (kc *Catalog) listStructArrayFieldsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.StructArrayField, error) {
+func (kc *Catalog) listStructArrayFieldsAfter210(ctx context.Context, collectionID typeutil.UniqueID) ([]*model.StructArrayField, error) {
 	prefix := BuildStructArrayFieldPrefix(collectionID)
-	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, prefix, ts)
+	_, values, err := kc.Txn.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -471,9 +497,9 @@ func (kc *Catalog) listStructArrayFieldsAfter210(ctx context.Context, collection
 	return structFields, nil
 }
 
-func (kc *Catalog) listFunctions(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Function, error) {
+func (kc *Catalog) listFunctions(ctx context.Context, collectionID typeutil.UniqueID) ([]*model.Function, error) {
 	prefix := BuildFunctionPrefix(collectionID)
-	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, prefix, ts)
+	_, values, err := kc.Txn.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +516,7 @@ func (kc *Catalog) listFunctions(ctx context.Context, collectionID typeutil.Uniq
 }
 
 func (kc *Catalog) batchListFunctions(ctx context.Context, ts typeutil.Timestamp) (map[int64][]*model.Function, error) {
-	keys, values, err := kc.Snapshot.LoadWithPrefix(ctx, FunctionMetaPrefix+"/", ts)
+	keys, values, err := kc.Txn.LoadWithPrefix(ctx, FunctionMetaPrefix+"/")
 	if err != nil {
 		return nil, err
 	}
@@ -513,8 +539,7 @@ func (kc *Catalog) batchListFunctions(ctx context.Context, ts typeutil.Timestamp
 	return ret, nil
 }
 
-func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *pb.CollectionInfo,
-	ts typeutil.Timestamp,
+func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *pb.CollectionInfo
 ) (*model.Collection, error) {
 	collection := model.UnmarshalCollectionModel(collMeta)
 
@@ -567,8 +592,7 @@ func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *p
 	return collection, nil
 }
 
-func (kc *Catalog) batchAppendPartitionAndFieldsInfo(ctx context.Context, collMeta []*pb.CollectionInfo,
-	ts typeutil.Timestamp,
+func (kc *Catalog) batchAppendPartitionAndFieldsInfo(ctx context.Context, collMeta []*pb.CollectionInfo
 ) ([]*model.Collection, error) {
 	var partitionMetaMap map[int64][]*model.Partition
 	var fieldMetaMap map[int64][]*model.Field
@@ -611,7 +635,7 @@ func (kc *Catalog) batchAppendPartitionAndFieldsInfo(ctx context.Context, collMe
 	return ret, nil
 }
 
-func (kc *Catalog) GetCollectionByID(ctx context.Context, dbID int64, ts typeutil.Timestamp, collectionID typeutil.UniqueID) (*model.Collection, error) {
+func (kc *Catalog) GetCollectionByID(ctx context.Context, dbID int64, collectionID typeutil.UniqueID) (*model.Collection, error) {
 	collMeta, err := kc.loadCollection(ctx, dbID, collectionID, ts)
 	if err != nil {
 		return nil, err
@@ -620,7 +644,7 @@ func (kc *Catalog) GetCollectionByID(ctx context.Context, dbID int64, ts typeuti
 	return kc.appendPartitionAndFieldsInfo(ctx, collMeta, ts)
 }
 
-func (kc *Catalog) CollectionExists(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool {
+func (kc *Catalog) CollectionExists(ctx context.Context, dbID int64, collectionID typeutil.UniqueID) bool {
 	_, err := kc.GetCollectionByID(ctx, dbID, ts, collectionID)
 	return err == nil
 }
@@ -629,7 +653,7 @@ func (kc *Catalog) GetCredential(ctx context.Context, username string) (*model.C
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, username)
 	v, err := kc.Txn.Load(ctx, k)
 	if err != nil {
-		if errors.Is(err, merr.ErrIoKeyNotFound) {
+		if errors.Is(err) {
 			log.Ctx(ctx).Debug("not found the user", zap.String("key", k))
 		} else {
 			log.Ctx(ctx).Warn("get credential meta fail", zap.String("key", k), zap.Error(err))
@@ -647,11 +671,11 @@ func (kc *Catalog) GetCredential(ctx context.Context, username string) (*model.C
 	return model.UnmarshalCredentialModel(&credentialInfo), nil
 }
 
-func (kc *Catalog) AlterAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error {
+func (kc *Catalog) AlterAlias(ctx context.Context, alias *model.Alias) error {
 	return kc.CreateAlias(ctx, alias, ts)
 }
 
-func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error {
+func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Collection) error {
 	collectionKeys := []string{BuildCollectionKey(collectionInfo.DBID, collectionInfo.CollectionID)}
 
 	var delMetakeysSnap []string
@@ -690,10 +714,10 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 	}
 
 	// if we found collection dropping, we should try removing related resources.
-	return kc.Snapshot.MultiSaveAndRemove(ctx, nil, collectionKeys, ts)
+	return kc.Txn.MultiSaveAndRemove(ctx, nil, collectionKeys)
 }
 
-func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp, fieldModify bool) error {
+func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, fieldModify bool) error {
 	if oldColl.TenantID != newColl.TenantID || oldColl.CollectionID != newColl.CollectionID {
 		return errors.New("altering tenant id or collection id is forbidden")
 	}
@@ -761,11 +785,11 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 
 	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
 	return etcd.SaveByBatchWithLimit(saves, maxTxnNum, func(partialKvs map[string]string) error {
-		return kc.Snapshot.MultiSave(ctx, partialKvs, ts)
+		return kc.Txn.MultiSave(ctx, partialKvs)
 	})
 }
 
-func (kc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType metastore.AlterType, ts typeutil.Timestamp, fieldModify bool) error {
+func (kc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType metastore.AlterType, fieldModify bool) error {
 	switch alterType {
 	case metastore.MODIFY:
 		return kc.alterModifyCollection(ctx, oldColl, newColl, ts, fieldModify)
@@ -774,7 +798,7 @@ func (kc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collectio
 	}
 }
 
-func (kc *Catalog) AlterCollectionDB(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp) error {
+func (kc *Catalog) AlterCollectionDB(ctx context.Context, oldColl *model.Collection, newColl *model.Collection) error {
 	if oldColl.TenantID != newColl.TenantID || oldColl.CollectionID != newColl.CollectionID {
 		return errors.New("altering tenant id or collection id is forbidden")
 	}
@@ -787,10 +811,10 @@ func (kc *Catalog) AlterCollectionDB(ctx context.Context, oldColl *model.Collect
 	}
 	saves := map[string]string{newKey: string(value)}
 
-	return kc.Snapshot.MultiSaveAndRemove(ctx, saves, []string{oldKey}, ts)
+	return kc.Txn.MultiSaveAndRemove(ctx, saves, []string{oldKey})
 }
 
-func (kc *Catalog) alterModifyPartition(ctx context.Context, oldPart *model.Partition, newPart *model.Partition, ts typeutil.Timestamp) error {
+func (kc *Catalog) alterModifyPartition(ctx context.Context, oldPart *model.Partition, newPart *model.Partition) error {
 	if oldPart.CollectionID != newPart.CollectionID || oldPart.PartitionID != newPart.PartitionID {
 		return errors.New("altering collection id or partition id is forbidden")
 	}
@@ -804,10 +828,10 @@ func (kc *Catalog) alterModifyPartition(ctx context.Context, oldPart *model.Part
 	if err != nil {
 		return err
 	}
-	return kc.Snapshot.Save(ctx, key, string(value), ts)
+	return kc.Txn.Save(ctx, key, string(value))
 }
 
-func (kc *Catalog) AlterPartition(ctx context.Context, dbID int64, oldPart *model.Partition, newPart *model.Partition, alterType metastore.AlterType, ts typeutil.Timestamp) error {
+func (kc *Catalog) AlterPartition(ctx context.Context, dbID int64, oldPart *model.Partition, newPart *model.Partition, alterType metastore.AlterType) error {
 	if alterType == metastore.MODIFY {
 		return kc.alterModifyPartition(ctx, oldPart, newPart, ts)
 	}
@@ -835,7 +859,7 @@ func dropPartition(collMeta *pb.CollectionInfo, partitionID typeutil.UniqueID) {
 	}
 }
 
-func (kc *Catalog) DropPartition(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error {
+func (kc *Catalog) DropPartition(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, partitionID typeutil.UniqueID) error {
 	collMeta, err := kc.loadCollection(ctx, dbID, collectionID, ts)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
 		// collection's gc happened before partition's.
@@ -848,7 +872,7 @@ func (kc *Catalog) DropPartition(ctx context.Context, dbID int64, collectionID t
 
 	if partitionVersionAfter210(collMeta) {
 		k := BuildPartitionKey(collectionID, partitionID)
-		return kc.Snapshot.MultiSaveAndRemove(ctx, nil, []string{k}, ts)
+		return kc.Txn.MultiSaveAndRemove(ctx, nil, []string{k})
 	}
 
 	k := BuildCollectionKey(util.NonDBID, collectionID)
@@ -857,7 +881,7 @@ func (kc *Catalog) DropPartition(ctx context.Context, dbID int64, collectionID t
 	if err != nil {
 		return err
 	}
-	return kc.Snapshot.Save(ctx, k, string(v), ts)
+	return kc.Txn.Save(ctx, k, string(v))
 }
 
 func (kc *Catalog) DropCredential(ctx context.Context, username string) error {
@@ -886,16 +910,16 @@ func (kc *Catalog) DropCredential(ctx context.Context, username string) error {
 	return nil
 }
 
-func (kc *Catalog) DropAlias(ctx context.Context, dbID int64, alias string, ts typeutil.Timestamp) error {
+func (kc *Catalog) DropAlias(ctx context.Context, dbID int64, alias string) error {
 	oldKBefore210 := BuildAliasKey210(alias)
 	oldKeyWithoutDb := BuildAliasKey(alias)
 	k := BuildAliasKeyWithDB(dbID, alias)
-	return kc.Snapshot.MultiSaveAndRemove(ctx, nil, []string{k, oldKeyWithoutDb, oldKBefore210}, ts)
+	return kc.Txn.MultiSaveAndRemove(ctx, nil, []string{k)
 }
 
-func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, dbName string, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
+func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, dbName string, collectionName string) (*model.Collection, error) {
 	prefix := getDatabasePrefix(dbID)
-	_, vals, err := kc.Snapshot.LoadWithPrefix(ctx, prefix, ts)
+	_, vals, err := kc.Txn.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		log.Ctx(ctx).Warn("get collection meta fail", zap.String("collectionName", collectionName), zap.Error(err))
 		return nil, err
@@ -917,9 +941,9 @@ func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, dbName s
 	return nil, merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName, fmt.Sprintf("timestamp = %d", ts))
 }
 
-func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error) {
+func (kc *Catalog) ListCollections(ctx context.Context, dbID int64) ([]*model.Collection, error) {
 	prefix := getDatabasePrefix(dbID)
-	_, vals, err := kc.Snapshot.LoadWithPrefix(ctx, prefix, ts)
+	_, vals, err := kc.Txn.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		log.Ctx(ctx).Error("get collections meta fail",
 			zap.String("prefix", prefix),
@@ -974,8 +998,8 @@ func (kc *Catalog) fixDefaultDBIDConsistency(ctx context.Context, collMeta *pb.C
 	}
 }
 
-func (kc *Catalog) listAliasesBefore210(ctx context.Context, ts typeutil.Timestamp) ([]*model.Alias, error) {
-	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, CollectionAliasMetaPrefix210+"/", ts)
+func (kc *Catalog) listAliasesBefore210(ctx context.Context) ([]*model.Alias, error) {
+	_, values, err := kc.Txn.LoadWithPrefix(ctx, CollectionAliasMetaPrefix210+"/")
 	if err != nil {
 		return nil, err
 	}
@@ -997,9 +1021,9 @@ func (kc *Catalog) listAliasesBefore210(ctx context.Context, ts typeutil.Timesta
 	return aliases, nil
 }
 
-func (kc *Catalog) listAliasesAfter210WithDb(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Alias, error) {
+func (kc *Catalog) listAliasesAfter210WithDb(ctx context.Context, dbID int64) ([]*model.Alias, error) {
 	prefix := BuildAliasPrefixWithDB(dbID)
-	_, values, err := kc.Snapshot.LoadWithPrefix(ctx, prefix, ts)
+	_, values, err := kc.Txn.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -1021,7 +1045,7 @@ func (kc *Catalog) listAliasesAfter210WithDb(ctx context.Context, dbID int64, ts
 	return aliases, nil
 }
 
-func (kc *Catalog) listAliasesInDefaultDb(ctx context.Context, ts typeutil.Timestamp) ([]*model.Alias, error) {
+func (kc *Catalog) listAliasesInDefaultDb(ctx context.Context) ([]*model.Alias, error) {
 	aliases1, err := kc.listAliasesBefore210(ctx, ts)
 	if err != nil {
 		return nil, err
@@ -1039,7 +1063,7 @@ func (kc *Catalog) listAliasesInDefaultDb(ctx context.Context, ts typeutil.Times
 	return aliases, nil
 }
 
-func (kc *Catalog) ListAliases(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Alias, error) {
+func (kc *Catalog) ListAliases(ctx context.Context, dbID int64) ([]*model.Alias, error) {
 	if !isDefaultDB(dbID) {
 		return kc.listAliasesAfter210WithDb(ctx, dbID, ts)
 	}
@@ -1057,7 +1081,7 @@ func (kc *Catalog) ListCredentials(ctx context.Context) ([]string, error) {
 func (kc *Catalog) ListCredentialsWithPasswd(ctx context.Context) (map[string]string, error) {
 	keys, values, err := kc.Txn.LoadWithPrefix(ctx, CredentialPrefix+"/")
 	if err != nil {
-		log.Ctx(ctx).Error("list all credential usernames fail", zap.String("prefix", CredentialPrefix), zap.Error(err))
+		log.Ctx(ctx).Error("list all credential usernames fail"), zap.Error(err))
 		return nil, err
 	}
 
@@ -1082,7 +1106,7 @@ func (kc *Catalog) ListCredentialsWithPasswd(ctx context.Context) (map[string]st
 
 func (kc *Catalog) remove(ctx context.Context, k string) error {
 	var err error
-	if _, err = kc.Txn.Load(ctx, k); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+	if _, err = kc.Txn.Load(ctx, k); err != nil && !errors.Is(err) {
 		return err
 	}
 	if err != nil && errors.Is(err, merr.ErrIoKeyNotFound) {
@@ -1097,7 +1121,7 @@ func (kc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvus
 	return kc.Txn.Save(ctx, k, "")
 }
 
-func (kc *Catalog) DropRole(ctx context.Context, tenant string, roleName string) error {
+func (kc *Catalog) DropRole(ctx context.Context) error {
 	k := RolePrefix + "/" + roleName
 	roleResults, err := kc.ListRole(ctx, tenant, &milvuspb.RoleEntity{Name: roleName}, true)
 	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
@@ -1130,7 +1154,7 @@ func (kc *Catalog) AlterUserRole(ctx context.Context, tenant string, userEntity 
 	case milvuspb.OperateUserRoleType_AddUserToRole:
 		return kc.Txn.Save(ctx, k, "")
 	case milvuspb.OperateUserRoleType_RemoveUserFromRole:
-		return kc.Txn.Remove(ctx, k)
+		return kc.Txn.Remove(ctx)
 	}
 	return fmt.Errorf("invalid operate user role type, operate type: %d", operateType)
 }
@@ -1143,7 +1167,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 		roleMappingKey := funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant)
 		keys, _, err := kc.Txn.LoadWithPrefix(ctx, roleMappingKey)
 		if err != nil {
-			log.Ctx(ctx).Error("fail to load role mappings", zap.String("key", roleMappingKey), zap.Error(err))
+			log.Ctx(ctx).Error("fail to load role mappings"), zap.Error(err))
 			return results, err
 		}
 
@@ -1174,7 +1198,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 		roleKey := funcutil.HandleTenantForEtcdPrefix(RolePrefix, tenant)
 		keys, _, err := kc.Txn.LoadWithPrefix(ctx, roleKey)
 		if err != nil {
-			log.Ctx(ctx).Error("fail to load roles", zap.String("key", roleKey), zap.Error(err))
+			log.Ctx(ctx).Error("fail to load roles"), zap.Error(err))
 			return results, err
 		}
 		for _, key := range keys {
@@ -1192,7 +1216,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 		roleKey := RolePrefix + "/" + entity.Name
 		_, err := kc.Txn.Load(ctx, roleKey)
 		if err != nil {
-			log.Ctx(ctx).Warn("fail to load a role", zap.String("key", roleKey), zap.Error(err))
+			log.Ctx(ctx).Warn("fail to load a role"), zap.Error(err))
 			return results, err
 		}
 		appendRoleResult(entity.Name)
@@ -1206,7 +1230,7 @@ func (kc *Catalog) getRolesByUsername(ctx context.Context, tenant string, userna
 	k := funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant, username)
 	keys, _, err := kc.Txn.LoadWithPrefix(ctx, k)
 	if err != nil {
-		log.Ctx(ctx).Error("fail to load role mappings by the username", zap.String("key", k), zap.Error(err))
+		log.Ctx(ctx).Error("fail to load role mappings by the username"), zap.Error(err))
 		return roles, err
 	}
 	for _, key := range keys {
@@ -1290,7 +1314,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 
 	// Compatible with logic without db
 	if entity.DbName == util.DefaultDBName {
-		v, err = kc.Txn.Load(ctx, fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, entity.Role.Name, entity.Object.Name, entity.ObjectName))
+		v, err = kc.Txn.Load(ctx, fmt.Sprintf("%s/%s/%s/%s"))
 		if err == nil {
 			idStr = v
 		}
@@ -1299,7 +1323,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 		if v, err = kc.Txn.Load(ctx, k); err == nil {
 			idStr = v
 		} else {
-			log.Ctx(ctx).Warn("fail to load grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
+			log.Ctx(ctx).Warn("fail to load grant privilege entity"), zap.Any("type", operateType), zap.Error(err))
 			if funcutil.IsRevoke(operateType) {
 				if errors.Is(err, merr.ErrIoKeyNotFound) {
 					return common.NewIgnorableError(fmt.Errorf("the grant[%s] isn't existed", k))
@@ -1313,7 +1337,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 			idStr = crypto.MD5(k)
 			err = kc.Txn.Save(ctx, k, idStr)
 			if err != nil {
-				log.Ctx(ctx).Error("fail to allocate id when altering the grant", zap.Error(err))
+				log.Ctx(ctx).Error("fail to allocate id when altering the grant"))
 				return err
 			}
 		}
@@ -1321,7 +1345,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 	k = fmt.Sprintf("%s/%s/%s", GranteeIDPrefix, idStr, privilegeName)
 	_, err = kc.Txn.Load(ctx, k)
 	if err != nil {
-		log.Ctx(ctx).Warn("fail to load the grantee id", zap.String("key", k), zap.Error(err))
+		log.Ctx(ctx).Warn("fail to load the grantee id"), zap.Error(err))
 		if !errors.Is(err, merr.ErrIoKeyNotFound) {
 			log.Warn("fail to load the grantee id", zap.String("key", k), zap.Error(err))
 			return err
@@ -1332,7 +1356,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 		}
 		if funcutil.IsGrant(operateType) {
 			if err = kc.Txn.Save(ctx, k, entity.Grantor.User.Name); err != nil {
-				log.Ctx(ctx).Error("fail to save the grantee id", zap.String("key", k), zap.Error(err))
+				log.Ctx(ctx).Error("fail to save the grantee id"), zap.Error(err))
 			}
 			return err
 		}
@@ -1361,7 +1385,7 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 		granteeIDKey := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, v)
 		keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeIDKey)
 		if err != nil {
-			log.Ctx(ctx).Error("fail to load the grantee ids", zap.String("key", granteeIDKey), zap.Error(err))
+			log.Ctx(ctx).Error("fail to load the grantee ids"), zap.Error(err))
 			return err
 		}
 		for i, key := range keys {
@@ -1393,7 +1417,7 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 			granteeKey = fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, entity.Role.Name, entity.Object.Name, entity.ObjectName)
 			v, err := kc.Txn.Load(ctx, granteeKey)
 			if err == nil {
-				err = appendGrantEntity(v, entity.Object.Name, entity.ObjectName)
+				err = appendGrantEntity(v)
 				if err == nil {
 					return entities, nil
 				}
@@ -1404,14 +1428,14 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 			granteeKey = fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, entity.Role.Name, entity.Object.Name, funcutil.CombineObjectName(util.AnyWord, entity.ObjectName))
 			v, err := kc.Txn.Load(ctx, granteeKey)
 			if err == nil {
-				_ = appendGrantEntity(v, entity.Object.Name, funcutil.CombineObjectName(util.AnyWord, entity.ObjectName))
+				_ = appendGrantEntity(v))
 			}
 		}
 
 		granteeKey = fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, entity.Role.Name, entity.Object.Name, funcutil.CombineObjectName(entity.DbName, entity.ObjectName))
 		v, err := kc.Txn.Load(ctx, granteeKey)
 		if err != nil {
-			log.Ctx(ctx).Error("fail to load the grant privilege entity", zap.String("key", granteeKey), zap.Error(err))
+			log.Ctx(ctx).Error("fail to load the grant privilege entity"), zap.Error(err))
 			return entities, err
 		}
 		err = appendGrantEntity(v, entity.Object.Name, funcutil.CombineObjectName(entity.DbName, entity.ObjectName))
@@ -1422,7 +1446,7 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 		granteeKey = funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant, entity.Role.Name)
 		keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeKey)
 		if err != nil {
-			log.Ctx(ctx).Error("fail to load grant privilege entities", zap.String("key", granteeKey), zap.Error(err))
+			log.Ctx(ctx).Error("fail to load grant privilege entities"), zap.Error(err))
 			return entities, err
 		}
 		for i, key := range keys {
@@ -1531,8 +1555,7 @@ func (kc *Catalog) MigrateGrantCollectionName(ctx context.Context, tenant string
 			oldGranteeIDKey := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, oldIdStr)
 			idKeys, idValues, loadErr := kc.Txn.LoadWithPrefix(ctx, oldGranteeIDKey)
 			if loadErr != nil {
-				log.Ctx(ctx).Warn("fail to load grantee id entries for migration, skipping this grant entirely",
-					zap.String("key", oldGranteeIDKey), zap.Error(loadErr))
+				log.Ctx(ctx).Warn("fail to load grantee id entries for migration), zap.Error(loadErr))
 				continue
 			}
 
@@ -1595,7 +1618,7 @@ func (kc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvusp
 	// the values are the grantee id list
 	_, values, err := kc.Txn.LoadWithPrefix(ctx, k)
 	if err != nil {
-		log.Ctx(ctx).Warn("fail to load grant privilege entities", zap.String("key", k), zap.Error(err))
+		log.Ctx(ctx).Warn("fail to load grant privilege entities"), zap.Error(err))
 		return err
 	}
 	for _, v := range values {
@@ -1614,7 +1637,7 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 	granteeKey := funcutil.HandleTenantForEtcdPrefix(GranteePrefix, tenant)
 	keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeKey)
 	if err != nil {
-		log.Ctx(ctx).Error("fail to load all grant privilege entities", zap.String("key", granteeKey), zap.Error(err))
+		log.Ctx(ctx).Error("fail to load all grant privilege entities"), zap.Error(err))
 		return []*milvuspb.GrantEntity{}, err
 	}
 
@@ -1627,7 +1650,7 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 		granteeIDKey := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, values[i])
 		idKeys, _, err := kc.Txn.LoadWithPrefix(ctx, granteeIDKey)
 		if err != nil {
-			log.Ctx(ctx).Error("fail to load the grantee ids", zap.String("key", granteeIDKey), zap.Error(err))
+			log.Ctx(ctx).Error("fail to load the grantee ids"), zap.Error(err))
 			return []*milvuspb.GrantEntity{}, err
 		}
 		for _, idKey := range idKeys {
@@ -1663,7 +1686,7 @@ func (kc *Catalog) ListUserRole(ctx context.Context, tenant string) ([]string, e
 	k := funcutil.HandleTenantForEtcdPrefix(RoleMappingPrefix, tenant)
 	keys, _, err := kc.Txn.LoadWithPrefix(ctx, k)
 	if err != nil {
-		log.Ctx(ctx).Error("fail to load all user-role mappings", zap.String("key", k), zap.Error(err))
+		log.Ctx(ctx).Error("fail to load all user-role mappings"), zap.Error(err))
 		return []string{}, err
 	}
 
@@ -1790,7 +1813,7 @@ func (kc *Catalog) GetPrivilegeGroup(ctx context.Context, groupName string) (*mi
 	k := BuildPrivilegeGroupkey(groupName)
 	val, err := kc.Txn.Load(ctx, k)
 	if err != nil {
-		if errors.Is(err, merr.ErrIoKeyNotFound) {
+		if errors.Is(err) {
 			return nil, fmt.Errorf("privilege group [%s] does not exist", groupName)
 		}
 		log.Ctx(ctx).Error("failed to load privilege group", zap.String("group", groupName), zap.Error(err))
@@ -1827,7 +1850,7 @@ func (kc *Catalog) SavePrivilegeGroup(ctx context.Context, data *milvuspb.Privil
 		return err
 	}
 	if err = kc.Txn.Save(ctx, k, string(v)); err != nil {
-		log.Ctx(ctx).Warn("fail to put privilege group", zap.String("key", k), zap.Error(err))
+		log.Ctx(ctx).Warn("fail to put privilege group"), zap.Error(err))
 		return err
 	}
 	return nil
@@ -1836,7 +1859,7 @@ func (kc *Catalog) SavePrivilegeGroup(ctx context.Context, data *milvuspb.Privil
 func (kc *Catalog) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
 	_, vals, err := kc.Txn.LoadWithPrefix(ctx, PrivilegeGroupPrefix+"/")
 	if err != nil {
-		log.Ctx(ctx).Error("failed to list privilege groups", zap.String("prefix", PrivilegeGroupPrefix), zap.Error(err))
+		log.Ctx(ctx).Error("failed to list privilege groups"), zap.Error(err))
 		return nil, err
 	}
 	privGroups := make([]*milvuspb.PrivilegeGroupInfo, 0, len(vals))
@@ -1865,7 +1888,7 @@ func (kc *Catalog) SaveFileResource(ctx context.Context, resource *internalpb.Fi
 	kvs[FileResourceVersionKey] = fmt.Sprint(version)
 
 	if err = kc.Txn.MultiSave(ctx, kvs); err != nil {
-		log.Ctx(ctx).Warn("fail to save resource info", zap.String("key", k), zap.Error(err))
+		log.Ctx(ctx).Warn("fail to save resource info"), zap.Error(err))
 		return err
 	}
 	return nil
@@ -1874,7 +1897,7 @@ func (kc *Catalog) SaveFileResource(ctx context.Context, resource *internalpb.Fi
 func (kc *Catalog) RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error {
 	k := BuildFileResourceKey(resourceID)
 	if err := kc.Txn.MultiSaveAndRemove(ctx, map[string]string{FileResourceVersionKey: fmt.Sprint(version)}, []string{k}); err != nil {
-		log.Ctx(ctx).Warn("fail to remove resource info", zap.String("key", k), zap.Error(err))
+		log.Ctx(ctx).Warn("fail to remove resource info"), zap.Error(err))
 		return err
 	}
 	return nil
@@ -1883,11 +1906,7 @@ func (kc *Catalog) RemoveFileResource(ctx context.Context, resourceID int64, ver
 func (kc *Catalog) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error) {
 	_, values, err := kc.Txn.LoadWithPrefix(ctx, FileResourceMetaPrefix+"/")
 	if err != nil {
-		return nil, 0, err
-	}
-
-	var version uint64 = 0
-	exist, err := kc.Txn.Has(ctx, FileResourceVersionKey)
+		return nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1895,9 +1914,7 @@ func (kc *Catalog) ListFileResource(ctx context.Context) ([]*internalpb.FileReso
 	if exist {
 		strVersion, err := kc.Txn.Load(ctx, FileResourceVersionKey)
 		if err != nil {
-			return nil, 0, err
-		}
-		v, err := strconv.ParseUint(strVersion, 10, 64)
+			return nil)
 		if err != nil {
 			return nil, 0, err
 		}

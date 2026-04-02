@@ -1,0 +1,23 @@
+meta_table.go:211: dbs, err := mt.catalog.ListDatabases(mt.ctx, typeutil.MaxTimestamp)
+meta_table.go:246: collections, err := mt.catalog.ListCollections(mt.ctx, db.ID, typeutil.MaxTimestamp)
+meta_table.go:286: aliases, err := mt.catalog.ListAliases(mt.ctx, db.ID, typeutil.MaxTimestamp)
+meta_table.go:325: oldCollections, err := mt.catalog.ListCollections(mt.ctx, util.NonDBID, typeutil.MaxTimestamp)
+meta_table.go:348: aliases, err := mt.catalog.ListAliases(mt.ctx, util.NonDBID, typeutil.MaxTimestamp)
+meta_table.go:421: if err := mt.catalog.CreateDatabase(ctx, db, ts); err != nil {
+meta_table.go:438: if err := mt.catalog.AlterDatabase(ctx1, newDB, ts); err != nil {
+meta_table.go:479: if err := mt.catalog.DropDatabase(ctx, db.ID, ts); err != nil {
+meta_table.go:554: if err := mt.catalog.CreateCollection(ctx1, coll, coll.CreateTime); err != nil {
+meta_table.go:596: if err := mt.catalog.AlterCollection(ctx1, coll, clone, metastore.MODIFY, ts, false); err != nil {
+meta_table.go:705: if err := mt.catalog.DropCollection(ctx1, newColl, ts); err != nil {
+meta_table.go:779: coll, err = mt.catalog.GetCollectionByID(ctx1, db.ID, ts, collectionID)
+meta_table.go:868: coll, err := mt.catalog.GetCollectionByName(ctx, db.ID, db.Name, collectionName, ts)
+meta_table.go:955: colls, err := mt.catalog.ListCollections(ctx1, db.ID, ts)
+meta_table.go:1040: if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, fieldModify); err != nil {
+meta_table.go:1044: if err := mt.catalog.AlterCollectionDB(ctx1, oldColl, newColl, newColl.UpdateTimestamp); err != nil {
+meta_table.go:1095: if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
+meta_table.go:1126: if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
+meta_table.go:1259: if err := mt.catalog.CreatePartition(ctx, coll.DBID, partition, partition.PartitionCreatedTimestamp); err != nil {
+meta_table.go:1291: if err := mt.catalog.AlterPartition(ctx1, coll.DBID, part, clone, metastore.MODIFY, ts); err != nil {
+meta_table.go:1335: if err := mt.catalog.DropPartition(ctx1, coll.DBID, collectionID, partitionID, ts); err != nil {
+meta_table.go:1414: if err := mt.catalog.DropAlias(ctx1, header.DbId, header.Alias, result.GetControlChannelResult().TimeTick); err != nil {
+meta_table.go:1432: if err := mt.catalog.AlterAlias(ctx, &model.Alias{
