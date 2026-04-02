@@ -85,6 +85,17 @@ class MilvusConan(ConanFile):
         "gtest:build_gmock": True,
         "boost:without_locale": False,
         "boost:without_test": True,
+        # Disable unused Boost compiled modules to speed up --build=missing
+        # Keep: context, filesystem, program_options, regex, system, thread (needed by folly)
+        # Keep: locale, serialization, stacktrace (used by milvus/arrow)
+        "boost:without_graph": True,
+        "boost:without_graph_parallel": True,
+        "boost:without_mpi": True,
+        "boost:without_wave": True,
+        "boost:without_log": True,
+        "boost:without_python": True,
+        "boost:without_type_erasure": True,
+        "boost:without_math": True,
         "glog:with_gflags": True,
         "glog:shared": True,
         "prometheus-cpp:with_pull": False,
