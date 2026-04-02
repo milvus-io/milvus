@@ -65,6 +65,15 @@ func (s *ackCallbackScheduler) Initialize(tasks []*broadcastTask, tombstoneIDs [
 	// when initializing, the tasks in recovery info may be out of order, so we need to sort them by the broadcastID.
 	sortByControlChannelTimeTick(tasks)
 	s.tombstoneScheduler.Initialize(bm, tombstoneIDs)
+	// Mark all tasks as already joined the ack callback scheduler to prevent duplicate scheduling.
+	// Without this, when fixIncompleteBroadcastsForForcePromote calls FastAck → ack on a recovered task,
+	// ack() would re-add the task to the scheduler (since joinAckCallbackScheduled was false),
+	// causing two concurrent doAckCallback goroutines on the same task (data race on taskMetricsGuard).
+	for _, task := range tasks {
+		task.mu.Lock()
+		task.joinAckCallbackScheduled = true
+		task.mu.Unlock()
+	}
 	s.pendingAckedTasks = tasks
 	go s.background()
 }
