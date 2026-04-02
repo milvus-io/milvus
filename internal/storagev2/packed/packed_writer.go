@@ -26,7 +26,6 @@ package packed
 import "C"
 
 import (
-	"strings"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -39,15 +38,6 @@ import (
 )
 
 func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
-	// The C++ packed writer prepends root_path from storageConfig to file paths.
-	// Stored binlog paths already include root_path, so strip it to avoid double-append.
-	if storageConfig != nil && storageConfig.GetRootPath() != "" {
-		prefix := storageConfig.GetRootPath() + "/"
-		for i, p := range filePaths {
-			filePaths[i] = strings.TrimPrefix(p, prefix)
-		}
-	}
-
 	cFilePaths := make([]*C.char, len(filePaths))
 	for i, path := range filePaths {
 		cFilePaths[i] = C.CString(path)
