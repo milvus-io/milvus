@@ -417,35 +417,6 @@ func ToMilvusIoError(fileName string, err error) error {
 	return mapObjectStorageError(fileName, err)
 }
 
-func (mcm *RemoteChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
-	err := mcm.copyObject(ctx, mcm.bucketName, srcFilePath, dstFilePath)
-	if err != nil {
-		log.Warn("failed to copy object", zap.String("bucket", mcm.bucketName), zap.String("src", srcFilePath), zap.String("dst", dstFilePath), zap.Error(err))
-		return err
-	}
-	return nil
-}
-
-func (mcm *RemoteChunkManager) copyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
-	start := timerecord.NewTimeRecorder("copyObject")
-
-	err := mcm.client.CopyObject(ctx, bucketName, srcObjectName, dstObjectName)
-	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataPutLabel, metrics.TotalLabel).Inc()
-	if err == nil {
-		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataPutLabel).
-			Observe(float64(start.ElapseSpan().Milliseconds()))
-		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataPutLabel, metrics.SuccessLabel).Inc()
-	} else {
-		if errors.Is(err, context.Canceled) {
-			metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataPutLabel, metrics.CancelLabel).Inc()
-		} else {
-			metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataPutLabel, metrics.FailLabel).Inc()
-		}
-	}
-
-	return err
-}
-
 // Error code constants for cloud provider error mapping.
 const (
 	// Azure Blob Storage error codes
