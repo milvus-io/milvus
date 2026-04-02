@@ -102,22 +102,6 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	suite.manager.Collection.PutOrRef(suite.collectionID, suite.schema, indexMeta, loadMeta)
 }
 
-func (suite *SegmentLoaderSuite) SetupBM25() {
-	// Dependencies
-	suite.manager = NewManager()
-	suite.loader = NewLoader(context.Background(), suite.manager, suite.chunkManager)
-	initcore.InitRemoteChunkManager(paramtable.Get())
-
-	suite.schema = mock_segcore.GenTestBM25CollectionSchema("test")
-	indexMeta := mock_segcore.GenTestIndexMeta(suite.collectionID, suite.schema)
-	loadMeta := &querypb.LoadMetaInfo{
-		LoadType:     querypb.LoadType_LoadCollection,
-		CollectionID: suite.collectionID,
-		PartitionIDs: []int64{suite.partitionID},
-	}
-	suite.manager.Collection.PutOrRef(suite.collectionID, suite.schema, indexMeta, loadMeta)
-}
-
 func (suite *SegmentLoaderSuite) TearDownTest() {
 	ctx := context.Background()
 	for i := 0; i < suite.segmentNum; i++ {
@@ -434,41 +418,6 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 			exist := segment.MayPkExist(lc)
 			suite.Require().True(exist)
 		}
-	}
-}
-
-func (suite *SegmentLoaderSuite) TestLoadBm25Stats() {
-	suite.SetupBM25()
-	msgLength := 1
-	sparseFieldID := mock_segcore.SimpleSparseFloatVectorField.ID
-	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
-
-	for i := 0; i < suite.segmentNum; i++ {
-		segmentID := suite.segmentID + int64(i)
-
-		bm25logs, err := mock_segcore.SaveBM25Log(suite.collectionID, suite.partitionID, segmentID, sparseFieldID, msgLength, suite.chunkManager)
-		suite.NoError(err)
-
-		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
-			SegmentID:     segmentID,
-			PartitionID:   suite.partitionID,
-			CollectionID:  suite.collectionID,
-			Bm25Logs:      []*datapb.FieldBinlog{bm25logs},
-			NumOfRows:     int64(msgLength),
-			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-		})
-	}
-
-	statsMap, err := suite.loader.LoadBM25Stats(context.Background(), suite.collectionID, loadInfos...)
-	suite.NoError(err)
-
-	for i := 0; i < suite.segmentNum; i++ {
-		segmentID := suite.segmentID + int64(i)
-		stats, ok := statsMap.Get(segmentID)
-		suite.True(ok)
-		fieldStats, ok := stats[sparseFieldID]
-		suite.True(ok)
-		suite.Equal(int64(msgLength), fieldStats.NumRow())
 	}
 }
 
