@@ -68,6 +68,10 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 		if errors.Is(err, io.EOF) {
 			return false, err
 		}
+		// Context canceled or deadline exceeded - don't retry
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return false, err
+		}
 		log.Ctx(r.ctx).Warn("retryable reader read failed",
 			zap.String("path", r.path),
 			zap.Error(err),
