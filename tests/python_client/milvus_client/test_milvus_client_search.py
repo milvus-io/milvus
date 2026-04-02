@@ -6010,12 +6010,9 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
                 legacy actual behavior — Timestamptz remains unsupported.
         method: create collection with a TIMESTAMPTZ field, attempt search
                 with decay reranker using that field as input
-        expected: error reporting unsupported field type Timestamptz.
-        Note: in the proxy search pipeline, chain.FromSearchResultData
-        (Arrow converter) runs *before* BuildRerankChain, so the user-visible
-        error comes from the converter's "unsupported field type" branch
-        rather than from chain validateInputField. Both layers reject
-        Timestamptz; the converter just fires first end-to-end.
+        expected: error reporting Timestamptz is not a numeric decay input.
+        Note: chain.FromSearchResultData supports Timestamptz conversion, so
+        the user-visible error now comes from decay reranker input validation.
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -6030,8 +6027,7 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         self.create_collection(client, collection_name, dimension=dim,
                                schema=schema, index_params=index_params)
-        # 2. insert (any data — chain converter rejects before any rerank
-        #    logic actually runs)
+        # 2. insert data; reranker validation rejects event_time during search.
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i,
                  default_vector_field_name: list(rng.random((1, dim))[0]),
@@ -6052,8 +6048,8 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
             }
         )
         vectors_to_search = rng.random((1, dim))
-        error = {ct.err_code: 65535,
-                 ct.err_msg: "unsupported field type: Timestamptz"}
+        error = {ct.err_code: 1100,
+                 ct.err_msg: "decay input field event_time must be numeric, got Timestamptz"}
         self.search(client, collection_name, vectors_to_search, ranker=decay_fn,
                     check_task=CheckTasks.err_res, check_items=error)
 
