@@ -14,10 +14,12 @@
 #include <cxxabi.h>
 #include <folly/ExceptionWrapper.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <future>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -29,6 +31,7 @@
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
 #include "common/Channel.h"
+#include "common/Consts.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
@@ -800,10 +803,9 @@ CreateDataArrayFrom(const void* data_raw,
 // IMPORTANT: This function uses std::move to transfer string/bytes data from
 // the per-segment output_fields_data_ (accessed via MergeBase) into the merged
 // DataArray. This is safe because each per-segment DataArray is discarded after
-// MergeDataArray completes — the caller (GetSearchResultDataSlice) never reads
-// the per-segment output_fields_data_ again after this point. Each offset
-// within a segment is referenced at most once in merge_bases (guaranteed by the
-// deduplication in ReduceSearchResultForOneNQ), so no element is moved twice.
+// MergeDataArray completes — callers must not read the per-segment
+// output_fields_data_ again after this point. Each offset within a segment must
+// be referenced at most once in merge_bases, so no element is moved twice.
 // If this invariant changes, the std::move calls below must be revisited.
 std::unique_ptr<DataArray>
 MergeDataArray(std::vector<MergeBase>& merge_bases,
@@ -1627,4 +1629,112 @@ bulk_script_field_data(milvus::OpContext* op_ctx,
 
     return ret;
 }
+
+// sortEqualScoresOneNQ sorts an equal-score run within [nq_begin, nq_end) by
+// PK ASC, using in-place cyclic permutation. Handles optional element_indices_
+// and composite_group_by_values_ fields.
+static void
+sortEqualScoresOneNQ(size_t nq_begin,
+                     size_t nq_end,
+                     SearchResult* search_result) {
+    if (nq_end - nq_begin <= 1)
+        return;
+
+    std::vector<size_t> indices;
+    size_t start = nq_begin;
+    while (start < nq_end) {
+        size_t end = start + 1;
+        while (end < nq_end &&
+               std::fabs(search_result->distances_[end] -
+                         search_result->distances_[start]) < EPSILON) {
+            ++end;
+        }
+
+        if (end - start > 1) {
+            indices.resize(end - start);
+            std::iota(indices.begin(), indices.end(), 0);
+
+            std::sort(indices.begin(),
+                      indices.end(),
+                      [&search_result, start](size_t i, size_t j) {
+                          return search_result->primary_keys_[start + i] <
+                                 search_result->primary_keys_[start + j];
+                      });
+
+            const bool has_element_level =
+                search_result->element_level_ &&
+                !search_result->element_indices_.empty();
+            const bool has_group_by =
+                search_result->composite_group_by_values_.has_value();
+
+            // In-place cyclic permutation over the equal-score run.
+            for (size_t i = 0; i < indices.size();) {
+                size_t target = indices[i];
+                if (target == i) {
+                    ++i;
+                    continue;
+                }
+
+                PkType temp_pk =
+                    std::move(search_result->primary_keys_[start + i]);
+                int64_t temp_offset = search_result->seg_offsets_[start + i];
+                int32_t temp_elem_idx =
+                    has_element_level
+                        ? search_result->element_indices_[start + i]
+                        : -1;
+                CompositeGroupKey temp_group_by_val;
+                if (has_group_by) {
+                    temp_group_by_val =
+                        std::move(search_result->composite_group_by_values_
+                                      .value()[start + i]);
+                }
+
+                size_t curr = i;
+                while (indices[curr] != i) {
+                    size_t next = indices[curr];
+                    search_result->primary_keys_[start + curr] =
+                        std::move(search_result->primary_keys_[start + next]);
+                    search_result->seg_offsets_[start + curr] =
+                        search_result->seg_offsets_[start + next];
+                    if (has_element_level) {
+                        search_result->element_indices_[start + curr] =
+                            search_result->element_indices_[start + next];
+                    }
+                    if (has_group_by) {
+                        search_result->composite_group_by_values_
+                            .value()[start + curr] =
+                            std::move(search_result->composite_group_by_values_
+                                          .value()[start + next]);
+                    }
+                    indices[curr] = curr;
+                    curr = next;
+                }
+
+                search_result->primary_keys_[start + curr] = std::move(temp_pk);
+                search_result->seg_offsets_[start + curr] = temp_offset;
+                if (has_element_level) {
+                    search_result->element_indices_[start + curr] =
+                        temp_elem_idx;
+                }
+                if (has_group_by) {
+                    search_result->composite_group_by_values_
+                        .value()[start + curr] = std::move(temp_group_by_val);
+                }
+                indices[curr] = curr;
+            }
+        }
+
+        start = end;
+    }
+}
+
+void
+SortEqualScoresByPks(SearchResult* search_result) {
+    for (int64_t i = 0; i < search_result->total_nq_; i++) {
+        auto nq_begin = search_result->topk_per_nq_prefix_sum_[i];
+        auto nq_end = search_result->topk_per_nq_prefix_sum_[i + 1];
+        sortEqualScoresOneNQ(nq_begin, nq_end, search_result);
+    }
+}
+
 }  // namespace milvus::segcore
