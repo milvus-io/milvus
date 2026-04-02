@@ -600,13 +600,13 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
 		}
 		return nil, err
-	}, "Query", log)
+	}, "QueryStream", log)
 	if err != nil {
-		log.Warn("Delegator query failed", zap.Error(err))
+		log.Warn("Delegator query stream failed", zap.Error(err))
 		return err
 	}
 
-	log.Info("Delegator Query done")
+	log.Info("Delegator QueryStream done")
 
 	return nil
 }
@@ -634,24 +634,16 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		req.Req.GetIsIterator(),
 	)
 
-	partialResultRequiredDataRatio := paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	var tSafe uint64
-	var err error
-	if partialResultRequiredDataRatio >= 1.0 {
-		tSafe, err = sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
-	} else {
-		// partial search enabled, could ignore streaming data
-		tSafe = sd.GetTSafe()
-	}
+	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
 	if err != nil {
-		log.Warn("delegator search failed to wait tsafe", zap.Error(err))
+		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
 		return nil, err
 	}
 
@@ -660,7 +652,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		req.Req.MvccTimestamp = tSafe
 	}
 
-	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
+	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(float64(1.0), req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
 		return nil, err
@@ -859,7 +851,7 @@ func executeSubTasks[T any, R interface {
 	defer cancel()
 
 	var partialResultRequiredDataRatio float64
-	if taskType == "Query" || taskType == "Search" {
+	if taskType == "Search" {
 		partialResultRequiredDataRatio = paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
 	} else {
 		partialResultRequiredDataRatio = 1.0
@@ -1398,7 +1390,7 @@ type PartialResultEvaluator func(taskType string, successSegments typeutil.Set[i
 func NewRowCountBasedEvaluator(sealedRowCount map[int64]int64) PartialResultEvaluator {
 	return func(taskType string, successSegments typeutil.Set[int64], failureSegments []int64, errors []error) (bool, float64) {
 		var partialResultRequiredDataRatio float64
-		if taskType == "Query" || taskType == "Search" {
+		if taskType == "Search" {
 			partialResultRequiredDataRatio = paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
 		} else {
 			partialResultRequiredDataRatio = 1.0
@@ -1423,6 +1415,6 @@ func NewRowCountBasedEvaluator(sealedRowCount map[int64]int64) PartialResultEval
 		}
 
 		accessedDataRatio := float64(successRowCount) / float64(totalRowCount)
-		return accessedDataRatio > partialResultRequiredDataRatio, accessedDataRatio
+		return accessedDataRatio >= partialResultRequiredDataRatio, accessedDataRatio
 	}
 }
