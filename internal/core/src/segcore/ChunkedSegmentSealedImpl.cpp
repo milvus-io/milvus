@@ -2568,37 +2568,36 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
         return fill_with_empty(field_id, count);
     }
 
-    // hold field shared_ptr here, preventing field got destroyed
-    auto [field, exist] = GetFieldDataIfExist(field_id);
-    if (exist) {
-        Assert(get_bit(field_data_ready_bitset_, field_id));
-        return get_raw_data(op_ctx, field_id, field_meta, seg_offsets, count);
-    }
-
-    PinWrapper<const index::IndexBase*> pin_scalar_index_ptr;
-    auto scalar_indexes = PinIndex(op_ctx, field_id);
-    if (!scalar_indexes.empty()) {
-        pin_scalar_index_ptr = std::move(scalar_indexes[0]);
-    }
-
-    auto index_has_raw = HasRawData(field_id.get());
-
     if (!IsVectorDataType(field_meta.get_data_type())) {
-        // if field has load scalar index, reverse raw data from index
-        if (index_has_raw) {
-            return ReverseDataFromIndex(
-                pin_scalar_index_ptr.get(), seg_offsets, count, field_meta);
+        // === Scalar field ===
+        // Try index first: if scalar index exists and has raw data, read from index
+        PinWrapper<const index::IndexBase*> pin_scalar_index_ptr;
+        auto scalar_indexes = PinIndex(op_ctx, field_id);
+        if (!scalar_indexes.empty()) {
+            pin_scalar_index_ptr = std::move(scalar_indexes[0]);
+            if (HasRawData(field_id.get())) {
+                return ReverseDataFromIndex(
+                    pin_scalar_index_ptr.get(), seg_offsets, count, field_meta);
+            }
         }
+        // Fallback to field data
+        auto [field, exist] = GetFieldDataIfExist(field_id);
         return get_raw_data(op_ctx, field_id, field_meta, seg_offsets, count);
     }
 
+    // === Vector field ===
     std::chrono::high_resolution_clock::time_point get_vector_start =
         std::chrono::high_resolution_clock::now();
 
     std::unique_ptr<DataArray> vector{nullptr};
-    if (index_has_raw) {
+    // Try index first: if vector index exists and has raw data, read from index
+    bool has_vector_index = get_bit(index_ready_bitset_, field_id) ||
+                            get_bit(binlog_index_bitset_, field_id);
+    if (has_vector_index && HasRawData(field_id.get())) {
         vector = get_vector(op_ctx, field_id, seg_offsets, count);
     } else {
+        // Fallback to field data
+        auto [field, exist] = GetFieldDataIfExist(field_id);
         vector = get_raw_data(op_ctx, field_id, field_meta, seg_offsets, count);
     }
 
