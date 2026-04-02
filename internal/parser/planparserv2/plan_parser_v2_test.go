@@ -2563,6 +2563,9 @@ func TestExpr_ElementFilter(t *testing.T) {
 
 		`element_filter(struct_array, $[sub_int] > 1) || element_filter(struct_array, $[sub_str] == "test")`,
 		`element_filter(struct_array, $[sub_int] > 1) && Int64Field > 0`,
+
+		`not element_filter(struct_array, $[sub_int] > 1)`,
+		`!element_filter(struct_array, $[sub_int] > 1)`,
 	}
 
 	for _, expr := range invalidExprs {
