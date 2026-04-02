@@ -522,6 +522,9 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual int64_t
     get_active_count(Timestamp ts) const = 0;
 
+    virtual Timestamp
+    get_max_timestamp() const = 0;
+
     /**
      * search offset by possible pk values and mvcc timestamp
      *

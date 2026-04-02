@@ -178,6 +178,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return indexing_record_;
     }
 
+    Timestamp
+    get_max_timestamp() const override {
+        return insert_record_.timestamp_index_.get_max_timestamp();
+    }
+
     std::shared_mutex&
     get_chunk_mutex() const {
         return chunk_mutex_;

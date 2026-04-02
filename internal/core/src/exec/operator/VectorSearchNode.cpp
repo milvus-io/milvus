@@ -109,63 +109,74 @@ PhyVectorSearchNode::GetOutput() {
         search_info_.array_offsets_ = array_offsets;
     }
 
-    // There are two types of execution: pre-filter and iterative filter
-    // For **pre-filter**, we have execution path: FilterBitsNode -> MvccNode -> ElementFilterBitsNode -> VectorSearchNode -> ...
-    // For **iterative filter**, we have execution path: MvccNode -> VectorSearchNode -> ElementFilterNode -> FilterNode -> ...
-    //
-    // When embedding search embedding on embedding list is used, which means element_level_ is true, we need to transform doc-level
-    // bitset to element-level bitset. In pre-filter path, ElementFilterBitsNode already transforms the bitset. We need to transform it
-    // in iterative filter path or when ElementFilterBitsNode is not present (e.g., only doc-level filter without element-level filter).
-    //
-    // Check if bitset needs conversion: element_level search is requested but bitset hasn't been converted yet
-    if (ph.element_level_ && !query_context_->bitset_is_element_level()) {
+    // Prepare BitsetView for search.
+    // Fast path: all_rows_visible + non-element-level → empty BitsetView
+    //            (IDSelectorAll in Knowhere, skips per-vector bit test).
+    // Normal path: build BitsetView from the bitmap produced upstream.
+    milvus::BitsetView search_view;
+    int64_t data_cnt = active_count_;
+
+    if (query_context_->get_all_rows_visible() && !ph.element_level_) {
+        // search_view stays default-constructed (empty)
+    } else {
+        // There are two types of execution: pre-filter and iterative filter
+        // For **pre-filter**: FilterBitsNode -> MvccNode -> ElementFilterBitsNode -> VectorSearchNode -> ...
+        // For **iterative filter**: MvccNode -> VectorSearchNode -> ElementFilterNode -> FilterNode -> ...
+        //
+        // When element_level_ is true, we need to transform doc-level bitset
+        // to element-level bitset.  In pre-filter path, ElementFilterBitsNode
+        // already does this.  We only need to do it here for the iterative
+        // path or when ElementFilterBitsNode is not present.
+        if (ph.element_level_ && !query_context_->bitset_is_element_level()) {
+            auto col_input = GetColumnVector(input_);
+            TargetBitmapView view(col_input->GetRawData(), col_input->size());
+            TargetBitmapView valid_view(col_input->GetValidRawData(),
+                                        col_input->size());
+
+            auto [element_bitset, valid_element_bitset] =
+                array_offsets->RowBitsetToElementBitset(view, valid_view, 0);
+
+            query_context_->set_active_element_count(element_bitset.size());
+
+            std::vector<VectorPtr> col_res;
+            col_res.push_back(std::make_shared<ColumnVector>(
+                std::move(element_bitset), std::move(valid_element_bitset)));
+            input_ = std::make_shared<RowVector>(col_res);
+        }
+
         auto col_input = GetColumnVector(input_);
         TargetBitmapView view(col_input->GetRawData(), col_input->size());
-        TargetBitmapView valid_view(col_input->GetValidRawData(),
-                                    col_input->size());
 
-        auto [element_bitset, valid_element_bitset] =
-            array_offsets->RowBitsetToElementBitset(view, valid_view, 0);
+        if (view.all()) {
+            query_context_->set_search_result(empty_search_result(num_queries));
+            return input_;
+        }
 
-        query_context_->set_active_element_count(element_bitset.size());
-
-        std::vector<VectorPtr> col_res;
-        col_res.push_back(std::make_shared<ColumnVector>(
-            std::move(element_bitset), std::move(valid_element_bitset)));
-        input_ = std::make_shared<RowVector>(col_res);
+        // TODO: uniform knowhere BitsetView and milvus BitsetView
+        search_view = milvus::BitsetView((uint8_t*)col_input->GetRawData(),
+                                         col_input->size());
+        data_cnt = search_view.size();
     }
 
+    // Single search + metrics path
     milvus::SearchResult search_result;
-
-    auto col_input = GetColumnVector(input_);
-    TargetBitmapView view(col_input->GetRawData(), col_input->size());
-
-    if (view.all()) {
-        query_context_->set_search_result(empty_search_result(num_queries));
-        return input_;
-    }
-
-    // TODO: uniform knowhere BitsetView and milvus BitsetView
-    milvus::BitsetView final_view((uint8_t*)col_input->GetRawData(),
-                                  col_input->size());
     auto op_context = query_context_->get_op_context();
-    // todo(SpadeA): need to pass element_level to make check more rigorously?
     segment_->vector_search(search_info_,
                             src_data,
                             src_offsets,
                             num_queries,
                             query_timestamp_,
-                            final_view,
+                            search_view,
                             op_context,
                             search_result);
 
-    search_result.total_data_cnt_ = final_view.size();
+    search_result.total_data_cnt_ = data_cnt;
     search_result.element_level_ = ph.element_level_;
 
     span.GetSpan()->SetAttribute(
         "result_count", static_cast<int>(search_result.seg_offsets_.size()));
-
     query_context_->set_search_result(std::move(search_result));
+
     std::chrono::high_resolution_clock::time_point vector_end =
         std::chrono::high_resolution_clock::now();
     double vector_cost =
@@ -173,8 +184,8 @@ PhyVectorSearchNode::GetOutput() {
             .count();
     milvus::monitor::internal_core_search_latency_vector.Observe(vector_cost /
                                                                  1000);
-    // for now, vector search store result in query_context
-    // this node interface just return bitset
+    // vector search stores result in query_context;
+    // this node returns the bitset for downstream operators
     return input_;
 }
 

@@ -73,6 +73,30 @@ PhyMvccNode::GetOutput() {
     }
 
     tracer::AddEvent(fmt::format("input_rows: {}", active_count_));
+
+    // ── Sealed-segment fast path (skip timestamp mask) ──
+    // On a sealed segment without TTL, when query_ts covers all inserts,
+    // mask_with_timestamps is redundant (all rows pass).  Only apply the
+    // delete mask — which is a no-op when no deletes exist.  Then decide
+    // all_rows_visible from the actual bitmap instead of a racy
+    // get_deleted_count() check.
+    if (is_source_node_ && segment_->type() == SegmentType::Sealed &&
+        collection_ttl_timestamp_ == 0 &&
+        query_timestamp_ >= segment_->get_max_timestamp()) {
+        auto col_input = std::make_shared<ColumnVector>(
+            TargetBitmap(active_count_), TargetBitmap(active_count_));
+        TargetBitmapView data(col_input->GetRawData(), col_input->size());
+        segment_->mask_with_delete(data, active_count_, query_timestamp_);
+
+        if (data.none()) {
+            query_context->set_all_rows_visible(true);
+        }
+
+        is_finished_ = true;
+        return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
+    }
+
+    // Default path (has filter / growing / TTL)
     // the first vector is filtering result and second bitset is a valid bitset
     // if valid_bitset[i]==false, means result[i] is null
     auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
