@@ -1479,14 +1479,17 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
     def test_hybrid_search_nullable_vector_with_filter(self):
         """
         target: verify hybrid search on nullable vectors combined with scalar filter
-        method: 1. hybrid search on nullable_float_vector + float_vector1 with filter on nullable_float field
+        method: 1. hybrid search on nullable_float_vector + float_vector1 with expr in each sub request
                 2. verify filter is effective: returned rows satisfy the filter condition
                 3. verify nullable_float output field values are consistent with filter
+        note: hybrid search does not support top-level filter; filter must be provided via expr
+              in each AnnSearchRequest individually
         expected: all returned results satisfy the filter, nullable rows (null float) are excluded by filter
         """
         client = self._client()
         nq = 2
         filter_value = 1000
+        filter_expr = f"{self.nullable_float_field_name} > {filter_value}"
 
         search_data = cf.gen_vectors(nq, self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
         req_list = []
@@ -1497,13 +1500,13 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                 "anns_field": field_name,
                 "param": param,
                 "limit": default_limit,
+                "expr": filter_expr,
             })
             req_list.append(req)
 
         res = self.hybrid_search(client, self.collection_name, reqs=req_list,
                                  ranker=WeightedRanker(0.5, 0.5),
                                  limit=default_limit,
-                                 filter=f"{self.nullable_float_field_name} > {filter_value}",
                                  output_fields=[self.primary_key_field_name,
                                                 self.nullable_float_field_name],
                                  check_task=CheckTasks.check_search_results,
