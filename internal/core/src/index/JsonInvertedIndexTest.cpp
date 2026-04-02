@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
 #include <simdjson.h>
 #include <cstdint>
@@ -53,11 +54,96 @@
 #include "storage/FileManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Types.h"
+#include "storage/Util.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::index;
+
+namespace {
+
+struct FileSliceSizeGuard {
+    explicit FileSliceSizeGuard(int64_t slice_size)
+        : old_slice_size_(FILE_SLICE_SIZE.load()) {
+        FILE_SLICE_SIZE.store(slice_size);
+    }
+
+    ~FileSliceSizeGuard() {
+        FILE_SLICE_SIZE.store(old_slice_size_);
+    }
+
+    int64_t old_slice_size_;
+};
+
+int64_t
+BuildAndLoadJsonInvertedIndexForOffsetRegression(
+    const std::vector<std::string>& json_raw_data) {
+    constexpr int64_t collection_id = 1;
+    constexpr int64_t partition_id = 2;
+    constexpr int64_t segment_id = 3;
+    constexpr int64_t field_id = 101;
+    constexpr int64_t index_build_id = 4000;
+    constexpr int64_t index_version = 4000;
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      field_id,
+                                                      DataType::JSON);
+    auto index_meta =
+        gen_index_meta(segment_id, field_id, index_build_id, index_version);
+
+    auto root_path =
+        (boost::filesystem::path(TestLocalPath) /
+         boost::filesystem::unique_path("json-offset-regression-%%%%-%%%%"))
+            .string();
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    ChunkManagerWrapper cm_w(cm);
+
+    storage::FileManagerContext build_ctx(field_meta, index_meta, cm, fs);
+    index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index::INVERTED_INDEX_TYPE;
+    create_index_info.json_cast_type = JsonCastType::FromString("DOUBLE");
+    create_index_info.json_path = "/a";
+
+    auto build_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        create_index_info, build_ctx);
+    auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
+        static_cast<JsonInvertedIndex<double>*>(build_index.release()));
+
+    std::vector<milvus::Json> jsons;
+    jsons.reserve(json_raw_data.size());
+    for (auto& json : json_raw_data) {
+        jsons.push_back(milvus::Json(simdjson::padded_string(json)));
+    }
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    json_field->add_json_data(jsons);
+    json_index->BuildWithFieldData({json_field});
+
+    auto stats = json_index->Upload();
+    auto index_files = stats->GetIndexFiles();
+
+    build_ctx.set_for_loading_index(true);
+    auto load_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        create_index_info, build_ctx);
+    auto loaded_json_index = std::unique_ptr<JsonInvertedIndex<double>>(
+        static_cast<JsonInvertedIndex<double>*>(load_index.release()));
+
+    Config load_config;
+    load_config[index::INDEX_FILES] = index_files;
+    load_config[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+
+    loaded_json_index->Load(milvus::tracer::TraceContext{}, load_config);
+    return loaded_json_index->Count();
+}
+
+}  // namespace
 
 TEST(JsonIndexTest, TestJSONErrRecorder) {
     std::vector<std::string> json_raw_data = {
@@ -315,8 +401,7 @@ TEST(JsonIndexTest, TestJsonCast) {
 // find ALL slices referenced in _meta_slice, not just the target key's.
 TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     // Use a small slice size so both offset files get sliced.
-    auto old_slice_size = FILE_SLICE_SIZE.load();
-    FILE_SLICE_SIZE.store(64);
+    FileSliceSizeGuard slice_size_guard(64);
 
     auto schema = std::make_shared<Schema>();
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
@@ -416,5 +501,36 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         EXPECT_EQ(result.size_, 20 * sizeof(size_t));
     }
 
-    FILE_SLICE_SIZE.store(old_slice_size);
+}
+
+TEST(JsonIndexTest, TestLoadWithOnlySlicedNonExistOffsets) {
+    FileSliceSizeGuard slice_size_guard(64);
+
+    std::vector<std::string> json_raw_data;
+    for (int i = 0; i < 20; ++i) {
+        json_raw_data.emplace_back(R"({"b": 1})");
+    }
+    for (int i = 0; i < 10; ++i) {
+        json_raw_data.emplace_back(R"({"a": 1.0})");
+    }
+
+    EXPECT_EQ(
+        BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data),
+        json_raw_data.size());
+}
+
+TEST(JsonIndexTest, TestLoadWithOnlySlicedNullOffsets) {
+    FileSliceSizeGuard slice_size_guard(64);
+
+    std::vector<std::string> json_raw_data;
+    for (int i = 0; i < 20; ++i) {
+        json_raw_data.emplace_back(R"({"a": null})");
+    }
+    for (int i = 0; i < 10; ++i) {
+        json_raw_data.emplace_back(R"({"a": 1.0})");
+    }
+
+    EXPECT_EQ(
+        BuildAndLoadJsonInvertedIndexForOffsetRegression(json_raw_data),
+        json_raw_data.size());
 }
