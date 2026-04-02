@@ -995,6 +995,87 @@ func WrapErrNodeNotMatch(expectedNodeID, actualNodeID int64, msg ...string) erro
 	return err
 }
 
+// WrapErrSerializationFailedMsg creates a new ErrSerializationFailed (code 1004)
+// with a detail message. Used when stored bytes cannot be decoded into the
+// expected shape and there is no underlying error to wrap (e.g. valuesRead vs
+// rows mismatch in payload reader, type mismatch when reading a column from
+// the wrong DataType).
+func WrapErrSerializationFailedMsg(format string, args ...any) error {
+	detail := fmt.Sprintf(format, args...)
+	return errors.Wrap(ErrSerializationFailed, detail)
+}
+
+// WrapErrSerializationFailed wraps an existing underlying error 'err' with
+// ErrSerializationFailed (code 1004). Used when a decode / unmarshal /
+// schema-conversion step fails with a non-typed inner error (json, proto,
+// arrow). If 'err' is already a typed merr, use merr.Wrap(err, msg) instead.
+func WrapErrSerializationFailed(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrSerializationFailedMsg(format, args...)
+	}
+	return &wrappedMilvusError{
+		msg:      fmt.Sprintf(format, args...),
+		inner:    err,
+		sentinel: ErrSerializationFailed,
+	}
+}
+
+// WrapErrDataIntegrityMsg creates a new ErrDataIntegrity (code 1009) with a
+// detail message. Use when on-disk bytes don't conform to the expected schema
+// (binlog type mismatch, valuesRead vs rows mismatch, malformed event header,
+// unparseable stats buffer) — i.e. the stored data itself is corrupt, not the
+// (de)serialization step.
+func WrapErrDataIntegrityMsg(format string, args ...any) error {
+	detail := fmt.Sprintf(format, args...)
+	return errors.Wrap(ErrDataIntegrity, detail)
+}
+
+// WrapErrDataIntegrity wraps an existing underlying error with ErrDataIntegrity
+// (code 1009). Use when stored-byte parsing surfaces a non-typed inner error
+// (json unmarshal of stats buffer, type assertion of decoded header extras).
+// If 'err' is already a typed merr, use merr.Wrap(err, msg) instead.
+func WrapErrDataIntegrity(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrDataIntegrityMsg(format, args...)
+	}
+	return &wrappedMilvusError{
+		msg:      fmt.Sprintf(format, args...),
+		inner:    err,
+		sentinel: ErrDataIntegrity,
+	}
+}
+
+// WrapErrStorageMsg creates a new ErrStorage (code 1008) with a detail message.
+// Used when a logical internal error occurs in the storage layer (e.g. invalid
+// state, corrupted data structure check, nil data) and there is no underlying
+// Go error to wrap.
+func WrapErrStorageMsg(format string, args ...any) error {
+	detail := fmt.Sprintf(format, args...)
+	return errors.Wrap(ErrStorage, detail)
+}
+
+// WrapErrStorage wraps an existing underlying error 'err' with ErrStorage
+// (code 1008). Used for storage subsystem failures (transaction state machine,
+// writer/reader lifecycle, FFI internal failures) that are not physical I/O,
+// not serialization, and not client-input errors.
+//
+// IMPORTANT: only use when 'err' is a raw error (FFI / fs / proto / arrow).
+// If 'err' is already a typed merr, use merr.Wrap(err, msg) instead — wrapping
+// a typed merr here would mask its inner code (defect#3 pattern).
+//
+// merr.Code(result) returns ErrStorage.code() = 1008; errors.Is(result, ErrStorage)
+// succeeds; errors.Is(result, err) also succeeds (inner chain preserved via Unwrap).
+func WrapErrStorage(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrStorageMsg(format, args...)
+	}
+	return &wrappedMilvusError{
+		msg:      fmt.Sprintf(format, args...),
+		inner:    err,
+		sentinel: ErrStorage,
+	}
+}
+
 // IO related
 func WrapErrIoKeyNotFound(key string, msg ...string) error {
 	err := wrapFields(ErrIoKeyNotFound, value("key", key))

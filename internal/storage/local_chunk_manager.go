@@ -119,7 +119,7 @@ func (lcm *LocalChunkManager) MultiWrite(ctx context.Context, contents map[strin
 	for filePath, content := range contents {
 		err := lcm.Write(ctx, filePath, content)
 		if err != nil {
-			el = merr.Combine(el, errors.Wrapf(err, "write %s failed", filePath))
+			el = merr.Combine(el, merr.Wrapf(err, "write %s failed", filePath))
 		}
 	}
 	return el
@@ -149,7 +149,7 @@ func (lcm *LocalChunkManager) MultiRead(ctx context.Context, filePaths []string)
 	for i, filePath := range filePaths {
 		content, err := lcm.Read(ctx, filePath)
 		if err != nil {
-			el = merr.Combine(el, errors.Wrapf(err, "failed to read %s", filePath))
+			el = merr.Combine(el, merr.Wrapf(err, "failed to read %s", filePath))
 		}
 		results[i] = content
 	}
@@ -271,7 +271,7 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 	if len(prefix) == 0 {
 		errMsg := "empty prefix is not allowed for ChunkManager remove operation"
 		log.Warn(errMsg)
-		return merr.WrapErrParameterInvalidMsg(errMsg)
+		return merr.WrapErrStorageMsg("%s", errMsg)
 	}
 	var removeErr error
 	if err := lcm.WalkWithPrefix(ctx, prefix, true, func(chunkInfo *ChunkObjectInfo) bool {

@@ -124,7 +124,11 @@ func (s *GrpcAccessInfoSuite) TestErrorType() {
 	result = Get(s.info, "$error_type")
 	s.Equal(merr.InputError.String(), result[0])
 
-	s.info.err = merr.ErrParameterInvalid
+	// ErrServiceInternal is a SystemError-typed sentinel.
+	// (ErrParameterInvalid was previously SystemError but became InputError after
+	// the 02-storage err-std PR; keep this branch on a still-SystemError sentinel
+	// so the test still covers the "system_error" classification path.)
+	s.info.err = merr.ErrServiceInternal
 	result = Get(s.info, "$error_type")
 	s.Equal(merr.SystemError.String(), result[0])
 }

@@ -159,8 +159,7 @@ func NewPackedRecordWriter(
 	columnGroupCompressed := make(map[typeutil.UniqueID]uint64)
 	pathsMap := make(map[typeutil.UniqueID]string)
 	if len(paths) != len(columnGroups) {
-		return nil, merr.WrapErrParameterInvalid(len(paths), len(columnGroups),
-			"paths length is not equal to column groups length for packed record writer")
+		return nil, merr.WrapErrStorageMsg("paths length is not equal to column groups length for packed record writer: paths=%d columnGroups=%d", len(paths), len(columnGroups))
 	}
 	for i, columnGroup := range columnGroups {
 		columnGroupUncompressed[columnGroup.GroupID] = 0

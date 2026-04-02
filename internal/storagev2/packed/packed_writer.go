@@ -30,11 +30,11 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
@@ -59,7 +59,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	for _, group := range columnGroups {
 		cGroup := C.malloc(C.size_t(len(group.Columns)) * C.size_t(unsafe.Sizeof(C.int(0))))
 		if cGroup == nil {
-			return nil, errors.New("failed to allocate memory for column groups")
+			return nil, merr.WrapErrServiceInternalMsg("failed to allocate memory for column groups")
 		}
 		cGroupSlice := (*[1 << 30]C.int)(cGroup)[:len(group.Columns):len(group.Columns)]
 		for i, val := range group.Columns {
@@ -135,7 +135,7 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 		return nil
 	}
 	if pw.cPackedWriter == nil {
-		return errors.New("packed writer is closed")
+		return merr.WrapErrStorageMsg("packed writer is closed")
 	}
 
 	cArrays := make([]CArrowArray, recordBatch.NumCols())
@@ -176,13 +176,13 @@ func (pw *PackedWriter) Close() error {
 
 func (pw *PackedWriter) CloseAndTell(numGroups int) ([]int64, error) {
 	if numGroups <= 0 {
-		return nil, errors.New("numGroups must be greater than 0")
+		return nil, merr.WrapErrServiceInternalMsg("numGroups must be greater than 0")
 	}
 	if pw.cPackedWriter == nil {
 		if len(pw.closedSizes) == numGroups {
 			return append([]int64(nil), pw.closedSizes...), nil
 		}
-		return nil, errors.New("packed writer is closed")
+		return nil, merr.WrapErrStorageMsg("packed writer is closed")
 	}
 
 	sizes := make([]int64, numGroups)

@@ -342,7 +342,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 ) (*PackedBinlogRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 
 	writer := &PackedBinlogRecordWriter{
@@ -522,7 +522,7 @@ func (pw *PackedManifestRecordWriter) appendV3Stats(updates *packed.ManifestUpda
 		}
 		fullPath := path.Join(pw.basePath, fmt.Sprintf("_stats/bloom_filter.%d/%d", pkFieldID, id))
 		if err := packed.WriteFile(pw.storageConfig, fullPath, statsBlob.Value); err != nil {
-			return fmt.Errorf("appendV3Stats: failed to write bloom filter stats: %w", err)
+			return merr.Wrap(err, "appendV3Stats: failed to write bloom filter stats")
 		}
 		updates.Stats = append(updates.Stats, packed.StatEntry{
 			Key:      fmt.Sprintf("bloom_filter.%d", pkFieldID),
@@ -542,7 +542,7 @@ func (pw *PackedManifestRecordWriter) appendV3Stats(updates *packed.ManifestUpda
 		}
 		fullPath := path.Join(pw.basePath, fmt.Sprintf("_stats/bm25.%d/%d", fieldID, id))
 		if err := packed.WriteFile(pw.storageConfig, fullPath, blob.Value); err != nil {
-			return fmt.Errorf("appendV3Stats: failed to write bm25 stats: %w", err)
+			return merr.Wrap(err, "appendV3Stats: failed to write bm25 stats")
 		}
 		updates.Stats = append(updates.Stats, packed.StatEntry{
 			Key:      fmt.Sprintf("bm25.%d", fieldID),
@@ -560,7 +560,7 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 ) (*PackedManifestRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 
 	writer := &PackedManifestRecordWriter{
@@ -736,7 +736,7 @@ func NewPackedTextManifestRecordWriter(
 ) (*PackedTextManifestRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 
 	writer := &PackedTextManifestRecordWriter{

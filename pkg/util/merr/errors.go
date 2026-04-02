@@ -150,6 +150,27 @@ var (
 	ErrIoUnexpectEOF     = newMilvusError("unexpected EOF", 1002, true)
 	ErrIoTooManyRequests = newMilvusError("too many requests", 1003, true)
 
+	// Serialization / deserialization step failed — a transformation pipeline
+	// (proto Marshal/Unmarshal, json encode/decode, arrow schema conversion etc.)
+	// could not complete. Use for "conversion process failed" semantics rather
+	// than "stored bytes are corrupt" — for the latter use ErrDataIntegrity.
+	ErrSerializationFailed = newMilvusError("data serialization or deserialization failed", 1004, false)
+
+	// Data integrity check failed — bytes already on disk (binlog payload,
+	// event header extras, stats buffer) don't match the layout we expect from
+	// the schema (type mismatch, valuesRead vs rows mismatch, unknown column
+	// type, malformed event header). Likely permanent corruption; retry won't
+	// help. Distinct from ErrSerializationFailed (process step failed) and
+	// ErrParameterInvalid (caller-input we control).
+	ErrDataIntegrity = newMilvusError("data integrity check failed", 1009, false)
+
+	// Storage subsystem fallback — used for non-IO / non-serde / non-client-input
+	// failures inside the storage package (transaction state machine, writer/reader
+	// lifecycle, FFI internal failures, ext-table metadata operations).
+	// Prefer ErrIo*/ErrSerializationFailed/ErrDataIntegrity/ErrParameterInvalid
+	// when they fit; reach for ErrStorage only when none of those describe the failure.
+	ErrStorage = newMilvusError("storage internal error", 1008, false, WithErrorType(SystemError))
+
 	// Permanent errors - resource doesn't exist or access denied
 	ErrIoPermissionDenied   = newMilvusError("permission denied", 1005, false)
 	ErrIoBucketNotFound     = newMilvusError("bucket not found", 1006, false)
@@ -161,7 +182,7 @@ var (
 	ErrIoEntityTooLarge  = newMilvusError("entity too large", 1012, false)
 
 	// Parameter related
-	ErrParameterInvalid  = newMilvusError("invalid parameter", 1100, false)
+	ErrParameterInvalid  = newMilvusError("invalid parameter", 1100, false, WithErrorType(InputError))
 	ErrParameterMissing  = newMilvusError("missing parameter", 1101, false)
 	ErrParameterTooLarge = newMilvusError("parameter too large", 1102, false)
 
