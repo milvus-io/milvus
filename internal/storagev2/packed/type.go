@@ -15,10 +15,12 @@
 package packed
 
 /*
+#cgo pkg-config: milvus_core milvus-storage
+
 #include <stdlib.h>
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
-#include "storage/loon_ffi/ffi_reader_c.h"
+#include "milvus-storage/ffi_c.h"
 #include "segcore/packed_reader_c.h"
 #include "segcore/packed_writer_c.h"
 */
@@ -49,7 +51,7 @@ type PackedReader struct {
 }
 
 type FFIPackedReader struct {
-	cPackedReader C.CFFIPackedReader
+	cReaderHandle C.LoonReaderHandle
 	recordReader  arrio.Reader
 	schema        *arrow.Schema
 }

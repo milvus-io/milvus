@@ -177,21 +177,21 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 
 	cBasePath := C.CString(pw.basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
-	var transationHandle C.LoonTransactionHandle
+	var transactionHandle C.LoonTransactionHandle
 
-	result = C.loon_transaction_begin(cBasePath, pw.cProperties, C.int64_t(pw.baseVersion), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transationHandle)
+	result = C.loon_transaction_begin(cBasePath, pw.cProperties, C.int64_t(pw.baseVersion), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
-	defer C.loon_transaction_destroy(transationHandle)
+	defer C.loon_transaction_destroy(transactionHandle)
 
-	result = C.loon_transaction_append_files(transationHandle, cColumnGroups)
+	result = C.loon_transaction_append_files(transactionHandle, cColumnGroups)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
 
 	var cCommitVersion C.int64_t
-	result = C.loon_transaction_commit(transationHandle, &cCommitVersion)
+	result = C.loon_transaction_commit(transactionHandle, &cCommitVersion)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}

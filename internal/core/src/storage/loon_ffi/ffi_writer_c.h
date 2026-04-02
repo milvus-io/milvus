@@ -20,6 +20,7 @@ extern "C" {
 
 #include "common/common_type_c.h"
 #include "common/type_c.h"
+#include "milvus-storage/ffi_c.h"
 
 /**
  * @brief Retrieves encryption parameters from the cipher plugin for CMEK (Customer Managed Encryption Keys).
@@ -40,6 +41,21 @@ extern "C" {
  */
 CStatus
 GetEncParams(CPluginContext* c_plugin_context, char** out_key, char** out_meta);
+
+/**
+ * @brief Sets up CMEK key retriever callback on a Loon reader.
+ *
+ * Updates the cipher plugin singleton with the provided context and sets
+ * a key retriever callback on the reader that decrypts data using the plugin.
+ *
+ * @param[in] reader Loon reader handle to configure
+ * @param[in] c_plugin_context Plugin context for CMEK decryption
+ *
+ * @return CStatus Success status or error with message if failed
+ */
+CStatus
+SetupReaderKeyRetriever(LoonReaderHandle reader,
+                        CPluginContext* c_plugin_context);
 
 #ifdef __cplusplus
 }

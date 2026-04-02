@@ -9,9 +9,8 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
-# FFI Reader source files for interfacing with milvus-storage through FFI
+# FFI source files for interfacing with milvus-storage through FFI
 set(FFI_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/ffi_reader_c.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ffi_writer_c.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/util.cpp
 )
