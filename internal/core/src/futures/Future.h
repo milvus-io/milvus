@@ -115,28 +115,28 @@ class Metrics {
 
  private:
     prometheus::Gauge&
-    inflightGauge() {
+    inflightGauge() const {
         return pool_type_ == PoolType::kSearch
                    ? milvus::monitor::internal_cgo_inflight_task_total_search
                    : milvus::monitor::internal_cgo_inflight_task_total_load;
     }
 
     prometheus::Gauge&
-    executingGauge() {
+    executingGauge() const {
         return pool_type_ == PoolType::kSearch
                    ? milvus::monitor::internal_cgo_executing_task_total_search
                    : milvus::monitor::internal_cgo_executing_task_total_load;
     }
 
     prometheus::Histogram&
-    queueDurationHist() {
+    queueDurationHist() const {
         return pool_type_ == PoolType::kSearch
                    ? milvus::monitor::internal_cgo_queue_duration_seconds_search
                    : milvus::monitor::internal_cgo_queue_duration_seconds_load;
     }
 
     prometheus::Histogram&
-    executeDurationHist() {
+    executeDurationHist() const {
         return pool_type_ == PoolType::kSearch
                    ? milvus::monitor::
                          internal_cgo_execute_duration_seconds_search
@@ -145,7 +145,7 @@ class Metrics {
     }
 
     prometheus::Counter&
-    cancelBeforeCounter() {
+    cancelBeforeCounter() const {
         return pool_type_ == PoolType::kSearch
                    ? milvus::monitor::
                          internal_cgo_cancel_before_execute_total_search
@@ -154,7 +154,7 @@ class Metrics {
     }
 
     prometheus::Counter&
-    cancelDuringCounter() {
+    cancelDuringCounter() const {
         return pool_type_ == PoolType::kSearch
                    ? milvus::monitor::
                          internal_cgo_cancel_during_execute_total_search
@@ -162,7 +162,7 @@ class Metrics {
                          internal_cgo_cancel_during_execute_total_load;
     }
 
-    PoolType pool_type_;
+    const PoolType pool_type_;
     std::chrono::steady_clock::time_point time_point_;
     Duration queue_duration_;
     Duration execute_duration_;
