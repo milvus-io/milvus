@@ -7,12 +7,12 @@ import random
 from pathlib import Path
 from time import sleep
 
-from pymilvus import connections
+from pymilvus import connections, Collection
 from chaos.checker import (InsertFlushChecker, SearchChecker, QueryChecker, Op)
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready, get_pod_ip_name_pairs, get_milvus_instance_name
+from utils.util_k8s import wait_pods_ready, get_querynode_id_pod_pairs, get_milvus_instance_name
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
 from common import common_func as cf
@@ -21,9 +21,9 @@ from delayed_assert import expect, assert_expectations
 
 config_file_name = f"{str(Path(__file__).absolute().parent)}/config/multi_replicas_chaos.yaml"
 
+
 def assert_statistic(checkers, expectations={}):
     for k in checkers.keys():
-        # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
         average_time = checkers[k].average_time
@@ -45,17 +45,6 @@ def record_results(checkers):
         check_result = checkers[k].check_result()
         res += f"{str(k):10} {check_result}\n"
     return res
-
-
-def get_querynode_info(release_name):
-    querynode_id_pod_pair = {}
-    querynode_ip_pod_pair = get_pod_ip_name_pairs(
-        "chaos-testing", f"app.kubernetes.io/instance={release_name}, component=querynode")
-    ms = MilvusSys()
-    for node in ms.query_nodes:
-        ip = node["infos"]['hardware_infos']["ip"].split(":")[0]
-        querynode_id_pod_pair[node["identifier"]] = querynode_ip_pod_pair[ip]
-    return querynode_id_pod_pair
 
 
 class TestChaosBase:
@@ -87,12 +76,13 @@ class TestChaos(TestChaosBase):
     @pytest.fixture(scope="function", autouse=True)
     def init_health_checkers(self):
         c_name = cf.gen_unique_str('MultiReplicasChecker_')
-        replicas_num = 2
         shards_num = 2
+        # replica_number is managed by cluster-level config (clusterLevelLoadReplicaNumber)
+        # via replicaResourceGroups in helm chart, no need to pass explicitly
         checkers = {
             Op.insert: InsertFlushChecker(collection_name=c_name, shards_num=shards_num),
-            Op.search: SearchChecker(collection_name=c_name, shards_num=shards_num, replica_number=replicas_num),
-            Op.query: QueryChecker(collection_name=c_name, shards_num=shards_num, replica_number=replicas_num)
+            Op.search: SearchChecker(collection_name=c_name, shards_num=shards_num),
+            Op.query: QueryChecker(collection_name=c_name, shards_num=shards_num)
         }
         self.health_checkers = checkers
 
@@ -107,42 +97,55 @@ class TestChaos(TestChaosBase):
         log.info(f'Alive threads: {threading.enumerate()}')
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("is_streaming", cc.gen_experiment_config(config_file_name)['is_streaming'])  # [False, True]
-    @pytest.mark.parametrize("failed_group_scope", cc.gen_experiment_config(config_file_name)['failed_group_scope'])  # ["one", "except_one" "all"]
-    @pytest.mark.parametrize("failed_node_type", cc.gen_experiment_config(config_file_name)['failed_node_type'])  # ["non_shard_leader", "shard_leader"]
-    @pytest.mark.parametrize("chaos_type", cc.gen_experiment_config(config_file_name)['chaos_type'])  # ["pod-failure", "pod-kill"]
+    @pytest.mark.parametrize("is_streaming", cc.gen_experiment_config(config_file_name)['is_streaming'])
+    @pytest.mark.parametrize("failed_group_scope", cc.gen_experiment_config(config_file_name)['failed_group_scope'])
+    @pytest.mark.parametrize("failed_node_type", cc.gen_experiment_config(config_file_name)['failed_node_type'])
+    @pytest.mark.parametrize("chaos_type", cc.gen_experiment_config(config_file_name)['chaos_type'])
     def test_multi_replicas_with_only_one_group_available(self, chaos_type, failed_node_type, failed_group_scope, is_streaming):
-        # start the monitor threads to check the milvus ops
         log.info("*********************Chaos Test Start**********************")
         log.info("Test config")
         log.info(cc.gen_experiment_config(config_file_name))
-        # log.info(f"chaos_yaml: {chaos_yaml}")
         log.info(connections.get_connection_addr('default'))
+
         if is_streaming is False:
             del self.health_checkers[Op.insert]
         cc.start_monitor_threads(self.health_checkers)
-        # get replicas info
+
+        # get replicas info via ORM Collection
         release_name = self.instance_name
-        querynode_id_pod_pair = get_querynode_info(release_name)
-        log.info(querynode_id_pod_pair)
+        querynode_id_pod_pair = get_querynode_id_pod_pairs(
+            constants.CHAOS_NAMESPACE,
+            f"app.kubernetes.io/instance={release_name}, component=querynode"
+        )
+        log.info(f"querynode_id_pod_pair: {querynode_id_pod_pair}")
+
+        # use a checker's collection to get replica info
+        search_c_name = self.health_checkers[Op.search].c_name
+        col = Collection(name=search_c_name, using='default')
+        replicas_info = col.get_replicas()
+        log.info(f"replicas_info: {replicas_info}")
+
         group_list = []
         shard_leader_list = []
-        replicas_info, _ = self.health_checkers[Op.search].c_wrap.get_replicas()
         for g in replicas_info.groups:
             group_list.append(list(g.group_nodes))
             for shard in g.shards:
                 shard_leader_list.append(shard.shard_leader)
-        # keep only one group in healthy status, other groups will be unhealthy by injecting pod failure chaos,
-        # In the effected groups, each group has one pod is in pod failure status 
+
+        log.info(f"group_list: {group_list}")
+        log.info(f"shard_leader_list: {shard_leader_list}")
+
+        # select target pods based on parameters
         target_pod_list = []
         target_group = []
         group_list = sorted(group_list, key=lambda x: -len(x))
         if failed_group_scope == "one":
             target_group = random.sample(group_list, 1)
         if failed_group_scope == "except_one":
-            target_group = random.sample(group_list, len(group_list)-1)
+            target_group = random.sample(group_list, len(group_list) - 1)
         if failed_group_scope == "all":
             target_group = group_list[:]
+
         for g in target_group:
             target_nodes = []
             if failed_node_type == "shard_leader":
@@ -155,48 +158,60 @@ class TestChaos(TestChaosBase):
             for target_node in target_nodes:
                 pod = querynode_id_pod_pair[target_node]
                 target_pod_list.append(pod)
+
         log.info(f"target_pod_list: {target_pod_list}")
-        chaos_config = cc.gen_experiment_config(f"{str(Path(__file__).absolute().parent)}/chaos_objects/template/{chaos_type}-by-pod-list.yaml")
-        chaos_config['metadata']['name'] = f"test-multi-replicase-{int(time.time())}"
+
+        # prepare chaos config
+        chaos_config = cc.gen_experiment_config(
+            f"{str(Path(__file__).absolute().parent)}/chaos_objects/template/{chaos_type}-by-pod-list.yaml"
+        )
+        chaos_config['metadata']['name'] = f"test-multi-replicas-{int(time.time())}"
         meta_name = chaos_config.get('metadata', None).get('name', None)
         chaos_config['spec']['selector']['pods']['chaos-testing'] = target_pod_list
-        self._chaos_config = chaos_config  # cache the chaos config for tear down
-        
-        log.info(f"chaos_config: {chaos_config}")
-        # wait 20s
-        sleep(constants.WAIT_PER_OP * 2)
-        # replicas info
-        replicas_info, _ = self.health_checkers[Op.search].c_wrap.get_replicas()
-        log.info(f"replicas_info for search collection {self.health_checkers[Op.search].c_wrap.name}: {replicas_info}")
+        self._chaos_config = chaos_config
 
-        # assert statistic:all ops 100% succ
+        log.info(f"chaos_config: {chaos_config}")
+        sleep(constants.WAIT_PER_OP * 2)
+
+        # replicas info before chaos
+        replicas_info = col.get_replicas()
+        log.info(f"replicas_info for search collection {search_c_name}: {replicas_info}")
+
+        # 1st assert: all ops 100% succ before chaos
         log.info("******1st assert before chaos: ")
         assert_statistic(self.health_checkers)
-        # apply chaos object
+
+        # apply chaos
         chaos_res = CusResource(kind=chaos_config['kind'],
                                 group=constants.CHAOS_GROUP,
                                 version=constants.CHAOS_VERSION,
                                 namespace=constants.CHAOS_NAMESPACE)
-
         chaos_res.create(chaos_config)
         log.info("chaos injected")
         sleep(constants.WAIT_PER_OP * 2)
+
         # reset counting
         cc.reset_counting(self.health_checkers)
 
-        # wait 120s
+        # wait for chaos duration
         sleep(constants.CHAOS_DURATION)
         log.info(f'Alive threads: {threading.enumerate()}')
-        # node info
-        querynode_id_pod_pair = get_querynode_info(release_name)
-        log.info(querynode_id_pod_pair)
-        # replicas info
-        replicas_info, _ = self.health_checkers[Op.search].c_wrap.get_replicas()
-        log.info(f"replicas_info for search collection {self.health_checkers[Op.search].c_wrap.name}: {replicas_info}")
 
-        replicas_info, _ = self.health_checkers[Op.query].c_wrap.get_replicas()
-        log.info(f"replicas_info for query collection {self.health_checkers[Op.query].c_wrap.name}: {replicas_info}")
-        # assert statistic
+        # node info during chaos
+        querynode_id_pod_pair = get_querynode_id_pod_pairs(
+            constants.CHAOS_NAMESPACE,
+            f"app.kubernetes.io/instance={release_name}, component=querynode"
+        )
+        log.info(f"querynode_id_pod_pair during chaos: {querynode_id_pod_pair}")
+
+        # replicas info during chaos
+        try:
+            replicas_info = col.get_replicas()
+            log.info(f"replicas_info for search collection {search_c_name}: {replicas_info}")
+        except Exception as e:
+            log.warning(f"get_replicas failed during chaos: {e}")
+
+        # 2nd assert: check expectations based on failed_group_scope
         log.info("******2nd assert after chaos injected: ")
         expectations = {
             Op.search: constants.SUCC,
@@ -208,37 +223,41 @@ class TestChaos(TestChaosBase):
                 Op.query: constants.FAIL
             }
         assert_statistic(self.health_checkers, expectations=expectations)
+
         # delete chaos
         chaos_res.delete(meta_name)
         log.info("chaos deleted")
         sleep(2)
+
         # wait all pods ready
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label app.kubernetes.io/instance={release_name}")
-        ready_1 = wait_pods_ready(constants.CHAOS_NAMESPACE,f"app.kubernetes.io/instance={release_name}")
+        ready_1 = wait_pods_ready(constants.CHAOS_NAMESPACE, f"app.kubernetes.io/instance={release_name}")
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label release={release_name}")
         ready_2 = wait_pods_ready(constants.CHAOS_NAMESPACE, f"release={release_name}")
         if ready_1 and ready_2:
             log.info("all pods are ready")
-        # reconnect if needed
+
+        # wait for recovery
         sleep(constants.WAIT_PER_OP * 2)
-        # cc.reconnect(connections, alias='default')
-        # reset counting again
         cc.reset_counting(self.health_checkers)
-        # wait 50s (varies by feature)
         sleep(constants.WAIT_PER_OP * 5)
-        # node info
-        querynode_id_pod_pair = get_querynode_info(release_name)
-        log.info(querynode_id_pod_pair)
+
+        # node info after recovery
+        querynode_id_pod_pair = get_querynode_id_pod_pairs(
+            constants.CHAOS_NAMESPACE,
+            f"app.kubernetes.io/instance={release_name}, component=querynode"
+        )
+        log.info(f"querynode_id_pod_pair after recovery: {querynode_id_pod_pair}")
+
         sleep(30)
-        # replicas info
-        replicas_info, _ = self.health_checkers[Op.search].c_wrap.get_replicas()
-        log.info(f"replicas_info for collection {self.health_checkers[Op.search].c_wrap.name}: {replicas_info}")
-        replicas_info, _ = self.health_checkers[Op.query].c_wrap.get_replicas()
-        log.info(f"replicas_info for collection {self.health_checkers[Op.query].c_wrap.name}: {replicas_info}")         
-        # assert statistic: all ops success again
+
+        # replicas info after recovery
+        replicas_info = col.get_replicas()
+        log.info(f"replicas_info for collection {search_c_name}: {replicas_info}")
+
+        # 3rd assert: all ops success again after chaos deleted
         log.info("******3rd assert after chaos deleted: ")
         assert_statistic(self.health_checkers)
-        # assert all expectations
         assert_expectations()
 
         log.info("*********************Chaos Test Completed**********************")
