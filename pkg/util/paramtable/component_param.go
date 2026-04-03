@@ -3807,7 +3807,7 @@ If set to 0, time based eviction is disabled.`,
 	p.TieredLoadingTimeoutMs = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.loadingTimeoutMs",
 		Version:      "2.6.10",
-		DefaultValue: "0",
+		DefaultValue: "-1",
 		Doc:          "Loading timeout in milliseconds for cache slot loading. -1 means no timeout, 0 means immediate failure if resource cannot be reserved, >0 means a specific timeout.",
 		Export:       false,
 	}
