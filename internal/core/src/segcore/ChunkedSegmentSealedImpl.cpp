@@ -2575,7 +2575,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
         auto scalar_indexes = PinIndex(op_ctx, field_id);
         if (!scalar_indexes.empty()) {
             pin_scalar_index_ptr = std::move(scalar_indexes[0]);
-            if (HasRawData(field_id.get())) {
+            if (IndexHasRawData(field_id)) {
                 return ReverseDataFromIndex(
                     pin_scalar_index_ptr.get(), seg_offsets, count, field_meta);
             }
@@ -2591,9 +2591,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
 
     std::unique_ptr<DataArray> vector{nullptr};
     // Try index first: if vector index exists and has raw data, read from index
-    bool has_vector_index = get_bit(index_ready_bitset_, field_id) ||
-                            get_bit(binlog_index_bitset_, field_id);
-    if (has_vector_index && HasRawData(field_id.get())) {
+    if (IndexHasRawData(field_id)) {
         vector = get_vector(op_ctx, field_id, seg_offsets, count);
     } else {
         // Fallback to field data
@@ -2724,6 +2722,16 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
         }
     }
     return true;
+}
+
+bool
+ChunkedSegmentSealedImpl::IndexHasRawData(FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    auto it = index_has_raw_data_.find(field_id);
+    if (it == index_has_raw_data_.end()) {
+        return false;
+    }
+    return it->second;
 }
 
 DataType
