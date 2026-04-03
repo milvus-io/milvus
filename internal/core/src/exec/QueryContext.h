@@ -303,6 +303,16 @@ class QueryContext : public Context {
         return plan_options_;
     }
 
+    void
+    set_all_rows_visible(bool v) {
+        all_rows_visible_ = v;
+    }
+
+    bool
+    get_all_rows_visible() const {
+        return all_rows_visible_;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -331,6 +341,11 @@ class QueryContext : public Context {
     int32_t consistency_level_ = 0;
 
     query::PlanOptions plan_options_;
+
+    // Set by MvccNode when no filtering is needed (sealed, no filter,
+    // no deletes, no TTL). VectorSearchNode checks this to pass empty
+    // BitsetView to Knowhere (IDSelectorAll fast path).
+    bool all_rows_visible_{false};
 };
 
 // Represent the state of one thread of query execution.

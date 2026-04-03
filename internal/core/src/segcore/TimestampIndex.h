@@ -45,6 +45,11 @@ class TimestampIndex {
                       Timestamp expire_ts,
                       std::pair<int64_t, int64_t> active_range);
 
+    Timestamp
+    get_max_timestamp() const {
+        return max_timestamp_;
+    }
+
     size_t
     memory_size() const {
         return sizeof(*this) + lengths_.size() * sizeof(int64_t) +
