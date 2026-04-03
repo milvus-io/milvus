@@ -50,10 +50,17 @@ misc:
       - 'status-success=Code Checker MacOS 13'
       - 'status-success=Code Checker MacOS'
   
+  # CI-v2 checker conditions
+  - when_build_ut_cov_success: &WHEN_BUILD_UT_COV_SUCCESS
+      - 'status-success=ci-v2/build-ut-cov'
+  - when_e2e_amd_success: &WHEN_E2E_AMD_SUCCESS
+      - 'status-success=ci-v2/e2e-amd'
+
   # Branch configurations
   - branch: &BRANCHES
       - &MASTER_BRANCH base=master
       - &2X_BRANCH base~=^2(\.\d+){1,2}$
+      - &3X_BRANCH base=3.0
 
 # ==============================================================================
 # PULL REQUEST RULES
@@ -132,12 +139,36 @@ pull_request_rules:
         add:
           - ci-passed
 
+  - name: Test passed for code changed on 3.0 branch
+    conditions:
+      - *3X_BRANCH
+      - or: *WHEN_BUILD_UT_COV_SUCCESS
+      - or: *WHEN_E2E_AMD_SUCCESS
+      - or: *WHEN_GO_SDK_STATUS_SUCCESS
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
+    actions:
+      label:
+        add:
+          - ci-passed
+
   # Special cases for minimal testing requirements
   - name: Test passed for tests changed
     conditions:
-      - or: *BRANCHES
+      - or:
+        - *MASTER_BRANCH
+        - *2X_BRANCH
       - -files~=^(?!tests\/python_client).+
       - or: *WHEN_E2E_TEST_SUCCESS
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  - name: Test passed for tests changed on 3.0
+    conditions:
+      - *3X_BRANCH
+      - -files~=^(?!tests\/python_client).+
+      - or: *WHEN_E2E_AMD_SUCCESS
     actions:
       label:
         add:
@@ -154,8 +185,20 @@ pull_request_rules:
 
   - name: Test passed for non rust go or c++ code changed
     conditions:
-      - or: *BRANCHES
+      - or:
+        - *MASTER_BRANCH
+        - *2X_BRANCH
       - or: *WHEN_E2E_TEST_SUCCESS
+      - *no_source_code_files
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  - name: Test passed for non rust go or c++ code changed on 3.0
+    conditions:
+      - *3X_BRANCH
+      - or: *WHEN_E2E_AMD_SUCCESS
       - *no_source_code_files
     actions:
       label:
@@ -164,12 +207,25 @@ pull_request_rules:
 
   - name: Test passed for go unittest code changed-master
     conditions:
-      - or: *BRANCHES
+      - or:
+        - *MASTER_BRANCH
+        - *2X_BRANCH
       - *only_go_unittest_files
       - or: *WHEN_BUILD_SUCCESS
       - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
       - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  - name: Test passed for go unittest code changed on 3.0
+    conditions:
+      - *3X_BRANCH
+      - *only_go_unittest_files
+      - or: *WHEN_BUILD_UT_COV_SUCCESS
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
     actions:
       label:
         add:
@@ -198,13 +254,27 @@ pull_request_rules:
 
   - name: Test passed for skip e2e when source code changed
     conditions:
-      - or: *BRANCHES
+      - or:
+        - *MASTER_BRANCH
+        - *2X_BRANCH
       - or: *WHEN_BUILD_SUCCESS
       - title~=\[skip e2e\]
       - or: *WHEN_CPP_UNIT_TEST_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
+      - *source_code_files
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  - name: Test passed for skip e2e when source code changed on 3.0
+    conditions:
+      - *3X_BRANCH
+      - title~=\[skip e2e\]
+      - or: *WHEN_BUILD_UT_COV_SUCCESS
       - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       - *source_code_files
     actions:
@@ -219,7 +289,9 @@ pull_request_rules:
 
   - name: Remove ci-passed when E2E test not success for tests changed
     conditions:
-      - or: *BRANCHES
+      - or:
+        - *MASTER_BRANCH
+        - *2X_BRANCH
       - -files~=^(?!tests\/python_client).+
       - label!=manual-pass
       - label=ci-passed
@@ -227,6 +299,18 @@ pull_request_rules:
           or:
             - status-success=cpu-e2e
             - status-success=ci-v2/e2e-default
+    actions:
+      label:
+        remove:
+          - ci-passed
+
+  - name: Remove ci-passed when E2E test not success for tests changed on 3.0
+    conditions:
+      - *3X_BRANCH
+      - -files~=^(?!tests\/python_client).+
+      - label!=manual-pass
+      - label=ci-passed
+      - -status-success=ci-v2/e2e-amd
     actions:
       label:
         remove:
@@ -326,6 +410,38 @@ pull_request_rules:
         remove:
           - ci-passed
 
+  - name: Remove ci-passed when any CI fails on 3.0 branch
+    conditions:
+      - *3X_BRANCH
+      - label!=manual-pass
+      - *source_code_files
+      - or:
+        # build-ut-cov: remove if no success AND has failure
+        - and:
+            - -status-success = ci-v2/build-ut-cov
+            - status-failure = ci-v2/build-ut-cov
+        # e2e-amd: remove if no success AND has failure
+        - and:
+            - -status-success = ci-v2/e2e-amd
+            - status-failure = ci-v2/e2e-amd
+        # go-sdk: remove if no success AND has failure
+        - and:
+            - -status-success = ci-v2/go-sdk
+            - status-failure = ci-v2/go-sdk
+        # Code checker MacOS: remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = Code Checker MacOS 13
+                  - status-success = Code Checker MacOS
+            - or:
+                - status-failure = Code Checker MacOS 13
+                - status-failure = Code Checker MacOS
+    actions:
+      label:
+        remove:
+          - ci-passed
+
   # ==========================================================================
   # PR VALIDATION AND BLOCKING RULES
   # Ensure PRs meet project standards before merging
@@ -371,7 +487,9 @@ pull_request_rules:
 
   - name: Blocking PR if missing a related master PR or doesn't have kind/branch-feature label
     conditions:
-      - *2X_BRANCH
+      - or:
+        - *2X_BRANCH
+        - *3X_BRANCH
       - and:
           - -body~=pr\:\ \#[0-9]{1,6}(\s+|$)
           - -body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
@@ -387,7 +505,9 @@ pull_request_rules:
 
   - name: Dismiss block label if related pr be added into PR
     conditions:
-      - *2X_BRANCH
+      - or:
+        - *2X_BRANCH
+        - *3X_BRANCH
       - or:
           - body~=pr\:\ \#[0-9]{1,6}(\s+|$)
           - body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
