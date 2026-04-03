@@ -908,6 +908,8 @@ type mockBroker struct {
 
 	BroadcastAlteredCollectionFunc func(ctx context.Context, collectionID UniqueID) error
 
+	ShowResourceGroupsFunc func(ctx context.Context) ([]string, error)
+
 	GCConfirmFunc func(ctx context.Context, collectionID, partitionID UniqueID) bool
 }
 
@@ -927,6 +929,9 @@ func newValidMockBroker() *mockBroker {
 	}
 	broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
 		return nil
+	}
+	broker.ShowResourceGroupsFunc = func(ctx context.Context) ([]string, error) {
+		return []string{}, nil
 	}
 	return broker
 }
@@ -965,6 +970,13 @@ func (b mockBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, i
 
 func (b mockBroker) BroadcastAlteredCollection(ctx context.Context, collectionID UniqueID) error {
 	return b.BroadcastAlteredCollectionFunc(ctx, collectionID)
+}
+
+func (b mockBroker) ShowResourceGroups(ctx context.Context) ([]string, error) {
+	if b.ShowResourceGroupsFunc != nil {
+		return b.ShowResourceGroupsFunc(ctx)
+	}
+	return []string{}, nil
 }
 
 func (b mockBroker) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {
