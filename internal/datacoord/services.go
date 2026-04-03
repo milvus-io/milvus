@@ -2873,55 +2873,69 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 	return err
 }
 
+// validateAndExecuteImportAction handles the boilerplate for commit/abort import operations:
+// health check, get job, auto-commit guard, per-job keylock with TOCTOU re-validation, and action execution.
+func (s *Server) validateAndExecuteImportAction(
+	ctx context.Context,
+	jobID int64,
+	validateState func(job ImportJob) *commonpb.Status,
+	action func(ctx context.Context, job ImportJob) error,
+) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	job := s.importMeta.GetJob(ctx, jobID)
+	if job == nil {
+		return merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("job %d not found", jobID))), nil
+	}
+	if st := validateState(job); st != nil {
+		return st, nil
+	}
+	if job.GetAutoCommit() {
+		return merr.Status(merr.WrapErrImportFailed(
+			fmt.Sprintf("job %d is auto-commit, manual commit/abort not allowed", jobID))), nil
+	}
+
+	mu := s.getOrCreateImportJobMu(jobID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	job = s.importMeta.GetJob(ctx, jobID)
+	if job == nil {
+		return merr.Status(merr.WrapErrImportFailed("job not found after lock")), nil
+	}
+	if st := validateState(job); st != nil {
+		return st, nil
+	}
+
+	if err := action(ctx, job); err != nil {
+		return merr.Status(err), nil
+	}
+	return merr.Success(), nil
+}
+
 // CommitImport commits a 2PC import job so that the imported data becomes visible.
 // It transitions the job from Uncommitted → Committing by broadcasting a CommitImport WAL message.
 // The call is idempotent: if the job is already Committing or Completed it returns success.
 func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("jobID", req.GetJobId()))
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	jobID := req.GetJobId()
-	job := s.importMeta.GetJob(ctx, jobID)
-	if job == nil {
-		return merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("job %d not found", jobID))), nil
-	}
-	state := job.GetState()
-	// Idempotent: already committing or completed is fine.
-	if state == internalpb.ImportJobState_Committing || state == internalpb.ImportJobState_Completed {
-		return merr.Success(), nil
-	}
-	if state != internalpb.ImportJobState_Uncommitted {
-		return merr.Status(merr.WrapErrImportFailed(
-			fmt.Sprintf("job %d is in state %s, expected Uncommitted", jobID, state))), nil
-	}
-
-	// Acquire per-job mutex to serialize concurrent commit/abort.
-	mu := s.getOrCreateImportJobMu(jobID)
-	mu.Lock()
-	defer mu.Unlock()
-
-	// Re-check state after acquiring mutex (another goroutine may have changed it).
-	job = s.importMeta.GetJob(ctx, jobID)
-	if job == nil {
-		return merr.Status(merr.WrapErrImportFailed("job not found after lock")), nil
-	}
-	switch job.GetState() {
-	case internalpb.ImportJobState_Committing, internalpb.ImportJobState_Completed:
-		return merr.Success(), nil
-	case internalpb.ImportJobState_Uncommitted:
-		// proceed
-	default:
-		return merr.Status(merr.WrapErrImportFailed(
-			fmt.Sprintf("job %d state changed to %s before broadcast", jobID, job.GetState()))), nil
-	}
-
-	log.Info("committing import job via WAL broadcast")
-	if err := s.broadcastCommitImportMessage(ctx, job); err != nil {
-		log.Warn("failed to broadcast commit import message", zap.Error(err))
-		return merr.Status(err), nil
-	}
-	return merr.Success(), nil
+	return s.validateAndExecuteImportAction(ctx, req.GetJobId(),
+		func(job ImportJob) *commonpb.Status {
+			switch job.GetState() {
+			case internalpb.ImportJobState_Committing, internalpb.ImportJobState_Completed:
+				return merr.Success()
+			case internalpb.ImportJobState_Uncommitted:
+				return nil // proceed
+			default:
+				return merr.Status(merr.WrapErrImportFailed(
+					fmt.Sprintf("job %d is in state %s, expected Uncommitted", req.GetJobId(), job.GetState())))
+			}
+		},
+		func(ctx context.Context, job ImportJob) error {
+			log.Info("committing import job via WAL broadcast")
+			return s.broadcastCommitImportMessage(ctx, job)
+		},
+	)
 }
 
 // AbortImport aborts a 2PC import job that has not yet been committed.
@@ -2929,45 +2943,22 @@ func (s *Server) CommitImport(ctx context.Context, req *datapb.CommitImportReque
 // Returns an error if the job is already committed or committing.
 func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("jobID", req.GetJobId()))
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	jobID := req.GetJobId()
-	job := s.importMeta.GetJob(ctx, jobID)
-	if job == nil {
-		return merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("job %d not found", jobID))), nil
-	}
-	state := job.GetState()
-	if state == internalpb.ImportJobState_Failed ||
-		state == internalpb.ImportJobState_Committing ||
-		state == internalpb.ImportJobState_Completed {
-		return merr.Status(merr.WrapErrImportFailed(
-			fmt.Sprintf("job %d is in terminal/committed state %s, abort not allowed", jobID, state))), nil
-	}
-
-	// Acquire per-job mutex to serialize concurrent commit/abort.
-	mu := s.getOrCreateImportJobMu(jobID)
-	mu.Lock()
-	defer mu.Unlock()
-
-	// Re-check state after acquiring mutex.
-	job = s.importMeta.GetJob(ctx, jobID)
-	if job == nil {
-		return merr.Status(merr.WrapErrImportFailed("job not found after lock")), nil
-	}
-	if job.GetState() == internalpb.ImportJobState_Failed ||
-		job.GetState() == internalpb.ImportJobState_Committing ||
-		job.GetState() == internalpb.ImportJobState_Completed {
-		return merr.Status(merr.WrapErrImportFailed(
-			fmt.Sprintf("job %d is in terminal/committed state %s, abort not allowed", jobID, job.GetState()))), nil
-	}
-
-	log.Info("aborting import job via WAL broadcast")
-	if err := s.broadcastRollbackImportMessage(ctx, job); err != nil {
-		log.Warn("failed to broadcast rollback import message", zap.Error(err))
-		return merr.Status(err), nil
-	}
-	return merr.Success(), nil
+	return s.validateAndExecuteImportAction(ctx, req.GetJobId(),
+		func(job ImportJob) *commonpb.Status {
+			state := job.GetState()
+			if state == internalpb.ImportJobState_Failed ||
+				state == internalpb.ImportJobState_Committing ||
+				state == internalpb.ImportJobState_Completed {
+				return merr.Status(merr.WrapErrImportFailed(
+					fmt.Sprintf("job %d is in terminal/committed state %s, abort not allowed", req.GetJobId(), state)))
+			}
+			return nil // proceed
+		},
+		func(ctx context.Context, job ImportJob) error {
+			log.Info("aborting import job via WAL broadcast")
+			return s.broadcastRollbackImportMessage(ctx, job)
+		},
+	)
 }
 
 // HandleCommitVchannel records that a vchannel has processed the commit fence for a 2PC import job.

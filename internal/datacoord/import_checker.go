@@ -277,7 +277,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 
 	if totalRows == 0 {
 		if job.GetAutoCommit() {
-			// backward-compatible: auto-commit jobs skip Uncommitted directly to Completed
+			// auto-commit: no data to import, skip Uncommitted directly to Completed
 			log.Info("no data to import, auto_commit=true, transitioning directly to Completed")
 			updateJobState(internalpb.ImportJobState_Completed)
 		} else {
@@ -470,9 +470,7 @@ func (c *importChecker) checkUncommittedJob(job ImportJob) {
 	}
 	// auto_commit=true: trigger commit by broadcasting the WAL message.
 	if c.commitImportFn == nil {
-		log.Error("commitImportFn is nil but auto_commit=true; job will stall in Uncommitted state",
-			zap.Int64("jobID", job.GetJobID()))
-		return
+		panic("commitImportFn is nil but auto_commit=true; this is a programming error")
 	}
 	if err := c.commitImportFn(c.ctx, job); err != nil {
 		log.Warn("auto-commit import failed", zap.Error(err))

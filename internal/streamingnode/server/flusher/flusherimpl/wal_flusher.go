@@ -309,7 +309,8 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 			Vchannel: vchannel,
 		})
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			return errors.Wrap(err, "HandleCommitVchannel RPC failed")
+			impl.logger.Panic("HandleCommitVchannel RPC failed, panicking to retry from WAL",
+				zap.Int64("jobID", jobID), zap.String("vchannel", vchannel), zap.Error(err))
 		}
 		impl.logger.Info("CommitImportMessage handled: vchannel committed",
 			zap.String("vchannel", vchannel), zap.Int64("jobID", jobID))

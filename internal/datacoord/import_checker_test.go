@@ -838,15 +838,14 @@ func (s *ImportCheckerSuite) TestCheckUncommittedJob_AutoCommitFalse() {
 }
 
 func (s *ImportCheckerSuite) TestCheckUncommittedJob_NilFn_AutoCommitTrue() {
-	// Ensure no panic when commitImportFn is nil (e.g. in unit tests that don't inject it).
+	// commitImportFn=nil with auto_commit=true is a programming error and should panic.
 	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
 		job.(*importJob).ImportJob.State = internalpb.ImportJobState_Uncommitted
 		job.(*importJob).ImportJob.AutoCommit = true
 	})
 	s.checker.commitImportFn = nil
 
-	// Should not panic; just log a warning.
-	s.NotPanics(func() {
+	s.Panics(func() {
 		s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	})
 }
