@@ -19,13 +19,19 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	imocks "github.com/milvus-io/milvus/internal/mocks"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -34,6 +40,9 @@ import (
 
 func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	core := initStreamingSystemAndCore(t)
+	core.broker.(*mockBroker).ShowResourceGroupsFunc = func(ctx context.Context) ([]string, error) {
+		return []string{"rg1", "rg2"}, nil
+	}
 
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
@@ -158,6 +167,224 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 		Properties:     []*commonpb.KeyValuePair{{Key: common.EnableDynamicSchemaKey, Value: "true"}, {Key: common.CollectionReplicaNumber, Value: "1"}},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+}
+
+func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigRPCError(t *testing.T) {
+	ctx := context.Background()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
+
+	mixc := imocks.NewMixCoord(t)
+	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
+
+	c := newTestCore(
+		withMeta(meta),
+		withMixCoord(mixc),
+		withValidProxyManager(),
+		withBroker(&mockBroker{}),
+	)
+	cb := &DDLCallback{Core: c}
+
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
+					ReplicaNumber:  1,
+					ResourceGroups: []string{"rg1"},
+				},
+			},
+		}).
+		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
+		MustBuildBroadcast()
+	msg := message.MustAsBroadcastAlterCollectionMessageV2(raw)
+
+	err := cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+		Message: msg,
+		Results: map[string]*message.AppendResult{},
+	})
+	require.Error(t, err)
+}
+
+func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigNonRGNotFoundError(t *testing.T) {
+	ctx := context.Background()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
+
+	mixc := imocks.NewMixCoord(t)
+	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(merr.Status(errors.New("mock error")), nil)
+
+	c := newTestCore(
+		withMeta(meta),
+		withMixCoord(mixc),
+		withValidProxyManager(),
+		withBroker(&mockBroker{}),
+	)
+	cb := &DDLCallback{Core: c}
+
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
+					ReplicaNumber:  1,
+					ResourceGroups: []string{"rg1"},
+				},
+			},
+		}).
+		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
+		MustBuildBroadcast()
+	msg := message.MustAsBroadcastAlterCollectionMessageV2(raw)
+
+	err := cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+		Message: msg,
+		Results: map[string]*message.AppendResult{},
+	})
+	require.Error(t, err)
+	require.False(t, errors.Is(err, merr.ErrResourceGroupNotFound))
+}
+
+func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFound(t *testing.T) {
+	ctx := context.Background()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
+
+	mixc := imocks.NewMixCoord(t)
+	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(
+		merr.Status(merr.WrapErrResourceGroupNotFound("rg_not_exist")),
+		nil,
+	)
+
+	c := newTestCore(
+		withMeta(meta),
+		withMixCoord(mixc),
+		withValidProxyManager(),
+		withBroker(&mockBroker{}),
+	)
+	cb := &DDLCallback{Core: c}
+
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
+					ReplicaNumber:  1,
+					ResourceGroups: []string{"rg_not_exist"},
+				},
+			},
+		}).
+		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
+		MustBuildBroadcast()
+	msg := message.MustAsBroadcastAlterCollectionMessageV2(raw)
+
+	err := cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+		Message: msg,
+		Results: map[string]*message.AppendResult{},
+	})
+	require.NoError(t, err)
+}
+
+func TestCore_getAlterLoadConfigOfAlterCollection(t *testing.T) {
+	core := &Core{}
+
+	t.Run("no changes", func(t *testing.T) {
+		cfg := core.getAlterLoadConfigOfAlterCollection(
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+		)
+		require.Nil(t, cfg)
+	})
+
+	t.Run("replica changed", func(t *testing.T) {
+		cfg := core.getAlterLoadConfigOfAlterCollection(
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "2"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+		)
+		require.NotNil(t, cfg)
+		require.Equal(t, int32(2), cfg.ReplicaNumber)
+		require.Equal(t, []string{"rg1"}, cfg.ResourceGroups)
+	})
+
+	t.Run("rg changed", func(t *testing.T) {
+		cfg := core.getAlterLoadConfigOfAlterCollection(
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg1"},
+			},
+			[]*commonpb.KeyValuePair{
+				{Key: common.CollectionReplicaNumber, Value: "1"},
+				{Key: common.CollectionResourceGroups, Value: "rg2"},
+			},
+		)
+		require.NotNil(t, cfg)
+		require.Equal(t, int32(1), cfg.ReplicaNumber)
+		require.Equal(t, []string{"rg2"}, cfg.ResourceGroups)
+	})
+}
+
+func TestDDLCallbacksAlterCollectionV2AckCallback_BroadcastAlteredCollectionError(t *testing.T) {
+	ctx := context.Background()
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
+
+	mixc := imocks.NewMixCoord(t)
+	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(merr.Success(), nil)
+
+	c := newTestCore(
+		withMeta(meta),
+		withMixCoord(mixc),
+		withValidProxyManager(),
+		withBroker(&mockBroker{
+			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
+				return errors.New("broadcast error")
+			},
+		}),
+	)
+	cb := &DDLCallback{Core: c}
+
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
+					ReplicaNumber:  1,
+					ResourceGroups: []string{"rg1"},
+				},
+			},
+		}).
+		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
+		MustBuildBroadcast()
+	msg := message.MustAsBroadcastAlterCollectionMessageV2(raw)
+
+	err := cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+		Message: msg,
+		Results: map[string]*message.AppendResult{},
+	})
+	require.Error(t, err)
 }
 
 func TestDDLCallbacksAlterCollectionPropertiesForDynamicField(t *testing.T) {

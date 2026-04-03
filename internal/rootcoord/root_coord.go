@@ -77,6 +77,42 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// Helper function to validate resource groups
+func (c *Core) validateResourceGroups(ctx context.Context, properties []*commonpb.KeyValuePair, level string) error {
+	var rgs []string
+	var err error
+
+	if level == "database" {
+		rgs, err = common.DatabaseLevelResourceGroups(properties)
+	} else if level == "collection" {
+		rgs, err = common.CollectionLevelResourceGroups(properties)
+	} else {
+		return fmt.Errorf("invalid level %s for resource group validation", level)
+	}
+
+	if err != nil || len(rgs) == 0 {
+		// If the property is not found or empty, it's valid (no changes or removed)
+		return nil
+	}
+
+	resp, err := c.broker.ShowResourceGroups(ctx)
+	if err != nil {
+		return err
+	}
+
+	existingRGs := make(map[string]bool)
+	for _, rg := range resp {
+		existingRGs[rg] = true
+	}
+
+	for _, rg := range rgs {
+		if !existingRGs[rg] {
+			return merr.WrapErrResourceGroupNotFound(rg)
+		}
+	}
+	return nil
+}
+
 // UniqueID is an alias of typeutil.UniqueID.
 type UniqueID = typeutil.UniqueID
 
@@ -1353,6 +1389,12 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	)
 	log.Info("received request to alter collection")
 
+	if err := c.validateResourceGroups(ctx, in.GetProperties(), "collection"); err != nil {
+		log.Warn("failed to validate resource groups", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
 	if err := c.broadcastAlterCollectionForAlterCollection(ctx, in); err != nil {
 		if errors.Is(err, errIgnoredAlterCollection) {
 			log.Info("alter collection make no changes, ignore it")
@@ -1535,6 +1577,12 @@ func (c *Core) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseR
 		zap.Any("props", in.Properties),
 		zap.Strings("deleteKeys", in.DeleteKeys))
 	log.Info("received request to alter database")
+
+	if err := c.validateResourceGroups(ctx, in.GetProperties(), "database"); err != nil {
+		log.Warn("failed to validate resource groups", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
 
 	if err := c.broadcastAlterDatabase(ctx, in); err != nil {
 		if errors.Is(err, errIgnoredAlterDatabase) {
