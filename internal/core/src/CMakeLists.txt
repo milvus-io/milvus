@@ -108,6 +108,7 @@ set(LINK_TARGETS
     milvus-storage
     milvus-common
     bsoncxx
+    atomic
     ${OpenMP_CXX_FLAGS}
     ${CONAN_LIBS}
     )
