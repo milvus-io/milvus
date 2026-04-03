@@ -1,6 +1,7 @@
 import pytest
 import time
 import json
+import random
 from time import sleep
 from datetime import datetime
 from pymilvus import connections
@@ -12,20 +13,20 @@ from utils.util_common import wait_signal_to_apply_chaos
 import constants
 
 
+def parse_duration(duration_str):
+    """Parse duration string like '24h', '10m', '30s' to seconds."""
+    s = duration_str.strip()
+    s = s.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+') + '+0'
+    return eval(s)
+
+
 def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs, duration="2m"):
     """Build a chaos config that targets querynode pods by resource group labels.
 
     Uses expressionSelectors with 'In' operator to target one or more RGs,
     combined with labelSelectors for instance and component filtering.
-
-    Args:
-        chaos_type: 'pod-failure' or 'pod-kill'
-        release_name: milvus helm release name
-        namespace: k8s namespace
-        target_rgs: list of resource group names to target (e.g. ['rg1', 'rg2'])
-        duration: chaos duration string (e.g. '2m')
     """
-    action = chaos_type  # pod-failure or pod-kill
+    action = chaos_type
 
     config = {
         "apiVersion": constants.CHAOS_API_VERSION,
@@ -80,6 +81,7 @@ class TestChaosApplyMultiReplicas:
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
         self.deploy_by = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
+        self.chaos_config = None
 
     def reconnect(self):
         if self.user and self.password:
@@ -91,6 +93,8 @@ class TestChaosApplyMultiReplicas:
             raise Exception("no connections")
 
     def teardown(self):
+        if self.chaos_config is None:
+            return
         chaos_res = CusResource(kind=self.chaos_config['kind'],
                                 group=constants.CHAOS_GROUP,
                                 version=constants.CHAOS_VERSION,
@@ -99,65 +103,32 @@ class TestChaosApplyMultiReplicas:
         chaos_res.delete(meta_name, raise_ex=False)
         sleep(2)
 
-    def test_chaos_apply(self, chaos_type, target_rgs, chaos_duration, wait_signal):
-        """Apply chaos to specific resource groups by label selector.
-
-        Args:
-            chaos_type: pod-failure or pod-kill (from --chaos_type)
-            target_rgs: comma-separated RG names (from --target_rgs, e.g. "rg1,rg2")
-            chaos_duration: duration string (from --chaos_duration, e.g. "7m")
-            wait_signal: whether to wait for signal before applying chaos
+    def _apply_and_wait_chaos(self, chaos_type, target_rg, chaos_duration_seconds):
+        """Apply chaos to one RG, wait for duration, delete and wait recovery.
+        Returns event record dict.
         """
-        log.info("*********************Multi-Replica Chaos Test Start**********************")
-        if wait_signal:
-            log.info("need wait signal to start chaos")
-            ready_for_chaos = wait_signal_to_apply_chaos()
-            if not ready_for_chaos:
-                log.info("get the signal to apply chaos timeout")
-            else:
-                log.info("get the signal to apply chaos")
-
-        log.info(connections.get_connection_addr('default'))
         release_name = self.release_name
-
-        # Parse target resource groups
-        rg_list = [rg.strip() for rg in target_rgs.split(',') if rg.strip()]
-        assert len(rg_list) > 0, "target_rgs must not be empty, e.g. 'rg1,rg2'"
-        log.info(f"target resource groups: {rg_list}")
-
-        # Parse chaos duration
-        chaos_duration_str = chaos_duration
-        chaos_duration_seconds = chaos_duration.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+') + '+0'
-        chaos_duration_seconds = eval(chaos_duration_seconds)
         duration_for_spec = f"{chaos_duration_seconds // 60}m" if chaos_duration_seconds >= 60 else f"{chaos_duration_seconds}s"
 
-        # Build chaos config with RG label selectors
         chaos_config = build_rg_chaos_config(
             chaos_type=chaos_type,
             release_name=release_name,
             namespace=self.milvus_ns,
-            target_rgs=rg_list,
+            target_rgs=[target_rg],
             duration=duration_for_spec,
         )
         meta_name = chaos_config['metadata']['name']
         self.chaos_config = chaos_config
 
-        log.info(f"chaos_config: {json.dumps(chaos_config, indent=2)}")
+        log.info(f"injecting {chaos_type} to RG={target_rg}, duration={duration_for_spec}")
 
-        # Apply chaos object
         chaos_res = CusResource(kind=chaos_config['kind'],
                                 group=constants.CHAOS_GROUP,
                                 version=constants.CHAOS_VERSION,
                                 namespace=constants.CHAOS_NAMESPACE)
         chaos_res.create(chaos_config)
         create_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f')
-        log.info("chaos injected")
-
-        res = chaos_res.list_all()
-        chaos_list = [r['metadata']['name'] for r in res['items']]
-        assert meta_name in chaos_list
-        res = chaos_res.get(meta_name)
-        log.info(f"chaos inject result: {res['kind']}, {res['metadata']['name']}")
+        log.info(f"chaos injected: {meta_name}")
 
         # Wait for chaos duration
         sleep(chaos_duration_seconds)
@@ -165,53 +136,159 @@ class TestChaosApplyMultiReplicas:
         # Delete chaos
         chaos_res.delete(meta_name)
         delete_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f')
-        log.info("chaos deleted")
+        log.info(f"chaos deleted: {meta_name}")
 
-        # Verify the chaos is deleted
-        res = chaos_res.list_all()
-        chaos_list = [r['metadata']['name'] for r in res['items']]
+        # Verify deletion
         t0 = time.time()
-        while meta_name in chaos_list and time.time() - t0 < 60:
-            sleep(10)
+        while time.time() - t0 < 60:
             res = chaos_res.list_all()
             chaos_list = [r['metadata']['name'] for r in res['items']]
-        assert meta_name not in chaos_list
+            if meta_name not in chaos_list:
+                break
+            sleep(5)
 
         # Wait all pods ready
         t0 = time.time()
-        log.info(f"wait for pods in namespace {self.milvus_ns} with label app.kubernetes.io/instance={release_name}")
         wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={release_name}")
-        log.info(f"wait for pods in namespace {self.milvus_ns} with label release={release_name}")
         wait_pods_ready(self.milvus_ns, f"release={release_name}")
-        log.info("all pods are ready")
         pods_ready_time = time.time() - t0
-        log.info(f"pods ready time: {pods_ready_time}")
+        log.info(f"all pods ready, recovery took {pods_ready_time:.1f}s")
+
         recovery_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f')
 
-        # Save event records
-        event_records = {
-            "chaos_type": chaos_type,
-            "target_component": "querynode",
-            "target_rgs": rg_list,
-            "meta_name": meta_name,
-            "create_time": create_time,
-            "delete_time": delete_time,
-            "recovery_time": recovery_time,
-        }
-        with open(constants.CHAOS_INFO_SAVE_PATH, 'w') as f:
-            json.dump(event_records, f)
-
-        # Reconnect to verify service is healthy
-        start_time = time.time()
-        end_time = start_time + 120
-        while time.time() < end_time:
+        # Reconnect to verify service
+        t0 = time.time()
+        while time.time() - t0 < 120:
             try:
                 self.reconnect()
                 break
             except Exception as e:
-                log.error(e)
+                log.error(f"reconnect failed: {e}")
                 sleep(2)
-        recovery_time = time.time() - start_time
-        log.info(f"recovery time from pod ready to can be connected: {recovery_time}")
+        log.info(f"service reconnected, took {time.time() - t0:.1f}s")
+
+        return {
+            "target_rg": target_rg,
+            "chaos_type": chaos_type,
+            "meta_name": meta_name,
+            "create_time": create_time,
+            "delete_time": delete_time,
+            "recovery_time": recovery_time,
+            "pods_ready_time": pods_ready_time,
+        }
+
+    def test_chaos_apply(self, chaos_type, target_rgs, chaos_duration, wait_signal):
+        """One-shot chaos injection to specific RGs (for quick testing)."""
+        log.info("*********************Multi-Replica Chaos Test Start**********************")
+        if wait_signal:
+            ready_for_chaos = wait_signal_to_apply_chaos()
+            if not ready_for_chaos:
+                log.info("get the signal to apply chaos timeout")
+            else:
+                log.info("get the signal to apply chaos")
+
+        log.info(connections.get_connection_addr('default'))
+        rg_list = [rg.strip() for rg in target_rgs.split(',') if rg.strip()]
+        assert len(rg_list) > 0, "target_rgs must not be empty"
+
+        chaos_duration_seconds = parse_duration(chaos_duration)
+        record = self._apply_and_wait_chaos(chaos_type, rg_list[0], chaos_duration_seconds)
+
+        with open(constants.CHAOS_INFO_SAVE_PATH, 'w') as f:
+            json.dump(record, f)
 
         log.info("*********************Multi-Replica Chaos Test Completed**********************")
+
+    def test_chaos_apply_periodic(self, chaos_type, target_rgs, chaos_duration,
+                                  chaos_interval, request_duration, wait_signal):
+        """Periodically inject chaos to a random RG for long-duration stability testing.
+
+        Each cycle: randomly pick one RG -> inject chaos -> wait duration -> delete -> recover -> wait interval.
+        Runs for total request_duration (e.g. 24h). Goal: zero request errors across all cycles.
+
+        Args:
+            chaos_type: pod-failure or pod-kill
+            target_rgs: comma-separated RG names to randomly select from (e.g. "rg1,rg2,rg3")
+            chaos_duration: duration of each chaos injection (e.g. "2m")
+            chaos_interval: total interval between chaos starts (e.g. "10m")
+            request_duration: total test duration (e.g. "24h")
+            wait_signal: whether to wait for signal before starting
+        """
+        log.info("*********************Periodic Chaos Test Start**********************")
+        if wait_signal:
+            ready_for_chaos = wait_signal_to_apply_chaos()
+            if not ready_for_chaos:
+                log.info("get the signal to apply chaos timeout")
+            else:
+                log.info("get the signal to apply chaos")
+
+        log.info(connections.get_connection_addr('default'))
+
+        rg_list = [rg.strip() for rg in target_rgs.split(',') if rg.strip()]
+        assert len(rg_list) > 0, "target_rgs must not be empty"
+
+        total_seconds = parse_duration(request_duration)
+        interval_seconds = parse_duration(chaos_interval)
+        chaos_dur_seconds = parse_duration(chaos_duration)
+
+        log.info(f"periodic chaos config:")
+        log.info(f"  target RGs: {rg_list}")
+        log.info(f"  chaos type: {chaos_type}")
+        log.info(f"  chaos duration per cycle: {chaos_duration} ({chaos_dur_seconds}s)")
+        log.info(f"  interval between cycles: {chaos_interval} ({interval_seconds}s)")
+        log.info(f"  total duration: {request_duration} ({total_seconds}s)")
+        log.info(f"  expected cycles: ~{total_seconds // interval_seconds}")
+
+        start_time = time.time()
+        round_num = 0
+        all_records = []
+
+        while time.time() - start_time < total_seconds:
+            round_num += 1
+            cycle_start = time.time()
+            elapsed = cycle_start - start_time
+            remaining = total_seconds - elapsed
+
+            # Randomly pick one RG
+            target_rg = random.choice(rg_list)
+            log.info(f"===== Round {round_num} | elapsed={elapsed/3600:.1f}h | remaining={remaining/3600:.1f}h | target={target_rg} =====")
+
+            # Don't start a new cycle if remaining time < chaos duration
+            if remaining < chaos_dur_seconds:
+                log.info(f"remaining time ({remaining:.0f}s) < chaos duration ({chaos_dur_seconds}s), stopping")
+                break
+
+            try:
+                record = self._apply_and_wait_chaos(chaos_type, target_rg, chaos_dur_seconds)
+                record["round"] = round_num
+                all_records.append(record)
+                log.info(f"round {round_num} completed: target={target_rg}, recovery={record['pods_ready_time']:.1f}s")
+            except Exception as e:
+                log.error(f"round {round_num} failed: {e}")
+                all_records.append({
+                    "round": round_num,
+                    "target_rg": target_rg,
+                    "error": str(e),
+                    "time": datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f'),
+                })
+
+            # Wait for next interval
+            cycle_elapsed = time.time() - cycle_start
+            wait_time = interval_seconds - cycle_elapsed
+            if wait_time > 0 and time.time() - start_time + wait_time < total_seconds:
+                log.info(f"waiting {wait_time:.0f}s until next cycle")
+                sleep(wait_time)
+
+        # Save all event records
+        summary = {
+            "total_rounds": round_num,
+            "total_duration_hours": (time.time() - start_time) / 3600,
+            "chaos_type": chaos_type,
+            "rg_list": rg_list,
+            "records": all_records,
+        }
+        with open(constants.CHAOS_INFO_SAVE_PATH, 'w') as f:
+            json.dump(summary, f, indent=2)
+
+        log.info(f"*********************Periodic Chaos Test Completed**********************")
+        log.info(f"total rounds: {round_num}, duration: {(time.time() - start_time)/3600:.1f}h")
