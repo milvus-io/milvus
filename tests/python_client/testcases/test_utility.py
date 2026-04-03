@@ -6599,3 +6599,20 @@ class TestUtilityPositiveRbacPrivilegeGroup(TestcaseBase):
             self.utility_wrap.drop_privilege_group("privilege_group_1")
         else:
             self.utility_wrap.drop_privilege_group("privilege_group_1", check_task=CheckTasks.check_permission_deny)
+
+
+class TestMilvusSys:
+
+    def test_query_nodes_include_streamingnode(self, monkeypatch):
+        nodes = [
+            {"identifier": 1, "infos": {"type": "querynode", "has_error": False}},
+            {"identifier": 2, "infos": {"type": "streamingnode", "has_error": False}},
+            {"identifier": 3, "infos": {"type": "proxy", "has_error": False}},
+        ]
+
+        monkeypatch.setattr(MilvusSys, "nodes", property(lambda self: nodes))
+
+        ms = MilvusSys.__new__(MilvusSys)
+        query_nodes = ms.query_nodes
+
+        assert [node["identifier"] for node in query_nodes] == [1, 2]

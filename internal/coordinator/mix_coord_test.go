@@ -27,22 +27,151 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/tidwall/gjson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+func TestMixCoord_GetMetricsIncludesAllProxyNodes(t *testing.T) {
+	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+	assert.NoError(t, err)
+
+	rootCoordResp := &milvuspb.GetMetricsResponse{
+		Status: merr.Success(),
+		Response: mustMarshalTopology(t, metricsinfo.RootCoordTopology{
+			Self: metricsinfo.RootCoordInfos{
+				BaseComponentInfos: metricsinfo.BaseComponentInfos{
+					Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, 1),
+					Type: typeutil.RootCoordRole,
+					ID:   1,
+				},
+			},
+		}),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, 1),
+	}
+	dataCoordResp := &milvuspb.GetMetricsResponse{
+		Status: merr.Success(),
+		Response: mustMarshalTopology(t, metricsinfo.DataCoordTopology{
+			Cluster: metricsinfo.DataClusterTopology{
+				Self: metricsinfo.DataCoordInfos{
+					BaseComponentInfos: metricsinfo.BaseComponentInfos{
+						Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, 2),
+						Type: typeutil.DataCoordRole,
+						ID:   2,
+					},
+				},
+				ConnectedDataNodes: nil,
+			},
+		}),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, 2),
+	}
+	queryCoordResp := &milvuspb.GetMetricsResponse{
+		Status: merr.Success(),
+		Response: mustMarshalTopology(t, metricsinfo.QueryCoordTopology{
+			Cluster: metricsinfo.QueryClusterTopology{
+				Self: metricsinfo.QueryCoordInfos{
+					BaseComponentInfos: metricsinfo.BaseComponentInfos{
+						Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, 3),
+						Type: typeutil.QueryCoordRole,
+						ID:   3,
+					},
+				},
+				ConnectedNodes: nil,
+			},
+		}),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, 3),
+	}
+
+	coord := &mixCoordImpl{
+		rootcoordServer:  &rootcoord.Core{},
+		datacoordServer:  &datacoord.Server{},
+		queryCoordServer: &querycoordv2.Server{},
+		proxyClientManager: func() proxyutil.ProxyClientManagerInterface {
+			manager := proxyutil.NewMockProxyClientManager(t)
+			manager.EXPECT().GetProxyMetrics(mock.Anything).Return([]*milvuspb.GetMetricsResponse{
+				{
+					Status: merr.Success(),
+					Response: mustMarshalComponentInfos(t, &metricsinfo.ProxyInfos{
+						BaseComponentInfos: metricsinfo.BaseComponentInfos{
+							Name: metricsinfo.ConstructComponentName(typeutil.ProxyRole, 11),
+							Type: typeutil.ProxyRole,
+							ID:   11,
+						},
+					}),
+				},
+				{
+					Status: merr.Success(),
+					Response: mustMarshalComponentInfos(t, &metricsinfo.ProxyInfos{
+						BaseComponentInfos: metricsinfo.BaseComponentInfos{
+							Name: metricsinfo.ConstructComponentName(typeutil.ProxyRole, 12),
+							Type: typeutil.ProxyRole,
+							ID:   12,
+						},
+					}),
+				},
+			}, nil).Once()
+			return manager
+		}(),
+	}
+
+	mockey.PatchConvey("mixcoord system_info contains all proxy nodes", t, func() {
+		mockey.Mock((*rootcoord.Core).GetMetrics).Return(rootCoordResp, nil).Build()
+		mockey.Mock((*datacoord.Server).GetMetrics).Return(dataCoordResp, nil).Build()
+		mockey.Mock((*querycoordv2.Server).GetMetrics).Return(queryCoordResp, nil).Build()
+
+		resp, err := coord.GetMetrics(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+		names := collectNodeNames(resp.GetResponse())
+		assert.Contains(t, names, metricsinfo.ConstructComponentName(typeutil.ProxyRole, 11))
+		assert.Contains(t, names, metricsinfo.ConstructComponentName(typeutil.ProxyRole, 12))
+	})
+}
+
+func mustMarshalTopology(t *testing.T, topology metricsinfo.Topology) string {
+	t.Helper()
+	resp, err := metricsinfo.MarshalTopology(topology)
+	assert.NoError(t, err)
+	return resp
+}
+
+func mustMarshalComponentInfos(t *testing.T, infos metricsinfo.ComponentInfos) string {
+	t.Helper()
+	resp, err := metricsinfo.MarshalComponentInfos(infos)
+	assert.NoError(t, err)
+	return resp
+}
+
+func collectNodeNames(response string) []string {
+	results := make([]string, 0)
+	gjson.Get(response, "nodes_info").ForEach(func(_, value gjson.Result) bool {
+		name := value.Get("infos.name").String()
+		if name != "" {
+			results = append(results, name)
+		}
+		return true
+	})
+	return results
+}
 
 func TestMixcoord_EnableActiveStandby(t *testing.T) {
 	randVal := rand.Int()

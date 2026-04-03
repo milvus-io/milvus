@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/tidwall/gjson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -40,6 +41,75 @@ func TestProxy_metrics(t *testing.T) {
 	resp, err := getSystemInfoMetrics(ctx, req, getMockProxyRequestMetrics())
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
+}
+
+func TestProxy_metrics_DeduplicateCurrentProxyNode(t *testing.T) {
+	ctx := context.Background()
+	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+	assert.NoError(t, err)
+
+	proxy := getMockProxyRequestMetrics()
+	currentProxyName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, proxy.session.ServerID)
+	otherProxyName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, proxy.session.ServerID+1)
+
+	proxy.mixCoord.(*MixCoordMock).getMetricsFunc = func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+		systemTopology := metricsinfo.SystemTopology{
+			NodesInfo: []metricsinfo.SystemTopologyNode{
+				{
+					Identifier: int(proxy.session.ServerID),
+					Infos: &metricsinfo.ProxyInfos{
+						BaseComponentInfos: metricsinfo.BaseComponentInfos{
+							Name: currentProxyName,
+							Type: typeutil.ProxyRole,
+							ID:   proxy.session.ServerID,
+						},
+					},
+				},
+				{
+					Identifier: int(proxy.session.ServerID + 1),
+					Infos: &metricsinfo.ProxyInfos{
+						BaseComponentInfos: metricsinfo.BaseComponentInfos{
+							Name: otherProxyName,
+							Type: typeutil.ProxyRole,
+							ID:   proxy.session.ServerID + 1,
+						},
+					},
+				},
+			},
+		}
+		resp, err := metricsinfo.MarshalTopology(systemTopology)
+		assert.NoError(t, err)
+		return &milvuspb.GetMetricsResponse{
+			Status:   merr.Success(),
+			Response: resp,
+		}, nil
+	}
+
+	resp, err := getSystemInfoMetrics(ctx, req, proxy)
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+
+	var names []string
+	gjson.Get(resp.GetResponse(), "nodes_info").ForEach(func(_, value gjson.Result) bool {
+		name := value.Get("infos.name").String()
+		if name != "" {
+			names = append(names, name)
+		}
+		return true
+	})
+
+	assert.Equal(t, 1, countName(names, currentProxyName))
+	assert.Equal(t, 1, countName(names, otherProxyName))
+}
+
+func countName(names []string, target string) int {
+	count := 0
+	for _, name := range names {
+		if name == target {
+			count++
+		}
+	}
+	return count
 }
 
 func createMockDDQueue() *ddTaskQueue {

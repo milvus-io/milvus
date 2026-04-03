@@ -102,6 +102,7 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 		rootcoordServer:  rootCoordServer,
 		queryCoordServer: queryCoordServer,
 		datacoordServer:  dataCoordServer,
+		proxyCreator:     proxyutil.DefaultProxyCreator,
 		factory:          factory,
 	}, nil
 }
@@ -153,6 +154,10 @@ func (s *mixCoordImpl) activateFunc() error {
 	if err != nil {
 		return err
 	}
+	if err = s.proxyWatcher.WatchProxy(s.ctx); err != nil {
+		log.Error("mixCoord failed to watch proxy", zap.Error(err))
+		return err
+	}
 	log.Info("mixCoord startup success", zap.String("address", s.session.GetAddress()))
 	s.startAndUpdateHealthy()
 	return err
@@ -164,6 +169,10 @@ func (s *mixCoordImpl) initInternal() error {
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
 	s.fileResourceObserver = NewFileResourceObserver(s.ctx)
+	s.proxyClientManager = proxyutil.NewProxyClientManager(s.proxyCreator)
+	s.proxyWatcher = proxyutil.NewProxyWatcher(s.etcdCli, s.proxyClientManager.SetProxyClients)
+	s.proxyWatcher.AddSessionFunc(s.proxyClientManager.AddProxyClient)
+	s.proxyWatcher.DelSessionFunc(s.proxyClientManager.DelProxyClient)
 
 	// Register WAL callbacks
 	RegisterWALCallbacks(s)
@@ -347,6 +356,10 @@ func (s *mixCoordImpl) Stop() error {
 
 	s.GracefulStop()
 	log.Info("graceful stop done")
+
+	if s.proxyWatcher != nil {
+		s.proxyWatcher.Stop()
+	}
 
 	if err := s.queryCoordServer.Stop(); err != nil {
 		log.Error("Failed to stop queryCoord", zap.Error(err))
@@ -874,6 +887,47 @@ func (s *mixCoordImpl) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRe
 		systemTopology.NodesInfo = append(systemTopology.NodesInfo, queryCoordTopologyNode)
 	}
 
+	if s.proxyClientManager != nil {
+		proxyMetrics, err := getProxyMetrics(ctx, s.proxyClientManager)
+		if err != nil {
+			log.Warn("failed to get proxy metrics, skip proxy nodes in topology", zap.Error(err))
+		}
+
+		for _, proxyMetric := range proxyMetrics {
+			identifier := int(proxyMetric.ID)
+			identifierMap[proxyMetric.Name] = identifier
+
+			proxyTopologyNode := metricsinfo.SystemTopologyNode{
+				Identifier: identifier,
+				Connected:  make([]metricsinfo.ConnectionEdge, 0, 3),
+				Infos:      proxyMetric,
+			}
+			if rootCoordErr == nil && rootCoordResp != nil {
+				proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
+					ConnectedIdentifier: identifierMap[rootCoordRoleName],
+					Type:                metricsinfo.Forward,
+					TargetType:          typeutil.RootCoordRole,
+				})
+			}
+			if dataCoordErr == nil && dataCoordResp != nil {
+				proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
+					ConnectedIdentifier: identifierMap[dataCoordRoleName],
+					Type:                metricsinfo.Forward,
+					TargetType:          typeutil.DataCoordRole,
+				})
+			}
+			if queryCoordErr == nil && queryCoordResp != nil {
+				proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
+					ConnectedIdentifier: identifierMap[queryCoordRoleName],
+					Type:                metricsinfo.Forward,
+					TargetType:          typeutil.QueryCoordRole,
+				})
+			}
+
+			systemTopology.NodesInfo = append(systemTopology.NodesInfo, proxyTopologyNode)
+		}
+	}
+
 	resp, err := metricsinfo.MarshalTopology(systemTopology)
 	if err != nil {
 		return &milvuspb.GetMetricsResponse{
@@ -888,6 +942,25 @@ func (s *mixCoordImpl) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRe
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.MixCoordRole, paramtable.GetNodeID()),
 	}, nil
+}
+
+func getProxyMetrics(ctx context.Context, proxies proxyutil.ProxyClientManagerInterface) ([]*metricsinfo.ProxyInfos, error) {
+	resp, err := proxies.GetProxyMetrics(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ret := make([]*metricsinfo.ProxyInfos, 0, len(resp))
+	for _, rsp := range resp {
+		proxyMetric := &metricsinfo.ProxyInfos{}
+		if err = metricsinfo.UnmarshalComponentInfos(rsp.GetResponse(), proxyMetric); err != nil {
+			log.Warn("failed to unmarshal proxy metrics, skip this proxy", zap.Error(err))
+			continue
+		}
+		ret = append(ret, proxyMetric)
+	}
+
+	return ret, nil
 }
 
 // GetMetrics get metrics

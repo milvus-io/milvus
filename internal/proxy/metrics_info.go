@@ -231,7 +231,12 @@ func getSystemInfoMetrics(
 	}
 
 	systemTopology.NodesInfo = append(systemTopology.NodesInfo, proxyTopologyNode)
-	systemTopology.NodesInfo = append(systemTopology.NodesInfo, mixCoordTopology.NodesInfo...)
+	for _, topologyNode := range mixCoordTopology.NodesInfo {
+		if topologyNode.Identifier == int(node.session.ServerID) {
+			continue
+		}
+		systemTopology.NodesInfo = append(systemTopology.NodesInfo, topologyNode)
+	}
 
 	resp, err := metricsinfo.MarshalTopology(systemTopology)
 	if err != nil {

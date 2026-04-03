@@ -70,7 +70,7 @@ class MilvusSys:
         """get all query nodes in Milvus deployment"""
         query_nodes = []
         for node in self.nodes:
-            if 'querynode' == node.get('infos').get('type'):
+            if node.get('infos').get('type') in ('querynode', 'streamingnode'):
                 query_nodes.append(node)
         return query_nodes
 
