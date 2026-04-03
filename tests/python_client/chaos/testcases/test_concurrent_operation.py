@@ -114,7 +114,7 @@ class TestOperations(TestBase):
             Op.json_query: JsonQueryChecker(collection_name=c_name),
             Op.geo_query: GeoQueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
-            Op.add_field: AddFieldChecker(collection_name=c_name),
+            # Op.add_field: AddFieldChecker(collection_name=c_name),  # disabled: causes schema mismatch for other checkers
             Op.snapshot: SnapshotChecker(collection_name=c_name),
             Op.restore_snapshot: SnapshotRestoreChecker(),
             Op.null_vector_search: NullVectorSearchChecker(collection_name=c_name),
