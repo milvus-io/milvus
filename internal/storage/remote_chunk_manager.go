@@ -24,6 +24,7 @@ import (
 	"strings"
 	"syscall"
 
+	cstorage "cloud.google.com/go/storage"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
@@ -416,15 +417,19 @@ func ToMilvusIoError(fileName string, err error) error {
 	return mapObjectStorageError(fileName, err)
 }
 
-// Performance: Pre-allocate common error code strings to avoid repeated allocations
+// Error code constants for cloud provider error mapping.
 const (
+	// Azure Blob Storage error codes
 	azureBlobNotFound      = "BlobNotFound"
 	azureServerBusy        = "ServerBusy"
 	azureAuthFailed        = "AuthenticationFailed"
+	azureAuthFailure       = "AuthorizationFailure"
 	azureContainerNotFound = "ContainerNotFound"
 	azureInvalidParam      = "InvalidParameterValue"
 	azureInvalidRange      = "InvalidRange"
+	azureRequestBodyTooLg  = "RequestBodyTooLarge"
 
+	// S3-compatible error codes (AWS S3, MinIO, Aliyun OSS, Tencent COS, etc.)
 	minioNoSuchKey      = "NoSuchKey"
 	minioSlowDown       = "SlowDown"
 	minioTooMany        = "TooManyRequestsException"
@@ -439,6 +444,9 @@ const (
 	minioInvalidRange   = "InvalidRange"
 	minioEntityTooLarge = "EntityTooLarge"
 	minioMaxMessage     = "MaxMessageLengthExceeded"
+	// Aliyun OSS specific error codes (S3-compatible, via MinIO client)
+	ossSecurityTokenExpired = "SecurityTokenExpired"
+	ossInvalidAccessKeyId   = "InvalidAccessKeyId.Inactive"
 )
 
 func mapObjectStorageError(fileName string, err error) error {
@@ -451,16 +459,14 @@ func mapObjectStorageError(fileName string, err error) error {
 		return err
 	}
 
-	// Performance: Type switch is efficient - Go compiler optimizes this to a jump table
 	switch err := err.(type) {
 	case *azcore.ResponseError:
-		// Performance: Compare against const instead of calling string() repeatedly
 		switch err.ErrorCode {
 		case azureBlobNotFound:
 			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
 		case azureServerBusy:
 			return merr.WrapErrIoTooManyRequests(fileName, err)
-		case azureAuthFailed:
+		case azureAuthFailed, azureAuthFailure:
 			return merr.WrapErrIoPermissionDenied(fileName, err)
 		case azureContainerNotFound:
 			return merr.WrapErrIoBucketNotFound(fileName, err)
@@ -468,21 +474,22 @@ func mapObjectStorageError(fileName string, err error) error {
 			return merr.WrapErrIoInvalidArgument(fileName, err)
 		case azureInvalidRange:
 			return merr.WrapErrIoInvalidRange(fileName, err)
+		case azureRequestBodyTooLg:
+			return merr.WrapErrIoEntityTooLarge(fileName, err)
 		default:
 			return merr.WrapErrIoFailed(fileName, err)
 		}
 	case minio.ErrorResponse:
-		// Performance: Use switch for better branch prediction than multiple ifs
 		switch err.Code {
 		case minioNoSuchKey:
 			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
 		case minioSlowDown, minioTooMany:
 			return merr.WrapErrIoTooManyRequests(fileName, err)
-		case minioAccessDenied, minioInvalidKeyId, minioSigMismatch:
+		case minioAccessDenied, minioInvalidKeyId, minioSigMismatch, ossInvalidAccessKeyId:
 			return merr.WrapErrIoPermissionDenied(fileName, err)
 		case minioNoSuchBucket:
 			return merr.WrapErrIoBucketNotFound(fileName, err)
-		case minioInvalidToken, minioExpiredToken:
+		case minioInvalidToken, minioExpiredToken, ossSecurityTokenExpired:
 			return merr.WrapErrIoInvalidCredentials(fileName, err)
 		case minioInvalidArg, minioInvalidRequest:
 			return merr.WrapErrIoInvalidArgument(fileName, err)
@@ -494,7 +501,6 @@ func mapObjectStorageError(fileName string, err error) error {
 			return merr.WrapErrIoFailed(fileName, err)
 		}
 	case *googleapi.Error:
-		// Performance: Integer comparison is faster than string comparison
 		switch err.Code {
 		case http.StatusNotFound:
 			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
@@ -502,8 +508,12 @@ func mapObjectStorageError(fileName string, err error) error {
 			return merr.WrapErrIoTooManyRequests(fileName, err)
 		case http.StatusForbidden:
 			return merr.WrapErrIoPermissionDenied(fileName, err)
+		case http.StatusUnauthorized:
+			return merr.WrapErrIoInvalidCredentials(fileName, err)
 		case http.StatusBadRequest:
 			return merr.WrapErrIoInvalidArgument(fileName, err)
+		case http.StatusRequestedRangeNotSatisfiable:
+			return merr.WrapErrIoInvalidRange(fileName, err)
 		case http.StatusRequestEntityTooLarge:
 			return merr.WrapErrIoEntityTooLarge(fileName, err)
 		default:
@@ -511,10 +521,15 @@ func mapObjectStorageError(fileName string, err error) error {
 		}
 	}
 
-	// Performance: Check specific errors before generic fallback
-	// errors.Is() with syscall errors is optimized in Go stdlib
-	// syscall.ECONNRESET is typically triggered by rate limiting, with errors such as: `read tcp xxxxx:xx->xxxxxx:xxxxx: read: connection reset by peer`
-	// so we need to wrap it as ErrIoTooManyRequests and trigger retry.
+	// GCP cloud.google.com/go/storage sentinel errors (not *googleapi.Error)
+	if errors.Is(err, cstorage.ErrObjectNotExist) {
+		return merr.WrapErrIoKeyNotFound(fileName, err.Error())
+	}
+	if errors.Is(err, cstorage.ErrBucketNotExist) {
+		return merr.WrapErrIoBucketNotFound(fileName, err)
+	}
+
+	// syscall.ECONNRESET is typically triggered by rate limiting
 	if errors.Is(err, syscall.ECONNRESET) {
 		return merr.WrapErrIoTooManyRequests(fileName, err)
 	}
