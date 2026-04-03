@@ -581,12 +581,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
                                 .value();
         local_chunk_manager->CreateFile(offsets_path);
 
-        uint32_t num_offsets = offsets.size();
+        size_t num_offsets = offsets.size();
         int64_t offsets_write_pos = 0;
 
         local_chunk_manager->Write(
-            offsets_path, offsets_write_pos, &num_offsets, sizeof(uint32_t));
-        offsets_write_pos += sizeof(uint32_t);
+            offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
+        offsets_write_pos += sizeof(size_t);
 
         local_chunk_manager->Write(offsets_path,
                                    offsets_write_pos,
@@ -790,12 +790,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
 
         local_chunk_manager->CreateFile(offsets_path);
 
-        uint32_t num_offsets = offsets.size();
+        size_t num_offsets = offsets.size();
         int64_t offsets_write_pos = 0;
 
         local_chunk_manager->Write(
-            offsets_path, offsets_write_pos, &num_offsets, sizeof(uint32_t));
-        offsets_write_pos += sizeof(uint32_t);
+            offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
+        offsets_write_pos += sizeof(size_t);
 
         local_chunk_manager->Write(offsets_path,
                                    offsets_write_pos,

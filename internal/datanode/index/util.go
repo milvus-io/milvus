@@ -64,6 +64,12 @@ func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType)
 		return uint64(dim) * uint64(numRows) * 2, nil
 	case schemapb.DataType_SparseFloatVector:
 		return 0, errors.New("could not estimate field data size of SparseFloatVector")
+	case schemapb.DataType_Array, schemapb.DataType_ArrayOfVector, schemapb.DataType_ArrayOfStruct:
+		// For Array of Vectors (Embedding List), we assume at least one vector per row.
+		if dim > 0 {
+			return uint64(dim) * uint64(numRows) * 4, nil
+		}
+		return 0, nil
 	default:
 		return 0, nil
 	}
