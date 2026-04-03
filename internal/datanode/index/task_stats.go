@@ -685,12 +685,12 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		return binlog.GetFieldID()
 	})
 
-	getInsertFiles := func(fieldID int64) ([]string, error) {
+	getInsertFiles := func(fieldID int64, enableNull bool) ([]string, error) {
 		if st.req.GetStorageVersion() == storage.StorageV2 || st.req.GetStorageVersion() == storage.StorageV3 {
 			return []string{}, nil
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
-		if !ok {
+		if !ok && !enableNull {
 			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
 		}
 		result := make([]string, 0, len(binlogs))
@@ -724,7 +724,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		log.Info("field enable json key index, ready to create json key index", zap.Int64("field id", field.GetFieldID()))
 
 		eg.Go(func() error {
-			files, err := getInsertFiles(field.GetFieldID())
+			files, err := getInsertFiles(field.GetFieldID(), field.GetNullable())
 			if err != nil {
 				return err
 			}
