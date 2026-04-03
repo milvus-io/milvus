@@ -200,14 +200,14 @@ class TestChaosApplyMultiReplicas:
 
     def test_chaos_apply_periodic(self, chaos_type, target_rgs, chaos_duration,
                                   chaos_interval, request_duration, wait_signal):
-        """Periodically inject chaos to a random RG for long-duration stability testing.
+        """Periodically inject chaos to RGs in round-robin order for long-duration stability testing.
 
-        Each cycle: randomly pick one RG -> inject chaos -> wait duration -> delete -> recover -> wait interval.
+        Each cycle: pick next RG in round-robin -> inject chaos -> wait duration -> delete -> recover -> wait interval.
         Runs for total request_duration (e.g. 24h). Goal: zero request errors across all cycles.
 
         Args:
             chaos_type: pod-failure or pod-kill
-            target_rgs: comma-separated RG names to randomly select from (e.g. "rg1,rg2,rg3")
+            target_rgs: comma-separated RG names to rotate through (e.g. "rg1,rg2,rg3")
             chaos_duration: duration of each chaos injection (e.g. "2m")
             chaos_interval: total interval between chaos starts (e.g. "10m")
             request_duration: total test duration (e.g. "24h")
@@ -231,7 +231,7 @@ class TestChaosApplyMultiReplicas:
         chaos_dur_seconds = parse_duration(chaos_duration)
 
         log.info(f"periodic chaos config:")
-        log.info(f"  target RGs: {rg_list}")
+        log.info(f"  target RGs (round-robin): {rg_list}")
         log.info(f"  chaos type: {chaos_type}")
         log.info(f"  chaos duration per cycle: {chaos_duration} ({chaos_dur_seconds}s)")
         log.info(f"  interval between cycles: {chaos_interval} ({interval_seconds}s)")
@@ -248,8 +248,8 @@ class TestChaosApplyMultiReplicas:
             elapsed = cycle_start - start_time
             remaining = total_seconds - elapsed
 
-            # Randomly pick one RG
-            target_rg = random.choice(rg_list)
+            # Round-robin: pick RG by index
+            target_rg = rg_list[(round_num - 1) % len(rg_list)]
             log.info(f"===== Round {round_num} | elapsed={elapsed/3600:.1f}h | remaining={remaining/3600:.1f}h | target={target_rg} =====")
 
             # Don't start a new cycle if remaining time < chaos duration
