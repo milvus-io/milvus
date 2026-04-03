@@ -93,26 +93,6 @@ if (LINUX AND NOT USE_ASAN STREQUAL "ON")
     endif ()
 endif ()
 
-# ---- Faster linker detection ----
-# Try mold > lld > gold > default (bfd). Faster linkers can cut link time 2-5x.
-if (NOT APPLE)
-    # Write a trivial source file to test linking
-    file(WRITE "${CMAKE_BINARY_DIR}/linker_test.c" "int main(){return 0;}")
-    foreach(_linker "mold" "lld" "gold")
-        execute_process(
-            COMMAND ${CMAKE_C_COMPILER} -fuse-ld=${_linker} -o /dev/null
-                    "${CMAKE_BINARY_DIR}/linker_test.c"
-            OUTPUT_QUIET ERROR_QUIET
-            RESULT_VARIABLE _linker_result)
-        if (_linker_result EQUAL 0)
-            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=${_linker}")
-            set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=${_linker}")
-            message(STATUS "Using faster linker: ${_linker}")
-            break()
-        endif ()
-    endforeach()
-    file(REMOVE "${CMAKE_BINARY_DIR}/linker_test.c")
-endif ()
 
 # **************************** Build time, type and code version ****************************
 get_current_time( BUILD_TIME )
