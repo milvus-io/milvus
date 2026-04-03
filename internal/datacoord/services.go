@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -2824,12 +2823,6 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 	}, nil
 }
 
-// getOrCreateImportJobMu returns a per-job mutex for serializing concurrent commit/abort on the same job.
-func (s *Server) getOrCreateImportJobMu(jobID int64) *sync.Mutex {
-	actual, _ := s.importJobMu.LoadOrStore(jobID, &sync.Mutex{})
-	return actual.(*sync.Mutex)
-}
-
 // broadcastCommitImportMessage broadcasts a CommitImport WAL message for the given import job.
 // The message is sent to the control channel so that all vchannels receive the commit fence.
 func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob) error {
@@ -2896,9 +2889,8 @@ func (s *Server) validateAndExecuteImportAction(
 			fmt.Sprintf("job %d is auto-commit, manual commit/abort not allowed", jobID))), nil
 	}
 
-	mu := s.getOrCreateImportJobMu(jobID)
-	mu.Lock()
-	defer mu.Unlock()
+	s.importJobLock.Lock(jobID)
+	defer s.importJobLock.Unlock(jobID)
 
 	job = s.importMeta.GetJob(ctx, jobID)
 	if job == nil {
