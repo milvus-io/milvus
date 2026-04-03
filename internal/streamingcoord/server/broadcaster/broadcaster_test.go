@@ -622,17 +622,10 @@ func TestPendingBroadcastMessages(t *testing.T) {
 	})
 }
 
-func TestMarkIgnoreAndSave(t *testing.T) {
+func TestMarkIgnore(t *testing.T) {
 	paramtable.Init()
 
 	t.Run("success", func(t *testing.T) {
-		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
-		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		rc := idalloc.NewMockRootCoordClient(t)
-		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
-		f.Set(rc)
-		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
-
 		metrics := newBroadcasterMetrics()
 		ackScheduler := newAckCallbackScheduler(log.With())
 
@@ -643,7 +636,7 @@ func TestMarkIgnoreAndSave(t *testing.T) {
 		task := newBroadcastTaskFromProto(proto, metrics, ackScheduler)
 		task.SetLogger(log.With())
 
-		err := task.MarkIgnoreAndSave(context.Background())
+		err := task.MarkIgnore()
 		assert.NoError(t, err)
 
 		// Verify the message now has ignore=true
@@ -653,7 +646,6 @@ func TestMarkIgnoreAndSave(t *testing.T) {
 	})
 
 	t.Run("non_alter_replicate_config", func(t *testing.T) {
-		resource.InitForTest()
 		metrics := newBroadcasterMetrics()
 		ackScheduler := newAckCallbackScheduler(log.With())
 
@@ -661,7 +653,7 @@ func TestMarkIgnoreAndSave(t *testing.T) {
 		task := newBroadcastTaskFromProto(proto, metrics, ackScheduler)
 		task.SetLogger(log.With())
 
-		err := task.MarkIgnoreAndSave(context.Background())
+		err := task.MarkIgnore()
 		assert.Error(t, err)
 	})
 }
@@ -1129,58 +1121,6 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 			assert.NotEqual(t, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE, fpTask.State())
 		case <-time.After(5 * time.Second):
 			t.Fatal("timed out waiting for doForcePromoteFixIncompleteBroadcasts to exit on cancel")
-		}
-	})
-}
-
-func TestRetryUntilDone(t *testing.T) {
-	t.Run("succeeds_first_try", func(t *testing.T) {
-		ackScheduler := newAckCallbackScheduler(log.With())
-		callCount := 0
-		err := ackScheduler.retryUntilDone(context.Background(), func() error {
-			callCount++
-			return nil
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, 1, callCount)
-	})
-
-	t.Run("succeeds_after_retries", func(t *testing.T) {
-		ackScheduler := newAckCallbackScheduler(log.With())
-		callCount := 0
-		err := ackScheduler.retryUntilDone(context.Background(), func() error {
-			callCount++
-			if callCount < 3 {
-				return errors.New("not yet")
-			}
-			return nil
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, 3, callCount)
-	})
-
-	t.Run("aborts_on_context_cancel", func(t *testing.T) {
-		ackScheduler := newAckCallbackScheduler(log.With())
-		ctx, cancel := context.WithCancel(context.Background())
-		callCount := 0
-
-		done := make(chan error, 1)
-		go func() {
-			done <- ackScheduler.retryUntilDone(ctx, func() error {
-				callCount++
-				if callCount == 2 {
-					cancel()
-				}
-				return errors.New("always fail")
-			})
-		}()
-
-		select {
-		case err := <-done:
-			assert.Error(t, err)
-			assert.True(t, errors.Is(err, context.Canceled))
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out")
 		}
 	})
 }

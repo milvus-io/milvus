@@ -2,6 +2,7 @@ package broadcaster
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -183,10 +184,14 @@ func (s *ackCallbackScheduler) doForcePromoteFixIncompleteBroadcasts(bt *broadca
 	logger.Info("completed fixing incomplete broadcasts for force promote")
 
 	// Acquire resource key lock before executing ack callback.
-	g, err := s.acquireResourceKeyLockUntilDone(ctx, bt.Header().ResourceKeys.Collect()...)
+	// Force promote runs on a secondary cluster. By step 3, all incomplete tasks have reached
+	// tombstone (their ack callbacks finished, resource key locks released), and no new broadcasts
+	// can arrive (cluster is still secondary). So rkLocker has zero contenders — FastLock always succeeds.
+	s.rkLockerMu.Lock()
+	g, err := s.rkLocker.FastLock(bt.Header().ResourceKeys.Collect()...)
+	s.rkLockerMu.Unlock()
 	if err != nil {
-		logger.Warn("force promote acquire lock aborted", zap.Error(err))
-		return
+		panic(fmt.Sprintf("unreachable: FastLock failed during force promote with zero contenders: %v", err))
 	}
 	s.doAckCallback(bt, g)
 }
@@ -211,6 +216,8 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 		zap.Int("incompleteTasks", len(incompleteTasks)))
 
 	// Mark AlterReplicateConfig tasks with ignore=true (to prevent old config overwriting force promote config)
+	// MarkIgnore is a memory-only operation. It only runs on tasks where IsAlterReplicateConfigMessage() == true,
+	// so the parse inside MarkIgnore cannot fail — panic if it does.
 	for _, task := range incompleteTasks {
 		if !task.IsAlterReplicateConfigMessage() {
 			continue
@@ -218,10 +225,8 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 		s.Logger().Info("Marking AlterReplicateConfig task with ignore=true",
 			zap.Uint64("broadcastID", task.Header().BroadcastID))
 
-		if err := s.retryUntilDone(ctx, func() error {
-			return task.MarkIgnoreAndSave(ctx)
-		}); err != nil {
-			return errors.Wrapf(err, "failed to mark task %d with ignore", task.Header().BroadcastID)
+		if err := task.MarkIgnore(); err != nil {
+			panic(fmt.Sprintf("unreachable: MarkIgnore failed on AlterReplicateConfig task %d: %v", task.Header().BroadcastID, err))
 		}
 	}
 
@@ -291,28 +296,8 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 	return nil
 }
 
-// acquireResourceKeyLockUntilDone acquires the resource key lock with infinite retry.
-func (s *ackCallbackScheduler) acquireResourceKeyLockUntilDone(ctx context.Context, resourceKeys ...message.ResourceKey) (*lockGuards, error) {
-	var g *lockGuards
-	err := s.retryUntilDone(ctx, func() error {
-		s.rkLockerMu.Lock()
-		defer s.rkLockerMu.Unlock()
-		var err error
-		g, err = s.rkLocker.FastLock(resourceKeys...)
-		return err
-	})
-	return g, err
-}
-
 // callMessageAckCallbackUntilDone calls the message ack callback until done.
 func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Context, msg message.BroadcastMutableMessage, result map[string]*message.AppendResult) error {
-	return s.retryUntilDone(ctx, func() error {
-		return registry.CallMessageAckCallback(ctx, msg, result)
-	})
-}
-
-// retryUntilDone retries fn with exponential backoff until it succeeds or ctx is canceled.
-func (s *ackCallbackScheduler) retryUntilDone(ctx context.Context, fn func() error) error {
 	backoff := backoff.NewExponentialBackOff()
 	backoff.InitialInterval = 10 * time.Millisecond
 	backoff.MaxInterval = 10 * time.Second
@@ -320,15 +305,15 @@ func (s *ackCallbackScheduler) retryUntilDone(ctx context.Context, fn func() err
 	backoff.Reset()
 
 	for {
-		err := fn()
+		err := registry.CallMessageAckCallback(ctx, msg, result)
 		if err == nil {
 			return nil
 		}
 		nextInterval := backoff.NextBackOff()
-		s.Logger().Warn("operation failed, retrying...",
+		s.Logger().Warn("failed to call message ack callback, wait for retry...",
+			log.FieldMessage(msg),
 			zap.Duration("nextInterval", nextInterval),
-			zap.Error(err),
-			zap.Stack("stack"))
+			zap.Error(err))
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
