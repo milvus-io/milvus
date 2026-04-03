@@ -413,7 +413,6 @@ class TestStructArrayElementFilterSearch(TestMilvusClientV2Base):
         # Distance ordering (L2: ascending)
         _assert_distance_order(results, "L2")
 
-    @pytest.mark.xfail(reason="flaky: element-level search on growing segment intermittently returns 0 hits")
     @pytest.mark.tags(CaseLabel.L0)
     def test_element_filter_with_doc_level_filter(self):
         """
