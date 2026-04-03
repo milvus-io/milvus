@@ -3411,6 +3411,8 @@ type queryNodeConfig struct {
 	CPURatio              ParamItem `refreshable:"true"`
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
 
+	EnableResultZeroCopy ParamItem `refreshable:"true"`
+
 	// tsafe
 	MaxTimestampLag           ParamItem `refreshable:"true"`
 	DowngradeTsafe            ParamItem `refreshable:"true"`
@@ -4263,6 +4265,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.TopKMergeRatio.Init(base.mgr)
+
+	p.EnableResultZeroCopy = ParamItem{
+		Key:          "queryNode.search.enableResultZeroCopy",
+		Version:      "2.6.14",
+		DefaultValue: "false",
+		Doc:          "When true, delegator passes reduced SearchResultData directly instead of re-marshaling to SlicedBlob. Toggle at runtime for instant fallback.",
+		Export:       true,
+	}
+	p.EnableResultZeroCopy.Init(base.mgr)
 
 	p.CPURatio = ParamItem{
 		Key:          "queryNode.scheduler.cpuRatio",

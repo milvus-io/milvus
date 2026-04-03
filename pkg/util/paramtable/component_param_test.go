@@ -36,6 +36,10 @@ func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()
 
+	t.Run("query node zero copy config key", func(t *testing.T) {
+		assert.Equal(t, "queryNode.search.enableResultZeroCopy", params.QueryNodeCfg.EnableResultZeroCopy.Key)
+	})
+
 	t.Run("test commonConfig", func(t *testing.T) {
 		Params := &params.CommonCfg
 

@@ -589,16 +589,17 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 	tr := timerecord.NewTimeRecorder("decodeSearchResults")
 	results := make([]*schemapb.SearchResultData, 0)
 	for _, partialSearchResult := range searchResults {
-		if partialSearchResult.SlicedBlob == nil {
-			continue
+		if partialSearchResult.ResultData != nil {
+			// Pre-decoded by delegator — use directly, no unmarshal needed.
+			results = append(results, partialSearchResult.ResultData)
+		} else if partialSearchResult.SlicedBlob != nil {
+			var partialResultData schemapb.SearchResultData
+			err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, &partialResultData)
 		}
-
-		var partialResultData schemapb.SearchResultData
-		err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
-		if err != nil {
-			return nil, err
-		}
-		results = append(results, &partialResultData)
 	}
 	tr.CtxElapse(ctx, "decodeSearchResults done")
 	return results, nil
