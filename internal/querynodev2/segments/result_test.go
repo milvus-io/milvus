@@ -382,15 +382,15 @@ func (suite *ResultSuite) TestDecodeSearchResults_ResultDataAndBlob() {
 	suite.NoError(err)
 
 	decoded, err := DecodeSearchResults(ctx, []*internalpb.SearchResults{
-		{ResultData: resultData},        // zero-copy path
-		{SlicedBlob: blob},              // legacy path
-		{},                              // empty — should be skipped
-		{SlicedBlob: nil},               // nil blob — should be skipped
+		{ResultData: resultData}, // zero-copy path
+		{SlicedBlob: blob},       // legacy path
+		{},                       // empty — should be skipped
+		{SlicedBlob: nil},        // nil blob — should be skipped
 	})
 	suite.NoError(err)
 	suite.Len(decoded, 2)
-	suite.Same(resultData, decoded[0])               // zero-copy: same pointer
-	suite.True(proto.Equal(blobData, decoded[1]))     // blob: equal content
+	suite.Same(resultData, decoded[0])            // zero-copy: same pointer
+	suite.True(proto.Equal(blobData, decoded[1])) // blob: equal content
 }
 
 func (suite *ResultSuite) TestReduceSearchResults_FilterIncludesResultData() {
@@ -414,8 +414,8 @@ func (suite *ResultSuite) TestReduceSearchResults_FilterIncludesResultData() {
 			TopK:       topK,
 			ResultData: resultData,
 		},
-		nil,  // should be filtered out
-		{},   // no data — should be filtered out
+		nil, // should be filtered out
+		{},  // no data — should be filtered out
 	}, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metric.IP).WithPkType(schemapb.DataType_Int64))
 	suite.NoError(err)
 	suite.Same(resultData, out.GetResultData())
