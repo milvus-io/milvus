@@ -20,6 +20,12 @@
 #include <string>
 #include <vector>
 
+// For skip-if-no-Azurite detection
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include "AzureChunkManager.h"
 #include "common/EasyAssert.h"
 #include "gtest/gtest.h"
@@ -30,6 +36,25 @@
 using namespace std;
 using namespace milvus;
 using namespace milvus::storage;
+
+// Returns true if a TCP connection to host:port succeeds within ~1 second.
+static bool
+isTcpReachable(const char* host, int port) {
+    int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0)
+        return false;
+    struct sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(static_cast<uint16_t>(port));
+    ::inet_pton(AF_INET, host, &addr.sin_addr);
+    struct timeval tv{1, 0};  // 1-second timeout
+    ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    int ret =
+        ::connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
+    ::close(sock);
+    return ret == 0;
+}
 
 // the accessKey and accessValue is the the fixed storage account used by Azure Storage Emulator
 StorageConfig
@@ -81,6 +106,11 @@ class AzureChunkManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
+        // Skip when Azurite emulator is not running locally.
+        // Start with: docker run -p 10000:10000 mcr.microsoft.com/azure-storage/azurite azurite-blob
+        if (!isTcpReachable("127.0.0.1", 10000)) {
+            GTEST_SKIP() << "Azurite not reachable at 127.0.0.1:10000 — skipping Azure tests";
+        }
         configs_ = get_default_storage_config(false);
         chunk_manager_ = make_unique<AzureChunkManager>(configs_);
         chunk_manager_ptr_ = CreateChunkManager(configs_);
