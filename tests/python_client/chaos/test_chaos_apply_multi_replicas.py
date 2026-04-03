@@ -21,10 +21,10 @@ def parse_duration(duration_str):
 
 
 def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs, duration="2m"):
-    """Build a chaos config that targets querynode pods by resource group labels.
+    """Build a chaos config that targets all pods in target RGs (querynode + streamingnode).
 
-    Uses expressionSelectors with 'In' operator to target one or more RGs,
-    combined with labelSelectors for instance and component filtering.
+    Uses expressionSelectors with 'In' operator to target one or more RGs.
+    No component filter — all pods with the RG label are affected.
     """
     action = chaos_type
 
@@ -40,7 +40,6 @@ def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs, durat
                 "namespaces": [namespace],
                 "labelSelectors": {
                     "app.kubernetes.io/instance": release_name,
-                    "component": "querynode",
                 },
                 "expressionSelectors": [
                     {
