@@ -627,7 +627,9 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			return fmt.Errorf("failed to add text index stats to manifest: %w", err)
 		}
 		st.manifestPath = newManifest
-		clear(textIndexLogs)
+		// Dual-write: keep textIndexLogs populated so it is stored in segment metadata as a
+		// placeholder. This prevents stats_inspector from re-triggering TextIndexJob for V3
+		// segments that already have text index stats in the manifest.
 	}
 
 	st.manager.StoreStatsTextIndexResult(st.req.GetClusterID(),
@@ -798,7 +800,9 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			return fmt.Errorf("failed to add JSON key stats to manifest: %w", err)
 		}
 		st.manifestPath = newManifest
-		clear(jsonKeyIndexStats)
+		// Dual-write: keep jsonKeyIndexStats populated so it is stored in segment metadata as a
+		// placeholder. This prevents stats_inspector from re-triggering JsonKeyIndexJob for V3
+		// segments that already have JSON key stats in the manifest.
 	}
 
 	totalElapse := st.tr.RecordSpan()
