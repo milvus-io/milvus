@@ -12,6 +12,7 @@ def pytest_addoption(parser):
     parser.addoption("--chaos_interval", action="store", default="2m", help="chaos_interval")
     parser.addoption("--wait_signal", action="store", type=bool, default=True, help="wait_signal")
     parser.addoption("--enable_import", action="store", type=bool, default=False, help="enable_import")
+    parser.addoption("--target_rgs", action="store", default="", help="comma-separated resource group names to target for chaos (e.g. rg1,rg2)")
     parser.addoption("--collection_num", action="store", default="1", help="collection_num")
 
 
@@ -68,3 +69,8 @@ def wait_signal(request):
 @pytest.fixture
 def enable_import(request):
     return request.config.getoption("--enable_import")
+
+
+@pytest.fixture
+def target_rgs(request):
+    return request.config.getoption("--target_rgs")
