@@ -347,21 +347,27 @@ func (m *importMeta) HandleCommitVchannel(ctx context.Context, jobID int64, vcha
 	if job == nil {
 		return merr.WrapErrImportFailed(fmt.Sprintf("job %d not found", jobID))
 	}
-	// Idempotency: if vchannel already committed, skip
+	// Idempotency: if vchannel already committed, skip.
 	for _, c := range job.GetCommittedVchannels() {
 		if c == vchannel {
 			return nil
 		}
 	}
-	// Persist first: clone, append vchannel, then save to catalog.
-	// This ensures callback is only called once even on retry — if save fails,
-	// the caller retries and the callback is not invoked until save succeeds.
+	// Callback first, persist second.
+	// If callback fails, we return error without persisting — the caller retries
+	// and the callback will be invoked again. This avoids the scenario where persist
+	// succeeds but callback fails, causing the idempotency check to skip the callback
+	// on retry (data stays invisible forever).
+	// The callback (setting is_importing=false) is idempotent, so re-execution on
+	// retry after a persist failure is safe.
+	if err := callback(); err != nil {
+		return err
+	}
 	updatedJob := job.Clone()
 	updatedJob.(*importJob).ImportJob.CommittedVchannels = append(updatedJob.GetCommittedVchannels(), vchannel)
 	if err := m.catalog.SaveImportJob(ctx, updatedJob.(*importJob).ImportJob); err != nil {
 		return err
 	}
 	m.jobs[jobID] = updatedJob
-	// Invoke caller-supplied callback after successful persist
-	return callback()
+	return nil
 }

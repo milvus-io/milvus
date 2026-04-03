@@ -204,12 +204,24 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 	log.Ctx(ctx).Info("CommitImport broadcast ack received", zap.Int64("jobID", jobID))
 
 	// CAS: Uncommitted → Committing; no-op if job already left Uncommitted (abort won the race)
-	return c.importMeta.UpdateJob(ctx, jobID,
+	if err := c.importMeta.UpdateJob(ctx, jobID,
 		UpdateJobStateWithCAS(
 			internalpb.ImportJobState_Uncommitted,
 			internalpb.ImportJobState_Committing,
 		),
-	)
+	); err != nil {
+		return err
+	}
+
+	// Log timecost for the Uncommitted → Committing transition.
+	job := c.importMeta.GetJob(ctx, jobID)
+	if job != nil && job.GetState() == internalpb.ImportJobState_Committing {
+		uncommittedDuration := job.GetTR().RecordSpan()
+		log.Ctx(ctx).Info("import job uncommitted stage done",
+			zap.Int64("jobID", jobID),
+			zap.Duration("jobTimeCost/uncommitted", uncommittedDuration))
+	}
+	return nil
 }
 
 // rollbackImportV2AckCallback handles the ack callback for RollbackImport WAL message.
@@ -238,53 +250,7 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 
 	// CAS: transition from the pre-read state → Failed.
 	// If state changed concurrently (e.g. commit won the race), UpdateJobStateWithCAS is a
-	// no-op and UpdateJob returns nil, so we skip the segment drop safely.
-	if err := c.importMeta.UpdateJob(ctx, jobID, UpdateJobStateWithCAS(state, internalpb.ImportJobState_Failed)); err != nil {
-		return err
-	}
-
-	// Read back to check if our CAS actually applied.
-	// UpdateJob holds the mutex, so the in-memory state after it returns reflects
-	// whether the CAS fired (state matched 'from') or was a no-op (state had already
-	// changed before this goroutine acquired the lock).
-	updated := c.importMeta.GetJob(ctx, jobID)
-	if updated == nil || updated.GetState() != internalpb.ImportJobState_Failed {
-		log.Ctx(ctx).Info("RollbackImport CAS was no-op (state changed before lock acquired), skipping segment drop",
-			zap.Int64("jobID", jobID))
-		return nil
-	}
-
-	// Drop all import segments for this job.
-	return c.dropImportJobSegments(ctx, jobID)
-}
-
-// dropImportJobSegments marks all segments belonging to the given import job as Dropped.
-func (c *DDLCallbacks) dropImportJobSegments(ctx context.Context, jobID int64) error {
-	tasks := c.importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
-	for _, task := range tasks {
-		it, ok := task.(*importTask)
-		if !ok {
-			continue
-		}
-		candidates := make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
-		candidates = append(candidates, it.GetSegmentIDs()...)
-		candidates = append(candidates, it.GetSortedSegmentIDs()...)
-		for _, segID := range candidates {
-			seg := c.meta.GetSegment(ctx, segID)
-			if seg == nil {
-				continue
-			}
-			if seg.GetState() == commonpb.SegmentState_Dropped {
-				continue
-			}
-			if err := c.meta.SetState(ctx, segID, commonpb.SegmentState_Dropped); err != nil {
-				log.Ctx(ctx).Warn("failed to drop import segment during rollback",
-					zap.Int64("jobID", jobID),
-					zap.Int64("segmentID", segID),
-					zap.Error(err))
-				return err
-			}
-		}
-	}
-	return nil
+	// no-op and UpdateJob returns nil.
+	// Segment cleanup is handled by the import inspector (processFailed), not here.
+	return c.importMeta.UpdateJob(ctx, jobID, UpdateJobStateWithCAS(state, internalpb.ImportJobState_Failed))
 }
