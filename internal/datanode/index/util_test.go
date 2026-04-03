@@ -20,11 +20,59 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/stretchr/testify/suite"
 )
 
 type utilSuite struct {
 	suite.Suite
+}
+
+func (s *utilSuite) Test_estimateFieldDataSize() {
+	s.Run("BinaryVector", func() {
+		size, err := estimateFieldDataSize(128, 1000, schemapb.DataType_BinaryVector, 0)
+		s.NoError(err)
+		s.Equal(uint64(128/8*1000), size)
+	})
+
+	s.Run("FloatVector", func() {
+		size, err := estimateFieldDataSize(128, 1000, schemapb.DataType_FloatVector, 0)
+		s.NoError(err)
+		s.Equal(uint64(128*1000*4), size)
+	})
+
+	s.Run("Float16Vector", func() {
+		size, err := estimateFieldDataSize(128, 1000, schemapb.DataType_Float16Vector, 0)
+		s.NoError(err)
+		s.Equal(uint64(128*1000*2), size)
+	})
+
+	s.Run("SparseFloatVector", func() {
+		size, err := estimateFieldDataSize(128, 1000, schemapb.DataType_SparseFloatVector, 0)
+		s.Error(err)
+		s.Equal(uint64(0), size)
+	})
+
+	s.Run("ArrayOfVector_WithMaxCapacity", func() {
+		size, err := estimateFieldDataSize(128, 1000, schemapb.DataType_ArrayOfVector, 10)
+		s.NoError(err)
+		// 128 * 1000 * 4 * 10
+		s.Equal(uint64(128*1000*4*10), size)
+	})
+
+	s.Run("ArrayOfVector_WithoutMaxCapacity", func() {
+		size, err := estimateFieldDataSize(128, 1000, schemapb.DataType_ArrayOfVector, 0)
+		s.NoError(err)
+		// default multiplier is 2
+		// 128 * 1000 * 4 * 2
+		s.Equal(uint64(128*1000*4*2), size)
+	})
+
+	s.Run("UnknownType", func() {
+		size, err := estimateFieldDataSize(128, 1000, schemapb.DataType_Int64, 0)
+		s.NoError(err)
+		s.Equal(uint64(0), size)
+	})
 }
 
 func (s *utilSuite) Test_mapToKVPairs() {

@@ -46,7 +46,7 @@ func getCurrentIndexVersion(v int32) int32 {
 	return v
 }
 
-func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType) (uint64, error) {
+func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType, maxCapacity int64) (uint64, error) {
 	switch dataType {
 	case schemapb.DataType_BinaryVector:
 		return uint64(dim) / 8 * uint64(numRows), nil
@@ -56,6 +56,17 @@ func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType)
 		return uint64(dim) * uint64(numRows) * 2, nil
 	case schemapb.DataType_SparseFloatVector:
 		return 0, errors.New("could not estimate field data size of SparseFloatVector")
+	case schemapb.DataType_Array, schemapb.DataType_ArrayOfVector, schemapb.DataType_ArrayOfStruct:
+		// For Array of Vectors (Embedding List), we use max_capacity to estimate the total vector count.
+		// If max_capacity is not provided, we use a default multiplier of 2.
+		multiplier := int64(2)
+		if maxCapacity > 0 {
+			multiplier = maxCapacity
+		}
+		if dim > 0 {
+			return uint64(dim) * uint64(numRows) * 4 * uint64(multiplier), nil
+		}
+		return 0, nil
 	default:
 		return 0, nil
 	}

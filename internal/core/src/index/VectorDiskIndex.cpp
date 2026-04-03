@@ -285,6 +285,10 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     knowhere::Json build_config;
     build_config.update(config);
+
+    auto is_embedding_list = (elem_type_ != DataType::NONE);
+    build_config[EMB_LIST] = is_embedding_list;
+
     // set data path
     auto segment_id = file_manager_->GetFieldDataMeta().segment_id;
     auto field_id = file_manager_->GetFieldDataMeta().field_id;
@@ -340,16 +344,16 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 
         // Calculate the number of offsets (num_rows + 1)
         // We need to find the actual number by looking at the data
-        uint32_t num_rows =
-            static_cast<uint32_t>(milvus::GetDatasetRows(dataset));
-        uint32_t num_offsets = num_rows + 1;
+        size_t num_rows =
+            static_cast<size_t>(milvus::GetDatasetRows(dataset));
+        size_t num_offsets = num_rows + 1;
 
         // Write offsets to file
         // Format: [num_offsets][offsets_data]
         int64_t write_pos = 0;
         local_chunk_manager->Write(
-            offsets_path, write_pos, &num_offsets, sizeof(uint32_t));
-        write_pos += sizeof(uint32_t);
+            offsets_path, write_pos, &num_offsets, sizeof(size_t));
+        write_pos += sizeof(size_t);
 
         local_chunk_manager->Write(
             offsets_path,
@@ -527,6 +531,9 @@ inline knowhere::Json
 VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
     knowhere::Json load_config;
     load_config.update(config);
+
+    auto is_embedding_list = (elem_type_ != DataType::NONE);
+    load_config[EMB_LIST] = is_embedding_list;
 
     // set data path
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();

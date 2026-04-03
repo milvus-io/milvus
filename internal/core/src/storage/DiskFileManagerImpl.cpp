@@ -564,6 +564,10 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
         FetchRawData();
     }
 
+    if (is_vector_array) {
+        num_rows = (uint32_t)offsets.back();
+    }
+
     // write num_rows and dim value to file header
     write_offset = 0;
     local_chunk_manager->Write(
@@ -574,23 +578,19 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
 
     // Write offsets file for VECTOR_ARRAY
     if (is_vector_array) {
-        AssertInfo(offsets.size() == num_rows + 1,
-                   "offsets size is not equal to num_rows + 1: offset size {}, "
-                   "num_rows {}",
-                   offsets.size(),
-                   num_rows);
+        AssertInfo(offsets.size() > 0, "offsets should not be empty");
         // Get offsets path from config if provided, otherwise use default
         auto offsets_path = index::GetValueFromConfig<std::string>(
                                 config, index::EMB_LIST_OFFSETS_PATH)
                                 .value();
         local_chunk_manager->CreateFile(offsets_path);
 
-        uint32_t num_offsets = offsets.size();
+        size_t num_offsets = offsets.size();
         int64_t offsets_write_pos = 0;
 
         local_chunk_manager->Write(
-            offsets_path, offsets_write_pos, &num_offsets, sizeof(uint32_t));
-        offsets_write_pos += sizeof(uint32_t);
+            offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
+        offsets_write_pos += sizeof(size_t);
 
         local_chunk_manager->Write(offsets_path,
                                    offsets_write_pos,
@@ -830,6 +830,10 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                          is_vector_array ? &offsets : nullptr);
     }
 
+    if (is_vector_array) {
+        num_rows = (uint32_t)offsets.back();
+    }
+
     // write num_rows and dim value to file header
     write_offset = 0;
     local_chunk_manager->Write(
@@ -840,11 +844,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
 
     // Write offsets file for VECTOR_ARRAY
     if (is_vector_array) {
-        AssertInfo(offsets.size() == num_rows + 1,
-                   "offsets size is not equal to num_rows + 1: offset size {}, "
-                   "num_rows {}",
-                   offsets.size(),
-                   num_rows);
+        AssertInfo(offsets.size() > 0, "offsets should not be empty");
         // Get offsets path from config if provided, otherwise use default
         auto offsets_path = index::GetValueFromConfig<std::string>(
                                 config, index::EMB_LIST_OFFSETS_PATH)
@@ -852,12 +852,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
 
         local_chunk_manager->CreateFile(offsets_path);
 
-        uint32_t num_offsets = offsets.size();
+        size_t num_offsets = offsets.size();
         int64_t offsets_write_pos = 0;
 
         local_chunk_manager->Write(
-            offsets_path, offsets_write_pos, &num_offsets, sizeof(uint32_t));
-        offsets_write_pos += sizeof(uint32_t);
+            offsets_path, offsets_write_pos, &num_offsets, sizeof(size_t));
+        offsets_write_pos += sizeof(size_t);
 
         local_chunk_manager->Write(offsets_path,
                                    offsets_write_pos,

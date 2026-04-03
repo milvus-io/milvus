@@ -237,8 +237,16 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	var fieldDataSize uint64
 	var err error
 
+	var maxCapacity int64
+	for _, kv := range it.req.GetField().GetTypeParams() {
+		if kv.Key == common.MaxCapacityKey {
+			maxCapacity, _ = strconv.ParseInt(kv.Value, 10, 64)
+			break
+		}
+	}
+
 	// Ignore the error here, this param will only be used for diskann and aisaq
-	fieldDataSize, _ = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
+	fieldDataSize, _ = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType(), maxCapacity)
 	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 		err = indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize))
 		if err != nil {
