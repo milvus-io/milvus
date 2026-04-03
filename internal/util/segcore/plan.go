@@ -44,6 +44,9 @@ type SearchPlan struct {
 }
 
 func createSearchPlanByExpr(col *CCollection, expr []byte) (*SearchPlan, error) {
+	if len(expr) == 0 {
+		return nil, errors.New("empty expression plan")
+	}
 	var cPlan C.CSearchPlan
 	status := C.CreateSearchPlanByExpr(col.rawPointer(), unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
