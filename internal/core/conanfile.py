@@ -66,7 +66,7 @@ class MilvusConan(ConanFile):
         "arrow:with_zstd": True,
         "arrow:with_boost": True,
         "arrow:with_thrift": True,
-        "arrow:with_jemalloc": True,
+        "arrow:with_jemalloc": False,
         "arrow:with_openssl": True,
         "arrow:shared": False,
         "arrow:with_azure": True,
