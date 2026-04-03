@@ -264,9 +264,10 @@ class FixedWidthChunk : public RowChunk {
 
     AnyDataView
     GetAnyDataView() const override {
-        auto data = reinterpret_cast<const T*>(data_start_);
-        return AnyDataView(std::make_shared<ContiguousDataView<T>>(
-            data, nullable_ ? valid_.data() : nullptr, row_nums_));
+        return AnyDataView(reinterpret_cast<const T*>(data_start_),
+                           nullable_ ? valid_.data() : nullptr,
+                           row_nums_,
+                           &typeid(T));
     }
 
     const std::type_info&
@@ -314,9 +315,10 @@ class FixedWidthChunk<
 
     AnyDataView
     GetAnyDataView() const override {
-        auto data = reinterpret_cast<const ValueType*>(data_start_);
-        return AnyDataView(std::make_shared<ContiguousDataView<VectorType>>(
-            data, nullable_ ? valid_.data() : nullptr, row_nums_, dim_));
+        return AnyDataView(reinterpret_cast<const ValueType*>(data_start_),
+                           nullable_ ? valid_.data() : nullptr,
+                           row_nums_,
+                           &typeid(VectorType));
     }
 
     const std::type_info&

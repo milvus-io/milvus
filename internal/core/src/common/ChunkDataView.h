@@ -517,43 +517,112 @@ class StringDataView : public ChunkDataView<std::string_view> {
 
 class AnyDataView {
  public:
+    // Inline construction: zero-alloc path for fixed-width scalars/vectors.
+    // Stores raw pointers directly; caller must guarantee lifetime (PinWrapper).
+    AnyDataView(const void* data,
+                const bool* valid,
+                int64_t row_count,
+                const std::type_info* type)
+        : kind_(Kind::Inline) {
+        inline_.data = data;
+        inline_.valid = valid;
+        inline_.row_count = row_count;
+        inline_.type = type;
+    }
+
+    // Shared construction: heap-allocated path for variable-length / Vortex.
     template <
         typename Derived,
         typename = std::enable_if_t<std::is_base_of_v<BaseDataView, Derived>>>
-    AnyDataView(std::shared_ptr<Derived> view)
-        : view_(std::move(view)),
-          actual_type_(view_ ? &typeid(*view_) : nullptr) {
+    AnyDataView(std::shared_ptr<Derived> view) : kind_(Kind::Shared) {
+        new (&shared_.view) std::shared_ptr<BaseDataView>(std::move(view));
+        shared_.actual_type = shared_.view ? &typeid(*shared_.view) : nullptr;
     }
 
+    ~AnyDataView() {
+        if (kind_ == Kind::Shared) {
+            shared_.view.~shared_ptr();
+        }
+    }
+
+    AnyDataView(AnyDataView&& o) noexcept : kind_(o.kind_) {
+        if (kind_ == Kind::Inline) {
+            inline_ = o.inline_;
+        } else {
+            new (&shared_.view)
+                std::shared_ptr<BaseDataView>(std::move(o.shared_.view));
+            shared_.actual_type = o.shared_.actual_type;
+        }
+    }
+
+    AnyDataView&
+    operator=(AnyDataView&& o) noexcept {
+        if (this != &o) {
+            if (kind_ == Kind::Shared)
+                shared_.view.~shared_ptr();
+            kind_ = o.kind_;
+            if (kind_ == Kind::Inline) {
+                inline_ = o.inline_;
+            } else {
+                new (&shared_.view)
+                    std::shared_ptr<BaseDataView>(std::move(o.shared_.view));
+                shared_.actual_type = o.shared_.actual_type;
+            }
+        }
+        return *this;
+    }
+
+    AnyDataView(const AnyDataView&) = delete;
+    AnyDataView&
+    operator=(const AnyDataView&) = delete;
+
+    // Fast path: direct pointer cast, no RTTI, no heap alloc.
+    // For inline storage this is a trivial static_cast.
+    // For shared storage, falls back to as<T>()->Data().
+    template <typename T>
+    const T*
+    DataAs() const {
+        if (kind_ == Kind::Inline) {
+            return static_cast<const T*>(inline_.data);
+        }
+        return const_cast<AnyDataView*>(this)->as<T>()->Data();
+    }
+
+    // Full type-recovery path: returns shared_ptr<ChunkDataView<T>>.
+    // For inline storage, constructs ContiguousDataView on demand (not hot path).
     template <typename T>
     std::shared_ptr<ChunkDataView<T>>
     as() {
-        auto result = std::dynamic_pointer_cast<ChunkDataView<T>>(view_);
+        if (kind_ == Kind::Inline) {
+            if constexpr (std::is_arithmetic_v<T>) {
+                return std::make_shared<ContiguousDataView<T>>(
+                    static_cast<const T*>(inline_.data),
+                    inline_.valid,
+                    inline_.row_count);
+            }
+            AssertInfo(false,
+                       "as<T>() on inline AnyDataView: unsupported type");
+            return nullptr;
+        }
+
+        auto result = std::dynamic_pointer_cast<ChunkDataView<T>>(shared_.view);
         if (result) {
             return result;
         }
 
-        // Support string -> string_view conversion:
-        // Growing non-mmap segment stores std::string but some callers
-        // request string_view. Wrap with an adapter that builds string_view
-        // vector from the underlying string data.
         if constexpr (std::is_same_v<T, std::string_view>) {
             auto str_view =
-                std::dynamic_pointer_cast<ChunkDataView<std::string>>(view_);
+                std::dynamic_pointer_cast<ChunkDataView<std::string>>(
+                    shared_.view);
             if (str_view) {
                 return std::make_shared<StringDataView>(std::move(str_view));
             }
         }
 
-        // Support string_view -> Json conversion:
-        // JSONChunk stores data as strings and returns
-        // ContiguousDataView<string_view>. When callers request Json type,
-        // wrap with an adapter that constructs Json objects from string_view
-        // (same behavior as old chunk_view<Json>).
         if constexpr (std::is_same_v<T, Json>) {
             auto sv_view =
                 std::dynamic_pointer_cast<ChunkDataView<std::string_view>>(
-                    view_);
+                    shared_.view);
             if (sv_view) {
                 return std::make_shared<JsonDataView>(std::move(sv_view));
             }
@@ -561,30 +630,55 @@ class AnyDataView {
 
         AssertInfo(
             false,
-            fmt::format("ChunkDataView type mismatch: requested={}, actual={}",
-                        typeid(ChunkDataView<T>).name(),
-                        actual_type_ ? actual_type_->name() : "null"));
+            fmt::format(
+                "ChunkDataView type mismatch: requested={}, actual={}",
+                typeid(ChunkDataView<T>).name(),
+                shared_.actual_type ? shared_.actual_type->name() : "null"));
         return nullptr;
     }
 
     const bool*
     ValidData() const {
-        return view_->ValidData();
+        if (kind_ == Kind::Inline)
+            return inline_.valid;
+        return shared_.view->ValidData();
     }
 
     void
     SetValidData(const bool* valid) {
-        view_->SetValidData(valid);
+        if (kind_ == Kind::Inline) {
+            inline_.valid = valid;
+            return;
+        }
+        shared_.view->SetValidData(valid);
     }
 
     int64_t
     RowCount() const {
-        return view_->RowCount();
+        if (kind_ == Kind::Inline)
+            return inline_.row_count;
+        return shared_.view->RowCount();
     }
 
  private:
-    std::shared_ptr<BaseDataView> view_;
-    const std::type_info* actual_type_{nullptr};
+    enum class Kind : uint8_t { Inline, Shared };
+
+    struct InlineData {
+        const void* data;
+        const bool* valid;
+        int64_t row_count;
+        const std::type_info* type;
+    };
+    struct SharedData {
+        std::shared_ptr<BaseDataView> view;
+        const std::type_info* actual_type;
+    };
+
+    union {
+        InlineData inline_;
+        SharedData shared_;
+    };
+    Kind kind_;
 };
 
 }  // namespace milvus

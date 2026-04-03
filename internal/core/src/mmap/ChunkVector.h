@@ -220,9 +220,10 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
                     static_cast<Type*>(get_chunk_data(chunk_id)),
                     get_chunk_size(chunk_id)));
         } else {
-            return AnyDataView(std::make_shared<ContiguousDataView<Type>>(
-                static_cast<Type*>(get_chunk_data(chunk_id)),
-                get_chunk_size(chunk_id)));
+            return AnyDataView(static_cast<Type*>(get_chunk_data(chunk_id)),
+                               nullptr,
+                               get_chunk_size(chunk_id),
+                               &typeid(Type));
         }
     }
 

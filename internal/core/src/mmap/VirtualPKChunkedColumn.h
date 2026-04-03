@@ -104,11 +104,10 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
     }
 
     PinWrapper<AnyDataView>
-    ChunkDataView(milvus::OpContext* op_ctx,
-                  int64_t chunk_id) const override {
+    ChunkDataView(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
         EnsureMaterialized();
-        return PinWrapper<AnyDataView>(AnyDataView(
-            std::make_shared<ContiguousDataView<int64_t>>(
+        return PinWrapper<AnyDataView>(
+            AnyDataView(std::make_shared<ContiguousDataView<int64_t>>(
                 materialized_pks_.data(), num_rows_)));
     }
 
@@ -118,8 +117,8 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
                          int64_t start_offset,
                          int64_t length) const override {
         EnsureMaterialized();
-        return PinWrapper<AnyDataView>(AnyDataView(
-            std::make_shared<ContiguousDataView<int64_t>>(
+        return PinWrapper<AnyDataView>(
+            AnyDataView(std::make_shared<ContiguousDataView<int64_t>>(
                 materialized_pks_.data() + start_offset, length)));
     }
 

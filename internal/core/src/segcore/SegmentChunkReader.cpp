@@ -74,7 +74,6 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
         if (current_chunk_pos >= current_chunk_size) {
             current_chunk_id++;
             current_chunk_pos = 0;
-            // the old chunk will be unpinned, pw will now pin the new chunk.
             pw = segment_->chunk_view<T>(op_ctx_, field_id, current_chunk_id);
             chunk_data = pw.get()->Data();
             chunk_valid_data = pw.get()->ValidData();

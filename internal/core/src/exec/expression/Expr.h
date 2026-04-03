@@ -657,10 +657,10 @@ class SegmentExpr : public Expr {
                     auto [chunk_id, chunk_offset] =
                         segment_->get_chunk_by_offset(field_id_, offset);
                     auto pw =
-                        segment_->chunk_view<T>(op_ctx_, field_id_, chunk_id);
-                    auto chunk = pw.get();
-                    const T* data = chunk->Data() + chunk_offset;
-                    const bool* valid_data = chunk->ValidData();
+                        segment_->chunk_data_view(op_ctx_, field_id_, chunk_id);
+                    auto& view = pw.get();
+                    const T* data = view.DataAs<T>() + chunk_offset;
+                    const bool* valid_data = view.ValidData();
                     if (valid_data != nullptr) {
                         valid_data += chunk_offset;
                     }
@@ -690,10 +690,10 @@ class SegmentExpr : public Expr {
                     return ProcessDataByOffsetsForSealedSeg<T>(
                         func, skip_func, input, res, valid_res, values...);
                 }
-                auto pw = segment_->chunk_view<T>(op_ctx_, field_id_, 0);
-                auto chunk = pw.get();
-                const T* data = chunk->Data();
-                const bool* valid_data = chunk->ValidData();
+                auto pw = segment_->chunk_data_view(op_ctx_, field_id_, 0);
+                auto& view = pw.get();
+                const T* data = view.DataAs<T>();
+                const bool* valid_data = view.ValidData();
                 if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
                     func.template operator()<FilterType::random>(data,
                                                                  valid_data,
@@ -713,10 +713,11 @@ class SegmentExpr : public Expr {
                 int64_t offset = (*input)[i];
                 auto chunk_id = offset / size_per_chunk_;
                 auto chunk_offset = offset % size_per_chunk_;
-                auto pw = segment_->chunk_view<T>(op_ctx_, field_id_, chunk_id);
-                auto chunk = pw.get();
-                const T* data = chunk->Data() + chunk_offset;
-                const bool* valid_data = chunk->ValidData();
+                auto pw =
+                    segment_->chunk_data_view(op_ctx_, field_id_, chunk_id);
+                auto& view = pw.get();
+                const T* data = view.DataAs<T>() + chunk_offset;
+                const bool* valid_data = view.ValidData();
                 if (valid_data != nullptr) {
                     valid_data += chunk_offset;
                 }
@@ -1188,14 +1189,14 @@ class SegmentExpr : public Expr {
                 continue;  //do not go empty-loop at the bound of the chunk
 
             auto& skip_index = segment_->GetSkipIndex();
-            auto pw = segment_->chunk_view<T>(op_ctx_, field_id_, i);
-            auto chunk = pw.get();
-            const bool* valid_data = chunk->ValidData();
+            auto pw = segment_->chunk_data_view(op_ctx_, field_id_, i);
+            auto& view = pw.get();
+            const bool* valid_data = view.ValidData();
             if (valid_data != nullptr) {
                 valid_data += data_pos;
             }
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
-                const T* data = chunk->Data() + data_pos;
+                const T* data = view.DataAs<T>() + data_pos;
 
                 if constexpr (NeedSegmentOffsets) {
                     // For GIS functions: construct segment offsets array
@@ -1346,10 +1347,10 @@ class SegmentExpr : public Expr {
                     }
                 }
                 if (!is_seal) {
-                    auto pw = segment_->chunk_view<T>(op_ctx_, field_id_, i);
-                    auto chunk = pw.get();
-                    const T* data = chunk->Data() + data_pos;
-                    const bool* valid_data = chunk->ValidData();
+                    auto pw = segment_->chunk_data_view(op_ctx_, field_id_, i);
+                    auto& view = pw.get();
+                    const T* data = view.DataAs<T>() + data_pos;
+                    const bool* valid_data = view.ValidData();
                     if (valid_data != nullptr) {
                         valid_data += data_pos;
                     }
@@ -1393,9 +1394,8 @@ class SegmentExpr : public Expr {
                                    valid_res + processed_size,
                                    size);
                 } else {
-                    auto pw = segment_->chunk_view<T>(op_ctx_, field_id_, i);
-                    auto chunk = pw.get();
-                    valid_data = chunk->ValidData();
+                    auto pw = segment_->chunk_data_view(op_ctx_, field_id_, i);
+                    valid_data = pw.get().ValidData();
                     if (valid_data != nullptr) {
                         valid_data += data_pos;
                     }
@@ -1764,9 +1764,9 @@ class SegmentExpr : public Expr {
                         return {0, offset};
                     }
                 }();
-                auto pw = segment_->chunk_view<T>(op_ctx_, field_id_, chunk_id);
-                auto chunk = pw.get();
-                const bool* valid_data = chunk->ValidData();
+                auto pw =
+                    segment_->chunk_data_view(op_ctx_, field_id_, chunk_id);
+                const bool* valid_data = pw.get().ValidData();
                 if (valid_data != nullptr) {
                     valid_result[i] = valid_data[chunk_offset];
                 } else {
@@ -1821,9 +1821,8 @@ class SegmentExpr : public Expr {
             }
 
             if (!access_sealed_variable_column) {
-                auto pw = segment_->chunk_view<T>(op_ctx_, field_id_, i);
-                auto chunk = pw.get();
-                const bool* valid_data = chunk->ValidData();
+                auto pw = segment_->chunk_data_view(op_ctx_, field_id_, i);
+                const bool* valid_data = pw.get().ValidData();
                 if (valid_data == nullptr) {
                     return valid_result;
                 }

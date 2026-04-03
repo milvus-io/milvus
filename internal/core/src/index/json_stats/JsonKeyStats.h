@@ -249,7 +249,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         for (size_t i = 0; i < num_data_chunk; i++) {
             auto chunk_size = column->chunk_row_nums(i);
             auto pw = column->ChunkDataView(op_ctx, i);
-            auto data_view = pw.get();
+            auto& data_view = pw.get();
             const bool* valid_data = data_view.ValidData();
             ApplyOnlyValidData(
                 valid_data, valid_res + processed_size, chunk_size);
@@ -288,7 +288,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
             if (!skip_func || !skip_func(skip_index_, path, i)) {
                 auto pw = column->ChunkDataView(op_ctx, i);
-                auto any_view = pw.get();
+                auto& any_view = pw.get();
                 if constexpr (std::is_same_v<T, std::string_view>) {
                     // Get string data as string_view directly
                     auto data_view = any_view.as<std::string_view>();
@@ -314,7 +314,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                 }
             } else {
                 auto pw = column->ChunkDataView(op_ctx, i);
-                auto chunk = pw.get();
+                auto& chunk = pw.get();
                 const bool* valid_data = chunk.ValidData();
                 ApplyValidData(valid_data,
                                res + processed_size,

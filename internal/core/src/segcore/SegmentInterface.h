@@ -319,6 +319,15 @@ class SegmentInternalInterface : public SegmentInterface {
                 });
     }
 
+    // Fast path: returns PinWrapper<AnyDataView> directly, skipping
+    // transform + as<T>() + shared_ptr overhead. Use DataAs<T>() to access.
+    PinWrapper<AnyDataView>
+    chunk_data_view(milvus::OpContext* op_ctx,
+                    FieldId field_id,
+                    int64_t chunk_id) const {
+        return chunk_view_impl(op_ctx, field_id, chunk_id);
+    }
+
     // union(segment_id, field_id) as unique id
     virtual std::string
     GetUniqueFieldId(int64_t field_id) const {

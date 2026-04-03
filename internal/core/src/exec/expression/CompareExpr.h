@@ -335,14 +335,16 @@ class PhyCompareFilterExpr : public Expr {
                 auto [right_chunk_id, right_chunk_offset] =
                     get_chunk_id_and_offset(right_field_);
 
-                auto pw_left = segment_chunk_reader_.segment_->chunk_view<T>(
+                auto pw_left = segment_chunk_reader_.segment_->chunk_data_view(
                     op_ctx_, left_field_, left_chunk_id);
-                auto left_chunk = pw_left.get();
-                auto pw_right = segment_chunk_reader_.segment_->chunk_view<U>(
+                auto& left_view = pw_left.get();
+                auto pw_right = segment_chunk_reader_.segment_->chunk_data_view(
                     op_ctx_, right_field_, right_chunk_id);
-                auto right_chunk = pw_right.get();
-                const T* left_data = left_chunk->Data() + left_chunk_offset;
-                const U* right_data = right_chunk->Data() + right_chunk_offset;
+                auto& right_view = pw_right.get();
+                const T* left_data =
+                    left_view.template DataAs<T>() + left_chunk_offset;
+                const U* right_data =
+                    right_view.template DataAs<U>() + right_chunk_offset;
                 func.template operator()<FilterType::random>(
                     left_data,
                     right_data,
@@ -350,8 +352,8 @@ class PhyCompareFilterExpr : public Expr {
                     1,
                     res + processed_size,
                     values...);
-                const bool* left_valid_data = left_chunk->ValidData();
-                const bool* right_valid_data = right_chunk->ValidData();
+                const bool* left_valid_data = left_view.ValidData();
+                const bool* right_valid_data = right_view.ValidData();
                 // mask with valid_data
                 if (left_valid_data && !left_valid_data[left_chunk_offset]) {
                     res[processed_size] = false;
@@ -366,18 +368,18 @@ class PhyCompareFilterExpr : public Expr {
             }
             return processed_size;
         } else {
-            auto pw_left = segment_chunk_reader_.segment_->chunk_view<T>(
+            auto pw_left = segment_chunk_reader_.segment_->chunk_data_view(
                 op_ctx_, left_field_, 0);
-            auto left_chunk = pw_left.get();
-            auto pw_right = segment_chunk_reader_.segment_->chunk_view<U>(
+            auto& left_view = pw_left.get();
+            auto pw_right = segment_chunk_reader_.segment_->chunk_data_view(
                 op_ctx_, right_field_, 0);
-            auto right_chunk = pw_right.get();
-            const T* left_data = left_chunk->Data();
-            const U* right_data = right_chunk->Data();
+            auto& right_view = pw_right.get();
+            const T* left_data = left_view.template DataAs<T>();
+            const U* right_data = right_view.template DataAs<U>();
             func.template operator()<FilterType::random>(
                 left_data, right_data, input->data(), size, res, values...);
-            const bool* left_valid_data = left_chunk->ValidData();
-            const bool* right_valid_data = right_chunk->ValidData();
+            const bool* left_valid_data = left_view.ValidData();
+            const bool* right_valid_data = right_view.ValidData();
             // mask with valid_data
             for (int i = 0; i < size; ++i) {
                 if (left_valid_data && !left_valid_data[(*input)[i]]) {
@@ -405,12 +407,12 @@ class PhyCompareFilterExpr : public Expr {
 
         const auto active_count = segment_chunk_reader_.active_count_;
         for (size_t i = current_chunk_id_; i < num_chunk_; i++) {
-            auto pw_left = segment_chunk_reader_.segment_->chunk_view<T>(
+            auto pw_left = segment_chunk_reader_.segment_->chunk_data_view(
                 op_ctx_, left_field_, i);
-            auto left_chunk = pw_left.get();
-            auto pw_right = segment_chunk_reader_.segment_->chunk_view<U>(
+            auto& left_view = pw_left.get();
+            auto pw_right = segment_chunk_reader_.segment_->chunk_data_view(
                 op_ctx_, right_field_, i);
-            auto right_chunk = pw_right.get();
+            auto& right_view = pw_right.get();
             auto data_pos = (i == current_chunk_id_) ? current_chunk_pos_ : 0;
             auto size =
                 (i == (num_chunk_ - 1))
@@ -431,16 +433,16 @@ class PhyCompareFilterExpr : public Expr {
                 size = batch_size_ - processed_size;
             }
 
-            const T* left_data = left_chunk->Data() + data_pos;
-            const U* right_data = right_chunk->Data() + data_pos;
+            const T* left_data = left_view.template DataAs<T>() + data_pos;
+            const U* right_data = right_view.template DataAs<U>() + data_pos;
             func(left_data,
                  right_data,
                  nullptr,
                  size,
                  res + processed_size,
                  values...);
-            const bool* left_valid_data = left_chunk->ValidData();
-            const bool* right_valid_data = right_chunk->ValidData();
+            const bool* left_valid_data = left_view.ValidData();
+            const bool* right_valid_data = right_view.ValidData();
             // mask with valid_data
             for (int i = 0; i < size; ++i) {
                 if (left_valid_data && !left_valid_data[i + data_pos]) {
@@ -475,12 +477,12 @@ class PhyCompareFilterExpr : public Expr {
 
         // only call this function when left and right are not indexed, so they have the same number of chunks
         for (size_t i = left_current_chunk_id_; i < left_num_chunk_; i++) {
-            auto pw_left = segment_chunk_reader_.segment_->chunk_view<T>(
+            auto pw_left = segment_chunk_reader_.segment_->chunk_data_view(
                 op_ctx_, left_field_, i);
-            auto left_chunk = pw_left.get();
-            auto pw_right = segment_chunk_reader_.segment_->chunk_view<U>(
+            auto& left_view = pw_left.get();
+            auto pw_right = segment_chunk_reader_.segment_->chunk_data_view(
                 op_ctx_, right_field_, i);
-            auto right_chunk = pw_right.get();
+            auto& right_view = pw_right.get();
             auto data_pos =
                 (i == left_current_chunk_id_) ? left_current_chunk_pos_ : 0;
             auto size = 0;
@@ -506,16 +508,16 @@ class PhyCompareFilterExpr : public Expr {
                 size = batch_size_ - processed_size;
             }
 
-            const T* left_data = left_chunk->Data() + data_pos;
-            const U* right_data = right_chunk->Data() + data_pos;
+            const T* left_data = left_view.template DataAs<T>() + data_pos;
+            const U* right_data = right_view.template DataAs<U>() + data_pos;
             func(left_data,
                  right_data,
                  nullptr,
                  size,
                  res + processed_size,
                  values...);
-            const bool* left_valid_data = left_chunk->ValidData();
-            const bool* right_valid_data = right_chunk->ValidData();
+            const bool* left_valid_data = left_view.ValidData();
+            const bool* right_valid_data = right_view.ValidData();
             // mask with valid_data
             for (int i = 0; i < size; ++i) {
                 if (left_valid_data && !left_valid_data[i + data_pos]) {
