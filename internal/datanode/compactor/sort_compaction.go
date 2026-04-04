@@ -480,9 +480,12 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 				}, nil
 			}
 			resultSegment.Manifest = newManifest
-			// Dual-write: V3 segments store text index stats in both manifest and segment metadata.
-			// Manifest is the source of truth at load time; metadata acts as a placeholder so that
-			// needDoTextIndex() in stats_inspector.go won't trigger a redundant TextIndexJob.
+			// V3 segments store text index stats in the manifest (source of truth at load time).
+			// Clear file paths from metadata to avoid stale references, but keep the map entries
+			// as placeholders so needDoTextIndex() in stats_inspector.go won't trigger redundant jobs.
+			for _, stats := range textStatsLogs {
+				stats.Files = nil
+			}
 		}
 		resultSegment.TextStatsLogs = textStatsLogs
 	}
