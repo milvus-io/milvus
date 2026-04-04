@@ -108,10 +108,8 @@ TEST(IterativeFilter, SealedIndex) {
     // matches for "int16 in [1, 2]" regardless of platform RNG.
     {
         std::vector<int16_t> int16_vals;
-        for (int i = 0; i < 6; ++i)
-            int16_vals.push_back(1);
-        for (int i = 0; i < 6; ++i)
-            int16_vals.push_back(2);
+        for (int i = 0; i < 6; ++i) int16_vals.push_back(1);
+        for (int i = 0; i < 6; ++i) int16_vals.push_back(2);
         for (size_t i = 12; i < N; ++i)
             int16_vals.push_back(static_cast<int16_t>(i + 3));
         std::mt19937 rng(42);
@@ -120,11 +118,9 @@ TEST(IterativeFilter, SealedIndex) {
         for (int i = 0; i < raw_data.raw_->fields_data_size(); ++i) {
             auto* fd = raw_data.raw_->mutable_fields_data(i);
             if (fd->field_id() == int16_fid.get()) {
-                auto* int_data =
-                    fd->mutable_scalars()->mutable_int_data();
+                auto* int_data = fd->mutable_scalars()->mutable_int_data();
                 int_data->clear_data();
-                for (auto v : int16_vals)
-                    int_data->add_data(v);
+                for (auto v : int16_vals) int_data->add_data(v);
                 break;
             }
         }

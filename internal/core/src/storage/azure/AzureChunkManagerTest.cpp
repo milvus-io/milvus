@@ -50,8 +50,8 @@ isTcpReachable(const char* host, int port) {
     struct timeval tv{1, 0};  // 1-second timeout
     ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    int ret =
-        ::connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
+    int ret = ::connect(
+        sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
     ::close(sock);
     return ret == 0;
 }
@@ -109,7 +109,8 @@ class AzureChunkManagerTest : public testing::Test {
         // Skip when Azurite emulator is not running locally.
         // Start with: docker run -p 10000:10000 mcr.microsoft.com/azure-storage/azurite azurite-blob
         if (!isTcpReachable("127.0.0.1", 10000)) {
-            GTEST_SKIP() << "Azurite not reachable at 127.0.0.1:10000 — skipping Azure tests";
+            GTEST_SKIP() << "Azurite not reachable at 127.0.0.1:10000 — "
+                            "skipping Azure tests";
         }
         configs_ = get_default_storage_config(false);
         chunk_manager_ = make_unique<AzureChunkManager>(configs_);
