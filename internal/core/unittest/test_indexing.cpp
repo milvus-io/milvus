@@ -570,6 +570,13 @@ TEST_P(IndexTest, BuildAndQuery) {
 }
 
 TEST_P(IndexTest, Mmap) {
+#ifdef __APPLE__
+    // faiss MmappedFileMappingOwner is not implemented on macOS:
+    // knowhere/thirdparty/faiss/impl/mapped_io.cpp only has Linux/FreeBSD
+    // and Windows branches; the #else falls through to FAISS_THROW_MSG.
+    // Skip until faiss adds __APPLE__ support upstream.
+    GTEST_SKIP() << "faiss mmap not implemented on macOS (mapped_io.cpp)";
+#endif
     auto dim = is_binary ? BINARY_DIM : DIM;
     milvus::index::CreateIndexInfo create_index_info;
     create_index_info.index_type = index_type;

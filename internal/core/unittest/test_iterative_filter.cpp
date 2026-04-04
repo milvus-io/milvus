@@ -17,6 +17,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <random>
 #include <string>
 #include <utility>
 #include <vector>
@@ -91,7 +92,7 @@ TEST(IterativeFilter, SealedIndex) {
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
     schema->AddDebugField("int8", DataType::INT8);
-    schema->AddDebugField("int16", DataType::INT16);
+    auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
     schema->AddDebugField("int32", DataType::INT32);
     schema->AddDebugField("int64", DataType::INT64);
     auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
@@ -101,6 +102,30 @@ TEST(IterativeFilter, SealedIndex) {
 
     //2. load raw data
     auto raw_data = DataGen(schema, N, 42, 0, 8, 10, false, false);
+
+    // Override int16 column: 6 rows = 1, 6 rows = 2, rest >= 3.
+    // Shuffle so rows are not trivially ordered, guaranteeing >= 10
+    // matches for "int16 in [1, 2]" regardless of platform RNG.
+    {
+        std::vector<int16_t> int16_vals;
+        for (int i = 0; i < 6; ++i) int16_vals.push_back(1);
+        for (int i = 0; i < 6; ++i) int16_vals.push_back(2);
+        for (size_t i = 12; i < N; ++i)
+            int16_vals.push_back(static_cast<int16_t>(i + 3));
+        std::mt19937 rng(42);
+        std::shuffle(int16_vals.begin(), int16_vals.end(), rng);
+
+        for (int i = 0; i < raw_data.raw_->fields_data_size(); ++i) {
+            auto* fd = raw_data.raw_->mutable_fields_data(i);
+            if (fd->field_id() == int16_fid.get()) {
+                auto* int_data = fd->mutable_scalars()->mutable_int_data();
+                int_data->clear_data();
+                for (auto v : int16_vals) int_data->add_data(v);
+                break;
+            }
+        }
+    }
+
     auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
 
     //3. load index

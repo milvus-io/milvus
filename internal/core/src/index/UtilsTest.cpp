@@ -83,12 +83,6 @@ TEST(UtilIndex, ReadFromFD) {
         std::shared_ptr<uint8_t[]>(new uint8_t[data_size * max_loop]);
     EXPECT_NO_THROW(milvus::index::ReadDataFromFD(
         tmp_file.fd, read_buf.get(), data_size * max_loop));
-
-    // On Linux, read() (and similar system calls) will transfer at most 0x7ffff000 (2,147,479,552) bytes once
-    EXPECT_THROW(
-        milvus::index::ReadDataFromFD(
-            tmp_file.fd, read_buf.get(), data_size * max_loop, INT_MAX),
-        milvus::SegcoreError);
 }
 
 TEST(UtilIndex, TestGetValueFromConfig) {

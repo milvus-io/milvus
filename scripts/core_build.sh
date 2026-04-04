@@ -103,6 +103,9 @@ USE_OPENDAL="OFF"
 TANTIVY_FEATURES=""
 INDEX_ENGINE="KNOWHERE"
 ENABLE_AZURE_FS="ON"
+if [[ "$(uname)" == "Darwin" ]]; then
+  ENABLE_AZURE_FS="OFF"
+fi
 : "${ENABLE_GCP_NATIVE:="OFF"}"
 # Build acceleration options (override via env vars)
 : "${USE_PCH:="ON"}"
