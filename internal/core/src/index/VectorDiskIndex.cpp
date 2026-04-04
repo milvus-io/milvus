@@ -219,6 +219,10 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     knowhere::Json build_config;
     build_config.update(config);
+
+    auto is_embedding_list = (elem_type_ != DataType::NONE);
+    build_config[EMB_LIST] = is_embedding_list;
+
     // set data path
     auto segment_id = file_manager_->GetFieldDataMeta().segment_id;
     auto field_id = file_manager_->GetFieldDataMeta().field_id;
@@ -272,18 +276,23 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
             "offset";
         local_chunk_manager->CreateFile(offsets_path);
 
-        // Calculate the number of offsets (num_rows + 1)
-        // We need to find the actual number by looking at the data
-        uint32_t num_rows =
-            static_cast<uint32_t>(milvus::GetDatasetRows(dataset));
-        uint32_t num_offsets = num_rows + 1;
+        // GetDatasetRows returns total flattened vector count for vector arrays,
+        // not the number of emb_lists. Count actual offsets by scanning the array
+        // until we reach the terminal element (== total_vectors).
+        size_t total_vectors =
+            static_cast<size_t>(milvus::GetDatasetRows(dataset));
+        size_t num_offsets = 0;
+        while (offsets[num_offsets] < total_vectors) {
+            num_offsets++;
+        }
+        num_offsets++;  // include the terminal element (== total_vectors)
 
         // Write offsets to file
-        // Format: [num_offsets][offsets_data]
+        // Format: [num_offsets (size_t)][offsets_data (size_t array)]
         int64_t write_pos = 0;
         local_chunk_manager->Write(
-            offsets_path, write_pos, &num_offsets, sizeof(uint32_t));
-        write_pos += sizeof(uint32_t);
+            offsets_path, write_pos, &num_offsets, sizeof(size_t));
+        write_pos += sizeof(size_t);
 
         local_chunk_manager->Write(
             offsets_path,
