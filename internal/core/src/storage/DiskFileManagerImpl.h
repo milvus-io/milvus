@@ -240,6 +240,12 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     cache_raw_data_to_disk_storage_v2(const Config& config);
 
+    std::string
+    cache_opt_field_to_disk_v2(const Config& config);
+
+    std::string
+    cache_opt_field_to_disk_v3(const Config& config);
+
     template <typename DataType>
     void
     cache_raw_data_to_disk_common(
