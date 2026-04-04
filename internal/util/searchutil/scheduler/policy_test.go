@@ -11,6 +11,7 @@ import (
 
 func TestUserTaskPollingPolicy(t *testing.T) {
 	paramtable.Init()
+	paramtable.Get().QueryNodeCfg.SchedulePolicyMaxConcurrentRatioPerUser.SwapTempValue("1")
 	testCommonPolicyOperation(t, newUserTaskPollingPolicy())
 	testCrossUserMerge(t, newUserTaskPollingPolicy())
 }

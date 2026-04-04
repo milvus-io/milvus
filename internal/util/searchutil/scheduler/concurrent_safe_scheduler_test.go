@@ -19,6 +19,7 @@ import (
 func TestScheduler(t *testing.T) {
 	paramtable.Init()
 	t.Run("user-task-polling", func(t *testing.T) {
+		paramtable.Get().QueryNodeCfg.SchedulePolicyMaxConcurrentRatioPerUser.SwapTempValue("1")
 		testScheduler(t, newUserTaskPollingPolicy())
 	})
 	t.Run("fifo", func(t *testing.T) {

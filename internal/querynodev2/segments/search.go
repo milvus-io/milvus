@@ -26,6 +26,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/limiter"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -62,6 +63,7 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 
 	// calling segment search in goroutines
 	errGroup, ctx := errgroup.WithContext(ctx)
+	errGroup.SetLimit(limiter.GetCurrentSegmentSQConcurrentLimit())
 	segmentsWithoutIndex := make([]int64, 0)
 	for _, segment := range segments {
 		seg := segment
@@ -155,6 +157,7 @@ func searchSegmentsStreamly(ctx context.Context,
 
 	// calling segment search in goroutines
 	errGroup, ctx := errgroup.WithContext(ctx)
+	errGroup.SetLimit(limiter.GetCurrentSegmentSQConcurrentLimit())
 	log := log.Ctx(ctx)
 	for _, segment := range segments {
 		seg := segment
