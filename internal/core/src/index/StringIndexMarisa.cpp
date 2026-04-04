@@ -350,28 +350,20 @@ StringIndexMarisa::StreamFilesToDisk(
     auto file_writer = storage::FileWriter(
         local_path, storage::io::GetPriorityFromLoadPriority(load_priority));
 
-    std::vector<std::string> batch;
-    auto flushBatch = [&]() {
-        auto futures =
-            storage::GetObjectData(file_manager_->GetChunkManager().get(),
-                                   batch,
-                                   milvus::PriorityForLoad(load_priority));
-        auto codecs = storage::WaitAllFutures(std::move(futures));
-        for (auto& codec : codecs) {
-            file_writer.Write(codec->PayloadData(), codec->PayloadSize());
-            total_size += codec->PayloadSize();
+    // Pipeline: prefetch next slice while writing current one.
+    auto cm = file_manager_->GetChunkManager().get();
+    auto prio = milvus::PriorityForLoad(load_priority);
+    if (!files.empty()) {
+        auto next_future = storage::GetObjectData(cm, {files[0]}, prio);
+        for (size_t i = 0; i < files.size(); ++i) {
+            auto codecs = storage::WaitAllFutures(std::move(next_future));
+            if (i + 1 < files.size()) {
+                next_future = storage::GetObjectData(cm, {files[i + 1]}, prio);
+            }
+            file_writer.Write(codecs[0]->PayloadData(),
+                              codecs[0]->PayloadSize());
+            total_size += codecs[0]->PayloadSize();
         }
-        batch.clear();
-    };
-
-    for (auto& file : files) {
-        batch.push_back(file);
-        if (batch.size() >= parallel_degree) {
-            flushBatch();
-        }
-    }
-    if (!batch.empty()) {
-        flushBatch();
     }
 
     file_writer.Finish();

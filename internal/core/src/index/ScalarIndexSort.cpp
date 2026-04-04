@@ -545,28 +545,23 @@ ScalarIndexSort<T>::StreamDataToDisk(
             mmap_filepath_,
             storage::io::GetPriorityFromLoadPriority(load_priority));
 
-        std::vector<std::string> batch;
-        auto flushBatch = [&]() {
-            auto futures =
-                storage::GetObjectData(file_manager_->GetChunkManager().get(),
-                                       batch,
-                                       milvus::PriorityForLoad(load_priority));
-            auto codecs = storage::WaitAllFutures(std::move(futures));
-            for (auto& codec : codecs) {
-                file_writer.Write(codec->PayloadData(), codec->PayloadSize());
-                total_data_size += codec->PayloadSize();
+        // Pipeline: prefetch next slice while writing current one.
+        // Peak memory = 2 slices (~32MB) instead of batch * slices (~128MB).
+        auto cm = file_manager_->GetChunkManager().get();
+        auto prio = milvus::PriorityForLoad(load_priority);
+        if (!data_files.empty()) {
+            auto next_future =
+                storage::GetObjectData(cm, {data_files[0]}, prio);
+            for (size_t i = 0; i < data_files.size(); ++i) {
+                auto codecs = storage::WaitAllFutures(std::move(next_future));
+                if (i + 1 < data_files.size()) {
+                    next_future =
+                        storage::GetObjectData(cm, {data_files[i + 1]}, prio);
+                }
+                file_writer.Write(codecs[0]->PayloadData(),
+                                  codecs[0]->PayloadSize());
+                total_data_size += codecs[0]->PayloadSize();
             }
-            batch.clear();
-        };
-
-        for (auto& file : data_files) {
-            batch.push_back(file);
-            if (batch.size() >= parallel_degree) {
-                flushBatch();
-            }
-        }
-        if (!batch.empty()) {
-            flushBatch();
         }
 
         auto aligned_size =
@@ -605,30 +600,22 @@ ScalarIndexSort<T>::StreamDataToMemory(
     data_.resize(index_size);
     size_t write_offset = 0;
 
-    std::vector<std::string> batch;
-    auto flushBatch = [&]() {
-        auto futures =
-            storage::GetObjectData(file_manager_->GetChunkManager().get(),
-                                   batch,
-                                   milvus::PriorityForLoad(load_priority));
-        auto codecs = storage::WaitAllFutures(std::move(futures));
-        for (auto& codec : codecs) {
+    // Pipeline: prefetch next slice while copying current one.
+    auto cm = file_manager_->GetChunkManager().get();
+    auto prio = milvus::PriorityForLoad(load_priority);
+    if (!data_files.empty()) {
+        auto next_future = storage::GetObjectData(cm, {data_files[0]}, prio);
+        for (size_t i = 0; i < data_files.size(); ++i) {
+            auto codecs = storage::WaitAllFutures(std::move(next_future));
+            if (i + 1 < data_files.size()) {
+                next_future =
+                    storage::GetObjectData(cm, {data_files[i + 1]}, prio);
+            }
             memcpy(reinterpret_cast<uint8_t*>(data_.data()) + write_offset,
-                   codec->PayloadData(),
-                   codec->PayloadSize());
-            write_offset += codec->PayloadSize();
+                   codecs[0]->PayloadData(),
+                   codecs[0]->PayloadSize());
+            write_offset += codecs[0]->PayloadSize();
         }
-        batch.clear();
-    };
-
-    for (auto& file : data_files) {
-        batch.push_back(file);
-        if (batch.size() >= parallel_degree) {
-            flushBatch();
-        }
-    }
-    if (!batch.empty()) {
-        flushBatch();
     }
 }
 
