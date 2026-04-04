@@ -43,6 +43,7 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "fmt/core.h"
+#include "index/IndexStreamUtils.h"
 #include "index/Meta.h"
 #include "index/StringIndexMarisa.h"
 #include "index/Utils.h"
@@ -350,20 +351,14 @@ StringIndexMarisa::StreamFilesToDisk(
     auto file_writer = storage::FileWriter(
         local_path, storage::io::GetPriorityFromLoadPriority(load_priority));
 
-    // Pipeline: prefetch next slice while writing current one.
     auto cm = file_manager_->GetChunkManager().get();
     auto prio = milvus::PriorityForLoad(load_priority);
-    if (!files.empty()) {
-        auto next_future = storage::GetObjectData(cm, {files[0]}, prio);
-        for (size_t i = 0; i < files.size(); ++i) {
-            auto codecs = storage::WaitAllFutures(std::move(next_future));
-            if (i + 1 < files.size()) {
-                next_future = storage::GetObjectData(cm, {files[i + 1]}, prio);
-            }
-            file_writer.Write(codecs[0]->PayloadData(),
-                              codecs[0]->PayloadSize());
-            total_size += codecs[0]->PayloadSize();
-        }
+    for (auto& file : files) {
+        DownloadSemaphore::Guard guard;
+        auto futures = storage::GetObjectData(cm, {file}, prio);
+        auto codecs = storage::WaitAllFutures(std::move(futures));
+        file_writer.Write(codecs[0]->PayloadData(), codecs[0]->PayloadSize());
+        total_size += codecs[0]->PayloadSize();
     }
 
     file_writer.Finish();

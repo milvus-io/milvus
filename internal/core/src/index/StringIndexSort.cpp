@@ -38,6 +38,7 @@
 #include "bitset/bitset.h"
 #include "bitset/detail/element_vectorized.h"
 #include "common/Array.h"
+#include "index/IndexStreamUtils.h"
 #include "common/CDataType.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -387,22 +388,15 @@ StringIndexSort::LoadWithStreaming(
         auto file_writer = storage::FileWriter(
             data_path, storage::io::GetPriorityFromLoadPriority(load_priority));
 
-        // Pipeline: prefetch next slice while writing current one.
         auto cm = file_manager_->GetChunkManager().get();
         auto prio = milvus::PriorityForLoad(load_priority);
-        if (!data_files.empty()) {
-            auto next_future =
-                storage::GetObjectData(cm, {data_files[0]}, prio);
-            for (size_t i = 0; i < data_files.size(); ++i) {
-                auto codecs = storage::WaitAllFutures(std::move(next_future));
-                if (i + 1 < data_files.size()) {
-                    next_future =
-                        storage::GetObjectData(cm, {data_files[i + 1]}, prio);
-                }
-                file_writer.Write(codecs[0]->PayloadData(),
-                                  codecs[0]->PayloadSize());
-                data_size += codecs[0]->PayloadSize();
-            }
+        for (auto& file : data_files) {
+            DownloadSemaphore::Guard guard;
+            auto futures = storage::GetObjectData(cm, {file}, prio);
+            auto codecs = storage::WaitAllFutures(std::move(futures));
+            file_writer.Write(codecs[0]->PayloadData(),
+                              codecs[0]->PayloadSize());
+            data_size += codecs[0]->PayloadSize();
         }
         file_writer.Finish();
     }
