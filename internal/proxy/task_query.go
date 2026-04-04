@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -995,8 +996,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 		}
 	}
 
-	retrieveReq := typeutil.Clone(t.RetrieveRequest)
-	retrieveReq.GetBase().TargetID = nodeID
+	retrieveReq := shallowcopy.ShallowCopyRetrieveRequest(t.RetrieveRequest, nodeID)
 	if needOverrideMvcc && mvccTs > 0 {
 		retrieveReq.MvccTimestamp = mvccTs
 		retrieveReq.GuaranteeTimestamp = mvccTs
