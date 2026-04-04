@@ -37,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type RetrieveSuite struct {
@@ -225,7 +227,7 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 		// no exist pk
 		exprStr := "int64Field == 10000000"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(suite.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
+		_, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		suite.NoError(err)
 
 		req := &querypb.QueryRequest{
@@ -238,7 +240,7 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 			Scope:      querypb.DataScope_Historical,
 		}
 
-		res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req, planNode)
+		res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 		suite.NoError(err)
 		suite.Len(res, 0)
 		suite.manager.Segment.Unpin(segments)
@@ -247,7 +249,7 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 	suite.Run("GrowingSegmentFilter", func() {
 		exprStr := "int64Field == 10000000"
 		schemaHelper, _ := typeutil.CreateSchemaHelper(suite.schema)
-		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
+		_, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
 		suite.NoError(err)
 
 		req := &querypb.QueryRequest{
@@ -260,7 +262,7 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 			Scope:      querypb.DataScope_Streaming,
 		}
 
-		res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req, planNode)
+		res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 		suite.NoError(err)
 		suite.Len(res, 0)
 		suite.manager.Segment.Unpin(segments)
