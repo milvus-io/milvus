@@ -565,3 +565,87 @@ TEST_F(DiskAnnFileManagerTest, FileCleanup) {
     EXPECT_FALSE(local_chunk_manager->Exist(local_index_file_path));
     EXPECT_FALSE(local_chunk_manager->Exist(local_json_stats_file_path));
 }
+
+TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskVectorArray) {
+    const int64_t collection_id = 1;
+    const int64_t partition_id = 2;
+    const int64_t segment_id = 3;
+    const int64_t field_id = 100;
+    const int64_t dim = 128;
+    const int64_t num_rows = 10;
+    const int64_t vectors_per_row = 3;
+
+    auto field_data =
+        milvus::storage::CreateFieldData(milvus::DataType::VECTOR_ARRAY,
+                                         milvus::DataType::VECTOR_FLOAT,
+                                         false,
+                                         dim,
+                                         num_rows);
+    auto vec_array_data =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::VectorArray>>(
+            field_data);
+
+    std::vector<float> raw_floats(num_rows * vectors_per_row * dim, 1.0f);
+
+    std::vector<milvus::VectorArray> vec_arrays;
+    for (int64_t i = 0; i < num_rows; ++i) {
+        milvus::VectorArray arr;
+        auto ptr = (uint8_t*)(raw_floats.data() + i * vectors_per_row * dim);
+        auto size = vectors_per_row * dim * sizeof(float);
+        arr.Init(ptr, size, vectors_per_row);
+        vec_arrays.push_back(arr);
+    }
+    vec_array_data->FillFieldData(vec_arrays.data(), vec_arrays.size());
+
+    auto file_manager = std::make_shared<milvus::storage::DiskFileManagerImpl>(
+        milvus::storage::FieldDataMeta{
+            collection_id, partition_id, segment_id, field_id},
+        milvus::storage::IndexMeta{segment_id, field_id, 1, 1, 1, "test_index"},
+        milvus::storage::StorageConfig{});
+
+    auto local_chunk_manager =
+        milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager();
+    std::string local_data_path;
+    bool file_created = false;
+    int64_t write_offset = sizeof(uint32_t) * 2;
+    std::vector<size_t> offsets;
+    offsets.push_back(0);
+
+    uint32_t var_dim = dim;
+    file_manager->cache_raw_data_to_disk_common<float>(field_data,
+                                                       local_chunk_manager,
+                                                       local_data_path,
+                                                       file_created,
+                                                       var_dim,
+                                                       write_offset,
+                                                       &offsets);
+
+    ASSERT_EQ(offsets.size(), num_rows + 1);
+    ASSERT_EQ(offsets.back(), static_cast<size_t>(num_rows * vectors_per_row));
+
+    // Write data file header with total vector count (not emb_list count)
+    uint32_t header_num_rows = offsets.back();
+    write_offset = 0;
+    local_chunk_manager->Write(
+        local_data_path, write_offset, &header_num_rows, sizeof(uint32_t));
+    write_offset += sizeof(uint32_t);
+    local_chunk_manager->Write(
+        local_data_path, write_offset, &var_dim, sizeof(uint32_t));
+
+    // Verify data file header
+    uint32_t read_num_rows = 0;
+    uint32_t read_dim = 0;
+    auto file_size = local_chunk_manager->Size(local_data_path);
+    ASSERT_GT(file_size, sizeof(uint32_t) * 2);
+
+    local_chunk_manager->Read(
+        local_data_path, 0, &read_num_rows, sizeof(uint32_t));
+    local_chunk_manager->Read(
+        local_data_path, sizeof(uint32_t), &read_dim, sizeof(uint32_t));
+
+    ASSERT_EQ(read_num_rows, num_rows * vectors_per_row);
+    ASSERT_EQ(read_dim, dim);
+
+    local_chunk_manager->Remove(local_data_path);
+}
