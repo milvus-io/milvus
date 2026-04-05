@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -245,8 +246,7 @@ func TestShallowCopyRetrieveRequest_OrderByFields(t *testing.T) {
 		OrderByFields: orderByFields,
 	}
 
-	sd := &shardDelegator{}
-	copied := sd.shallowCopyRetrieveRequest(req, 99)
+	copied := shallowcopy.ShallowCopyRetrieveRequest(req, 99)
 
 	// Verify OrderByFields is shallow-copied
 	assert.Equal(t, len(req.OrderByFields), len(copied.OrderByFields))
@@ -292,8 +292,7 @@ func TestShallowCopyRetrieveRequest_AllFields(t *testing.T) {
 		OrderByFields:                []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
 	}
 
-	sd := &shardDelegator{}
-	copied := sd.shallowCopyRetrieveRequest(req, 99)
+	copied := shallowcopy.ShallowCopyRetrieveRequest(req, 99)
 
 	assert.Equal(t, int64(99), copied.Base.TargetID)
 	assert.Equal(t, req.ReqID, copied.ReqID)

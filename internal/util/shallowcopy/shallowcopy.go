@@ -77,5 +77,6 @@ func ShallowCopyRetrieveRequest(src *internalpb.RetrieveRequest, targetID int64)
 		Aggregates:                   src.Aggregates,
 		EntityTtlPhysicalTime:        src.EntityTtlPhysicalTime,
 		OrderByFields:                src.OrderByFields,
+		QueryLabel:                   src.QueryLabel,
 	}
 }
