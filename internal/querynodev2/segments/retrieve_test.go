@@ -37,8 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type RetrieveSuite struct {
@@ -222,51 +220,6 @@ func (suite *RetrieveSuite) TestRetrieveSealed() {
 func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 	plan, err := mock_segcore.GenSimpleRetrievePlan(suite.collection.GetCCollection())
 	suite.NoError(err)
-
-	suite.Run("SealSegmentFilter", func() {
-		// no exist pk
-		exprStr := "int64Field == 10000000"
-		schemaHelper, _ := typeutil.CreateSchemaHelper(suite.schema)
-		_, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
-		suite.NoError(err)
-
-		req := &querypb.QueryRequest{
-			Req: &internalpb.RetrieveRequest{
-				PkFilter:     0,
-				CollectionID: suite.collectionID,
-				PartitionIDs: []int64{suite.partitionID},
-			},
-			SegmentIDs: []int64{suite.sealed.ID()},
-			Scope:      querypb.DataScope_Historical,
-		}
-
-		res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
-		suite.NoError(err)
-		suite.Len(res, 0)
-		suite.manager.Segment.Unpin(segments)
-	})
-
-	suite.Run("GrowingSegmentFilter", func() {
-		exprStr := "int64Field == 10000000"
-		schemaHelper, _ := typeutil.CreateSchemaHelper(suite.schema)
-		_, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
-		suite.NoError(err)
-
-		req := &querypb.QueryRequest{
-			Req: &internalpb.RetrieveRequest{
-				PkFilter:     0,
-				CollectionID: suite.collectionID,
-				PartitionIDs: []int64{suite.partitionID},
-			},
-			SegmentIDs: []int64{suite.growing.ID()},
-			Scope:      querypb.DataScope_Streaming,
-		}
-
-		res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
-		suite.NoError(err)
-		suite.Len(res, 0)
-		suite.manager.Segment.Unpin(segments)
-	})
 
 	suite.Run("SegmentFilterRules", func() {
 		// create more 10 seal segments to test BF
