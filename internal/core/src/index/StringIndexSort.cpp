@@ -336,16 +336,9 @@ StringIndexSort::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
 
-    if (disk_file_manager_ != nullptr) {
-        LoadWithStreaming(index_files.value(), config, load_priority);
-    } else {
-        auto index_datas = file_manager_->LoadIndexToMemory(index_files.value(),
-                                                            load_priority);
-        BinarySet binary_set;
-        AssembleIndexDatas(index_datas, binary_set);
-        index_datas.clear();
-        LoadWithoutAssemble(binary_set, config);
-    }
+    AssertInfo(file_manager_ != nullptr,
+               "file_manager_ must not be null when loading StringIndexSort");
+    LoadWithStreaming(index_files.value(), config, load_priority);
 }
 
 void
@@ -378,29 +371,6 @@ StringIndexSort::LoadWithStreaming(
                   });
     }
 
-    // Stream data to local disk file
-    auto data_path =
-        disk_file_manager_->GetLocalIndexObjectPrefix() + "strsort-index-data";
-    int64_t data_size = 0;
-    {
-        std::filesystem::create_directories(
-            std::filesystem::path(data_path).parent_path());
-        auto file_writer = storage::FileWriter(
-            data_path, storage::io::GetPriorityFromLoadPriority(load_priority));
-
-        auto cm = file_manager_->GetChunkManager().get();
-        auto prio = milvus::PriorityForLoad(load_priority);
-        for (auto& file : data_files) {
-            DownloadSemaphore::Guard guard;
-            auto futures = storage::GetObjectData(cm, {file}, prio);
-            auto codecs = storage::WaitAllFutures(std::move(futures));
-            file_writer.Write(codecs[0]->PayloadData(),
-                              codecs[0]->PayloadSize());
-            data_size += codecs[0]->PayloadSize();
-        }
-        file_writer.Finish();
-    }
-
     // Load metadata to memory (tiny: version, index_num_rows, valid_bitset)
     auto meta_datas =
         file_manager_->LoadIndexToMemory(meta_files, load_priority);
@@ -408,20 +378,77 @@ StringIndexSort::LoadWithStreaming(
     AssembleIndexDatas(meta_datas, binary_set);
     meta_datas.clear();
 
-    // mmap the data file into BinarySet with a custom deleter
-    auto fd = open(data_path.c_str(), O_RDONLY);
-    AssertInfo(fd >= 0, "failed to open string sort data file");
-    auto mapped = mmap(NULL, data_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-    AssertInfo(mapped != MAP_FAILED, "failed to mmap string sort data file");
+    bool use_mmap = config.contains(MMAP_FILE_PATH) &&
+                    disk_file_manager_ != nullptr;
 
-    auto data_ptr = std::shared_ptr<uint8_t[]>(
-        static_cast<uint8_t*>(mapped),
-        [sz = data_size, path = data_path](uint8_t* p) {
-            munmap(p, sz);
-            unlink(path.c_str());
-        });
-    binary_set.Append("index_data", data_ptr, data_size);
+    if (use_mmap) {
+        // Stream data slices to local disk, then mmap
+        auto data_path = disk_file_manager_->GetLocalIndexObjectPrefix() +
+                         "strsort-index-data";
+        int64_t data_size = 0;
+        {
+            std::filesystem::create_directories(
+                std::filesystem::path(data_path).parent_path());
+            auto file_writer = storage::FileWriter(
+                data_path,
+                storage::io::GetPriorityFromLoadPriority(load_priority));
+
+            auto cm = file_manager_->GetChunkManager().get();
+            auto prio = milvus::PriorityForLoad(load_priority);
+            for (auto& file : data_files) {
+                DownloadSemaphore::Guard guard;
+                auto futures = storage::GetObjectData(cm, {file}, prio);
+                auto codecs = storage::WaitAllFutures(std::move(futures));
+                file_writer.Write(codecs[0]->PayloadData(),
+                                  codecs[0]->PayloadSize());
+                data_size += codecs[0]->PayloadSize();
+            }
+            file_writer.Finish();
+        }
+
+        auto fd = open(data_path.c_str(), O_RDONLY);
+        AssertInfo(fd >= 0, "failed to open string sort data file");
+        auto mapped = mmap(NULL, data_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        close(fd);
+        AssertInfo(mapped != MAP_FAILED,
+                   "failed to mmap string sort data file");
+
+        auto data_ptr = std::shared_ptr<uint8_t[]>(
+            static_cast<uint8_t*>(mapped),
+            [sz = data_size, path = data_path](uint8_t* p) {
+                munmap(p, sz);
+                unlink(path.c_str());
+            });
+        binary_set.Append("index_data", data_ptr, data_size);
+    } else {
+        // Stream data slices directly to memory buffer
+        // First pass: calculate total size
+        int64_t total_size = 0;
+        auto cm = file_manager_->GetChunkManager().get();
+        auto prio = milvus::PriorityForLoad(load_priority);
+
+        std::vector<std::vector<uint8_t>> slice_buffers;
+        for (auto& file : data_files) {
+            DownloadSemaphore::Guard guard;
+            auto futures = storage::GetObjectData(cm, {file}, prio);
+            auto codecs = storage::WaitAllFutures(std::move(futures));
+            total_size += codecs[0]->PayloadSize();
+            slice_buffers.emplace_back(
+                codecs[0]->PayloadData(),
+                codecs[0]->PayloadData() + codecs[0]->PayloadSize());
+        }
+
+        // Assemble into a single contiguous buffer
+        std::shared_ptr<uint8_t[]> data_ptr(new uint8_t[total_size]);
+        size_t offset = 0;
+        for (auto& buf : slice_buffers) {
+            memcpy(data_ptr.get() + offset, buf.data(), buf.size());
+            offset += buf.size();
+        }
+        slice_buffers.clear();
+
+        binary_set.Append("index_data", data_ptr, total_size);
+    }
 
     LoadWithoutAssemble(binary_set, config);
 }

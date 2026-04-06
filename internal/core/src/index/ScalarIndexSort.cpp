@@ -422,17 +422,9 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
 
-    if (this->file_manager_ != nullptr) {
-        LoadWithStreaming(index_files.value(), config, load_priority);
-    } else {
-        // Fallback for unit tests without valid file_manager_context
-        auto index_datas = this->file_manager_->LoadIndexToMemory(
-            index_files.value(), load_priority);
-        BinarySet binary_set;
-        AssembleIndexDatas(index_datas, binary_set);
-        index_datas.clear();
-        LoadWithoutAssemble(binary_set, config);
-    }
+    AssertInfo(this->file_manager_ != nullptr,
+               "file_manager_ must not be null when loading ScalarIndexSort");
+    LoadWithStreaming(index_files.value(), config, load_priority);
 }
 
 template <typename T>

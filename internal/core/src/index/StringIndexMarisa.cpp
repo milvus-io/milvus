@@ -325,17 +325,9 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
 
-    if (disk_file_manager_ != nullptr) {
-        LoadWithStreaming(index_files.value(), config, load_priority);
-    } else {
-        // Fallback for unit tests without valid file_manager_context
-        auto index_datas = file_manager_->LoadIndexToMemory(index_files.value(),
-                                                            load_priority);
-        BinarySet binary_set;
-        AssembleIndexDatas(index_datas, binary_set);
-        index_datas.clear();
-        LoadWithoutAssemble(binary_set, config);
-    }
+    AssertInfo(file_manager_ != nullptr,
+               "file_manager_ must not be null when loading StringIndexMarisa");
+    LoadWithStreaming(index_files.value(), config, load_priority);
 }
 
 int64_t
@@ -395,15 +387,24 @@ StringIndexMarisa::LoadWithStreaming(
     sortBySliceIndex(trie_files);
     sortBySliceIndex(str_ids_files);
 
-    auto parallel_degree = static_cast<uint64_t>(
-        DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE.load());
-    auto local_prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
+    bool use_mmap = config.contains(MMAP_FILE_PATH) &&
+                    disk_file_manager_ != nullptr;
+
+    // trie must go through disk (marisa::read() requires fd)
+    auto local_prefix = disk_file_manager_ != nullptr
+                            ? disk_file_manager_->GetLocalIndexObjectPrefix()
+                            : std::string{};
+    AssertInfo(!local_prefix.empty(),
+               "disk_file_manager_ must not be null for StringIndexMarisa "
+               "streaming load (marisa trie requires disk path)");
     auto trie_path = local_prefix + "marisa-trie";
-    auto str_ids_path = local_prefix + "marisa-str-ids";
 
-    StreamFilesToDisk(trie_files, trie_path, load_priority, parallel_degree);
+    auto cm = file_manager_->GetChunkManager().get();
+    auto prio = milvus::PriorityForLoad(load_priority);
 
-    bool use_mmap = config.contains(MMAP_FILE_PATH);
+    StreamFilesToDisk(
+        trie_files, trie_path, load_priority, 0 /*unused parallel_degree*/);
+
     if (use_mmap) {
         trie_.mmap(trie_path.c_str());
         mmap_file_raii_ = std::make_unique<MmapFileRAII>(trie_path);
@@ -414,16 +415,29 @@ StringIndexMarisa::LoadWithStreaming(
         unlink(trie_path.c_str());
     }
 
-    auto str_ids_total = StreamFilesToDisk(
-        str_ids_files, str_ids_path, load_priority, parallel_degree);
-    str_ids_.resize(str_ids_total / sizeof(size_t), MARISA_NULL_KEY_ID);
+    // str_ids: stream directly to memory (no disk round-trip needed)
+    int64_t str_ids_total = 0;
     {
-        auto fd = open(str_ids_path.c_str(), O_RDONLY);
-        AssertInfo(fd >= 0, "failed to open str_ids file");
-        ReadDataFromFD(fd, str_ids_.data(), str_ids_total);
-        close(fd);
+        std::vector<std::vector<uint8_t>> slice_buffers;
+        for (auto& file : str_ids_files) {
+            DownloadSemaphore::Guard guard;
+            auto futures = storage::GetObjectData(cm, {file}, prio);
+            auto codecs = storage::WaitAllFutures(std::move(futures));
+            str_ids_total += codecs[0]->PayloadSize();
+            slice_buffers.emplace_back(
+                codecs[0]->PayloadData(),
+                codecs[0]->PayloadData() + codecs[0]->PayloadSize());
+        }
+
+        str_ids_.resize(str_ids_total / sizeof(size_t), MARISA_NULL_KEY_ID);
+        size_t offset = 0;
+        for (auto& buf : slice_buffers) {
+            memcpy(reinterpret_cast<uint8_t*>(str_ids_.data()) + offset,
+                   buf.data(),
+                   buf.size());
+            offset += buf.size();
+        }
     }
-    unlink(str_ids_path.c_str());
 
     fill_offsets();
     built_ = true;
