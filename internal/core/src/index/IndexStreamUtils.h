@@ -25,25 +25,20 @@
 #include <string>
 #include <vector>
 
+#include "common/Common.h"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "storage/DataCodec.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
 namespace milvus::index {
 
-// Process-wide semaphore that limits the number of in-flight index data
-// slices across all concurrent scalar index loads. This bounds the total
-// transient memory used for streaming downloads regardless of how many
-// indexes are loading simultaneously.
-//
-// Default capacity = 8 slots. Each slot holds one FILE_SLICE_SIZE (16MB)
-// download, so the global cap is 8 * 16MB = 128MB.
+// Counting semaphore for bounding in-flight download slices.
+// Each slot represents one FILE_SLICE_SIZE (~16MB) in transient memory.
 class DownloadSemaphore {
  public:
-    static DownloadSemaphore&
-    GetInstance() {
-        static DownloadSemaphore instance(8);
-        return instance;
+    explicit DownloadSemaphore(int capacity) : count_(capacity) {
     }
 
     void
@@ -63,26 +58,28 @@ class DownloadSemaphore {
     // RAII guard for automatic release
     class Guard {
      public:
-        Guard() : active_(true) {
-            DownloadSemaphore::GetInstance().Acquire();
+        explicit Guard(DownloadSemaphore& sem) : sem_(&sem), active_(true) {
+            sem_->Acquire();
         }
         ~Guard() {
             if (active_) {
-                DownloadSemaphore::GetInstance().Release();
+                sem_->Release();
             }
         }
         Guard(const Guard&) = delete;
         Guard&
         operator=(const Guard&) = delete;
-        Guard(Guard&& other) noexcept : active_(other.active_) {
+        Guard(Guard&& other) noexcept
+            : sem_(other.sem_), active_(other.active_) {
             other.active_ = false;
         }
         Guard&
         operator=(Guard&& other) noexcept {
             if (this != &other) {
                 if (active_) {
-                    DownloadSemaphore::GetInstance().Release();
+                    sem_->Release();
                 }
+                sem_ = other.sem_;
                 active_ = other.active_;
                 other.active_ = false;
             }
@@ -90,15 +87,57 @@ class DownloadSemaphore {
         }
 
      private:
+        DownloadSemaphore* sem_;
         bool active_;
     };
 
  private:
-    explicit DownloadSemaphore(int capacity) : count_(capacity) {
-    }
     std::mutex mtx_;
     std::condition_variable cv_;
     int count_;
+};
+
+// Per-priority download semaphores for scalar index streaming loads.
+// Slot count is derived from the corresponding thread pool size to avoid
+// having more in-flight downloads than threads available, while also
+// capping total transient memory.
+//
+// Total budget = 512MB, split 3:1 between HIGH and LOW priority.
+// Formula: slots = min(pool.MaxThreads, memory_budget / FILE_SLICE_SIZE)
+//   HIGH: 384MB / 16MB = 24 slots (capped by pool threads if fewer)
+//   LOW:  128MB / 16MB = 8 slots  (capped by pool threads if fewer)
+class DownloadSemaphores {
+ public:
+    static constexpr int64_t kTotalBudget = 512 << 20;  // 512MB
+
+    static DownloadSemaphore&
+    Get(milvus::ThreadPoolPriority priority) {
+        static DownloadSemaphores instance;
+        if (priority == milvus::ThreadPoolPriority::LOW) {
+            return instance.low_;
+        }
+        return instance.high_;
+    }
+
+ private:
+    static int
+    ComputeSlots(milvus::ThreadPoolPriority priority, int64_t memory_budget) {
+        auto& pool = ::milvus::ThreadPools::GetThreadPool(priority);
+        int pool_threads = pool.GetMaxThreadNum();
+        int64_t slice_size = FILE_SLICE_SIZE.load();
+        int mem_slots =
+            std::max(1, static_cast<int>(memory_budget / slice_size));
+        return std::min(pool_threads, mem_slots);
+    }
+
+    DownloadSemaphores()
+        : high_(ComputeSlots(milvus::ThreadPoolPriority::HIGH,
+                             kTotalBudget * 3 / 4)),
+          low_(ComputeSlots(milvus::ThreadPoolPriority::LOW,
+                            kTotalBudget * 1 / 4)) {
+    }
+    DownloadSemaphore high_;
+    DownloadSemaphore low_;
 };
 
 // Prefetch and process slices with a sliding window.
@@ -135,6 +174,7 @@ PrefetchAndProcess(storage::ChunkManager* cm,
         Future future;
     };
 
+    auto& sem = DownloadSemaphores::Get(prio);
     std::deque<PrefetchEntry> window;
     size_t next = 0;
 
@@ -142,7 +182,7 @@ PrefetchAndProcess(storage::ChunkManager* cm,
         if (next >= files.size()) {
             return;
         }
-        DownloadSemaphore::Guard guard;
+        DownloadSemaphore::Guard guard(sem);
         auto futures = storage::GetObjectData(cm, {files[next]}, prio);
         window.push_back({std::move(guard), std::move(futures[0])});
         next++;

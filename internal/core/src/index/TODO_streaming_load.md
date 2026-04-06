@@ -19,6 +19,14 @@
 - Currently entry buffer + impl construction = 2x for mmap path (StringIndexSort, ScalarIndexSort)
 - Requires no IndexEntryReader interface changes — `ReadEntryToFile` already exists
 
+## mmap mode: mmap idx_to_offsets_ to reduce resident memory
+- `idx_to_offsets_` is `vector<int32_t>`, size = total_num_rows * 4 bytes (30M rows = 120MB)
+- Only used by `Reverse_Lookup` (groupby / output fields), low frequency access
+- In mmap mode the index data is already mmap'd, but idx_to_offsets_ stays fully resident
+- Fix: after rebuilding idx_to_offsets_, write to local file and mmap it back
+- Kernel can evict unused pages; most pages likely never touched
+- Applies to both ScalarIndexSort and StringIndexSort (and MmapImpl)
+
 ## StringIndexMarisa: trie always requires disk
 - marisa::read() only accepts fd, no memory-buffer API
 - Non-mmap mode still does: download → write to disk → read fd → delete file
