@@ -345,13 +345,12 @@ StringIndexMarisa::StreamFilesToDisk(
 
     auto cm = file_manager_->GetChunkManager().get();
     auto prio = milvus::PriorityForLoad(load_priority);
-    for (auto& file : files) {
-        DownloadSemaphore::Guard guard;
-        auto futures = storage::GetObjectData(cm, {file}, prio);
-        auto codecs = storage::WaitAllFutures(std::move(futures));
-        file_writer.Write(codecs[0]->PayloadData(), codecs[0]->PayloadSize());
-        total_size += codecs[0]->PayloadSize();
-    }
+    constexpr size_t kPrefetchDepth = 2;
+    PrefetchAndProcess(
+        cm, files, prio, kPrefetchDepth, [&](const uint8_t* data, size_t size) {
+            file_writer.Write(data, size);
+            total_size += size;
+        });
 
     file_writer.Finish();
     return total_size;
@@ -399,6 +398,7 @@ StringIndexMarisa::LoadWithStreaming(
 
     auto cm = file_manager_->GetChunkManager().get();
     auto prio = milvus::PriorityForLoad(load_priority);
+    constexpr size_t kPrefetchDepth = 2;
 
     StreamFilesToDisk(
         trie_files, trie_path, load_priority, 0 /*unused parallel_degree*/);
@@ -414,28 +414,19 @@ StringIndexMarisa::LoadWithStreaming(
     }
 
     // str_ids: stream directly to memory (no disk round-trip needed)
-    int64_t str_ids_total = 0;
-    {
-        std::vector<std::vector<uint8_t>> slice_buffers;
-        for (auto& file : str_ids_files) {
-            DownloadSemaphore::Guard guard;
-            auto futures = storage::GetObjectData(cm, {file}, prio);
-            auto codecs = storage::WaitAllFutures(std::move(futures));
-            str_ids_total += codecs[0]->PayloadSize();
-            slice_buffers.emplace_back(
-                codecs[0]->PayloadData(),
-                codecs[0]->PayloadData() + codecs[0]->PayloadSize());
-        }
+    std::vector<uint8_t> str_ids_buf;
+    PrefetchAndProcess(cm,
+                       str_ids_files,
+                       prio,
+                       kPrefetchDepth,
+                       [&](const uint8_t* data, size_t size) {
+                           str_ids_buf.insert(
+                               str_ids_buf.end(), data, data + size);
+                       });
 
-        str_ids_.resize(str_ids_total / sizeof(size_t), MARISA_NULL_KEY_ID);
-        size_t offset = 0;
-        for (auto& buf : slice_buffers) {
-            memcpy(reinterpret_cast<uint8_t*>(str_ids_.data()) + offset,
-                   buf.data(),
-                   buf.size());
-            offset += buf.size();
-        }
-    }
+    int64_t str_ids_total = str_ids_buf.size();
+    str_ids_.resize(str_ids_total / sizeof(size_t), MARISA_NULL_KEY_ID);
+    memcpy(str_ids_.data(), str_ids_buf.data(), str_ids_total);
 
     fill_offsets();
     built_ = true;

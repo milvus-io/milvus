@@ -647,6 +647,10 @@ BitmapIndex<T>::LoadWithStreaming(
     bool use_mmap =
         config.contains(MMAP_FILE_PATH) && disk_file_manager_ != nullptr;
 
+    auto cm = this->file_manager_->GetChunkManager().get();
+    auto prio = milvus::PriorityForLoad(load_priority);
+    constexpr size_t kPrefetchDepth = 2;
+
     if (use_mmap) {
         // Stream data slices to local disk, then mmap
         auto data_path = disk_file_manager_->GetLocalIndexObjectPrefix() +
@@ -659,16 +663,14 @@ BitmapIndex<T>::LoadWithStreaming(
                 data_path,
                 storage::io::GetPriorityFromLoadPriority(load_priority));
 
-            auto cm = this->file_manager_->GetChunkManager().get();
-            auto prio = milvus::PriorityForLoad(load_priority);
-            for (auto& file : data_files) {
-                DownloadSemaphore::Guard guard;
-                auto futures = storage::GetObjectData(cm, {file}, prio);
-                auto codecs = storage::WaitAllFutures(std::move(futures));
-                file_writer.Write(codecs[0]->PayloadData(),
-                                  codecs[0]->PayloadSize());
-                data_size += codecs[0]->PayloadSize();
-            }
+            PrefetchAndProcess(cm,
+                               data_files,
+                               prio,
+                               kPrefetchDepth,
+                               [&](const uint8_t* data, size_t size) {
+                                   file_writer.Write(data, size);
+                                   data_size += size;
+                               });
             file_writer.Finish();
         }
 
@@ -687,30 +689,18 @@ BitmapIndex<T>::LoadWithStreaming(
         binary_set.Append(BITMAP_INDEX_DATA, data_ptr, data_size);
     } else {
         // Stream data slices directly to memory buffer
-        auto cm = this->file_manager_->GetChunkManager().get();
-        auto prio = milvus::PriorityForLoad(load_priority);
+        std::vector<uint8_t> buffer;
+        PrefetchAndProcess(cm,
+                           data_files,
+                           prio,
+                           kPrefetchDepth,
+                           [&](const uint8_t* data, size_t size) {
+                               buffer.insert(buffer.end(), data, data + size);
+                           });
 
-        std::vector<std::vector<uint8_t>> slice_buffers;
-        int64_t total_size = 0;
-        for (auto& file : data_files) {
-            DownloadSemaphore::Guard guard;
-            auto futures = storage::GetObjectData(cm, {file}, prio);
-            auto codecs = storage::WaitAllFutures(std::move(futures));
-            total_size += codecs[0]->PayloadSize();
-            slice_buffers.emplace_back(
-                codecs[0]->PayloadData(),
-                codecs[0]->PayloadData() + codecs[0]->PayloadSize());
-        }
-
-        std::shared_ptr<uint8_t[]> data_ptr(new uint8_t[total_size]);
-        size_t offset = 0;
-        for (auto& buf : slice_buffers) {
-            memcpy(data_ptr.get() + offset, buf.data(), buf.size());
-            offset += buf.size();
-        }
-        slice_buffers.clear();
-
-        binary_set.Append(BITMAP_INDEX_DATA, data_ptr, total_size);
+        std::shared_ptr<uint8_t[]> data_ptr(new uint8_t[buffer.size()]);
+        memcpy(data_ptr.get(), buffer.data(), buffer.size());
+        binary_set.Append(BITMAP_INDEX_DATA, data_ptr, buffer.size());
     }
 
     LoadWithoutAssemble(binary_set, config);

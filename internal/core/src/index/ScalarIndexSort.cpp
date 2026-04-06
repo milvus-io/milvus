@@ -538,18 +538,17 @@ ScalarIndexSort<T>::StreamDataToDisk(
             mmap_filepath_,
             storage::io::GetPriorityFromLoadPriority(load_priority));
 
-        // Sequential download with global semaphore to bound total memory
-        // across all concurrent index loads to semaphore_slots * 16MB.
         auto cm = this->file_manager_->GetChunkManager().get();
         auto prio = milvus::PriorityForLoad(load_priority);
-        for (auto& file : data_files) {
-            DownloadSemaphore::Guard guard;
-            auto futures = storage::GetObjectData(cm, {file}, prio);
-            auto codecs = storage::WaitAllFutures(std::move(futures));
-            file_writer.Write(codecs[0]->PayloadData(),
-                              codecs[0]->PayloadSize());
-            total_data_size += codecs[0]->PayloadSize();
-        }
+        constexpr size_t kPrefetchDepth = 2;
+        PrefetchAndProcess(cm,
+                           data_files,
+                           prio,
+                           kPrefetchDepth,
+                           [&](const uint8_t* data, size_t size) {
+                               file_writer.Write(data, size);
+                               total_data_size += size;
+                           });
 
         auto aligned_size =
             ((total_data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
@@ -589,15 +588,18 @@ ScalarIndexSort<T>::StreamDataToMemory(
 
     auto cm = this->file_manager_->GetChunkManager().get();
     auto prio = milvus::PriorityForLoad(load_priority);
-    for (auto& file : data_files) {
-        DownloadSemaphore::Guard guard;
-        auto futures = storage::GetObjectData(cm, {file}, prio);
-        auto codecs = storage::WaitAllFutures(std::move(futures));
-        memcpy(reinterpret_cast<uint8_t*>(data_.data()) + write_offset,
-               codecs[0]->PayloadData(),
-               codecs[0]->PayloadSize());
-        write_offset += codecs[0]->PayloadSize();
-    }
+    constexpr size_t kPrefetchDepth = 2;
+    PrefetchAndProcess(
+        cm,
+        data_files,
+        prio,
+        kPrefetchDepth,
+        [&](const uint8_t* data, size_t size) {
+            memcpy(reinterpret_cast<uint8_t*>(data_.data()) + write_offset,
+                   data,
+                   size);
+            write_offset += size;
+        });
 }
 
 template <typename T>

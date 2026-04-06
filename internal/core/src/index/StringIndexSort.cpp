@@ -381,6 +381,12 @@ StringIndexSort::LoadWithStreaming(
     bool use_mmap =
         config.contains(MMAP_FILE_PATH) && disk_file_manager_ != nullptr;
 
+    auto cm = file_manager_->GetChunkManager().get();
+    auto prio = milvus::PriorityForLoad(load_priority);
+    constexpr size_t kPrefetchDepth = 2;
+
+    ParseMetadata(binary_set);
+
     if (use_mmap) {
         // Stream data slices to local disk, then mmap
         auto data_path = disk_file_manager_->GetLocalIndexObjectPrefix() +
@@ -393,16 +399,14 @@ StringIndexSort::LoadWithStreaming(
                 data_path,
                 storage::io::GetPriorityFromLoadPriority(load_priority));
 
-            auto cm = file_manager_->GetChunkManager().get();
-            auto prio = milvus::PriorityForLoad(load_priority);
-            for (auto& file : data_files) {
-                DownloadSemaphore::Guard guard;
-                auto futures = storage::GetObjectData(cm, {file}, prio);
-                auto codecs = storage::WaitAllFutures(std::move(futures));
-                file_writer.Write(codecs[0]->PayloadData(),
-                                  codecs[0]->PayloadSize());
-                data_size += codecs[0]->PayloadSize();
-            }
+            PrefetchAndProcess(cm,
+                               data_files,
+                               prio,
+                               kPrefetchDepth,
+                               [&](const uint8_t* data, size_t size) {
+                                   file_writer.Write(data, size);
+                                   data_size += size;
+                               });
             file_writer.Finish();
         }
 
@@ -420,7 +424,6 @@ StringIndexSort::LoadWithStreaming(
                 unlink(path.c_str());
             });
         binary_set.Append("index_data", data_ptr, data_size);
-        ParseMetadata(binary_set);
         auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
         auto mmap_path =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
@@ -430,31 +433,15 @@ StringIndexSort::LoadWithStreaming(
         impl_ = std::move(mmap_impl);
     } else {
         // Stream data slices directly to memory buffer
-        auto cm = file_manager_->GetChunkManager().get();
-        auto prio = milvus::PriorityForLoad(load_priority);
+        std::vector<uint8_t> buffer;
+        PrefetchAndProcess(cm,
+                           data_files,
+                           prio,
+                           kPrefetchDepth,
+                           [&](const uint8_t* data, size_t size) {
+                               buffer.insert(buffer.end(), data, data + size);
+                           });
 
-        std::vector<std::vector<uint8_t>> slice_buffers;
-        int64_t total_size = 0;
-        for (auto& file : data_files) {
-            DownloadSemaphore::Guard guard;
-            auto futures = storage::GetObjectData(cm, {file}, prio);
-            auto codecs = storage::WaitAllFutures(std::move(futures));
-            total_size += codecs[0]->PayloadSize();
-            slice_buffers.emplace_back(
-                codecs[0]->PayloadData(),
-                codecs[0]->PayloadData() + codecs[0]->PayloadSize());
-        }
-
-        std::vector<uint8_t> buffer(total_size);
-        size_t offset = 0;
-        for (auto& buf : slice_buffers) {
-            memcpy(buffer.data() + offset, buf.data(), buf.size());
-            offset += buf.size();
-        }
-        slice_buffers.clear();
-
-        // Parse metadata, then directly create impl with zero-copy
-        ParseMetadata(binary_set);
         auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
         mmap_impl->LoadFromOwnedBuffer(
             std::move(buffer), total_num_rows_, valid_bitset_, idx_to_offsets_);
