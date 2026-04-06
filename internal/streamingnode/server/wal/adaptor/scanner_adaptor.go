@@ -394,7 +394,7 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	}
 	// otherwise add message into reorder buffer directly.
 	if err := s.reorderBuffer.Push(msg); err != nil {
-		if errors.Is(err, utility.ErrTimeTickVoilation) {
+		if errors.Is(err, utility.ErrTimeTickViolation) {
 			s.metrics.ObserveTimeTickViolation(isTailing, msg.MessageType())
 		}
 		s.logger.Warn("failed to push message into reorder buffer",

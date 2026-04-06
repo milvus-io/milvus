@@ -83,7 +83,7 @@ func createOpenAIProvider(url string, schema *schemapb.FieldSchema, providerName
 	case azureOpenAIProvider:
 		return NewAzureOpenAIEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	default:
-		return nil, errors.New("Unknow provider")
+		return nil, errors.New("Unknown provider")
 	}
 }
 

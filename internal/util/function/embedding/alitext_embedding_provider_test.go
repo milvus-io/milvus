@@ -80,7 +80,7 @@ func createAliProvider(url string, schema *schemapb.FieldSchema, providerName st
 	case aliDashScopeProvider:
 		return NewAliDashScopeEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 	default:
-		return nil, errors.New("Unknow provider")
+		return nil, errors.New("Unknown provider")
 	}
 }
 

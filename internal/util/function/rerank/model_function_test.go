@@ -62,12 +62,12 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: providerParamName, Value: "unknown"},
 		}
 		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Unknow rerank model provider")
+		s.ErrorContains(err, "Unknown rerank model provider")
 	}
 
 	{
 		_, err := newProvider([]*commonpb.KeyValuePair{}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Lost rerank params")
+		s.ErrorContains(err, "Missing rerank params")
 	}
 	{
 		params := []*commonpb.KeyValuePair{
@@ -503,12 +503,12 @@ func (s *RerankModelSuite) TestNewModelFunction() {
 	{
 		functionSchema.Params[0] = &commonpb.KeyValuePair{Key: providerParamName, Value: `notExist`}
 		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Unknow rerank model provider")
+		s.ErrorContains(err, "Unknown rerank model provider")
 	}
 	{
 		functionSchema.Params[0] = &commonpb.KeyValuePair{Key: "NotExist", Value: `notExist`}
 		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
-		s.ErrorContains(err, "Lost rerank params")
+		s.ErrorContains(err, "Missing rerank params")
 	}
 }
 
