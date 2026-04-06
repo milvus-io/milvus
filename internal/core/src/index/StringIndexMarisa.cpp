@@ -360,6 +360,9 @@ StringIndexMarisa::LoadWithStreaming(
     const std::vector<std::string>& index_files,
     const Config& config,
     milvus::proto::common::LoadPriority load_priority) {
+    // Classify files by key prefix. If Serialize() adds new keys in the
+    // future, this must be updated in sync — otherwise the new slices
+    // will be silently dropped.
     std::vector<std::string> trie_files;
     std::vector<std::string> str_ids_files;
 
@@ -409,6 +412,7 @@ StringIndexMarisa::LoadWithStreaming(
         trie_.read(file.Descriptor());
         file.Close();
         unlink(trie_path.c_str());
+        mmap_file_raii_ = nullptr;
     }
 
     // str_ids: stream directly to memory (no disk round-trip needed)
