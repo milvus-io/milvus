@@ -387,8 +387,8 @@ StringIndexMarisa::LoadWithStreaming(
     sortBySliceIndex(trie_files);
     sortBySliceIndex(str_ids_files);
 
-    bool use_mmap = config.contains(MMAP_FILE_PATH) &&
-                    disk_file_manager_ != nullptr;
+    bool use_mmap =
+        config.contains(MMAP_FILE_PATH) && disk_file_manager_ != nullptr;
 
     // trie must go through disk (marisa::read() requires fd)
     auto local_prefix = disk_file_manager_ != nullptr

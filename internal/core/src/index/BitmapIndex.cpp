@@ -644,8 +644,8 @@ BitmapIndex<T>::LoadWithStreaming(
     AssembleIndexDatas(meta_datas, binary_set);
     meta_datas.clear();
 
-    bool use_mmap = config.contains(MMAP_FILE_PATH) &&
-                    disk_file_manager_ != nullptr;
+    bool use_mmap =
+        config.contains(MMAP_FILE_PATH) && disk_file_manager_ != nullptr;
 
     if (use_mmap) {
         // Stream data slices to local disk, then mmap
