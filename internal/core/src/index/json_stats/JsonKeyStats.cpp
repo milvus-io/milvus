@@ -1001,18 +1001,15 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
 
     // Fetch row group metadata from all files in parallel using HIGH POOL
     // to avoid blocking the caller thread with serial S3 I/O
-    auto& pool =
-        ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
     std::vector<std::future<int64_t>> futures;
     futures.reserve(files.size());
     for (const auto& file : files) {
-        futures.push_back(pool.Submit([&fs, &file]() {
-            auto result =
-                milvus_storage::FileRowGroupReader::Make(fs, file);
-            AssertInfo(
-                result.ok(),
-                "[StorageV2] Failed to create file row group reader: " +
-                    result.status().ToString());
+        futures.push_back(pool.Submit([&fs, file]() {
+            auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
+            AssertInfo(result.ok(),
+                       "[StorageV2] Failed to create file row group reader: " +
+                           result.status().ToString());
             auto reader = result.ValueOrDie();
             auto row_group_meta_vector =
                 reader->file_metadata()->GetRowGroupMetadataVector();

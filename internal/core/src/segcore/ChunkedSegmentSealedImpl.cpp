@@ -624,7 +624,8 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields() {
     if (num_rows == 0) {
         std::unique_lock lck(mutex_);
         update_row_count(0);
-        system_ready_count_++;
+        // Initialize empty timestamps so is_system_field_ready() returns true
+        insert_record_.init_timestamps_from_owned({}, TimestampIndex());
         return;
     }
 
@@ -654,7 +655,6 @@ ChunkedSegmentSealedImpl::SynthesizeExternalSystemFields() {
         std::unique_lock lck(mutex_);
         update_row_count(num_rows);
     }
-    system_ready_count_++;
 }
 
 std::optional<ChunkedSegmentSealedImpl::ParquetStatistics>
