@@ -165,7 +165,6 @@ class StringIndexMarisa : public StringIndex {
     std::vector<int64_t> str_ids_;  // used to retrieve.
     std::map<size_t, std::vector<size_t>> str_ids_to_offsets_;
     bool built_ = false;
-    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;
     int64_t total_size_ = 0;  // Cached total size to avoid runtime calculation
 };

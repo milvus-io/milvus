@@ -325,7 +325,7 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
 
-    AssertInfo(file_manager_ != nullptr,
+    AssertInfo(this->file_manager_ != nullptr,
                "file_manager_ must not be null when loading StringIndexMarisa");
     LoadWithStreaming(index_files.value(), config, load_priority);
 }
@@ -342,7 +342,7 @@ StringIndexMarisa::StreamFilesToDisk(
     auto file_writer = storage::FileWriter(
         local_path, storage::io::GetPriorityFromLoadPriority(load_priority));
 
-    auto cm = file_manager_->GetChunkManager().get();
+    auto cm = this->file_manager_->GetChunkManager().get();
     auto prio = milvus::PriorityForLoad(load_priority);
     constexpr size_t kPrefetchDepth = 2;
     PrefetchAndProcess(
@@ -398,7 +398,7 @@ StringIndexMarisa::LoadWithStreaming(
     auto local_prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
     auto trie_path = local_prefix + "marisa-trie";
 
-    auto cm = file_manager_->GetChunkManager().get();
+    auto cm = this->file_manager_->GetChunkManager().get();
     auto prio = milvus::PriorityForLoad(load_priority);
     constexpr size_t kPrefetchDepth = 2;
 
