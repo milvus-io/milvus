@@ -137,6 +137,14 @@ func (t *clusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster sess
 }
 
 func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
+	// If task is in analyzing state, skip querying the DataNode — the compaction has not been
+	// submitted yet. The state transition (analyzing → pipelining) is driven by Process() /
+	// processAnalyzing(). Once the state becomes pipelining, the scheduler will move the task
+	// back to pendingTasks and CreateTaskOnWorker will call doCompact.
+	if t.GetTaskProto().GetState() == datapb.CompactionTaskState_analyzing {
+		return
+	}
+
 	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetTaskProto().GetPlanID()),
 		zap.String("type", t.GetTaskProto().GetType().String()))
 
