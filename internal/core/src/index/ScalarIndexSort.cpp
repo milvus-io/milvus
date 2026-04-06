@@ -352,7 +352,8 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
                (size_t)is_nested_index->size);
     }
 
-    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true) &&
+               disk_file_manager_ != nullptr;
 
     auto index_data = index_binary.GetByName("index_data");
 
@@ -593,6 +594,10 @@ ScalarIndexSort<T>::StreamDataToMemory(
                    size);
             write_offset += size;
         });
+
+    AssertInfo(
+        write_offset == index_size,
+        "the real index size is not equal to the value parsed from meta");
 }
 
 template <typename T>
