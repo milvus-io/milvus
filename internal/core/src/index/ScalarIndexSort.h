@@ -203,13 +203,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     void
     StreamDataToDisk(const std::vector<std::string>& data_files,
-                     milvus::proto::common::LoadPriority load_priority,
-                     uint64_t parallel_degree);
+                     milvus::proto::common::LoadPriority load_priority);
 
     void
     StreamDataToMemory(const std::vector<std::string>& data_files,
                        milvus::proto::common::LoadPriority load_priority,
-                       uint64_t parallel_degree,
                        size_t index_size);
 
  public:

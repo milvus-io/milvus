@@ -334,8 +334,7 @@ int64_t
 StringIndexMarisa::StreamFilesToDisk(
     const std::vector<std::string>& files,
     const std::string& local_path,
-    milvus::proto::common::LoadPriority load_priority,
-    uint64_t parallel_degree) {
+    milvus::proto::common::LoadPriority load_priority) {
     std::filesystem::create_directories(
         std::filesystem::path(local_path).parent_path());
 
@@ -400,8 +399,7 @@ StringIndexMarisa::LoadWithStreaming(
     auto prio = milvus::PriorityForLoad(load_priority);
     constexpr size_t kPrefetchDepth = 2;
 
-    StreamFilesToDisk(
-        trie_files, trie_path, load_priority, 0 /*unused parallel_degree*/);
+    StreamFilesToDisk(trie_files, trie_path, load_priority);
 
     if (use_mmap) {
         trie_.mmap(trie_path.c_str());

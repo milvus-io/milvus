@@ -147,8 +147,7 @@ class StringIndexMarisa : public StringIndex {
     int64_t
     StreamFilesToDisk(const std::vector<std::string>& files,
                       const std::string& local_path,
-                      milvus::proto::common::LoadPriority load_priority,
-                      uint64_t parallel_degree);
+                      milvus::proto::common::LoadPriority load_priority);
 
     int64_t
     CalculateTotalSize() const;

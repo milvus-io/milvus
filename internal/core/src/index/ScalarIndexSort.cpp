@@ -488,15 +488,10 @@ ScalarIndexSort<T>::LoadWithStreaming(
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true) &&
                disk_file_manager_ != nullptr;
 
-    // Stream data slices in batches
-    auto parallel_degree = static_cast<uint64_t>(
-        DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE.load());
-
     if (is_mmap_) {
-        StreamDataToDisk(data_files, load_priority, parallel_degree);
+        StreamDataToDisk(data_files, load_priority);
     } else {
-        StreamDataToMemory(
-            data_files, load_priority, parallel_degree, index_size);
+        StreamDataToMemory(data_files, load_priority, index_size);
     }
 
     setup_data_pointers();
@@ -525,8 +520,7 @@ template <typename T>
 void
 ScalarIndexSort<T>::StreamDataToDisk(
     const std::vector<std::string>& data_files,
-    milvus::proto::common::LoadPriority load_priority,
-    uint64_t parallel_degree) {
+    milvus::proto::common::LoadPriority load_priority) {
     mmap_filepath_ = disk_file_manager_->GetLocalIndexObjectPrefix() +
                      STLSORT_INDEX_FILE_NAME;
     std::filesystem::create_directories(
@@ -581,7 +575,6 @@ void
 ScalarIndexSort<T>::StreamDataToMemory(
     const std::vector<std::string>& data_files,
     milvus::proto::common::LoadPriority load_priority,
-    uint64_t parallel_degree,
     size_t index_size) {
     data_.resize(index_size);
     size_t write_offset = 0;
