@@ -66,11 +66,11 @@ BsonInvertedIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t) const {
     // ignore the cid checking, because there is only one cell
     if (load_info_.enable_mmap) {
-        return {{0, load_info_.index_size},
-                {load_info_.index_size, load_info_.index_size}};
+        // loaded: on disk; overhead: temp memory for download buffer
+        return {{0, load_info_.index_size}, {load_info_.index_size, 0}};
     } else {
-        return {{load_info_.index_size, 0},
-                {load_info_.index_size, load_info_.index_size}};
+        // loaded: in memory; overhead: temp disk for local file before loading
+        return {{load_info_.index_size, 0}, {0, load_info_.index_size}};
     }
 }
 
