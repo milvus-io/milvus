@@ -79,11 +79,8 @@ TEST(CompressedInt64PkArrayTest, NegativeValues) {
 
 TEST(CompressedInt64PkArrayTest, LargeRange) {
     // Large deltas requiring many bits
-    std::vector<int64_t> pks = {0,
-                                1,
-                                INT64_MAX / 2,
-                                INT64_MAX / 2 + 1,
-                                INT64_MAX - 1};
+    std::vector<int64_t> pks = {
+        0, 1, INT64_MAX / 2, INT64_MAX / 2 + 1, INT64_MAX - 1};
 
     CompressedInt64PkArray arr;
     arr.build(pks.data(), pks.size());
@@ -133,8 +130,8 @@ TEST(CompressedInt64PkArrayTest, BulkAt) {
 
     for (size_t i = 0; i < offsets.size(); ++i) {
         EXPECT_EQ(output[i], pks[offsets[i]])
-            << "bulk_at mismatch at query index " << i
-            << " (offset " << offsets[i] << ")";
+            << "bulk_at mismatch at query index " << i << " (offset "
+            << offsets[i] << ")";
     }
 }
 
@@ -162,9 +159,9 @@ TEST(CompressedInt64PkArrayTest, BlockBoundary) {
     arr.build(pks.data(), N);
 
     // Verify boundary elements
-    EXPECT_EQ(arr.at(0), 0);       // first of block 0
-    EXPECT_EQ(arr.at(127), 127);   // last of block 0
-    EXPECT_EQ(arr.at(128), 128);   // first of block 1
+    EXPECT_EQ(arr.at(0), 0);      // first of block 0
+    EXPECT_EQ(arr.at(127), 127);  // last of block 0
+    EXPECT_EQ(arr.at(128), 128);  // first of block 1
 }
 
 TEST(CompressedInt64PkArrayTest, MemorySize) {
@@ -201,29 +198,33 @@ TEST(CompressedInt64PkArrayTest, PowerOfTwoBitWidths) {
         arr.build(pks.data(), N);
 
         for (int64_t i = 0; i < N; ++i) {
-            EXPECT_EQ(arr.at(i), pks[i])
-                << "mismatch at offset " << i
-                << " with max_delta=" << max_delta;
+            EXPECT_EQ(arr.at(i), pks[i]) << "mismatch at offset " << i
+                                         << " with max_delta=" << max_delta;
         }
     };
 
-    test_max_delta(1);          // 1 bit
-    test_max_delta(3);          // 2 bits
-    test_max_delta(15);         // 4 bits
-    test_max_delta(255);        // 8 bits
-    test_max_delta(65535);      // 16 bits
-    test_max_delta(0xFFFFFFFF); // 32 bits
+    test_max_delta(1);           // 1 bit
+    test_max_delta(3);           // 2 bits
+    test_max_delta(15);          // 4 bits
+    test_max_delta(255);         // 8 bits
+    test_max_delta(65535);       // 16 bits
+    test_max_delta(0xFFFFFFFF);  // 32 bits
 }
 
 // Simulate what build_offset2pk does: build from unsorted PK data
 // (as would happen in a non-sorted segment)
 TEST(CompressedInt64PkArrayTest, UnsortedPks) {
     // Typical auto-id pattern: IDs assigned out of order due to concurrent inserts
-    std::vector<int64_t> pks = {
-        449595445547098119, 449595445547098120, 449595445547098121,
-        449595445547098115, 449595445547098116, 449595445547098117,
-        449595445547098112, 449595445547098113, 449595445547098114,
-        449595445547098118};
+    std::vector<int64_t> pks = {449595445547098119,
+                                449595445547098120,
+                                449595445547098121,
+                                449595445547098115,
+                                449595445547098116,
+                                449595445547098117,
+                                449595445547098112,
+                                449595445547098113,
+                                449595445547098114,
+                                449595445547098118};
 
     CompressedInt64PkArray arr;
     arr.build(pks.data(), pks.size());

@@ -29,7 +29,8 @@ namespace milvus::segcore::storagev2translator {
 
 class TimestampIndexCell {
  public:
-    explicit TimestampIndexCell(TimestampIndex timestamp_index, int64_t num_rows);
+    explicit TimestampIndexCell(TimestampIndex timestamp_index,
+                                int64_t num_rows);
 
     const TimestampIndex&
     timestamp_index() const {
@@ -143,8 +144,7 @@ class TimestampIndexTranslator
     milvus::cachinglayer::Meta meta_;
 };
 
-class PkIndexTranslator
-    : public milvus::cachinglayer::Translator<PkIndexCell> {
+class PkIndexTranslator : public milvus::cachinglayer::Translator<PkIndexCell> {
  public:
     PkIndexTranslator(int64_t segment_id,
                       std::shared_ptr<ChunkedColumnInterface> column,
@@ -166,8 +166,8 @@ class PkIndexTranslator
     const std::string&
     key() const override;
 
-    std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<PkIndexCell>>>
+    std::vector<
+        std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<PkIndexCell>>>
     get_cells(milvus::OpContext* ctx,
               const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
