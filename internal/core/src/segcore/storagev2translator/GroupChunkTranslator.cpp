@@ -140,16 +140,15 @@ GroupChunkTranslator::GroupChunkTranslator(
     std::vector<std::future<FileMetaResult>> futures;
     futures.reserve(insert_files_.size());
     for (const auto& file : insert_files_) {
-        futures.push_back(pool.Submit([&fs, &file, this]() {
+        futures.push_back(pool.Submit([&fs, file, this]() {
             auto result = milvus_storage::FileRowGroupReader::Make(
                 fs,
                 file,
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
                 storage::GetReaderProperties());
-            AssertInfo(
-                result.ok(),
-                "[StorageV2] Failed to create file row group reader: " +
-                    result.status().ToString());
+            AssertInfo(result.ok(),
+                       "[StorageV2] Failed to create file row group reader: " +
+                           result.status().ToString());
             auto reader = result.ValueOrDie();
             FileMetaResult meta_result;
             meta_result.parquet_metadata =
