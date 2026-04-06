@@ -218,9 +218,12 @@ func (b *broadcastTask) IsForcePromoteMessage() bool {
 	return alterMsg.Header().ForcePromote
 }
 
-// MarkIgnoreAndSave marks the task's message header with ignore=true and saves to catalog.
+// MarkIgnore marks the task's message header with ignore=true in memory.
 // This is used for force promote to mark incomplete AlterReplicateConfig messages as ignored.
-func (b *broadcastTask) MarkIgnoreAndSave(ctx context.Context) error {
+// This is a memory-only operation — no etcd persistence needed because:
+// 1. The ignore flag only needs to take effect during the subsequent ack callback in the same process.
+// 2. If the coordinator crashes, force promote must be re-executed anyway.
+func (b *broadcastTask) MarkIgnore() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -240,13 +243,10 @@ func (b *broadcastTask) MarkIgnoreAndSave(ctx context.Context) error {
 	// The OverwriteHeader call above modified the underlying messageImpl properties
 	updatedMsg := message.NewBroadcastMutableMessageBeforeAppend(b.task.Message.Payload, b.task.Message.Properties)
 
-	// Update the task's message proto
+	// Update the task's in-memory message
 	b.task.Message = updatedMsg.IntoMessageProto()
 	b.msg = updatedMsg
-	b.dirty = true
-
-	// Save to catalog
-	return b.saveTaskIfDirty(ctx, b.Logger())
+	return nil
 }
 
 // InitializeRecovery initializes the recovery of the broadcast task.
