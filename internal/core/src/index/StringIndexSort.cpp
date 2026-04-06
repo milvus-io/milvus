@@ -501,26 +501,21 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
     config_ = config;
     ParseMetadata(binary_set);
 
-    auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
     if (config.contains(MMAP_FILE_PATH)) {
         LOG_INFO("StringIndexSort: loading with mmap strategy");
+        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
         auto mmap_path =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
         mmap_impl->SetMmapFilePath(mmap_path);
         mmap_impl->LoadFromBinary(
             binary_set, total_num_rows_, valid_bitset_, idx_to_offsets_);
+        impl_ = std::move(mmap_impl);
     } else {
-        LOG_INFO("StringIndexSort: loading with owned buffer strategy");
-        auto index_data = binary_set.GetByName("index_data");
-        AssertInfo(index_data != nullptr,
-                   "Failed to find 'index_data' in binary_set");
-        // Copy into owned buffer since BinarySet uses shared_ptr
-        std::vector<uint8_t> buffer(index_data->data.get(),
-                                    index_data->data.get() + index_data->size);
-        mmap_impl->LoadFromOwnedBuffer(
-            std::move(buffer), total_num_rows_, valid_bitset_, idx_to_offsets_);
+        LOG_INFO("StringIndexSort: loading with memory strategy");
+        impl_ = std::make_unique<StringIndexSortMemoryImpl>();
+        impl_->LoadFromBinary(
+            binary_set, total_num_rows_, valid_bitset_, idx_to_offsets_);
     }
-    impl_ = std::move(mmap_impl);
 
     is_built_ = true;
     total_size_ = CalculateTotalSize();
