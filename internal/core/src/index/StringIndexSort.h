@@ -157,6 +157,11 @@ class StringIndexSort : public StringIndex {
     int64_t
     CalculateTotalSize() const;
 
+    // Parse metadata fields (version, num_rows, valid_bitset, is_nested)
+    // from a BinarySet. Shared by LoadWithoutAssemble and LoadWithStreaming.
+    void
+    ParseMetadata(const BinarySet& binary_set);
+
     void
     LoadWithStreaming(const std::vector<std::string>& index_files,
                       const Config& config,

@@ -391,12 +391,10 @@ StringIndexMarisa::LoadWithStreaming(
         config.contains(MMAP_FILE_PATH) && disk_file_manager_ != nullptr;
 
     // trie must go through disk (marisa::read() requires fd)
-    auto local_prefix = disk_file_manager_ != nullptr
-                            ? disk_file_manager_->GetLocalIndexObjectPrefix()
-                            : std::string{};
-    AssertInfo(!local_prefix.empty(),
+    AssertInfo(disk_file_manager_ != nullptr,
                "disk_file_manager_ must not be null for StringIndexMarisa "
                "streaming load (marisa trie requires disk path)");
+    auto local_prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
     auto trie_path = local_prefix + "marisa-trie";
 
     auto cm = file_manager_->GetChunkManager().get();

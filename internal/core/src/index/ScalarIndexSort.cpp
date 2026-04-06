@@ -857,11 +857,12 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
     is_nested_index_ = reader.GetMeta<bool>("is_nested");
 
+    auto data_entry = reader.ReadEntry("index_data");
+
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true) &&
                disk_file_manager_ != nullptr;
 
     if (is_mmap_) {
-        auto data_entry = reader.ReadEntry("index_data");
         auto load_priority =
             GetValueFromConfig<milvus::proto::common::LoadPriority>(
                 config, milvus::LOAD_PRIORITY)
@@ -869,7 +870,6 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         SetupMmapFromData(
             data_entry.data.data(), data_entry.data.size(), load_priority);
     } else {
-        auto data_entry = reader.ReadEntry("index_data");
         owned_data_ = std::move(data_entry.data);
     }
 

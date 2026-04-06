@@ -420,14 +420,21 @@ StringIndexSort::LoadWithStreaming(
                 unlink(path.c_str());
             });
         binary_set.Append("index_data", data_ptr, data_size);
+        ParseMetadata(binary_set);
+        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
+        auto mmap_path =
+            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
+        mmap_impl->SetMmapFilePath(mmap_path);
+        mmap_impl->LoadFromBinary(
+            binary_set, total_num_rows_, valid_bitset_, idx_to_offsets_);
+        impl_ = std::move(mmap_impl);
     } else {
         // Stream data slices directly to memory buffer
-        // First pass: calculate total size
-        int64_t total_size = 0;
         auto cm = file_manager_->GetChunkManager().get();
         auto prio = milvus::PriorityForLoad(load_priority);
 
         std::vector<std::vector<uint8_t>> slice_buffers;
+        int64_t total_size = 0;
         for (auto& file : data_files) {
             DownloadSemaphore::Guard guard;
             auto futures = storage::GetObjectData(cm, {file}, prio);
@@ -438,32 +445,35 @@ StringIndexSort::LoadWithStreaming(
                 codecs[0]->PayloadData() + codecs[0]->PayloadSize());
         }
 
-        // Assemble into a single contiguous buffer
-        std::shared_ptr<uint8_t[]> data_ptr(new uint8_t[total_size]);
+        std::vector<uint8_t> buffer(total_size);
         size_t offset = 0;
         for (auto& buf : slice_buffers) {
-            memcpy(data_ptr.get() + offset, buf.data(), buf.size());
+            memcpy(buffer.data() + offset, buf.data(), buf.size());
             offset += buf.size();
         }
         slice_buffers.clear();
 
-        binary_set.Append("index_data", data_ptr, total_size);
+        // Parse metadata, then directly create impl with zero-copy
+        ParseMetadata(binary_set);
+        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
+        mmap_impl->LoadFromOwnedBuffer(
+            std::move(buffer), total_num_rows_, valid_bitset_, idx_to_offsets_);
+        impl_ = std::move(mmap_impl);
     }
 
-    LoadWithoutAssemble(binary_set, config);
+    config_ = config;
+    is_built_ = true;
+    total_size_ = CalculateTotalSize();
+    ComputeByteSize();
 }
 
 void
-StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
-                                     const Config& config) {
-    config_ = config;
-
+StringIndexSort::ParseMetadata(const BinarySet& binary_set) {
     auto index_num_rows = binary_set.GetByName("index_num_rows");
     AssertInfo(index_num_rows != nullptr,
                "Failed to find 'index_num_rows' in binary_set");
     memcpy(&total_num_rows_, index_num_rows->data.get(), sizeof(size_t));
 
-    // Initialize idx_to_offsets - it will be rebuilt by LoadFromBinary
     idx_to_offsets_.resize(total_num_rows_);
 
     auto valid_bitset_data = binary_set.GetByName("valid_bitset");
@@ -477,7 +487,6 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
         }
     }
 
-    // Deserialize is_nested_index (optional for backward compatibility)
     auto is_nested_data = binary_set.GetByName("is_nested_index");
     if (is_nested_data != nullptr) {
         memcpy(&is_nested_index_, is_nested_data->data.get(), sizeof(bool));
@@ -497,6 +506,13 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
                               version,
                               SERIALIZATION_VERSION));
     }
+}
+
+void
+StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
+                                     const Config& config) {
+    config_ = config;
+    ParseMetadata(binary_set);
 
     auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
     if (config.contains(MMAP_FILE_PATH)) {
