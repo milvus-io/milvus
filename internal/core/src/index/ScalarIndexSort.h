@@ -145,6 +145,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
         if (is_mmap_) {
             // mmap mode: add mmap size and filepath
             total += mmap_size_;
+        } else if (!owned_data_.empty()) {
+            // owned buffer mode: raw byte buffer
+            total += owned_data_.capacity();
         } else {
             // memory mode: add data vector
             total += data_.capacity() * sizeof(IndexStructure<T>);
@@ -251,6 +254,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
             data_ptr_ = reinterpret_cast<IndexStructure<T>*>(mmap_data_);
             size_ = data_size_ / sizeof(IndexStructure<T>);
             end_ptr_ = data_ptr_ + size_;
+        } else if (!owned_data_.empty()) {
+            data_ptr_ =
+                reinterpret_cast<const IndexStructure<T>*>(owned_data_.data());
+            size_ = owned_data_.size() / sizeof(IndexStructure<T>);
+            end_ptr_ = data_ptr_ + size_;
         } else {
             data_ptr_ = data_.data();
             end_ptr_ = data_ptr_ + data_.size();
@@ -272,6 +280,10 @@ class ScalarIndexSort : public ScalarIndex<T> {
     // for ram and also used for building index.
     // Note: it should not be used directly for accessing data. Use data_ptr_ instead.
     std::vector<IndexStructure<T>> data_;
+
+    // Owned raw buffer for zero-copy load (V3 non-mmap path).
+    // When populated, data_ptr_ points into this buffer instead of data_.
+    std::vector<uint8_t> owned_data_;
 
     // for mmap
     bool is_mmap_{false};
