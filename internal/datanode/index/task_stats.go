@@ -610,17 +610,22 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	// When manifest_path is set, register text index stats in manifest.
 	// C++ Upload() returns relative paths; convert to absolute by prepending basePath
 	// before registering with manifest (loon library expects absolute paths).
+	// Use a separate copy for manifest so the original stats retain relative paths
+	// for dual-write to etcd (etcd stores relative paths, reconstructed on read).
 	if st.manifestPath != "" && len(textIndexLogs) > 0 {
-		for _, stats := range textIndexLogs {
+		manifestStats := make(map[int64]*datapb.TextIndexStats, len(textIndexLogs))
+		for fieldID, stats := range textIndexLogs {
+			cloned := proto.Clone(stats).(*datapb.TextIndexStats)
 			basePath, err := computeStatsBasePath(st.req, st.manifestPath, "text_index", stats.GetFieldID())
 			if err != nil {
 				return err
 			}
-			for i, f := range stats.GetFiles() {
-				stats.Files[i] = basePath + "/" + f
+			for i, f := range cloned.GetFiles() {
+				cloned.Files[i] = basePath + "/" + f
 			}
+			manifestStats[fieldID] = cloned
 		}
-		statEntries := packed.TextIndexStatEntries(textIndexLogs, st.req.GetCurrentScalarIndexVersion())
+		statEntries := packed.TextIndexStatEntries(manifestStats, st.req.GetCurrentScalarIndexVersion())
 		newManifest, err := packed.AddStatsToManifest(
 			st.manifestPath, st.req.GetStorageConfig(), statEntries)
 		if err != nil {
@@ -783,17 +788,22 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	// When manifest_path is set, register JSON key stats in manifest.
 	// C++ Upload() returns relative paths; convert to absolute by prepending basePath
 	// before registering with manifest (loon library expects absolute paths).
+	// Use a separate copy for manifest so the original stats retain relative paths
+	// for dual-write to etcd (etcd stores relative paths, reconstructed on read).
 	if st.manifestPath != "" && len(jsonKeyIndexStats) > 0 {
-		for _, stats := range jsonKeyIndexStats {
+		manifestStats := make(map[int64]*datapb.JsonKeyStats, len(jsonKeyIndexStats))
+		for fieldID, stats := range jsonKeyIndexStats {
+			cloned := proto.Clone(stats).(*datapb.JsonKeyStats)
 			basePath, err := computeStatsBasePath(st.req, st.manifestPath, "json_key_index", stats.GetFieldID())
 			if err != nil {
 				return err
 			}
-			for i, f := range stats.GetFiles() {
-				stats.Files[i] = basePath + "/" + f
+			for i, f := range cloned.GetFiles() {
+				cloned.Files[i] = basePath + "/" + f
 			}
+			manifestStats[fieldID] = cloned
 		}
-		statEntries := packed.JSONKeyStatEntries(jsonKeyIndexStats)
+		statEntries := packed.JSONKeyStatEntries(manifestStats)
 		newManifest, err := packed.AddStatsToManifest(
 			st.manifestPath, st.req.GetStorageConfig(), statEntries)
 		if err != nil {
