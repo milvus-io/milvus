@@ -336,7 +336,7 @@ StringIndexSort::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
 
-    AssertInfo(file_manager_ != nullptr,
+    AssertInfo(this->file_manager_ != nullptr,
                "file_manager_ must not be null when loading StringIndexSort");
     LoadWithStreaming(index_files.value(), config, load_priority);
 }
@@ -373,7 +373,7 @@ StringIndexSort::LoadWithStreaming(
 
     // Load metadata to memory (tiny: version, index_num_rows, valid_bitset)
     auto meta_datas =
-        file_manager_->LoadIndexToMemory(meta_files, load_priority);
+        this->file_manager_->LoadIndexToMemory(meta_files, load_priority);
     BinarySet binary_set;
     AssembleIndexDatas(meta_datas, binary_set);
     meta_datas.clear();
@@ -381,7 +381,7 @@ StringIndexSort::LoadWithStreaming(
     bool use_mmap =
         config.contains(MMAP_FILE_PATH) && disk_file_manager_ != nullptr;
 
-    auto cm = file_manager_->GetChunkManager().get();
+    auto cm = this->file_manager_->GetChunkManager().get();
     auto prio = milvus::PriorityForLoad(load_priority);
     constexpr size_t kPrefetchDepth = 2;
 

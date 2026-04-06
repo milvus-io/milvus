@@ -171,7 +171,6 @@ class StringIndexSort : public StringIndex {
     int64_t field_id_ = 0;
     bool is_built_ = false;
     Config config_;
-    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;
     size_t total_num_rows_{0};
     TargetBitmap valid_bitset_;

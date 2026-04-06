@@ -352,8 +352,7 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
                (size_t)is_nested_index->size);
     }
 
-    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true) &&
-               disk_file_manager_ != nullptr;
+    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 
     auto index_data = index_binary.GetByName("index_data");
 
