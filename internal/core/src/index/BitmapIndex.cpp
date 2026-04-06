@@ -698,9 +698,10 @@ BitmapIndex<T>::LoadWithStreaming(
                                buffer.insert(buffer.end(), data, data + size);
                            });
 
-        std::shared_ptr<uint8_t[]> data_ptr(new uint8_t[buffer.size()]);
-        memcpy(data_ptr.get(), buffer.data(), buffer.size());
-        binary_set.Append(BITMAP_INDEX_DATA, data_ptr, buffer.size());
+        auto buf_ptr =
+            std::make_shared<std::vector<uint8_t>>(std::move(buffer));
+        std::shared_ptr<uint8_t[]> data_ptr(buf_ptr, buf_ptr->data());
+        binary_set.Append(BITMAP_INDEX_DATA, data_ptr, buf_ptr->size());
     }
 
     LoadWithoutAssemble(binary_set, config);

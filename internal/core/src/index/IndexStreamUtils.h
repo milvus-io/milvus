@@ -25,6 +25,7 @@
 #include <string>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "storage/DataCodec.h"
 #include "storage/Util.h"
 
@@ -124,6 +125,8 @@ PrefetchAndProcess(storage::ChunkManager* cm,
     if (files.empty()) {
         return;
     }
+    AssertInfo(prefetch_depth > 0,
+               "PrefetchAndProcess: prefetch_depth must be > 0");
 
     using Future = std::future<std::unique_ptr<storage::DataCodec>>;
 
@@ -145,22 +148,41 @@ PrefetchAndProcess(storage::ChunkManager* cm,
         next++;
     };
 
+    // Drain all remaining futures to avoid background tasks writing to
+    // destroyed promises. Guards are released as entries are destroyed.
+    auto drain_window = [&window]() {
+        while (!window.empty()) {
+            auto entry = std::move(window.front());
+            window.pop_front();
+            try {
+                entry.future.get();
+            } catch (...) {
+            }
+        }
+    };
+
     // Fill initial prefetch window
     for (size_t i = 0; i < std::min(prefetch_depth, files.size()); i++) {
         submit_one();
     }
 
     // Process in order: pop front, submit next, process
-    while (!window.empty()) {
-        auto entry = std::move(window.front());
-        window.pop_front();
+    try {
+        while (!window.empty()) {
+            auto entry = std::move(window.front());
+            window.pop_front();
 
-        // Submit next before waiting, so download overlaps with wait+process
-        submit_one();
+            // Submit next before waiting, so download overlaps with
+            // wait+process
+            submit_one();
 
-        auto codec = entry.future.get();
-        process_fn(codec->PayloadData(), codec->PayloadSize());
-        // entry destroyed → Guard released → semaphore slot freed
+            auto codec = entry.future.get();
+            process_fn(codec->PayloadData(), codec->PayloadSize());
+            // entry destroyed → Guard released → semaphore slot freed
+        }
+    } catch (...) {
+        drain_window();
+        throw;
     }
 }
 
