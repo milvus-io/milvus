@@ -51,18 +51,18 @@ constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
 
 template <typename T>
 BitmapIndex<T>::BitmapIndex(
-    const storage::FileManagerContext& this->file_manager_context)
+    const storage::FileManagerContext& file_manager_context)
     : ScalarIndex<T>(BITMAP_INDEX_TYPE),
       is_built_(false),
-      schema_(this->file_manager_context.fieldDataMeta.field_schema),
+      schema_(file_manager_context.fieldDataMeta.field_schema),
       is_mmap_(false) {
-    if (this->file_manager_context.Valid()) {
-        this->file_manager_ = std::make_shared<storage::MemFileManagerImpl>(
-            this->file_manager_context);
+    if (file_manager_context.Valid()) {
+        this->file_manager_ =
+            std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
         AssertInfo(this->file_manager_ != nullptr,
                    "create file manager failed!");
         disk_file_manager_ = std::make_shared<storage::DiskFileManagerImpl>(
-            this->file_manager_context);
+            file_manager_context);
     }
 }
 

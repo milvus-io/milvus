@@ -68,19 +68,19 @@ const uint64_t MMAP_INDEX_PADDING = 1;
 
 template <typename T>
 ScalarIndexSort<T>::ScalarIndexSort(
-    const storage::FileManagerContext& this->file_manager_context,
+    const storage::FileManagerContext& file_manager_context,
     bool is_nested_index)
     : ScalarIndex<T>(ASCENDING_SORT),
       is_nested_index_(is_nested_index),
       is_built_(false),
       data_() {
     // not valid means we are in unit test
-    if (this->file_manager_context.Valid()) {
-        field_id_ = this->file_manager_context.fieldDataMeta.field_id;
-        this->file_manager_ = std::make_shared<storage::MemFileManagerImpl>(
-            this->file_manager_context);
+    if (file_manager_context.Valid()) {
+        field_id_ = file_manager_context.fieldDataMeta.field_id;
+        this->file_manager_ =
+            std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
         disk_file_manager_ = std::make_shared<storage::DiskFileManagerImpl>(
-            this->file_manager_context);
+            file_manager_context);
     }
 }
 
@@ -425,7 +425,7 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
     if (this->file_manager_ != nullptr) {
         LoadWithStreaming(index_files.value(), config, load_priority);
     } else {
-        // Fallback for unit tests without valid this->file_manager_context
+        // Fallback for unit tests without valid file_manager_context
         auto index_datas = this->file_manager_->LoadIndexToMemory(
             index_files.value(), load_priority);
         BinarySet binary_set;
