@@ -51,17 +51,18 @@ constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
 
 template <typename T>
 BitmapIndex<T>::BitmapIndex(
-    const storage::FileManagerContext& file_manager_context)
+    const storage::FileManagerContext& this->file_manager_context)
     : ScalarIndex<T>(BITMAP_INDEX_TYPE),
       is_built_(false),
-      schema_(file_manager_context.fieldDataMeta.field_schema),
+      schema_(this->file_manager_context.fieldDataMeta.field_schema),
       is_mmap_(false) {
-    if (file_manager_context.Valid()) {
-        this->file_manager_ =
-            std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
-        AssertInfo(file_manager_ != nullptr, "create file manager failed!");
+    if (this->file_manager_context.Valid()) {
+        this->file_manager_ = std::make_shared<storage::MemFileManagerImpl>(
+            this->file_manager_context);
+        AssertInfo(this->file_manager_ != nullptr,
+                   "create file manager failed!");
         disk_file_manager_ = std::make_shared<storage::DiskFileManagerImpl>(
-            file_manager_context);
+            this->file_manager_context);
     }
 }
 
@@ -608,8 +609,8 @@ BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     if (disk_file_manager_ != nullptr) {
         LoadWithStreaming(index_files.value(), config, load_priority);
     } else {
-        auto index_datas = file_manager_->LoadIndexToMemory(index_files.value(),
-                                                            load_priority);
+        auto index_datas = this->file_manager_->LoadIndexToMemory(
+            index_files.value(), load_priority);
         BinarySet binary_set;
         AssembleIndexDatas(index_datas, binary_set);
         index_datas.clear();
@@ -653,7 +654,7 @@ BitmapIndex<T>::LoadWithStreaming(
         auto file_writer = storage::FileWriter(
             data_path, storage::io::GetPriorityFromLoadPriority(load_priority));
 
-        auto cm = file_manager_->GetChunkManager().get();
+        auto cm = this->file_manager_->GetChunkManager().get();
         auto prio = milvus::PriorityForLoad(load_priority);
         for (auto& file : data_files) {
             DownloadSemaphore::Guard guard;
@@ -667,7 +668,7 @@ BitmapIndex<T>::LoadWithStreaming(
     }
 
     auto meta_datas =
-        file_manager_->LoadIndexToMemory(meta_files, load_priority);
+        this->file_manager_->LoadIndexToMemory(meta_files, load_priority);
     BinarySet binary_set;
     AssembleIndexDatas(meta_datas, binary_set);
     meta_datas.clear();

@@ -68,19 +68,19 @@ const uint64_t MMAP_INDEX_PADDING = 1;
 
 template <typename T>
 ScalarIndexSort<T>::ScalarIndexSort(
-    const storage::FileManagerContext& file_manager_context,
+    const storage::FileManagerContext& this->file_manager_context,
     bool is_nested_index)
     : ScalarIndex<T>(ASCENDING_SORT),
       is_nested_index_(is_nested_index),
       is_built_(false),
       data_() {
     // not valid means we are in unit test
-    if (file_manager_context.Valid()) {
-        field_id_ = file_manager_context.fieldDataMeta.field_id;
-        this->file_manager_ =
-            std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
+    if (this->file_manager_context.Valid()) {
+        field_id_ = this->file_manager_context.fieldDataMeta.field_id;
+        this->file_manager_ = std::make_shared<storage::MemFileManagerImpl>(
+            this->file_manager_context);
         disk_file_manager_ = std::make_shared<storage::DiskFileManagerImpl>(
-            file_manager_context);
+            this->file_manager_context);
     }
 }
 
@@ -422,12 +422,12 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
 
-    if (file_manager_ != nullptr) {
+    if (this->file_manager_ != nullptr) {
         LoadWithStreaming(index_files.value(), config, load_priority);
     } else {
-        // Fallback for unit tests without valid file_manager_context
-        auto index_datas = file_manager_->LoadIndexToMemory(index_files.value(),
-                                                            load_priority);
+        // Fallback for unit tests without valid this->file_manager_context
+        auto index_datas = this->file_manager_->LoadIndexToMemory(
+            index_files.value(), load_priority);
         BinarySet binary_set;
         AssembleIndexDatas(index_datas, binary_set);
         index_datas.clear();
@@ -467,7 +467,7 @@ ScalarIndexSort<T>::LoadWithStreaming(
 
     // Load metadata first (tiny: index_length, index_num_rows)
     auto index_datas =
-        file_manager_->LoadIndexToMemory(meta_files, load_priority);
+        this->file_manager_->LoadIndexToMemory(meta_files, load_priority);
     BinarySet meta_binary;
     AssembleIndexDatas(index_datas, meta_binary);
     index_datas.clear();
@@ -548,7 +548,7 @@ ScalarIndexSort<T>::StreamDataToDisk(
 
         // Sequential download with global semaphore to bound total memory
         // across all concurrent index loads to semaphore_slots * 16MB.
-        auto cm = file_manager_->GetChunkManager().get();
+        auto cm = this->file_manager_->GetChunkManager().get();
         auto prio = milvus::PriorityForLoad(load_priority);
         for (auto& file : data_files) {
             DownloadSemaphore::Guard guard;
@@ -595,7 +595,7 @@ ScalarIndexSort<T>::StreamDataToMemory(
     data_.resize(index_size);
     size_t write_offset = 0;
 
-    auto cm = file_manager_->GetChunkManager().get();
+    auto cm = this->file_manager_->GetChunkManager().get();
     auto prio = milvus::PriorityForLoad(load_priority);
     for (auto& file : data_files) {
         DownloadSemaphore::Guard guard;
