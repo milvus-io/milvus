@@ -33,10 +33,10 @@ int64_t
 estimate_timestamp_index_bytes(int64_t num_rows, int64_t num_chunks) {
     auto num_slices = std::max<int64_t>(1, (num_rows + 4095) / 4096);
     return sizeof(TimestampIndex) +
-           num_slices * static_cast<int64_t>(sizeof(int64_t) * 2 +
-                                             sizeof(Timestamp)) +
-           num_chunks * static_cast<int64_t>(sizeof(const Timestamp*) +
-                                             sizeof(int64_t));
+           num_slices *
+               static_cast<int64_t>(sizeof(int64_t) * 2 + sizeof(Timestamp)) +
+           num_chunks *
+               static_cast<int64_t>(sizeof(const Timestamp*) + sizeof(int64_t));
 }
 
 TimestampIndex
@@ -58,7 +58,8 @@ create_offset_map(DataType data_type) {
             return std::make_unique<OffsetOrderedArray<std::string>>();
         default:
             ThrowInfo(DataTypeInvalid,
-                      "unsupported primary key data type {}", data_type);
+                      "unsupported primary key data type {}",
+                      data_type);
     }
     return nullptr;
 }
@@ -82,12 +83,14 @@ estimate_pk_index_bytes(DataType data_type,
             if (is_sorted_by_pk) {
                 base = 0;  // sorted varchar: no index built
             } else {
-                base = num_rows * static_cast<int64_t>(sizeof(std::string) + 16);
+                base =
+                    num_rows * static_cast<int64_t>(sizeof(std::string) + 16);
             }
             break;
         default:
             ThrowInfo(DataTypeInvalid,
-                      "unsupported primary key data type {}", data_type);
+                      "unsupported primary key data type {}",
+                      data_type);
     }
     return std::max<int64_t>(base, 1024);
 }
@@ -106,10 +109,10 @@ PkIndexCell::PkIndexCell(std::unique_ptr<OffsetMap> pk2offset,
     : pk2offset_(std::move(pk2offset)),
       offset2pk_(std::move(offset2pk)),
       is_int64_pk_(is_int64_pk),
-      byte_size_{static_cast<int64_t>(
-                     (pk2offset_ ? pk2offset_->memory_size() : 0) +
-                     (offset2pk_ ? offset2pk_->memory_size() : 0)),
-                 0} {
+      byte_size_{
+          static_cast<int64_t>((pk2offset_ ? pk2offset_->memory_size() : 0) +
+                               (offset2pk_ ? offset2pk_->memory_size() : 0)),
+          0} {
 }
 
 void
@@ -150,9 +153,9 @@ std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
 TimestampIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t) const {
-    return {{estimate_timestamp_index_bytes(num_rows_, column_->num_chunks()),
-             0},
-            {0, 0}};
+    return {
+        {estimate_timestamp_index_bytes(num_rows_, column_->num_chunks()), 0},
+        {0, 0}};
 }
 
 const std::string&
@@ -160,11 +163,10 @@ TimestampIndexTranslator::key() const {
     return key_;
 }
 
-std::vector<std::pair<milvus::cachinglayer::cid_t,
-                      std::unique_ptr<TimestampIndexCell>>>
+std::vector<
+    std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<TimestampIndexCell>>>
 TimestampIndexTranslator::get_cells(
-    milvus::OpContext* ctx,
-    const std::vector<milvus::cachinglayer::cid_t>&) {
+    milvus::OpContext* ctx, const std::vector<milvus::cachinglayer::cid_t>&) {
     CheckCancellation(
         ctx, segment_id_, "TimestampIndexTranslator::get_cells()");
 
@@ -215,10 +217,11 @@ TimestampIndexTranslator::meta() {
     return &meta_;
 }
 
-PkIndexTranslator::PkIndexTranslator(int64_t segment_id,
-                                     std::shared_ptr<ChunkedColumnInterface> column,
-                                     DataType data_type,
-                                     bool is_sorted_by_pk)
+PkIndexTranslator::PkIndexTranslator(
+    int64_t segment_id,
+    std::shared_ptr<ChunkedColumnInterface> column,
+    DataType data_type,
+    bool is_sorted_by_pk)
     : segment_id_(segment_id),
       column_(std::move(column)),
       data_type_(data_type),
@@ -245,7 +248,8 @@ std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
 PkIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t) const {
-    return {{estimate_pk_index_bytes(data_type_, column_->NumRows(), is_sorted_by_pk_),
+    return {{estimate_pk_index_bytes(
+                 data_type_, column_->NumRows(), is_sorted_by_pk_),
              0},
             {0, 0}};
 }
@@ -255,7 +259,8 @@ PkIndexTranslator::key() const {
     return key_;
 }
 
-std::vector<std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<PkIndexCell>>>
+std::vector<
+    std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<PkIndexCell>>>
 PkIndexTranslator::get_cells(milvus::OpContext* ctx,
                              const std::vector<milvus::cachinglayer::cid_t>&) {
     CheckCancellation(ctx, segment_id_, "PkIndexTranslator::get_cells()");
@@ -311,19 +316,22 @@ PkIndexTranslator::get_cells(milvus::OpContext* ctx,
         }
         default:
             ThrowInfo(DataTypeInvalid,
-                      "unsupported primary key data type {}", data_type_);
+                      "unsupported primary key data type {}",
+                      data_type_);
     }
 
     if (pk2offset) {
         pk2offset->seal();
     }
 
-    std::vector<std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<PkIndexCell>>>
+    std::vector<
+        std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<PkIndexCell>>>
         result;
     result.emplace_back(
         0,
-        std::make_unique<PkIndexCell>(
-            std::move(pk2offset), std::move(offset2pk), data_type_ == DataType::INT64));
+        std::make_unique<PkIndexCell>(std::move(pk2offset),
+                                      std::move(offset2pk),
+                                      data_type_ == DataType::INT64));
     return result;
 }
 

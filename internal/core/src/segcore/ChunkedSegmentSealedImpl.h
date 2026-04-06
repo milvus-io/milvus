@@ -89,7 +89,7 @@ class InsertRecordTranslator;
 namespace storagev2translator {
 class TimestampIndexCell;
 class PkIndexCell;
-}
+}  // namespace storagev2translator
 
 using namespace milvus::cachinglayer;
 
@@ -1240,8 +1240,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     init_storage_v2_timestamp_index(
-        const std::shared_ptr<ChunkedColumnInterface>& column,
-        size_t num_rows);
+        const std::shared_ptr<ChunkedColumnInterface>& column, size_t num_rows);
 
     void
     init_storage_v2_pk_index(
