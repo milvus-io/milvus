@@ -1180,6 +1180,81 @@ func (s *QuotaCenterSuite) TestSyncMetricsSuccess() {
 		nodes := lo.Keys(quotaCenter.dataNodeMetrics)
 		s.ElementsMatch([]int64{1, 2}, nodes)
 	})
+
+	s.Run("datacoord_cluster_with_empty_datanode_collectionIDs", func() {
+		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
+		qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyQCTopology(), nil).Once()
+
+		dcTopology := &metricsinfo.DataCoordTopology{
+			Cluster: metricsinfo.DataClusterTopology{
+				ConnectedDataNodes: []metricsinfo.DataNodeInfos{
+					{BaseComponentInfos: metricsinfo.BaseComponentInfos{ID: 1}, QuotaMetrics: &metricsinfo.DataNodeQuotaMetrics{Effect: metricsinfo.NodeEffect{NodeID: 1, CollectionIDs: []int64{}}}},
+					{BaseComponentInfos: metricsinfo.BaseComponentInfos{ID: 2}, QuotaMetrics: &metricsinfo.DataNodeQuotaMetrics{Effect: metricsinfo.NodeEffect{NodeID: 2, CollectionIDs: []int64{}}}},
+				},
+				Self: metricsinfo.DataCoordInfos{
+					CollectionMetrics: &metricsinfo.DataCoordCollectionMetrics{
+						Collections: map[int64]*metricsinfo.DataCoordCollectionInfo{
+							100: {NumEntitiesTotal: 1000},
+							200: {NumEntitiesTotal: 2000},
+							300: {NumEntitiesTotal: 3000},
+						},
+					},
+				},
+			},
+		}
+
+		qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(dcTopology, nil).Once()
+		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i int64) (*model.Collection, error) {
+			return &model.Collection{CollectionID: i, DBID: 1}, nil
+		}).Times(3)
+
+		quotaCenter := NewQuotaCenter(pcm, qc, core.tsoAllocator, meta)
+
+		err := quotaCenter.collectMetrics()
+		s.Require().NoError(err)
+
+		s.ElementsMatch([]int64{100, 200, 300}, lo.Keys(quotaCenter.writableCollections[1]))
+		nodes := lo.Keys(quotaCenter.dataNodeMetrics)
+		s.ElementsMatch([]int64{1, 2}, nodes)
+	})
+
+	s.Run("datacoord_cluster_without_collection_metrics_but_quota_has_collections", func() {
+		pcm.EXPECT().GetProxyMetrics(mock.Anything).Return(nil, nil).Once()
+		qc.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).Return(s.getEmptyQCTopology(), nil).Once()
+
+		dcTopology := &metricsinfo.DataCoordTopology{
+			Cluster: metricsinfo.DataClusterTopology{
+				ConnectedDataNodes: []metricsinfo.DataNodeInfos{
+					{BaseComponentInfos: metricsinfo.BaseComponentInfos{ID: 1}, QuotaMetrics: &metricsinfo.DataNodeQuotaMetrics{Effect: metricsinfo.NodeEffect{NodeID: 1, CollectionIDs: []int64{}}}},
+					{BaseComponentInfos: metricsinfo.BaseComponentInfos{ID: 2}, QuotaMetrics: &metricsinfo.DataNodeQuotaMetrics{Effect: metricsinfo.NodeEffect{NodeID: 2, CollectionIDs: []int64{}}}},
+				},
+				Self: metricsinfo.DataCoordInfos{
+					QuotaMetrics: &metricsinfo.DataCoordQuotaMetrics{
+						PartitionsBinlogSize: map[int64]map[int64]int64{
+							100: {10: 1},
+							200: {20: 2},
+							300: {30: 3},
+						},
+					},
+					CollectionMetrics: nil,
+				},
+			},
+		}
+
+		qc.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).Return(dcTopology, nil).Once()
+		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i int64) (*model.Collection, error) {
+			return &model.Collection{CollectionID: i, DBID: 1}, nil
+		}).Times(3)
+
+		quotaCenter := NewQuotaCenter(pcm, qc, core.tsoAllocator, meta)
+
+		err := quotaCenter.collectMetrics()
+		s.Require().NoError(err)
+
+		s.ElementsMatch([]int64{100, 200, 300}, lo.Keys(quotaCenter.writableCollections[1]))
+		nodes := lo.Keys(quotaCenter.dataNodeMetrics)
+		s.ElementsMatch([]int64{1, 2}, nodes)
+	})
 }
 
 func (s *QuotaCenterSuite) TestSyncMetricsFailure() {

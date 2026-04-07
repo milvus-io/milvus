@@ -502,6 +502,20 @@ func (q *QuotaCenter) collectMetrics() error {
 			collectionMetrics = cm.Collections
 		}
 
+		// Because DataNode getQuotaMetrics only sets Effect.NodeID and does not populate
+		// Effect.CollectionIDs, DataNode quota metrics do not report collection IDs.
+		// Fall back to DataCoord-side collection metrics so we can still refresh writable
+		// collections and RootCoord entity_num(total).
+		if collections.Len() == 0 && collectionMetrics != nil {
+			for collectionID := range collectionMetrics {
+				collections.Insert(collectionID)
+			}
+		}
+
+		// Also include collections observed by DataCoord quota metrics (e.g. binlog size)
+		// to avoid missing collections when CollectionMetrics is absent.
+		collections.Insert(datacoordQuotaCollections...)
+
 		collections.Range(func(collectionID int64) bool {
 			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
 			if getErr != nil {
@@ -538,20 +552,6 @@ func (q *QuotaCenter) collectMetrics() error {
 			}
 			return true
 		})
-
-		for _, collectionID := range datacoordQuotaCollections {
-			_, ok := q.collectionIDToDBID.Get(collectionID)
-			if ok {
-				continue
-			}
-			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
-			if getErr != nil {
-				// skip limit check if the collection meta has been removed from rootcoord meta
-				continue
-			}
-			q.collectionIDToDBID.Insert(collectionID, coll.DBID)
-			q.collections.Insert(FormatCollectionKey(coll.DBID, coll.Name), collectionID)
-		}
 
 		return nil
 	})
