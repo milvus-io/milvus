@@ -2787,6 +2787,53 @@ func (_c *MilvusServiceServer_Dummy_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// DumpMessages provides a mock function with given fields: _a0, _a1
+func (_m *MilvusServiceServer) DumpMessages(_a0 *milvuspb.DumpMessagesRequest, _a1 milvuspb.MilvusService_DumpMessagesServer) error {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DumpMessages")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*milvuspb.DumpMessagesRequest, milvuspb.MilvusService_DumpMessagesServer) error); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MilvusServiceServer_DumpMessages_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DumpMessages'
+type MilvusServiceServer_DumpMessages_Call struct {
+	*mock.Call
+}
+
+// DumpMessages is a helper method to define mock.On call
+//   - _a0 *milvuspb.DumpMessagesRequest
+//   - _a1 milvuspb.MilvusService_DumpMessagesServer
+func (_e *MilvusServiceServer_Expecter) DumpMessages(_a0 interface{}, _a1 interface{}) *MilvusServiceServer_DumpMessages_Call {
+	return &MilvusServiceServer_DumpMessages_Call{Call: _e.mock.On("DumpMessages", _a0, _a1)}
+}
+
+func (_c *MilvusServiceServer_DumpMessages_Call) Run(run func(_a0 *milvuspb.DumpMessagesRequest, _a1 milvuspb.MilvusService_DumpMessagesServer)) *MilvusServiceServer_DumpMessages_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*milvuspb.DumpMessagesRequest), args[1].(milvuspb.MilvusService_DumpMessagesServer))
+	})
+	return _c
+}
+
+func (_c *MilvusServiceServer_DumpMessages_Call) Return(_a0 error) *MilvusServiceServer_DumpMessages_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MilvusServiceServer_DumpMessages_Call) RunAndReturn(run func(*milvuspb.DumpMessagesRequest, milvuspb.MilvusService_DumpMessagesServer) error) *MilvusServiceServer_DumpMessages_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Flush provides a mock function with given fields: _a0, _a1
 func (_m *MilvusServiceServer) Flush(_a0 context.Context, _a1 *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
 	ret := _m.Called(_a0, _a1)
