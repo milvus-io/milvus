@@ -1041,6 +1041,7 @@ common:
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
   traceLogMode: 0 # trace request info
+  bloomFilterEnabled: true # whether to load and apply bloom filter/pk stats on querynode
   bloomFilterSize: 100000 # bloom filter initial size
   bloomFilterType: BlockedBloomFilter # bloom filter type, support BasicBloomFilter and BlockedBloomFilter
   maxBloomFalsePositive: 0.001 # max false positive rate for bloom filter

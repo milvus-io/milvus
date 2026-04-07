@@ -303,6 +303,7 @@ type commonConfig struct {
 	StorageReadRetryAttempts ParamItem `refreshable:"true"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
+	BloomFilterEnabled        ParamItem `refreshable:"false"`
 	BloomFilterSize           ParamItem `refreshable:"true"`
 	BloomFilterType           ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
@@ -1094,6 +1095,15 @@ The default value is 1, which is enough for most cases.`,
 		Export:       true,
 	}
 	p.TraceLogMode.Init(base.mgr)
+
+	p.BloomFilterEnabled = ParamItem{
+		Key:          "common.bloomFilterEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "whether to load and apply bloom filter/pk stats on querynode",
+		Export:       true,
+	}
+	p.BloomFilterEnabled.Init(base.mgr)
 
 	p.BloomFilterSize = ParamItem{
 		Key:          "common.bloomFilterSize",
