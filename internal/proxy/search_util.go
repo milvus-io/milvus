@@ -544,7 +544,10 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 					"range search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
 			}
 
-			if groupByFieldId > 0 {
+			// For hybrid search (rankInfo != nil), group by on vector array is not supported.
+			// For simple search, group by validation is handled in initSearchRequest()
+			// where placeholder type is available to distinguish element-level vs embedding list.
+			if groupByFieldId > 0 && rankParams != nil {
 				return nil, merr.WrapErrParameterInvalid("", "",
 					"group by search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
 			}
