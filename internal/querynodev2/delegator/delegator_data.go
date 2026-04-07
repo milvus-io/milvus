@@ -574,7 +574,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		log.Warn("load stream delete failed", zap.Error(err))
 		// BM25 stats already loaded into idf oracle will be cleaned up
 		// automatically by SyncDistribution when the segment is not in target.
-		return refundCandidatesOnErr(err)
+		return releaseCandidatesOnErr(err)
 	}
 
 	return nil
