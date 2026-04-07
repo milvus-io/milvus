@@ -1183,22 +1183,8 @@ class TestMilvusClientLoadPartitionValid(TestMilvusClientV2Base):
         # 4. Create binary index
         index_params = self.prepare_index_params(client)[0]
         binary_index = {"index_type": binary_index_type, "metric_type": metric_type, "params": {"nlist": 128}}
-        # Handle special case for BIN_IVF_FLAT with structure metrics
-        if binary_index_type == "BIN_IVF_FLAT" and metric_type in ct.structure_metrics:
-            # This combination should raise an error, so create with default instead
-            error = {ct.err_code: 65535,
-                     ct.err_msg: f"metric type {metric_type} not found or not supported, supported: [HAMMING JACCARD]"}
-            index_params.add_index(field_name=ct.default_binary_vec_field_name, 
-                                 index_type=binary_index_type, metric_type=metric_type, params={"nlist": 128})
-            self.create_index(client, collection_name, index_params,
-                            check_task=CheckTasks.err_res, check_items=error)
-            # Create with default binary index instead
-            index_params = self.prepare_index_params(client)[0]
-            index_params.add_index(field_name=ct.default_binary_vec_field_name, **ct.default_bin_flat_index)
-            self.create_index(client, collection_name, index_params)
-        else:
-            index_params.add_index(field_name=ct.default_binary_vec_field_name, **binary_index)
-            self.create_index(client, collection_name, index_params)
+        index_params.add_index(field_name=ct.default_binary_vec_field_name, **binary_index)
+        self.create_index(client, collection_name, index_params)
         # 5. Load the partition
         self.release_collection(client, collection_name)
         self.load_partitions(client, collection_name, [partition_name])

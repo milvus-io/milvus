@@ -30,6 +30,15 @@ func GenerateMorganFingerprint(smiles string, radius int, fingerprintSize int) (
 	return cgoGenerateMorganFingerprint(smiles, radius, fingerprintSize)
 }
 
+// GenerateMorganFingerprintFromPickle generates a Morgan fingerprint directly from pickle data
+func GenerateMorganFingerprintFromPickle(pickle []byte, radius int, fingerprintSize int) ([]byte, error) {
+	if len(pickle) == 0 {
+		return make([]byte, fingerprintSize/8), nil
+	}
+
+	return cgoGenerateMorganFingerprintFromPickle(pickle, radius, fingerprintSize)
+}
+
 // MorganFingerprintToFloatVector converts binary fingerprint to float32 vector
 // Each bit becomes 0.0 or 1.0
 func MorganFingerprintToFloatVector(fingerprint []byte, numBits int) []float32 {

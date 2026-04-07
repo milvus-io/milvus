@@ -61,8 +61,8 @@ func Test_binFlatChecker_CheckTrain(t *testing.T) {
 		{p3, false},
 		{p4, true},
 		{p5, true},
-		{p6, true},
-		{p7, true},
+		{p6, false},
+		{p7, false},
 	}
 
 	c, _ := GetIndexCheckerMgrInstance().GetChecker("BINFLAT")

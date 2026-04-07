@@ -35,6 +35,19 @@ func GenerateRDKitFingerprint(smiles string, minPath int, maxPath int, fingerpri
 	return cgoGenerateRDKitFingerprint(smiles, minPath, maxPath, fingerprintSize)
 }
 
+// GenerateRDKitFingerprintFromPickle generates an RDKit fingerprint directly from pickle data
+func GenerateRDKitFingerprintFromPickle(pickle []byte, minPath int, maxPath int, fingerprintSize int) ([]byte, error) {
+	if len(pickle) == 0 {
+		byteSize := fingerprintSize / 8
+		if fingerprintSize%8 != 0 {
+			byteSize++
+		}
+		return make([]byte, byteSize), nil
+	}
+
+	return cgoGenerateRDKitFingerprintFromPickle(pickle, minPath, maxPath, fingerprintSize)
+}
+
 // RDKitFingerprintToFloatVector converts binary RDKit fingerprint to float32 vector
 // Each bit becomes 0.0 or 1.0
 func RDKitFingerprintToFloatVector(fingerprint []byte, numBits int) []float32 {

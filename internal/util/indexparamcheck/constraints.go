@@ -55,15 +55,15 @@ var (
 	// all consts
 	FloatVectorMetrics       = []string{metric.L2, metric.IP, metric.COSINE}
 	SparseFloatVectorMetrics = []string{metric.IP, metric.BM25}
-	BinaryVectorMetrics      = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE, metric.MHJACCARD}
+	BinaryVectorMetrics      = []string{metric.HAMMING, metric.JACCARD, metric.MHJACCARD}
 	IntVectorMetrics         = []string{metric.L2, metric.IP, metric.COSINE}
 	EmbListMetrics           = []string{metric.MaxSim, metric.MaxSimCosine, metric.MaxSimL2, metric.MaxSimIP, metric.MaxSimHamming, metric.MaxSimJaccard}
 )
 
 // BinIDMapMetrics is a set of all metric types supported for binary vector.
 var (
-	BinIDMapMetrics           = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE} // const
-	BinIvfMetrics             = []string{metric.HAMMING, metric.JACCARD}                                             // const
+	BinIDMapMetrics           = []string{metric.HAMMING, metric.JACCARD} // const
+	BinIvfMetrics             = []string{metric.HAMMING, metric.JACCARD}  // const
 	HnswMetrics               = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
 	RaftMetrics               = []string{metric.L2, metric.IP}
 	CagraBuildAlgoTypes       = []string{CagraBuildAlgoIVFPQ, CagraBuildAlgoNNDESCENT}

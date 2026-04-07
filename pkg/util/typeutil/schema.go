@@ -2797,6 +2797,31 @@ func IsMolFingerprintFunctionOutputField(field *schemapb.FieldSchema, collSchema
 	return false
 }
 
+// GetMolFingerprintFunctionByInputFieldID finds the MolFingerprint function schema
+// and its output field for a given MOL input field ID. Returns nil, nil if not found.
+func (helper *SchemaHelper) GetMolFingerprintFunctionByInputFieldID(inputFieldID int64) (*schemapb.FunctionSchema, *schemapb.FieldSchema) {
+	for _, fSchema := range helper.schema.GetFunctions() {
+		if fSchema.GetType() != schemapb.FunctionType_MolFingerprint {
+			continue
+		}
+		for _, id := range fSchema.GetInputFieldIds() {
+			if id == inputFieldID {
+				if len(fSchema.GetOutputFieldIds()) == 0 {
+					return nil, nil
+				}
+				outID := fSchema.GetOutputFieldIds()[0]
+				for _, field := range helper.schema.GetFields() {
+					if field.GetFieldID() == outID {
+						return fSchema, field
+					}
+				}
+				return nil, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
 // ConcatStructFieldName transforms struct field names to structName[fieldName] format
 // This ensures global uniqueness while allowing same field names across different structs
 func ConcatStructFieldName(structName string, fieldName string) string {

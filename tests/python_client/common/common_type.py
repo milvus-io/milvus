@@ -325,8 +325,8 @@ sparse_supported_index_types = ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"]
 gpu_supported_index_types = ["GPU_IVF_FLAT", "GPU_IVF_PQ"]
 default_L0_metric = "COSINE"
 dense_metrics = ["L2", "IP", "COSINE"]
-binary_metrics = ["JACCARD", "HAMMING", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
-structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
+binary_metrics = ["JACCARD", "HAMMING"]
+structure_metrics = []
 sparse_metrics = ["IP", "BM25"]
 # all_scalar_data_types = ['int8', 'int16', 'int32', 'int64', 'float', 'double', 'bool', 'varchar']
 

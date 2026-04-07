@@ -820,7 +820,7 @@ func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) err
 		if typeutil.IsFloatVectorType(dataType) {
 			return nil
 		}
-	case metric.JACCARD, metric.HAMMING, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE, metric.MHJACCARD:
+	case metric.JACCARD, metric.HAMMING, metric.MHJACCARD:
 		if dataType == schemapb.DataType_BinaryVector {
 			return nil
 		}

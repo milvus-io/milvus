@@ -65,11 +65,11 @@ def binary_support():
 
 
 def binary_metrics():
-    return ["JACCARD", "HAMMING", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
+    return ["JACCARD", "HAMMING"]
 
 
 def structure_metrics():
-    return ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
+    return []
 
 
 def l2(x, y):

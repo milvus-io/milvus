@@ -116,6 +116,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     DropFieldData(const FieldId field_id) override;
     bool
     HasIndex(FieldId field_id) const override;
+
+    const SealedIndexingRecord*
+    GetSealedIndexingRecord() const override {
+        return &vector_indexings_;
+    }
     bool
     HasFieldData(FieldId field_id) const override;
 

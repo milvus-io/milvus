@@ -443,7 +443,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     HasIndex(FieldId field_id) const override {
         auto& field_meta = schema_->operator[](field_id);
         if ((IsVectorDataType(field_meta.get_data_type()) ||
-             IsGeometryType(field_meta.get_data_type())) &&
+             IsGeometryType(field_meta.get_data_type()) ||
+             field_meta.get_data_type() == DataType::MOL) &&
             indexing_record_.SyncDataWithIndex(field_id)) {
             return true;
         }
@@ -461,12 +462,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
         auto& field_meta = schema_->operator[](field_id);
 
-        // For geometry fields, return segment-level index (RTree doesn't use chunks)
-        if (IsGeometryType(field_meta.get_data_type())) {
+        // For geometry/mol fields, return segment-level index
+        if (IsGeometryType(field_meta.get_data_type()) ||
+            field_meta.get_data_type() == DataType::MOL) {
             auto segment_index = indexing_record_.get_field_indexing(field_id)
                                      .get_segment_indexing();
             if (segment_index.get() != nullptr) {
-                // Convert from PinWrapper<index::IndexBase*> to PinWrapper<const index::IndexBase*>
                 return {
                     PinWrapper<const index::IndexBase*>(segment_index.get())};
             } else {
