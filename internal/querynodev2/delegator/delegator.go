@@ -282,6 +282,7 @@ func (sd *shardDelegator) shallowCopySearchRequest(req *internalpb.SearchRequest
 		IsRecallEvaluation:      req.IsRecallEvaluation,
 		CollectionTtlTimestamps: req.CollectionTtlTimestamps,
 		EntityTtlPhysicalTime:   req.EntityTtlPhysicalTime,
+		PkFilter:                req.PkFilter,
 	}
 
 	return nodeReq
@@ -328,6 +329,7 @@ func (sd *shardDelegator) shallowCopyRetrieveRequest(req *internalpb.RetrieveReq
 		Aggregates:                   req.Aggregates,      // Shallow copy: Same underlying slice of pointers
 		EntityTtlPhysicalTime:        req.EntityTtlPhysicalTime,
 		OrderByFields:                req.OrderByFields, // Shallow copy: Same underlying slice of pointers
+		PkFilter:                     req.PkFilter,
 	}
 }
 
@@ -355,6 +357,16 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 			PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
 				PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 		}()
+	}
+
+	if paramtable.Get().QueryNodeCfg.EnableSegmentFilter.GetAsBool() {
+		PruneSealedSegmentsByPKFilter(ctx,
+			req.GetReq().GetSerializedExprPlan(),
+			req.GetReq().GetPkFilter(),
+			sealed,
+			req.GetReq().GetCollectionID(),
+			metrics.SearchLabel,
+		)
 	}
 
 	if sd.functionFieldType[req.GetReq().GetFieldId()] == schemapb.FunctionType_BM25 {
@@ -503,6 +515,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				CollectionTtlTimestamps: req.GetReq().GetCollectionTtlTimestamps(),
 				EntityTtlPhysicalTime:   req.GetReq().GetEntityTtlPhysicalTime(),
 				AnalyzerName:            subReq.GetAnalyzerName(),
+				PkFilter:                common.PkFilterNoPkFilter, // hybrid search sub-requests rarely have PK predicates, skip unmarshal
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{
@@ -604,6 +617,16 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		growing = []SegmentEntry{}
 	}
 
+	if paramtable.Get().QueryNodeCfg.EnableSegmentFilter.GetAsBool() {
+		PruneSealedSegmentsByPKFilter(ctx,
+			req.GetReq().GetSerializedExprPlan(),
+			req.GetReq().GetPkFilter(),
+			sealed,
+			req.GetReq().GetCollectionID(),
+			metrics.QueryLabel,
+		)
+	}
+
 	log.Info("query stream segments...",
 		zap.Int("sealedNum", len(sealed)),
 		zap.Int("growingNum", len(growing)),
@@ -690,6 +713,16 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 			defer sd.partitionStatsMut.RUnlock()
 			PruneSegments(ctx, sd.partitionStats, nil, req.GetReq(), sd.collection.Schema(), sealed, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 		}()
+	}
+
+	if paramtable.Get().QueryNodeCfg.EnableSegmentFilter.GetAsBool() {
+		PruneSealedSegmentsByPKFilter(ctx,
+			req.GetReq().GetSerializedExprPlan(),
+			req.GetReq().GetPkFilter(),
+			sealed,
+			req.GetReq().GetCollectionID(),
+			metrics.QueryLabel,
+		)
 	}
 
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })

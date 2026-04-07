@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
@@ -168,7 +167,7 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 }
 
 // retrieve will retrieve all the validate target segments
-func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest, queryPlan *planpb.PlanNode) ([]RetrieveSegmentResult, []Segment, error) {
+func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, []Segment, error) {
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
 	}
@@ -184,10 +183,10 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
-		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs, queryPlan)
+		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
 	} else {
 		SegType = SegmentTypeGrowing
-		retrieveSegments, err = validateOnStream(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs, queryPlan)
+		retrieveSegments, err = validateOnStream(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
 	}
 
 	if err != nil {
@@ -199,7 +198,7 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 }
 
 // retrieveStreaming will retrieve all the validate target segments  and  return by stream
-func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest, queryPlan *planpb.PlanNode, srv streamrpc.QueryStreamServer) ([]Segment, error) {
+func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) ([]Segment, error) {
 	var err error
 	var SegType commonpb.SegmentState
 	var retrieveSegments []Segment
@@ -210,10 +209,10 @@ func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, r
 
 	if req.GetScope() == querypb.DataScope_Historical {
 		SegType = SegmentTypeSealed
-		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs, queryPlan)
+		retrieveSegments, err = validateOnHistorical(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
 	} else {
 		SegType = SegmentTypeGrowing
-		retrieveSegments, err = validateOnStream(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs, queryPlan)
+		retrieveSegments, err = validateOnStream(ctx, manager, collID, req.GetReq().GetPartitionIDs(), segIDs)
 	}
 
 	if err != nil {
