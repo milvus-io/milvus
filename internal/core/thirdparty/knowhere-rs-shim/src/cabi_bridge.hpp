@@ -10,6 +10,7 @@ enum class CIndexType : int32_t {
     Hnsw = 1,
     SparseInverted = 12,
     SparseWand = 13,
+    DiskAnn = 19,
 };
 
 enum class CMetricType : int32_t {
@@ -102,6 +103,7 @@ size_t knowhere_get_index_size(const void* index);
 int32_t knowhere_has_raw_data(const void* index);
 CBinarySet* knowhere_serialize_index(const void* index);
 int32_t knowhere_deserialize_index(void* index, const CBinarySet* binset);
+int32_t knowhere_save_index(const void* index, const char* path);
 int32_t knowhere_load_index(void* index, const char* path);
 void knowhere_free_binary_set(CBinarySet* binset);
 

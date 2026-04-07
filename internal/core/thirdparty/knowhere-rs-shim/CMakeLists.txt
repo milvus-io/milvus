@@ -16,7 +16,7 @@ find_file(KNOWHERE_RS_LIBRARY
         ENV KNOWHERE_RS_LIB_DIR
 )
 if (KNOWHERE_RS_LIBRARY)
-    target_sources(knowhere PRIVATE src/hnsw_rust_node.cpp src/sparse_rust_node.cpp)
+    target_sources(knowhere PRIVATE src/hnsw_rust_node.cpp src/sparse_rust_node.cpp src/diskann_rust_node.cpp)
     target_link_libraries(knowhere PRIVATE ${KNOWHERE_RS_LIBRARY})
 endif ()
 set(KNOWHERE_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include CACHE INTERNAL "Path to knowhere include directory")
