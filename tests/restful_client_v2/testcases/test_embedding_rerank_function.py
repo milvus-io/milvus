@@ -4,7 +4,6 @@ from faker import Faker
 from base.testbase import TestBase
 from utils.utils import gen_collection_name
 from utils.util_log import test_log as logger
-from utils.constant import default_nb
 
 fake_en = Faker("en_US")
 
@@ -398,8 +397,8 @@ class TestTextEmbeddingSearch(TestBase):
         rsp = self.collection_client.collection_create(payload)
         assert rsp['code'] == 0
 
-        # Insert text data
-        nb = default_nb
+        # Insert text data (small nb for embedding function tests to avoid API limits)
+        nb = 100
         documents = [
             "Machine learning is a subset of artificial intelligence",
             "Deep learning uses neural networks with multiple layers",
