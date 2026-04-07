@@ -105,7 +105,8 @@ class TimestampIndexTranslator
  public:
     TimestampIndexTranslator(int64_t segment_id,
                              std::shared_ptr<ChunkedColumnInterface> column,
-                             int64_t num_rows);
+                             int64_t num_rows,
+                             const std::string& warmup_policy = "");
 
     ~TimestampIndexTranslator() override = default;
 

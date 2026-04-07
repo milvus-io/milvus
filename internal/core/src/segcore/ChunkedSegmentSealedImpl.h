@@ -530,7 +530,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Initialize timestamp index with owned data (StorageV1 path)
     void
     init_storage_v1_timestamp_index(std::vector<Timestamp> timestamps,
-                               size_t num_rows);
+                                    size_t num_rows);
 
     template <typename PK>
     void
@@ -1234,7 +1234,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     init_storage_v2_timestamp_index(
-        const std::shared_ptr<ChunkedColumnInterface>& column, size_t num_rows);
+        const std::shared_ptr<ChunkedColumnInterface>& column,
+        size_t num_rows,
+        const std::string& warmup_policy = "");
 
     void
     init_storage_v1_pk_index(
