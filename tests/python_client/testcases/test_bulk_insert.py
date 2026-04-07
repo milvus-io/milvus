@@ -17,6 +17,7 @@ from common.bulk_insert_data import (
     prepare_bulk_insert_new_json_files,
     prepare_bulk_insert_numpy_files,
     prepare_bulk_insert_parquet_files,
+    prepare_bulk_insert_csv_files,
     DataField as df,
 )
 from faker import Faker
@@ -2725,6 +2726,211 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             check_task=CheckTasks.check_search_results,
             check_items={"nq": ct.default_nq,
                          "limit": ct.default_limit})
+
+class TestImportWithMolFunction(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test import with mol fingerprint
+    ******************************************************************
+    """
+
+    @pytest.mark.parametrize("file_format", ["json", "parquet", "numpy", "csv"])
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_import_with_mol_fingerprint(self, minio_host, minio_bucket, file_format):
+        """
+        target: test import data with mol fingerprint function
+        method: 1. create collection with mol fingerprint function
+                2. import data with mol field
+                3. verify mol_contains and mol_fp search
+        expected: mol_contains returns expected ids and search returns results
+        """
+        self._connect()
+        dim = 2048
+        fields = [
+            FieldSchema(name=df.pk_field, dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name=df.mol_field, dtype=DataType.MOL),
+            FieldSchema(name="mol_fp", dtype=DataType.BINARY_VECTOR, dim=dim),
+        ]
+        schema = CollectionSchema(fields=fields, description="test mol function")
+
+        mol_function = Function(
+            name="mol_fingerprint",
+            function_type=FunctionType.MOL_FINGERPRINT,
+            input_field_names=[df.mol_field],
+            output_field_names=["mol_fp"],
+            params={
+                "fingerprint_type": "morgan",
+                "fingerprint_size": "2048",
+                "radius": "2",
+            },
+        )
+        schema.add_function(mol_function)
+        c_name = cf.gen_unique_str("import_mol")
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+
+        nb = 100
+        data_fields = [df.pk_field, df.mol_field]
+        if file_format == "json":
+            files = prepare_bulk_insert_new_json_files(
+                minio_endpoint=f"{minio_host}:9000",
+                bucket_name=minio_bucket,
+                rows=nb,
+                dim=8,
+                data_fields=data_fields,
+                force=True,
+                schema=schema,
+            )
+        elif file_format == "numpy":
+            files = prepare_bulk_insert_numpy_files(
+                minio_endpoint=f"{minio_host}:9000",
+                bucket_name=minio_bucket,
+                rows=nb,
+                dim=8,
+                data_fields=data_fields,
+                force=True,
+                schema=schema,
+            )
+        elif file_format == "csv":
+            files = prepare_bulk_insert_csv_files(
+                minio_endpoint=f"{minio_host}:9000",
+                bucket_name=minio_bucket,
+                rows=nb,
+                dim=8,
+                auto_id=False,
+                float_vector=True,
+                data_fields=data_fields,
+                file_nums=1,
+                force=True,
+            )
+        else:
+            files = prepare_bulk_insert_parquet_files(
+                minio_endpoint=f"{minio_host}:9000",
+                bucket_name=minio_bucket,
+                rows=nb,
+                dim=8,
+                data_fields=data_fields,
+                force=True,
+                schema=schema,
+            )
+
+        task_id, _ = self.utility_wrap.do_bulk_insert(
+            collection_name=c_name, files=files
+        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+            task_ids=[task_id], timeout=300
+        )
+        log.info(f"bulk insert state:{success} with states:{states}")
+        assert success
+
+        num_entities = collection_w.num_entities
+        assert num_entities == nb
+
+        collection_w.create_index(
+            field_name="mol_fp",
+            index_params=ct.default_binary_index,
+        )
+        collection_w.load()
+
+        res, _ = collection_w.query(
+            expr='MOL_CONTAINS(mol, "c1ccccc1")',
+            output_fields=[df.pk_field],
+        )
+        got_ids = sorted([r[df.pk_field] for r in res])
+        assert len(got_ids) > 0
+
+        search_res, _ = collection_w.search(
+            data=["CCO"],
+            anns_field="mol_fp",
+            param=ct.default_search_binary_params,
+            limit=5,
+            output_fields=[df.pk_field, df.mol_field],
+        )
+        assert len(search_res) == 1
+        assert len(search_res[0]) > 0
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_import_with_mol_fingerprint_row_json(self, minio_host, minio_bucket):
+        """
+        target: test row-based json import with mol fingerprint function
+        method: 1. create collection with mol fingerprint function
+                2. import row-based json data with mol field
+                3. verify mol_contains and mol_fp search
+        expected: mol_contains returns expected ids and search returns results
+        """
+        self._connect()
+        dim = 2048
+        fields = [
+            FieldSchema(name=df.pk_field, dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name=df.mol_field, dtype=DataType.MOL),
+            FieldSchema(name="mol_fp", dtype=DataType.BINARY_VECTOR, dim=dim),
+        ]
+        schema = CollectionSchema(fields=fields, description="test mol function row json")
+
+        mol_function = Function(
+            name="mol_fingerprint",
+            function_type=FunctionType.MOL_FINGERPRINT,
+            input_field_names=[df.mol_field],
+            output_field_names=["mol_fp"],
+            params={
+                "fingerprint_type": "morgan",
+                "fingerprint_size": "2048",
+                "radius": "2",
+            },
+        )
+        schema.add_function(mol_function)
+        c_name = cf.gen_unique_str("import_mol_row_json")
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+
+        nb = 100
+        data_fields = [df.pk_field, df.mol_field]
+        files = prepare_bulk_insert_json_files(
+            minio_endpoint=f"{minio_host}:9000",
+            bucket_name=minio_bucket,
+            is_row_based=True,
+            rows=nb,
+            dim=8,
+            auto_id=False,
+            data_fields=data_fields,
+            force=True,
+            schema=schema,
+        )
+
+        task_id, _ = self.utility_wrap.do_bulk_insert(
+            collection_name=c_name, files=files
+        )
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+            task_ids=[task_id], timeout=300
+        )
+        log.info(f"bulk insert state:{success} with states:{states}")
+        assert success
+
+        num_entities = collection_w.num_entities
+        assert num_entities == nb
+
+        collection_w.create_index(
+            field_name="mol_fp",
+            index_params=ct.default_binary_index,
+        )
+        collection_w.load()
+
+        res, _ = collection_w.query(
+            expr='MOL_CONTAINS(mol, "c1ccccc1")',
+            output_fields=[df.pk_field],
+        )
+        got_ids = sorted([r[df.pk_field] for r in res])
+        assert len(got_ids) > 0
+
+        search_res, _ = collection_w.search(
+            data=["CCO"],
+            anns_field="mol_fp",
+            param=ct.default_search_binary_params,
+            limit=5,
+            output_fields=[df.pk_field, df.mol_field],
+        )
+        assert len(search_res) == 1
+        assert len(search_res[0]) > 0
+
 
 class TestImportWithTextEmbeddingFunction(TestcaseBase):
     """

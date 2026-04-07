@@ -33,8 +33,9 @@ const (
 	IndexBitmap   IndexType = "BITMAP"
 	IndexHybrid   IndexType = "HYBRID" // BITMAP + INVERTED
 	IndexINVERTED IndexType = "INVERTED"
-	IndexNGRAM    IndexType = "NGRAM"
-	IndexRTREE    IndexType = "RTREE"
+	IndexNGRAM      IndexType = "NGRAM"
+	IndexRTREE      IndexType = "RTREE"
+	IndexMolPattern IndexType = "PATTERN"
 
 	AutoIndex IndexType = "AUTOINDEX"
 )
@@ -66,7 +67,8 @@ func IsScalarMmapIndex(indexType IndexType) bool {
 		indexType == IndexBitmap ||
 		indexType == IndexHybrid ||
 		indexType == IndexTrie ||
-		indexType == IndexNGRAM
+		indexType == IndexNGRAM ||
+		indexType == IndexMolPattern
 }
 
 func ValidateMmapIndexParams(indexType IndexType, indexParams map[string]string) error {

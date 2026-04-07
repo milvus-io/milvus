@@ -615,15 +615,24 @@ ScalarFieldIndexing<T>::recreate_index(const FieldMeta& field_meta,
             return;
         }
         if (field_meta.get_data_type() == DataType::MOL) {
+            int32_t n_bit = 0;
+            if (config_) {
+                auto& idx_params = config_->GetIndexParams();
+                auto it = idx_params.find("n_bit");
+                if (it != idx_params.end()) {
+                    n_bit = std::stoi(it->second);
+                }
+            }
             index_ =
                 std::make_unique<index::MolPatternIndex<std::string>>(
-                    segment_max_row_count_);
+                    segment_max_row_count_, n_bit);
             built_ = false;
             sync_with_index_ = false;
             index_cur_ = 0;
             LOG_INFO(
-                "Created MolPattern index for mol fieldID: {}",
-                field_meta.get_id().get());
+                "Created MolPattern index for mol fieldID: {}, n_bit={}",
+                field_meta.get_id().get(),
+                n_bit > 0 ? n_bit : 2048);
             return;
         }
         index_ = index::CreateStringIndexMarisa();

@@ -44,10 +44,13 @@ class MolPatternIndex : public ScalarIndex<T> {
     using MemFileManager = storage::MemFileManagerImpl;
     using MemFileManagerPtr = std::shared_ptr<MemFileManager>;
 
-    explicit MolPatternIndex(int64_t max_row_count = 0)
+    explicit MolPatternIndex(int64_t max_row_count = 0, int32_t n_bit = 0)
         : ScalarIndex<T>(MOL_PATTERN_INDEX_TYPE),
-          bytes_per_row_((dim_ + 7) / 8),
           max_row_count_(max_row_count) {
+        if (n_bit > 0) {
+            dim_ = n_bit;
+        }
+        bytes_per_row_ = (dim_ + 7) / 8;
         if (max_row_count_ > 0) {
             fp_data_owned_.resize(max_row_count_ * bytes_per_row_, 0);
         }
@@ -184,9 +187,9 @@ class MolPatternIndex : public ScalarIndex<T> {
 
     // Return the high-water mark of written offsets (max offset + 1).
     // Under concurrent inserts, gaps may exist where fp data is still
-    // zero-initialized (conservative, matches everything).  Query
-    // visibility is ultimately bounded by AckResponder::GetAck(), which
-    // only advances when all rows in [0, ack) are fully committed.
+    // zero-initialized.  These gaps are NOT query-visible because query
+    // visibility is bounded by AckResponder::GetAck(), which only
+    // advances when all rows in [0, ack) are fully committed.
     int64_t
     RowCount() const {
         return published_row_count_.load(std::memory_order_acquire);
@@ -214,8 +217,8 @@ class MolPatternIndex : public ScalarIndex<T> {
     // High-water mark of written offsets (max row_offset + 1, lock-free).
     // NOT a "continuous prefix" guarantee — under concurrent/out-of-order
     // inserts, some rows in [0, published_row_count_) may still be zero.
-    // This is safe because: (a) zero FP is conservative, and (b) query
-    // visibility is bounded by AckResponder which IS a continuous prefix.
+    // This is safe because query visibility is bounded by AckResponder
+    // which IS a continuous prefix — zero-FP gaps are never query-visible.
     std::atomic<int64_t> published_row_count_{0};
 
     // Fingerprint data — owned (Build / non-mmap Load / Growing)

@@ -13,6 +13,7 @@
 #include "cachinglayer/Utils.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/MolCache.h"
 #include "common/Types.h"
 #include "common/mol_c.h"
 #include "index/MolPatternIndex.h"
@@ -31,6 +32,9 @@ PhyMolFunctionFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     AssertInfo(expr_->column_.data_type_ == DataType::MOL,
                "unsupported data type: {}",
                expr_->column_.data_type_);
+    // MOL always evaluates on raw data (not via standard index path),
+    // so force data-chunk cursors in GetNextBatchSize / MoveCursor.
+    use_index_ = false;
     result = EvalForDataSegment();
 }
 
@@ -39,6 +43,8 @@ PhyMolFunctionFilterExpr::TryMolPatternIndex() {
     // Try to pin the mol field's own index (MOL_PATTERN)
     auto pinned = segment_->PinIndex(op_ctx_, field_id_);
     if (pinned.empty()) {
+        LOG_DEBUG("TryMolPatternIndex: PinIndex returned empty for field {}",
+                 field_id_.get());
         return false;
     }
 
@@ -46,6 +52,10 @@ PhyMolFunctionFilterExpr::TryMolPatternIndex() {
         dynamic_cast<const index::MolPatternIndex<std::string>*>(
             pinned[0].get());
     if (!mol_index) {
+        LOG_DEBUG("TryMolPatternIndex: dynamic_cast failed for field {}, "
+                 "pinned count: {}",
+                 field_id_.get(),
+                 pinned.size());
         return false;
     }
 
@@ -64,7 +74,6 @@ PhyMolFunctionFilterExpr::TryMolPatternIndex() {
     }
     query_fingerprint_.assign(fp_result.data, fp_result.data + byte_size);
     FreeMolDataResult(&fp_result);
-    query_fp_cached_ = true;
 
     // Use knowhere BruteForce RangeSearch for sub/superstructure screening
     knowhere::Json search_cfg;
@@ -161,7 +170,7 @@ PhyMolFunctionFilterExpr::EvalForDataSegment() {
     if (!query_mol_) {
         query_mol_ = ParseSMILESToMol(expr_->smiles_.c_str());
         if (!query_mol_) {
-            ThrowInfo(ErrorCode::InvalidArgument,
+            ThrowInfo(ErrorCode::ExprInvalid,
                       "Invalid SMILES in mol_contains: \"{}\"",
                       expr_->smiles_);
         }
@@ -185,7 +194,12 @@ PhyMolFunctionFilterExpr::EvalForDataSegment() {
 
     bool has_fp = fp_candidates_cached_;
 
-    auto execute_sub_batch = [this, has_fp, &global_offset](
+    // Try to get lazy ROMol cache for this segment+field
+    auto* mol_cache = SimpleMolCacheManager::Instance().GetCache(
+        segment_->get_segment_id(), field_id_);
+
+    auto execute_sub_batch =
+        [this, has_fp, &global_offset, mol_cache](
                                  const auto* data,
                                  const bool* valid_data,
                                  const int32_t* offsets,
@@ -195,6 +209,13 @@ PhyMolFunctionFilterExpr::EvalForDataSegment() {
         if (data == nullptr) {
             return;
         }
+
+        // Acquire read lock once for the entire batch if cache available
+        std::optional<std::shared_lock<std::shared_mutex>> cache_lock;
+        if (mol_cache) {
+            cache_lock.emplace(mol_cache->AcquireReadLock());
+        }
+
         for (int i = 0; i < size; ++i) {
             if (valid_data != nullptr && !valid_data[i]) {
                 res[i] = valid_res[i] = false;
@@ -209,20 +230,73 @@ PhyMolFunctionFilterExpr::EvalForDataSegment() {
                 continue;
             }
 
-            const auto* row_data =
-                reinterpret_cast<const uint8_t*>(data[i].data());
-            auto row_size = data[i].size();
-
             int match_result;
-            if (expr_->op_ ==
-                proto::plan::MolFunctionFilterExpr_MolOp_Substructure) {
-                // row molecule contains query substructure
-                match_result = HasSubstructMatchWithQuery(
-                    row_data, row_size, query_mol_);
+            if (mol_cache) {
+                auto state =
+                    mol_cache->GetStateByOffsetUnsafe(global_offset);
+                if (state == milvus::exec::MolCacheEntryState::kUnavailable) {
+                    res[i] = false;
+                    global_offset++;
+                    continue;
+                }
+
+                auto cached_mol = state ==
+                                          milvus::exec::MolCacheEntryState::
+                                              kReady
+                                      ? mol_cache->GetByOffsetUnsafe(
+                                            global_offset)
+                                      : nullptr;
+
+                if (state ==
+                    milvus::exec::MolCacheEntryState::kUninitialized) {
+                    cache_lock->unlock();
+
+                    const auto* row_data =
+                        reinterpret_cast<const uint8_t*>(data[i].data());
+                    auto row_size = data[i].size();
+                    auto parsed_mol = ParsePickleToMol(row_data, row_size);
+                    auto [published_mol, published_state] =
+                        mol_cache->PublishByOffset(global_offset,
+                                                   parsed_mol);
+
+                    cache_lock->lock();
+
+                    if (published_state !=
+                            milvus::exec::MolCacheEntryState::kReady ||
+                        !published_mol) {
+                        res[i] = false;
+                        global_offset++;
+                        continue;
+                    }
+                    cached_mol = published_mol;
+                }
+
+                if (expr_->op_ ==
+                    proto::plan::
+                        MolFunctionFilterExpr_MolOp_Substructure) {
+                    match_result = HasSubstructMatchHandles(
+                        cached_mol, query_mol_);
+                } else {
+                    match_result = HasSubstructMatchHandles(
+                        query_mol_, cached_mol);
+                }
             } else {
-                // query molecule contains row substructure
-                match_result = HasSubstructMatchWithMol(
-                    query_mol_, row_data, row_size);
+                // Fallback: deserialize pickle on-the-fly
+                const auto* row_data =
+                    reinterpret_cast<const uint8_t*>(data[i].data());
+                auto row_size = data[i].size();
+                if (expr_->op_ ==
+                    proto::plan::
+                        MolFunctionFilterExpr_MolOp_Substructure) {
+                    match_result = HasSubstructMatchWithQuery(
+                        row_data, row_size, query_mol_);
+                } else {
+                    match_result = HasSubstructMatchWithMol(
+                        query_mol_, row_data, row_size);
+                }
+            }
+            if (match_result < 0) {
+                LOG_WARN("mol_contains exact check error at row {}: code {}", global_offset, match_result);
             }
             res[i] = (match_result == 1);
             global_offset++;

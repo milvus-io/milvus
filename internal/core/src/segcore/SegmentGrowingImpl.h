@@ -11,70 +11,34 @@
 
 #pragma once
 
-#include <algorithm>
-#include <atomic>
-#include <cstddef>
-#include <cstdint>
-#include <functional>
+#include <deque>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <shared_mutex>
 #include <string>
-#include <string_view>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
+#include <tbb/concurrent_priority_queue.h>
+#include <tbb/concurrent_unordered_map.h>
+#include <tbb/concurrent_vector.h>
 #include <vector>
+#include <utility>
 
+#include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/Manager.h"
 #include "AckResponder.h"
 #include "ConcurrentVector.h"
 #include "DeletedRecord.h"
 #include "FieldIndexing.h"
 #include "InsertRecord.h"
-#include "NamedType/underlying_functionalities.hpp"
+#include "SealedIndexingRecord.h"
 #include "SegmentGrowing.h"
-#include "cachinglayer/CacheSlot.h"
-#include "cachinglayer/Manager.h"
-#include "cachinglayer/Utils.h"
-#include "common/Array.h"
-#include "common/ArrayOffsets.h"
-#include "common/BitsetView.h"
 #include "common/EasyAssert.h"
-#include "common/FieldData.h"
-#include "common/FieldMeta.h"
-#include "common/GeometryCache.h"
 #include "common/IndexMeta.h"
-#include "common/Json.h"
-#include "common/LoadInfo.h"
-#include "common/OpContext.h"
-#include "common/QueryInfo.h"
-#include "common/QueryResult.h"
-#include "common/Schema.h"
-#include "common/Span.h"
-#include "common/SystemProperty.h"
-#include "common/Tracer.h"
 #include "common/Types.h"
-#include "common/Utils.h"
-#include "common/VectorArray.h"
-#include "common/VectorTrait.h"
-#include "common/protobuf_utils.h"
-#include "fmt/core.h"
-#include "folly/FBVector.h"
-#include "geos_c.h"
-#include "google/protobuf/message.h"
-#include "index/Index.h"
-#include "milvus-storage/column_groups.h"
-#include "milvus-storage/properties.h"
+#include "query/PlanNode.h"
+#include "common/GeometryCache.h"
+#include "common/MolCache.h"
+#include "common/ArrayOffsets.h"
 #include "milvus-storage/reader.h"
-#include "pb/plan.pb.h"
-#include "pb/schema.pb.h"
-#include "pb/segcore.pb.h"
-#include "query/PlanImpl.h"
-#include "segcore/SegcoreConfig.h"
-#include "segcore/SegmentInterface.h"
-#include "storage/MmapChunkManager.h"
-#include "storage/MmapManager.h"
 
 namespace milvus::segcore {
 
@@ -152,6 +116,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     LazyCheckSchema(SchemaPtr sch) override;
 
     void
+    FinishLoad() override;
+
+    void
     Load(milvus::tracer::TraceContext& trace_ctx,
          milvus::OpContext* op_ctx = nullptr) override;
 
@@ -166,6 +133,17 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     BuildGeometryCacheForLoad(FieldId field_id,
                               const std::vector<FieldDataPtr>& field_data);
+
+    // Initialize lazy mol cache slots for inserted data.
+    void
+    BuildMolCacheForInsert(FieldId field_id,
+                           const DataArray* data_array,
+                           int64_t num_rows);
+
+    // Initialize lazy mol cache slots for loaded field data.
+    void
+    BuildMolCacheForLoad(FieldId field_id,
+                         const std::vector<FieldDataPtr>& field_data);
 
  public:
     const InsertRecord<false>&
@@ -364,7 +342,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     virtual void
     BulkGetJsonData(milvus::OpContext* op_ctx,
                     FieldId field_id,
-                    const std::function<void(milvus::Json, size_t, bool)>& fn,
+                    std::function<void(milvus::Json, size_t, bool)> fn,
                     const int64_t* offsets,
                     int64_t count) const override;
 
@@ -393,8 +371,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
               &insert_record_,
               [this](const std::vector<PkType>& pks,
                      const Timestamp* timestamps,
-                     const std::function<void(const SegOffset offset,
-                                              const Timestamp ts)>& callback) {
+                     std::function<void(const SegOffset offset,
+                                        const Timestamp ts)> callback) {
                   this->search_batch_pks(pks, timestamps, false, callback);
               },
               segment_id) {
@@ -408,6 +386,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
         auto& cache_manager =
             milvus::exec::SimpleGeometryCacheManager::Instance();
         cache_manager.RemoveSegmentCaches(ctx_, get_segment_id());
+
+        // Clean up mol cache
+        milvus::exec::SimpleMolCacheManager::Instance()
+            .RemoveSegmentCaches(get_segment_id());
 
         if (ctx_) {
             GEOS_finish_r(ctx_);

@@ -55,11 +55,14 @@ MolPatternIndex<T>::~MolPatternIndex() {
 template <typename T>
 void
 MolPatternIndex<T>::Build(const Config& config) {
-    // Read dim from config if provided
-    auto dim_opt = GetValueFromConfig<int64_t>(config, "dim");
-    if (dim_opt.has_value()) {
-        dim_ = static_cast<int32_t>(dim_opt.value());
-        bytes_per_row_ = (dim_ + 7) / 8;
+    // Read fingerprint bit size from index params (user-configurable)
+    auto n_bit = GetValueFromConfig<std::string>(config, "n_bit");
+    if (n_bit.has_value()) {
+        auto val = std::stoi(n_bit.value());
+        if (val > 0) {
+            dim_ = static_cast<int32_t>(val);
+            bytes_per_row_ = (dim_ + 7) / 8;
+        }
     }
 
     // Download raw field data from object storage
@@ -82,7 +85,8 @@ MolPatternIndex<T>::Build(size_t n,
         for (size_t i = 0; i < n; ++i) {
             bool is_valid = (valid_data == nullptr) || valid_data[i];
             if (!is_valid || values[i].empty()) {
-                // Append zero fingerprint for null/invalid rows
+                // Null/empty: zero FP placeholder (nullable rows are
+                // handled by valid_data in expression evaluation)
                 fp_data_owned_.resize(fp_data_owned_.size() + bytes_per_row_, 0);
                 row_count_++;
                 continue;
@@ -94,19 +98,14 @@ MolPatternIndex<T>::Build(size_t n,
                 pickle.size(),
                 dim_);
 
-            if (result.error_code == MOL_SUCCESS && result.data != nullptr &&
-                result.size == static_cast<size_t>(bytes_per_row_)) {
-                fp_data_owned_.insert(fp_data_owned_.end(),
-                                      result.data,
-                                      result.data + bytes_per_row_);
-            } else {
-                // Fingerprint generation failed — use zero fingerprint (conservative)
-                fp_data_owned_.resize(fp_data_owned_.size() + bytes_per_row_, 0);
-                LOG_WARN(
-                    "MolPatternIndex: failed to generate fingerprint for row "
-                    "{}, using zero FP",
-                    i);
-            }
+            AssertInfo(result.error_code == MOL_SUCCESS &&
+                       result.data != nullptr &&
+                       result.size == static_cast<size_t>(bytes_per_row_),
+                       "MolPatternIndex: FP generation should not fail for "
+                       "validated pickle data (row {})", i);
+            fp_data_owned_.insert(fp_data_owned_.end(),
+                                  result.data,
+                                  result.data + bytes_per_row_);
             FreeMolDataResult(&result);
             row_count_++;
         }
@@ -146,6 +145,7 @@ MolPatternIndex<T>::BuildWithFieldData(
         for (int64_t i = 0; i < num_rows; ++i) {
             bool is_valid = field_data->is_valid(i);
             if (!is_valid) {
+                // Null/empty: zero FP placeholder
                 fp_data_owned_.resize(
                     fp_data_owned_.size() + bytes_per_row_, 0);
                 row_count_++;
@@ -167,19 +167,14 @@ MolPatternIndex<T>::BuildWithFieldData(
                 str_data->size(),
                 dim_);
 
-            if (result.error_code == MOL_SUCCESS && result.data != nullptr &&
-                result.size == static_cast<size_t>(bytes_per_row_)) {
-                fp_data_owned_.insert(fp_data_owned_.end(),
-                                      result.data,
-                                      result.data + bytes_per_row_);
-            } else {
-                fp_data_owned_.resize(
-                    fp_data_owned_.size() + bytes_per_row_, 0);
-                LOG_WARN(
-                    "MolPatternIndex: failed to generate FP for row {}, using "
-                    "zero FP",
-                    row_count_);
-            }
+            AssertInfo(result.error_code == MOL_SUCCESS &&
+                       result.data != nullptr &&
+                       result.size == static_cast<size_t>(bytes_per_row_),
+                       "MolPatternIndex: FP generation should not fail for "
+                       "validated pickle data (row {})", row_count_);
+            fp_data_owned_.insert(fp_data_owned_.end(),
+                                  result.data,
+                                  result.data + bytes_per_row_);
             FreeMolDataResult(&result);
             row_count_++;
         }
@@ -342,26 +337,33 @@ MolPatternIndex<T>::AppendMolRow(int64_t row_offset,
                "MolPatternIndex: row_offset {} out of range [0, {})",
                row_offset, max_row_count_);
 
-    // Write fp data at the exact offset (buffer is pre-allocated, no realloc).
-    // Zero-initialized at construction, so unwritten/failed rows are conservative.
+    // Write fp data at the exact offset (buffer is pre-allocated with 0x00).
     if (is_valid && !pickle_data.empty()) {
         auto byte_offset = row_offset * bytes_per_row_;
         auto result = GeneratePatternFingerprintFromPickle(
             reinterpret_cast<const uint8_t*>(pickle_data.data()),
             pickle_data.size(),
             dim_);
-        if (result.error_code == MOL_SUCCESS && result.data != nullptr &&
-            result.size == static_cast<size_t>(bytes_per_row_)) {
+        auto fp_ok = result.error_code == MOL_SUCCESS &&
+                     result.data != nullptr &&
+                     result.size == static_cast<size_t>(bytes_per_row_);
+        auto error_code = result.error_code;
+        if (fp_ok) {
             std::memcpy(fp_data_owned_.data() + byte_offset,
                         result.data, bytes_per_row_);
         }
         FreeMolDataResult(&result);
+        AssertInfo(fp_ok,
+                   "MolPatternIndex: FP generation should not fail for "
+                   "validated pickle data (row {}) with error code {}",
+                   row_offset,
+                   error_code);
     }
 
     // Advance published_row_count_ to max(current, row_offset + 1).
     // Concurrent callers with disjoint offsets race here; the highest
-    // offset wins.  Gaps contain zero FPs (conservative), and query
-    // visibility is ultimately bounded by AckResponder::GetAck().
+    // offset wins.  Gaps contain zero FPs, and query visibility is
+    // ultimately bounded by AckResponder::GetAck().
     auto desired = row_offset + 1;
     auto cur = published_row_count_.load(std::memory_order_relaxed);
     while (desired > cur) {

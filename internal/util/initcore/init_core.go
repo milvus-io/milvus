@@ -705,6 +705,12 @@ func InitGeometryCache(params *paramtable.ComponentParam) error {
 	return nil
 }
 
+func InitMolCache(params *paramtable.ComponentParam) error {
+	enableMolCache := C.bool(params.QueryNodeCfg.EnableMolCache.GetAsBool())
+	C.SegcoreSetEnableMolCache(enableMolCache)
+	return nil
+}
+
 func CleanRemoteChunkManager() {
 	C.CleanRemoteChunkManagerSingleton()
 }

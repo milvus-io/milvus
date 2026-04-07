@@ -20,6 +20,7 @@
 
 // RDKit includes
 #include <GraphMol/GraphMol.h>
+#include <GraphMol/MolOps.h>
 #include <GraphMol/SmilesParse/SmilesParse.h>
 #include <GraphMol/SmilesParse/SmilesWrite.h>
 #include <GraphMol/MolPickler.h>
@@ -61,6 +62,16 @@ std::vector<uint8_t> BitVectToBinaryVector(const ExplicitBitVect& bv) {
     return result;
 }
 
+// Milvus only needs topology-level molecule data here.
+// Explicitly skip pickle props/conformers to avoid carrying optional baggage.
+constexpr unsigned int kMolPickleLoadFlags = RDKit::PicklerOps::NoConformers;
+
+// Parse SMILES with RDKit's default strict sanitization.
+// Molecules rejected by the default parser surface as invalid SMILES.
+std::unique_ptr<RDKit::RWMol> SmilesToMolStrict(const char* smiles) {
+    return std::unique_ptr<RDKit::RWMol>(RDKit::SmilesToMol(smiles));
+}
+
 MolDataResult GenerateFingerprintImpl(
     const char* smiles,
     const std::function<ExplicitBitVect*(RDKit::ROMol&)>& gen_fp) {
@@ -68,7 +79,7 @@ MolDataResult GenerateFingerprintImpl(
         return CreateErrorResult(MOL_ERROR_INVALID_SMILES, "Empty SMILES string");
     }
     try {
-        std::unique_ptr<RDKit::ROMol> mol(RDKit::SmilesToMol(smiles));
+        auto mol = SmilesToMolStrict(smiles);
         if (!mol) {
             return CreateErrorResult(MOL_ERROR_INVALID_SMILES, "Failed to parse SMILES string");
         }
@@ -92,7 +103,11 @@ MolDataResult GenerateFingerprintFromPickleImpl(
     try {
         std::string pickle_str(reinterpret_cast<const char*>(pickle_data), pickle_size);
         RDKit::ROMol mol;
-        RDKit::MolPickler::molFromPickle(pickle_str, &mol);
+        RDKit::MolPickler::molFromPickle(
+            pickle_str, &mol, kMolPickleLoadFlags);
+        if (!mol.getRingInfo()->isInitialized()) {
+            RDKit::MolOps::fastFindRings(mol);
+        }
         std::unique_ptr<ExplicitBitVect> fp(gen_fp(mol));
         if (!fp) {
             return CreateErrorResult(MOL_ERROR_FINGERPRINT_FAILED, "Failed to generate fingerprint");
@@ -128,7 +143,7 @@ MolDataResult ConvertSMILESToPickle(const char* smiles) {
         return CreateErrorResult(MOL_ERROR_INVALID_SMILES, "Empty SMILES string");
     }
     try {
-        std::unique_ptr<RDKit::ROMol> mol(RDKit::SmilesToMol(smiles));
+        auto mol = SmilesToMolStrict(smiles);
         if (!mol) {
             return CreateErrorResult(MOL_ERROR_INVALID_SMILES, "Failed to parse SMILES string");
         }
@@ -150,7 +165,8 @@ MolDataResult ConvertPickleToSMILES(const uint8_t* pickle_data, size_t pickle_si
     try {
         std::string pickle_str(reinterpret_cast<const char*>(pickle_data), pickle_size);
         RDKit::ROMol mol;
-        RDKit::MolPickler::molFromPickle(pickle_str, &mol);
+        RDKit::MolPickler::molFromPickle(
+            pickle_str, &mol, kMolPickleLoadFlags);
         std::string smiles = RDKit::MolToSmiles(mol);
         if (smiles.empty()) {
             return CreateErrorResult(MOL_ERROR_PICKLE_FAILED, "Failed to convert molecule to SMILES");
@@ -241,10 +257,12 @@ int HasSubstructMatch(const uint8_t* mol_pickle, size_t mol_size,
         std::string query_str(reinterpret_cast<const char*>(query_pickle), query_size);
 
         RDKit::ROMol mol;
-        RDKit::MolPickler::molFromPickle(mol_str, &mol);
+        RDKit::MolPickler::molFromPickle(
+            mol_str, &mol, kMolPickleLoadFlags);
 
         RDKit::ROMol query;
-        RDKit::MolPickler::molFromPickle(query_str, &query);
+        RDKit::MolPickler::molFromPickle(
+            query_str, &query, kMolPickleLoadFlags);
 
         RDKit::MatchVectType matchV;
         return RDKit::SubstructMatch(mol, query, matchV) ? 1 : 0;
@@ -258,9 +276,11 @@ MolHandle ParseSMILESToMol(const char* smiles) {
         return nullptr;
     }
     try {
-        // SmilesToMol returns a new'd pointer; wrap in ROMol* as opaque handle
-        auto* mol = RDKit::SmilesToMol(smiles);
-        return static_cast<MolHandle>(mol);
+        auto mol = SmilesToMolStrict(smiles);
+        if (!mol) {
+            return nullptr;
+        }
+        return static_cast<MolHandle>(mol.release());
     } catch (const std::exception&) {
         return nullptr;
     }
@@ -273,7 +293,8 @@ MolHandle ParsePickleToMol(const uint8_t* pickle_data, size_t pickle_size) {
     try {
         std::string pickle_str(reinterpret_cast<const char*>(pickle_data), pickle_size);
         auto* mol = new RDKit::ROMol();
-        RDKit::MolPickler::molFromPickle(pickle_str, mol);
+        RDKit::MolPickler::molFromPickle(
+            pickle_str, mol, kMolPickleLoadFlags);
         return static_cast<MolHandle>(mol);
     } catch (const std::exception&) {
         return nullptr;
@@ -292,7 +313,8 @@ int HasSubstructMatchWithQuery(const uint8_t* mol_pickle, size_t mol_size,
     try {
         std::string mol_str(reinterpret_cast<const char*>(mol_pickle), mol_size);
         RDKit::ROMol mol;
-        RDKit::MolPickler::molFromPickle(mol_str, &mol);
+        RDKit::MolPickler::molFromPickle(
+            mol_str, &mol, kMolPickleLoadFlags);
 
         const auto* query = static_cast<const RDKit::ROMol*>(query_handle);
         RDKit::MatchVectType matchV;
@@ -310,7 +332,8 @@ int HasSubstructMatchWithMol(MolHandle mol_handle,
     try {
         std::string query_str(reinterpret_cast<const char*>(query_pickle), query_size);
         RDKit::ROMol query;
-        RDKit::MolPickler::molFromPickle(query_str, &query);
+        RDKit::MolPickler::molFromPickle(
+            query_str, &query, kMolPickleLoadFlags);
 
         const auto* mol = static_cast<const RDKit::ROMol*>(mol_handle);
         RDKit::MatchVectType matchV;
@@ -320,5 +343,18 @@ int HasSubstructMatchWithMol(MolHandle mol_handle,
     }
 }
 
-}  // extern "C"
+int HasSubstructMatchHandles(MolHandle mol_handle, MolHandle query_handle) {
+    if (!mol_handle || !query_handle) {
+        return -MOL_ERROR_SUBSTRUCT_FAILED;
+    }
+    try {
+        const auto* mol = static_cast<const RDKit::ROMol*>(mol_handle);
+        const auto* query = static_cast<const RDKit::ROMol*>(query_handle);
+        RDKit::MatchVectType matchV;
+        return RDKit::SubstructMatch(*mol, *query, matchV) ? 1 : 0;
+    } catch (const std::exception&) {
+        return -MOL_ERROR_SUBSTRUCT_FAILED;
+    }
+}
 
+}  // extern "C"

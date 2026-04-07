@@ -3347,6 +3347,7 @@ type queryNodeConfig struct {
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
 	EnableGeometryCache           ParamItem `refreshable:"false"`
+	EnableMolCache                ParamItem `refreshable:"false"`
 
 	TieredWarmupScalarField         ParamItem `refreshable:"true"`
 	TieredWarmupScalarIndex         ParamItem `refreshable:"true"`
@@ -3960,6 +3961,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.EnableGeometryCache.Init(base.mgr)
+
+		p.EnableMolCache = ParamItem{
+			Key:          "queryNode.segcore.enableMolCache",
+			Version:      "2.6.9",
+			DefaultValue: "false",
+			Doc:          "Enable lazy RDKit molecule cache for MOL fields; molecules are deserialized on first use and reused by later queries, reducing CPU at the cost of additional memory",
+			Export:       true,
+		}
+	p.EnableMolCache.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",

@@ -125,6 +125,11 @@ int HasSubstructMatchWithQuery(const uint8_t* mol_pickle, size_t mol_size,
 int HasSubstructMatchWithMol(MolHandle mol_handle,
                              const uint8_t* query_pickle, size_t query_size);
 
+// Check substructure match between two pre-parsed molecule handles.
+// Zero deserialization — both sides are already parsed ROMol objects.
+// Returns: 1=match, 0=no match, negative=error
+int HasSubstructMatchHandles(MolHandle mol_handle, MolHandle query_handle);
+
 #ifdef __cplusplus
 }
 #endif

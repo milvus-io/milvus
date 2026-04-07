@@ -90,7 +90,6 @@ class PhyMolFunctionFilterExpr : public SegmentExpr {
     MolHandle query_mol_ = nullptr;
     // Fingerprint pre-filter state
     std::vector<uint8_t> query_fingerprint_;
-    bool query_fp_cached_ = false;
     TargetBitmap fp_candidates_;
     bool fp_candidates_cached_ = false;
 
