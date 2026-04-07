@@ -127,15 +127,18 @@ PkIndexCell::bulk_get_int64_pks_by_offsets(const int64_t* offsets,
 TimestampIndexTranslator::TimestampIndexTranslator(
     int64_t segment_id,
     std::shared_ptr<ChunkedColumnInterface> column,
-    int64_t num_rows)
+    int64_t num_rows,
+    const std::string& warmup_policy)
     : segment_id_(segment_id),
       column_(std::move(column)),
       num_rows_(num_rows),
       key_(fmt::format("seg_{}_ts_index", segment_id)),
       meta_(milvus::cachinglayer::StorageType::MEMORY,
             milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
-            milvus::cachinglayer::CellDataType::OTHER,
-            CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+            milvus::cachinglayer::CellDataType::SCALAR_INDEX,
+            milvus::segcore::getCacheWarmupPolicy(warmup_policy,
+                                                  /* is_vector */ false,
+                                                  /* is_index */ false),
             /* support_eviction */ true) {
 }
 

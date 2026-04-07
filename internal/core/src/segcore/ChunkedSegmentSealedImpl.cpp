@@ -332,11 +332,13 @@ ChunkedSegmentSealedImpl::is_system_field_ready() const {
 
 void
 ChunkedSegmentSealedImpl::init_storage_v2_timestamp_index(
-    const std::shared_ptr<ChunkedColumnInterface>& column, size_t num_rows) {
+    const std::shared_ptr<ChunkedColumnInterface>& column,
+    size_t num_rows,
+    const std::string& warmup_policy) {
     std::unique_ptr<Translator<storagev2translator::TimestampIndexCell>>
         translator =
             std::make_unique<storagev2translator::TimestampIndexTranslator>(
-                id_, column, num_rows);
+                id_, column, num_rows, warmup_policy);
     *timestamp_index_slot_.wlock() =
         Manager::GetInstance().CreateCacheSlot(std::move(translator));
 }
@@ -819,7 +821,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 op_ctx,
                 is_replace);
             if (field_id == TimestampFieldID) {
-                init_storage_v2_timestamp_index(column, num_rows);
+                init_storage_v2_timestamp_index(
+                    column, num_rows, info.warmup_policy);
             }
         }
 
