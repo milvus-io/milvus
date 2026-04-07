@@ -761,7 +761,7 @@ func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {
 	// Mock allocator to return sequential IDs starting from 9001
 	nextID := int64(9001)
 	alloc := &struct{ allocator.Allocator }{}
-	mock2 := mockey.Mock(mockey.GetMethod(alloc, "AllocID")).To(func(ctx context.Context) (typeutil.UniqueID, error) {
+	mock2 := mockey.Mock((*struct{ allocator.Allocator }).AllocID).To(func(ctx context.Context) (typeutil.UniqueID, error) {
 		id := nextID
 		nextID++
 		return id, nil
