@@ -1280,6 +1280,17 @@ class TestUtilityBase(TestcaseBase):
 class TestUtilityAdvanced(TestcaseBase):
     """ Test case of index interface """
 
+    def _sorted_querynodes_for_load_balance(self, segment_distribution, min_querynode_num=2):
+        self._connect()
+        all_querynodes = [node["identifier"] for node in MilvusSys().query_nodes]
+        if len(all_querynodes) < min_querynode_num:
+            pytest.skip(f"skip load balance testcase when querynode number less than {min_querynode_num}")
+        return sorted(
+            all_querynodes,
+            key=lambda x: len(segment_distribution[x]["sealed"]) if x in segment_distribution else 0,
+            reverse=True,
+        )
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_multi_collections(self):
         """
@@ -1535,6 +1546,7 @@ class TestUtilityAdvanced(TestcaseBase):
         expected: raise exception
         """
         # init a collection
+        self._connect()
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         ms = MilvusSys()
@@ -1550,10 +1562,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # prepare load balance params
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
-        all_querynodes = [node["identifier"] for node in ms.query_nodes]
-        all_querynodes = sorted(all_querynodes,
-                                key=lambda x: len(segment_distribution[x]["sealed"])
-                                if x in segment_distribution else 0, reverse=True)
+        all_querynodes = self._sorted_querynodes_for_load_balance(segment_distribution)
         # use a node id greater than all nodes (not just querynodes) to ensure it truly does not exist
         all_node_ids = [node["identifier"] for node in ms.nodes]
         invalid_src_node_id = max(all_node_ids) + 1
@@ -1573,6 +1582,7 @@ class TestUtilityAdvanced(TestcaseBase):
         expected: raise exception
         """
         # init a collection
+        self._connect()
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         ms = MilvusSys()
@@ -1588,10 +1598,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # prepare load balance params
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
-        all_querynodes = [node["identifier"] for node in ms.query_nodes]
-        all_querynodes = sorted(all_querynodes,
-                                key=lambda x: len(segment_distribution[x]["sealed"])
-                                if x in segment_distribution else 0, reverse=True)
+        all_querynodes = self._sorted_querynodes_for_load_balance(segment_distribution)
         src_node_id = all_querynodes[0]
         # use node ids greater than all nodes (not just querynodes) to ensure they truly do not exist
         all_node_ids = [node["identifier"] for node in ms.nodes]
@@ -1611,6 +1618,7 @@ class TestUtilityAdvanced(TestcaseBase):
         expected: raise exception
         """
         # init a collection
+        self._connect()
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         collection_w.create_index(default_field_name, default_index_params)
@@ -1626,10 +1634,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # prepare load balance params
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
-        all_querynodes = [node["identifier"] for node in ms.query_nodes]
-        all_querynodes = sorted(all_querynodes,
-                                key=lambda x: len(segment_distribution[x]["sealed"])
-                                if x in segment_distribution else 0, reverse=True)
+        all_querynodes = self._sorted_querynodes_for_load_balance(segment_distribution)
         src_node_id = all_querynodes[0]
         dst_node_ids = all_querynodes[1:]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
@@ -1651,6 +1656,7 @@ class TestUtilityAdvanced(TestcaseBase):
         expected: raise exception
         """
         # init a collection
+        self._connect()
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         ms = MilvusSys()
@@ -1666,10 +1672,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # prepare load balance params
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
-        all_querynodes = [node["identifier"] for node in ms.query_nodes]
-        all_querynodes = sorted(all_querynodes,
-                                key=lambda x: len(segment_distribution[x]["sealed"])
-                                if x in segment_distribution else 0, reverse=True)
+        all_querynodes = self._sorted_querynodes_for_load_balance(segment_distribution)
         src_node_id = all_querynodes[0]
         dst_node_ids = all_querynodes[1:]
         # add segment ids which are not exist
