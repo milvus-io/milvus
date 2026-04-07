@@ -1975,8 +1975,10 @@ func (v *ParserVisitor) VisitMolSubstructure(ctx *parser.MolSubstructureContext)
 		return merr.WrapErrParameterInvalidMsg(
 			"mol_contains substructure operation is only supported on MOL fields, got: %s", ctx.GetText())
 	}
-	element := ctx.StringLiteral().GetText()
-	smilesString := element[1 : len(element)-1]
+	smilesString, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
+	}
 
 	molExpr := &planpb.MolFunctionFilterExpr{
 		ColumnInfo:   columnInfo,
@@ -2006,8 +2008,10 @@ func (v *ParserVisitor) VisitMolSuperstructure(ctx *parser.MolSuperstructureCont
 		return merr.WrapErrParameterInvalidMsg(
 			"mol_contains superstructure operation is only supported on MOL fields, got: %s", ctx.GetText())
 	}
-	element := ctx.StringLiteral().GetText()
-	smilesString := element[1 : len(element)-1]
+	smilesString, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
+	}
 
 	molExpr := &planpb.MolFunctionFilterExpr{
 		ColumnInfo:   columnInfo,

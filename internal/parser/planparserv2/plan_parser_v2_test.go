@@ -3223,3 +3223,37 @@ func TestExpr_MolFunctionsPlanGeneration(t *testing.T) {
 	}
 }
 
+func TestExpr_MolFunctionsEscapedStrings(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	testcases := []struct {
+		expr     string
+		expected string
+	}{
+		{
+			expr:     `mol_contains(MolField, "C\\C=C\\C")`,
+			expected: `C\C=C\C`,
+		},
+		{
+			expr:     `mol_contains("C\\C=C\\C", MolField)`,
+			expected: `C\C=C\C`,
+		},
+	}
+
+	for _, tc := range testcases {
+		plan, err := CreateSearchPlan(schema, tc.expr, "FloatVectorField", &planpb.QueryInfo{
+			Topk:         10,
+			MetricType:   "L2",
+			SearchParams: "",
+			RoundDecimal: 0,
+		}, nil, nil)
+		require.NoError(t, err, tc.expr)
+		require.NotNil(t, plan)
+		require.NotNil(t, plan.GetVectorAnns())
+		require.NotNil(t, plan.GetVectorAnns().GetPredicates())
+
+		molExpr := plan.GetVectorAnns().GetPredicates().GetMolfunctionFilterExpr()
+		require.NotNil(t, molExpr, tc.expr)
+		assert.Equal(t, tc.expected, molExpr.GetSmilesString(), tc.expr)
+	}
+}
