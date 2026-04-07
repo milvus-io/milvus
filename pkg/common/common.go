@@ -97,10 +97,8 @@ const (
 
 const (
 	MinimalScalarIndexEngineVersion = int32(0)
-	// TODO: scalar index version 3 is still in development, so we use 2 as the current version.
-	// Do not use version 3 until this TODO is resolved.
-	CurrentScalarIndexEngineVersion = int32(2)
-	MaximumScalarIndexEngineVersion = int32(2)
+	CurrentScalarIndexEngineVersion = int32(3)
+	MaximumScalarIndexEngineVersion = int32(3)
 )
 
 // ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.

@@ -85,7 +85,7 @@ DiskFileManagerImpl::GetRemoteIndexPath(const std::string& file_name,
 
 std::string
 DiskFileManagerImpl::GetRemoteIndexPathV2(const std::string& file_name) const {
-    std::string remote_prefix = GetRemoteIndexObjectPrefixV2();
+    std::string remote_prefix = GetRemoteIndexObjectPrefix();
     return remote_prefix + "/" + file_name;
 }
 
