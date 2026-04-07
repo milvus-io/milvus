@@ -990,23 +990,6 @@ class InsertRecordSealed {
         estimated_memory_size_ += total_size;
     }
 
-    // Pin mode: zero-copy from column chunks (StorageV2, single or multi-chunk)
-    void
-    init_timestamps_from_column(
-        std::shared_ptr<ChunkedColumnInterface> column,
-        std::vector<cachinglayer::PinWrapper<Chunk*>> pins,
-        TimestampIndex timestamp_index) {
-        std::lock_guard lck(shared_mutex_);
-        timestamps_.InitFromPinnedChunks(std::move(column), std::move(pins));
-        timestamp_index_ = std::move(timestamp_index);
-        // Pin mode: timestamp data is managed by the column group,
-        // only charge the index metadata memory.
-        size_t ts_index_size = timestamp_index_.memory_size();
-        cachinglayer::Manager::GetInstance().ChargeLoadedResource(
-            {static_cast<int64_t>(ts_index_size), 0});
-        estimated_memory_size_ += ts_index_size;
-    }
-
     // Own mode: takes ownership of timestamp data (StorageV1 / multi-chunk)
     void
     init_timestamps_from_owned(std::vector<Timestamp> data,

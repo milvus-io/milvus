@@ -527,15 +527,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         FieldDataInfo& data,
         milvus::proto::common::LoadPriority load_priority);
 
-    // Initialize timestamp index from a column (zero-copy pin mode for single
-    // chunk, owned copy for multi-chunk)
-    void
-    init_timestamp_index_from_column(
-        std::shared_ptr<ChunkedColumnInterface> column, size_t num_rows);
-
     // Initialize timestamp index with owned data (StorageV1 path)
     void
-    init_timestamp_index_owned(std::vector<Timestamp> timestamps,
+    init_storage_v1_timestamp_index(std::vector<Timestamp> timestamps,
                                size_t num_rows);
 
     template <typename PK>
@@ -1241,6 +1235,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     init_storage_v2_timestamp_index(
         const std::shared_ptr<ChunkedColumnInterface>& column, size_t num_rows);
+
+    void
+    init_storage_v1_pk_index(
+        FieldId field_id,
+        const std::shared_ptr<ChunkedColumnInterface>& column,
+        DataType data_type,
+        bool is_replace);
 
     void
     init_storage_v2_pk_index(
