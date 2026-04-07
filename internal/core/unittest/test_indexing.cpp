@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/filesystem/operations.hpp>
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json_fwd.hpp>
@@ -1182,6 +1183,9 @@ TEST(Indexing, DiskAnnEmbListBuildWithDataset) {
     // 2 query emb_lists
     EXPECT_EQ(result.total_nq_, 2);
     EXPECT_EQ(result.distances_.size(), 2 * K);
+
+    // Cleanup local index data
+    vec_index->CleanLocalData();
 }
 
 TEST(Indexing, DiskAnnEmbListBuildFromBinlog) {
@@ -1242,12 +1246,11 @@ TEST(Indexing, DiskAnnEmbListBuildFromBinlog) {
     auto chunk_manager = storage::CreateChunkManager(storage_config);
     auto fs = milvus::storage::InitArrowFileSystem(storage_config);
 
-    std::string log_path = fmt::format("{}{}/{}/{}/{}/0",
-                                       TestRemotePath,
-                                       collection_id,
-                                       partition_id,
-                                       segment_id,
-                                       field_id);
+    std::string log_root = fmt::format("{}{}", TestRemotePath, collection_id);
+    boost::filesystem::remove_all(log_root);
+    std::string log_dir = fmt::format(
+        "{}/{}/{}/{}", log_root, partition_id, segment_id, field_id);
+    std::string log_path = log_dir + "/0";
     chunk_manager->Write(
         log_path, serialized_bytes.data(), serialized_bytes.size());
 
@@ -1326,8 +1329,9 @@ TEST(Indexing, DiskAnnEmbListBuildFromBinlog) {
     EXPECT_EQ(result.total_nq_, 2);
     EXPECT_EQ(result.distances_.size(), 2 * K);
 
-    // Cleanup
-    chunk_manager->Remove(log_path);
+    // Cleanup: local index data + binlog
+    vec_index->CleanLocalData();
+    boost::filesystem::remove_all(log_root);
 }
 
 #endif
