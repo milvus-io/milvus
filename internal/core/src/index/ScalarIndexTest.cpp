@@ -39,6 +39,10 @@
 #include "index/IndexInfo.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
+#include "pb/common.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "index/StringIndexMarisa.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/schema.pb.h"
@@ -82,9 +86,13 @@ GetTempFileManagerCtx(CDataType data_type) {
     storage_config.storage_type = "local";
     storage_config.root_path = TestLocalPath;
     auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
-    auto ctx = milvus::storage::FileManagerContext(chunk_manager);
-    ctx.fieldDataMeta.field_schema.set_data_type(
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 101};
+    field_meta.field_schema.set_data_type(
         static_cast<milvus::proto::schema::DataType>(data_type));
+    milvus::storage::IndexMeta index_meta{3, 101, 1000, 10000};
+    auto ctx = milvus::storage::FileManagerContext(
+        field_meta, index_meta, chunk_manager, fs);
     return ctx;
 }
 
@@ -233,11 +241,16 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
         auto arr = GenSortedArr<T>(nb);
         scalar_index->Build(nb, arr.data());
 
-        auto binary_set = index->Serialize(nullptr);
+        auto create_index_result = index->UploadV3({});
+        auto index_files = create_index_result->GetIndexFiles();
         auto copy_index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
                 create_index_info, GetTempFileManagerCtx(dtype));
-        copy_index->Load(binary_set);
+        milvus::Config load_config;
+        load_config["index_files"] = index_files;
+        load_config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
+        copy_index->LoadV3(load_config);
 
         auto copy_scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(copy_index.get());
