@@ -1198,7 +1198,7 @@ TEST_F(SegmentLoadInfoTest, GetLoadDiffTextIndexesFromStats) {
     text_stats.set_version(1);
     text_stats.set_buildid(5001);
     text_stats.set_memory_size(1024);
-    text_stats.set_current_scalar_index_version(2);
+    text_stats.set_current_scalar_index_version(3);
     text_stats.add_files("/path/to/text_index_file1");
     text_stats.add_files("/path/to/text_index_file2");
 
@@ -1221,7 +1221,7 @@ TEST_F(SegmentLoadInfoTest, GetLoadDiffTextIndexesFromStats) {
     EXPECT_EQ(load_info->collectionid(), 200);
     EXPECT_EQ(load_info->partitionid(), 300);
     EXPECT_EQ(load_info->index_size(), 1024);
-    EXPECT_EQ(load_info->current_scalar_index_version(), 2);
+    EXPECT_EQ(load_info->current_scalar_index_version(), 3);
 }
 
 TEST_F(SegmentLoadInfoTest, GetLoadDiffTextIndexesToCreate) {
@@ -1417,7 +1417,7 @@ TEST_F(SegmentLoadInfoTest, ConvertTextIndexStatsToLoadTextIndexInfo) {
     text_stats.set_version(3);
     text_stats.set_buildid(5001);
     text_stats.set_memory_size(2048);
-    text_stats.set_current_scalar_index_version(2);
+    text_stats.set_current_scalar_index_version(3);
     text_stats.add_files("/path/to/file1");
     text_stats.add_files("/path/to/file2");
     text_stats.add_files("/path/to/file3");
@@ -1431,7 +1431,7 @@ TEST_F(SegmentLoadInfoTest, ConvertTextIndexStatsToLoadTextIndexInfo) {
     EXPECT_EQ(load_info->version(), 3);
     EXPECT_EQ(load_info->buildid(), 5001);
     EXPECT_EQ(load_info->index_size(), 2048);
-    EXPECT_EQ(load_info->current_scalar_index_version(), 2);
+    EXPECT_EQ(load_info->current_scalar_index_version(), 3);
     EXPECT_EQ(load_info->files_size(), 3);
     EXPECT_EQ(load_info->files(0), "/path/to/file1");
     EXPECT_EQ(load_info->files(1), "/path/to/file2");

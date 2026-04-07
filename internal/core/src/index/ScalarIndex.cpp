@@ -196,8 +196,8 @@ ScalarIndex<T>::UploadV3(const Config& config) {
     // Return IndexStats with the single packed file (full remote path)
     std::vector<SerializedIndexFileInfo> index_files;
     auto remote_prefix = is_index_file_
-                             ? file_manager_->GetRemoteIndexObjectPrefixV2()
-                             : file_manager_->GetRemoteTextLogPrefixV2();
+                             ? file_manager_->GetRemoteIndexObjectPrefix()
+                             : file_manager_->GetRemoteTextLogPrefix();
     auto remote_path = remote_prefix + "/" + filename;
     index_files.emplace_back(remote_path, file_size);
 

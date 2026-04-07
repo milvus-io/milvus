@@ -121,6 +121,6 @@ main(int argc, char** argv) {
         std::chrono::milliseconds(0),
         std::chrono::milliseconds(-1));
 
-    milvus::index::kScalarIndexUseV3 = false;
+    milvus::index::kScalarIndexUseV3 = true;
     return RUN_ALL_TESTS();
 }
