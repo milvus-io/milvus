@@ -125,7 +125,7 @@ class TestRestfulSdkCompatibility(TestBase):
         """
         # 1. create collection by sdk
         dim = 128
-        nb = 100
+        nb = 3000
         name = gen_collection_name()
         default_fields = [
             FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),
@@ -168,7 +168,7 @@ class TestRestfulSdkCompatibility(TestBase):
         """
         """
         dim = 128
-        nb = 100
+        nb = 3000
         name = gen_collection_name()
         default_fields = [
             FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),
@@ -203,7 +203,7 @@ class TestRestfulSdkCompatibility(TestBase):
         """
         """
         dim = 128
-        nb = 100
+        nb = 3000
         name = gen_collection_name()
         default_fields = [
             FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),
@@ -289,7 +289,7 @@ class TestRestfulSdkCompatibility(TestBase):
         """
         """
         dim = 128
-        nb = 100
+        nb = 3000
         name = gen_collection_name()
         default_fields = [
             FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),

@@ -78,7 +78,7 @@ class TestGeometryCollection(TestBase):
         assert rsp['code'] == 0
 
         # Generate WKT data
-        nb = 100
+        nb = 3000
         wkt_data = generate_wkt_by_type(wkt_type, bounds=(0, 100, 0, 100), count=nb)
         data = []
         for i, wkt in enumerate(wkt_data):
@@ -195,7 +195,7 @@ class TestGeometryCollection(TestBase):
         rsp = self.collection_client.collection_create(payload)
         assert rsp['code'] == 0
 
-        nb = 100
+        nb = 3000
 
         # Define query geometry and matching data based on spatial function
         # Each spatial function needs specific data patterns to guarantee matches
@@ -478,7 +478,7 @@ class TestGeometryCollection(TestBase):
         rsp = self.collection_client.collection_create(payload)
         assert rsp['code'] == 0
 
-        nb = 100
+        nb = 3000
 
         def generate_geo_data(start_id, count):
             data = []
@@ -532,7 +532,7 @@ class TestGeometryCollection(TestBase):
         rsp = self.collection_client.collection_create(payload)
         assert rsp['code'] == 0
 
-        nb = 100
+        nb = 3000
 
         def generate_geo_data(start_id, count):
             data = []
@@ -597,7 +597,7 @@ class TestGeometryCollection(TestBase):
         rsp = self.collection_client.collection_create(payload)
         assert rsp['code'] == 0
 
-        nb = 100
+        nb = 3000
         data = []
         for i in range(nb):
             item = {

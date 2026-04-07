@@ -21,7 +21,7 @@ default_float_field_name = "float"
 default_new_field_name = "field_new"
 default_dynamic_field_name = "field_new"
 exp_res = "exp_res"
-default_nb = 2000
+default_nb = ct.default_nb
 default_dim = 128
 default_limit = 10
 

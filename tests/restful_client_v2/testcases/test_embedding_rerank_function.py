@@ -398,7 +398,7 @@ class TestTextEmbeddingSearch(TestBase):
         assert rsp['code'] == 0
 
         # Insert text data
-        nb = 100
+        nb = 3000
         documents = [
             "Machine learning is a subset of artificial intelligence",
             "Deep learning uses neural networks with multiple layers",

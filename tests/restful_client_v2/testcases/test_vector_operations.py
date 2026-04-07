@@ -796,7 +796,7 @@ class TestInsertVectorNegative(TestBase):
         rsp = self.collection_client.collection_describe(name)
         assert rsp['code'] == 0
         # insert data
-        nb = 100
+        nb = 3000
         data = get_data_by_payload(payload, nb)
         payload = {
             "collectionName": "invalid_collection_name",
@@ -1270,7 +1270,7 @@ class TestUpsertVectorNegative(TestBase):
         rsp = self.collection_client.collection_describe(name)
         assert rsp['code'] == 0
         # insert data
-        nb = 100
+        nb = 3000
         data = get_data_by_payload(payload, nb)
         payload = {
             "collectionName": "invalid_collection_name",
@@ -2036,7 +2036,7 @@ class TestSearchVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = 3000
         dim = 128
         limit = 100
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
@@ -2068,7 +2068,7 @@ class TestSearchVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = 3000
         dim = 128
         limit = 100
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
@@ -2115,7 +2115,7 @@ class TestSearchVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = 3000
         dim = 128
         limit = 100
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
@@ -2164,7 +2164,7 @@ class TestSearchVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = 3000
         dim = 128
         limit = 100
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
@@ -3625,7 +3625,7 @@ class TestQueryVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = 3000
         dim = 128
         limit = 100
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
@@ -3671,7 +3671,7 @@ class TestQueryVector(TestBase):
         name = gen_collection_name()
         filter_expr = "name > \"placeholder\""
         self.name = name
-        nb = 200
+        nb = 3000
         dim = 128
         limit = 100
         offset = sum_of_limit_offset - limit
@@ -4050,7 +4050,7 @@ class TestQueryVectorNegative(TestBase):
     def test_query_with_wrong_filter_expr(self):
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = 3000
         dim = 128
         schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
         output_fields = get_common_fields_by_data(data)
@@ -4113,7 +4113,7 @@ class TestGetVector(TestBase):
     def test_get_vector_complex(self, id_field_type, include_output_fields, include_invalid_id):
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = 3000
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
         output_fields = get_common_fields_by_data(data)
@@ -4194,7 +4194,7 @@ class TestDeleteVector(TestBase):
     def test_delete_vector_by_pk_field_ids(self, id_field_type):
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = 3000
         dim = 128
         schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
         time.sleep(1)
@@ -4227,7 +4227,7 @@ class TestDeleteVector(TestBase):
     def test_delete_vector_by_filter_pk_field(self, id_field_type):
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = 3000
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
         time.sleep(1)
@@ -4413,7 +4413,7 @@ class TestDeleteVector(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        self.init_collection(name, dim=128, nb=300)
+        self.init_collection(name, dim=128, nb=3000)
         expr = "uid > 0"
         payload = {
             "collectionName": name,
@@ -4583,7 +4583,7 @@ class TestVectorWithAuth(TestBase):
         """
         name = gen_collection_name()
         self.name = name
-        nb = 200
+        nb = 3000
         dim = 128
         schema_payload, data = self.init_collection(name, dim=dim, nb=nb)
         output_fields = get_common_fields_by_data(data)
@@ -4641,7 +4641,7 @@ class TestSearchByPK(TestBase):
         name = gen_collection_name()
         self.name = name
         dim = 128
-        nb = 100
+        nb = 3000
         limit = 10
         schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
 
@@ -4673,7 +4673,7 @@ class TestSearchByPK(TestBase):
         name = gen_collection_name()
         self.name = name
         dim = 128
-        nb = 100
+        nb = 3000
         limit = 10
         schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
 
@@ -4726,7 +4726,7 @@ class TestSearchByPK(TestBase):
         self.wait_collection_load_completed(name)
 
         # Insert data
-        nb = 100
+        nb = 3000
         data = []
         insert_pks = []
         for i in range(nb):
@@ -4766,7 +4766,7 @@ class TestSearchByPK(TestBase):
         name = gen_collection_name()
         self.name = name
         dim = 128
-        nb = 100
+        nb = 3000
         schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
 
         # Use string IDs to avoid float64 precision loss
@@ -4794,7 +4794,7 @@ class TestSearchByPK(TestBase):
         name = gen_collection_name()
         self.name = name
         dim = 128
-        nb = 100
+        nb = 3000
         limit = 10
         schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
 
@@ -4823,7 +4823,7 @@ class TestSearchByPK(TestBase):
         name = gen_collection_name()
         self.name = name
         dim = 128
-        nb = 100
+        nb = 3000
         schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
 
         # Use string IDs to avoid float64 precision loss
@@ -4850,7 +4850,7 @@ class TestSearchByPK(TestBase):
         name = gen_collection_name()
         self.name = name
         dim = 128
-        nb = 100
+        nb = 3000
         limit = 10
         schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
 
@@ -4875,7 +4875,7 @@ class TestSearchByPK(TestBase):
         name = gen_collection_name()
         self.name = name
         dim = 128
-        nb = 100
+        nb = 3000
         limit = 5
         schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
 
@@ -4948,7 +4948,7 @@ class TestSearchByPK(TestBase):
         self.wait_collection_load_completed(name)
 
         # Insert data
-        nb = 100
+        nb = 3000
         data = []
         for i in range(nb):
             data.append({
@@ -5015,7 +5015,7 @@ class TestSearchByPK(TestBase):
         self.wait_collection_load_completed(name)
 
         # Insert data
-        nb = 100
+        nb = 3000
         data = []
         insert_pks = []
         for i in range(nb):
@@ -5086,7 +5086,7 @@ class TestSearchByPK(TestBase):
         self.wait_collection_load_completed(name)
 
         # Insert data
-        nb = 100
+        nb = 3000
         data = []
         insert_pks = []
         for i in range(nb):
@@ -5131,7 +5131,7 @@ class TestSearchByPKNegative(TestBase):
         name = gen_collection_name()
         self.name = name
         dim = 128
-        nb = 100
+        nb = 3000
         schema_payload, data, insert_ids = self.init_collection(name, dim=dim, nb=nb, return_insert_id=True)
 
         # Use string IDs to avoid float64 precision loss
@@ -5157,7 +5157,7 @@ class TestSearchByPKNegative(TestBase):
         name = gen_collection_name()
         self.name = name
         dim = 128
-        nb = 100
+        nb = 3000
         self.init_collection(name, dim=dim, nb=nb)
 
         payload = {
@@ -5177,7 +5177,7 @@ class TestSearchByPKNegative(TestBase):
         name = gen_collection_name()
         self.name = name
         dim = 128
-        nb = 100
+        nb = 3000
         self.init_collection(name, dim=dim, nb=nb)
 
         payload = {
@@ -5197,7 +5197,7 @@ class TestSearchByPKNegative(TestBase):
         name = gen_collection_name()
         self.name = name
         dim = 128
-        nb = 100
+        nb = 3000
         self.init_collection(name, dim=dim, nb=nb)
 
         payload = {
@@ -5217,7 +5217,7 @@ class TestSearchByPKNegative(TestBase):
         name = gen_collection_name()
         self.name = name
         dim = 128
-        nb = 100
+        nb = 3000
         self.init_collection(name, dim=dim, nb=nb)
 
         payload = {
