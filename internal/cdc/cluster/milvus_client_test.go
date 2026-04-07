@@ -17,10 +17,13 @@
 package cluster
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -88,5 +91,46 @@ func TestBuildCDCTLSConfig(t *testing.T) {
 		tlsConfig, err = buildCDCTLSConfig("cluster-c")
 		assert.NoError(t, err)
 		assert.Nil(t, tlsConfig)
+	})
+}
+
+func TestNewMilvusClientWithAuthority(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("authority not set does not add dial options", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		cluster := &commonpb.MilvusCluster{
+			ClusterId: "test-cluster",
+			ConnectionParam: &commonpb.ConnectionParam{
+				Uri:   "localhost:19530",
+				Token: "",
+			},
+		}
+
+		_, err := NewMilvusClient(ctx, cluster)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create milvus client")
+	})
+
+	t.Run("authority set via paramtable adds dial option", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		paramtable.Get().Save("grpc.clusters.proxy-cluster.authority", "milvus.internal.example.com")
+		defer paramtable.Get().Save("grpc.clusters.proxy-cluster.authority", "")
+
+		cluster := &commonpb.MilvusCluster{
+			ClusterId: "proxy-cluster",
+			ConnectionParam: &commonpb.ConnectionParam{
+				Uri:   "localhost:19530",
+				Token: "test-token",
+			},
+		}
+
+		_, err := NewMilvusClient(ctx, cluster)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create milvus client")
 	})
 }

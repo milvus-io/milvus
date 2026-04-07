@@ -160,3 +160,10 @@ func (c *ClientConfig) WithTLSConfig(tlsConfig *tls.Config) *ClientConfig {
 	c.EnableTLSAuth = true
 	return c
 }
+
+// WithGrpcAuthority sets the gRPC :authority header, used for proxy-based routing.
+// Preserves all DefaultGrpcOpts.
+func (c *ClientConfig) WithGrpcAuthority(authority string) *ClientConfig {
+	c.DialOptions = append(append([]grpc.DialOption{}, DefaultGrpcOpts...), grpc.WithAuthority(authority))
+	return c
+}
