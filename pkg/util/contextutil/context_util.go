@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 )
@@ -150,4 +151,19 @@ func MergeContext(ctx1 context.Context, ctx2 context.Context) (context.Context, 
 		stop()
 		cancel(context.Canceled)
 	}
+}
+
+type queryLabelKey struct{}
+
+// WithQueryLabel sets the query label in context for metrics differentiation.
+func WithQueryLabel(ctx context.Context, label string) context.Context {
+	return context.WithValue(ctx, queryLabelKey{}, label)
+}
+
+// GetQueryLabel returns the query label from context, defaulting to "query".
+func GetQueryLabel(ctx context.Context) string {
+	if v, ok := ctx.Value(queryLabelKey{}).(string); ok && v != "" {
+		return v
+	}
+	return metrics.QueryLabel
 }

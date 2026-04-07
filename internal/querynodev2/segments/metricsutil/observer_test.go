@@ -20,7 +20,7 @@ func TestSegmentGather(t *testing.T) {
 	r2 := NewCacheEvictRecord(l)
 	g.Observe(r2)
 
-	r3 := NewQuerySegmentAccessRecord(l)
+	r3 := NewQuerySegmentAccessRecord(l, "query")
 	g.Observe(r3)
 
 	r4 := NewSearchSegmentAccessRecord(l)
@@ -43,7 +43,7 @@ func TestSegmentsGather(t *testing.T) {
 	r1 := NewQuerySegmentAccessRecord(SegmentLabel{
 		ResourceGroup: "rg1",
 		DatabaseName:  "db1",
-	})
+	}, "query")
 	r1.Finish(nil)
 	g.Observe(r1)
 	assert.Equal(t, 1, g.segments.Len())

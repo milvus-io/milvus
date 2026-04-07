@@ -442,6 +442,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) sha
 				SerializedExprPlan: serializedPlan,
 				OutputFieldsId:     outputFieldIDs,
 				GuaranteeTimestamp: parseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
+				QueryLabel:         metrics.DeleteQueryLabel,
 			},
 			DmlChannels: []string{channel},
 			Scope:       querypb.DataScope_All,

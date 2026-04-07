@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -418,6 +419,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 			ReqID:            paramtable.GetNodeID(),
 			PartitionIDs:     op.partitionIDs, // use search partitionIDs
 			ConsistencyLevel: op.consistencyLevel,
+			QueryLabel:       metrics.ReQueryLabel,
 		},
 		request:        queryReq,
 		plan:           plan,

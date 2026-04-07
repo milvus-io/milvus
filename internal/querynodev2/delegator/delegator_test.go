@@ -770,7 +770,7 @@ func (s *DelegatorSuite) TestQuery() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		results, err := s.delegator.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 
@@ -787,7 +787,8 @@ func (s *DelegatorSuite) TestQuery() {
 		defer cancel()
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
-				Base: commonpbutil.NewMsgBase(),
+				QueryLabel: "query",
+				Base:       commonpbutil.NewMsgBase(),
 				// not load partation -1,will return error
 				PartitionIDs: []int64{-1},
 			},
@@ -824,7 +825,7 @@ func (s *DelegatorSuite) TestQuery() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 
@@ -861,7 +862,7 @@ func (s *DelegatorSuite) TestQuery() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 
@@ -873,7 +874,7 @@ func (s *DelegatorSuite) TestQuery() {
 		defer cancel()
 
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{"non_exist_channel"},
 		})
 
@@ -889,7 +890,7 @@ func (s *DelegatorSuite) TestQuery() {
 		sd.distribution.MarkOfflineSegments(1001)
 
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 
@@ -903,7 +904,7 @@ func (s *DelegatorSuite) TestQuery() {
 		defer cancel()
 
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 
@@ -981,7 +982,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		// run stream function
 		go func() {
 			err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
-				Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+				Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 				DmlChannels: []string{s.vchannelName},
 			}, server)
 			s.NoError(err)
@@ -1018,7 +1019,8 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
-				Base: commonpbutil.NewMsgBase(),
+				QueryLabel: "query",
+				Base:       commonpbutil.NewMsgBase(),
 				// not load partation -1,will return error
 				PartitionIDs: []int64{-1},
 			},
@@ -1036,6 +1038,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
+				QueryLabel:         "query",
 				Base:               commonpbutil.NewMsgBase(),
 				GuaranteeTimestamp: uint64(paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)),
 			},
@@ -1062,7 +1065,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		// run stream function
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		}, server)
 		s.Error(err)
@@ -1115,7 +1118,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		// run stream function
 		go func() {
 			err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
-				Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+				Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 				DmlChannels: []string{s.vchannelName},
 			}, server)
 			server.Send(&internalpb.RetrieveResults{
@@ -1152,7 +1155,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		server := client.CreateServer()
 
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{"non_exist_channel"},
 		}, server)
 
@@ -1172,7 +1175,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		// run stream function
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		}, server)
 		s.Error(err)
@@ -1188,7 +1191,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		server := client.CreateServer()
 
 		err := s.delegator.QueryStream(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		}, server)
 
@@ -1770,7 +1773,7 @@ func (s *DelegatorSuite) TestDelegatorLifetimeIntegration() {
 
 		// Query should fail when not ready
 		_, err = sd.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 		s.Error(err)
@@ -1804,7 +1807,7 @@ func (s *DelegatorSuite) TestDelegatorLifetimeIntegration() {
 
 		// Query should fail when stopped
 		_, err = sd.Query(ctx, &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			Req:         &internalpb.RetrieveRequest{QueryLabel: "query", Base: commonpbutil.NewMsgBase()},
 			DmlChannels: []string{s.vchannelName},
 		})
 		s.Error(err)
