@@ -77,6 +77,8 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cMaxGroupByGroups := C.int64_t(paramtable.Get().CommonCfg.GroupByMaxGroups.GetAsInt64())
 	C.SegcoreSetMaxGroupByGroups(cMaxGroupByGroups)
 
+	C.SegcoreSetVisibilityFilterEnabled(C.bool(paramtable.Get().CommonCfg.VisibilityFilterEnabled.GetAsBool()))
+
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
 
