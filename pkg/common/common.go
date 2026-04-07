@@ -495,22 +495,26 @@ func IsQueryModeKeyExists(kvs ...*commonpb.KeyValuePair) bool {
 func GetQueryMode(kvs ...*commonpb.KeyValuePair) string {
 	for _, kv := range kvs {
 		if kv.Key == QueryModeKey {
-			return strings.ToLower(strings.TrimSpace(kv.Value))
+			return kv.Value
 		}
 	}
 	return ""
 }
 
 // ValidateQueryMode validates the query_mode value. Returns nil if the value
-// is valid or if query_mode is not set.
+// is valid or if query_mode is not set. Also rejects case-variant keys
+// (e.g. "QUERY_MODE", "Query_Mode") that would be silently ignored.
 func ValidateQueryMode(kvs ...*commonpb.KeyValuePair) error {
 	for _, kv := range kvs {
 		if kv.Key == QueryModeKey {
-			mode := strings.ToLower(strings.TrimSpace(kv.Value))
+			mode := kv.Value
 			if mode != QueryModeLargeTopK {
 				return fmt.Errorf("invalid query_mode value %q, valid values: [%s]", kv.Value, ValidQueryModes)
 			}
 			return nil
+		}
+		if strings.EqualFold(kv.Key, QueryModeKey) {
+			return fmt.Errorf("invalid property key %q, did you mean %q?", kv.Key, QueryModeKey)
 		}
 	}
 	return nil
