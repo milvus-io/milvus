@@ -552,6 +552,18 @@ func (s *ClusteringCompactionTaskSuite) TestQueryTaskOnWorker() {
 	})
 }
 
+func (s *ClusteringCompactionTaskSuite) TestQueryTaskOnWorkerSkipAnalyzing() {
+	s.Run("QueryTaskOnWorker skips when state is analyzing", func() {
+		task := s.generateBasicTask(true) // vector clustering key
+		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_analyzing))
+		cluster := session.NewMockCluster(s.T())
+		// No QueryCompaction mock — if QueryTaskOnWorker calls it, the mock will panic.
+		task.QueryTaskOnWorker(cluster)
+		// State should remain analyzing, not be reset to pipelining.
+		s.Equal(datapb.CompactionTaskState_analyzing, task.GetTaskProto().GetState())
+	})
+}
+
 func (s *ClusteringCompactionTaskSuite) TestProcess() {
 	s.Run("test process states", func() {
 		testCases := []struct {
