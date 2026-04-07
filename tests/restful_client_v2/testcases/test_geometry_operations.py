@@ -5,6 +5,7 @@ from sklearn import preprocessing
 from base.testbase import TestBase
 from utils.utils import gen_collection_name, generate_wkt_by_type
 from utils.util_log import test_log as logger
+from utils import constant
 
 
 default_dim = 128
@@ -78,7 +79,7 @@ class TestGeometryCollection(TestBase):
         assert rsp['code'] == 0
 
         # Generate WKT data
-        nb = 3000
+        nb = constant.default_nb
         wkt_data = generate_wkt_by_type(wkt_type, bounds=(0, 100, 0, 100), count=nb)
         data = []
         for i, wkt in enumerate(wkt_data):
@@ -195,7 +196,7 @@ class TestGeometryCollection(TestBase):
         rsp = self.collection_client.collection_create(payload)
         assert rsp['code'] == 0
 
-        nb = 3000
+        nb = constant.default_nb
 
         # Define query geometry and matching data based on spatial function
         # Each spatial function needs specific data patterns to guarantee matches
@@ -478,7 +479,7 @@ class TestGeometryCollection(TestBase):
         rsp = self.collection_client.collection_create(payload)
         assert rsp['code'] == 0
 
-        nb = 3000
+        nb = constant.default_nb
 
         def generate_geo_data(start_id, count):
             data = []
@@ -532,7 +533,7 @@ class TestGeometryCollection(TestBase):
         rsp = self.collection_client.collection_create(payload)
         assert rsp['code'] == 0
 
-        nb = 3000
+        nb = constant.default_nb
 
         def generate_geo_data(start_id, count):
             data = []
@@ -597,7 +598,7 @@ class TestGeometryCollection(TestBase):
         rsp = self.collection_client.collection_create(payload)
         assert rsp['code'] == 0
 
-        nb = 3000
+        nb = constant.default_nb
         data = []
         for i in range(nb):
             item = {

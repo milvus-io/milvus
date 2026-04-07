@@ -4,6 +4,7 @@ from faker import Faker
 from base.testbase import TestBase
 from utils.utils import gen_collection_name
 from utils.util_log import test_log as logger
+from utils import constant
 
 fake_en = Faker("en_US")
 
@@ -398,7 +399,7 @@ class TestTextEmbeddingSearch(TestBase):
         assert rsp['code'] == 0
 
         # Insert text data
-        nb = 3000
+        nb = constant.default_nb
         documents = [
             "Machine learning is a subset of artificial intelligence",
             "Deep learning uses neural networks with multiple layers",

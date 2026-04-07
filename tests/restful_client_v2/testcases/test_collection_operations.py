@@ -8,6 +8,7 @@ from api.milvus import CollectionClient
 from base.testbase import TestBase
 import threading
 from utils.utils import get_data_by_payload
+from utils import constant
 from pymilvus import (
     FieldSchema, CollectionSchema, DataType,
     Collection
@@ -939,7 +940,7 @@ class TestGetCollectionStats(TestBase):
         assert rsp['code'] == 0
         assert rsp['data']['rowCount'] == 0
         # insert data
-        nb = 3000
+        nb = constant.default_nb
         data = get_data_by_payload(payload, nb)
         payload = {
             "collectionName": name,
@@ -1034,7 +1035,7 @@ class TestGetCollectionLoadState(TestBase):
             time.sleep(1)
         assert rsp['data']['loadState'] in ["LoadStateLoading", "LoadStateLoaded"]
         # insert data
-        nb = 3000
+        nb = constant.default_nb
         data = get_data_by_payload(payload, nb)
         payload = {
             "collectionName": name,
@@ -1614,7 +1615,7 @@ class TestCollectionAddField(TestBase):
         """
         name = gen_collection_name()
         dim = 128
-        nb = 3000  # Number of records to insert in each batch
+        nb = constant.default_nb  # Number of records to insert in each batch
         client = self.collection_client
         vector_client = self.vector_client
         field_name = field_params["fieldName"]
