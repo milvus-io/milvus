@@ -1465,199 +1465,31 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
         res, check = self.create_index(client, collection_name, index_params)
         assert check
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_create_emb_list_hnsw_sq_index(self):
-        """
-        target: test create HNSW_SQ index on struct array vector field
-        method: create HNSW_SQ index with MAX_SIM_COSINE metric
-        expected: index creation successful
-        """
-        collection_name = cf.gen_unique_str(f"{prefix}_index_hnsw_sq")
-        client = self._client()
-        self.create_collection_with_data(client, collection_name)
-
-        index_params = client.prepare_index_params()
-        index_params.add_index(
-            field_name="normal_vector",
-            index_type="IVF_FLAT",
-            metric_type="L2",
-            params={"nlist": 128},
-        )
-        index_params.add_index(
-            field_name="clips[clip_embedding1]",
-            index_name="struct_vector_index_hnsw_sq",
-            index_type="HNSW_SQ",
-            metric_type="MAX_SIM_COSINE",
-            params=EMB_LIST_INDEX_CONFIGS["HNSW_SQ"]["build_params"],
-        )
-
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_create_emb_list_hnsw_pq_index(self):
-        """
-        target: test create HNSW_PQ index on struct array vector field
-        method: create HNSW_PQ index with MAX_SIM_COSINE metric
-        expected: index creation successful
-        """
-        collection_name = cf.gen_unique_str(f"{prefix}_index_hnsw_pq")
-        client = self._client()
-        self.create_collection_with_data(client, collection_name)
-
-        index_params = client.prepare_index_params()
-        index_params.add_index(
-            field_name="normal_vector",
-            index_type="IVF_FLAT",
-            metric_type="L2",
-            params={"nlist": 128},
-        )
-        index_params.add_index(
-            field_name="clips[clip_embedding1]",
-            index_name="struct_vector_index_hnsw_pq",
-            index_type="HNSW_PQ",
-            metric_type="MAX_SIM_COSINE",
-            params=EMB_LIST_INDEX_CONFIGS["HNSW_PQ"]["build_params"],
-        )
-
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_create_emb_list_hnsw_prq_index(self):
-        """
-        target: test create HNSW_PRQ index on struct array vector field
-        method: create HNSW_PRQ index with MAX_SIM_COSINE metric
-        expected: index creation successful
-        """
-        collection_name = cf.gen_unique_str(f"{prefix}_index_hnsw_prq")
-        client = self._client()
-        self.create_collection_with_data(client, collection_name)
-
-        index_params = client.prepare_index_params()
-        index_params.add_index(
-            field_name="normal_vector",
-            index_type="IVF_FLAT",
-            metric_type="L2",
-            params={"nlist": 128},
-        )
-        index_params.add_index(
-            field_name="clips[clip_embedding1]",
-            index_name="struct_vector_index_hnsw_prq",
-            index_type="HNSW_PRQ",
-            metric_type="MAX_SIM_COSINE",
-            params=EMB_LIST_INDEX_CONFIGS["HNSW_PRQ"]["build_params"],
-        )
-
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_create_emb_list_ivf_flat_cc_index(self):
-        """
-        target: test create IVF_FLAT_CC index on struct array vector field
-        method: create IVF_FLAT_CC index with MAX_SIM_COSINE metric
-        expected: index creation successful
-        """
-        collection_name = cf.gen_unique_str(f"{prefix}_index_ivf_flat_cc")
-        client = self._client()
-        self.create_collection_with_data(client, collection_name)
-
-        index_params = client.prepare_index_params()
-        index_params.add_index(
-            field_name="normal_vector",
-            index_type="IVF_FLAT",
-            metric_type="L2",
-            params={"nlist": 128},
-        )
-        index_params.add_index(
-            field_name="clips[clip_embedding1]",
-            index_name="struct_vector_index_ivf_flat_cc",
-            index_type="IVF_FLAT_CC",
-            metric_type="MAX_SIM_COSINE",
-            params=EMB_LIST_INDEX_CONFIGS["IVF_FLAT_CC"]["build_params"],
-        )
-
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_create_emb_list_diskann_index(self):
-        """
-        target: test create DISKANN index on struct array vector field
-        method: create DISKANN index with MAX_SIM_COSINE metric
-        expected: index creation successful
-        """
-        collection_name = cf.gen_unique_str(f"{prefix}_index_diskann")
-        client = self._client()
-        self.create_collection_with_data(client, collection_name)
-
-        index_params = client.prepare_index_params()
-        index_params.add_index(
-            field_name="normal_vector",
-            index_type="IVF_FLAT",
-            metric_type="L2",
-            params={"nlist": 128},
-        )
-        index_params.add_index(
-            field_name="clips[clip_embedding1]",
-            index_name="struct_vector_index_diskann",
-            index_type="DISKANN",
-            metric_type="MAX_SIM_COSINE",
-            params=EMB_LIST_INDEX_CONFIGS["DISKANN"]["build_params"],
-        )
-
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index_type", EMB_LIST_INDEX_TYPES)
     @pytest.mark.parametrize("metric_type", METRICS)
     def test_emb_list_index_different_types_and_metrics(self, index_type, metric_type):
         """
-        target: test different emb list index types with different metric types
-        method: create index with various index type and metric combinations
-        expected: index creation successful for all supported combinations
+        target: test emb list index with full CRUD path for different index types and metrics
+        method: insert (flushed + growing) → create index → load → search → upsert → delete → verify
+        expected: all CRUD operations successful with correct search results
         """
         collection_name = cf.gen_unique_str(
             f"{prefix}_idx_{index_type.lower()}_{metric_type.lower()}"
         )
         client = self._client()
-        self.create_collection_with_data(client, collection_name)
 
-        build_params = EMB_LIST_INDEX_CONFIGS[index_type]["build_params"]
-
-        index_params = client.prepare_index_params()
-        index_params.add_index(
-            field_name="normal_vector",
-            index_type="IVF_FLAT",
-            metric_type="L2",
-            params={"nlist": 128},
-        )
-        index_params.add_index(
-            field_name="clips[clip_embedding1]",
-            index_name=f"struct_index_{index_type.lower()}_{metric_type.lower()}",
-            index_type=index_type,
-            metric_type=metric_type,
-            params=build_params,
-        )
-
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-    def _create_collection_with_vector_type(
-        self, client, collection_name, vector_type, dim=default_dim, nb=default_nb
-    ):
-        """Create collection with struct array using specified vector type"""
+        # Create collection schema with label field for upsert verification
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
         schema.add_field(
-            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=dim
+            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
         struct_schema = client.create_struct_field_schema()
-        struct_schema.add_field("clip_embedding1", vector_type, dim=dim)
+        struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim)
         struct_schema.add_field("scalar_field", DataType.INT64)
+        struct_schema.add_field("label", DataType.VARCHAR, max_length=128)
 
         schema.add_field(
             "clips",
@@ -1670,50 +1502,191 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        # Generate and insert data with the specified vector type
-        data = []
-        for i in range(nb):
-            array_length = random.randint(1, 10)
-            struct_array = []
-            for j in range(array_length):
-                vec = cf.gen_vectors(1, dim, vector_type)[0]
-                struct_element = {
-                    "clip_embedding1": vec,
+        # Insert 200 records and flush (sealed segments)
+        nb_flushed = 200
+        flushed_data = []
+        for i in range(nb_flushed):
+            array_length = random.randint(1, 5)
+            struct_array = [
+                {
+                    "clip_embedding1": [random.random() for _ in range(default_dim)],
                     "scalar_field": i * 10 + j,
+                    "label": f"flushed_{i}",
                 }
-                struct_array.append(struct_element)
-
+                for j in range(array_length)
+            ]
             row = {
                 "id": i,
-                "normal_vector": [random.random() for _ in range(dim)],
+                "normal_vector": [random.random() for _ in range(default_dim)],
                 "clips": struct_array,
             }
-            data.append(row)
+            flushed_data.append(row)
 
-        res, check = self.insert(client, collection_name, data)
+        res, check = self.insert(client, collection_name, flushed_data)
         assert check
-        return data
+        assert res["insert_count"] == nb_flushed
+
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        # Insert 100 more growing records
+        nb_growing = 100
+        growing_data = []
+        for i in range(nb_flushed, nb_flushed + nb_growing):
+            array_length = random.randint(1, 5)
+            struct_array = [
+                {
+                    "clip_embedding1": [random.random() for _ in range(default_dim)],
+                    "scalar_field": i * 10 + j,
+                    "label": f"growing_{i}",
+                }
+                for j in range(array_length)
+            ]
+            row = {
+                "id": i,
+                "normal_vector": [random.random() for _ in range(default_dim)],
+                "clips": struct_array,
+            }
+            growing_data.append(row)
+
+        res, check = self.insert(client, collection_name, growing_data)
+        assert check
+        assert res["insert_count"] == nb_growing
+
+        # Create index with specified type and metric
+        build_params = EMB_LIST_INDEX_CONFIGS[index_type]["build_params"]
+        search_params = EMB_LIST_INDEX_CONFIGS[index_type]["search_params"]
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        index_params.add_index(
+            field_name="clips[clip_embedding1]",
+            index_name=f"struct_idx_{index_type.lower()}_{metric_type.lower()}",
+            index_type=index_type,
+            metric_type=metric_type,
+            params=build_params,
+        )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+        # Load collection
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        # Search with EmbeddingList and verify results
+        embedding_list = EmbeddingList()
+        for _ in range(3):
+            embedding_list.add([random.random() for _ in range(default_dim)])
+
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[embedding_list],
+            anns_field="clips[clip_embedding1]",
+            search_params={"metric_type": metric_type, "params": search_params},
+            limit=10,
+            output_fields=["id", "clips"],
+        )
+        assert check
+        assert len(results[0]) > 0
+        for hit in results[0]:
+            assert "id" in hit
+            assert 0 <= hit["id"] < nb_flushed + nb_growing
+
+        # Upsert 10 records from flushed segment
+        upsert_data = []
+        for i in range(10):
+            row = {
+                "id": i,
+                "normal_vector": [random.random() for _ in range(default_dim)],
+                "clips": [
+                    {
+                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "scalar_field": i + 10000,
+                        "label": f"upserted_{i}",
+                    }
+                ],
+            }
+            upsert_data.append(row)
+
+        res, check = self.upsert(client, collection_name, upsert_data)
+        assert check
+
+        # Verify upsert via query
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        results, check = self.query(
+            client, collection_name, filter="id < 10", output_fields=["id", "clips"]
+        )
+        assert check
+        assert len(results) == 10
+        for result in results:
+            assert "upserted" in result["clips"][0]["label"]
+
+        # Delete 5 records from growing segment
+        delete_ids = list(range(nb_flushed, nb_flushed + 5))
+        res, check = self.delete(client, collection_name, filter=f"id in {delete_ids}")
+        assert check
+
+        # Verify deletion
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        results, check = self.query(
+            client, collection_name, filter="id >= 0", output_fields=["id"]
+        )
+        assert check
+        remaining_ids = {r["id"] for r in results}
+        for del_id in delete_ids:
+            assert del_id not in remaining_ids
+        assert len(results) == nb_flushed + nb_growing - 5
+
+        # Search again after CRUD operations to verify index still works
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[embedding_list],
+            anns_field="clips[clip_embedding1]",
+            search_params={"metric_type": metric_type, "params": search_params},
+            limit=10,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) > 0
+        for hit in results[0]:
+            assert hit["id"] not in delete_ids
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index_type", list(EMB_LIST_VECTOR_TYPES.keys()))
     def test_emb_list_index_with_different_vector_types(self, index_type):
         """
-        target: test emb list index creation with different vector data types
-        method: create index on struct array vector field with float16/bfloat16/int8/binary types
-        expected: index creation successful for all supported vector types per index
+        target: test emb list index with full CRUD path for different vector data types
+        method: for each supported vector type per index: insert (flushed + growing) → index → load → search → upsert → delete → verify
+        expected: all CRUD operations successful for all supported vector types
         """
         client = self._client()
         supported_types = EMB_LIST_VECTOR_TYPES[index_type]
 
-        # Get build params
+        # Get build/search params
         if index_type in EMB_LIST_INDEX_CONFIGS:
             build_params = EMB_LIST_INDEX_CONFIGS[index_type]["build_params"]
+            search_params = EMB_LIST_INDEX_CONFIGS[index_type]["search_params"]
         elif index_type == "HNSW":
             build_params = INDEX_PARAMS
+            search_params = {"ef": 64}
         elif index_type == "IVF_FLAT":
             build_params = {"nlist": 128}
+            search_params = {"nprobe": 10}
         else:
             build_params = {}
+            search_params = {}
 
         for vector_type in supported_types:
             # Skip FLOAT_VECTOR since it is already tested
@@ -1725,16 +1698,87 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
                 f"{prefix}_vtype_{index_type.lower()}_{type_name}"
             )
 
-            self._create_collection_with_vector_type(
-                client, collection_name, vector_type
-            )
-
             # Choose metric based on vector type
             if vector_type == DataType.BINARY_VECTOR:
                 metric_type = BINARY_METRIC
             else:
                 metric_type = FLOAT_METRIC
 
+            # Create collection with struct array schema including label field
+            schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+            schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+            schema.add_field(
+                field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
+            )
+
+            struct_schema = client.create_struct_field_schema()
+            struct_schema.add_field("clip_embedding1", vector_type, dim=default_dim)
+            struct_schema.add_field("scalar_field", DataType.INT64)
+            struct_schema.add_field("label", DataType.VARCHAR, max_length=128)
+
+            schema.add_field(
+                "clips",
+                datatype=DataType.ARRAY,
+                element_type=DataType.STRUCT,
+                struct_schema=struct_schema,
+                max_capacity=100,
+            )
+
+            res, check = self.create_collection(client, collection_name, schema=schema)
+            assert check
+
+            # Insert 100 records and flush (sealed segments)
+            nb_flushed = 100
+            flushed_data = []
+            for i in range(nb_flushed):
+                array_length = random.randint(1, 5)
+                struct_array = [
+                    {
+                        "clip_embedding1": cf.gen_vectors(1, default_dim, vector_type)[0],
+                        "scalar_field": i * 10 + j,
+                        "label": f"flushed_{i}",
+                    }
+                    for j in range(array_length)
+                ]
+                row = {
+                    "id": i,
+                    "normal_vector": [random.random() for _ in range(default_dim)],
+                    "clips": struct_array,
+                }
+                flushed_data.append(row)
+
+            res, check = self.insert(client, collection_name, flushed_data)
+            assert check
+            assert res["insert_count"] == nb_flushed
+
+            res, check = self.flush(client, collection_name)
+            assert check
+
+            # Insert 50 more growing records
+            nb_growing = 50
+            growing_data = []
+            for i in range(nb_flushed, nb_flushed + nb_growing):
+                array_length = random.randint(1, 5)
+                struct_array = [
+                    {
+                        "clip_embedding1": cf.gen_vectors(1, default_dim, vector_type)[0],
+                        "scalar_field": i * 10 + j,
+                        "label": f"growing_{i}",
+                    }
+                    for j in range(array_length)
+                ]
+                row = {
+                    "id": i,
+                    "normal_vector": [random.random() for _ in range(default_dim)],
+                    "clips": struct_array,
+                }
+                growing_data.append(row)
+
+            res, check = self.insert(client, collection_name, growing_data)
+            assert check
+            assert res["insert_count"] == nb_growing
+
+            # Create index
             index_params = client.prepare_index_params()
             index_params.add_index(
                 field_name="normal_vector",
@@ -1754,6 +1798,97 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
             assert check, (
                 f"Failed to create {index_type} index with {type_name} vector type"
             )
+
+            # Load collection
+            res, check = self.load_collection(client, collection_name)
+            assert check
+
+            # Search with EmbeddingList and verify results
+            search_vecs = cf.gen_vectors(3, default_dim, vector_type)
+            embedding_list = EmbeddingList(
+                [np.frombuffer(v, dtype=np.uint8) if isinstance(v, bytes) else
+                 (np.array(v) if not isinstance(v, np.ndarray) else v) for v in search_vecs]
+            )
+
+            results, check = self.search(
+                client,
+                collection_name,
+                data=[embedding_list],
+                anns_field="clips[clip_embedding1]",
+                search_params={"metric_type": metric_type, "params": search_params},
+                limit=10,
+                output_fields=["id", "clips"],
+            )
+            assert check
+            assert len(results[0]) > 0
+            for hit in results[0]:
+                assert 0 <= hit["id"] < nb_flushed + nb_growing
+
+            # Upsert 5 records from flushed segment
+            upsert_data = []
+            for i in range(5):
+                row = {
+                    "id": i,
+                    "normal_vector": [random.random() for _ in range(default_dim)],
+                    "clips": [
+                        {
+                            "clip_embedding1": cf.gen_vectors(1, default_dim, vector_type)[0],
+                            "scalar_field": i + 10000,
+                            "label": f"upserted_{i}",
+                        }
+                    ],
+                }
+                upsert_data.append(row)
+
+            res, check = self.upsert(client, collection_name, upsert_data)
+            assert check
+
+            # Verify upsert via query
+            res, check = self.flush(client, collection_name)
+            assert check
+
+            results, check = self.query(
+                client, collection_name, filter="id < 5", output_fields=["id", "clips"]
+            )
+            assert check
+            assert len(results) == 5
+            for result in results:
+                assert "upserted" in result["clips"][0]["label"]
+
+            # Delete 3 records from growing segment
+            delete_ids = list(range(nb_flushed, nb_flushed + 3))
+            res, check = self.delete(
+                client, collection_name, filter=f"id in {delete_ids}"
+            )
+            assert check
+
+            # Verify deletion
+            res, check = self.flush(client, collection_name)
+            assert check
+
+            results, check = self.query(
+                client, collection_name, filter="id >= 0", output_fields=["id"]
+            )
+            assert check
+            remaining_ids = {r["id"] for r in results}
+            for del_id in delete_ids:
+                assert del_id not in remaining_ids
+            assert len(results) == nb_flushed + nb_growing - 3
+
+            # Search again after CRUD operations
+            results, check = self.search(
+                client,
+                collection_name,
+                data=[embedding_list],
+                anns_field="clips[clip_embedding1]",
+                search_params={"metric_type": metric_type, "params": search_params},
+                limit=10,
+                output_fields=["id"],
+            )
+            assert check
+            assert len(results[0]) > 0
+            for hit in results[0]:
+                assert hit["id"] not in delete_ids
 
 
 class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
@@ -2546,9 +2681,9 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
     @pytest.mark.parametrize("index_type", EMB_LIST_INDEX_TYPES)
     def test_search_emb_list_with_different_index_types(self, index_type):
         """
-        target: test search with different emb list index types
-        method: create collection with configurable index type, search with EmbeddingList
-        expected: search returns non-empty results for all supported index types
+        target: test search with full CRUD path for different emb list index types
+        method: insert (flushed + growing) → index → load → search → upsert → delete → search → verify
+        expected: all CRUD operations and search work correctly for each index type
         """
         collection_name = cf.gen_unique_str(
             f"{prefix}_search_{index_type.lower()}"
@@ -2556,18 +2691,119 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         client = self._client()
 
         config = EMB_LIST_INDEX_CONFIGS[index_type]
-        self.create_collection_with_configurable_index(
-            client,
-            collection_name,
-            index_type=index_type,
-            metric_type="MAX_SIM_COSINE",
-            build_params=config["build_params"],
+
+        # Create collection with full schema
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(
+            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
-        # Create EmbeddingList with multiple vectors
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim)
+        struct_schema.add_field("scalar_field", DataType.INT64)
+        struct_schema.add_field("category", DataType.VARCHAR, max_length=128)
+
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=100,
+        )
+
+        schema.add_field("scalar_field", datatype=DataType.INT64)
+        schema.add_field("category", datatype=DataType.VARCHAR, max_length=128)
+        schema.add_field("score", datatype=DataType.FLOAT)
+
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        # Insert 200 records and flush (sealed segments)
+        nb_flushed = 200
+        flushed_data = []
+        for i in range(nb_flushed):
+            array_length = random.randint(1, 5)
+            struct_array = []
+            for j in range(array_length):
+                struct_element = {
+                    "clip_embedding1": [random.random() for _ in range(default_dim)],
+                    "scalar_field": i * 10 + j,
+                    "category": f"cat_{i % 5}",
+                }
+                struct_array.append(struct_element)
+
+            row = {
+                "id": i,
+                "normal_vector": [random.random() for _ in range(default_dim)],
+                "clips": struct_array,
+                "scalar_field": i * 10 + j,
+                "category": f"cat_{i % 5}",
+                "score": random.uniform(0.1, 10.0),
+            }
+            flushed_data.append(row)
+
+        res, check = self.insert(client, collection_name, flushed_data)
+        assert check
+        assert res["insert_count"] == nb_flushed
+
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        # Insert 100 more growing records
+        nb_growing = 100
+        growing_data = []
+        for i in range(nb_flushed, nb_flushed + nb_growing):
+            array_length = random.randint(1, 5)
+            struct_array = []
+            for j in range(array_length):
+                struct_element = {
+                    "clip_embedding1": [random.random() for _ in range(default_dim)],
+                    "scalar_field": i * 10 + j,
+                    "category": f"cat_{i % 5}",
+                }
+                struct_array.append(struct_element)
+
+            row = {
+                "id": i,
+                "normal_vector": [random.random() for _ in range(default_dim)],
+                "clips": struct_array,
+                "scalar_field": i * 10 + j,
+                "category": f"cat_{i % 5}",
+                "score": random.uniform(0.1, 10.0),
+            }
+            growing_data.append(row)
+
+        res, check = self.insert(client, collection_name, growing_data)
+        assert check
+        assert res["insert_count"] == nb_growing
+
+        # Create index with configurable type
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+        index_params.add_index(
+            field_name="clips[clip_embedding1]",
+            index_name="struct_vector_index",
+            index_type=index_type,
+            metric_type="MAX_SIM_COSINE",
+            params=config["build_params"],
+        )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+        # Load collection
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        # Search with EmbeddingList and verify results
         embedding_list = self.create_embedding_list(default_dim, 3)
 
-        # Search using EmbeddingList
         results, check = self.search(
             client,
             collection_name,
@@ -2578,9 +2814,84 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                 "params": config["search_params"],
             },
             limit=10,
+            output_fields=["id", "clips"],
         )
         assert check
         assert len(results[0]) > 0
+        for hit in results[0]:
+            assert 0 <= hit["id"] < nb_flushed + nb_growing
+
+        # Upsert 10 records from flushed segment
+        upsert_data = []
+        for i in range(10):
+            row = {
+                "id": i,
+                "normal_vector": [random.random() for _ in range(default_dim)],
+                "clips": [
+                    {
+                        "clip_embedding1": [random.random() for _ in range(default_dim)],
+                        "scalar_field": i + 10000,
+                        "category": f"upserted_{i}",
+                    }
+                ],
+                "scalar_field": i + 10000,
+                "category": f"upserted_{i}",
+                "score": random.uniform(10.0, 20.0),
+            }
+            upsert_data.append(row)
+
+        res, check = self.upsert(client, collection_name, upsert_data)
+        assert check
+
+        # Verify upsert via query
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        results, check = self.query(
+            client, collection_name, filter="id < 10",
+            output_fields=["id", "category", "clips"],
+        )
+        assert check
+        assert len(results) == 10
+        for result in results:
+            assert "upserted" in result["category"]
+            assert "upserted" in result["clips"][0]["category"]
+
+        # Delete 5 records from growing segment
+        delete_ids = list(range(nb_flushed, nb_flushed + 5))
+        res, check = self.delete(client, collection_name, filter=f"id in {delete_ids}")
+        assert check
+
+        # Verify deletion
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        results, check = self.query(
+            client, collection_name, filter="id >= 0", output_fields=["id"]
+        )
+        assert check
+        remaining_ids = {r["id"] for r in results}
+        for del_id in delete_ids:
+            assert del_id not in remaining_ids
+        assert len(results) == nb_flushed + nb_growing - 5
+
+        # Search again after CRUD operations
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[embedding_list],
+            anns_field="clips[clip_embedding1]",
+            search_params={
+                "metric_type": "MAX_SIM_COSINE",
+                "params": config["search_params"],
+            },
+            limit=10,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) > 0
+        for hit in results[0]:
+            assert hit["id"] not in delete_ids
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -2589,9 +2900,9 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
     )
     def test_search_emb_list_with_different_vector_types(self, vector_type):
         """
-        target: test search with different vector data types in struct array
-        method: create collection with float16/bfloat16/int8 vectors, build HNSW index, search
-        expected: search returns non-empty results
+        target: test search with full CRUD path for different vector data types in struct array
+        method: insert (flushed + growing) → HNSW index → load → search → upsert → delete → search → verify
+        expected: all CRUD operations and search work correctly for each vector type
         """
         type_name = vector_type.name.lower()
         collection_name = cf.gen_unique_str(f"{prefix}_search_vtype_{type_name}")
@@ -2624,9 +2935,10 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         res, check = self.create_collection(client, collection_name, schema=schema)
         assert check
 
-        # Insert data
-        data = []
-        for i in range(default_nb):
+        # Insert 200 records and flush (sealed segments)
+        nb_flushed = 200
+        flushed_data = []
+        for i in range(nb_flushed):
             array_length = random.randint(1, 5)
             struct_array = []
             for j in range(array_length):
@@ -2634,7 +2946,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                 struct_element = {
                     "clip_embedding1": vec,
                     "scalar_field": i * 10 + j,
-                    "category": f"cat_{i % 5}",
+                    "category": f"flushed_{i}",
                 }
                 struct_array.append(struct_element)
 
@@ -2643,13 +2955,46 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                 "normal_vector": [random.random() for _ in range(default_dim)],
                 "clips": struct_array,
                 "scalar_field": i * 10 + j,
-                "category": f"cat_{i % 5}",
+                "category": f"flushed_{i}",
                 "score": random.uniform(0.1, 10.0),
             }
-            data.append(row)
+            flushed_data.append(row)
 
-        res, check = self.insert(client, collection_name, data)
+        res, check = self.insert(client, collection_name, flushed_data)
         assert check
+        assert res["insert_count"] == nb_flushed
+
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        # Insert 100 more growing records
+        nb_growing = 100
+        growing_data = []
+        for i in range(nb_flushed, nb_flushed + nb_growing):
+            array_length = random.randint(1, 5)
+            struct_array = []
+            for j in range(array_length):
+                vec = cf.gen_vectors(1, default_dim, vector_type)[0]
+                struct_element = {
+                    "clip_embedding1": vec,
+                    "scalar_field": i * 10 + j,
+                    "category": f"growing_{i}",
+                }
+                struct_array.append(struct_element)
+
+            row = {
+                "id": i,
+                "normal_vector": [random.random() for _ in range(default_dim)],
+                "clips": struct_array,
+                "scalar_field": i * 10 + j,
+                "category": f"growing_{i}",
+                "score": random.uniform(0.1, 10.0),
+            }
+            growing_data.append(row)
+
+        res, check = self.insert(client, collection_name, growing_data)
+        assert check
+        assert res["insert_count"] == nb_growing
 
         # Create HNSW index with MAX_SIM_COSINE (works for float16/bfloat16/int8)
         index_params = client.prepare_index_params()
@@ -2673,7 +3018,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         res, check = self.load_collection(client, collection_name)
         assert check
 
-        # Search with EmbeddingList using the same vector type
+        # Search with EmbeddingList and verify results
         search_vecs = cf.gen_vectors(3, default_dim, vector_type)
         embedding_list = EmbeddingList(
             [np.array(v) if not isinstance(v, np.ndarray) else v for v in search_vecs]
@@ -2686,9 +3031,85 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             anns_field="clips[clip_embedding1]",
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
+            output_fields=["id", "clips"],
         )
         assert check
         assert len(results[0]) > 0
+        for hit in results[0]:
+            assert 0 <= hit["id"] < nb_flushed + nb_growing
+
+        # Upsert 10 records from flushed segment
+        upsert_data = []
+        for i in range(10):
+            row = {
+                "id": i,
+                "normal_vector": [random.random() for _ in range(default_dim)],
+                "clips": [
+                    {
+                        "clip_embedding1": cf.gen_vectors(1, default_dim, vector_type)[0],
+                        "scalar_field": i + 10000,
+                        "category": f"upserted_{i}",
+                    }
+                ],
+                "scalar_field": i + 10000,
+                "category": f"upserted_{i}",
+                "score": random.uniform(10.0, 20.0),
+            }
+            upsert_data.append(row)
+
+        res, check = self.upsert(client, collection_name, upsert_data)
+        assert check
+
+        # Verify upsert via query
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        results, check = self.query(
+            client, collection_name, filter="id < 10",
+            output_fields=["id", "category", "clips"],
+        )
+        assert check
+        assert len(results) == 10
+        for result in results:
+            assert "upserted" in result["category"]
+            assert "upserted" in result["clips"][0]["category"]
+
+        # Delete 5 records from flushed segment and 3 from growing segment
+        delete_flushed_ids = [10, 11, 12, 13, 14]
+        delete_growing_ids = list(range(nb_flushed, nb_flushed + 3))
+        all_delete_ids = delete_flushed_ids + delete_growing_ids
+        res, check = self.delete(
+            client, collection_name, filter=f"id in {all_delete_ids}"
+        )
+        assert check
+
+        # Verify deletion
+        res, check = self.flush(client, collection_name)
+        assert check
+
+        results, check = self.query(
+            client, collection_name, filter="id >= 0", output_fields=["id"]
+        )
+        assert check
+        remaining_ids = {r["id"] for r in results}
+        for del_id in all_delete_ids:
+            assert del_id not in remaining_ids
+        assert len(results) == nb_flushed + nb_growing - len(all_delete_ids)
+
+        # Search again after CRUD operations
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[embedding_list],
+            anns_field="clips[clip_embedding1]",
+            search_params={"metric_type": "MAX_SIM_COSINE"},
+            limit=10,
+            output_fields=["id"],
+        )
+        assert check
+        assert len(results[0]) > 0
+        for hit in results[0]:
+            assert hit["id"] not in all_delete_ids
 
 
 class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
