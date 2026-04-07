@@ -65,6 +65,7 @@
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/MmapManager.h"
+#include "folly/ScopeGuard.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -1016,6 +1017,18 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             return static_cast<int64_t>(row_group_meta_vector.row_num());
         }));
     }
+    // Ensure all futures are awaited even if one throws, to prevent
+    // use-after-free on captured references (&fs) in background tasks.
+    auto futures_guard = folly::makeGuard([&futures]() {
+        for (auto& f : futures) {
+            if (f.valid()) {
+                try {
+                    f.get();
+                } catch (...) {
+                }
+            }
+        }
+    });
     for (auto& f : futures) {
         num_rows += f.get();
     }

@@ -32,6 +32,7 @@
 #include "common/Tracer.h"
 #include "common/protobuf_utils.h"
 #include "fmt/core.h"
+#include "folly/ScopeGuard.h"
 #include "glog/logging.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
@@ -191,6 +192,16 @@ ReduceHelper::FillPrimaryKey() {
             });
             futures.emplace_back(std::move(future));
         }
+        auto futures_guard = folly::makeGuard([&futures]() {
+            for (auto& f : futures) {
+                if (f.valid()) {
+                    try {
+                        f.get();
+                    } catch (...) {
+                    }
+                }
+            }
+        });
         for (auto& future : futures) {
             future.get();
         }
