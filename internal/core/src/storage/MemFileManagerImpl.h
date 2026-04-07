@@ -98,6 +98,9 @@ class MemFileManagerImpl : public FileManagerImpl {
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>>
     cache_opt_field_memory_v2(const Config& config);
 
+    std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>>
+    cache_opt_field_memory_v3(const Config& config);
+
  private:
     // remote file path
     std::map<std::string, int64_t> remote_paths_to_size_;
