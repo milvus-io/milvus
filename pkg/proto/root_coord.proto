@@ -8,6 +8,7 @@ import "milvus.proto";
 import "internal.proto";
 import "proxy.proto";
 import "etcd_meta.proto";
+import "messages.proto";
 
 service RootCoord {
   rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
@@ -191,6 +192,16 @@ service RootCoord {
     rpc GetClientTelemetry(milvus.GetClientTelemetryRequest) returns (milvus.GetClientTelemetryResponse) {}
     rpc PushClientCommand(milvus.PushClientCommandRequest) returns (milvus.PushClientCommandResponse) {}
     rpc DeleteClientCommand(milvus.DeleteClientCommandRequest) returns (milvus.DeleteClientCommandResponse) {}
+
+    // RLS (Row Level Security) Management
+    rpc CreateRowPolicy(messages.CreateRowPolicyRequest) returns (common.Status) {}
+    rpc DropRowPolicy(messages.DropRowPolicyRequest) returns (common.Status) {}
+    rpc ListRowPolicies(messages.ListRowPoliciesRequest) returns (messages.ListRowPoliciesResponse) {}
+    rpc SetUserTags(messages.SetUserTagsRequest) returns (common.Status) {}
+    rpc GetUserTags(messages.GetUserTagsRequest) returns (messages.GetUserTagsResponse) {}
+    rpc DeleteUserTag(messages.DeleteUserTagRequest) returns (common.Status) {}
+    rpc ListUsersWithTag(messages.ListUsersWithTagRequest) returns (messages.ListUsersWithTagResponse) {}
+    rpc RefreshRLSCache(messages.RefreshRLSCacheRequest) returns (common.Status) {}
 }
 
 message AllocTimestampRequest {

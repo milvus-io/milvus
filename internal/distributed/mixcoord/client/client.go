@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -2154,5 +2155,55 @@ func (c *Client) PushClientCommand(ctx context.Context, req *milvuspb.PushClient
 func (c *Client) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.DeleteClientCommandResponse, error) {
 		return client.RootCoordClient.DeleteClientCommand(ctx, req, opts...)
+	})
+}
+
+// RLS (Row Level Security) methods
+
+func (c *Client) CreateRowPolicy(ctx context.Context, req *messagespb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.RootCoordClient.CreateRowPolicy(ctx, req, opts...)
+	})
+}
+
+func (c *Client) DropRowPolicy(ctx context.Context, req *messagespb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.RootCoordClient.DropRowPolicy(ctx, req, opts...)
+	})
+}
+
+func (c *Client) ListRowPolicies(ctx context.Context, req *messagespb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*messagespb.ListRowPoliciesResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*messagespb.ListRowPoliciesResponse, error) {
+		return client.RootCoordClient.ListRowPolicies(ctx, req, opts...)
+	})
+}
+
+func (c *Client) SetUserTags(ctx context.Context, req *messagespb.SetUserTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.RootCoordClient.SetUserTags(ctx, req, opts...)
+	})
+}
+
+func (c *Client) GetUserTags(ctx context.Context, req *messagespb.GetUserTagsRequest, opts ...grpc.CallOption) (*messagespb.GetUserTagsResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*messagespb.GetUserTagsResponse, error) {
+		return client.RootCoordClient.GetUserTags(ctx, req, opts...)
+	})
+}
+
+func (c *Client) DeleteUserTag(ctx context.Context, req *messagespb.DeleteUserTagRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.RootCoordClient.DeleteUserTag(ctx, req, opts...)
+	})
+}
+
+func (c *Client) ListUsersWithTag(ctx context.Context, req *messagespb.ListUsersWithTagRequest, opts ...grpc.CallOption) (*messagespb.ListUsersWithTagResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*messagespb.ListUsersWithTagResponse, error) {
+		return client.RootCoordClient.ListUsersWithTag(ctx, req, opts...)
+	})
+}
+
+func (c *Client) RefreshRLSCache(ctx context.Context, req *messagespb.RefreshRLSCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.RootCoordClient.RefreshRLSCache(ctx, req, opts...)
 	})
 }

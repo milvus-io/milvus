@@ -15,6 +15,8 @@ import (
 
 	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 
+	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
@@ -2602,6 +2604,80 @@ func (_c *MockMixCoordClient_CreateRole_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// CreateRowPolicy provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) CreateRowPolicy(ctx context.Context, in *messagespb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.CreateRowPolicyRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.CreateRowPolicyRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.CreateRowPolicyRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_CreateRowPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateRowPolicy'
+type MockMixCoordClient_CreateRowPolicy_Call struct {
+	*mock.Call
+}
+
+// CreateRowPolicy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *messagespb.CreateRowPolicyRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) CreateRowPolicy(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_CreateRowPolicy_Call {
+	return &MockMixCoordClient_CreateRowPolicy_Call{Call: _e.mock.On("CreateRowPolicy",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_CreateRowPolicy_Call) Run(run func(ctx context.Context, in *messagespb.CreateRowPolicyRequest, opts ...grpc.CallOption)) *MockMixCoordClient_CreateRowPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*messagespb.CreateRowPolicyRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_CreateRowPolicy_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_CreateRowPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_CreateRowPolicy_Call) RunAndReturn(run func(context.Context, *messagespb.CreateRowPolicyRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_CreateRowPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateSnapshot provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) CreateSnapshot(ctx context.Context, in *datapb.CreateSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
@@ -2894,6 +2970,80 @@ func (_c *MockMixCoordClient_DeleteCredential_Call) Return(_a0 *commonpb.Status,
 }
 
 func (_c *MockMixCoordClient_DeleteCredential_Call) RunAndReturn(run func(context.Context, *milvuspb.DeleteCredentialRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_DeleteCredential_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteUserTag provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) DeleteUserTag(ctx context.Context, in *messagespb.DeleteUserTagRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteUserTag")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.DeleteUserTagRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.DeleteUserTagRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.DeleteUserTagRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_DeleteUserTag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteUserTag'
+type MockMixCoordClient_DeleteUserTag_Call struct {
+	*mock.Call
+}
+
+// DeleteUserTag is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *messagespb.DeleteUserTagRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) DeleteUserTag(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_DeleteUserTag_Call {
+	return &MockMixCoordClient_DeleteUserTag_Call{Call: _e.mock.On("DeleteUserTag",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_DeleteUserTag_Call) Run(run func(ctx context.Context, in *messagespb.DeleteUserTagRequest, opts ...grpc.CallOption)) *MockMixCoordClient_DeleteUserTag_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*messagespb.DeleteUserTagRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_DeleteUserTag_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_DeleteUserTag_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_DeleteUserTag_Call) RunAndReturn(run func(context.Context, *messagespb.DeleteUserTagRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_DeleteUserTag_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4078,6 +4228,80 @@ func (_c *MockMixCoordClient_DropRole_Call) Return(_a0 *commonpb.Status, _a1 err
 }
 
 func (_c *MockMixCoordClient_DropRole_Call) RunAndReturn(run func(context.Context, *milvuspb.DropRoleRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_DropRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropRowPolicy provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) DropRowPolicy(ctx context.Context, in *messagespb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.DropRowPolicyRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.DropRowPolicyRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.DropRowPolicyRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_DropRowPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropRowPolicy'
+type MockMixCoordClient_DropRowPolicy_Call struct {
+	*mock.Call
+}
+
+// DropRowPolicy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *messagespb.DropRowPolicyRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) DropRowPolicy(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_DropRowPolicy_Call {
+	return &MockMixCoordClient_DropRowPolicy_Call{Call: _e.mock.On("DropRowPolicy",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_DropRowPolicy_Call) Run(run func(ctx context.Context, in *messagespb.DropRowPolicyRequest, opts ...grpc.CallOption)) *MockMixCoordClient_DropRowPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*messagespb.DropRowPolicyRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_DropRowPolicy_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_DropRowPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_DropRowPolicy_Call) RunAndReturn(run func(context.Context, *messagespb.DropRowPolicyRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_DropRowPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -7190,6 +7414,80 @@ func (_c *MockMixCoordClient_GetTimeTickChannel_Call) RunAndReturn(run func(cont
 	return _c
 }
 
+// GetUserTags provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) GetUserTags(ctx context.Context, in *messagespb.GetUserTagsRequest, opts ...grpc.CallOption) (*messagespb.GetUserTagsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetUserTags")
+	}
+
+	var r0 *messagespb.GetUserTagsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.GetUserTagsRequest, ...grpc.CallOption) (*messagespb.GetUserTagsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.GetUserTagsRequest, ...grpc.CallOption) *messagespb.GetUserTagsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*messagespb.GetUserTagsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.GetUserTagsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_GetUserTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetUserTags'
+type MockMixCoordClient_GetUserTags_Call struct {
+	*mock.Call
+}
+
+// GetUserTags is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *messagespb.GetUserTagsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) GetUserTags(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_GetUserTags_Call {
+	return &MockMixCoordClient_GetUserTags_Call{Call: _e.mock.On("GetUserTags",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_GetUserTags_Call) Run(run func(ctx context.Context, in *messagespb.GetUserTagsRequest, opts ...grpc.CallOption)) *MockMixCoordClient_GetUserTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*messagespb.GetUserTagsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_GetUserTags_Call) Return(_a0 *messagespb.GetUserTagsResponse, _a1 error) *MockMixCoordClient_GetUserTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_GetUserTags_Call) RunAndReturn(run func(context.Context, *messagespb.GetUserTagsRequest, ...grpc.CallOption) (*messagespb.GetUserTagsResponse, error)) *MockMixCoordClient_GetUserTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // HasCollection provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -8522,6 +8820,80 @@ func (_c *MockMixCoordClient_ListRestoreSnapshotJobs_Call) RunAndReturn(run func
 	return _c
 }
 
+// ListRowPolicies provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) ListRowPolicies(ctx context.Context, in *messagespb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*messagespb.ListRowPoliciesResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRowPolicies")
+	}
+
+	var r0 *messagespb.ListRowPoliciesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.ListRowPoliciesRequest, ...grpc.CallOption) (*messagespb.ListRowPoliciesResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.ListRowPoliciesRequest, ...grpc.CallOption) *messagespb.ListRowPoliciesResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*messagespb.ListRowPoliciesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.ListRowPoliciesRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_ListRowPolicies_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRowPolicies'
+type MockMixCoordClient_ListRowPolicies_Call struct {
+	*mock.Call
+}
+
+// ListRowPolicies is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *messagespb.ListRowPoliciesRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) ListRowPolicies(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_ListRowPolicies_Call {
+	return &MockMixCoordClient_ListRowPolicies_Call{Call: _e.mock.On("ListRowPolicies",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_ListRowPolicies_Call) Run(run func(ctx context.Context, in *messagespb.ListRowPoliciesRequest, opts ...grpc.CallOption)) *MockMixCoordClient_ListRowPolicies_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*messagespb.ListRowPoliciesRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_ListRowPolicies_Call) Return(_a0 *messagespb.ListRowPoliciesResponse, _a1 error) *MockMixCoordClient_ListRowPolicies_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_ListRowPolicies_Call) RunAndReturn(run func(context.Context, *messagespb.ListRowPoliciesRequest, ...grpc.CallOption) (*messagespb.ListRowPoliciesResponse, error)) *MockMixCoordClient_ListRowPolicies_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListSnapshots provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) ListSnapshots(ctx context.Context, in *datapb.ListSnapshotsRequest, opts ...grpc.CallOption) (*datapb.ListSnapshotsResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -8592,6 +8964,80 @@ func (_c *MockMixCoordClient_ListSnapshots_Call) Return(_a0 *datapb.ListSnapshot
 }
 
 func (_c *MockMixCoordClient_ListSnapshots_Call) RunAndReturn(run func(context.Context, *datapb.ListSnapshotsRequest, ...grpc.CallOption) (*datapb.ListSnapshotsResponse, error)) *MockMixCoordClient_ListSnapshots_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListUsersWithTag provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) ListUsersWithTag(ctx context.Context, in *messagespb.ListUsersWithTagRequest, opts ...grpc.CallOption) (*messagespb.ListUsersWithTagResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListUsersWithTag")
+	}
+
+	var r0 *messagespb.ListUsersWithTagResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.ListUsersWithTagRequest, ...grpc.CallOption) (*messagespb.ListUsersWithTagResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.ListUsersWithTagRequest, ...grpc.CallOption) *messagespb.ListUsersWithTagResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*messagespb.ListUsersWithTagResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.ListUsersWithTagRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_ListUsersWithTag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListUsersWithTag'
+type MockMixCoordClient_ListUsersWithTag_Call struct {
+	*mock.Call
+}
+
+// ListUsersWithTag is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *messagespb.ListUsersWithTagRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) ListUsersWithTag(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_ListUsersWithTag_Call {
+	return &MockMixCoordClient_ListUsersWithTag_Call{Call: _e.mock.On("ListUsersWithTag",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_ListUsersWithTag_Call) Run(run func(ctx context.Context, in *messagespb.ListUsersWithTagRequest, opts ...grpc.CallOption)) *MockMixCoordClient_ListUsersWithTag_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*messagespb.ListUsersWithTagRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_ListUsersWithTag_Call) Return(_a0 *messagespb.ListUsersWithTagResponse, _a1 error) *MockMixCoordClient_ListUsersWithTag_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_ListUsersWithTag_Call) RunAndReturn(run func(context.Context, *messagespb.ListUsersWithTagRequest, ...grpc.CallOption) (*messagespb.ListUsersWithTagResponse, error)) *MockMixCoordClient_ListUsersWithTag_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -9332,6 +9778,80 @@ func (_c *MockMixCoordClient_RefreshExternalCollection_Call) Return(_a0 *datapb.
 }
 
 func (_c *MockMixCoordClient_RefreshExternalCollection_Call) RunAndReturn(run func(context.Context, *datapb.RefreshExternalCollectionRequest, ...grpc.CallOption) (*datapb.RefreshExternalCollectionResponse, error)) *MockMixCoordClient_RefreshExternalCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RefreshRLSCache provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) RefreshRLSCache(ctx context.Context, in *messagespb.RefreshRLSCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RefreshRLSCache")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.RefreshRLSCacheRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.RefreshRLSCacheRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.RefreshRLSCacheRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_RefreshRLSCache_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RefreshRLSCache'
+type MockMixCoordClient_RefreshRLSCache_Call struct {
+	*mock.Call
+}
+
+// RefreshRLSCache is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *messagespb.RefreshRLSCacheRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) RefreshRLSCache(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_RefreshRLSCache_Call {
+	return &MockMixCoordClient_RefreshRLSCache_Call{Call: _e.mock.On("RefreshRLSCache",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_RefreshRLSCache_Call) Run(run func(ctx context.Context, in *messagespb.RefreshRLSCacheRequest, opts ...grpc.CallOption)) *MockMixCoordClient_RefreshRLSCache_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*messagespb.RefreshRLSCacheRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_RefreshRLSCache_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_RefreshRLSCache_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_RefreshRLSCache_Call) RunAndReturn(run func(context.Context, *messagespb.RefreshRLSCacheRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_RefreshRLSCache_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -10442,6 +10962,80 @@ func (_c *MockMixCoordClient_SetSegmentState_Call) Return(_a0 *datapb.SetSegment
 }
 
 func (_c *MockMixCoordClient_SetSegmentState_Call) RunAndReturn(run func(context.Context, *datapb.SetSegmentStateRequest, ...grpc.CallOption) (*datapb.SetSegmentStateResponse, error)) *MockMixCoordClient_SetSegmentState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetUserTags provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) SetUserTags(ctx context.Context, in *messagespb.SetUserTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetUserTags")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.SetUserTagsRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *messagespb.SetUserTagsRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *messagespb.SetUserTagsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_SetUserTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetUserTags'
+type MockMixCoordClient_SetUserTags_Call struct {
+	*mock.Call
+}
+
+// SetUserTags is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *messagespb.SetUserTagsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) SetUserTags(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_SetUserTags_Call {
+	return &MockMixCoordClient_SetUserTags_Call{Call: _e.mock.On("SetUserTags",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_SetUserTags_Call) Run(run func(ctx context.Context, in *messagespb.SetUserTagsRequest, opts ...grpc.CallOption)) *MockMixCoordClient_SetUserTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*messagespb.SetUserTagsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_SetUserTags_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_SetUserTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_SetUserTags_Call) RunAndReturn(run func(context.Context, *messagespb.SetUserTagsRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_SetUserTags_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -104,6 +104,25 @@ type RootCoordCatalog interface {
 	RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error
 	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error)
 
+	// RLS Policy operations
+	SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error
+	DeleteRLSPolicy(ctx context.Context, dbID int64, collectionID int64, policyName string) error
+	ListRLSPolicies(ctx context.Context, dbID int64, collectionID int64) ([]*model.RLSPolicy, error)
+	GetRLSPolicy(ctx context.Context, dbID int64, collectionID int64, policyName string) (*model.RLSPolicy, error)
+
+	// RLS Collection Config operations
+	SaveRLSCollectionConfig(ctx context.Context, dbID int64, collectionID int64, enabled bool, force bool) error
+	GetRLSCollectionConfig(ctx context.Context, dbID int64, collectionID int64) (*model.RLSCollectionConfig, error)
+
+	// RLS User Tags operations
+	SaveUserTags(ctx context.Context, userTags *model.RLSUserTags) error
+	GetUserTags(ctx context.Context, userName string) (*model.RLSUserTags, error)
+	DeleteUserTags(ctx context.Context, userName string) error
+	ListUsersWithTag(ctx context.Context, tagKey string, tagValue string) ([]string, error)
+
+	// RLS cleanup
+	DeleteAllRLSPoliciesForCollection(ctx context.Context, dbID int64, collectionID int64) error
+
 	Close()
 }
 

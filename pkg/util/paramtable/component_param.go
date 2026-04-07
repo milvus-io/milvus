@@ -1986,6 +1986,18 @@ type proxyConfig struct {
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+
+	// Row Level Security (RLS) configuration
+	RLSEnabled                  ParamItem `refreshable:"true"`
+	RLSMode                     ParamItem `refreshable:"true"`
+	RLSAuditEnabled             ParamItem `refreshable:"true"`
+	RLSCacheExpirationSec       ParamItem `refreshable:"true"`
+	RLSMaxCacheEntries          ParamItem `refreshable:"true"`
+	RLSMaxPoliciesPerCollection ParamItem `refreshable:"true"`
+	RLSMaxUserTags              ParamItem `refreshable:"true"`
+	RLSMaxExpressionLength      ParamItem `refreshable:"true"`
+	RLSFailOnCacheError         ParamItem `refreshable:"true"`
+	RLSFailOnContextError       ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -2507,6 +2519,96 @@ Disabled if the value is less or equal to 0.`,
 		Export:       true,
 	}
 	p.QueryNodePoolingSize.Init(base.mgr)
+
+	p.RLSEnabled = ParamItem{
+		Key:          "proxy.rls.enabled",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "Whether Row Level Security is enabled.",
+		Export:       true,
+	}
+	p.RLSEnabled.Init(base.mgr)
+
+	p.RLSMode = ParamItem{
+		Key:          "proxy.rls.mode",
+		Version:      "2.6.0",
+		DefaultValue: "permissive",
+		Doc:          "RLS enforcement mode for runtime evaluation errors: disabled, permissive (log errors but allow), strict (fail-closed). If RLS is enabled and no policy matches, access is denied by default.",
+		Export:       true,
+	}
+	p.RLSMode.Init(base.mgr)
+
+	p.RLSAuditEnabled = ParamItem{
+		Key:          "proxy.rls.auditEnabled",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "Whether RLS audit logging is enabled.",
+		Export:       true,
+	}
+	p.RLSAuditEnabled.Init(base.mgr)
+
+	p.RLSCacheExpirationSec = ParamItem{
+		Key:          "proxy.rls.cacheExpirationSeconds",
+		Version:      "2.6.0",
+		DefaultValue: "3600",
+		Doc:          "How long cached RLS policies are valid in seconds.",
+		Export:       true,
+	}
+	p.RLSCacheExpirationSec.Init(base.mgr)
+
+	p.RLSMaxCacheEntries = ParamItem{
+		Key:          "proxy.rls.maxCacheEntries",
+		Version:      "2.6.0",
+		DefaultValue: "10000",
+		Doc:          "Maximum number of entries in the RLS merged expression cache.",
+		Export:       true,
+	}
+	p.RLSMaxCacheEntries.Init(base.mgr)
+
+	p.RLSMaxPoliciesPerCollection = ParamItem{
+		Key:          "proxy.rls.maxPoliciesPerCollection",
+		Version:      "2.6.0",
+		DefaultValue: "100",
+		Doc:          "Maximum number of RLS policies per collection.",
+		Export:       true,
+	}
+	p.RLSMaxPoliciesPerCollection.Init(base.mgr)
+
+	p.RLSMaxUserTags = ParamItem{
+		Key:          "proxy.rls.maxUserTags",
+		Version:      "2.6.0",
+		DefaultValue: "50",
+		Doc:          "Maximum number of tags per user for RLS.",
+		Export:       true,
+	}
+	p.RLSMaxUserTags.Init(base.mgr)
+
+	p.RLSMaxExpressionLength = ParamItem{
+		Key:          "proxy.rls.maxExpressionLength",
+		Version:      "2.6.0",
+		DefaultValue: "4096",
+		Doc:          "Maximum length of USING/CHECK expressions in RLS policies.",
+		Export:       true,
+	}
+	p.RLSMaxExpressionLength.Init(base.mgr)
+
+	p.RLSFailOnCacheError = ParamItem{
+		Key:          "proxy.rls.failOnCacheError",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "If true, fail requests when the RLS policy cache cannot be loaded",
+		Export:       true,
+	}
+	p.RLSFailOnCacheError.Init(base.mgr)
+
+	p.RLSFailOnContextError = ParamItem{
+		Key:          "proxy.rls.failOnContextError",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "If true, fail requests when user context cannot be obtained for RLS",
+		Export:       true,
+	}
+	p.RLSFailOnContextError.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

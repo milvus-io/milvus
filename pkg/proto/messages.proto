@@ -778,3 +778,123 @@ message BatchUpdateManifestItem {
     int64 manifest_version = 2;
 }
 
+// RLS Policy Type enumeration
+enum RLSPolicyType {
+    PERMISSIVE = 0;
+    RESTRICTIVE = 1;
+}
+
+// RLS Policy definition
+message RLSPolicy {
+    string policy_name = 1;
+    string collection_name = 2;
+    int64 collection_id = 3;
+    RLSPolicyType policy_type = 4;
+    repeated string actions = 5;          // query, search, insert, delete, upsert
+    repeated string roles = 6;             // role names or "PUBLIC"
+    string using_expr = 7;                // USING expression for SELECT/DELETE
+    string check_expr = 8;                // CHECK expression for INSERT/UPDATE
+    string description = 9;
+    int64 created_at = 10;               // Timestamp in milliseconds
+}
+
+// RLS Collection Configuration
+message RLSCollectionConfig {
+    string collection_name = 1;
+    int64 collection_id = 2;
+    bool enabled = 3;
+    bool force = 4;
+}
+
+// RLS User Tags
+message RLSUserTags {
+    string user_name = 1;
+    map<string, string> tags = 2;
+}
+
+// CreateRowPolicy Request
+message CreateRowPolicyRequest {
+    common.MsgBase base = 1;
+    string db_name = 2;
+    RLSPolicy policy = 3;
+}
+
+// DropRowPolicy Request
+message DropRowPolicyRequest {
+    common.MsgBase base = 1;
+    string db_name = 2;
+    string collection_name = 3;
+    string policy_name = 4;
+}
+
+// ListRowPolicies Request
+message ListRowPoliciesRequest {
+    common.MsgBase base = 1;
+    string db_name = 2;
+    string collection_name = 3;
+}
+
+// ListRowPolicies Response
+message ListRowPoliciesResponse {
+    common.Status status = 1;
+    repeated RLSPolicy policies = 2;
+}
+
+// SetUserTags Request
+message SetUserTagsRequest {
+    common.MsgBase base = 1;
+    string user_name = 2;
+    map<string, string> tags = 3;
+}
+
+// GetUserTags Request
+message GetUserTagsRequest {
+    common.MsgBase base = 1;
+    string user_name = 2;
+}
+
+// GetUserTags Response
+message GetUserTagsResponse {
+    common.Status status = 1;
+    map<string, string> tags = 2;
+}
+
+// DeleteUserTag Request
+message DeleteUserTagRequest {
+    common.MsgBase base = 1;
+    string user_name = 2;
+    string tag_key = 3;
+}
+
+// ListUsersWithTag Request
+message ListUsersWithTagRequest {
+    common.MsgBase base = 1;
+    string tag_key = 2;
+    string tag_value = 3;
+}
+
+// ListUsersWithTag Response
+message ListUsersWithTagResponse {
+    common.Status status = 1;
+    repeated string users = 2;
+}
+
+// RLS Cache Refresh Operation Type
+enum RLSCacheOpType {
+    CreatePolicy = 0;
+    DropPolicy = 1;
+    UpdateUserTags = 2;
+    DeleteUserTag = 3;
+    UpdateCollectionConfig = 4;
+}
+
+// RefreshRLSCache Request (broadcast from RootCoord to Proxies)
+message RefreshRLSCacheRequest {
+    common.MsgBase base = 1;
+    RLSCacheOpType op_type = 2;
+    string db_name = 3;
+    string collection_name = 4;
+    string policy_name = 5;
+    string user_name = 6;
+}
+

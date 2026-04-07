@@ -705,6 +705,14 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.request.Expr = IDs2Expr(pkField, t.ids)
 	}
 
+	// Apply RLS filter
+	if rlsExpr, err := applyRLSFilter(ctx, t.request.GetDbName(), collectionName, t.CollectionID, t.request.GetExpr()); err != nil {
+		log.Warn("failed to apply RLS filter for query", zap.Error(err))
+		return err
+	} else {
+		t.request.Expr = rlsExpr
+	}
+
 	if t.queryParams.timezone != "" {
 		// validated in queryParams, no need to validate again
 		t.resolvedTimezoneStr = t.queryParams.timezone

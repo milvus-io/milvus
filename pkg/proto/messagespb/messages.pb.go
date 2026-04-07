@@ -371,6 +371,109 @@ func (ResourceDomain) EnumDescriptor() ([]byte, []int) {
 	return file_messages_proto_rawDescGZIP(), []int{2}
 }
 
+// RLS Policy Type enumeration
+type RLSPolicyType int32
+
+const (
+	RLSPolicyType_PERMISSIVE  RLSPolicyType = 0
+	RLSPolicyType_RESTRICTIVE RLSPolicyType = 1
+)
+
+// Enum value maps for RLSPolicyType.
+var (
+	RLSPolicyType_name = map[int32]string{
+		0: "PERMISSIVE",
+		1: "RESTRICTIVE",
+	}
+	RLSPolicyType_value = map[string]int32{
+		"PERMISSIVE":  0,
+		"RESTRICTIVE": 1,
+	}
+)
+
+func (x RLSPolicyType) Enum() *RLSPolicyType {
+	p := new(RLSPolicyType)
+	*p = x
+	return p
+}
+
+func (x RLSPolicyType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RLSPolicyType) Descriptor() protoreflect.EnumDescriptor {
+	return file_messages_proto_enumTypes[3].Descriptor()
+}
+
+func (RLSPolicyType) Type() protoreflect.EnumType {
+	return &file_messages_proto_enumTypes[3]
+}
+
+func (x RLSPolicyType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RLSPolicyType.Descriptor instead.
+func (RLSPolicyType) EnumDescriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{3}
+}
+
+// RLS Cache Refresh Operation Type
+type RLSCacheOpType int32
+
+const (
+	RLSCacheOpType_CreatePolicy           RLSCacheOpType = 0
+	RLSCacheOpType_DropPolicy             RLSCacheOpType = 1
+	RLSCacheOpType_UpdateUserTags         RLSCacheOpType = 2
+	RLSCacheOpType_DeleteUserTag          RLSCacheOpType = 3
+	RLSCacheOpType_UpdateCollectionConfig RLSCacheOpType = 4
+)
+
+// Enum value maps for RLSCacheOpType.
+var (
+	RLSCacheOpType_name = map[int32]string{
+		0: "CreatePolicy",
+		1: "DropPolicy",
+		2: "UpdateUserTags",
+		3: "DeleteUserTag",
+		4: "UpdateCollectionConfig",
+	}
+	RLSCacheOpType_value = map[string]int32{
+		"CreatePolicy":           0,
+		"DropPolicy":             1,
+		"UpdateUserTags":         2,
+		"DeleteUserTag":          3,
+		"UpdateCollectionConfig": 4,
+	}
+)
+
+func (x RLSCacheOpType) Enum() *RLSCacheOpType {
+	p := new(RLSCacheOpType)
+	*p = x
+	return p
+}
+
+func (x RLSCacheOpType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RLSCacheOpType) Descriptor() protoreflect.EnumDescriptor {
+	return file_messages_proto_enumTypes[4].Descriptor()
+}
+
+func (RLSCacheOpType) Type() protoreflect.EnumType {
+	return &file_messages_proto_enumTypes[4]
+}
+
+func (x RLSCacheOpType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RLSCacheOpType.Descriptor instead.
+func (RLSCacheOpType) EnumDescriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{4}
+}
+
 // Message is the basic unit of communication between publisher and consumer.
 type Message struct {
 	state         protoimpl.MessageState
@@ -6247,6 +6350,958 @@ func (x *BatchUpdateManifestItem) GetManifestVersion() int64 {
 	return 0
 }
 
+// RLS Policy definition
+type RLSPolicy struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	PolicyName     string        `protobuf:"bytes,1,opt,name=policy_name,json=policyName,proto3" json:"policy_name,omitempty"`
+	CollectionName string        `protobuf:"bytes,2,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	CollectionId   int64         `protobuf:"varint,3,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
+	PolicyType     RLSPolicyType `protobuf:"varint,4,opt,name=policy_type,json=policyType,proto3,enum=milvus.proto.messages.RLSPolicyType" json:"policy_type,omitempty"`
+	Actions        []string      `protobuf:"bytes,5,rep,name=actions,proto3" json:"actions,omitempty"`                      // query, search, insert, delete, upsert
+	Roles          []string      `protobuf:"bytes,6,rep,name=roles,proto3" json:"roles,omitempty"`                          // role names or "PUBLIC"
+	UsingExpr      string        `protobuf:"bytes,7,opt,name=using_expr,json=usingExpr,proto3" json:"using_expr,omitempty"` // USING expression for SELECT/DELETE
+	CheckExpr      string        `protobuf:"bytes,8,opt,name=check_expr,json=checkExpr,proto3" json:"check_expr,omitempty"` // CHECK expression for INSERT/UPDATE
+	Description    string        `protobuf:"bytes,9,opt,name=description,proto3" json:"description,omitempty"`
+	CreatedAt      int64         `protobuf:"varint,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // Timestamp in milliseconds
+}
+
+func (x *RLSPolicy) Reset() {
+	*x = RLSPolicy{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[112]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *RLSPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RLSPolicy) ProtoMessage() {}
+
+func (x *RLSPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[112]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RLSPolicy.ProtoReflect.Descriptor instead.
+func (*RLSPolicy) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{112}
+}
+
+func (x *RLSPolicy) GetPolicyName() string {
+	if x != nil {
+		return x.PolicyName
+	}
+	return ""
+}
+
+func (x *RLSPolicy) GetCollectionName() string {
+	if x != nil {
+		return x.CollectionName
+	}
+	return ""
+}
+
+func (x *RLSPolicy) GetCollectionId() int64 {
+	if x != nil {
+		return x.CollectionId
+	}
+	return 0
+}
+
+func (x *RLSPolicy) GetPolicyType() RLSPolicyType {
+	if x != nil {
+		return x.PolicyType
+	}
+	return RLSPolicyType_PERMISSIVE
+}
+
+func (x *RLSPolicy) GetActions() []string {
+	if x != nil {
+		return x.Actions
+	}
+	return nil
+}
+
+func (x *RLSPolicy) GetRoles() []string {
+	if x != nil {
+		return x.Roles
+	}
+	return nil
+}
+
+func (x *RLSPolicy) GetUsingExpr() string {
+	if x != nil {
+		return x.UsingExpr
+	}
+	return ""
+}
+
+func (x *RLSPolicy) GetCheckExpr() string {
+	if x != nil {
+		return x.CheckExpr
+	}
+	return ""
+}
+
+func (x *RLSPolicy) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *RLSPolicy) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+// RLS Collection Configuration
+type RLSCollectionConfig struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	CollectionName string `protobuf:"bytes,1,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	CollectionId   int64  `protobuf:"varint,2,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
+	Enabled        bool   `protobuf:"varint,3,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Force          bool   `protobuf:"varint,4,opt,name=force,proto3" json:"force,omitempty"`
+}
+
+func (x *RLSCollectionConfig) Reset() {
+	*x = RLSCollectionConfig{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[113]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *RLSCollectionConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RLSCollectionConfig) ProtoMessage() {}
+
+func (x *RLSCollectionConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[113]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RLSCollectionConfig.ProtoReflect.Descriptor instead.
+func (*RLSCollectionConfig) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{113}
+}
+
+func (x *RLSCollectionConfig) GetCollectionName() string {
+	if x != nil {
+		return x.CollectionName
+	}
+	return ""
+}
+
+func (x *RLSCollectionConfig) GetCollectionId() int64 {
+	if x != nil {
+		return x.CollectionId
+	}
+	return 0
+}
+
+func (x *RLSCollectionConfig) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *RLSCollectionConfig) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
+}
+
+// RLS User Tags
+type RLSUserTags struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	UserName string            `protobuf:"bytes,1,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`
+	Tags     map[string]string `protobuf:"bytes,2,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+}
+
+func (x *RLSUserTags) Reset() {
+	*x = RLSUserTags{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[114]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *RLSUserTags) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RLSUserTags) ProtoMessage() {}
+
+func (x *RLSUserTags) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[114]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RLSUserTags.ProtoReflect.Descriptor instead.
+func (*RLSUserTags) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{114}
+}
+
+func (x *RLSUserTags) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+func (x *RLSUserTags) GetTags() map[string]string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+// CreateRowPolicy Request
+type CreateRowPolicyRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base   *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	DbName string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	Policy *RLSPolicy        `protobuf:"bytes,3,opt,name=policy,proto3" json:"policy,omitempty"`
+}
+
+func (x *CreateRowPolicyRequest) Reset() {
+	*x = CreateRowPolicyRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[115]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *CreateRowPolicyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateRowPolicyRequest) ProtoMessage() {}
+
+func (x *CreateRowPolicyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[115]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateRowPolicyRequest.ProtoReflect.Descriptor instead.
+func (*CreateRowPolicyRequest) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{115}
+}
+
+func (x *CreateRowPolicyRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *CreateRowPolicyRequest) GetDbName() string {
+	if x != nil {
+		return x.DbName
+	}
+	return ""
+}
+
+func (x *CreateRowPolicyRequest) GetPolicy() *RLSPolicy {
+	if x != nil {
+		return x.Policy
+	}
+	return nil
+}
+
+// DropRowPolicy Request
+type DropRowPolicyRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base           *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	DbName         string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	CollectionName string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	PolicyName     string            `protobuf:"bytes,4,opt,name=policy_name,json=policyName,proto3" json:"policy_name,omitempty"`
+}
+
+func (x *DropRowPolicyRequest) Reset() {
+	*x = DropRowPolicyRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[116]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *DropRowPolicyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DropRowPolicyRequest) ProtoMessage() {}
+
+func (x *DropRowPolicyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[116]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DropRowPolicyRequest.ProtoReflect.Descriptor instead.
+func (*DropRowPolicyRequest) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{116}
+}
+
+func (x *DropRowPolicyRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *DropRowPolicyRequest) GetDbName() string {
+	if x != nil {
+		return x.DbName
+	}
+	return ""
+}
+
+func (x *DropRowPolicyRequest) GetCollectionName() string {
+	if x != nil {
+		return x.CollectionName
+	}
+	return ""
+}
+
+func (x *DropRowPolicyRequest) GetPolicyName() string {
+	if x != nil {
+		return x.PolicyName
+	}
+	return ""
+}
+
+// ListRowPolicies Request
+type ListRowPoliciesRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base           *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	DbName         string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	CollectionName string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+}
+
+func (x *ListRowPoliciesRequest) Reset() {
+	*x = ListRowPoliciesRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[117]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ListRowPoliciesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRowPoliciesRequest) ProtoMessage() {}
+
+func (x *ListRowPoliciesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[117]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRowPoliciesRequest.ProtoReflect.Descriptor instead.
+func (*ListRowPoliciesRequest) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{117}
+}
+
+func (x *ListRowPoliciesRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *ListRowPoliciesRequest) GetDbName() string {
+	if x != nil {
+		return x.DbName
+	}
+	return ""
+}
+
+func (x *ListRowPoliciesRequest) GetCollectionName() string {
+	if x != nil {
+		return x.CollectionName
+	}
+	return ""
+}
+
+// ListRowPolicies Response
+type ListRowPoliciesResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Status   *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Policies []*RLSPolicy     `protobuf:"bytes,2,rep,name=policies,proto3" json:"policies,omitempty"`
+}
+
+func (x *ListRowPoliciesResponse) Reset() {
+	*x = ListRowPoliciesResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[118]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ListRowPoliciesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRowPoliciesResponse) ProtoMessage() {}
+
+func (x *ListRowPoliciesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[118]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRowPoliciesResponse.ProtoReflect.Descriptor instead.
+func (*ListRowPoliciesResponse) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{118}
+}
+
+func (x *ListRowPoliciesResponse) GetStatus() *commonpb.Status {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
+func (x *ListRowPoliciesResponse) GetPolicies() []*RLSPolicy {
+	if x != nil {
+		return x.Policies
+	}
+	return nil
+}
+
+// SetUserTags Request
+type SetUserTagsRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base     *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	UserName string            `protobuf:"bytes,2,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`
+	Tags     map[string]string `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+}
+
+func (x *SetUserTagsRequest) Reset() {
+	*x = SetUserTagsRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[119]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SetUserTagsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetUserTagsRequest) ProtoMessage() {}
+
+func (x *SetUserTagsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[119]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetUserTagsRequest.ProtoReflect.Descriptor instead.
+func (*SetUserTagsRequest) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{119}
+}
+
+func (x *SetUserTagsRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *SetUserTagsRequest) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+func (x *SetUserTagsRequest) GetTags() map[string]string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+// GetUserTags Request
+type GetUserTagsRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base     *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	UserName string            `protobuf:"bytes,2,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`
+}
+
+func (x *GetUserTagsRequest) Reset() {
+	*x = GetUserTagsRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[120]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetUserTagsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetUserTagsRequest) ProtoMessage() {}
+
+func (x *GetUserTagsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[120]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetUserTagsRequest.ProtoReflect.Descriptor instead.
+func (*GetUserTagsRequest) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{120}
+}
+
+func (x *GetUserTagsRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *GetUserTagsRequest) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+// GetUserTags Response
+type GetUserTagsResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Status *commonpb.Status  `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Tags   map[string]string `protobuf:"bytes,2,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+}
+
+func (x *GetUserTagsResponse) Reset() {
+	*x = GetUserTagsResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[121]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetUserTagsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetUserTagsResponse) ProtoMessage() {}
+
+func (x *GetUserTagsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[121]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetUserTagsResponse.ProtoReflect.Descriptor instead.
+func (*GetUserTagsResponse) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{121}
+}
+
+func (x *GetUserTagsResponse) GetStatus() *commonpb.Status {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
+func (x *GetUserTagsResponse) GetTags() map[string]string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+// DeleteUserTag Request
+type DeleteUserTagRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base     *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	UserName string            `protobuf:"bytes,2,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`
+	TagKey   string            `protobuf:"bytes,3,opt,name=tag_key,json=tagKey,proto3" json:"tag_key,omitempty"`
+}
+
+func (x *DeleteUserTagRequest) Reset() {
+	*x = DeleteUserTagRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[122]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *DeleteUserTagRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteUserTagRequest) ProtoMessage() {}
+
+func (x *DeleteUserTagRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[122]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteUserTagRequest.ProtoReflect.Descriptor instead.
+func (*DeleteUserTagRequest) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{122}
+}
+
+func (x *DeleteUserTagRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *DeleteUserTagRequest) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+func (x *DeleteUserTagRequest) GetTagKey() string {
+	if x != nil {
+		return x.TagKey
+	}
+	return ""
+}
+
+// ListUsersWithTag Request
+type ListUsersWithTagRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base     *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	TagKey   string            `protobuf:"bytes,2,opt,name=tag_key,json=tagKey,proto3" json:"tag_key,omitempty"`
+	TagValue string            `protobuf:"bytes,3,opt,name=tag_value,json=tagValue,proto3" json:"tag_value,omitempty"`
+}
+
+func (x *ListUsersWithTagRequest) Reset() {
+	*x = ListUsersWithTagRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[123]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ListUsersWithTagRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListUsersWithTagRequest) ProtoMessage() {}
+
+func (x *ListUsersWithTagRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[123]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListUsersWithTagRequest.ProtoReflect.Descriptor instead.
+func (*ListUsersWithTagRequest) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{123}
+}
+
+func (x *ListUsersWithTagRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *ListUsersWithTagRequest) GetTagKey() string {
+	if x != nil {
+		return x.TagKey
+	}
+	return ""
+}
+
+func (x *ListUsersWithTagRequest) GetTagValue() string {
+	if x != nil {
+		return x.TagValue
+	}
+	return ""
+}
+
+// ListUsersWithTag Response
+type ListUsersWithTagResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Status *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Users  []string         `protobuf:"bytes,2,rep,name=users,proto3" json:"users,omitempty"`
+}
+
+func (x *ListUsersWithTagResponse) Reset() {
+	*x = ListUsersWithTagResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[124]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ListUsersWithTagResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListUsersWithTagResponse) ProtoMessage() {}
+
+func (x *ListUsersWithTagResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[124]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListUsersWithTagResponse.ProtoReflect.Descriptor instead.
+func (*ListUsersWithTagResponse) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{124}
+}
+
+func (x *ListUsersWithTagResponse) GetStatus() *commonpb.Status {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
+func (x *ListUsersWithTagResponse) GetUsers() []string {
+	if x != nil {
+		return x.Users
+	}
+	return nil
+}
+
+// RefreshRLSCache Request (broadcast from RootCoord to Proxies)
+type RefreshRLSCacheRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base           *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	OpType         RLSCacheOpType    `protobuf:"varint,2,opt,name=op_type,json=opType,proto3,enum=milvus.proto.messages.RLSCacheOpType" json:"op_type,omitempty"`
+	DbName         string            `protobuf:"bytes,3,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	CollectionName string            `protobuf:"bytes,4,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	PolicyName     string            `protobuf:"bytes,5,opt,name=policy_name,json=policyName,proto3" json:"policy_name,omitempty"`
+	UserName       string            `protobuf:"bytes,6,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`
+}
+
+func (x *RefreshRLSCacheRequest) Reset() {
+	*x = RefreshRLSCacheRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_messages_proto_msgTypes[125]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *RefreshRLSCacheRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefreshRLSCacheRequest) ProtoMessage() {}
+
+func (x *RefreshRLSCacheRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_messages_proto_msgTypes[125]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefreshRLSCacheRequest.ProtoReflect.Descriptor instead.
+func (*RefreshRLSCacheRequest) Descriptor() ([]byte, []int) {
+	return file_messages_proto_rawDescGZIP(), []int{125}
+}
+
+func (x *RefreshRLSCacheRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *RefreshRLSCacheRequest) GetOpType() RLSCacheOpType {
+	if x != nil {
+		return x.OpType
+	}
+	return RLSCacheOpType_CreatePolicy
+}
+
+func (x *RefreshRLSCacheRequest) GetDbName() string {
+	if x != nil {
+		return x.DbName
+	}
+	return ""
+}
+
+func (x *RefreshRLSCacheRequest) GetCollectionName() string {
+	if x != nil {
+		return x.CollectionName
+	}
+	return ""
+}
+
+func (x *RefreshRLSCacheRequest) GetPolicyName() string {
+	if x != nil {
+		return x.PolicyName
+	}
+	return ""
+}
+
+func (x *RefreshRLSCacheRequest) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
 var File_messages_proto protoreflect.FileDescriptor
 
 var file_messages_proto_rawDesc = []byte{
@@ -6956,91 +8011,257 @@ var file_messages_proto_rawDesc = []byte{
 	0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x09, 0x73, 0x65, 0x67, 0x6d, 0x65,
 	0x6e, 0x74, 0x49, 0x64, 0x12, 0x29, 0x0a, 0x10, 0x6d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74,
 	0x5f, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0f,
-	0x6d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x2a,
-	0x9e, 0x07, 0x0a, 0x0b, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x54, 0x79, 0x70, 0x65, 0x12,
-	0x0b, 0x0a, 0x07, 0x55, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e, 0x10, 0x00, 0x12, 0x0c, 0x0a, 0x08,
-	0x54, 0x69, 0x6d, 0x65, 0x54, 0x69, 0x63, 0x6b, 0x10, 0x01, 0x12, 0x0a, 0x0a, 0x06, 0x49, 0x6e,
-	0x73, 0x65, 0x72, 0x74, 0x10, 0x02, 0x12, 0x0a, 0x0a, 0x06, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65,
-	0x10, 0x03, 0x12, 0x09, 0x0a, 0x05, 0x46, 0x6c, 0x75, 0x73, 0x68, 0x10, 0x04, 0x12, 0x14, 0x0a,
-	0x10, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f,
-	0x6e, 0x10, 0x05, 0x12, 0x12, 0x0a, 0x0e, 0x44, 0x72, 0x6f, 0x70, 0x43, 0x6f, 0x6c, 0x6c, 0x65,
-	0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x06, 0x12, 0x13, 0x0a, 0x0f, 0x43, 0x72, 0x65, 0x61, 0x74,
-	0x65, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x07, 0x12, 0x11, 0x0a, 0x0d,
-	0x44, 0x72, 0x6f, 0x70, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x08, 0x12,
-	0x0f, 0x0a, 0x0b, 0x4d, 0x61, 0x6e, 0x75, 0x61, 0x6c, 0x46, 0x6c, 0x75, 0x73, 0x68, 0x10, 0x09,
-	0x12, 0x11, 0x0a, 0x0d, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e,
-	0x74, 0x10, 0x0a, 0x12, 0x0a, 0x0a, 0x06, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x10, 0x0b, 0x12,
-	0x14, 0x0a, 0x0c, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x43, 0x68, 0x61, 0x6e, 0x67, 0x65, 0x10,
-	0x0c, 0x1a, 0x02, 0x08, 0x01, 0x12, 0x13, 0x0a, 0x0f, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x43, 0x6f,
-	0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x0d, 0x12, 0x13, 0x0a, 0x0f, 0x41, 0x6c,
-	0x74, 0x65, 0x72, 0x4c, 0x6f, 0x61, 0x64, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x10, 0x0e, 0x12,
-	0x12, 0x0a, 0x0e, 0x44, 0x72, 0x6f, 0x70, 0x4c, 0x6f, 0x61, 0x64, 0x43, 0x6f, 0x6e, 0x66, 0x69,
-	0x67, 0x10, 0x0f, 0x12, 0x12, 0x0a, 0x0e, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x44, 0x61, 0x74,
-	0x61, 0x62, 0x61, 0x73, 0x65, 0x10, 0x10, 0x12, 0x11, 0x0a, 0x0d, 0x41, 0x6c, 0x74, 0x65, 0x72,
-	0x44, 0x61, 0x74, 0x61, 0x62, 0x61, 0x73, 0x65, 0x10, 0x11, 0x12, 0x10, 0x0a, 0x0c, 0x44, 0x72,
-	0x6f, 0x70, 0x44, 0x61, 0x74, 0x61, 0x62, 0x61, 0x73, 0x65, 0x10, 0x12, 0x12, 0x0e, 0x0a, 0x0a,
-	0x41, 0x6c, 0x74, 0x65, 0x72, 0x41, 0x6c, 0x69, 0x61, 0x73, 0x10, 0x13, 0x12, 0x0d, 0x0a, 0x09,
-	0x44, 0x72, 0x6f, 0x70, 0x41, 0x6c, 0x69, 0x61, 0x73, 0x10, 0x14, 0x12, 0x0f, 0x0a, 0x0b, 0x52,
-	0x65, 0x73, 0x74, 0x6f, 0x72, 0x65, 0x52, 0x42, 0x41, 0x43, 0x10, 0x15, 0x12, 0x0d, 0x0a, 0x09,
-	0x41, 0x6c, 0x74, 0x65, 0x72, 0x55, 0x73, 0x65, 0x72, 0x10, 0x16, 0x12, 0x0c, 0x0a, 0x08, 0x44,
-	0x72, 0x6f, 0x70, 0x55, 0x73, 0x65, 0x72, 0x10, 0x17, 0x12, 0x0d, 0x0a, 0x09, 0x41, 0x6c, 0x74,
-	0x65, 0x72, 0x52, 0x6f, 0x6c, 0x65, 0x10, 0x18, 0x12, 0x0c, 0x0a, 0x08, 0x44, 0x72, 0x6f, 0x70,
-	0x52, 0x6f, 0x6c, 0x65, 0x10, 0x19, 0x12, 0x11, 0x0a, 0x0d, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x55,
-	0x73, 0x65, 0x72, 0x52, 0x6f, 0x6c, 0x65, 0x10, 0x1a, 0x12, 0x10, 0x0a, 0x0c, 0x44, 0x72, 0x6f,
-	0x70, 0x55, 0x73, 0x65, 0x72, 0x52, 0x6f, 0x6c, 0x65, 0x10, 0x1b, 0x12, 0x12, 0x0a, 0x0e, 0x41,
-	0x6c, 0x74, 0x65, 0x72, 0x50, 0x72, 0x69, 0x76, 0x69, 0x6c, 0x65, 0x67, 0x65, 0x10, 0x1c, 0x12,
-	0x11, 0x0a, 0x0d, 0x44, 0x72, 0x6f, 0x70, 0x50, 0x72, 0x69, 0x76, 0x69, 0x6c, 0x65, 0x67, 0x65,
-	0x10, 0x1d, 0x12, 0x17, 0x0a, 0x13, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x50, 0x72, 0x69, 0x76, 0x69,
-	0x6c, 0x65, 0x67, 0x65, 0x47, 0x72, 0x6f, 0x75, 0x70, 0x10, 0x1e, 0x12, 0x16, 0x0a, 0x12, 0x44,
-	0x72, 0x6f, 0x70, 0x50, 0x72, 0x69, 0x76, 0x69, 0x6c, 0x65, 0x67, 0x65, 0x47, 0x72, 0x6f, 0x75,
-	0x70, 0x10, 0x1f, 0x12, 0x16, 0x0a, 0x12, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x52, 0x65, 0x73, 0x6f,
-	0x75, 0x72, 0x63, 0x65, 0x47, 0x72, 0x6f, 0x75, 0x70, 0x10, 0x20, 0x12, 0x15, 0x0a, 0x11, 0x44,
-	0x72, 0x6f, 0x70, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x47, 0x72, 0x6f, 0x75, 0x70,
-	0x10, 0x21, 0x12, 0x0f, 0x0a, 0x0b, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x49, 0x6e, 0x64, 0x65,
-	0x78, 0x10, 0x22, 0x12, 0x0e, 0x0a, 0x0a, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x49, 0x6e, 0x64, 0x65,
-	0x78, 0x10, 0x23, 0x12, 0x0d, 0x0a, 0x09, 0x44, 0x72, 0x6f, 0x70, 0x49, 0x6e, 0x64, 0x65, 0x78,
-	0x10, 0x24, 0x12, 0x0c, 0x0a, 0x08, 0x46, 0x6c, 0x75, 0x73, 0x68, 0x41, 0x6c, 0x6c, 0x10, 0x25,
-	0x12, 0x16, 0x0a, 0x12, 0x54, 0x72, 0x75, 0x6e, 0x63, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6c, 0x6c,
-	0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x26, 0x12, 0x13, 0x0a, 0x0f, 0x52, 0x65, 0x73, 0x74,
-	0x6f, 0x72, 0x65, 0x53, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x10, 0x27, 0x12, 0x12, 0x0a,
-	0x0e, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x53, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x10,
-	0x28, 0x12, 0x10, 0x0a, 0x0c, 0x44, 0x72, 0x6f, 0x70, 0x53, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f,
-	0x74, 0x10, 0x29, 0x12, 0x17, 0x0a, 0x13, 0x42, 0x61, 0x74, 0x63, 0x68, 0x55, 0x70, 0x64, 0x61,
-	0x74, 0x65, 0x4d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74, 0x10, 0x2a, 0x12, 0x1d, 0x0a, 0x19,
-	0x52, 0x65, 0x66, 0x72, 0x65, 0x73, 0x68, 0x45, 0x78, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x43,
-	0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x2b, 0x12, 0x0d, 0x0a, 0x08, 0x41,
-	0x6c, 0x74, 0x65, 0x72, 0x57, 0x41, 0x4c, 0x10, 0xbc, 0x05, 0x12, 0x19, 0x0a, 0x14, 0x41, 0x6c,
-	0x74, 0x65, 0x72, 0x52, 0x65, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6e, 0x66,
-	0x69, 0x67, 0x10, 0xa0, 0x06, 0x12, 0x0d, 0x0a, 0x08, 0x42, 0x65, 0x67, 0x69, 0x6e, 0x54, 0x78,
-	0x6e, 0x10, 0x84, 0x07, 0x12, 0x0e, 0x0a, 0x09, 0x43, 0x6f, 0x6d, 0x6d, 0x69, 0x74, 0x54, 0x78,
-	0x6e, 0x10, 0x85, 0x07, 0x12, 0x10, 0x0a, 0x0b, 0x52, 0x6f, 0x6c, 0x6c, 0x62, 0x61, 0x63, 0x6b,
-	0x54, 0x78, 0x6e, 0x10, 0x86, 0x07, 0x12, 0x08, 0x0a, 0x03, 0x54, 0x78, 0x6e, 0x10, 0xe7, 0x07,
-	0x2a, 0x74, 0x0a, 0x08, 0x54, 0x78, 0x6e, 0x53, 0x74, 0x61, 0x74, 0x65, 0x12, 0x0e, 0x0a, 0x0a,
-	0x54, 0x78, 0x6e, 0x55, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e, 0x10, 0x00, 0x12, 0x0f, 0x0a, 0x0b,
-	0x54, 0x78, 0x6e, 0x49, 0x6e, 0x46, 0x6c, 0x69, 0x67, 0x68, 0x74, 0x10, 0x01, 0x12, 0x0f, 0x0a,
-	0x0b, 0x54, 0x78, 0x6e, 0x4f, 0x6e, 0x43, 0x6f, 0x6d, 0x6d, 0x69, 0x74, 0x10, 0x02, 0x12, 0x10,
-	0x0a, 0x0c, 0x54, 0x78, 0x6e, 0x43, 0x6f, 0x6d, 0x6d, 0x69, 0x74, 0x74, 0x65, 0x64, 0x10, 0x03,
-	0x12, 0x11, 0x0a, 0x0d, 0x54, 0x78, 0x6e, 0x4f, 0x6e, 0x52, 0x6f, 0x6c, 0x6c, 0x62, 0x61, 0x63,
-	0x6b, 0x10, 0x04, 0x12, 0x11, 0x0a, 0x0d, 0x54, 0x78, 0x6e, 0x52, 0x6f, 0x6c, 0x6c, 0x62, 0x61,
-	0x63, 0x6b, 0x65, 0x64, 0x10, 0x05, 0x2a, 0xe2, 0x01, 0x0a, 0x0e, 0x52, 0x65, 0x73, 0x6f, 0x75,
-	0x72, 0x63, 0x65, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x12, 0x19, 0x0a, 0x15, 0x52, 0x65, 0x73,
-	0x6f, 0x75, 0x72, 0x63, 0x65, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x55, 0x6e, 0x6b, 0x6e, 0x6f,
-	0x77, 0x6e, 0x10, 0x00, 0x12, 0x21, 0x0a, 0x19, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65,
-	0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x4a, 0x6f, 0x62, 0x49,
-	0x44, 0x10, 0x01, 0x1a, 0x02, 0x08, 0x01, 0x12, 0x20, 0x0a, 0x1c, 0x52, 0x65, 0x73, 0x6f, 0x75,
-	0x72, 0x63, 0x65, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74,
-	0x69, 0x6f, 0x6e, 0x4e, 0x61, 0x6d, 0x65, 0x10, 0x02, 0x12, 0x18, 0x0a, 0x14, 0x52, 0x65, 0x73,
-	0x6f, 0x75, 0x72, 0x63, 0x65, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x44, 0x42, 0x4e, 0x61, 0x6d,
-	0x65, 0x10, 0x03, 0x12, 0x1b, 0x0a, 0x17, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x44,
-	0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x50, 0x72, 0x69, 0x76, 0x69, 0x6c, 0x65, 0x67, 0x65, 0x10, 0x04,
-	0x12, 0x1e, 0x0a, 0x1a, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x44, 0x6f, 0x6d, 0x61,
-	0x69, 0x6e, 0x53, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x4e, 0x61, 0x6d, 0x65, 0x10, 0x05,
-	0x12, 0x19, 0x0a, 0x15, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x44, 0x6f, 0x6d, 0x61,
-	0x69, 0x6e, 0x43, 0x6c, 0x75, 0x73, 0x74, 0x65, 0x72, 0x10, 0x7f, 0x42, 0x35, 0x5a, 0x33, 0x67,
-	0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
-	0x2d, 0x69, 0x6f, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76,
-	0x32, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73,
-	0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x6d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x22,
+	0xf0, 0x02, 0x0a, 0x09, 0x52, 0x4c, 0x53, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x12, 0x1f, 0x0a,
+	0x0b, 0x70, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x0a, 0x70, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x27,
+	0x0a, 0x0f, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x6e, 0x61, 0x6d,
+	0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0e, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74,
+	0x69, 0x6f, 0x6e, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x23, 0x0a, 0x0d, 0x63, 0x6f, 0x6c, 0x6c, 0x65,
+	0x63, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x69, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0c,
+	0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x64, 0x12, 0x45, 0x0a, 0x0b,
+	0x70, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x18, 0x04, 0x20, 0x01, 0x28,
+	0x0e, 0x32, 0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x2e, 0x52, 0x4c, 0x53, 0x50, 0x6f, 0x6c,
+	0x69, 0x63, 0x79, 0x54, 0x79, 0x70, 0x65, 0x52, 0x0a, 0x70, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x54,
+	0x79, 0x70, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x61, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x18, 0x05,
+	0x20, 0x03, 0x28, 0x09, 0x52, 0x07, 0x61, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x12, 0x14, 0x0a,
+	0x05, 0x72, 0x6f, 0x6c, 0x65, 0x73, 0x18, 0x06, 0x20, 0x03, 0x28, 0x09, 0x52, 0x05, 0x72, 0x6f,
+	0x6c, 0x65, 0x73, 0x12, 0x1d, 0x0a, 0x0a, 0x75, 0x73, 0x69, 0x6e, 0x67, 0x5f, 0x65, 0x78, 0x70,
+	0x72, 0x18, 0x07, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x75, 0x73, 0x69, 0x6e, 0x67, 0x45, 0x78,
+	0x70, 0x72, 0x12, 0x1d, 0x0a, 0x0a, 0x63, 0x68, 0x65, 0x63, 0x6b, 0x5f, 0x65, 0x78, 0x70, 0x72,
+	0x18, 0x08, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x63, 0x68, 0x65, 0x63, 0x6b, 0x45, 0x78, 0x70,
+	0x72, 0x12, 0x20, 0x0a, 0x0b, 0x64, 0x65, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x69, 0x6f, 0x6e,
+	0x18, 0x09, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x64, 0x65, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74,
+	0x69, 0x6f, 0x6e, 0x12, 0x1d, 0x0a, 0x0a, 0x63, 0x72, 0x65, 0x61, 0x74, 0x65, 0x64, 0x5f, 0x61,
+	0x74, 0x18, 0x0a, 0x20, 0x01, 0x28, 0x03, 0x52, 0x09, 0x63, 0x72, 0x65, 0x61, 0x74, 0x65, 0x64,
+	0x41, 0x74, 0x22, 0x93, 0x01, 0x0a, 0x13, 0x52, 0x4c, 0x53, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63,
+	0x74, 0x69, 0x6f, 0x6e, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x12, 0x27, 0x0a, 0x0f, 0x63, 0x6f,
+	0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x01, 0x20,
+	0x01, 0x28, 0x09, 0x52, 0x0e, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x4e,
+	0x61, 0x6d, 0x65, 0x12, 0x23, 0x0a, 0x0d, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f,
+	0x6e, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0c, 0x63, 0x6f, 0x6c, 0x6c,
+	0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x64, 0x12, 0x18, 0x0a, 0x07, 0x65, 0x6e, 0x61, 0x62,
+	0x6c, 0x65, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28, 0x08, 0x52, 0x07, 0x65, 0x6e, 0x61, 0x62, 0x6c,
+	0x65, 0x64, 0x12, 0x14, 0x0a, 0x05, 0x66, 0x6f, 0x72, 0x63, 0x65, 0x18, 0x04, 0x20, 0x01, 0x28,
+	0x08, 0x52, 0x05, 0x66, 0x6f, 0x72, 0x63, 0x65, 0x22, 0xa5, 0x01, 0x0a, 0x0b, 0x52, 0x4c, 0x53,
+	0x55, 0x73, 0x65, 0x72, 0x54, 0x61, 0x67, 0x73, 0x12, 0x1b, 0x0a, 0x09, 0x75, 0x73, 0x65, 0x72,
+	0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x75, 0x73, 0x65,
+	0x72, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x40, 0x0a, 0x04, 0x74, 0x61, 0x67, 0x73, 0x18, 0x02, 0x20,
+	0x03, 0x28, 0x0b, 0x32, 0x2c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x2e, 0x52, 0x4c, 0x53, 0x55,
+	0x73, 0x65, 0x72, 0x54, 0x61, 0x67, 0x73, 0x2e, 0x54, 0x61, 0x67, 0x73, 0x45, 0x6e, 0x74, 0x72,
+	0x79, 0x52, 0x04, 0x74, 0x61, 0x67, 0x73, 0x1a, 0x37, 0x0a, 0x09, 0x54, 0x61, 0x67, 0x73, 0x45,
+	0x6e, 0x74, 0x72, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18,
+	0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01,
+	0x22, 0x9d, 0x01, 0x0a, 0x16, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x52, 0x6f, 0x77, 0x50, 0x6f,
+	0x6c, 0x69, 0x63, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x30, 0x0a, 0x04, 0x62,
+	0x61, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
+	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e,
+	0x4d, 0x73, 0x67, 0x42, 0x61, 0x73, 0x65, 0x52, 0x04, 0x62, 0x61, 0x73, 0x65, 0x12, 0x17, 0x0a,
+	0x07, 0x64, 0x62, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06,
+	0x64, 0x62, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x38, 0x0a, 0x06, 0x70, 0x6f, 0x6c, 0x69, 0x63, 0x79,
+	0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x20, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x2e, 0x52,
+	0x4c, 0x53, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x52, 0x06, 0x70, 0x6f, 0x6c, 0x69, 0x63, 0x79,
+	0x22, 0xab, 0x01, 0x0a, 0x14, 0x44, 0x72, 0x6f, 0x70, 0x52, 0x6f, 0x77, 0x50, 0x6f, 0x6c, 0x69,
+	0x63, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73,
+	0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d, 0x73,
+	0x67, 0x42, 0x61, 0x73, 0x65, 0x52, 0x04, 0x62, 0x61, 0x73, 0x65, 0x12, 0x17, 0x0a, 0x07, 0x64,
+	0x62, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x64, 0x62,
+	0x4e, 0x61, 0x6d, 0x65, 0x12, 0x27, 0x0a, 0x0f, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69,
+	0x6f, 0x6e, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0e, 0x63,
+	0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x1f, 0x0a,
+	0x0b, 0x70, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x04, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x0a, 0x70, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x4e, 0x61, 0x6d, 0x65, 0x22, 0x8c,
+	0x01, 0x0a, 0x16, 0x4c, 0x69, 0x73, 0x74, 0x52, 0x6f, 0x77, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x69,
+	0x65, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73,
+	0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d, 0x73,
+	0x67, 0x42, 0x61, 0x73, 0x65, 0x52, 0x04, 0x62, 0x61, 0x73, 0x65, 0x12, 0x17, 0x0a, 0x07, 0x64,
+	0x62, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x64, 0x62,
+	0x4e, 0x61, 0x6d, 0x65, 0x12, 0x27, 0x0a, 0x0f, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69,
+	0x6f, 0x6e, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0e, 0x63,
+	0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x4e, 0x61, 0x6d, 0x65, 0x22, 0x8c, 0x01,
+	0x0a, 0x17, 0x4c, 0x69, 0x73, 0x74, 0x52, 0x6f, 0x77, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x69, 0x65,
+	0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x33, 0x0a, 0x06, 0x73, 0x74, 0x61,
+	0x74, 0x75, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
+	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e,
+	0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x3c,
+	0x0a, 0x08, 0x70, 0x6f, 0x6c, 0x69, 0x63, 0x69, 0x65, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b,
+	0x32, 0x20, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x2e, 0x52, 0x4c, 0x53, 0x50, 0x6f, 0x6c, 0x69,
+	0x63, 0x79, 0x52, 0x08, 0x70, 0x6f, 0x6c, 0x69, 0x63, 0x69, 0x65, 0x73, 0x22, 0xe5, 0x01, 0x0a,
+	0x12, 0x53, 0x65, 0x74, 0x55, 0x73, 0x65, 0x72, 0x54, 0x61, 0x67, 0x73, 0x52, 0x65, 0x71, 0x75,
+	0x65, 0x73, 0x74, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x0b, 0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d, 0x73, 0x67, 0x42, 0x61, 0x73, 0x65, 0x52,
+	0x04, 0x62, 0x61, 0x73, 0x65, 0x12, 0x1b, 0x0a, 0x09, 0x75, 0x73, 0x65, 0x72, 0x5f, 0x6e, 0x61,
+	0x6d, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x75, 0x73, 0x65, 0x72, 0x4e, 0x61,
+	0x6d, 0x65, 0x12, 0x47, 0x0a, 0x04, 0x74, 0x61, 0x67, 0x73, 0x18, 0x03, 0x20, 0x03, 0x28, 0x0b,
+	0x32, 0x33, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x2e, 0x53, 0x65, 0x74, 0x55, 0x73, 0x65, 0x72,
+	0x54, 0x61, 0x67, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x2e, 0x54, 0x61, 0x67, 0x73,
+	0x45, 0x6e, 0x74, 0x72, 0x79, 0x52, 0x04, 0x74, 0x61, 0x67, 0x73, 0x1a, 0x37, 0x0a, 0x09, 0x54,
+	0x61, 0x67, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18,
+	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61,
+	0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65,
+	0x3a, 0x02, 0x38, 0x01, 0x22, 0x63, 0x0a, 0x12, 0x47, 0x65, 0x74, 0x55, 0x73, 0x65, 0x72, 0x54,
+	0x61, 0x67, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61,
+	0x73, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
+	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d,
+	0x73, 0x67, 0x42, 0x61, 0x73, 0x65, 0x52, 0x04, 0x62, 0x61, 0x73, 0x65, 0x12, 0x1b, 0x0a, 0x09,
+	0x75, 0x73, 0x65, 0x72, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52,
+	0x08, 0x75, 0x73, 0x65, 0x72, 0x4e, 0x61, 0x6d, 0x65, 0x22, 0xcd, 0x01, 0x0a, 0x13, 0x47, 0x65,
+	0x74, 0x55, 0x73, 0x65, 0x72, 0x54, 0x61, 0x67, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
+	0x65, 0x12, 0x33, 0x0a, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x0b, 0x32, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x06,
+	0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x48, 0x0a, 0x04, 0x74, 0x61, 0x67, 0x73, 0x18, 0x02,
+	0x20, 0x03, 0x28, 0x0b, 0x32, 0x34, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x2e, 0x47, 0x65, 0x74,
+	0x55, 0x73, 0x65, 0x72, 0x54, 0x61, 0x67, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
+	0x2e, 0x54, 0x61, 0x67, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x52, 0x04, 0x74, 0x61, 0x67, 0x73,
+	0x1a, 0x37, 0x0a, 0x09, 0x54, 0x61, 0x67, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x12, 0x10, 0x0a,
+	0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12,
+	0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05,
+	0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0x7e, 0x0a, 0x14, 0x44, 0x65, 0x6c,
+	0x65, 0x74, 0x65, 0x55, 0x73, 0x65, 0x72, 0x54, 0x61, 0x67, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
+	0x74, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32,
+	0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63,
+	0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d, 0x73, 0x67, 0x42, 0x61, 0x73, 0x65, 0x52, 0x04, 0x62,
+	0x61, 0x73, 0x65, 0x12, 0x1b, 0x0a, 0x09, 0x75, 0x73, 0x65, 0x72, 0x5f, 0x6e, 0x61, 0x6d, 0x65,
+	0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x75, 0x73, 0x65, 0x72, 0x4e, 0x61, 0x6d, 0x65,
+	0x12, 0x17, 0x0a, 0x07, 0x74, 0x61, 0x67, 0x5f, 0x6b, 0x65, 0x79, 0x18, 0x03, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x06, 0x74, 0x61, 0x67, 0x4b, 0x65, 0x79, 0x22, 0x81, 0x01, 0x0a, 0x17, 0x4c, 0x69,
+	0x73, 0x74, 0x55, 0x73, 0x65, 0x72, 0x73, 0x57, 0x69, 0x74, 0x68, 0x54, 0x61, 0x67, 0x52, 0x65,
+	0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73, 0x65, 0x18, 0x01, 0x20,
+	0x01, 0x28, 0x0b, 0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d, 0x73, 0x67, 0x42, 0x61, 0x73,
+	0x65, 0x52, 0x04, 0x62, 0x61, 0x73, 0x65, 0x12, 0x17, 0x0a, 0x07, 0x74, 0x61, 0x67, 0x5f, 0x6b,
+	0x65, 0x79, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x74, 0x61, 0x67, 0x4b, 0x65, 0x79,
+	0x12, 0x1b, 0x0a, 0x09, 0x74, 0x61, 0x67, 0x5f, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x03, 0x20,
+	0x01, 0x28, 0x09, 0x52, 0x08, 0x74, 0x61, 0x67, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x22, 0x65, 0x0a,
+	0x18, 0x4c, 0x69, 0x73, 0x74, 0x55, 0x73, 0x65, 0x72, 0x73, 0x57, 0x69, 0x74, 0x68, 0x54, 0x61,
+	0x67, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x33, 0x0a, 0x06, 0x73, 0x74, 0x61,
+	0x74, 0x75, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
+	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e,
+	0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x14,
+	0x0a, 0x05, 0x75, 0x73, 0x65, 0x72, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x09, 0x52, 0x05, 0x75,
+	0x73, 0x65, 0x72, 0x73, 0x22, 0x8a, 0x02, 0x0a, 0x16, 0x52, 0x65, 0x66, 0x72, 0x65, 0x73, 0x68,
+	0x52, 0x4c, 0x53, 0x43, 0x61, 0x63, 0x68, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12,
+	0x30, 0x0a, 0x04, 0x62, 0x61, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1c, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d,
+	0x6d, 0x6f, 0x6e, 0x2e, 0x4d, 0x73, 0x67, 0x42, 0x61, 0x73, 0x65, 0x52, 0x04, 0x62, 0x61, 0x73,
+	0x65, 0x12, 0x3e, 0x0a, 0x07, 0x6f, 0x70, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x18, 0x02, 0x20, 0x01,
+	0x28, 0x0e, 0x32, 0x25, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x2e, 0x52, 0x4c, 0x53, 0x43, 0x61,
+	0x63, 0x68, 0x65, 0x4f, 0x70, 0x54, 0x79, 0x70, 0x65, 0x52, 0x06, 0x6f, 0x70, 0x54, 0x79, 0x70,
+	0x65, 0x12, 0x17, 0x0a, 0x07, 0x64, 0x62, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x03, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x06, 0x64, 0x62, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x27, 0x0a, 0x0f, 0x63, 0x6f,
+	0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x04, 0x20,
+	0x01, 0x28, 0x09, 0x52, 0x0e, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x4e,
+	0x61, 0x6d, 0x65, 0x12, 0x1f, 0x0a, 0x0b, 0x70, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x5f, 0x6e, 0x61,
+	0x6d, 0x65, 0x18, 0x05, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0a, 0x70, 0x6f, 0x6c, 0x69, 0x63, 0x79,
+	0x4e, 0x61, 0x6d, 0x65, 0x12, 0x1b, 0x0a, 0x09, 0x75, 0x73, 0x65, 0x72, 0x5f, 0x6e, 0x61, 0x6d,
+	0x65, 0x18, 0x06, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x75, 0x73, 0x65, 0x72, 0x4e, 0x61, 0x6d,
+	0x65, 0x2a, 0x9e, 0x07, 0x0a, 0x0b, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x54, 0x79, 0x70,
+	0x65, 0x12, 0x0b, 0x0a, 0x07, 0x55, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e, 0x10, 0x00, 0x12, 0x0c,
+	0x0a, 0x08, 0x54, 0x69, 0x6d, 0x65, 0x54, 0x69, 0x63, 0x6b, 0x10, 0x01, 0x12, 0x0a, 0x0a, 0x06,
+	0x49, 0x6e, 0x73, 0x65, 0x72, 0x74, 0x10, 0x02, 0x12, 0x0a, 0x0a, 0x06, 0x44, 0x65, 0x6c, 0x65,
+	0x74, 0x65, 0x10, 0x03, 0x12, 0x09, 0x0a, 0x05, 0x46, 0x6c, 0x75, 0x73, 0x68, 0x10, 0x04, 0x12,
+	0x14, 0x0a, 0x10, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74,
+	0x69, 0x6f, 0x6e, 0x10, 0x05, 0x12, 0x12, 0x0a, 0x0e, 0x44, 0x72, 0x6f, 0x70, 0x43, 0x6f, 0x6c,
+	0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x06, 0x12, 0x13, 0x0a, 0x0f, 0x43, 0x72, 0x65,
+	0x61, 0x74, 0x65, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x07, 0x12, 0x11,
+	0x0a, 0x0d, 0x44, 0x72, 0x6f, 0x70, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x10,
+	0x08, 0x12, 0x0f, 0x0a, 0x0b, 0x4d, 0x61, 0x6e, 0x75, 0x61, 0x6c, 0x46, 0x6c, 0x75, 0x73, 0x68,
+	0x10, 0x09, 0x12, 0x11, 0x0a, 0x0d, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x53, 0x65, 0x67, 0x6d,
+	0x65, 0x6e, 0x74, 0x10, 0x0a, 0x12, 0x0a, 0x0a, 0x06, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x10,
+	0x0b, 0x12, 0x14, 0x0a, 0x0c, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x43, 0x68, 0x61, 0x6e, 0x67,
+	0x65, 0x10, 0x0c, 0x1a, 0x02, 0x08, 0x01, 0x12, 0x13, 0x0a, 0x0f, 0x41, 0x6c, 0x74, 0x65, 0x72,
+	0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x0d, 0x12, 0x13, 0x0a, 0x0f,
+	0x41, 0x6c, 0x74, 0x65, 0x72, 0x4c, 0x6f, 0x61, 0x64, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x10,
+	0x0e, 0x12, 0x12, 0x0a, 0x0e, 0x44, 0x72, 0x6f, 0x70, 0x4c, 0x6f, 0x61, 0x64, 0x43, 0x6f, 0x6e,
+	0x66, 0x69, 0x67, 0x10, 0x0f, 0x12, 0x12, 0x0a, 0x0e, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x44,
+	0x61, 0x74, 0x61, 0x62, 0x61, 0x73, 0x65, 0x10, 0x10, 0x12, 0x11, 0x0a, 0x0d, 0x41, 0x6c, 0x74,
+	0x65, 0x72, 0x44, 0x61, 0x74, 0x61, 0x62, 0x61, 0x73, 0x65, 0x10, 0x11, 0x12, 0x10, 0x0a, 0x0c,
+	0x44, 0x72, 0x6f, 0x70, 0x44, 0x61, 0x74, 0x61, 0x62, 0x61, 0x73, 0x65, 0x10, 0x12, 0x12, 0x0e,
+	0x0a, 0x0a, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x41, 0x6c, 0x69, 0x61, 0x73, 0x10, 0x13, 0x12, 0x0d,
+	0x0a, 0x09, 0x44, 0x72, 0x6f, 0x70, 0x41, 0x6c, 0x69, 0x61, 0x73, 0x10, 0x14, 0x12, 0x0f, 0x0a,
+	0x0b, 0x52, 0x65, 0x73, 0x74, 0x6f, 0x72, 0x65, 0x52, 0x42, 0x41, 0x43, 0x10, 0x15, 0x12, 0x0d,
+	0x0a, 0x09, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x55, 0x73, 0x65, 0x72, 0x10, 0x16, 0x12, 0x0c, 0x0a,
+	0x08, 0x44, 0x72, 0x6f, 0x70, 0x55, 0x73, 0x65, 0x72, 0x10, 0x17, 0x12, 0x0d, 0x0a, 0x09, 0x41,
+	0x6c, 0x74, 0x65, 0x72, 0x52, 0x6f, 0x6c, 0x65, 0x10, 0x18, 0x12, 0x0c, 0x0a, 0x08, 0x44, 0x72,
+	0x6f, 0x70, 0x52, 0x6f, 0x6c, 0x65, 0x10, 0x19, 0x12, 0x11, 0x0a, 0x0d, 0x41, 0x6c, 0x74, 0x65,
+	0x72, 0x55, 0x73, 0x65, 0x72, 0x52, 0x6f, 0x6c, 0x65, 0x10, 0x1a, 0x12, 0x10, 0x0a, 0x0c, 0x44,
+	0x72, 0x6f, 0x70, 0x55, 0x73, 0x65, 0x72, 0x52, 0x6f, 0x6c, 0x65, 0x10, 0x1b, 0x12, 0x12, 0x0a,
+	0x0e, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x50, 0x72, 0x69, 0x76, 0x69, 0x6c, 0x65, 0x67, 0x65, 0x10,
+	0x1c, 0x12, 0x11, 0x0a, 0x0d, 0x44, 0x72, 0x6f, 0x70, 0x50, 0x72, 0x69, 0x76, 0x69, 0x6c, 0x65,
+	0x67, 0x65, 0x10, 0x1d, 0x12, 0x17, 0x0a, 0x13, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x50, 0x72, 0x69,
+	0x76, 0x69, 0x6c, 0x65, 0x67, 0x65, 0x47, 0x72, 0x6f, 0x75, 0x70, 0x10, 0x1e, 0x12, 0x16, 0x0a,
+	0x12, 0x44, 0x72, 0x6f, 0x70, 0x50, 0x72, 0x69, 0x76, 0x69, 0x6c, 0x65, 0x67, 0x65, 0x47, 0x72,
+	0x6f, 0x75, 0x70, 0x10, 0x1f, 0x12, 0x16, 0x0a, 0x12, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x52, 0x65,
+	0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x47, 0x72, 0x6f, 0x75, 0x70, 0x10, 0x20, 0x12, 0x15, 0x0a,
+	0x11, 0x44, 0x72, 0x6f, 0x70, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x47, 0x72, 0x6f,
+	0x75, 0x70, 0x10, 0x21, 0x12, 0x0f, 0x0a, 0x0b, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x49, 0x6e,
+	0x64, 0x65, 0x78, 0x10, 0x22, 0x12, 0x0e, 0x0a, 0x0a, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x49, 0x6e,
+	0x64, 0x65, 0x78, 0x10, 0x23, 0x12, 0x0d, 0x0a, 0x09, 0x44, 0x72, 0x6f, 0x70, 0x49, 0x6e, 0x64,
+	0x65, 0x78, 0x10, 0x24, 0x12, 0x0c, 0x0a, 0x08, 0x46, 0x6c, 0x75, 0x73, 0x68, 0x41, 0x6c, 0x6c,
+	0x10, 0x25, 0x12, 0x16, 0x0a, 0x12, 0x54, 0x72, 0x75, 0x6e, 0x63, 0x61, 0x74, 0x65, 0x43, 0x6f,
+	0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x26, 0x12, 0x13, 0x0a, 0x0f, 0x52, 0x65,
+	0x73, 0x74, 0x6f, 0x72, 0x65, 0x53, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x10, 0x27, 0x12,
+	0x12, 0x0a, 0x0e, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x53, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f,
+	0x74, 0x10, 0x28, 0x12, 0x10, 0x0a, 0x0c, 0x44, 0x72, 0x6f, 0x70, 0x53, 0x6e, 0x61, 0x70, 0x73,
+	0x68, 0x6f, 0x74, 0x10, 0x29, 0x12, 0x17, 0x0a, 0x13, 0x42, 0x61, 0x74, 0x63, 0x68, 0x55, 0x70,
+	0x64, 0x61, 0x74, 0x65, 0x4d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74, 0x10, 0x2a, 0x12, 0x1d,
+	0x0a, 0x19, 0x52, 0x65, 0x66, 0x72, 0x65, 0x73, 0x68, 0x45, 0x78, 0x74, 0x65, 0x72, 0x6e, 0x61,
+	0x6c, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x2b, 0x12, 0x0d, 0x0a,
+	0x08, 0x41, 0x6c, 0x74, 0x65, 0x72, 0x57, 0x41, 0x4c, 0x10, 0xbc, 0x05, 0x12, 0x19, 0x0a, 0x14,
+	0x41, 0x6c, 0x74, 0x65, 0x72, 0x52, 0x65, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x65, 0x43, 0x6f,
+	0x6e, 0x66, 0x69, 0x67, 0x10, 0xa0, 0x06, 0x12, 0x0d, 0x0a, 0x08, 0x42, 0x65, 0x67, 0x69, 0x6e,
+	0x54, 0x78, 0x6e, 0x10, 0x84, 0x07, 0x12, 0x0e, 0x0a, 0x09, 0x43, 0x6f, 0x6d, 0x6d, 0x69, 0x74,
+	0x54, 0x78, 0x6e, 0x10, 0x85, 0x07, 0x12, 0x10, 0x0a, 0x0b, 0x52, 0x6f, 0x6c, 0x6c, 0x62, 0x61,
+	0x63, 0x6b, 0x54, 0x78, 0x6e, 0x10, 0x86, 0x07, 0x12, 0x08, 0x0a, 0x03, 0x54, 0x78, 0x6e, 0x10,
+	0xe7, 0x07, 0x2a, 0x74, 0x0a, 0x08, 0x54, 0x78, 0x6e, 0x53, 0x74, 0x61, 0x74, 0x65, 0x12, 0x0e,
+	0x0a, 0x0a, 0x54, 0x78, 0x6e, 0x55, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e, 0x10, 0x00, 0x12, 0x0f,
+	0x0a, 0x0b, 0x54, 0x78, 0x6e, 0x49, 0x6e, 0x46, 0x6c, 0x69, 0x67, 0x68, 0x74, 0x10, 0x01, 0x12,
+	0x0f, 0x0a, 0x0b, 0x54, 0x78, 0x6e, 0x4f, 0x6e, 0x43, 0x6f, 0x6d, 0x6d, 0x69, 0x74, 0x10, 0x02,
+	0x12, 0x10, 0x0a, 0x0c, 0x54, 0x78, 0x6e, 0x43, 0x6f, 0x6d, 0x6d, 0x69, 0x74, 0x74, 0x65, 0x64,
+	0x10, 0x03, 0x12, 0x11, 0x0a, 0x0d, 0x54, 0x78, 0x6e, 0x4f, 0x6e, 0x52, 0x6f, 0x6c, 0x6c, 0x62,
+	0x61, 0x63, 0x6b, 0x10, 0x04, 0x12, 0x11, 0x0a, 0x0d, 0x54, 0x78, 0x6e, 0x52, 0x6f, 0x6c, 0x6c,
+	0x62, 0x61, 0x63, 0x6b, 0x65, 0x64, 0x10, 0x05, 0x2a, 0xe2, 0x01, 0x0a, 0x0e, 0x52, 0x65, 0x73,
+	0x6f, 0x75, 0x72, 0x63, 0x65, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x12, 0x19, 0x0a, 0x15, 0x52,
+	0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x55, 0x6e, 0x6b,
+	0x6e, 0x6f, 0x77, 0x6e, 0x10, 0x00, 0x12, 0x21, 0x0a, 0x19, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72,
+	0x63, 0x65, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x4a, 0x6f,
+	0x62, 0x49, 0x44, 0x10, 0x01, 0x1a, 0x02, 0x08, 0x01, 0x12, 0x20, 0x0a, 0x1c, 0x52, 0x65, 0x73,
+	0x6f, 0x75, 0x72, 0x63, 0x65, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x43, 0x6f, 0x6c, 0x6c, 0x65,
+	0x63, 0x74, 0x69, 0x6f, 0x6e, 0x4e, 0x61, 0x6d, 0x65, 0x10, 0x02, 0x12, 0x18, 0x0a, 0x14, 0x52,
+	0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x44, 0x42, 0x4e,
+	0x61, 0x6d, 0x65, 0x10, 0x03, 0x12, 0x1b, 0x0a, 0x17, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63,
+	0x65, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x50, 0x72, 0x69, 0x76, 0x69, 0x6c, 0x65, 0x67, 0x65,
+	0x10, 0x04, 0x12, 0x1e, 0x0a, 0x1a, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x44, 0x6f,
+	0x6d, 0x61, 0x69, 0x6e, 0x53, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x4e, 0x61, 0x6d, 0x65,
+	0x10, 0x05, 0x12, 0x19, 0x0a, 0x15, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x44, 0x6f,
+	0x6d, 0x61, 0x69, 0x6e, 0x43, 0x6c, 0x75, 0x73, 0x74, 0x65, 0x72, 0x10, 0x7f, 0x2a, 0x30, 0x0a,
+	0x0d, 0x52, 0x4c, 0x53, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x54, 0x79, 0x70, 0x65, 0x12, 0x0e,
+	0x0a, 0x0a, 0x50, 0x45, 0x52, 0x4d, 0x49, 0x53, 0x53, 0x49, 0x56, 0x45, 0x10, 0x00, 0x12, 0x0f,
+	0x0a, 0x0b, 0x52, 0x45, 0x53, 0x54, 0x52, 0x49, 0x43, 0x54, 0x49, 0x56, 0x45, 0x10, 0x01, 0x2a,
+	0x75, 0x0a, 0x0e, 0x52, 0x4c, 0x53, 0x43, 0x61, 0x63, 0x68, 0x65, 0x4f, 0x70, 0x54, 0x79, 0x70,
+	0x65, 0x12, 0x10, 0x0a, 0x0c, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x50, 0x6f, 0x6c, 0x69, 0x63,
+	0x79, 0x10, 0x00, 0x12, 0x0e, 0x0a, 0x0a, 0x44, 0x72, 0x6f, 0x70, 0x50, 0x6f, 0x6c, 0x69, 0x63,
+	0x79, 0x10, 0x01, 0x12, 0x12, 0x0a, 0x0e, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x55, 0x73, 0x65,
+	0x72, 0x54, 0x61, 0x67, 0x73, 0x10, 0x02, 0x12, 0x11, 0x0a, 0x0d, 0x44, 0x65, 0x6c, 0x65, 0x74,
+	0x65, 0x55, 0x73, 0x65, 0x72, 0x54, 0x61, 0x67, 0x10, 0x03, 0x12, 0x1a, 0x0a, 0x16, 0x55, 0x70,
+	0x64, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x43, 0x6f,
+	0x6e, 0x66, 0x69, 0x67, 0x10, 0x04, 0x42, 0x35, 0x5a, 0x33, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62,
+	0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f, 0x2f, 0x6d,
+	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76, 0x32, 0x2f, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2f, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x70, 0x62, 0x62, 0x06, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -7055,202 +8276,241 @@ func file_messages_proto_rawDescGZIP() []byte {
 	return file_messages_proto_rawDescData
 }
 
-var file_messages_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 116)
+var file_messages_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 133)
 var file_messages_proto_goTypes = []interface{}{
 	(MessageType)(0),                               // 0: milvus.proto.messages.MessageType
 	(TxnState)(0),                                  // 1: milvus.proto.messages.TxnState
 	(ResourceDomain)(0),                            // 2: milvus.proto.messages.ResourceDomain
-	(*Message)(nil),                                // 3: milvus.proto.messages.Message
-	(*FlushMessageBody)(nil),                       // 4: milvus.proto.messages.FlushMessageBody
-	(*ManualFlushMessageBody)(nil),                 // 5: milvus.proto.messages.ManualFlushMessageBody
-	(*CreateSegmentMessageBody)(nil),               // 6: milvus.proto.messages.CreateSegmentMessageBody
-	(*BeginTxnMessageBody)(nil),                    // 7: milvus.proto.messages.BeginTxnMessageBody
-	(*CommitTxnMessageBody)(nil),                   // 8: milvus.proto.messages.CommitTxnMessageBody
-	(*RollbackTxnMessageBody)(nil),                 // 9: milvus.proto.messages.RollbackTxnMessageBody
-	(*TxnMessageBody)(nil),                         // 10: milvus.proto.messages.TxnMessageBody
-	(*TimeTickMessageHeader)(nil),                  // 11: milvus.proto.messages.TimeTickMessageHeader
-	(*InsertMessageHeader)(nil),                    // 12: milvus.proto.messages.InsertMessageHeader
-	(*PartitionSegmentAssignment)(nil),             // 13: milvus.proto.messages.PartitionSegmentAssignment
-	(*SegmentAssignment)(nil),                      // 14: milvus.proto.messages.SegmentAssignment
-	(*DeleteMessageHeader)(nil),                    // 15: milvus.proto.messages.DeleteMessageHeader
-	(*FlushMessageHeader)(nil),                     // 16: milvus.proto.messages.FlushMessageHeader
-	(*CreateSegmentMessageHeader)(nil),             // 17: milvus.proto.messages.CreateSegmentMessageHeader
-	(*ManualFlushMessageHeader)(nil),               // 18: milvus.proto.messages.ManualFlushMessageHeader
-	(*CreateCollectionMessageHeader)(nil),          // 19: milvus.proto.messages.CreateCollectionMessageHeader
-	(*DropCollectionMessageHeader)(nil),            // 20: milvus.proto.messages.DropCollectionMessageHeader
-	(*CreatePartitionMessageHeader)(nil),           // 21: milvus.proto.messages.CreatePartitionMessageHeader
-	(*DropPartitionMessageHeader)(nil),             // 22: milvus.proto.messages.DropPartitionMessageHeader
-	(*AlterReplicateConfigMessageHeader)(nil),      // 23: milvus.proto.messages.AlterReplicateConfigMessageHeader
-	(*AlterReplicateConfigMessageBody)(nil),        // 24: milvus.proto.messages.AlterReplicateConfigMessageBody
-	(*BeginTxnMessageHeader)(nil),                  // 25: milvus.proto.messages.BeginTxnMessageHeader
-	(*CommitTxnMessageHeader)(nil),                 // 26: milvus.proto.messages.CommitTxnMessageHeader
-	(*RollbackTxnMessageHeader)(nil),               // 27: milvus.proto.messages.RollbackTxnMessageHeader
-	(*TxnMessageHeader)(nil),                       // 28: milvus.proto.messages.TxnMessageHeader
-	(*ImportMessageHeader)(nil),                    // 29: milvus.proto.messages.ImportMessageHeader
-	(*SchemaChangeMessageHeader)(nil),              // 30: milvus.proto.messages.SchemaChangeMessageHeader
-	(*SchemaChangeMessageBody)(nil),                // 31: milvus.proto.messages.SchemaChangeMessageBody
-	(*AlterCollectionMessageHeader)(nil),           // 32: milvus.proto.messages.AlterCollectionMessageHeader
-	(*AlterCollectionMessageBody)(nil),             // 33: milvus.proto.messages.AlterCollectionMessageBody
-	(*AlterCollectionMessageUpdates)(nil),          // 34: milvus.proto.messages.AlterCollectionMessageUpdates
-	(*AlterLoadConfigOfAlterCollection)(nil),       // 35: milvus.proto.messages.AlterLoadConfigOfAlterCollection
-	(*AlterLoadConfigMessageHeader)(nil),           // 36: milvus.proto.messages.AlterLoadConfigMessageHeader
-	(*AlterLoadConfigMessageBody)(nil),             // 37: milvus.proto.messages.AlterLoadConfigMessageBody
-	(*LoadFieldConfig)(nil),                        // 38: milvus.proto.messages.LoadFieldConfig
-	(*LoadReplicaConfig)(nil),                      // 39: milvus.proto.messages.LoadReplicaConfig
-	(*DropLoadConfigMessageHeader)(nil),            // 40: milvus.proto.messages.DropLoadConfigMessageHeader
-	(*DropLoadConfigMessageBody)(nil),              // 41: milvus.proto.messages.DropLoadConfigMessageBody
-	(*CreateDatabaseMessageHeader)(nil),            // 42: milvus.proto.messages.CreateDatabaseMessageHeader
-	(*CreateDatabaseMessageBody)(nil),              // 43: milvus.proto.messages.CreateDatabaseMessageBody
-	(*AlterDatabaseMessageHeader)(nil),             // 44: milvus.proto.messages.AlterDatabaseMessageHeader
-	(*AlterDatabaseMessageBody)(nil),               // 45: milvus.proto.messages.AlterDatabaseMessageBody
-	(*AlterLoadConfigOfAlterDatabase)(nil),         // 46: milvus.proto.messages.AlterLoadConfigOfAlterDatabase
-	(*DropDatabaseMessageHeader)(nil),              // 47: milvus.proto.messages.DropDatabaseMessageHeader
-	(*DropDatabaseMessageBody)(nil),                // 48: milvus.proto.messages.DropDatabaseMessageBody
-	(*AlterAliasMessageHeader)(nil),                // 49: milvus.proto.messages.AlterAliasMessageHeader
-	(*AlterAliasMessageBody)(nil),                  // 50: milvus.proto.messages.AlterAliasMessageBody
-	(*DropAliasMessageHeader)(nil),                 // 51: milvus.proto.messages.DropAliasMessageHeader
-	(*DropAliasMessageBody)(nil),                   // 52: milvus.proto.messages.DropAliasMessageBody
-	(*CreateUserMessageHeader)(nil),                // 53: milvus.proto.messages.CreateUserMessageHeader
-	(*CreateUserMessageBody)(nil),                  // 54: milvus.proto.messages.CreateUserMessageBody
-	(*AlterUserMessageHeader)(nil),                 // 55: milvus.proto.messages.AlterUserMessageHeader
-	(*AlterUserMessageBody)(nil),                   // 56: milvus.proto.messages.AlterUserMessageBody
-	(*DropUserMessageHeader)(nil),                  // 57: milvus.proto.messages.DropUserMessageHeader
-	(*DropUserMessageBody)(nil),                    // 58: milvus.proto.messages.DropUserMessageBody
-	(*AlterRoleMessageHeader)(nil),                 // 59: milvus.proto.messages.AlterRoleMessageHeader
-	(*AlterRoleMessageBody)(nil),                   // 60: milvus.proto.messages.AlterRoleMessageBody
-	(*DropRoleMessageHeader)(nil),                  // 61: milvus.proto.messages.DropRoleMessageHeader
-	(*DropRoleMessageBody)(nil),                    // 62: milvus.proto.messages.DropRoleMessageBody
-	(*RoleBinding)(nil),                            // 63: milvus.proto.messages.RoleBinding
-	(*AlterUserRoleMessageHeader)(nil),             // 64: milvus.proto.messages.AlterUserRoleMessageHeader
-	(*AlterUserRoleMessageBody)(nil),               // 65: milvus.proto.messages.AlterUserRoleMessageBody
-	(*DropUserRoleMessageHeader)(nil),              // 66: milvus.proto.messages.DropUserRoleMessageHeader
-	(*DropUserRoleMessageBody)(nil),                // 67: milvus.proto.messages.DropUserRoleMessageBody
-	(*RestoreRBACMessageHeader)(nil),               // 68: milvus.proto.messages.RestoreRBACMessageHeader
-	(*RestoreRBACMessageBody)(nil),                 // 69: milvus.proto.messages.RestoreRBACMessageBody
-	(*AlterPrivilegeMessageHeader)(nil),            // 70: milvus.proto.messages.AlterPrivilegeMessageHeader
-	(*AlterPrivilegeMessageBody)(nil),              // 71: milvus.proto.messages.AlterPrivilegeMessageBody
-	(*DropPrivilegeMessageHeader)(nil),             // 72: milvus.proto.messages.DropPrivilegeMessageHeader
-	(*DropPrivilegeMessageBody)(nil),               // 73: milvus.proto.messages.DropPrivilegeMessageBody
-	(*AlterPrivilegeGroupMessageHeader)(nil),       // 74: milvus.proto.messages.AlterPrivilegeGroupMessageHeader
-	(*AlterPrivilegeGroupMessageBody)(nil),         // 75: milvus.proto.messages.AlterPrivilegeGroupMessageBody
-	(*DropPrivilegeGroupMessageHeader)(nil),        // 76: milvus.proto.messages.DropPrivilegeGroupMessageHeader
-	(*DropPrivilegeGroupMessageBody)(nil),          // 77: milvus.proto.messages.DropPrivilegeGroupMessageBody
-	(*AlterResourceGroupMessageHeader)(nil),        // 78: milvus.proto.messages.AlterResourceGroupMessageHeader
-	(*AlterResourceGroupMessageBody)(nil),          // 79: milvus.proto.messages.AlterResourceGroupMessageBody
-	(*DropResourceGroupMessageHeader)(nil),         // 80: milvus.proto.messages.DropResourceGroupMessageHeader
-	(*DropResourceGroupMessageBody)(nil),           // 81: milvus.proto.messages.DropResourceGroupMessageBody
-	(*CreateIndexMessageHeader)(nil),               // 82: milvus.proto.messages.CreateIndexMessageHeader
-	(*CreateIndexMessageBody)(nil),                 // 83: milvus.proto.messages.CreateIndexMessageBody
-	(*AlterIndexMessageHeader)(nil),                // 84: milvus.proto.messages.AlterIndexMessageHeader
-	(*AlterIndexMessageBody)(nil),                  // 85: milvus.proto.messages.AlterIndexMessageBody
-	(*DropIndexMessageHeader)(nil),                 // 86: milvus.proto.messages.DropIndexMessageHeader
-	(*DropIndexMessageBody)(nil),                   // 87: milvus.proto.messages.DropIndexMessageBody
-	(*CreateSnapshotMessageHeader)(nil),            // 88: milvus.proto.messages.CreateSnapshotMessageHeader
-	(*CreateSnapshotMessageBody)(nil),              // 89: milvus.proto.messages.CreateSnapshotMessageBody
-	(*DropSnapshotMessageHeader)(nil),              // 90: milvus.proto.messages.DropSnapshotMessageHeader
-	(*DropSnapshotMessageBody)(nil),                // 91: milvus.proto.messages.DropSnapshotMessageBody
-	(*RestoreSnapshotMessageHeader)(nil),           // 92: milvus.proto.messages.RestoreSnapshotMessageHeader
-	(*RestoreSnapshotMessageBody)(nil),             // 93: milvus.proto.messages.RestoreSnapshotMessageBody
-	(*AlterWALMessageHeader)(nil),                  // 94: milvus.proto.messages.AlterWALMessageHeader
-	(*AlterWALMessageBody)(nil),                    // 95: milvus.proto.messages.AlterWALMessageBody
-	(*RefreshExternalCollectionMessageHeader)(nil), // 96: milvus.proto.messages.RefreshExternalCollectionMessageHeader
-	(*RefreshExternalCollectionMessageBody)(nil),   // 97: milvus.proto.messages.RefreshExternalCollectionMessageBody
-	(*CacheExpirations)(nil),                       // 98: milvus.proto.messages.CacheExpirations
-	(*CacheExpiration)(nil),                        // 99: milvus.proto.messages.CacheExpiration
-	(*LegacyProxyCollectionMetaCache)(nil),         // 100: milvus.proto.messages.LegacyProxyCollectionMetaCache
-	(*ManualFlushExtraResponse)(nil),               // 101: milvus.proto.messages.ManualFlushExtraResponse
-	(*FlushAllMessageHeader)(nil),                  // 102: milvus.proto.messages.FlushAllMessageHeader
-	(*FlushAllMessageBody)(nil),                    // 103: milvus.proto.messages.FlushAllMessageBody
-	(*TxnContext)(nil),                             // 104: milvus.proto.messages.TxnContext
-	(*RMQMessageLayout)(nil),                       // 105: milvus.proto.messages.RMQMessageLayout
-	(*BroadcastHeader)(nil),                        // 106: milvus.proto.messages.BroadcastHeader
-	(*ReplicateHeader)(nil),                        // 107: milvus.proto.messages.ReplicateHeader
-	(*ResourceKey)(nil),                            // 108: milvus.proto.messages.ResourceKey
-	(*CipherHeader)(nil),                           // 109: milvus.proto.messages.CipherHeader
-	(*TruncateCollectionMessageHeader)(nil),        // 110: milvus.proto.messages.TruncateCollectionMessageHeader
-	(*TruncateCollectionMessageBody)(nil),          // 111: milvus.proto.messages.TruncateCollectionMessageBody
-	(*BatchUpdateManifestMessageHeader)(nil),       // 112: milvus.proto.messages.BatchUpdateManifestMessageHeader
-	(*BatchUpdateManifestMessageBody)(nil),         // 113: milvus.proto.messages.BatchUpdateManifestMessageBody
-	(*BatchUpdateManifestItem)(nil),                // 114: milvus.proto.messages.BatchUpdateManifestItem
-	nil,                                            // 115: milvus.proto.messages.Message.PropertiesEntry
-	nil,                                            // 116: milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry
-	nil,                                            // 117: milvus.proto.messages.AlterWALMessageHeader.ConfigEntry
-	nil,                                            // 118: milvus.proto.messages.RMQMessageLayout.PropertiesEntry
-	(datapb.SegmentLevel)(0),                       // 119: milvus.proto.data.SegmentLevel
-	(*commonpb.ReplicateConfiguration)(nil),        // 120: milvus.proto.common.ReplicateConfiguration
-	(*schemapb.CollectionSchema)(nil),              // 121: milvus.proto.schema.CollectionSchema
-	(*fieldmaskpb.FieldMask)(nil),                  // 122: google.protobuf.FieldMask
-	(commonpb.ConsistencyLevel)(0),                 // 123: milvus.proto.common.ConsistencyLevel
-	(*commonpb.KeyValuePair)(nil),                  // 124: milvus.proto.common.KeyValuePair
-	(commonpb.LoadPriority)(0),                     // 125: milvus.proto.common.LoadPriority
-	(*milvuspb.UserEntity)(nil),                    // 126: milvus.proto.milvus.UserEntity
-	(*internalpb.CredentialInfo)(nil),              // 127: milvus.proto.internal.CredentialInfo
-	(*milvuspb.RoleEntity)(nil),                    // 128: milvus.proto.milvus.RoleEntity
-	(*milvuspb.RBACMeta)(nil),                      // 129: milvus.proto.milvus.RBACMeta
-	(*milvuspb.GrantEntity)(nil),                   // 130: milvus.proto.milvus.GrantEntity
-	(*milvuspb.PrivilegeGroupInfo)(nil),            // 131: milvus.proto.milvus.PrivilegeGroupInfo
-	(*indexpb.FieldIndex)(nil),                     // 132: milvus.proto.index.FieldIndex
-	(commonpb.WALName)(0),                          // 133: milvus.proto.common.WALName
-	(commonpb.MsgType)(0),                          // 134: milvus.proto.common.MsgType
-	(*commonpb.MessageID)(nil),                     // 135: milvus.proto.common.MessageID
-	(*rgpb.ResourceGroupConfig)(nil),               // 136: milvus.proto.rg.ResourceGroupConfig
+	(RLSPolicyType)(0),                             // 3: milvus.proto.messages.RLSPolicyType
+	(RLSCacheOpType)(0),                            // 4: milvus.proto.messages.RLSCacheOpType
+	(*Message)(nil),                                // 5: milvus.proto.messages.Message
+	(*FlushMessageBody)(nil),                       // 6: milvus.proto.messages.FlushMessageBody
+	(*ManualFlushMessageBody)(nil),                 // 7: milvus.proto.messages.ManualFlushMessageBody
+	(*CreateSegmentMessageBody)(nil),               // 8: milvus.proto.messages.CreateSegmentMessageBody
+	(*BeginTxnMessageBody)(nil),                    // 9: milvus.proto.messages.BeginTxnMessageBody
+	(*CommitTxnMessageBody)(nil),                   // 10: milvus.proto.messages.CommitTxnMessageBody
+	(*RollbackTxnMessageBody)(nil),                 // 11: milvus.proto.messages.RollbackTxnMessageBody
+	(*TxnMessageBody)(nil),                         // 12: milvus.proto.messages.TxnMessageBody
+	(*TimeTickMessageHeader)(nil),                  // 13: milvus.proto.messages.TimeTickMessageHeader
+	(*InsertMessageHeader)(nil),                    // 14: milvus.proto.messages.InsertMessageHeader
+	(*PartitionSegmentAssignment)(nil),             // 15: milvus.proto.messages.PartitionSegmentAssignment
+	(*SegmentAssignment)(nil),                      // 16: milvus.proto.messages.SegmentAssignment
+	(*DeleteMessageHeader)(nil),                    // 17: milvus.proto.messages.DeleteMessageHeader
+	(*FlushMessageHeader)(nil),                     // 18: milvus.proto.messages.FlushMessageHeader
+	(*CreateSegmentMessageHeader)(nil),             // 19: milvus.proto.messages.CreateSegmentMessageHeader
+	(*ManualFlushMessageHeader)(nil),               // 20: milvus.proto.messages.ManualFlushMessageHeader
+	(*CreateCollectionMessageHeader)(nil),          // 21: milvus.proto.messages.CreateCollectionMessageHeader
+	(*DropCollectionMessageHeader)(nil),            // 22: milvus.proto.messages.DropCollectionMessageHeader
+	(*CreatePartitionMessageHeader)(nil),           // 23: milvus.proto.messages.CreatePartitionMessageHeader
+	(*DropPartitionMessageHeader)(nil),             // 24: milvus.proto.messages.DropPartitionMessageHeader
+	(*AlterReplicateConfigMessageHeader)(nil),      // 25: milvus.proto.messages.AlterReplicateConfigMessageHeader
+	(*AlterReplicateConfigMessageBody)(nil),        // 26: milvus.proto.messages.AlterReplicateConfigMessageBody
+	(*BeginTxnMessageHeader)(nil),                  // 27: milvus.proto.messages.BeginTxnMessageHeader
+	(*CommitTxnMessageHeader)(nil),                 // 28: milvus.proto.messages.CommitTxnMessageHeader
+	(*RollbackTxnMessageHeader)(nil),               // 29: milvus.proto.messages.RollbackTxnMessageHeader
+	(*TxnMessageHeader)(nil),                       // 30: milvus.proto.messages.TxnMessageHeader
+	(*ImportMessageHeader)(nil),                    // 31: milvus.proto.messages.ImportMessageHeader
+	(*SchemaChangeMessageHeader)(nil),              // 32: milvus.proto.messages.SchemaChangeMessageHeader
+	(*SchemaChangeMessageBody)(nil),                // 33: milvus.proto.messages.SchemaChangeMessageBody
+	(*AlterCollectionMessageHeader)(nil),           // 34: milvus.proto.messages.AlterCollectionMessageHeader
+	(*AlterCollectionMessageBody)(nil),             // 35: milvus.proto.messages.AlterCollectionMessageBody
+	(*AlterCollectionMessageUpdates)(nil),          // 36: milvus.proto.messages.AlterCollectionMessageUpdates
+	(*AlterLoadConfigOfAlterCollection)(nil),       // 37: milvus.proto.messages.AlterLoadConfigOfAlterCollection
+	(*AlterLoadConfigMessageHeader)(nil),           // 38: milvus.proto.messages.AlterLoadConfigMessageHeader
+	(*AlterLoadConfigMessageBody)(nil),             // 39: milvus.proto.messages.AlterLoadConfigMessageBody
+	(*LoadFieldConfig)(nil),                        // 40: milvus.proto.messages.LoadFieldConfig
+	(*LoadReplicaConfig)(nil),                      // 41: milvus.proto.messages.LoadReplicaConfig
+	(*DropLoadConfigMessageHeader)(nil),            // 42: milvus.proto.messages.DropLoadConfigMessageHeader
+	(*DropLoadConfigMessageBody)(nil),              // 43: milvus.proto.messages.DropLoadConfigMessageBody
+	(*CreateDatabaseMessageHeader)(nil),            // 44: milvus.proto.messages.CreateDatabaseMessageHeader
+	(*CreateDatabaseMessageBody)(nil),              // 45: milvus.proto.messages.CreateDatabaseMessageBody
+	(*AlterDatabaseMessageHeader)(nil),             // 46: milvus.proto.messages.AlterDatabaseMessageHeader
+	(*AlterDatabaseMessageBody)(nil),               // 47: milvus.proto.messages.AlterDatabaseMessageBody
+	(*AlterLoadConfigOfAlterDatabase)(nil),         // 48: milvus.proto.messages.AlterLoadConfigOfAlterDatabase
+	(*DropDatabaseMessageHeader)(nil),              // 49: milvus.proto.messages.DropDatabaseMessageHeader
+	(*DropDatabaseMessageBody)(nil),                // 50: milvus.proto.messages.DropDatabaseMessageBody
+	(*AlterAliasMessageHeader)(nil),                // 51: milvus.proto.messages.AlterAliasMessageHeader
+	(*AlterAliasMessageBody)(nil),                  // 52: milvus.proto.messages.AlterAliasMessageBody
+	(*DropAliasMessageHeader)(nil),                 // 53: milvus.proto.messages.DropAliasMessageHeader
+	(*DropAliasMessageBody)(nil),                   // 54: milvus.proto.messages.DropAliasMessageBody
+	(*CreateUserMessageHeader)(nil),                // 55: milvus.proto.messages.CreateUserMessageHeader
+	(*CreateUserMessageBody)(nil),                  // 56: milvus.proto.messages.CreateUserMessageBody
+	(*AlterUserMessageHeader)(nil),                 // 57: milvus.proto.messages.AlterUserMessageHeader
+	(*AlterUserMessageBody)(nil),                   // 58: milvus.proto.messages.AlterUserMessageBody
+	(*DropUserMessageHeader)(nil),                  // 59: milvus.proto.messages.DropUserMessageHeader
+	(*DropUserMessageBody)(nil),                    // 60: milvus.proto.messages.DropUserMessageBody
+	(*AlterRoleMessageHeader)(nil),                 // 61: milvus.proto.messages.AlterRoleMessageHeader
+	(*AlterRoleMessageBody)(nil),                   // 62: milvus.proto.messages.AlterRoleMessageBody
+	(*DropRoleMessageHeader)(nil),                  // 63: milvus.proto.messages.DropRoleMessageHeader
+	(*DropRoleMessageBody)(nil),                    // 64: milvus.proto.messages.DropRoleMessageBody
+	(*RoleBinding)(nil),                            // 65: milvus.proto.messages.RoleBinding
+	(*AlterUserRoleMessageHeader)(nil),             // 66: milvus.proto.messages.AlterUserRoleMessageHeader
+	(*AlterUserRoleMessageBody)(nil),               // 67: milvus.proto.messages.AlterUserRoleMessageBody
+	(*DropUserRoleMessageHeader)(nil),              // 68: milvus.proto.messages.DropUserRoleMessageHeader
+	(*DropUserRoleMessageBody)(nil),                // 69: milvus.proto.messages.DropUserRoleMessageBody
+	(*RestoreRBACMessageHeader)(nil),               // 70: milvus.proto.messages.RestoreRBACMessageHeader
+	(*RestoreRBACMessageBody)(nil),                 // 71: milvus.proto.messages.RestoreRBACMessageBody
+	(*AlterPrivilegeMessageHeader)(nil),            // 72: milvus.proto.messages.AlterPrivilegeMessageHeader
+	(*AlterPrivilegeMessageBody)(nil),              // 73: milvus.proto.messages.AlterPrivilegeMessageBody
+	(*DropPrivilegeMessageHeader)(nil),             // 74: milvus.proto.messages.DropPrivilegeMessageHeader
+	(*DropPrivilegeMessageBody)(nil),               // 75: milvus.proto.messages.DropPrivilegeMessageBody
+	(*AlterPrivilegeGroupMessageHeader)(nil),       // 76: milvus.proto.messages.AlterPrivilegeGroupMessageHeader
+	(*AlterPrivilegeGroupMessageBody)(nil),         // 77: milvus.proto.messages.AlterPrivilegeGroupMessageBody
+	(*DropPrivilegeGroupMessageHeader)(nil),        // 78: milvus.proto.messages.DropPrivilegeGroupMessageHeader
+	(*DropPrivilegeGroupMessageBody)(nil),          // 79: milvus.proto.messages.DropPrivilegeGroupMessageBody
+	(*AlterResourceGroupMessageHeader)(nil),        // 80: milvus.proto.messages.AlterResourceGroupMessageHeader
+	(*AlterResourceGroupMessageBody)(nil),          // 81: milvus.proto.messages.AlterResourceGroupMessageBody
+	(*DropResourceGroupMessageHeader)(nil),         // 82: milvus.proto.messages.DropResourceGroupMessageHeader
+	(*DropResourceGroupMessageBody)(nil),           // 83: milvus.proto.messages.DropResourceGroupMessageBody
+	(*CreateIndexMessageHeader)(nil),               // 84: milvus.proto.messages.CreateIndexMessageHeader
+	(*CreateIndexMessageBody)(nil),                 // 85: milvus.proto.messages.CreateIndexMessageBody
+	(*AlterIndexMessageHeader)(nil),                // 86: milvus.proto.messages.AlterIndexMessageHeader
+	(*AlterIndexMessageBody)(nil),                  // 87: milvus.proto.messages.AlterIndexMessageBody
+	(*DropIndexMessageHeader)(nil),                 // 88: milvus.proto.messages.DropIndexMessageHeader
+	(*DropIndexMessageBody)(nil),                   // 89: milvus.proto.messages.DropIndexMessageBody
+	(*CreateSnapshotMessageHeader)(nil),            // 90: milvus.proto.messages.CreateSnapshotMessageHeader
+	(*CreateSnapshotMessageBody)(nil),              // 91: milvus.proto.messages.CreateSnapshotMessageBody
+	(*DropSnapshotMessageHeader)(nil),              // 92: milvus.proto.messages.DropSnapshotMessageHeader
+	(*DropSnapshotMessageBody)(nil),                // 93: milvus.proto.messages.DropSnapshotMessageBody
+	(*RestoreSnapshotMessageHeader)(nil),           // 94: milvus.proto.messages.RestoreSnapshotMessageHeader
+	(*RestoreSnapshotMessageBody)(nil),             // 95: milvus.proto.messages.RestoreSnapshotMessageBody
+	(*AlterWALMessageHeader)(nil),                  // 96: milvus.proto.messages.AlterWALMessageHeader
+	(*AlterWALMessageBody)(nil),                    // 97: milvus.proto.messages.AlterWALMessageBody
+	(*RefreshExternalCollectionMessageHeader)(nil), // 98: milvus.proto.messages.RefreshExternalCollectionMessageHeader
+	(*RefreshExternalCollectionMessageBody)(nil),   // 99: milvus.proto.messages.RefreshExternalCollectionMessageBody
+	(*CacheExpirations)(nil),                       // 100: milvus.proto.messages.CacheExpirations
+	(*CacheExpiration)(nil),                        // 101: milvus.proto.messages.CacheExpiration
+	(*LegacyProxyCollectionMetaCache)(nil),         // 102: milvus.proto.messages.LegacyProxyCollectionMetaCache
+	(*ManualFlushExtraResponse)(nil),               // 103: milvus.proto.messages.ManualFlushExtraResponse
+	(*FlushAllMessageHeader)(nil),                  // 104: milvus.proto.messages.FlushAllMessageHeader
+	(*FlushAllMessageBody)(nil),                    // 105: milvus.proto.messages.FlushAllMessageBody
+	(*TxnContext)(nil),                             // 106: milvus.proto.messages.TxnContext
+	(*RMQMessageLayout)(nil),                       // 107: milvus.proto.messages.RMQMessageLayout
+	(*BroadcastHeader)(nil),                        // 108: milvus.proto.messages.BroadcastHeader
+	(*ReplicateHeader)(nil),                        // 109: milvus.proto.messages.ReplicateHeader
+	(*ResourceKey)(nil),                            // 110: milvus.proto.messages.ResourceKey
+	(*CipherHeader)(nil),                           // 111: milvus.proto.messages.CipherHeader
+	(*TruncateCollectionMessageHeader)(nil),        // 112: milvus.proto.messages.TruncateCollectionMessageHeader
+	(*TruncateCollectionMessageBody)(nil),          // 113: milvus.proto.messages.TruncateCollectionMessageBody
+	(*BatchUpdateManifestMessageHeader)(nil),       // 114: milvus.proto.messages.BatchUpdateManifestMessageHeader
+	(*BatchUpdateManifestMessageBody)(nil),         // 115: milvus.proto.messages.BatchUpdateManifestMessageBody
+	(*BatchUpdateManifestItem)(nil),                // 116: milvus.proto.messages.BatchUpdateManifestItem
+	(*RLSPolicy)(nil),                              // 117: milvus.proto.messages.RLSPolicy
+	(*RLSCollectionConfig)(nil),                    // 118: milvus.proto.messages.RLSCollectionConfig
+	(*RLSUserTags)(nil),                            // 119: milvus.proto.messages.RLSUserTags
+	(*CreateRowPolicyRequest)(nil),                 // 120: milvus.proto.messages.CreateRowPolicyRequest
+	(*DropRowPolicyRequest)(nil),                   // 121: milvus.proto.messages.DropRowPolicyRequest
+	(*ListRowPoliciesRequest)(nil),                 // 122: milvus.proto.messages.ListRowPoliciesRequest
+	(*ListRowPoliciesResponse)(nil),                // 123: milvus.proto.messages.ListRowPoliciesResponse
+	(*SetUserTagsRequest)(nil),                     // 124: milvus.proto.messages.SetUserTagsRequest
+	(*GetUserTagsRequest)(nil),                     // 125: milvus.proto.messages.GetUserTagsRequest
+	(*GetUserTagsResponse)(nil),                    // 126: milvus.proto.messages.GetUserTagsResponse
+	(*DeleteUserTagRequest)(nil),                   // 127: milvus.proto.messages.DeleteUserTagRequest
+	(*ListUsersWithTagRequest)(nil),                // 128: milvus.proto.messages.ListUsersWithTagRequest
+	(*ListUsersWithTagResponse)(nil),               // 129: milvus.proto.messages.ListUsersWithTagResponse
+	(*RefreshRLSCacheRequest)(nil),                 // 130: milvus.proto.messages.RefreshRLSCacheRequest
+	nil,                                            // 131: milvus.proto.messages.Message.PropertiesEntry
+	nil,                                            // 132: milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry
+	nil,                                            // 133: milvus.proto.messages.AlterWALMessageHeader.ConfigEntry
+	nil,                                            // 134: milvus.proto.messages.RMQMessageLayout.PropertiesEntry
+	nil,                                            // 135: milvus.proto.messages.RLSUserTags.TagsEntry
+	nil,                                            // 136: milvus.proto.messages.SetUserTagsRequest.TagsEntry
+	nil,                                            // 137: milvus.proto.messages.GetUserTagsResponse.TagsEntry
+	(datapb.SegmentLevel)(0),                       // 138: milvus.proto.data.SegmentLevel
+	(*commonpb.ReplicateConfiguration)(nil),        // 139: milvus.proto.common.ReplicateConfiguration
+	(*schemapb.CollectionSchema)(nil),              // 140: milvus.proto.schema.CollectionSchema
+	(*fieldmaskpb.FieldMask)(nil),                  // 141: google.protobuf.FieldMask
+	(commonpb.ConsistencyLevel)(0),                 // 142: milvus.proto.common.ConsistencyLevel
+	(*commonpb.KeyValuePair)(nil),                  // 143: milvus.proto.common.KeyValuePair
+	(commonpb.LoadPriority)(0),                     // 144: milvus.proto.common.LoadPriority
+	(*milvuspb.UserEntity)(nil),                    // 145: milvus.proto.milvus.UserEntity
+	(*internalpb.CredentialInfo)(nil),              // 146: milvus.proto.internal.CredentialInfo
+	(*milvuspb.RoleEntity)(nil),                    // 147: milvus.proto.milvus.RoleEntity
+	(*milvuspb.RBACMeta)(nil),                      // 148: milvus.proto.milvus.RBACMeta
+	(*milvuspb.GrantEntity)(nil),                   // 149: milvus.proto.milvus.GrantEntity
+	(*milvuspb.PrivilegeGroupInfo)(nil),            // 150: milvus.proto.milvus.PrivilegeGroupInfo
+	(*indexpb.FieldIndex)(nil),                     // 151: milvus.proto.index.FieldIndex
+	(commonpb.WALName)(0),                          // 152: milvus.proto.common.WALName
+	(commonpb.MsgType)(0),                          // 153: milvus.proto.common.MsgType
+	(*commonpb.MessageID)(nil),                     // 154: milvus.proto.common.MessageID
+	(*commonpb.MsgBase)(nil),                       // 155: milvus.proto.common.MsgBase
+	(*commonpb.Status)(nil),                        // 156: milvus.proto.common.Status
+	(*rgpb.ResourceGroupConfig)(nil),               // 157: milvus.proto.rg.ResourceGroupConfig
 }
 var file_messages_proto_depIdxs = []int32{
-	115, // 0: milvus.proto.messages.Message.properties:type_name -> milvus.proto.messages.Message.PropertiesEntry
-	3,   // 1: milvus.proto.messages.TxnMessageBody.messages:type_name -> milvus.proto.messages.Message
-	13,  // 2: milvus.proto.messages.InsertMessageHeader.partitions:type_name -> milvus.proto.messages.PartitionSegmentAssignment
-	14,  // 3: milvus.proto.messages.PartitionSegmentAssignment.segment_assignment:type_name -> milvus.proto.messages.SegmentAssignment
-	119, // 4: milvus.proto.messages.CreateSegmentMessageHeader.level:type_name -> milvus.proto.data.SegmentLevel
-	120, // 5: milvus.proto.messages.AlterReplicateConfigMessageHeader.replicate_configuration:type_name -> milvus.proto.common.ReplicateConfiguration
-	121, // 6: milvus.proto.messages.SchemaChangeMessageBody.schema:type_name -> milvus.proto.schema.CollectionSchema
-	122, // 7: milvus.proto.messages.AlterCollectionMessageHeader.update_mask:type_name -> google.protobuf.FieldMask
-	98,  // 8: milvus.proto.messages.AlterCollectionMessageHeader.cache_expirations:type_name -> milvus.proto.messages.CacheExpirations
-	34,  // 9: milvus.proto.messages.AlterCollectionMessageBody.updates:type_name -> milvus.proto.messages.AlterCollectionMessageUpdates
-	121, // 10: milvus.proto.messages.AlterCollectionMessageUpdates.schema:type_name -> milvus.proto.schema.CollectionSchema
-	123, // 11: milvus.proto.messages.AlterCollectionMessageUpdates.consistency_level:type_name -> milvus.proto.common.ConsistencyLevel
-	124, // 12: milvus.proto.messages.AlterCollectionMessageUpdates.properties:type_name -> milvus.proto.common.KeyValuePair
-	35,  // 13: milvus.proto.messages.AlterCollectionMessageUpdates.alter_load_config:type_name -> milvus.proto.messages.AlterLoadConfigOfAlterCollection
-	38,  // 14: milvus.proto.messages.AlterLoadConfigMessageHeader.load_fields:type_name -> milvus.proto.messages.LoadFieldConfig
-	39,  // 15: milvus.proto.messages.AlterLoadConfigMessageHeader.replicas:type_name -> milvus.proto.messages.LoadReplicaConfig
-	125, // 16: milvus.proto.messages.LoadReplicaConfig.priority:type_name -> milvus.proto.common.LoadPriority
-	124, // 17: milvus.proto.messages.CreateDatabaseMessageBody.properties:type_name -> milvus.proto.common.KeyValuePair
-	124, // 18: milvus.proto.messages.AlterDatabaseMessageBody.properties:type_name -> milvus.proto.common.KeyValuePair
-	46,  // 19: milvus.proto.messages.AlterDatabaseMessageBody.alter_load_config:type_name -> milvus.proto.messages.AlterLoadConfigOfAlterDatabase
-	126, // 20: milvus.proto.messages.CreateUserMessageHeader.user_entity:type_name -> milvus.proto.milvus.UserEntity
-	127, // 21: milvus.proto.messages.CreateUserMessageBody.credential_info:type_name -> milvus.proto.internal.CredentialInfo
-	126, // 22: milvus.proto.messages.AlterUserMessageHeader.user_entity:type_name -> milvus.proto.milvus.UserEntity
-	127, // 23: milvus.proto.messages.AlterUserMessageBody.credential_info:type_name -> milvus.proto.internal.CredentialInfo
-	128, // 24: milvus.proto.messages.AlterRoleMessageHeader.role_entity:type_name -> milvus.proto.milvus.RoleEntity
-	126, // 25: milvus.proto.messages.RoleBinding.user_entity:type_name -> milvus.proto.milvus.UserEntity
-	128, // 26: milvus.proto.messages.RoleBinding.role_entity:type_name -> milvus.proto.milvus.RoleEntity
-	63,  // 27: milvus.proto.messages.AlterUserRoleMessageHeader.role_binding:type_name -> milvus.proto.messages.RoleBinding
-	63,  // 28: milvus.proto.messages.DropUserRoleMessageHeader.role_binding:type_name -> milvus.proto.messages.RoleBinding
-	129, // 29: milvus.proto.messages.RestoreRBACMessageBody.rbac_meta:type_name -> milvus.proto.milvus.RBACMeta
-	130, // 30: milvus.proto.messages.AlterPrivilegeMessageHeader.entity:type_name -> milvus.proto.milvus.GrantEntity
-	130, // 31: milvus.proto.messages.DropPrivilegeMessageHeader.entity:type_name -> milvus.proto.milvus.GrantEntity
-	131, // 32: milvus.proto.messages.AlterPrivilegeGroupMessageHeader.privilege_group_info:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
-	131, // 33: milvus.proto.messages.DropPrivilegeGroupMessageHeader.privilege_group_info:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
-	116, // 34: milvus.proto.messages.AlterResourceGroupMessageHeader.resource_group_configs:type_name -> milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry
-	132, // 35: milvus.proto.messages.CreateIndexMessageBody.field_index:type_name -> milvus.proto.index.FieldIndex
-	132, // 36: milvus.proto.messages.AlterIndexMessageBody.field_indexes:type_name -> milvus.proto.index.FieldIndex
-	133, // 37: milvus.proto.messages.AlterWALMessageHeader.target_wal_name:type_name -> milvus.proto.common.WALName
-	117, // 38: milvus.proto.messages.AlterWALMessageHeader.config:type_name -> milvus.proto.messages.AlterWALMessageHeader.ConfigEntry
-	99,  // 39: milvus.proto.messages.CacheExpirations.cache_expirations:type_name -> milvus.proto.messages.CacheExpiration
-	100, // 40: milvus.proto.messages.CacheExpiration.legacy_proxy_collection_meta_cache:type_name -> milvus.proto.messages.LegacyProxyCollectionMetaCache
-	134, // 41: milvus.proto.messages.LegacyProxyCollectionMetaCache.msg_type:type_name -> milvus.proto.common.MsgType
-	118, // 42: milvus.proto.messages.RMQMessageLayout.properties:type_name -> milvus.proto.messages.RMQMessageLayout.PropertiesEntry
-	108, // 43: milvus.proto.messages.BroadcastHeader.Resource_keys:type_name -> milvus.proto.messages.ResourceKey
-	135, // 44: milvus.proto.messages.ReplicateHeader.message_id:type_name -> milvus.proto.common.MessageID
-	135, // 45: milvus.proto.messages.ReplicateHeader.last_confirmed_message_id:type_name -> milvus.proto.common.MessageID
+	131, // 0: milvus.proto.messages.Message.properties:type_name -> milvus.proto.messages.Message.PropertiesEntry
+	5,   // 1: milvus.proto.messages.TxnMessageBody.messages:type_name -> milvus.proto.messages.Message
+	15,  // 2: milvus.proto.messages.InsertMessageHeader.partitions:type_name -> milvus.proto.messages.PartitionSegmentAssignment
+	16,  // 3: milvus.proto.messages.PartitionSegmentAssignment.segment_assignment:type_name -> milvus.proto.messages.SegmentAssignment
+	138, // 4: milvus.proto.messages.CreateSegmentMessageHeader.level:type_name -> milvus.proto.data.SegmentLevel
+	139, // 5: milvus.proto.messages.AlterReplicateConfigMessageHeader.replicate_configuration:type_name -> milvus.proto.common.ReplicateConfiguration
+	140, // 6: milvus.proto.messages.SchemaChangeMessageBody.schema:type_name -> milvus.proto.schema.CollectionSchema
+	141, // 7: milvus.proto.messages.AlterCollectionMessageHeader.update_mask:type_name -> google.protobuf.FieldMask
+	100, // 8: milvus.proto.messages.AlterCollectionMessageHeader.cache_expirations:type_name -> milvus.proto.messages.CacheExpirations
+	36,  // 9: milvus.proto.messages.AlterCollectionMessageBody.updates:type_name -> milvus.proto.messages.AlterCollectionMessageUpdates
+	140, // 10: milvus.proto.messages.AlterCollectionMessageUpdates.schema:type_name -> milvus.proto.schema.CollectionSchema
+	142, // 11: milvus.proto.messages.AlterCollectionMessageUpdates.consistency_level:type_name -> milvus.proto.common.ConsistencyLevel
+	143, // 12: milvus.proto.messages.AlterCollectionMessageUpdates.properties:type_name -> milvus.proto.common.KeyValuePair
+	37,  // 13: milvus.proto.messages.AlterCollectionMessageUpdates.alter_load_config:type_name -> milvus.proto.messages.AlterLoadConfigOfAlterCollection
+	40,  // 14: milvus.proto.messages.AlterLoadConfigMessageHeader.load_fields:type_name -> milvus.proto.messages.LoadFieldConfig
+	41,  // 15: milvus.proto.messages.AlterLoadConfigMessageHeader.replicas:type_name -> milvus.proto.messages.LoadReplicaConfig
+	144, // 16: milvus.proto.messages.LoadReplicaConfig.priority:type_name -> milvus.proto.common.LoadPriority
+	143, // 17: milvus.proto.messages.CreateDatabaseMessageBody.properties:type_name -> milvus.proto.common.KeyValuePair
+	143, // 18: milvus.proto.messages.AlterDatabaseMessageBody.properties:type_name -> milvus.proto.common.KeyValuePair
+	48,  // 19: milvus.proto.messages.AlterDatabaseMessageBody.alter_load_config:type_name -> milvus.proto.messages.AlterLoadConfigOfAlterDatabase
+	145, // 20: milvus.proto.messages.CreateUserMessageHeader.user_entity:type_name -> milvus.proto.milvus.UserEntity
+	146, // 21: milvus.proto.messages.CreateUserMessageBody.credential_info:type_name -> milvus.proto.internal.CredentialInfo
+	145, // 22: milvus.proto.messages.AlterUserMessageHeader.user_entity:type_name -> milvus.proto.milvus.UserEntity
+	146, // 23: milvus.proto.messages.AlterUserMessageBody.credential_info:type_name -> milvus.proto.internal.CredentialInfo
+	147, // 24: milvus.proto.messages.AlterRoleMessageHeader.role_entity:type_name -> milvus.proto.milvus.RoleEntity
+	145, // 25: milvus.proto.messages.RoleBinding.user_entity:type_name -> milvus.proto.milvus.UserEntity
+	147, // 26: milvus.proto.messages.RoleBinding.role_entity:type_name -> milvus.proto.milvus.RoleEntity
+	65,  // 27: milvus.proto.messages.AlterUserRoleMessageHeader.role_binding:type_name -> milvus.proto.messages.RoleBinding
+	65,  // 28: milvus.proto.messages.DropUserRoleMessageHeader.role_binding:type_name -> milvus.proto.messages.RoleBinding
+	148, // 29: milvus.proto.messages.RestoreRBACMessageBody.rbac_meta:type_name -> milvus.proto.milvus.RBACMeta
+	149, // 30: milvus.proto.messages.AlterPrivilegeMessageHeader.entity:type_name -> milvus.proto.milvus.GrantEntity
+	149, // 31: milvus.proto.messages.DropPrivilegeMessageHeader.entity:type_name -> milvus.proto.milvus.GrantEntity
+	150, // 32: milvus.proto.messages.AlterPrivilegeGroupMessageHeader.privilege_group_info:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
+	150, // 33: milvus.proto.messages.DropPrivilegeGroupMessageHeader.privilege_group_info:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
+	132, // 34: milvus.proto.messages.AlterResourceGroupMessageHeader.resource_group_configs:type_name -> milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry
+	151, // 35: milvus.proto.messages.CreateIndexMessageBody.field_index:type_name -> milvus.proto.index.FieldIndex
+	151, // 36: milvus.proto.messages.AlterIndexMessageBody.field_indexes:type_name -> milvus.proto.index.FieldIndex
+	152, // 37: milvus.proto.messages.AlterWALMessageHeader.target_wal_name:type_name -> milvus.proto.common.WALName
+	133, // 38: milvus.proto.messages.AlterWALMessageHeader.config:type_name -> milvus.proto.messages.AlterWALMessageHeader.ConfigEntry
+	101, // 39: milvus.proto.messages.CacheExpirations.cache_expirations:type_name -> milvus.proto.messages.CacheExpiration
+	102, // 40: milvus.proto.messages.CacheExpiration.legacy_proxy_collection_meta_cache:type_name -> milvus.proto.messages.LegacyProxyCollectionMetaCache
+	153, // 41: milvus.proto.messages.LegacyProxyCollectionMetaCache.msg_type:type_name -> milvus.proto.common.MsgType
+	134, // 42: milvus.proto.messages.RMQMessageLayout.properties:type_name -> milvus.proto.messages.RMQMessageLayout.PropertiesEntry
+	110, // 43: milvus.proto.messages.BroadcastHeader.Resource_keys:type_name -> milvus.proto.messages.ResourceKey
+	154, // 44: milvus.proto.messages.ReplicateHeader.message_id:type_name -> milvus.proto.common.MessageID
+	154, // 45: milvus.proto.messages.ReplicateHeader.last_confirmed_message_id:type_name -> milvus.proto.common.MessageID
 	2,   // 46: milvus.proto.messages.ResourceKey.domain:type_name -> milvus.proto.messages.ResourceDomain
-	114, // 47: milvus.proto.messages.BatchUpdateManifestMessageBody.items:type_name -> milvus.proto.messages.BatchUpdateManifestItem
-	136, // 48: milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry.value:type_name -> milvus.proto.rg.ResourceGroupConfig
-	49,  // [49:49] is the sub-list for method output_type
-	49,  // [49:49] is the sub-list for method input_type
-	49,  // [49:49] is the sub-list for extension type_name
-	49,  // [49:49] is the sub-list for extension extendee
-	0,   // [0:49] is the sub-list for field type_name
+	116, // 47: milvus.proto.messages.BatchUpdateManifestMessageBody.items:type_name -> milvus.proto.messages.BatchUpdateManifestItem
+	3,   // 48: milvus.proto.messages.RLSPolicy.policy_type:type_name -> milvus.proto.messages.RLSPolicyType
+	135, // 49: milvus.proto.messages.RLSUserTags.tags:type_name -> milvus.proto.messages.RLSUserTags.TagsEntry
+	155, // 50: milvus.proto.messages.CreateRowPolicyRequest.base:type_name -> milvus.proto.common.MsgBase
+	117, // 51: milvus.proto.messages.CreateRowPolicyRequest.policy:type_name -> milvus.proto.messages.RLSPolicy
+	155, // 52: milvus.proto.messages.DropRowPolicyRequest.base:type_name -> milvus.proto.common.MsgBase
+	155, // 53: milvus.proto.messages.ListRowPoliciesRequest.base:type_name -> milvus.proto.common.MsgBase
+	156, // 54: milvus.proto.messages.ListRowPoliciesResponse.status:type_name -> milvus.proto.common.Status
+	117, // 55: milvus.proto.messages.ListRowPoliciesResponse.policies:type_name -> milvus.proto.messages.RLSPolicy
+	155, // 56: milvus.proto.messages.SetUserTagsRequest.base:type_name -> milvus.proto.common.MsgBase
+	136, // 57: milvus.proto.messages.SetUserTagsRequest.tags:type_name -> milvus.proto.messages.SetUserTagsRequest.TagsEntry
+	155, // 58: milvus.proto.messages.GetUserTagsRequest.base:type_name -> milvus.proto.common.MsgBase
+	156, // 59: milvus.proto.messages.GetUserTagsResponse.status:type_name -> milvus.proto.common.Status
+	137, // 60: milvus.proto.messages.GetUserTagsResponse.tags:type_name -> milvus.proto.messages.GetUserTagsResponse.TagsEntry
+	155, // 61: milvus.proto.messages.DeleteUserTagRequest.base:type_name -> milvus.proto.common.MsgBase
+	155, // 62: milvus.proto.messages.ListUsersWithTagRequest.base:type_name -> milvus.proto.common.MsgBase
+	156, // 63: milvus.proto.messages.ListUsersWithTagResponse.status:type_name -> milvus.proto.common.Status
+	155, // 64: milvus.proto.messages.RefreshRLSCacheRequest.base:type_name -> milvus.proto.common.MsgBase
+	4,   // 65: milvus.proto.messages.RefreshRLSCacheRequest.op_type:type_name -> milvus.proto.messages.RLSCacheOpType
+	157, // 66: milvus.proto.messages.AlterResourceGroupMessageHeader.ResourceGroupConfigsEntry.value:type_name -> milvus.proto.rg.ResourceGroupConfig
+	67,  // [67:67] is the sub-list for method output_type
+	67,  // [67:67] is the sub-list for method input_type
+	67,  // [67:67] is the sub-list for extension type_name
+	67,  // [67:67] is the sub-list for extension extendee
+	0,   // [0:67] is the sub-list for field type_name
 }
 
 func init() { file_messages_proto_init() }
@@ -8603,6 +9863,174 @@ func file_messages_proto_init() {
 				return nil
 			}
 		}
+		file_messages_proto_msgTypes[112].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*RLSPolicy); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[113].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*RLSCollectionConfig); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[114].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*RLSUserTags); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[115].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*CreateRowPolicyRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[116].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*DropRowPolicyRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[117].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ListRowPoliciesRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[118].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ListRowPoliciesResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[119].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SetUserTagsRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[120].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetUserTagsRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[121].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetUserTagsResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[122].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*DeleteUserTagRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[123].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ListUsersWithTagRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[124].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ListUsersWithTagResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_messages_proto_msgTypes[125].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*RefreshRLSCacheRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	file_messages_proto_msgTypes[96].OneofWrappers = []interface{}{
 		(*CacheExpiration_LegacyProxyCollectionMetaCache)(nil),
@@ -8612,8 +10040,8 @@ func file_messages_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_messages_proto_rawDesc,
-			NumEnums:      3,
-			NumMessages:   116,
+			NumEnums:      5,
+			NumMessages:   133,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

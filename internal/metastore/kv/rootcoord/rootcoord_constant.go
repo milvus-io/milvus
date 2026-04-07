@@ -58,6 +58,11 @@ const (
 	// FileResourceMetaPrefix prefix for file resource meta
 	FileResourceMetaPrefix = ComponentPrefix + "/file_resource_info"
 	FileResourceVersionKey = ComponentPrefix + "/file_resource_version"
+
+	// RLS (Row Level Security) prefixes
+	RLSPolicyMetaPrefix           = ComponentPrefix + "/rls/policy"
+	RLSCollectionConfigMetaPrefix = ComponentPrefix + "/rls/collection_config"
+	RLSUserTagsMetaPrefix         = ComponentPrefix + "/rls/user_tags"
 )
 
 func BuildDatabasePrefixWithDBID(dbID int64) string {
@@ -81,4 +86,25 @@ func getDatabasePrefix(dbID int64) string {
 
 func BuildPrivilegeGroupkey(groupName string) string {
 	return fmt.Sprintf("%s/%s", PrivilegeGroupPrefix, groupName)
+}
+
+// RLS key builders
+func BuildRLSPolicyKey(dbID int64, collectionID int64, policyName string) string {
+	return fmt.Sprintf("%s/%d/%d/%s", RLSPolicyMetaPrefix, dbID, collectionID, policyName)
+}
+
+func BuildRLSPoliciesPrefix(dbID int64, collectionID int64) string {
+	return fmt.Sprintf("%s/%d/%d/", RLSPolicyMetaPrefix, dbID, collectionID)
+}
+
+func BuildRLSCollectionConfigKey(dbID int64, collectionID int64) string {
+	return fmt.Sprintf("%s/%d/%d", RLSCollectionConfigMetaPrefix, dbID, collectionID)
+}
+
+func BuildRLSUserTagsKey(userName string) string {
+	return fmt.Sprintf("%s/%s", RLSUserTagsMetaPrefix, userName)
+}
+
+func GetRLSUserTagsPrefix() string {
+	return RLSUserTagsMetaPrefix + "/"
 }

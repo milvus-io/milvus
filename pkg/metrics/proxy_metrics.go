@@ -480,6 +480,63 @@ var (
 			Name:      "scanned_total_mb",
 			Help:      "the scanned total megabytes",
 		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, collectionName})
+
+	// RLS (Row Level Security) metrics
+
+	// ProxyRLSEvaluationTotal counts RLS policy evaluations by operation type and status
+	ProxyRLSEvaluationTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "rls_evaluation_total",
+			Help:      "total number of RLS policy evaluations",
+		}, []string{nodeIDLabelName, msgTypeLabelName, statusLabelName, databaseLabelName, collectionName})
+
+	// ProxyRLSEvaluationLatency records latency of RLS policy evaluation in milliseconds
+	ProxyRLSEvaluationLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "rls_evaluation_latency",
+			Help:      "latency of RLS policy evaluation in milliseconds",
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, collectionName})
+
+	// ProxyRLSCacheOps counts RLS cache operations (hit/miss)
+	ProxyRLSCacheOps = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "rls_cache_ops_total",
+			Help:      "total number of RLS cache operations",
+		}, []string{nodeIDLabelName, cacheStateLabelName})
+
+	// ProxyRLSAccessDenied counts access denied events by RLS policies
+	ProxyRLSAccessDenied = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "rls_access_denied_total",
+			Help:      "total number of access denied events by RLS policies",
+		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, collectionName})
+
+	// ProxyRLSActivePolicies tracks the number of active RLS policies per collection
+	ProxyRLSActivePolicies = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "rls_active_policies",
+			Help:      "number of active RLS policies per collection",
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
+
+	// ProxyRLSLoadFailures counts policy/user-tag load failures
+	ProxyRLSLoadFailures = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "rls_load_failures_total",
+			Help:      "total number of RLS policy or user tag load failures",
+		}, []string{nodeIDLabelName, msgTypeLabelName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -552,6 +609,15 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyScannedRemoteMB)
 	registry.MustRegister(ProxyScannedTotalMB)
+
+	// RLS metrics
+	registry.MustRegister(ProxyRLSEvaluationTotal)
+	registry.MustRegister(ProxyRLSEvaluationLatency)
+	registry.MustRegister(ProxyRLSCacheOps)
+	registry.MustRegister(ProxyRLSAccessDenied)
+	registry.MustRegister(ProxyRLSActivePolicies)
+	registry.MustRegister(ProxyRLSLoadFailures)
+
 	RegisterStreamingServiceClient(registry)
 	RegisterLoggingMetrics(registry)
 }

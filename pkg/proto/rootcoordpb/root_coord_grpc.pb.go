@@ -11,6 +11,7 @@ import (
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	proxypb "github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
@@ -94,6 +95,14 @@ const (
 	RootCoord_GetClientTelemetry_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/GetClientTelemetry"
 	RootCoord_PushClientCommand_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/PushClientCommand"
 	RootCoord_DeleteClientCommand_FullMethodName           = "/milvus.proto.rootcoord.RootCoord/DeleteClientCommand"
+	RootCoord_CreateRowPolicy_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/CreateRowPolicy"
+	RootCoord_DropRowPolicy_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/DropRowPolicy"
+	RootCoord_ListRowPolicies_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/ListRowPolicies"
+	RootCoord_SetUserTags_FullMethodName                   = "/milvus.proto.rootcoord.RootCoord/SetUserTags"
+	RootCoord_GetUserTags_FullMethodName                   = "/milvus.proto.rootcoord.RootCoord/GetUserTags"
+	RootCoord_DeleteUserTag_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/DeleteUserTag"
+	RootCoord_ListUsersWithTag_FullMethodName              = "/milvus.proto.rootcoord.RootCoord/ListUsersWithTag"
+	RootCoord_RefreshRLSCache_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/RefreshRLSCache"
 )
 
 // RootCoordClient is the client API for RootCoord service.
@@ -241,6 +250,15 @@ type RootCoordClient interface {
 	GetClientTelemetry(ctx context.Context, in *milvuspb.GetClientTelemetryRequest, opts ...grpc.CallOption) (*milvuspb.GetClientTelemetryResponse, error)
 	PushClientCommand(ctx context.Context, in *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error)
 	DeleteClientCommand(ctx context.Context, in *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error)
+	// RLS (Row Level Security) Management
+	CreateRowPolicy(ctx context.Context, in *messagespb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	DropRowPolicy(ctx context.Context, in *messagespb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ListRowPolicies(ctx context.Context, in *messagespb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*messagespb.ListRowPoliciesResponse, error)
+	SetUserTags(ctx context.Context, in *messagespb.SetUserTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	GetUserTags(ctx context.Context, in *messagespb.GetUserTagsRequest, opts ...grpc.CallOption) (*messagespb.GetUserTagsResponse, error)
+	DeleteUserTag(ctx context.Context, in *messagespb.DeleteUserTagRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ListUsersWithTag(ctx context.Context, in *messagespb.ListUsersWithTagRequest, opts ...grpc.CallOption) (*messagespb.ListUsersWithTagResponse, error)
+	RefreshRLSCache(ctx context.Context, in *messagespb.RefreshRLSCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type rootCoordClient struct {
@@ -890,6 +908,78 @@ func (c *rootCoordClient) DeleteClientCommand(ctx context.Context, in *milvuspb.
 	return out, nil
 }
 
+func (c *rootCoordClient) CreateRowPolicy(ctx context.Context, in *messagespb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_CreateRowPolicy_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) DropRowPolicy(ctx context.Context, in *messagespb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_DropRowPolicy_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) ListRowPolicies(ctx context.Context, in *messagespb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*messagespb.ListRowPoliciesResponse, error) {
+	out := new(messagespb.ListRowPoliciesResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ListRowPolicies_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) SetUserTags(ctx context.Context, in *messagespb.SetUserTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_SetUserTags_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) GetUserTags(ctx context.Context, in *messagespb.GetUserTagsRequest, opts ...grpc.CallOption) (*messagespb.GetUserTagsResponse, error) {
+	out := new(messagespb.GetUserTagsResponse)
+	err := c.cc.Invoke(ctx, RootCoord_GetUserTags_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) DeleteUserTag(ctx context.Context, in *messagespb.DeleteUserTagRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_DeleteUserTag_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) ListUsersWithTag(ctx context.Context, in *messagespb.ListUsersWithTagRequest, opts ...grpc.CallOption) (*messagespb.ListUsersWithTagResponse, error) {
+	out := new(messagespb.ListUsersWithTagResponse)
+	err := c.cc.Invoke(ctx, RootCoord_ListUsersWithTag_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) RefreshRLSCache(ctx context.Context, in *messagespb.RefreshRLSCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_RefreshRLSCache_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RootCoordServer is the server API for RootCoord service.
 // All implementations should embed UnimplementedRootCoordServer
 // for forward compatibility
@@ -1035,6 +1125,15 @@ type RootCoordServer interface {
 	GetClientTelemetry(context.Context, *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error)
 	PushClientCommand(context.Context, *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error)
 	DeleteClientCommand(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error)
+	// RLS (Row Level Security) Management
+	CreateRowPolicy(context.Context, *messagespb.CreateRowPolicyRequest) (*commonpb.Status, error)
+	DropRowPolicy(context.Context, *messagespb.DropRowPolicyRequest) (*commonpb.Status, error)
+	ListRowPolicies(context.Context, *messagespb.ListRowPoliciesRequest) (*messagespb.ListRowPoliciesResponse, error)
+	SetUserTags(context.Context, *messagespb.SetUserTagsRequest) (*commonpb.Status, error)
+	GetUserTags(context.Context, *messagespb.GetUserTagsRequest) (*messagespb.GetUserTagsResponse, error)
+	DeleteUserTag(context.Context, *messagespb.DeleteUserTagRequest) (*commonpb.Status, error)
+	ListUsersWithTag(context.Context, *messagespb.ListUsersWithTagRequest) (*messagespb.ListUsersWithTagResponse, error)
+	RefreshRLSCache(context.Context, *messagespb.RefreshRLSCacheRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedRootCoordServer should be embedded to have forward compatible implementations.
@@ -1253,6 +1352,30 @@ func (UnimplementedRootCoordServer) PushClientCommand(context.Context, *milvuspb
 }
 func (UnimplementedRootCoordServer) DeleteClientCommand(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteClientCommand not implemented")
+}
+func (UnimplementedRootCoordServer) CreateRowPolicy(context.Context, *messagespb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateRowPolicy not implemented")
+}
+func (UnimplementedRootCoordServer) DropRowPolicy(context.Context, *messagespb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DropRowPolicy not implemented")
+}
+func (UnimplementedRootCoordServer) ListRowPolicies(context.Context, *messagespb.ListRowPoliciesRequest) (*messagespb.ListRowPoliciesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRowPolicies not implemented")
+}
+func (UnimplementedRootCoordServer) SetUserTags(context.Context, *messagespb.SetUserTagsRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetUserTags not implemented")
+}
+func (UnimplementedRootCoordServer) GetUserTags(context.Context, *messagespb.GetUserTagsRequest) (*messagespb.GetUserTagsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetUserTags not implemented")
+}
+func (UnimplementedRootCoordServer) DeleteUserTag(context.Context, *messagespb.DeleteUserTagRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteUserTag not implemented")
+}
+func (UnimplementedRootCoordServer) ListUsersWithTag(context.Context, *messagespb.ListUsersWithTagRequest) (*messagespb.ListUsersWithTagResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListUsersWithTag not implemented")
+}
+func (UnimplementedRootCoordServer) RefreshRLSCache(context.Context, *messagespb.RefreshRLSCacheRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RefreshRLSCache not implemented")
 }
 
 // UnsafeRootCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -2544,6 +2667,150 @@ func _RootCoord_DeleteClientCommand_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_CreateRowPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(messagespb.CreateRowPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).CreateRowPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_CreateRowPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).CreateRowPolicy(ctx, req.(*messagespb.CreateRowPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_DropRowPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(messagespb.DropRowPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).DropRowPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_DropRowPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).DropRowPolicy(ctx, req.(*messagespb.DropRowPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_ListRowPolicies_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(messagespb.ListRowPoliciesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ListRowPolicies(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ListRowPolicies_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ListRowPolicies(ctx, req.(*messagespb.ListRowPoliciesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_SetUserTags_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(messagespb.SetUserTagsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).SetUserTags(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_SetUserTags_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).SetUserTags(ctx, req.(*messagespb.SetUserTagsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_GetUserTags_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(messagespb.GetUserTagsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).GetUserTags(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_GetUserTags_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).GetUserTags(ctx, req.(*messagespb.GetUserTagsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_DeleteUserTag_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(messagespb.DeleteUserTagRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).DeleteUserTag(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_DeleteUserTag_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).DeleteUserTag(ctx, req.(*messagespb.DeleteUserTagRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_ListUsersWithTag_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(messagespb.ListUsersWithTagRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).ListUsersWithTag(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_ListUsersWithTag_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).ListUsersWithTag(ctx, req.(*messagespb.ListUsersWithTagRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_RefreshRLSCache_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(messagespb.RefreshRLSCacheRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).RefreshRLSCache(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_RefreshRLSCache_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).RefreshRLSCache(ctx, req.(*messagespb.RefreshRLSCacheRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RootCoord_ServiceDesc is the grpc.ServiceDesc for RootCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2834,6 +3101,38 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteClientCommand",
 			Handler:    _RootCoord_DeleteClientCommand_Handler,
+		},
+		{
+			MethodName: "CreateRowPolicy",
+			Handler:    _RootCoord_CreateRowPolicy_Handler,
+		},
+		{
+			MethodName: "DropRowPolicy",
+			Handler:    _RootCoord_DropRowPolicy_Handler,
+		},
+		{
+			MethodName: "ListRowPolicies",
+			Handler:    _RootCoord_ListRowPolicies_Handler,
+		},
+		{
+			MethodName: "SetUserTags",
+			Handler:    _RootCoord_SetUserTags_Handler,
+		},
+		{
+			MethodName: "GetUserTags",
+			Handler:    _RootCoord_GetUserTags_Handler,
+		},
+		{
+			MethodName: "DeleteUserTag",
+			Handler:    _RootCoord_DeleteUserTag_Handler,
+		},
+		{
+			MethodName: "ListUsersWithTag",
+			Handler:    _RootCoord_ListUsersWithTag_Handler,
+		},
+		{
+			MethodName: "RefreshRLSCache",
+			Handler:    _RootCoord_RefreshRLSCache_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
