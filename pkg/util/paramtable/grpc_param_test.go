@@ -192,6 +192,15 @@ func TestGrpcClientParams(t *testing.T) {
 	assert.Equal(t, "", caPem)
 	assert.Equal(t, "", clientPem)
 	assert.Equal(t, "", clientKey)
+
+	// Per-cluster gRPC authority config lookup
+	base.Save("grpc.clusters.cluster-b.authority", "proxy.example.com")
+	authority := clientConfig.GetClusterAuthority("cluster-b")
+	assert.Equal(t, "proxy.example.com", authority)
+
+	// Unknown cluster returns empty string
+	authority = clientConfig.GetClusterAuthority("unknown-cluster")
+	assert.Equal(t, "", authority)
 }
 
 func TestInternalTLSParams(t *testing.T) {
