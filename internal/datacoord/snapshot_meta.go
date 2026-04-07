@@ -393,6 +393,16 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 		for _, indexFile := range segment.GetIndexFiles() {
 			buildIDs = append(buildIDs, indexFile.GetBuildID())
 		}
+		for _, textIndex := range segment.GetTextIndexFiles() {
+			if textIndex.GetBuildID() != 0 {
+				buildIDs = append(buildIDs, textIndex.GetBuildID())
+			}
+		}
+		for _, jsonKeyIndex := range segment.GetJsonKeyIndexFiles() {
+			if jsonKeyIndex.GetBuildID() != 0 {
+				buildIDs = append(buildIDs, jsonKeyIndex.GetBuildID())
+			}
+		}
 	}
 	snapshot.SegmentIDs = segmentIDs
 	snapshot.BuildIDs = buildIDs
