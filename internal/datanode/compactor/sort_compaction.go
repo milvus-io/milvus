@@ -70,6 +70,8 @@ type sortCompactionTask struct {
 	manifest              string
 	useLoonFFI            bool
 
+	ttlFieldID int64
+
 	done chan struct{}
 	tr   *timerecord.TimeRecorder
 
@@ -141,6 +143,7 @@ func (t *sortCompactionTask) preCompact() error {
 	t.segmentStorageVersion = segment.GetStorageVersion()
 	t.manifest = segment.GetManifest()
 	t.useLoonFFI = t.compactionParams.UseLoonFFI
+	t.ttlFieldID = getTTLFieldID(t.plan.GetSchema())
 
 	log.Ctx(t.ctx).Info("preCompaction analyze",
 		zap.Int64("planID", t.GetPlanID()),
@@ -201,6 +204,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		log.Warn("load deletePKs failed", zap.Error(err))
 		return nil, err
 	}
+	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 
 	loadDeltaCost := time.Since(phaseStart)
 	entityFilter := compaction.NewEntityFilter(deletePKs, t.plan.GetCollectionTtl(), t.currentTime)
@@ -210,13 +214,27 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		predicate = func(r storage.Record, ri, i int) bool {
 			pk := r.Column(pkField.FieldID).(*array.Int64).Value(i)
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
-			return !entityFilter.Filtered(pk, uint64(ts))
+			expireTs := int64(-1)
+			if hasTTLField {
+				col := r.Column(t.ttlFieldID).(*array.Int64)
+				if col.IsValid(i) {
+					expireTs = col.Value(i)
+				}
+			}
+			return !entityFilter.Filtered(pk, uint64(ts), expireTs)
 		}
 	case schemapb.DataType_VarChar:
 		predicate = func(r storage.Record, ri, i int) bool {
 			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
-			return !entityFilter.Filtered(pk, uint64(ts))
+			expireTs := int64(-1)
+			if hasTTLField {
+				col := r.Column(t.ttlFieldID).(*array.Int64)
+				if col.IsValid(i) {
+					expireTs = col.Value(i)
+				}
+			}
+			return !entityFilter.Filtered(pk, uint64(ts), expireTs)
 		}
 	default:
 		log.Warn("sort task only support int64 and varchar pk field")
@@ -263,8 +281,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	}
 	flushCost := time.Since(phaseStart)
 
-	phaseStart = time.Now()
-	binlogs, stats, bm25stats, manifest := srw.GetLogs()
+	binlogs, stats, bm25stats, manifest, expirQuantiles := srw.GetLogs()
 	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err
@@ -336,6 +353,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			IsSorted:            true,
 			StorageVersion:      t.storageVersion,
 			Manifest:            manifest,
+			ExpirQuantiles:      expirQuantiles,
 		},
 	}
 	planResult := &datapb.CompactionPlanResult{

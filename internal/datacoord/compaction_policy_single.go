@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // singleCompactionPolicy is to compact one segment with too many delta logs
@@ -104,7 +103,7 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 		return nil
 	}
 
-	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties, paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
+	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
 		log.Warn("failed to apply triggerSegmentSortCompaction, get collection ttl failed")
 		return nil
@@ -204,7 +203,7 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 		return nil, nil, 0, nil
 	}
 
-	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties, paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
+	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
 		log.Warn("failed to apply singleCompactionPolicy, get collection ttl failed")
 		return nil, nil, 0, err
