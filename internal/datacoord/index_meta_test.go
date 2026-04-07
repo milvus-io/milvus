@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
@@ -721,6 +722,51 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 
 		state := m.GetSegmentIndexState(collID, segID, indexID)
 		assert.Equal(t, commonpb.IndexState_Finished, state.GetState())
+	})
+
+	t.Run("pattern index uses scalar index version", func(t *testing.T) {
+		patternIndexID := indexID + 1
+		m.indexes[collID][patternIndexID] = &model.Index{
+			TenantID:     "",
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexID:      patternIndexID,
+			IndexName:    "mol_pattern_idx",
+			IsDeleted:    false,
+			CreateTime:   13,
+			TypeParams:   typeParams,
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: string(indexparamcheck.IndexMolPattern),
+				},
+			},
+			IsAutoIndex:     false,
+			UserIndexParams: indexParams,
+		}
+
+		m.updateSegmentIndex(&model.SegmentIndex{
+			SegmentID:                 segID,
+			CollectionID:              collID,
+			PartitionID:               partID,
+			NumRows:                   10250,
+			IndexID:                   patternIndexID,
+			BuildID:                   buildID + 1,
+			NodeID:                    1,
+			IndexVersion:              7,
+			CurrentIndexVersion:       7,
+			CurrentScalarIndexVersion: 11,
+			IndexState:                commonpb.IndexState_Finished,
+			FailReason:                "",
+			IsDeleted:                 false,
+			CreatedUTCTime:            13,
+			IndexFileKeys:             nil,
+			IndexSerializedSize:       0,
+		})
+
+		state := m.GetSegmentIndexState(collID, segID, patternIndexID)
+		assert.Equal(t, commonpb.IndexState_Finished, state.GetState())
+		assert.EqualValues(t, 11, state.GetIndexVersion())
 	})
 }
 

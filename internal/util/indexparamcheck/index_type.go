@@ -27,12 +27,12 @@ const (
 	IndexVector IndexType = "VECINDEX"
 
 	// scalar index
-	IndexSTLSORT  IndexType = "STL_SORT"
-	IndexTRIE     IndexType = "TRIE"
-	IndexTrie     IndexType = "Trie"
-	IndexBitmap   IndexType = "BITMAP"
-	IndexHybrid   IndexType = "HYBRID" // BITMAP + INVERTED
-	IndexINVERTED IndexType = "INVERTED"
+	IndexSTLSORT    IndexType = "STL_SORT"
+	IndexTRIE       IndexType = "TRIE"
+	IndexTrie       IndexType = "Trie"
+	IndexBitmap     IndexType = "BITMAP"
+	IndexHybrid     IndexType = "HYBRID" // BITMAP + INVERTED
+	IndexINVERTED   IndexType = "INVERTED"
 	IndexNGRAM      IndexType = "NGRAM"
 	IndexRTREE      IndexType = "RTREE"
 	IndexMolPattern IndexType = "PATTERN"
@@ -42,7 +42,8 @@ const (
 
 func IsScalarIndexType(indexType IndexType) bool {
 	return indexType == IndexSTLSORT || indexType == IndexTRIE || indexType == IndexTrie ||
-		indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED
+		indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED ||
+		indexType == IndexMolPattern
 }
 
 func IsGpuIndex(indexType IndexType) bool {
