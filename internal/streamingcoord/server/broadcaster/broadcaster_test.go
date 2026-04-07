@@ -622,17 +622,10 @@ func TestPendingBroadcastMessages(t *testing.T) {
 	})
 }
 
-func TestMarkIgnoreAndSave(t *testing.T) {
+func TestMarkIgnore(t *testing.T) {
 	paramtable.Init()
 
 	t.Run("success", func(t *testing.T) {
-		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
-		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		rc := idalloc.NewMockRootCoordClient(t)
-		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
-		f.Set(rc)
-		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
-
 		metrics := newBroadcasterMetrics()
 		ackScheduler := newAckCallbackScheduler(log.With())
 
@@ -643,7 +636,7 @@ func TestMarkIgnoreAndSave(t *testing.T) {
 		task := newBroadcastTaskFromProto(proto, metrics, ackScheduler)
 		task.SetLogger(log.With())
 
-		err := task.MarkIgnoreAndSave(context.Background())
+		err := task.MarkIgnore()
 		assert.NoError(t, err)
 
 		// Verify the message now has ignore=true
@@ -653,7 +646,6 @@ func TestMarkIgnoreAndSave(t *testing.T) {
 	})
 
 	t.Run("non_alter_replicate_config", func(t *testing.T) {
-		resource.InitForTest()
 		metrics := newBroadcasterMetrics()
 		ackScheduler := newAckCallbackScheduler(log.With())
 
@@ -661,7 +653,7 @@ func TestMarkIgnoreAndSave(t *testing.T) {
 		task := newBroadcastTaskFromProto(proto, metrics, ackScheduler)
 		task.SetLogger(log.With())
 
-		err := task.MarkIgnoreAndSave(context.Background())
+		err := task.MarkIgnore()
 		assert.Error(t, err)
 	})
 }
@@ -711,7 +703,6 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 
 		ackScheduler := newAckCallbackScheduler(log.With())
 
-		// Create a bm with no incomplete tasks (all acked)
 		bm := &broadcastTaskManager{
 			mu:    &sync.Mutex{},
 			tasks: make(map[uint64]*broadcastTask),
@@ -725,6 +716,10 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 	t.Run("with_alter_replicate_config_tasks", func(t *testing.T) {
 		paramtable.Init()
 		registry.ResetRegistration()
+		registry.RegisterAlterReplicateConfigV2AckCallback(
+			func(ctx context.Context, result message.BroadcastResult[*message.AlterReplicateConfigMessageHeader, *message.AlterReplicateConfigMessageBody]) error {
+				return nil
+			})
 
 		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
 		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -733,7 +728,16 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		f.Set(rc)
 		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
-		// Set up WAL mock for AppendMessages
+		metrics := newBroadcasterMetrics()
+		ackScheduler := newAckCallbackScheduler(log.With())
+
+		alterMsg := createAlterReplicateConfigBroadcastMsg([]string{"v1", "v2"}, false).WithBroadcastID(100)
+		alterProto := createNewWaitAckBroadcastTaskFromMessage(alterMsg,
+			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
+			[]byte{0x01, 0x00})
+		alterTask := newBroadcastTaskFromProto(alterProto, metrics, ackScheduler)
+		alterTask.SetLogger(log.With())
+
 		mw := mock_streaming.NewMockWALAccesser(t)
 		appendF := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
 			resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
@@ -749,30 +753,22 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		}
 		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(appendF).Maybe()
 		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(appendF).Maybe()
-		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(appendF).Maybe()
 		streaming.SetWALForTest(mw)
 
-		metrics := newBroadcasterMetrics()
-		ackScheduler := newAckCallbackScheduler(log.With())
-
-		// Create an incomplete AlterReplicateConfig task (v2 not acked)
-		alterMsg := createAlterReplicateConfigBroadcastMsg([]string{"v1", "v2"}, false).WithBroadcastID(100)
-		alterProto := createNewWaitAckBroadcastTaskFromMessage(alterMsg,
-			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
-			[]byte{0x01, 0x00}) // v1 acked, v2 not
-		alterTask := newBroadcastTaskFromProto(alterProto, metrics, ackScheduler)
-		alterTask.SetLogger(log.With())
-
 		bm := &broadcastTaskManager{
-			mu:    &sync.Mutex{},
-			tasks: map[uint64]*broadcastTask{100: alterTask},
+			lifetime:           typeutil.NewLifetime(),
+			mu:                 &sync.Mutex{},
+			tasks:              map[uint64]*broadcastTask{100: alterTask},
+			broadcastScheduler: newBroadcasterScheduler(nil, log.With()),
 		}
 		ackScheduler.bm = bm
+		ackScheduler.Initialize(nil, nil, bm)
+		defer ackScheduler.Close()
+		defer bm.broadcastScheduler.Close()
 
 		err := ackScheduler.fixIncompleteBroadcastsForForcePromote(context.Background())
 		assert.NoError(t, err)
 
-		// Verify the task was marked with ignore=true
 		parsedMsg, err := message.AsMutableAlterReplicateConfigMessageV2(alterTask.msg)
 		assert.NoError(t, err)
 		assert.True(t, parsedMsg.Header().Ignore)
@@ -781,6 +777,9 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 	t.Run("with_other_broadcast_tasks", func(t *testing.T) {
 		paramtable.Init()
 		registry.ResetRegistration()
+		registry.RegisterDropCollectionV1AckCallback(func(ctx context.Context, msg message.BroadcastResultDropCollectionMessageV1) error {
+			return nil
+		})
 
 		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
 		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -789,7 +788,16 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		f.Set(rc)
 		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
-		// Set up WAL mock
+		metrics := newBroadcasterMetrics()
+		ackScheduler := newAckCallbackScheduler(log.With())
+
+		dropMsg := createNewBroadcastMsg([]string{"v1", "v2", "v3"}).WithBroadcastID(200)
+		dropProto := createNewWaitAckBroadcastTaskFromMessage(dropMsg,
+			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
+			[]byte{0x01, 0x00, 0x00})
+		dropTask := newBroadcastTaskFromProto(dropProto, metrics, ackScheduler)
+		dropTask.SetLogger(log.With())
+
 		appendedCount := atomic.NewInt32(0)
 		mw := mock_streaming.NewMockWALAccesser(t)
 		appendF2 := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
@@ -810,33 +818,28 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(appendF2).Maybe()
 		streaming.SetWALForTest(mw)
 
-		metrics := newBroadcasterMetrics()
-		ackScheduler := newAckCallbackScheduler(log.With())
-
-		// Create an incomplete DropCollection task (v2, v3 not acked)
-		dropMsg := createNewBroadcastMsg([]string{"v1", "v2", "v3"}).WithBroadcastID(200)
-		dropProto := createNewWaitAckBroadcastTaskFromMessage(dropMsg,
-			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
-			[]byte{0x01, 0x00, 0x00}) // v1 acked, v2 & v3 not
-		dropTask := newBroadcastTaskFromProto(dropProto, metrics, ackScheduler)
-		dropTask.SetLogger(log.With())
-
 		bm := &broadcastTaskManager{
-			mu:    &sync.Mutex{},
-			tasks: map[uint64]*broadcastTask{200: dropTask},
+			lifetime:           typeutil.NewLifetime(),
+			mu:                 &sync.Mutex{},
+			tasks:              map[uint64]*broadcastTask{200: dropTask},
+			broadcastScheduler: newBroadcasterScheduler(nil, log.With()),
 		}
 		ackScheduler.bm = bm
+		ackScheduler.Initialize(nil, nil, bm)
+		defer ackScheduler.Close()
+		defer bm.broadcastScheduler.Close()
 
 		err := ackScheduler.fixIncompleteBroadcastsForForcePromote(context.Background())
 		assert.NoError(t, err)
-
-		// 2 pending messages should have been appended (v2 and v3)
 		assert.Equal(t, int32(2), appendedCount.Load())
 	})
 
-	t.Run("append_failure", func(t *testing.T) {
+	t.Run("append_failure_then_retry", func(t *testing.T) {
 		paramtable.Init()
 		registry.ResetRegistration()
+		registry.RegisterDropCollectionV1AckCallback(func(ctx context.Context, msg message.BroadcastResultDropCollectionMessageV1) error {
+			return nil
+		})
 
 		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
 		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -844,21 +847,6 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
 		f.Set(rc)
 		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
-
-		// Set up WAL mock that returns errors
-		mw := mock_streaming.NewMockWALAccesser(t)
-		appendErrF := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
-			resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
-			for i := range msgs {
-				resps.Responses[i] = types.AppendResponse{
-					Error: errors.New("append failed"),
-				}
-			}
-			return resps
-		}
-		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(appendErrF).Maybe()
-		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(appendErrF).Maybe()
-		streaming.SetWALForTest(mw)
 
 		metrics := newBroadcasterMetrics()
 		ackScheduler := newAckCallbackScheduler(log.With())
@@ -870,22 +858,182 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		dropTask := newBroadcastTaskFromProto(dropProto, metrics, ackScheduler)
 		dropTask.SetLogger(log.With())
 
+		// First call fails, subsequent calls succeed
+		callCount := atomic.NewInt32(0)
+		mw := mock_streaming.NewMockWALAccesser(t)
+		appendF := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+			resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
+			count := callCount.Inc()
+			for i := range msgs {
+				if count == 1 {
+					resps.Responses[i] = types.AppendResponse{Error: errors.New("append failed")}
+				} else {
+					resps.Responses[i] = types.AppendResponse{
+						AppendResult: &types.AppendResult{
+							MessageID: walimplstest.NewTestMessageID(int64(i + 1)),
+							TimeTick:  uint64(100 + i),
+						},
+					}
+				}
+			}
+			return resps
+		}
+		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(appendF).Maybe()
+		streaming.SetWALForTest(mw)
+
 		bm := &broadcastTaskManager{
-			mu:    &sync.Mutex{},
-			tasks: map[uint64]*broadcastTask{300: dropTask},
+			lifetime:           typeutil.NewLifetime(),
+			mu:                 &sync.Mutex{},
+			tasks:              map[uint64]*broadcastTask{300: dropTask},
+			broadcastScheduler: newBroadcasterScheduler(nil, log.With()),
 		}
 		ackScheduler.bm = bm
+		ackScheduler.Initialize(nil, nil, bm)
+		defer ackScheduler.Close()
+		defer bm.broadcastScheduler.Close()
 
 		err := ackScheduler.fixIncompleteBroadcastsForForcePromote(context.Background())
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "append failed")
+		assert.NoError(t, err)
+		// broadcastScheduler retried after first failure
+		assert.GreaterOrEqual(t, callCount.Load(), int32(2))
+	})
+
+	t.Run("blocks_until_tombstone", func(t *testing.T) {
+		paramtable.Init()
+		registry.ResetRegistration()
+		registry.RegisterDropCollectionV1AckCallback(func(ctx context.Context, msg message.BroadcastResultDropCollectionMessageV1) error {
+			return nil
+		})
+
+		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		rc := idalloc.NewMockRootCoordClient(t)
+		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+		f.Set(rc)
+		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
+
+		metrics := newBroadcasterMetrics()
+		ackScheduler := newAckCallbackScheduler(log.With())
+
+		// Create an incomplete task (v2 not acked)
+		dropMsg := createNewBroadcastMsg([]string{"v1", "v2"}).WithBroadcastID(500)
+		dropProto := createNewWaitAckBroadcastTaskFromMessage(dropMsg,
+			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
+			[]byte{0x01, 0x00})
+		dropTask := newBroadcastTaskFromProto(dropProto, metrics, ackScheduler)
+		dropTask.SetLogger(log.With())
+
+		mw := mock_streaming.NewMockWALAccesser(t)
+		appendF := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+			resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
+			for i := range msgs {
+				resps.Responses[i] = types.AppendResponse{
+					AppendResult: &types.AppendResult{
+						MessageID: walimplstest.NewTestMessageID(int64(i + 1)),
+						TimeTick:  uint64(100 + i),
+					},
+				}
+			}
+			return resps
+		}
+		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(appendF).Maybe()
+		streaming.SetWALForTest(mw)
+
+		bm := &broadcastTaskManager{
+			lifetime:           typeutil.NewLifetime(),
+			mu:                 &sync.Mutex{},
+			tasks:              map[uint64]*broadcastTask{500: dropTask},
+			broadcastScheduler: newBroadcasterScheduler(nil, log.With()),
+		}
+		ackScheduler.bm = bm
+		ackScheduler.Initialize(nil, nil, bm)
+		defer ackScheduler.Close()
+		defer bm.broadcastScheduler.Close()
+
+		// AddTask blocks until tombstone; fixIncompleteBroadcastsForForcePromote
+		// should only return after task reaches TOMBSTONE via broadcastScheduler.
+		err := ackScheduler.fixIncompleteBroadcastsForForcePromote(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE, dropTask.State())
+	})
+
+	t.Run("context_canceled_during_supplement", func(t *testing.T) {
+		paramtable.Init()
+		registry.ResetRegistration()
+
+		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		rc := idalloc.NewMockRootCoordClient(t)
+		f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+		f.Set(rc)
+		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
+
+		metrics := newBroadcasterMetrics()
+		ackScheduler := newAckCallbackScheduler(log.With())
+
+		dropMsg := createNewBroadcastMsg([]string{"v1", "v2"}).WithBroadcastID(600)
+		dropProto := createNewWaitAckBroadcastTaskFromMessage(dropMsg,
+			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
+			[]byte{0x01, 0x00})
+		dropTask := newBroadcastTaskFromProto(dropProto, metrics, ackScheduler)
+		dropTask.SetLogger(log.With())
+
+		// WAL mock succeeds but never acks
+		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+				resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
+				for i := range msgs {
+					resps.Responses[i] = types.AppendResponse{
+						AppendResult: &types.AppendResult{
+							MessageID: walimplstest.NewTestMessageID(int64(i + 1)),
+							TimeTick:  uint64(100 + i),
+						},
+					}
+				}
+				return resps
+			}).Maybe()
+		streaming.SetWALForTest(mw)
+
+		bm := &broadcastTaskManager{
+			lifetime:           typeutil.NewLifetime(),
+			mu:                 &sync.Mutex{},
+			tasks:              map[uint64]*broadcastTask{600: dropTask},
+			broadcastScheduler: newBroadcasterScheduler(nil, log.With()),
+		}
+		ackScheduler.bm = bm
+		ackScheduler.Initialize(nil, nil, bm)
+		defer ackScheduler.Close()
+		defer bm.broadcastScheduler.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			done <- ackScheduler.fixIncompleteBroadcastsForForcePromote(ctx)
+		}()
+
+		// Cancel context while AddTask is blocking
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+
+		select {
+		case err := <-done:
+			assert.Error(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for context cancellation")
+		}
 	})
 }
 
 func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
-	t.Run("success_after_all_ack", func(t *testing.T) {
+	t.Run("full_lifecycle_no_incomplete_tasks", func(t *testing.T) {
 		paramtable.Init()
 		registry.ResetRegistration()
+		// Register a no-op ack callback for AlterReplicateConfig so doAckCallback can proceed.
+		registry.RegisterAlterReplicateConfigV2AckCallback(
+			func(ctx context.Context, result message.BroadcastResult[*message.AlterReplicateConfigMessageHeader, *message.AlterReplicateConfigMessageBody]) error {
+				return nil
+			})
 
 		meta := mock_metastore.NewMockStreamingCoordCataLog(t)
 		meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -910,13 +1058,16 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 
 		// No incomplete tasks in the bm
 		bm := &broadcastTaskManager{
-			mu:    &sync.Mutex{},
-			tasks: map[uint64]*broadcastTask{400: fpTask},
+			lifetime: typeutil.NewLifetime(),
+			mu:       &sync.Mutex{},
+			tasks:    map[uint64]*broadcastTask{400: fpTask},
 		}
 		ackScheduler.bm = bm
+		ackScheduler.Initialize(nil, nil, bm)
+		defer ackScheduler.Close()
 
-		// doForcePromoteFixIncompleteBroadcasts should complete without error
-		// since all acked and no incomplete tasks
+		// doForcePromoteFixIncompleteBroadcasts should complete the full lifecycle:
+		// BlockUntilAllAck → fix (no-op) → acquire lock → doAckCallback → close(done)
 		done := make(chan struct{})
 		go func() {
 			ackScheduler.doForcePromoteFixIncompleteBroadcasts(fpTask)
@@ -925,13 +1076,14 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 
 		select {
 		case <-done:
-			// Success
+			// Verify task reached TOMBSTONE (ack callback completed)
+			assert.Equal(t, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE, fpTask.State())
 		case <-time.After(5 * time.Second):
 			t.Fatal("timed out waiting for doForcePromoteFixIncompleteBroadcasts")
 		}
 	})
 
-	t.Run("context_canceled", func(t *testing.T) {
+	t.Run("context_canceled_before_ack", func(t *testing.T) {
 		paramtable.Init()
 		registry.ResetRegistration()
 
@@ -954,19 +1106,19 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 		}
 		ackScheduler.bm = bm
 
-		// Cancel the notifier to simulate shutdown
 		done := make(chan struct{})
 		go func() {
 			ackScheduler.doForcePromoteFixIncompleteBroadcasts(fpTask)
 			close(done)
 		}()
 
-		// Cancel the scheduler context
+		// Cancel the scheduler context — should abort at BlockUntilAllAck
 		ackScheduler.notifier.Cancel()
 
 		select {
 		case <-done:
-			// Success - should return because context canceled
+			// Should return because context canceled, task NOT tombstoned
+			assert.NotEqual(t, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE, fpTask.State())
 		case <-time.After(5 * time.Second):
 			t.Fatal("timed out waiting for doForcePromoteFixIncompleteBroadcasts to exit on cancel")
 		}

@@ -53,6 +53,7 @@ import (
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -247,6 +248,44 @@ func TestRootCoord_AlterDatabase(t *testing.T) {
 		resp, err := c.AlterDatabase(ctx, &rootcoordpb.AlterDatabaseRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
+	})
+
+	t.Run("validate resource group failed", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withBroker(&mockBroker{
+			ShowResourceGroupsFunc: func(ctx context.Context) ([]string, error) {
+				return []string{"rg1"}, nil
+			},
+		}))
+		ctx := context.Background()
+		resp, err := c.AlterDatabase(ctx, &rootcoordpb.AlterDatabaseRequest{
+			DbName: "db",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.DatabaseResourceGroups, Value: "rg2"},
+			},
+		})
+		require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrResourceGroupNotFound)
+	})
+}
+
+func TestCore_validateResourceGroups(t *testing.T) {
+	t.Run("invalid level", func(t *testing.T) {
+		c := newTestCore(withHealthyCode())
+		err := c.validateResourceGroups(context.Background(), nil, "invalid")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid level")
+	})
+
+	t.Run("broker error", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withBroker(&mockBroker{
+			ShowResourceGroupsFunc: func(ctx context.Context) ([]string, error) {
+				return nil, errors.New("broker error")
+			},
+		}))
+
+		err := c.validateResourceGroups(context.Background(), []*commonpb.KeyValuePair{
+			{Key: common.CollectionResourceGroups, Value: "rg1"},
+		}, "collection")
+		require.Error(t, err)
 	})
 }
 
@@ -1292,6 +1331,23 @@ func TestRootCoord_AlterCollection(t *testing.T) {
 		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("validate resource group failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(), withBroker(&mockBroker{
+			ShowResourceGroupsFunc: func(ctx context.Context) ([]string, error) {
+				return []string{"rg1"}, nil
+			},
+		}))
+		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+			DbName:         "db",
+			CollectionName: "collection",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.CollectionResourceGroups, Value: "rg2"},
+			},
+		})
+		require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrResourceGroupNotFound)
 	})
 }
 

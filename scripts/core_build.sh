@@ -103,7 +103,13 @@ USE_OPENDAL="OFF"
 TANTIVY_FEATURES=""
 INDEX_ENGINE="KNOWHERE"
 ENABLE_AZURE_FS="ON"
+if [[ "$(uname)" == "Darwin" ]]; then
+  ENABLE_AZURE_FS="OFF"
+fi
 : "${ENABLE_GCP_NATIVE:="OFF"}"
+# Build acceleration options (override via env vars)
+: "${USE_PCH:="ON"}"
+: "${USE_UNITY_BUILD:="OFF"}"
 
 while getopts "p:t:s:n:a:y:x:o:f:ulcgbZh" arg; do
   case $arg in
@@ -246,7 +252,9 @@ ${CMAKE_EXTRA_ARGS} \
 -DINDEX_ENGINE=${INDEX_ENGINE} \
 -DTANTIVY_FEATURES_LIST=${TANTIVY_FEATURES} \
 -DENABLE_GCP_NATIVE=${ENABLE_GCP_NATIVE} \
--DENABLE_AZURE_FS=${ENABLE_AZURE_FS} "
+-DENABLE_AZURE_FS=${ENABLE_AZURE_FS} \
+-DMILVUS_USE_PCH=${USE_PCH} \
+-DMILVUS_UNITY_BUILD=${USE_UNITY_BUILD} "
 # Azure build variables removed as we now use Arrow with Azure support directly
 CMAKE_CMD=${CMAKE_CMD}"${CPP_SRC_DIR}"
 

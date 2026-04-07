@@ -589,6 +589,16 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 				return nil, err
 			}
 		}
+		for _, textIndex := range sourceSegDesc.GetTextIndexFiles() {
+			if err := allocNewBuildID(textIndex.GetBuildID()); err != nil {
+				return nil, err
+			}
+		}
+		for _, jsonStats := range sourceSegDesc.GetJsonKeyIndexFiles() {
+			if err := allocNewBuildID(jsonStats.GetBuildID()); err != nil {
+				return nil, err
+			}
+		}
 		// Build target with IDs and buildID mappings
 		target := &datapb.CopySegmentTarget{
 			CollectionId: job.GetCollectionId(),

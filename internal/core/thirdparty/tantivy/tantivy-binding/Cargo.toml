@@ -18,7 +18,7 @@ opt-level = 3
 debug = 1
 lto = true
 debug-assertions = false
-codegen-units = 1
+codegen-units = 4
 panic = "unwind"
 overflow-checks = false
 

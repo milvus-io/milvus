@@ -286,6 +286,8 @@ type AvroTextIndexStats struct {
 	MemorySize int64 `avro:"memory_size"`
 	// BuildID is the index build task identifier.
 	BuildID int64 `avro:"build_id"`
+	// CurrentScalarIndexVersion is the scalar index version used for this text index.
+	CurrentScalarIndexVersion int32 `avro:"current_scalar_index_version"`
 }
 
 // AvroJsonKeyStats represents datapb.JsonKeyStats in Avro-compatible format.
@@ -1192,12 +1194,13 @@ func convertTextIndexStatsToAvro(stats *datapb.TextIndexStats) *AvroTextIndexSta
 		return nil
 	}
 	return &AvroTextIndexStats{
-		FieldID:    stats.GetFieldID(),
-		Version:    stats.GetVersion(),
-		Files:      stats.GetFiles(),
-		LogSize:    stats.GetLogSize(),
-		MemorySize: stats.GetMemorySize(),
-		BuildID:    stats.GetBuildID(),
+		FieldID:                   stats.GetFieldID(),
+		Version:                   stats.GetVersion(),
+		Files:                     stats.GetFiles(),
+		LogSize:                   stats.GetLogSize(),
+		MemorySize:                stats.GetMemorySize(),
+		BuildID:                   stats.GetBuildID(),
+		CurrentScalarIndexVersion: stats.GetCurrentScalarIndexVersion(),
 	}
 }
 
@@ -1207,12 +1210,13 @@ func convertAvroToTextIndexStats(avroStats *AvroTextIndexStats) *datapb.TextInde
 		return nil
 	}
 	return &datapb.TextIndexStats{
-		FieldID:    avroStats.FieldID,
-		Version:    avroStats.Version,
-		Files:      avroStats.Files,
-		LogSize:    avroStats.LogSize,
-		MemorySize: avroStats.MemorySize,
-		BuildID:    avroStats.BuildID,
+		FieldID:                   avroStats.FieldID,
+		Version:                   avroStats.Version,
+		Files:                     avroStats.Files,
+		LogSize:                   avroStats.LogSize,
+		MemorySize:                avroStats.MemorySize,
+		BuildID:                   avroStats.BuildID,
+		CurrentScalarIndexVersion: avroStats.CurrentScalarIndexVersion,
 	}
 }
 
@@ -1426,7 +1430,8 @@ func getProperAvroSchema() string {
 								{"name": "index_version", "type": "long"},
 								{"name": "num_rows", "type": "long"},
 								{"name": "current_index_version", "type": "int"},
-								{"name": "mem_size", "type": "long"}
+								{"name": "mem_size", "type": "long"},
+								{"name": "current_scalar_index_version", "type": "int", "default": 0}
 							]
 						}
 					}

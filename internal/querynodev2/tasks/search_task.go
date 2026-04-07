@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/resource"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -239,31 +240,44 @@ func (t *SearchTask) Execute() error {
 		log.Warn("failed to reduce search results", zap.Error(err))
 		return err
 	}
-	defer segcore.DeleteSearchResultDataBlobs(blobs)
+	allTasks := append([]*SearchTask{t}, t.others...)
+	refs, err := resource.NewSharedPinnedRefs(
+		blobs,
+		len(allTasks),
+		segcore.DeleteSearchResultDataBlobs,
+		"SearchResultDataBlobs",
+	)
+	if err != nil {
+		segcore.DeleteSearchResultDataBlobs(blobs)
+		return err
+	}
+
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		fmt.Sprint(t.GetNodeID()),
 		metrics.SearchLabel,
 		metrics.ReduceSegments,
 		metrics.BatchReduce).
 		Observe(float64(tr.RecordSpan().Milliseconds()))
+
+	zeroCopy := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetAsBool()
+
+	// Phase 1: build all results.
+	var phaseErr error
 	for i := range t.originNqs {
 		blob, cost, err := segcore.GetSearchResultDataBlob(t.ctx, blobs, i)
 		if err != nil {
-			return err
+			phaseErr = err
+			break
 		}
-
-		var task *SearchTask
-		if i == 0 {
-			task = t
-		} else {
-			task = t.others[i-1]
+		// When zero-copy is enabled, blob references C memory directly and is
+		// freed after gRPC marshal via MsgPins. Otherwise copy to Go heap so C
+		// memory can be released immediately in Phase 2.
+		slicedBlob := blob
+		if !zeroCopy && len(blob) > 0 {
+			slicedBlob = make([]byte, len(blob))
+			copy(slicedBlob, blob)
 		}
-
-		// Note: blob is unsafe because get from C
-		bs := make([]byte, len(blob))
-		copy(bs, blob)
-
-		task.result = &internalpb.SearchResults{
+		allTasks[i].result = &internalpb.SearchResults{
 			Base: &commonpb.MsgBase{
 				SourceID: t.GetNodeID(),
 			},
@@ -271,7 +285,7 @@ func (t *SearchTask) Execute() error {
 			MetricType:     metricType,
 			NumQueries:     t.originNqs[i],
 			TopK:           t.originTopks[i],
-			SlicedBlob:     bs,
+			SlicedBlob:     slicedBlob,
 			SlicedOffset:   1,
 			SlicedNumCount: 1,
 			CostAggregation: &internalpb.CostAggregation{
@@ -280,6 +294,31 @@ func (t *SearchTask) Execute() error {
 			},
 			ScannedRemoteBytes: cost.ScannedRemoteBytes,
 			ScannedTotalBytes:  cost.ScannedTotalBytes,
+		}
+	}
+
+	// Phase 2: on error, nil out all results and release all refs.
+	// On success, pin or release refs based on zero-copy mode.
+	if phaseErr != nil {
+		for _, task := range allTasks {
+			task.result = nil
+		}
+		for _, ref := range refs {
+			ref.Release()
+		}
+		return phaseErr
+	}
+	if zeroCopy {
+		for i, task := range allTasks {
+			if len(task.result.GetSlicedBlob()) > 0 {
+				resource.MsgPins.Pin(task.result, refs[i].Release)
+			} else {
+				refs[i].Release()
+			}
+		}
+	} else {
+		for _, ref := range refs {
+			ref.Release()
 		}
 	}
 

@@ -69,7 +69,7 @@ class MilvusConan(ConanFile):
         "arrow:with_zstd": True,
         "arrow:with_boost": True,
         "arrow:with_thrift": True,
-        "arrow:with_jemalloc": True,
+        "arrow:with_jemalloc": False,
         "arrow:with_openssl": True,
         "arrow:shared": False,
         "arrow:with_azure": True,
@@ -112,7 +112,9 @@ class MilvusConan(ConanFile):
     def requirements(self):
         if self.settings.os != "Macos":
             self.requires("libunwind/1.8.1#97965ef7da98cf1662e14219b14134f7")
-        self.requires("aws-sdk-cpp/1.11.692@milvus/dev#1e17deac19383217d291a01c23147b33")
+        self.requires(
+            "aws-sdk-cpp/1.11.692@milvus/dev#1e17deac19383217d291a01c23147b33"
+        )
         # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection
         if self.settings.os in ["Linux", "FreeBSD"]:
             self.requires("s2n/1.6.0")

@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 )
 
 type SearchReduceUtilTestSuite struct {
@@ -340,6 +342,36 @@ func (s *SearchReduceUtilTestSuite) TestReduceMaxSimMetricsComparison() {
 		s.Equal([]float32{1, 2, 3, 4}, results.Results.GetScores(),
 			"metric %s: Scores should be distances in ascending order", metricType)
 	}
+}
+
+func (s *SearchReduceUtilTestSuite) TestDecodeSearchResultsSupportsResultDataAndBlob() {
+	blobData := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       1,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}}},
+		Scores:     []float32{0.8},
+		Topks:      []int64{1},
+	}
+	blob, err := proto.Marshal(blobData)
+	s.NoError(err)
+
+	resultData := &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       1,
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{20}}}},
+		Scores:     []float32{0.9},
+		Topks:      []int64{1},
+	}
+
+	decoded, err := decodeSearchResults(context.Background(), []*internalpb.SearchResults{
+		{ResultData: resultData},
+		{SlicedBlob: blob},
+		{},
+	})
+	s.NoError(err)
+	s.Len(decoded, 2)
+	s.Same(resultData, decoded[0])
+	s.True(proto.Equal(blobData, decoded[1]))
 }
 
 func TestSearchReduceUtilTestSuite(t *testing.T) {

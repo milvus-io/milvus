@@ -272,8 +272,6 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     lcm->Remove(small_index_file_path);
 }
 
-// Ensure that index v3 generated path is the same as v2 path, only with different
-// file name.
 TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
     FieldDataMeta filed_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
@@ -288,11 +286,11 @@ TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
     ASSERT_EQ(files.size(), 1);
 
     storage::MemFileManagerImpl file_manager(context);
-    std::string v2_path = file_manager.GetRemoteIndexObjectPrefixV2() +
-                          "/milvus_packed_stlsort_index.v3";
+    std::string expected_path = file_manager.GetRemoteIndexObjectPrefix() +
+                                "/milvus_packed_stlsort_index.v3";
     std::string v3_path = files[0];
 
-    EXPECT_EQ(v3_path, v2_path);
+    EXPECT_EQ(v3_path, expected_path);
 }
 
 int
