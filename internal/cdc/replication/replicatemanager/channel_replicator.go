@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
@@ -48,6 +49,11 @@ type Replicator interface {
 	// and wait for the loop to exit.
 	StopReplication()
 }
+
+// ErrCheckpointExpired is returned when the replicate checkpoint has been deleted
+// by the message queue retention policy. The checkpoint position no longer exists
+// in the source MQ, so replication cannot resume from that position.
+var ErrCheckpointExpired = errors.New("replicate checkpoint has been expired by message queue retention policy")
 
 var _ Replicator = (*channelReplicator)(nil)
 
@@ -91,6 +97,11 @@ func (r *channelReplicator) StartReplication() {
 			}
 			r.asyncNotifier.Finish(struct{}{})
 		}()
+		bo := backoff.NewExponentialBackOff()
+		bo.InitialInterval = 100 * time.Millisecond
+		bo.MaxInterval = 10 * time.Second
+		bo.MaxElapsedTime = 0 // retry indefinitely
+		bo.Reset()
 	INIT_LOOP:
 		for {
 			select {
@@ -99,7 +110,14 @@ func (r *channelReplicator) StartReplication() {
 			default:
 				err := r.init()
 				if err != nil {
-					logger.Warn("initialize replicator failed", zap.Error(err))
+					nextInterval := bo.NextBackOff()
+					logger.Warn("initialize replicator failed",
+						zap.Error(err), zap.Duration("nextRetryInterval", nextInterval))
+					select {
+					case <-r.asyncNotifier.Context().Done():
+						return
+					case <-time.After(nextInterval):
+					}
 					continue
 				}
 				break INIT_LOOP
@@ -126,6 +144,9 @@ func (r *channelReplicator) init() error {
 	if r.msgScanner == nil {
 		cp, err := r.getReplicateCheckpoint()
 		if err != nil {
+			return err
+		}
+		if err := r.validateCheckpoint(cp); err != nil {
 			return err
 		}
 		ch := make(adaptor.ChanMessageHandler)
@@ -175,6 +196,63 @@ func (r *channelReplicator) startConsumeLoop() {
 				}
 			}
 		}
+	}
+}
+
+// validateCheckpoint checks whether the checkpoint position still exists in the source MQ.
+// It creates a temporary scanner from the earliest available position and compares
+// the earliest message ID with the checkpoint's message ID. If the checkpoint is older
+// than the earliest available message, it means the checkpoint has been deleted by
+// the MQ retention policy, and ErrCheckpointExpired is returned.
+func (r *channelReplicator) validateCheckpoint(cp *utility.ReplicateCheckpoint) error {
+	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("modRevision", r.channel.ModRevision))
+
+	validateCtx, validateCancel := context.WithTimeout(r.asyncNotifier.Context(), 30*time.Second)
+	defer validateCancel()
+
+	// Create a temporary scanner from the earliest position to get the earliest available message ID.
+	tempCh := make(adaptor.ChanMessageHandler)
+	tempScanner := streaming.WAL().Read(validateCtx, streaming.ReadOption{
+		PChannel:       r.channel.Value.GetSourceChannelName(),
+		DeliverPolicy:  options.DeliverPolicyAll(),
+		MessageHandler: tempCh,
+	})
+	defer func() {
+		tempScanner.Close()
+		// Drain remaining messages to avoid goroutine leak in the handler.
+		for range tempCh {
+		}
+	}()
+
+	// Wait for the first message or timeout.
+	select {
+	case <-validateCtx.Done():
+		return errors.Wrap(validateCtx.Err(), "timeout waiting for earliest message to validate checkpoint")
+	case <-tempScanner.Done():
+		// Scanner terminated before delivering any message.
+		if err := tempScanner.Error(); err != nil {
+			return errors.Wrap(err, "failed to read earliest message for checkpoint validation")
+		}
+		// Scanner closed without error and no message — empty topic, checkpoint is valid.
+		return nil
+	case earliestMsg := <-tempCh:
+		earliestID := earliestMsg.MessageID()
+		if cp.MessageID.LT(earliestID) {
+			logger.Warn("replicate checkpoint has been expired by MQ retention policy",
+				zap.Stringer("expiredCheckpointID", cp.MessageID),
+				zap.Uint64("checkpointTimeTick", cp.TimeTick),
+				zap.Stringer("earliestAvailableID", earliestID),
+				zap.String("pchannel", r.channel.Value.GetSourceChannelName()),
+			)
+			return errors.Wrapf(ErrCheckpointExpired,
+				"checkpoint %s is older than earliest available message %s on channel %s",
+				cp.MessageID, earliestID, r.channel.Value.GetSourceChannelName())
+		}
+		logger.Info("checkpoint validated, position still available in MQ",
+			zap.Stringer("checkpointID", cp.MessageID),
+			zap.Stringer("earliestAvailableID", earliestID),
+		)
+		return nil
 	}
 }
 
