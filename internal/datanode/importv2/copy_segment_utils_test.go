@@ -1771,3 +1771,100 @@ func TestListAllFiles(t *testing.T) {
 		assert.Nil(t, files)
 	})
 }
+
+// TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats verifies that V3 segments
+// with text index and JSON key stats succeed during copy. Before the fix, V3
+// segments had wrong-format paths in TextIndexFiles/JsonKeyIndexFiles (etcd
+// metadata), causing "no mapping found" errors during buildIndexInfoFromSource.
+// The fix skips pb path extraction for V3 (files already copied via manifest
+// basePath/_stats/) and passes metadata as placeholders.
+func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
+
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifestPath,
+		InsertBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{EntriesNum: 500, LogPath: "files/insert_log/111/222/333/100/10001", LogSize: 1024},
+				},
+			},
+		},
+		// Text index with relative paths (as stored in etcd after dual-write fix)
+		TextIndexFiles: map[int64]*datapb.TextIndexStats{
+			101: {
+				FieldID: 101,
+				BuildID: 7000,
+				Version: 1,
+				Files:   []string{"tokenizer.json", "index.data"},
+			},
+		},
+		// JSON key stats with relative paths (as stored in etcd after dual-write fix)
+		JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
+			102: {
+				FieldID:                102,
+				BuildID:                8000,
+				Version:                1,
+				Files:                  []string{"shared_key_index/.managed.json_0", "shared_key_index/.managed.json_1"},
+				JsonKeyStatsDataFormat: 3,
+			},
+		},
+	}
+
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+		NewBuildIds:  map[int64]int64{7000: 7777, 8000: 9000},
+	}
+
+	mList := mockey.Mock(listAllFiles).To(func(_ context.Context, _ storage.ChunkManager, basePath string) ([]string, error) {
+		// Simulate listing all files under basePath including _stats/
+		return []string{
+			"files/insert_log/111/222/333/_data/0",
+			"files/insert_log/111/222/333/_metadata/manifest.json",
+			"files/insert_log/111/222/333/_stats/text_index.101/tokenizer.json",
+			"files/insert_log/111/222/333/_stats/text_index.101/index.data",
+			"files/insert_log/111/222/333/_stats/json_key_index.102/shared_key_index/.managed.json_0",
+			"files/insert_log/111/222/333/_stats/json_key_index.102/shared_key_index/.managed.json_1",
+		}, nil
+	}).Build()
+	defer mList.UnPatch()
+
+	mCopy := mockey.Mock(copyFile).Return(nil).Build()
+	defer mCopy.UnPatch()
+
+	cm := &struct{ storage.ChunkManager }{}
+	result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, int64(666), result.SegmentId)
+
+	// Verify text index metadata is passed through as placeholder
+	assert.Len(t, result.TextIndexInfos, 1)
+	assert.Contains(t, result.TextIndexInfos, int64(101))
+	// Files are passed through as-is (placeholder, not mapped)
+	assert.Equal(t, []string{"tokenizer.json", "index.data"}, result.TextIndexInfos[101].GetFiles())
+	assert.Equal(t, int64(7777), result.TextIndexInfos[101].GetBuildID(), "text index buildID should be remapped")
+
+	// Verify JSON key stats metadata is passed through as placeholder with new buildID
+	assert.Len(t, result.JsonKeyIndexInfos, 1)
+	assert.Contains(t, result.JsonKeyIndexInfos, int64(102))
+	assert.Equal(t, int64(9000), result.JsonKeyIndexInfos[102].GetBuildID(), "buildID should be remapped")
+	// Files are passed through as-is (placeholder, not mapped)
+	assert.Equal(t, []string{"shared_key_index/.managed.json_0", "shared_key_index/.managed.json_1"},
+		result.JsonKeyIndexInfos[102].GetFiles())
+
+	// Verify manifest path is transformed
+	expectedManifestPath := packed.MarshalManifestPath("files/insert_log/444/555/666", 2)
+	assert.Equal(t, expectedManifestPath, result.ManifestPath)
+
+	// Verify _stats files are included in the copy (from listAllFiles, part of InsertBinlogs)
+	assert.True(t, len(copiedFiles) >= 6, "should copy all files including _stats/")
+}
