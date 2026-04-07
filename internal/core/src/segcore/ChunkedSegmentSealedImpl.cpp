@@ -342,6 +342,31 @@ ChunkedSegmentSealedImpl::init_storage_v2_timestamp_index(
 }
 
 void
+ChunkedSegmentSealedImpl::init_storage_v1_pk_index(
+    FieldId field_id,
+    const std::shared_ptr<ChunkedColumnInterface>& column,
+    DataType data_type,
+    bool is_replace) {
+    if (schema_->get_primary_field_id() != field_id) {
+        return;
+    }
+    // Build compressed offset->pk for FillPrimaryKeys fast path
+    insert_record_.build_offset2pk(data_type, column.get());
+
+    if (!is_sorted_by_pk_) {
+        AssertInfo(field_id.get() != -1, "Primary key is -1");
+        if (!is_replace) {
+            AssertInfo(insert_record_.empty_pks(),
+                       "primary key records already exists, current "
+                       "field id {}",
+                       field_id.get());
+            insert_record_.insert_pks(data_type, column.get());
+            insert_record_.seal_pks();
+        }
+    }
+}
+
+void
 ChunkedSegmentSealedImpl::init_storage_v2_pk_index(
     FieldId field_id,
     const std::shared_ptr<ChunkedColumnInterface>& column,
@@ -929,7 +954,7 @@ ChunkedSegmentSealedImpl::load_system_field_internal(
             offset += chunk_ptr->Span().row_count();
         }
 
-        init_timestamp_index_owned(std::move(timestamps), num_rows);
+        init_storage_v1_timestamp_index(std::move(timestamps), num_rows);
     } else {
         AssertInfo(system_field_type == SystemFieldType::RowId,
                    "System field type of id column is not RowId");
@@ -3424,23 +3449,10 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
     // set pks to offset
     if (schema_->get_primary_field_id() == field_id) {
-        if (is_proxy_column) {
+        if (segment_load_info_.GetStorageVersion() >= STORAGE_V2) {
             init_storage_v2_pk_index(field_id, column, data_type);
         } else {
-            // Always build compressed offset->pk for FillPrimaryKeys fast path
-            insert_record_.build_offset2pk(data_type, column.get());
-
-            if (!is_sorted_by_pk_) {
-                AssertInfo(field_id.get() != -1, "Primary key is -1");
-                if (!is_replace) {
-                    AssertInfo(insert_record_.empty_pks(),
-                               "primary key records already exists, current "
-                               "field id {}",
-                               field_id.get());
-                    insert_record_.insert_pks(data_type, column.get());
-                    insert_record_.seal_pks();
-                }
-            }
+            init_storage_v1_pk_index(field_id, column, data_type, is_replace);
         }
     }
 
@@ -3514,53 +3526,7 @@ build_timestamp_index(const Timestamp* data, size_t num_rows) {
 }
 
 void
-ChunkedSegmentSealedImpl::init_timestamp_index_from_column(
-    std::shared_ptr<ChunkedColumnInterface> column, size_t num_rows) {
-    auto all_chunks = column->GetAllChunks(nullptr);
-
-    // Build timestamp index — needs contiguous data
-    TimestampIndex index;
-    if (all_chunks.size() == 1) {
-        // Single chunk: build index directly from chunk data
-        auto* fixed_chunk = static_cast<FixedWidthChunk*>(all_chunks[0].get());
-        auto span = fixed_chunk->Span();
-        auto* ts_ptr = static_cast<const Timestamp*>(span.data());
-        AssertInfo(static_cast<size_t>(span.row_count()) == num_rows,
-                   "timestamp chunk row count {} != expected {}",
-                   span.row_count(),
-                   num_rows);
-        index = build_timestamp_index(ts_ptr, num_rows);
-    } else {
-        // Multi-chunk: temp contiguous copy for index building only
-        std::vector<Timestamp> temp(num_rows);
-        size_t offset = 0;
-        for (auto& pin : all_chunks) {
-            auto* fixed_chunk = static_cast<FixedWidthChunk*>(pin.get());
-            auto span = fixed_chunk->Span();
-            auto n = std::min(static_cast<size_t>(span.row_count()),
-                              num_rows - offset);
-            std::copy_n(static_cast<const Timestamp*>(span.data()),
-                        n,
-                        temp.data() + offset);
-            offset += n;
-        }
-        AssertInfo(offset == num_rows,
-                   "timestamp total row count {} != expected {}",
-                   offset,
-                   num_rows);
-        index = build_timestamp_index(temp.data(), num_rows);
-        // temp is freed here — runtime access uses pinned chunks directly
-    }
-
-    // Always pin mode: zero-copy segmented access
-    std::unique_lock lck(mutex_);
-    AssertInfo(insert_record_.timestamps_.empty(), "already exists");
-    insert_record_.init_timestamps_from_column(
-        std::move(column), std::move(all_chunks), std::move(index));
-}
-
-void
-ChunkedSegmentSealedImpl::init_timestamp_index_owned(
+ChunkedSegmentSealedImpl::init_storage_v1_timestamp_index(
     std::vector<Timestamp> timestamps, size_t num_rows) {
     auto index = build_timestamp_index(timestamps.data(), num_rows);
     std::unique_lock lck(mutex_);
