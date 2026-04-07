@@ -50,6 +50,7 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/KeyRetriever.h"
+#include "folly/ScopeGuard.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
@@ -168,6 +169,18 @@ GroupChunkTranslator::GroupChunkTranslator(
             return meta_result;
         }));
     }
+    // Ensure all futures are awaited even if one throws, to prevent
+    // use-after-free on captured references (&fs, this) in background tasks.
+    auto futures_guard = folly::makeGuard([&futures]() {
+        for (auto& f : futures) {
+            if (f.valid()) {
+                try {
+                    f.get();
+                } catch (...) {
+                }
+            }
+        }
+    });
     parquet_file_metadata_.reserve(insert_files_.size());
     row_group_meta_list_.reserve(insert_files_.size());
     for (auto& f : futures) {
@@ -175,7 +188,9 @@ GroupChunkTranslator::GroupChunkTranslator(
         parquet_file_metadata_.push_back(
             std::move(meta_result.parquet_metadata));
         row_group_meta_list_.push_back(std::move(meta_result.row_group_meta));
-        field_id_mapping_ = std::move(meta_result.field_id_mapping);
+        if (field_id_mapping_.empty()) {
+            field_id_mapping_ = std::move(meta_result.field_id_mapping);
+        }
     }
 
     // Build prefix sum for O(1) lookup in get_cid_from_file_and_row_group_index
