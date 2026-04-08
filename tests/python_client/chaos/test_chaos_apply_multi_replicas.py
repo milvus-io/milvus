@@ -2,6 +2,7 @@ import pytest
 import time
 import json
 import random
+import yaml
 from time import sleep
 from datetime import datetime
 from pymilvus import connections
@@ -20,27 +21,40 @@ def parse_duration(duration_str):
     return eval(s)
 
 
-def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs, duration="2m"):
-    """Build a chaos config that targets all pods in target RGs (querynode + streamingnode).
+def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs,
+                          component=None, mode="one", duration="2m"):
+    """Build a chaos config that targets pods in target RGs.
 
-    Uses expressionSelectors with 'In' operator to target one or more RGs.
-    No component filter — all pods with the RG label are affected.
+    Args:
+        chaos_type: pod-failure or pod-kill
+        release_name: milvus helm release name
+        namespace: k8s namespace
+        target_rgs: list of RG names to target
+        component: optional component filter (e.g. 'querynode', 'streamingnode').
+                   If None, targets all pods in the RG.
+        mode: 'one' (random single pod) or 'all' (all matching pods)
+        duration: chaos duration string (e.g. '2m')
     """
     action = chaos_type
+    component_suffix = f"-{component}" if component else ""
+
+    label_selectors = {
+        "app.kubernetes.io/instance": release_name,
+    }
+    if component:
+        label_selectors["app.kubernetes.io/component"] = component
 
     config = {
         "apiVersion": constants.CHAOS_API_VERSION,
         "kind": "PodChaos",
         "metadata": {
-            "name": f"test-multi-replicas-rg-{int(time.time())}",
+            "name": f"test-multi-rg{component_suffix}-{int(time.time())}",
             "namespace": namespace,
         },
         "spec": {
             "selector": {
                 "namespaces": [namespace],
-                "labelSelectors": {
-                    "app.kubernetes.io/instance": release_name,
-                },
+                "labelSelectors": label_selectors,
                 "expressionSelectors": [
                     {
                         "key": "milvus.io/resource-group",
@@ -49,7 +63,7 @@ def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs, durat
                     }
                 ],
             },
-            "mode": "all",
+            "mode": mode,
             "action": action,
             "gracePeriod": 0,
         },
@@ -58,6 +72,16 @@ def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs, durat
     if action == "pod-failure":
         config["spec"]["duration"] = duration
 
+    return config
+
+
+def load_chaos_template(template_path, namespace, release_name):
+    """Load external ChaosMesh YAML template and override metadata."""
+    with open(template_path, 'r') as f:
+        config = yaml.safe_load(f)
+    # Override metadata to avoid name collision across cycles
+    config["metadata"]["name"] = f"{config['metadata'].get('name', 'custom-chaos')}-{int(time.time())}"
+    config["metadata"]["namespace"] = namespace
     return config
 
 
@@ -80,7 +104,7 @@ class TestChaosApplyMultiReplicas:
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
         self.deploy_by = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
-        self.chaos_config = None
+        self.chaos_configs = []
 
     def reconnect(self):
         if self.user and self.password:
@@ -92,34 +116,25 @@ class TestChaosApplyMultiReplicas:
             raise Exception("no connections")
 
     def teardown(self):
-        if self.chaos_config is None:
-            return
-        chaos_res = CusResource(kind=self.chaos_config['kind'],
-                                group=constants.CHAOS_GROUP,
-                                version=constants.CHAOS_VERSION,
-                                namespace=constants.CHAOS_NAMESPACE)
-        meta_name = self.chaos_config.get('metadata', None).get('name', None)
-        chaos_res.delete(meta_name, raise_ex=False)
+        for chaos_config in self.chaos_configs:
+            chaos_res = CusResource(kind=chaos_config['kind'],
+                                    group=constants.CHAOS_GROUP,
+                                    version=constants.CHAOS_VERSION,
+                                    namespace=constants.CHAOS_NAMESPACE)
+            meta_name = chaos_config.get('metadata', {}).get('name', None)
+            if meta_name:
+                chaos_res.delete(meta_name, raise_ex=False)
         sleep(2)
 
-    def _apply_and_wait_chaos(self, chaos_type, target_rg, chaos_duration_seconds):
-        """Apply chaos to one RG, wait for duration, delete and wait recovery.
+    def _apply_single_chaos(self, chaos_config, chaos_duration_seconds):
+        """Apply one chaos CR, wait for duration, delete and wait recovery.
         Returns event record dict.
         """
-        release_name = self.release_name
-        duration_for_spec = f"{chaos_duration_seconds // 60}m" if chaos_duration_seconds >= 60 else f"{chaos_duration_seconds}s"
-
-        chaos_config = build_rg_chaos_config(
-            chaos_type=chaos_type,
-            release_name=release_name,
-            namespace=self.milvus_ns,
-            target_rgs=[target_rg],
-            duration=duration_for_spec,
-        )
         meta_name = chaos_config['metadata']['name']
-        self.chaos_config = chaos_config
+        self.chaos_configs.append(chaos_config)
 
-        log.info(f"injecting {chaos_type} to RG={target_rg}, duration={duration_for_spec}")
+        log.info(f"applying chaos: {meta_name}")
+        log.info(f"chaos spec: {json.dumps(chaos_config['spec'], indent=2)}")
 
         chaos_res = CusResource(kind=chaos_config['kind'],
                                 group=constants.CHAOS_GROUP,
@@ -146,7 +161,15 @@ class TestChaosApplyMultiReplicas:
                 break
             sleep(5)
 
-        # Wait all pods ready
+        return {
+            "meta_name": meta_name,
+            "create_time": create_time,
+            "delete_time": delete_time,
+        }
+
+    def _wait_recovery(self):
+        """Wait for all pods to be ready and reconnect."""
+        release_name = self.release_name
         t0 = time.time()
         wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={release_name}")
         wait_pods_ready(self.milvus_ns, f"release={release_name}")
@@ -166,17 +189,76 @@ class TestChaosApplyMultiReplicas:
                 sleep(2)
         log.info(f"service reconnected, took {time.time() - t0:.1f}s")
 
-        return {
+        return recovery_time, pods_ready_time
+
+    def _apply_and_wait_chaos(self, chaos_type, target_rg, chaos_duration_seconds,
+                              mode="one", components=None, template_path=None):
+        """Apply chaos to one RG with per-component injection, wait and recover.
+
+        If template_path is provided, uses the external template directly.
+        Otherwise builds chaos configs per component with the given mode.
+
+        Args:
+            chaos_type: pod-failure or pod-kill
+            target_rg: single RG name to target
+            chaos_duration_seconds: duration in seconds
+            mode: 'one' or 'all'
+            components: list of components to inject sequentially (e.g. ['querynode', 'streamingnode'])
+            template_path: optional path to external ChaosMesh YAML template
+
+        Returns:
+            Event record dict with per-component details.
+        """
+        release_name = self.release_name
+        duration_str = f"{chaos_duration_seconds // 60}m" if chaos_duration_seconds >= 60 else f"{chaos_duration_seconds}s"
+
+        record = {
             "target_rg": target_rg,
             "chaos_type": chaos_type,
-            "meta_name": meta_name,
-            "create_time": create_time,
-            "delete_time": delete_time,
-            "recovery_time": recovery_time,
-            "pods_ready_time": pods_ready_time,
+            "mode": mode,
+            "steps": [],
         }
 
-    def test_chaos_apply(self, chaos_type, target_rgs, chaos_duration, wait_signal):
+        if template_path:
+            # Use external template directly
+            log.info(f"using external template: {template_path}")
+            chaos_config = load_chaos_template(template_path, self.milvus_ns, release_name)
+            step_record = self._apply_single_chaos(chaos_config, chaos_duration_seconds)
+            step_record["source"] = "template"
+            record["steps"].append(step_record)
+        else:
+            # Per-component sequential injection
+            if not components:
+                components = [None]  # No component filter, target all pods in RG
+
+            random.shuffle(components)
+            log.info(f"injection order: {components} (mode={mode})")
+
+            for component in components:
+                log.info(f"injecting {chaos_type} to RG={target_rg}, component={component or 'all'}, mode={mode}")
+                chaos_config = build_rg_chaos_config(
+                    chaos_type=chaos_type,
+                    release_name=release_name,
+                    namespace=self.milvus_ns,
+                    target_rgs=[target_rg],
+                    component=component,
+                    mode=mode,
+                    duration=duration_str,
+                )
+                step_record = self._apply_single_chaos(chaos_config, chaos_duration_seconds)
+                step_record["component"] = component or "all"
+                step_record["mode"] = mode
+                record["steps"].append(step_record)
+
+        # Wait recovery after all injections in this cycle
+        recovery_time, pods_ready_time = self._wait_recovery()
+        record["recovery_time"] = recovery_time
+        record["pods_ready_time"] = pods_ready_time
+
+        return record
+
+    def test_chaos_apply(self, chaos_type, target_rgs, chaos_duration, chaos_mode,
+                         target_components, chaos_template, wait_signal):
         """One-shot chaos injection to specific RGs (for quick testing)."""
         log.info("*********************Multi-Replica Chaos Test Start**********************")
         if wait_signal:
@@ -190,27 +272,38 @@ class TestChaosApplyMultiReplicas:
         rg_list = [rg.strip() for rg in target_rgs.split(',') if rg.strip()]
         assert len(rg_list) > 0, "target_rgs must not be empty"
 
+        components = [c.strip() for c in target_components.split(',') if c.strip()] if target_components else None
+        template_path = chaos_template if chaos_template else None
+
         chaos_duration_seconds = parse_duration(chaos_duration)
-        record = self._apply_and_wait_chaos(chaos_type, rg_list[0], chaos_duration_seconds)
+        record = self._apply_and_wait_chaos(
+            chaos_type, rg_list[0], chaos_duration_seconds,
+            mode=chaos_mode, components=components, template_path=template_path,
+        )
 
         with open(constants.CHAOS_INFO_SAVE_PATH, 'w') as f:
-            json.dump(record, f)
+            json.dump(record, f, indent=2)
 
         log.info("*********************Multi-Replica Chaos Test Completed**********************")
 
     def test_chaos_apply_periodic(self, chaos_type, target_rgs, chaos_duration,
-                                  chaos_interval, request_duration, wait_signal):
-        """Periodically inject chaos to RGs in round-robin order for long-duration stability testing.
+                                  chaos_interval, request_duration, chaos_mode,
+                                  target_components, chaos_template, wait_signal):
+        """Periodically inject chaos to RGs with per-component injection.
 
-        Each cycle: pick next RG in round-robin -> inject chaos -> wait duration -> delete -> recover -> wait interval.
-        Runs for total request_duration (e.g. 24h). Goal: zero request errors across all cycles.
+        Each cycle: pick next RG -> for each component, inject chaos (mode=one/all)
+        -> wait duration -> delete -> recover -> wait interval.
+        Runs for total request_duration (e.g. 24h).
 
         Args:
             chaos_type: pod-failure or pod-kill
-            target_rgs: comma-separated RG names to rotate through (e.g. "rg1,rg2,rg3")
-            chaos_duration: duration of each chaos injection (e.g. "2m")
-            chaos_interval: total interval between chaos starts (e.g. "10m")
-            request_duration: total test duration (e.g. "24h")
+            target_rgs: comma-separated RG names to rotate through
+            chaos_duration: duration of each chaos injection per component
+            chaos_interval: total interval between cycle starts
+            request_duration: total test duration
+            chaos_mode: 'one' (single random pod) or 'all' (all matching pods)
+            target_components: comma-separated components (e.g. 'querynode,streamingnode')
+            chaos_template: optional path to external ChaosMesh YAML
             wait_signal: whether to wait for signal before starting
         """
         log.info("*********************Periodic Chaos Test Start**********************")
@@ -226,6 +319,9 @@ class TestChaosApplyMultiReplicas:
         rg_list = [rg.strip() for rg in target_rgs.split(',') if rg.strip()]
         assert len(rg_list) > 0, "target_rgs must not be empty"
 
+        components = [c.strip() for c in target_components.split(',') if c.strip()] if target_components else None
+        template_path = chaos_template if chaos_template else None
+
         total_seconds = parse_duration(request_duration)
         interval_seconds = parse_duration(chaos_interval)
         chaos_dur_seconds = parse_duration(chaos_duration)
@@ -233,7 +329,10 @@ class TestChaosApplyMultiReplicas:
         log.info(f"periodic chaos config:")
         log.info(f"  target RGs (round-robin): {rg_list}")
         log.info(f"  chaos type: {chaos_type}")
-        log.info(f"  chaos duration per cycle: {chaos_duration} ({chaos_dur_seconds}s)")
+        log.info(f"  chaos mode: {chaos_mode}")
+        log.info(f"  target components: {components or 'all (no filter)'}")
+        log.info(f"  chaos template: {template_path or 'none (built-in)'}")
+        log.info(f"  chaos duration per component: {chaos_duration} ({chaos_dur_seconds}s)")
         log.info(f"  interval between cycles: {chaos_interval} ({interval_seconds}s)")
         log.info(f"  total duration: {request_duration} ({total_seconds}s)")
         log.info(f"  expected cycles: ~{total_seconds // interval_seconds}")
@@ -258,7 +357,10 @@ class TestChaosApplyMultiReplicas:
                 break
 
             try:
-                record = self._apply_and_wait_chaos(chaos_type, target_rg, chaos_dur_seconds)
+                record = self._apply_and_wait_chaos(
+                    chaos_type, target_rg, chaos_dur_seconds,
+                    mode=chaos_mode, components=components, template_path=template_path,
+                )
                 record["round"] = round_num
                 all_records.append(record)
                 log.info(f"round {round_num} completed: target={target_rg}, recovery={record['pods_ready_time']:.1f}s")
@@ -283,6 +385,8 @@ class TestChaosApplyMultiReplicas:
             "total_rounds": round_num,
             "total_duration_hours": (time.time() - start_time) / 3600,
             "chaos_type": chaos_type,
+            "chaos_mode": chaos_mode,
+            "target_components": components,
             "rg_list": rg_list,
             "records": all_records,
         }
