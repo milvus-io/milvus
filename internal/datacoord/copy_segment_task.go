@@ -547,10 +547,8 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		// Get source segment description from snapshot
 		sourceSegDesc, ok := sourceSegmentMap[sourceSegID]
 		if !ok {
-			log.Warn("source segment not found in snapshot",
-				zap.Int64("sourceSegmentID", sourceSegID),
-				zap.String("snapshotName", job.GetSnapshotName()))
-			continue
+			return nil, merr.WrapErrServiceInternal(
+				fmt.Sprintf("source segment %d not found in snapshot %s", sourceSegID, job.GetSnapshotName()))
 		}
 
 		// Build source with full binlog information
@@ -590,13 +588,17 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			}
 		}
 		for _, textIndex := range sourceSegDesc.GetTextIndexFiles() {
-			if err := allocNewBuildID(textIndex.GetBuildID()); err != nil {
-				return nil, err
+			if textIndex.GetBuildID() != 0 {
+				if err := allocNewBuildID(textIndex.GetBuildID()); err != nil {
+					return nil, err
+				}
 			}
 		}
-		for _, jsonStats := range sourceSegDesc.GetJsonKeyIndexFiles() {
-			if err := allocNewBuildID(jsonStats.GetBuildID()); err != nil {
-				return nil, err
+		for _, jsonKeyIndex := range sourceSegDesc.GetJsonKeyIndexFiles() {
+			if jsonKeyIndex.GetBuildID() != 0 {
+				if err := allocNewBuildID(jsonKeyIndex.GetBuildID()); err != nil {
+					return nil, err
+				}
 			}
 		}
 		// Build target with IDs and buildID mappings
