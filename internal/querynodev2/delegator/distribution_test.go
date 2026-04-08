@@ -1762,20 +1762,49 @@ func TestBatchGetFromSegments(t *testing.T) {
 				NodeID: 1,
 				Segments: []SegmentEntry{
 					{SegmentID: 1, PartitionID: 1, Candidate: candidate1, Offline: true}, // offline
-					{SegmentID: 2, PartitionID: 1, Candidate: nil},                       // nil candidate
+					{SegmentID: 2, PartitionID: 1, Candidate: nil},                       // nil candidate — skipped
 				},
 			},
 		}
 		growing := []SegmentEntry{
-			{SegmentID: 10, PartitionID: 1, Candidate: nil}, // nil candidate in growing
+			{SegmentID: 10, PartitionID: 1, Candidate: nil}, // nil candidate — skipped
 		}
 
 		pks := []storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}
 
 		result := BatchGetFromSegments(pks, common.AllPartitionsID, sealed, growing)
 
-		// All should be skipped
-		assert.Empty(t, result)
+		// nil candidates are skipped (not broadcast) in streaming forward path
+		assert.Len(t, result, 0)
+		assert.NotContains(t, result, int64(1))
+		assert.NotContains(t, result, int64(2))
+		assert.NotContains(t, result, int64(10))
+	})
+
+	t.Run("nil_candidates_are_skipped", func(t *testing.T) {
+		sealed := []SnapshotItem{
+			{
+				NodeID: 1,
+				Segments: []SegmentEntry{
+					{SegmentID: 1, PartitionID: 1, Candidate: nil},
+					{SegmentID: 2, PartitionID: 2, Candidate: nil},
+				},
+			},
+		}
+		growing := []SegmentEntry{
+			{SegmentID: 10, PartitionID: 1, Candidate: nil},
+			{SegmentID: 11, PartitionID: 2, Candidate: nil},
+		}
+
+		pks := []storage.PrimaryKey{
+			storage.NewInt64PrimaryKey(100),
+			storage.NewInt64PrimaryKey(200),
+		}
+
+		result := BatchGetFromSegments(pks, 1, sealed, growing)
+
+		// nil candidates are skipped entirely
+		assert.Len(t, result, 0)
 	})
 
 	t.Run("growing_segments", func(t *testing.T) {

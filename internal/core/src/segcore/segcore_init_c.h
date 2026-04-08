@@ -86,6 +86,9 @@ SegcoreSetKnowhereGpuMemoryPoolSize(const uint32_t init_size,
                                     const uint32_t max_size);
 
 void
+SegcoreSetVisibilityFilterEnabled(const bool value);
+
+void
 SegcoreCloseGlog();
 
 int32_t
