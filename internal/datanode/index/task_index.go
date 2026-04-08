@@ -238,7 +238,11 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	var err error
 
 	// Ignore the error here, this param will only be used for diskann and aisaq
-	fieldDataSize, _ = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
+	if it.req.GetField().GetDataType() == schemapb.DataType_ArrayOfVector {
+		fieldDataSize = getFieldDataSizeFromBinlogs(it.req.GetInsertLogs(), it.req.GetField().GetFieldID())
+	} else {
+		fieldDataSize, _ = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
+	}
 	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
 		err = indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize))
 		if err != nil {

@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -59,6 +60,19 @@ func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType)
 	default:
 		return 0, nil
 	}
+}
+
+func getFieldDataSizeFromBinlogs(insertLogs []*datapb.FieldBinlog, fieldID int64) uint64 {
+	var totalSize uint64
+	for _, fieldBinlog := range insertLogs {
+		if fieldBinlog.GetFieldID() == fieldID {
+			for _, binlog := range fieldBinlog.GetBinlogs() {
+				totalSize += uint64(binlog.GetMemorySize())
+			}
+			break
+		}
+	}
+	return totalSize
 }
 
 func mapToKVPairs(m map[string]string) []*commonpb.KeyValuePair {
