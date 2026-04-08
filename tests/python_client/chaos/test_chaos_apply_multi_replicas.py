@@ -71,6 +71,10 @@ def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs,
 
     if action == "pod-failure":
         config["spec"]["duration"] = duration
+    elif action == "container-kill":
+        # Container name matches the component name (e.g. querynode, streamingnode)
+        if component:
+            config["spec"]["containerNames"] = [component]
 
     return config
 
