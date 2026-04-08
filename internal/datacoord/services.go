@@ -2969,18 +2969,15 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 
 	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
 		// Only access s.meta (segment meta) here, NOT s.importMeta.
+		// Batch all segment updates into a single UpdateSegmentsInfo call (one etcd write).
+		ops := make([]UpdateOperator, 0, len(segIDs))
 		for _, segID := range segIDs {
-			op := UpdateIsImporting(segID, false)
-			if err := s.meta.UpdateSegmentsInfo(ctx, op); err != nil {
-				log.Ctx(ctx).Warn("failed to unset is_importing for segment",
-					zap.Int64("jobID", jobID),
-					zap.String("vchannel", vchannel),
-					zap.Int64("segmentID", segID),
-					zap.Error(err))
-				return err
-			}
+			ops = append(ops, UpdateIsImporting(segID, false))
 		}
-		return nil
+		if len(ops) == 0 {
+			return nil
+		}
+		return s.meta.UpdateSegmentsInfo(ctx, ops...)
 	})
 	if err != nil {
 		return merr.Status(err), nil

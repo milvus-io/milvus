@@ -290,11 +290,10 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		vchannel := msg.VChannel()
 		jobID := commitMsg.Header().GetJobId()
 
-		// Trigger async DML flush to ensure DML before this commit is flushed.
-		// FlushChannel failure is non-fatal: log warn and continue.
+		// Flush DML data before this commit fence. Panic on failure so WAL replays the message.
 		if err := resource.Resource().WriteBufferManager().
 			FlushChannel(context.Background(), vchannel, msg.TimeTick()); err != nil {
-			impl.logger.Warn("FlushChannel on CommitImport failed (non-fatal)",
+			impl.logger.Panic("FlushChannel on CommitImport failed, panicking to retry from WAL",
 				zap.String("vchannel", vchannel), zap.Int64("jobID", jobID), zap.Error(err))
 		}
 
