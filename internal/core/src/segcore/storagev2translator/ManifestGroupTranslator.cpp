@@ -70,12 +70,18 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority,
     bool eager_load,
-    const std::string& warmup_policy)
+    const std::string& warmup_policy,
+    const std::string& cache_key_suffix)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
       chunk_reader_(std::move(chunk_reader)),
-      key_(fmt::format("seg_{}_cg_{}", segment_id, column_group_index)),
+      key_(cache_key_suffix.empty()
+               ? fmt::format("seg_{}_cg_{}", segment_id, column_group_index)
+               : fmt::format("seg_{}_cg_{}_{}",
+                             segment_id,
+                             column_group_index,
+                             cache_key_suffix)),
       field_metas_(field_metas),
       mmap_dir_path_(mmap_dir_path),
       meta_(num_fields,

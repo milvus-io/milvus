@@ -3658,6 +3658,11 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                                      : mmap_config.GetScalarFieldEnableMmap();
     auto use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
 
+    // The set of columns this entry projects is exactly the field_ids the
+    // diff handed us. For lazy entries, SegmentLoadInfo::ComputeDiffColumnGroups
+    // emits one entry per field, so each lazy entry produces a single-column
+    // projected ChunkReader — touching one lazy field will not co-load chunks
+    // for sibling lazy fields in the same column group.
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     needed_columns->reserve(milvus_field_ids.size());
     for (const auto& fid : milvus_field_ids) {
@@ -3678,9 +3683,13 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
 
-    LOG_INFO("[StorageV2] segment {} loads manifest cg index {}",
-             this->get_segment_id(),
-             index);
+    LOG_INFO(
+        "[StorageV2] segment {} loads manifest cg index {} ({} field(s), "
+        "eager={})",
+        this->get_segment_id(),
+        index,
+        milvus_field_ids.size(),
+        eager_load);
     auto mmap_dir_path =
         milvus::storage::LocalChunkManagerSingleton::GetInstance()
             .GetChunkManager()
@@ -3690,6 +3699,15 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     // otherwise pass empty string to fall back to global config
     std::string warmup_policy =
         has_warmup_setting ? aggregated_warmup_policy : "";
+
+    // Multiple lazy entries can share the same column-group index (one per
+    // field), so the translator cache key must be disambiguated by the
+    // field-id of this entry. Eager entries are still one-per-cg, so they
+    // keep the unsuffixed key.
+    std::string cache_key_suffix;
+    if (!eager_load) {
+        cache_key_suffix = std::to_string(milvus_field_ids.front().get());
+    }
 
     auto translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
@@ -3701,10 +3719,11 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             use_mmap,
             mmap_config.GetMmapPopulate(),
             mmap_dir_path,
-            column_group->columns.size(),
+            milvus_field_ids.size(),
             segment_load_info_.GetPriority(),
             eager_load,
-            warmup_policy);
+            warmup_policy,
+            cache_key_suffix);
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -3714,7 +3733,6 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
         auto column = std::make_shared<ProxyChunkColumn>(
             chunked_column_group, field_id, field_meta);
         auto data_type = field_meta.get_data_type();
-        std::optional<ParquetStatistics> statistics_opt;
         load_field_data_common(
             field_id,
             column,
