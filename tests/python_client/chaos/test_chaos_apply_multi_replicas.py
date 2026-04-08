@@ -79,23 +79,46 @@ def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs,
     return config
 
 
+def _replace_rg_in_selector(selector, target_rg):
+    """Replace milvus.io/resource-group values in a selector dict."""
+    for expr in selector.get("expressionSelectors", []):
+        if expr.get("key") == "milvus.io/resource-group":
+            expr["values"] = [target_rg]
+
+
+def _replace_rg_recursive(obj, target_rg):
+    """Recursively find all selectors in a config and replace RG values.
+
+    Handles both simple CRs (spec.selector) and Workflow templates
+    (spec.templates[*].podChaos.selector, spec.templates[*].networkChaos.selector, etc.)
+    """
+    if isinstance(obj, dict):
+        # Direct selector match
+        if "expressionSelectors" in obj:
+            _replace_rg_in_selector(obj, target_rg)
+        # Recurse into all dict values
+        for v in obj.values():
+            _replace_rg_recursive(v, target_rg)
+    elif isinstance(obj, list):
+        for item in obj:
+            _replace_rg_recursive(item, target_rg)
+
+
 def load_chaos_template(template_path, namespace, release_name, target_rg=None):
     """Load external ChaosMesh YAML template and override metadata.
 
-    If target_rg is provided, replaces the RG values in expressionSelectors
-    so the template rotates across RGs each cycle.
+    Supports both simple CRs (PodChaos, NetworkChaos, etc.) and Workflow.
+    If target_rg is provided, recursively replaces all milvus.io/resource-group
+    values so the template rotates across RGs each cycle.
     """
     with open(template_path, 'r') as f:
         config = yaml.safe_load(f)
     # Override metadata to avoid name collision across cycles
     config["metadata"]["name"] = f"{config['metadata'].get('name', 'custom-chaos')}-{int(time.time())}"
     config["metadata"]["namespace"] = namespace
-    # Replace RG in expressionSelectors if target_rg is provided
+    # Recursively replace RG in all selectors
     if target_rg:
-        selector = config.get("spec", {}).get("selector", {})
-        for expr in selector.get("expressionSelectors", []):
-            if expr.get("key") == "milvus.io/resource-group":
-                expr["values"] = [target_rg]
+        _replace_rg_recursive(config, target_rg)
     return config
 
 
