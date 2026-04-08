@@ -75,13 +75,23 @@ def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs,
     return config
 
 
-def load_chaos_template(template_path, namespace, release_name):
-    """Load external ChaosMesh YAML template and override metadata."""
+def load_chaos_template(template_path, namespace, release_name, target_rg=None):
+    """Load external ChaosMesh YAML template and override metadata.
+
+    If target_rg is provided, replaces the RG values in expressionSelectors
+    so the template rotates across RGs each cycle.
+    """
     with open(template_path, 'r') as f:
         config = yaml.safe_load(f)
     # Override metadata to avoid name collision across cycles
     config["metadata"]["name"] = f"{config['metadata'].get('name', 'custom-chaos')}-{int(time.time())}"
     config["metadata"]["namespace"] = namespace
+    # Replace RG in expressionSelectors if target_rg is provided
+    if target_rg:
+        selector = config.get("spec", {}).get("selector", {})
+        for expr in selector.get("expressionSelectors", []):
+            if expr.get("key") == "milvus.io/resource-group":
+                expr["values"] = [target_rg]
     return config
 
 
@@ -220,11 +230,12 @@ class TestChaosApplyMultiReplicas:
         }
 
         if template_path:
-            # Use external template directly
-            log.info(f"using external template: {template_path}")
-            chaos_config = load_chaos_template(template_path, self.milvus_ns, release_name)
+            # Use external template, replace RG with current cycle's target
+            log.info(f"using external template: {template_path}, target_rg={target_rg}")
+            chaos_config = load_chaos_template(template_path, self.milvus_ns, release_name, target_rg=target_rg)
             step_record = self._apply_single_chaos(chaos_config, chaos_duration_seconds)
             step_record["source"] = "template"
+            step_record["target_rg"] = target_rg
             record["steps"].append(step_record)
         else:
             # Per-component sequential injection
