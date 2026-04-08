@@ -24,6 +24,7 @@
 #include "exec/expression/Utils.h"
 #include "fmt/core.h"
 #include "plan/PlanNode.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus {
@@ -74,6 +75,18 @@ PhyMvccNode::GetOutput() {
 
     tracer::AddEvent(fmt::format("input_rows: {}", active_count_));
 
+    // Visibility filtering disabled globally: skip all filtering.
+    if (!segcore::SegcoreConfig::default_config()
+             .get_visibility_filter_enabled()) {
+        auto col_input = is_source_node_ ? std::make_shared<ColumnVector>(
+                                               TargetBitmap(active_count_),
+                                               TargetBitmap(active_count_))
+                                         : GetColumnVector(input_);
+        query_context->set_all_rows_visible(true);
+        is_finished_ = true;
+        return std::make_shared<RowVector>(std::vector<VectorPtr>{col_input});
+    }
+
     // ── Sealed-segment fast path (skip timestamp mask) ──
     // On a sealed segment without TTL, when query_ts covers all inserts,
     // mask_with_timestamps is redundant (all rows pass).  Only apply the
@@ -105,7 +118,6 @@ PhyMvccNode::GetOutput() {
                                      : GetColumnVector(input_);
 
     TargetBitmapView data(col_input->GetRawData(), col_input->size());
-    // need to expose null?
     segment_->mask_with_timestamps(
         data, query_timestamp_, collection_ttl_timestamp_);
     segment_->mask_with_delete(data, active_count_, query_timestamp_);

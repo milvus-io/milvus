@@ -928,6 +928,66 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
+func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
+
+	workers := make(map[int64]*cluster.MockWorker)
+	worker1 := &cluster.MockWorker{}
+	workers[1] = worker1
+
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		Return(nil)
+	worker1.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).
+		RunAndReturn(func(ctx context.Context, req *querypb.DeleteRequest) error {
+			s.Equal(int64(100), req.GetSegmentId())
+			s.Equal(querypb.DataScope_Historical, req.GetScope())
+			s.ElementsMatch([]int64{1, 10}, req.GetPrimaryKeys().GetIntId().GetData())
+			s.ElementsMatch([]uint64{10, 10}, req.GetTimestamps())
+			return nil
+		}).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+		return workers[nodeID]
+	}, nil)
+
+	s.delegator.ProcessDelete([]*DeleteData{
+		{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{
+				storage.NewInt64PrimaryKey(1),
+				storage.NewInt64PrimaryKey(10),
+			},
+			Timestamps: []uint64{10, 10},
+			RowCount:   2,
+		},
+	}, 10)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			},
+		},
+	})
+
+	s.NoError(err)
+	sealed, _ := s.delegator.GetSegmentInfo(false)
+	s.Require().Equal(1, len(sealed))
+	s.Require().Equal(1, len(sealed[0].Segments))
+	s.Nil(sealed[0].Segments[0].Candidate)
+}
+
 func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
 	for {
 		if s.delegator.idfOracle.TargetVersion() >= targetVersion {
@@ -1484,6 +1544,14 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	delegator.deleteBuffer.RegisterL0(l0Global)
 	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	rawPks := make([]storage.PrimaryKey, 0, pks.Len())
+	for i := 0; i < pks.Len(); i++ {
+		rawPks = append(rawPks, pks.Get(i))
+	}
+	s.ElementsMatch(rawPks, []storage.PrimaryKey{partitionDeleteData.DeletePks().Get(0), allPartitionDeleteData.DeletePks().Get(0)})
+
+	stubCandidate := pkoracle.NewBloomFilterSet(3, l0.Partition(), commonpb.SegmentState_Sealed)
+	pks, _ = delegator.GetLevel0Deletions(partitionID, stubCandidate)
+	rawPks = rawPks[:0]
 	for i := 0; i < pks.Len(); i++ {
 		rawPks = append(rawPks, pks.Get(i))
 	}
