@@ -18,6 +18,7 @@
 #include "exec/QueryContext.h"
 #include "exec/Task.h"
 #include "plan/PlanNode.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Types.h"
@@ -27,6 +28,23 @@
 using namespace milvus;
 using namespace milvus::exec;
 using namespace milvus::segcore;
+
+// RAII guard to set/restore visibility_filter_enabled
+class VisibilityFilterGuard {
+ public:
+    explicit VisibilityFilterGuard(bool value)
+        : original_(SegcoreConfig::default_config()
+                        .get_visibility_filter_enabled()) {
+        SegcoreConfig::default_config().set_visibility_filter_enabled(value);
+    }
+    ~VisibilityFilterGuard() {
+        SegcoreConfig::default_config().set_visibility_filter_enabled(
+            original_);
+    }
+
+ private:
+    bool original_;
+};
 
 class MvccFastPathTest : public ::testing::Test {
  protected:
@@ -306,4 +324,89 @@ TEST_F(MvccFastPathTest, Level1_NoCachePollution_SequentialQueries) {
     TargetBitmapView view2(col2->GetRawData(), col2->size());
     EXPECT_EQ(view2.count(), 0)
         << "Second query must return clean bitmap, not polluted cache";
+}
+
+// ---------------------------------------------------------------------------
+// visibilityFilterEnabled=false: all MVCC filtering skipped, all rows visible
+// ---------------------------------------------------------------------------
+TEST_F(MvccFastPathTest, VisibilityFilterDisabled_AllRowsVisible) {
+    VisibilityFilterGuard guard(false);
+    auto segment = CreateSealedSegment();
+    auto result = RunMvccPlan(segment.get());
+
+    EXPECT_EQ(result.num_rows, N_);
+    EXPECT_TRUE(result.all_rows_visible)
+        << "visibilityFilterEnabled=false should set all_rows_visible=true";
+
+    // Verify output bitmap is all zeros (no rows filtered out)
+    ASSERT_NE(result.output, nullptr);
+    auto col = std::dynamic_pointer_cast<ColumnVector>(result.output->child(0));
+    ASSERT_NE(col, nullptr);
+    TargetBitmapView view(col->GetRawData(), col->size());
+    EXPECT_EQ(view.count(), 0)
+        << "visibilityFilterEnabled=false should produce all-zero bitmap";
+}
+
+// ---------------------------------------------------------------------------
+// visibilityFilterEnabled=false: deletes are ignored even when present
+// ---------------------------------------------------------------------------
+TEST_F(MvccFastPathTest, VisibilityFilterDisabled_DeletesIgnored) {
+    VisibilityFilterGuard guard(false);
+    int64_t num_deletes = 5;
+    auto segment = CreateSealedSegmentWithDeletes(num_deletes);
+    auto result = RunMvccPlan(segment.get());
+
+    EXPECT_EQ(result.num_rows, N_);
+    EXPECT_TRUE(result.all_rows_visible)
+        << "visibilityFilterEnabled=false should ignore deletes";
+
+    ASSERT_NE(result.output, nullptr);
+    auto col = std::dynamic_pointer_cast<ColumnVector>(result.output->child(0));
+    ASSERT_NE(col, nullptr);
+    TargetBitmapView view(col->GetRawData(), col->size());
+    EXPECT_EQ(view.count(), 0)
+        << "visibilityFilterEnabled=false should not mask deleted rows";
+}
+
+// ---------------------------------------------------------------------------
+// visibilityFilterEnabled=false on growing segment: still skips all filtering
+// ---------------------------------------------------------------------------
+TEST_F(MvccFastPathTest, VisibilityFilterDisabled_GrowingSegment) {
+    VisibilityFilterGuard guard(false);
+    auto raw_data = DataGen(schema_, N_);
+    auto segment = CreateGrowingSegment(schema_, empty_index_meta);
+    segment->PreInsert(N_);
+    segment->Insert(0,
+                    N_,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+
+    auto mvcc_node = std::make_shared<plan::MvccNode>("mvcc_1");
+    auto plan = plan::PlanFragment(mvcc_node);
+
+    auto query_context = std::make_shared<QueryContext>(
+        "test_vis_disabled_growing",
+        segment.get(),
+        N_,
+        MAX_TIMESTAMP,
+        0,
+        0,
+        query::PlanOptions{false},
+        std::make_shared<QueryConfig>(
+            std::unordered_map<std::string, std::string>{}));
+
+    auto task = Task::Create("task_vis_growing", plan, 0, query_context);
+    int64_t num_rows = 0;
+    for (;;) {
+        auto output = task->Next();
+        if (!output) {
+            break;
+        }
+        num_rows += output->size();
+    }
+    EXPECT_EQ(num_rows, N_);
+    EXPECT_TRUE(query_context->get_all_rows_visible())
+        << "visibilityFilterEnabled=false should skip filtering on growing "
+           "segments too";
 }
