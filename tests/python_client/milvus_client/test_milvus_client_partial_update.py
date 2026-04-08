@@ -1564,7 +1564,7 @@ class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
                 data[default_primary_key_field_name] = 0
             new_rows.append(data)
 
-        error = {ct.err_code: 1, 
+        error = {ct.err_code: 1,
                  ct.err_msg: f"The data fields length is inconsistent. previous length is {default_nb}, current length is {default_nb // 2}"}
         self.upsert(client, collection_name, new_rows, partial_update=True,
                     check_task=CheckTasks.err_res, check_items=error)
