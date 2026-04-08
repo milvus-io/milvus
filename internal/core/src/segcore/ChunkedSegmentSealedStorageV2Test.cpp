@@ -430,6 +430,30 @@ TEST_P(TestChunkSegmentStorageV2, TestLazySystemIndexesOnUnsortedSegment) {
               unsorted_segment->get_real_count());
 }
 
+// Verify that when delete_ts == insert_ts, the delete does NOT take effect.
+// This tests the same-timestamp correctness check in DeletedRecord when
+// insert_record_.timestamps_ is empty (StorageV2 lazy-init path).
+TEST_P(TestChunkSegmentStorageV2, TestSameTimestampDeleteNotEffective) {
+    auto unsorted_segment = CreateSegment(false);
+
+    // Row 42 has insert timestamp = 42 (from sequential int64 data).
+    // Deleting with the same timestamp should have no effect.
+    std::unique_ptr<IdArray> delete_ids = std::make_unique<IdArray>();
+    if (GetParam()) {
+        delete_ids->mutable_str_id()->mutable_data()->Add("test42");
+    } else {
+        delete_ids->mutable_int_id()->mutable_data()->Add(42);
+    }
+
+    Timestamp delete_ts = 42;  // same as insert timestamp of row 42
+    auto status = unsorted_segment->Delete(1, delete_ids.get(), &delete_ts);
+    ASSERT_TRUE(status.ok());
+
+    // The delete should not have taken effect because delete_ts == insert_ts
+    ASSERT_EQ(0, unsorted_segment->get_deleted_count());
+    ASSERT_EQ(chunk_num * test_data_count, unsorted_segment->get_real_count());
+}
+
 TEST_P(TestChunkSegmentStorageV2, TestLazySystemIndexesOnSortedSegment) {
     auto sorted_segment = CreateSegment(true);
     auto* segment_internal =
