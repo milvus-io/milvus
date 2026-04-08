@@ -37,6 +37,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -262,6 +263,40 @@ func ResizeBM25LoadPool(evt *config.Event) {
 		newSize := float64(hardware.GetCPUNum()) * pt.CommonCfg.BM25LoadThreadCoreCoefficient.GetAsFloat()
 		resizePool(GetBM25LoadPool(), int(newSize), "BM25LoadPool")
 	}
+}
+
+// CollectPoolStats returns current stats for all goroutine pools.
+// Called by PoolMetricsCollector at Prometheus scrape time (pull model).
+func CollectPoolStats() []metrics.PoolStats {
+	type poolRef struct {
+		name string
+		pool interface {
+			Cap() int
+			Running() int
+			Waiting() int
+		}
+	}
+
+	refs := []poolRef{
+		{"SQPool", GetSQPool()},
+		{"DynamicPool", GetDynamicPool()},
+		{"LoadPool", GetLoadPool()},
+		{"WarmupPool", GetWarmupPool()},
+		{"BFApplyPool", GetBFApplyPool()},
+		{"BM25LoadPool", GetBM25LoadPool()},
+		{"DeletePool", GetDeletePool()},
+	}
+
+	stats := make([]metrics.PoolStats, 0, len(refs))
+	for _, r := range refs {
+		stats = append(stats, metrics.PoolStats{
+			Name:    r.name,
+			Cap:     r.pool.Cap(),
+			Running: r.pool.Running(),
+			Waiting: r.pool.Waiting(),
+		})
+	}
+	return stats
 }
 
 func resizePool(pool *conc.Pool[any], newSize int, tag string) {

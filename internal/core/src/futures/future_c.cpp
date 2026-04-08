@@ -62,7 +62,7 @@ executor_set_thread_num(int thread_num) {
 extern "C" void
 executor_set_search_thread_num(int thread_num) {
     milvus::futures::getSearchCPUExecutor()->setNumThreads(thread_num);
-    milvus::monitor::internal_cgo_pool_size_all.Set(thread_num);
+    milvus::monitor::internal_cgo_pool_size_search.Set(thread_num);
     LOG_INFO("future executor setup search cpu executor with thread num: {}",
              thread_num);
 }
@@ -70,6 +70,7 @@ executor_set_search_thread_num(int thread_num) {
 extern "C" void
 executor_set_load_thread_num(int thread_num) {
     milvus::futures::getLoadCPUExecutor()->setNumThreads(thread_num);
+    milvus::monitor::internal_cgo_pool_size_load.Set(thread_num);
     LOG_INFO("future executor setup load cpu executor with thread num: {}",
              thread_num);
 }

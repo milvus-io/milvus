@@ -25,6 +25,8 @@
 
 namespace milvus::futures {
 
+enum class PoolType { kSearch, kLoad };
+
 template <class Duration>
 class Metrics;
 
@@ -52,11 +54,12 @@ class Metrics {
         Metrics& metrics_;
     };
 
-    explicit Metrics()
-        : time_point_(std::chrono::steady_clock::now()),
+    explicit Metrics(PoolType pool_type)
+        : pool_type_(pool_type),
+          time_point_(std::chrono::steady_clock::now()),
           queue_duration_(0),
           execute_duration_(0) {
-        milvus::monitor::internal_cgo_inflight_task_total_all.Increment();
+        inflightGauge().Increment();
     }
 
     Metrics(const Metrics&) = delete;
@@ -67,18 +70,16 @@ class Metrics {
     operator=(const Metrics&&) = delete;
 
     ~Metrics() {
-        milvus::monitor::internal_cgo_inflight_task_total_all.Decrement();
-        milvus::monitor::internal_cgo_queue_duration_seconds_all.Observe(
+        inflightGauge().Decrement();
+        queueDurationHist().Observe(
             std::chrono::duration<double>(queue_duration_).count());
         if (cancelled_before_execute_) {
-            milvus::monitor::internal_cgo_cancel_before_execute_total_all
-                .Increment();
+            cancelBeforeCounter().Increment();
         } else {
             if (cancelled_during_execute_) {
-                milvus::monitor::internal_cgo_cancel_during_execute_total_all
-                    .Increment();
+                cancelDuringCounter().Increment();
             }
-            milvus::monitor::internal_cgo_execute_duration_seconds_all.Observe(
+            executeDurationHist().Observe(
                 std::chrono::duration<double>(execute_duration_).count());
         }
     }
@@ -96,7 +97,7 @@ class Metrics {
         queue_duration_ =
             std::chrono::duration_cast<Duration>(now - time_point_);
         time_point_ = now;
-        milvus::monitor::internal_cgo_executing_task_total_all.Increment();
+        executingGauge().Increment();
     }
 
     void
@@ -109,10 +110,59 @@ class Metrics {
         auto now = std::chrono::steady_clock::now();
         execute_duration_ =
             std::chrono::duration_cast<Duration>(now - time_point_);
-        milvus::monitor::internal_cgo_executing_task_total_all.Decrement();
+        executingGauge().Decrement();
     }
 
  private:
+    prometheus::Gauge&
+    inflightGauge() const {
+        return pool_type_ == PoolType::kSearch
+                   ? milvus::monitor::internal_cgo_inflight_task_total_search
+                   : milvus::monitor::internal_cgo_inflight_task_total_load;
+    }
+
+    prometheus::Gauge&
+    executingGauge() const {
+        return pool_type_ == PoolType::kSearch
+                   ? milvus::monitor::internal_cgo_executing_task_total_search
+                   : milvus::monitor::internal_cgo_executing_task_total_load;
+    }
+
+    prometheus::Histogram&
+    queueDurationHist() const {
+        return pool_type_ == PoolType::kSearch
+                   ? milvus::monitor::internal_cgo_queue_duration_seconds_search
+                   : milvus::monitor::internal_cgo_queue_duration_seconds_load;
+    }
+
+    prometheus::Histogram&
+    executeDurationHist() const {
+        return pool_type_ == PoolType::kSearch
+                   ? milvus::monitor::
+                         internal_cgo_execute_duration_seconds_search
+                   : milvus::monitor::
+                         internal_cgo_execute_duration_seconds_load;
+    }
+
+    prometheus::Counter&
+    cancelBeforeCounter() const {
+        return pool_type_ == PoolType::kSearch
+                   ? milvus::monitor::
+                         internal_cgo_cancel_before_execute_total_search
+                   : milvus::monitor::
+                         internal_cgo_cancel_before_execute_total_load;
+    }
+
+    prometheus::Counter&
+    cancelDuringCounter() const {
+        return pool_type_ == PoolType::kSearch
+                   ? milvus::monitor::
+                         internal_cgo_cancel_during_execute_total_search
+                   : milvus::monitor::
+                         internal_cgo_cancel_during_execute_total_load;
+    }
+
+    const PoolType pool_type_;
     std::chrono::steady_clock::time_point time_point_;
     Duration queue_duration_;
     Duration execute_duration_;
@@ -123,6 +173,9 @@ class Metrics {
 // FutureResult is a struct that represents the result of the future.
 class FutureResult {
  public:
+    explicit FutureResult(PoolType pool_type = PoolType::kSearch)
+        : result(nullptr), status(), metrics(pool_type) {
+    }
     void* result;
     CStatus status;
     Metrics<std::chrono::microseconds> metrics;
@@ -188,8 +241,9 @@ class Future : public IFuture {
     static std::unique_ptr<Future<R>>
     async(folly::Executor::KeepAlive<> executor,
           int priority,
-          Fn&& fn) noexcept {
-        auto future = std::make_unique<Future<R>>();
+          Fn&& fn,
+          PoolType pool_type = PoolType::kSearch) noexcept {
+        auto future = std::make_unique<Future<R>>(pool_type);
         // setup the interrupt handler for the promise.
         future->setInterruptHandler();
         // start async function.
@@ -200,8 +254,8 @@ class Future : public IFuture {
     }
 
     /// use `async`.
-    Future()
-        : metrics_(),
+    explicit Future(PoolType pool_type = PoolType::kSearch)
+        : metrics_(pool_type),
           ready_(std::make_shared<Ready<LeakyResult<R>>>()),
           promise_(std::make_shared<folly::SharedPromise<R*>>()),
           cancellation_source_() {
