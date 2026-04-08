@@ -238,6 +238,9 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 		if pending == nil {
 			continue // no pending messages for this task
 		}
+		for i, msg := range pending.pendingMessages {
+			pending.pendingMessages[i] = message.ClearReplicateHeader(msg)
+		}
 		s.Logger().Info("Delegating incomplete task to broadcastScheduler",
 			zap.Uint64("broadcastID", task.Header().BroadcastID),
 			zap.String("messageType", task.msg.MessageType().String()),
@@ -328,3 +331,4 @@ func sortByControlChannelTimeTick(tasks []*broadcastTask) {
 		return tasks[i].ControlChannelTimeTick() < tasks[j].ControlChannelTimeTick()
 	})
 }
+
