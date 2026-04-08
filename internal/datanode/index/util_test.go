@@ -76,33 +76,42 @@ func (s *utilSuite) Test_estimateFieldDataSize() {
 }
 
 func (s *utilSuite) Test_getFieldDataSizeFromBinlogs() {
+	// Storage V2/V3 splits vector fields into their own column group,
+	// where GroupID (used as FieldBinlog.FieldID) equals the vector field's ID.
+	// Non-vector fields may be grouped together under a different GroupID.
+	vectorFieldID := int64(101)
 	insertLogs := []*datapb.FieldBinlog{
 		{
-			FieldID: 100,
+			// Non-vector column group: GroupID=100, contains scalar fields 100 and 102
+			FieldID:     100,
+			ChildFields: []int64{100, 102},
 			Binlogs: []*datapb.Binlog{
 				{MemorySize: 1024},
 				{MemorySize: 2048},
 			},
 		},
 		{
-			FieldID: 101,
+			// Vector field in its own column group: GroupID = FieldID = 101
+			FieldID:     vectorFieldID,
+			ChildFields: []int64{vectorFieldID},
 			Binlogs: []*datapb.Binlog{
 				{MemorySize: 4096},
+				{MemorySize: 8192},
 			},
 		},
 	}
 
-	// Match field 100
-	s.Equal(uint64(3072), getFieldDataSizeFromBinlogs(insertLogs, 100))
+	// Vector field matches by FieldID (== GroupID)
+	s.Equal(uint64(12288), getFieldDataSizeFromBinlogs(insertLogs, vectorFieldID))
 
-	// Match field 101
-	s.Equal(uint64(4096), getFieldDataSizeFromBinlogs(insertLogs, 101))
+	// Scalar field grouped under GroupID=100
+	s.Equal(uint64(3072), getFieldDataSizeFromBinlogs(insertLogs, 100))
 
 	// No match
 	s.Equal(uint64(0), getFieldDataSizeFromBinlogs(insertLogs, 999))
 
 	// Nil insert logs
-	s.Equal(uint64(0), getFieldDataSizeFromBinlogs(nil, 100))
+	s.Equal(uint64(0), getFieldDataSizeFromBinlogs(nil, vectorFieldID))
 }
 
 func Test_utilSuite(t *testing.T) {
