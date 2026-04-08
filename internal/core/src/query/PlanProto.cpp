@@ -12,10 +12,8 @@
 #include "PlanProto.h"
 
 #include <google/protobuf/text_format.h>
-#include <algorithm>
-#include <cstddef>
-#include <initializer_list>
-#include <map>
+
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <set>
@@ -25,29 +23,20 @@
 #include <unordered_map>
 #include <vector>
 
-#include "NamedType/underlying_functionalities.hpp"
+#include "common/Geometry.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/SystemProperty.h"
 #include "common/Types.h"
-#include "common/Utils.h"
-#include "common/protobuf_utils.h"
+#include "common/VectorTrait.h"
 #include "exec/expression/function/FunctionFactory.h"
-#include "expr/ITypeExpr.h"
-#include "glog/logging.h"
-#include "knowhere/comp/index_param.h"
-#include "knowhere/comp/materialized_view.h"
-#include "knowhere/config.h"
 #include "log/Log.h"
-#include "nlohmann/json.hpp"
-#include "nlohmann/json_fwd.hpp"
+#include "expr/ITypeExpr.h"
 #include "pb/plan.pb.h"
-#include "pb/schema.pb.h"
+#include "query/Utils.h"
+#include "knowhere/comp/materialized_view.h"
 #include "plan/PlanNode.h"
-#include "plan/PlanNodeIdGenerator.h"
-#include "query/PlanImpl.h"
-#include "query/PlanNode.h"
 #include "rescores/Scorer.h"
 
 namespace milvus::query {
@@ -795,7 +784,7 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
         auto field_id = FieldId(field_id_raw);
         plan->target_entries_.push_back(field_id);
     }
-    for (const auto& dynamic_field : plan_node_proto.dynamic_fields()) {
+    for (auto dynamic_field : plan_node_proto.dynamic_fields()) {
         plan->target_dynamic_fields_.push_back(dynamic_field);
     }
 
@@ -815,7 +804,7 @@ ProtoParser::CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto) {
         auto field_id = FieldId(field_id_raw);
         retrieve_plan->field_ids_.push_back(field_id);
     }
-    for (const auto& dynamic_field : plan_node_proto.dynamic_fields()) {
+    for (auto dynamic_field : plan_node_proto.dynamic_fields()) {
         retrieve_plan->target_dynamic_fields_.push_back(dynamic_field);
     }
     return retrieve_plan;
@@ -1128,6 +1117,28 @@ ProtoParser::ParseGISFunctionFilterExprs(
 }
 
 expr::TypedExprPtr
+ProtoParser::ParseMolFunctionFilterExprs(
+    const proto::plan::MolFunctionFilterExpr& expr_pb) {
+    auto& columnInfo = expr_pb.column_info();
+    auto field_id = FieldId(columnInfo.field_id());
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+
+    if (columnInfo.is_element_level()) {
+        Assert(data_type == DataType::ARRAY);
+        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
+    } else {
+        Assert(data_type == (DataType)columnInfo.data_type());
+    }
+
+    auto expr = std::make_shared<expr::MolFunctionFilterExpr>(
+        columnInfo,
+        expr_pb.op(),
+        expr_pb.smiles_string());
+    return expr;
+}
+
+expr::TypedExprPtr
 ProtoParser::CreateAlwaysTrueExprs() {
     return std::make_shared<expr::AlwaysTrueExpr>();
 }
@@ -1199,6 +1210,11 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         case ppe::kGisfunctionFilterExpr: {
             result =
                 ParseGISFunctionFilterExprs(expr_pb.gisfunction_filter_expr());
+            break;
+        }
+        case ppe::kMolfunctionFilterExpr: {
+            result =
+                ParseMolFunctionFilterExprs(expr_pb.molfunction_filter_expr());
             break;
         }
         case ppe::kTimestamptzArithCompareExpr: {

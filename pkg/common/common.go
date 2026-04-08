@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/mol"
 )
 
 // system field id:
@@ -181,20 +182,16 @@ const (
 
 	DropRatioBuildKey = "drop_ratio_build"
 
-	IsSparseKey                       = "is_sparse"
-	AutoIndexName                     = "AUTOINDEX"
-	BitmapCardinalityLimitKey         = "bitmap_cardinality_limit"
-	HybridLowCardinalityIndexTypeKey  = "hybrid_low_cardinality_index_type"
-	HybridHighCardinalityIndexTypeKey = "hybrid_high_cardinality_index_type"
-	IgnoreGrowing                     = "ignore_growing"
-	ConsistencyLevel                  = "consistency_level"
-	HintsKey                          = "hints"
+	IsSparseKey               = "is_sparse"
+	AutoIndexName             = "AUTOINDEX"
+	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
+	IgnoreGrowing             = "ignore_growing"
+	ConsistencyLevel          = "consistency_level"
+	HintsKey                  = "hints"
 
 	JSONCastTypeKey     = "json_cast_type"
 	JSONPathKey         = "json_path"
 	JSONCastFunctionKey = "json_cast_function"
-
-	SchemaVersionConsistencyProportionKey = "schema_version_consistency_proportion"
 )
 
 // expr query params
@@ -274,6 +271,7 @@ const (
 // common properties
 const (
 	MmapEnabledKey             = "mmap.enabled"
+	LazyLoadEnableKey          = "lazyload.enabled"
 	LoadPriorityKey            = "load_priority"
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
@@ -285,7 +283,6 @@ const (
 	TimezoneKey             = "timezone"
 	AllowInsertAutoIDKey    = "allow_insert_auto_id"
 	DisableFuncRuntimeCheck = "disable_func_runtime_check"
-
 	// query mode
 	QueryModeKey       = "query_mode"
 	QueryModeLargeTopK = "large_topk"
@@ -425,7 +422,6 @@ func FieldHasWarmupKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
 	}
 	return false
 }
-
 func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
 	for _, param := range indexParams {
 		if param.Key == IndexTypeKey {
@@ -466,6 +462,24 @@ func FieldHasMmapKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
 				}
 				return false
 			}
+		}
+	}
+	return false
+}
+
+func HasLazyload(props []*commonpb.KeyValuePair) bool {
+	for _, kv := range props {
+		if kv.Key == LazyLoadEnableKey {
+			return true
+		}
+	}
+	return false
+}
+
+func IsCollectionLazyLoadEnabled(kvs ...*commonpb.KeyValuePair) bool {
+	for _, kv := range kvs {
+		if kv.Key == LazyLoadEnableKey && strings.ToLower(kv.Value) == "true" {
+			return true
 		}
 	}
 	return false
@@ -801,4 +815,24 @@ func ConvertWKBToWKT(wkbData []byte) (string, error) {
 		return "", err
 	}
 	return wkt.Marshal(geomT)
+}
+
+// ConvertSMILESToPickle converts SMILES string to RDKit pickle format for storage
+// This function is called during data insertion to convert user-provided SMILES strings
+// into binary pickle format that can be efficiently stored and later reconstructed
+func ConvertSMILESToPickle(molData string) ([]byte, error) {
+	if len(molData) == 0 {
+		return nil, fmt.Errorf("empty SMILES string")
+	}
+	return mol.ConvertSMILESToPickle(molData)
+}
+
+// ConvertPickleToSMILES converts RDKit pickle format back to SMILES string
+// This function is called when retrieving data to convert stored pickle format
+// back to human-readable SMILES strings for display or further processing
+func ConvertPickleToSMILES(pickleData []byte) (string, error) {
+	if len(pickleData) == 0 {
+		return "", fmt.Errorf("empty pickle data")
+	}
+	return mol.ConvertPickleToSMILES(pickleData)
 }

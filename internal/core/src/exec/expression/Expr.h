@@ -1666,7 +1666,8 @@ class SegmentExpr : public Expr {
                     case DataType::VARCHAR: {
                         return ProcessIndexChunksForValid<std::string>();
                     }
-                    case DataType::GEOMETRY: {
+                    case DataType::GEOMETRY:
+                    case DataType::MOL: {
                         return ProcessIndexChunksForValid<std::string>();
                     }
                     default:

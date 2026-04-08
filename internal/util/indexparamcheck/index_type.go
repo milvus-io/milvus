@@ -27,21 +27,23 @@ const (
 	IndexVector IndexType = "VECINDEX"
 
 	// scalar index
-	IndexSTLSORT  IndexType = "STL_SORT"
-	IndexTRIE     IndexType = "TRIE"
-	IndexTrie     IndexType = "Trie"
-	IndexBitmap   IndexType = "BITMAP"
-	IndexHybrid   IndexType = "HYBRID" // BITMAP + INVERTED
-	IndexINVERTED IndexType = "INVERTED"
-	IndexNGRAM    IndexType = "NGRAM"
-	IndexRTREE    IndexType = "RTREE"
+	IndexSTLSORT    IndexType = "STL_SORT"
+	IndexTRIE       IndexType = "TRIE"
+	IndexTrie       IndexType = "Trie"
+	IndexBitmap     IndexType = "BITMAP"
+	IndexHybrid     IndexType = "HYBRID" // BITMAP + INVERTED
+	IndexINVERTED   IndexType = "INVERTED"
+	IndexNGRAM      IndexType = "NGRAM"
+	IndexRTREE      IndexType = "RTREE"
+	IndexMolPattern IndexType = "PATTERN"
 
 	AutoIndex IndexType = "AUTOINDEX"
 )
 
 func IsScalarIndexType(indexType IndexType) bool {
 	return indexType == IndexSTLSORT || indexType == IndexTRIE || indexType == IndexTrie ||
-		indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED
+		indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED ||
+		indexType == IndexMolPattern
 }
 
 func IsGpuIndex(indexType IndexType) bool {
@@ -66,7 +68,8 @@ func IsScalarMmapIndex(indexType IndexType) bool {
 		indexType == IndexBitmap ||
 		indexType == IndexHybrid ||
 		indexType == IndexTrie ||
-		indexType == IndexNGRAM
+		indexType == IndexNGRAM ||
+		indexType == IndexMolPattern
 }
 
 func ValidateMmapIndexParams(indexType IndexType, indexParams map[string]string) error {

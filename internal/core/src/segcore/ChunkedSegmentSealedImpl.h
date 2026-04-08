@@ -116,6 +116,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     DropFieldData(const FieldId field_id) override;
     bool
     HasIndex(FieldId field_id) const override;
+
+    const SealedIndexingRecord*
+    GetSealedIndexingRecord() const override {
+        return &vector_indexings_;
+    }
     bool
     HasFieldData(FieldId field_id) const override;
 
@@ -511,6 +516,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadGeometryCache(FieldId field_id,
                       const std::shared_ptr<ChunkedColumnInterface>& column);
+
+    // Load MOL cache for a field (pre-deserialize pickle to ROMol)
+    void
+    LoadMolCache(FieldId field_id,
+                 const std::shared_ptr<ChunkedColumnInterface>& column);
 
  private:
     void

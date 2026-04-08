@@ -187,6 +187,11 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		return err
 	}
 
+	err = InitMolCache(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
 	err = InitGeometryCache(paramtable.Get())
 	if err != nil {
 		return err

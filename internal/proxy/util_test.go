@@ -3032,6 +3032,44 @@ func TestValidateFunctionInputField(t *testing.T) {
 		err := checkFunctionInputField(function, fields)
 		assert.Error(t, err)
 	})
+
+	t.Run("Valid MolFingerprint function input", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_MolFingerprint,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_Mol,
+			},
+		}
+		err := checkFunctionInputField(function, fields)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Invalid MolFingerprint function input - wrong data type", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_MolFingerprint,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_VarChar,
+			},
+		}
+		err := checkFunctionInputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid MolFingerprint function input - multiple fields", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_MolFingerprint,
+		}
+		fields := []*schemapb.FieldSchema{
+			{DataType: schemapb.DataType_Mol},
+			{DataType: schemapb.DataType_Mol},
+		}
+		err := checkFunctionInputField(function, fields)
+		assert.Error(t, err)
+	})
 }
 
 func TestValidateFunctionOutputField(t *testing.T) {
@@ -3107,6 +3145,44 @@ func TestValidateFunctionOutputField(t *testing.T) {
 			{
 				DataType: schemapb.DataType_Int64,
 			},
+		}
+		err := checkFunctionOutputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Valid MolFingerprint function output", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_MolFingerprint,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_BinaryVector,
+			},
+		}
+		err := checkFunctionOutputField(function, fields)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Invalid MolFingerprint function output - wrong data type", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_MolFingerprint,
+		}
+		fields := []*schemapb.FieldSchema{
+			{
+				DataType: schemapb.DataType_FloatVector,
+			},
+		}
+		err := checkFunctionOutputField(function, fields)
+		assert.Error(t, err)
+	})
+
+	t.Run("Invalid MolFingerprint function output - multiple fields", func(t *testing.T) {
+		function := &schemapb.FunctionSchema{
+			Type: schemapb.FunctionType_MolFingerprint,
+		}
+		fields := []*schemapb.FieldSchema{
+			{DataType: schemapb.DataType_BinaryVector},
+			{DataType: schemapb.DataType_BinaryVector},
 		}
 		err := checkFunctionOutputField(function, fields)
 		assert.Error(t, err)
@@ -5425,15 +5501,12 @@ func TestInjectVirtualPKForExternalCollection(t *testing.T) {
 		err := injectVirtualPKForExternalCollection(schema)
 		assert.NoError(t, err)
 
-		// Virtual PK should be prepended as first field
 		assert.Len(t, schema.Fields, 3)
 		vpk := schema.Fields[0]
 		assert.Equal(t, common.VirtualPKFieldName, vpk.Name)
 		assert.Equal(t, schemapb.DataType_Int64, vpk.DataType)
 		assert.True(t, vpk.IsPrimaryKey)
 		assert.True(t, vpk.AutoID)
-
-		// Original fields remain unchanged
 		assert.Equal(t, "text", schema.Fields[1].Name)
 		assert.Equal(t, "vec", schema.Fields[2].Name)
 	})
@@ -5449,7 +5522,6 @@ func TestInjectVirtualPKForExternalCollection(t *testing.T) {
 		err := injectVirtualPKForExternalCollection(schema)
 		assert.NoError(t, err)
 
-		// No virtual PK injected — only 2 fields remain
 		assert.Len(t, schema.Fields, 2)
 		assert.Equal(t, "my_pk", schema.Fields[0].Name)
 	})
@@ -5477,7 +5549,113 @@ func TestInjectVirtualPKForExternalCollection(t *testing.T) {
 		err := injectVirtualPKForExternalCollection(schema)
 		assert.NoError(t, err)
 
-		// FieldID should be 0 (assigned by RootCoord later)
 		assert.Equal(t, int64(0), schema.Fields[0].FieldID)
+	})
+}
+
+func TestMolFingerprintFunction(t *testing.T) {
+	t.Run("MolFingerprint function valid", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "mol_field", DataType: schemapb.DataType_Mol},
+				{
+					Name:     "fp_output",
+					DataType: schemapb.DataType_BinaryVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2048"},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "mol_to_fp",
+					Type:             schemapb.FunctionType_MolFingerprint,
+					InputFieldNames:  []string{"mol_field"},
+					OutputFieldNames: []string{"fp_output"},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("MolFingerprint function with params", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "mol_field", DataType: schemapb.DataType_Mol},
+				{
+					Name:     "fp_output",
+					DataType: schemapb.DataType_BinaryVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2048"},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "mol_to_fp",
+					Type:             schemapb.FunctionType_MolFingerprint,
+					InputFieldNames:  []string{"mol_field"},
+					OutputFieldNames: []string{"fp_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "fingerprint_type", Value: "morgan"},
+						{Key: "fingerprint_size", Value: "2048"},
+						{Key: "radius", Value: "2"},
+					},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("MolFingerprint function wrong input type", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{
+					Name:     "fp_output",
+					DataType: schemapb.DataType_BinaryVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2048"},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "mol_to_fp",
+					Type:             schemapb.FunctionType_MolFingerprint,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"fp_output"},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.Error(t, err)
+	})
+
+	t.Run("MolFingerprint function wrong output type", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "mol_field", DataType: schemapb.DataType_Mol},
+				{
+					Name:     "fp_output",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2048"},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "mol_to_fp",
+					Type:             schemapb.FunctionType_MolFingerprint,
+					InputFieldNames:  []string{"mol_field"},
+					OutputFieldNames: []string{"fp_output"},
+				},
+			},
+		}
+		err := validateFunction(schema, "", false)
+		assert.Error(t, err)
 	})
 }

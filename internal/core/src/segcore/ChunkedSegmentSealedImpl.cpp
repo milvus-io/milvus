@@ -59,6 +59,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/GeometryCache.h"
+#include "common/MolCache.h"
 #include "common/GroupChunk.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
@@ -1922,7 +1923,8 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                           static_cast<Json*>(data));
             break;
         }
-        case DataType::GEOMETRY: {
+        case DataType::GEOMETRY:
+        case DataType::MOL: {
             // dst must have at least count elements; the callback's offset
             // parameter is guaranteed to be in [0, count)
             bulk_subscript_ptr_impl<std::string>(
@@ -2362,6 +2364,16 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
                                                  ret->mutable_scalars()
                                                      ->mutable_geometry_data()
                                                      ->mutable_data());
+            break;
+        }
+
+        case DataType::MOL: {
+            bulk_subscript_ptr_impl<std::string>(
+                op_ctx,
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_scalars()->mutable_mol_data()->mutable_data());
             break;
         }
 
@@ -3151,6 +3163,10 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             // Construct GeometryCache for the entire field
             LoadGeometryCache(field_id, column);
         }
+        if (data_type == DataType::MOL &&
+            segcore_config_.get_enable_mol_cache()) {
+            LoadMolCache(field_id, column);
+        }
 
         // Check if need to build ArrayOffsetsSealed for struct array fields
         if (data_type == DataType::ARRAY ||
@@ -3490,6 +3506,39 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
         }
         const auto& field_meta = schema_->operator[](field_id);
         fill_empty_field(field_meta);
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::LoadMolCache(
+    FieldId field_id, const std::shared_ptr<ChunkedColumnInterface>& column) {
+    try {
+        auto& mol_cache =
+            milvus::exec::SimpleMolCacheManager::Instance()
+                .GetOrCreateCache(get_segment_id(), field_id);
+
+        auto num_chunks = column->num_chunks();
+        for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
+            auto pw = column->StringViews(nullptr, chunk_id);
+            auto [string_views, valid_data] = pw.get();
+
+            for (size_t i = 0; i < string_views.size(); ++i) {
+                auto valid = valid_data.empty() || valid_data[i];
+                mol_cache.AppendLazySlot(valid);
+            }
+        }
+
+        LOG_INFO(
+            "Initialized lazy mol cache for segment {} field {} with {} slots",
+            get_segment_id(),
+            field_id.get(),
+            mol_cache.Size());
+    } catch (const std::exception& e) {
+        LOG_WARN(
+            "Failed to initialize lazy mol cache for segment {} field {}: {}",
+            get_segment_id(),
+            field_id.get(),
+            e.what());
     }
 }
 

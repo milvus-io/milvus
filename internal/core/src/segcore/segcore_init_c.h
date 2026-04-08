@@ -33,6 +33,9 @@ void
 SegcoreSetEnableGeometryCache(const bool);
 
 void
+SegcoreSetEnableMolCache(const bool);
+
+void
 SegcoreSetNlist(const int64_t);
 
 void

@@ -202,14 +202,10 @@ class ScalarFieldIndexing : public FieldIndexing {
     sync_data_with_index() const override {
         // For geometry fields, check if index is built and synchronized
         if constexpr (std::is_same_v<T, std::string>) {
-            if (data_type_ == DataType::GEOMETRY) {
+            if (data_type_ == DataType::GEOMETRY ||
+                data_type_ == DataType::MOL) {
                 bool is_built = built_.load();
                 bool is_synced = sync_with_index_.load();
-                LOG_DEBUG(
-                    "ScalarFieldIndexing::sync_data_with_index for geometry "
-                    "field: built={}, synced={}",
-                    is_built,
-                    is_synced);
                 return is_built && is_synced;
             }
         }
@@ -226,9 +222,10 @@ class ScalarFieldIndexing : public FieldIndexing {
 
     PinWrapper<index::IndexBase*>
     get_segment_indexing() const override {
-        // For geometry fields, return the single index
+        // For geometry/mol fields, return the single index
         if constexpr (std::is_same_v<T, std::string>) {
-            if (data_type_ == DataType::GEOMETRY) {
+            if (data_type_ == DataType::GEOMETRY ||
+                data_type_ == DataType::MOL) {
                 return index_.get();
             }
         }
@@ -256,6 +253,9 @@ class ScalarFieldIndexing : public FieldIndexing {
     std::atomic<bool> built_ = false;
     // whether all inserted data has been added to growing index and can be searched.
     std::atomic<bool> sync_with_index_ = false;
+
+    // Segment max row count (used by MolPatternIndex for pre-allocation)
+    int64_t segment_max_row_count_ = 0;
 
     // Configuration for scalar index building
     std::unique_ptr<FieldIndexMeta> config_;
@@ -415,7 +415,8 @@ class IndexingRecord {
                                         field_raw_data));
                     }
                 }
-            } else if (field_meta.get_data_type() == DataType::GEOMETRY) {
+            } else if (field_meta.get_data_type() == DataType::GEOMETRY ||
+                       field_meta.get_data_type() == DataType::MOL) {
                 if (index_meta_ == nullptr) {
                     LOG_INFO("miss index meta for growing interim index");
                     continue;
@@ -423,14 +424,14 @@ class IndexingRecord {
 
                 if (index_meta_->GetIndexMaxRowCount() > 0 &&
                     index_meta_->HasField(field_id)) {
-                    auto geo_field_meta =
+                    auto field_index_meta =
                         index_meta_->GetFieldIndexMeta(field_id);
                     auto field_raw_data =
                         insert_record->get_data_base(field_id);
                     field_indexings_.try_emplace(
                         field_id,
                         CreateIndex(field_meta,
-                                    geo_field_meta,
+                                    field_index_meta,
                                     index_meta_->GetIndexMaxRowCount(),
                                     segcore_config_,
                                     field_raw_data));

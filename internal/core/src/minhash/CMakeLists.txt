@@ -65,10 +65,43 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64)|(ARM64)|(arm64)")
     endif()
 endif()
 
+if(TARGET xxHash::xxhash)
+    set(MILVUS_MINHASH_XXHASH_TARGET xxHash::xxhash)
+elseif(TARGET xxhash::xxhash)
+    set(MILVUS_MINHASH_XXHASH_TARGET xxhash::xxhash)
+elseif(TARGET CONAN_PKG::xxhash)
+    set(MILVUS_MINHASH_XXHASH_TARGET CONAN_PKG::xxhash)
+elseif(TARGET xxhash)
+    set(MILVUS_MINHASH_XXHASH_TARGET xxhash)
+else()
+    # Conan may expose xxhash only as a raw link name.
+    set(MILVUS_MINHASH_XXHASH_TARGET xxhash)
+endif()
+
+if(TARGET xxHash::xxhash)
+    set(MILVUS_MINHASH_XXHASH_TARGET xxHash::xxhash)
+elseif(TARGET xxhash::xxhash)
+    set(MILVUS_MINHASH_XXHASH_TARGET xxhash::xxhash)
+elseif(TARGET CONAN_PKG::xxhash)
+    set(MILVUS_MINHASH_XXHASH_TARGET CONAN_PKG::xxhash)
+elseif(TARGET xxhash)
+    set(MILVUS_MINHASH_XXHASH_TARGET xxhash)
+else()
+    # Conan may expose xxhash only as a raw link name.
+    set(MILVUS_MINHASH_XXHASH_TARGET xxhash)
+endif()
+
 target_link_libraries(milvus_minhash PUBLIC
-    xxHash::xxhash
-    OpenSSL::SSL
+    ${MILVUS_MINHASH_XXHASH_TARGET}
 )
+
+if(TARGET OpenSSL::SSL)
+    target_link_libraries(milvus_minhash PUBLIC OpenSSL::SSL)
+elseif(TARGET OpenSSL::Crypto)
+    target_link_libraries(milvus_minhash PUBLIC OpenSSL::Crypto)
+else()
+    target_link_libraries(milvus_minhash PUBLIC ssl crypto)
+endif()
 
 target_include_directories(milvus_minhash PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/..

@@ -20,9 +20,12 @@
 #include <stdexcept>
 #include <string>
 
+#include "common/Mol.h"
+#include "common/TypeTraits.h"
 #include "common/Types.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
+#include "pb/schema.pb.h"
 
 using namespace milvus;
 
@@ -84,6 +87,16 @@ TEST(GetArrowDataTypeTest, ARRAY_JSON) {
     ASSERT_TRUE(result2->Equals(arrow::binary()));
 }
 
+TEST(GetArrowDataTypeTest, GEOMETRY) {
+    auto result = GetArrowDataType(DataType::GEOMETRY);
+    ASSERT_TRUE(result->Equals(arrow::binary()));
+}
+
+TEST(GetArrowDataTypeTest, MOL) {
+    auto result = GetArrowDataType(DataType::MOL);
+    ASSERT_TRUE(result->Equals(arrow::binary()));
+}
+
 TEST(GetArrowDataTypeTest, VECTOR_FLOAT) {
     int dim = 3;
     auto result = GetArrowDataType(DataType::VECTOR_FLOAT, dim);
@@ -123,4 +136,50 @@ TEST(GetArrowDataTypeTest, InvalidDataType) {
     EXPECT_THROW(
         GetArrowDataType(static_cast<DataType>(999)),
         std::runtime_error);  // Assuming ThrowInfo throws a std::runtime_error
+}
+
+// =====================================================================
+// MOL data type helper function tests
+// =====================================================================
+
+TEST(MolDataTypeTest, IsMolDataType) {
+    ASSERT_TRUE(IsMolDataType(DataType::MOL));
+    ASSERT_FALSE(IsMolDataType(DataType::JSON));
+    ASSERT_FALSE(IsMolDataType(DataType::GEOMETRY));
+    ASSERT_FALSE(IsMolDataType(DataType::VARCHAR));
+    ASSERT_FALSE(IsMolDataType(DataType::INT64));
+    ASSERT_FALSE(IsMolDataType(DataType::VECTOR_FLOAT));
+}
+
+TEST(MolDataTypeTest, IsBinaryDataType_IncludesMol) {
+    // MOL should be considered a binary data type
+    ASSERT_TRUE(IsBinaryDataType(DataType::MOL));
+    // Other binary types should still work
+    ASSERT_TRUE(IsBinaryDataType(DataType::JSON));
+    ASSERT_TRUE(IsBinaryDataType(DataType::ARRAY));
+    ASSERT_TRUE(IsBinaryDataType(DataType::GEOMETRY));
+    // Non-binary types
+    ASSERT_FALSE(IsBinaryDataType(DataType::VARCHAR));
+    ASSERT_FALSE(IsBinaryDataType(DataType::INT64));
+    ASSERT_FALSE(IsBinaryDataType(DataType::FLOAT));
+}
+
+TEST(MolDataTypeTest, GetDataTypeName) {
+    ASSERT_EQ(GetDataTypeName(DataType::MOL), "mol");
+}
+
+TEST(MolDataTypeTest, ToProtoDataType) {
+    auto proto_type = ToProtoDataType(DataType::MOL);
+    ASSERT_EQ(proto_type, milvus::proto::schema::DataType::Mol);
+}
+
+TEST(MolDataTypeTest, IsScalarType) {
+    // Mol should be recognized as a scalar type via TypeTraits
+    ASSERT_TRUE(IsScalar<Mol>);
+}
+
+TEST(MolDataTypeTest, FormatDataType) {
+    // Test fmt formatting for MOL data type
+    auto formatted = fmt::format("{}", DataType::MOL);
+    ASSERT_EQ(formatted, "MOL");
 }

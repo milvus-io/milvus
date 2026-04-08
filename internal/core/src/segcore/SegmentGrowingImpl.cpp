@@ -9,76 +9,50 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <boost/iterator/counting_iterator.hpp>
-#include <cxxabi.h>
 #include <algorithm>
 #include <cstring>
-#include <exception>
-#include <future>
-#include <iosfwd>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <queue>
 #include <string>
-#include <tuple>
+#include <thread>
+#include <boost/iterator/counting_iterator.hpp>
 #include <type_traits>
 #include <unordered_map>
 #include <variant>
 
-#include "NamedType/named_type_impl.hpp"
-#include "arrow/api.h"
-#include "bitset/bitset.h"
-#include "boost/iterator/iterator_facade.hpp"
 #include "cachinglayer/CacheSlot.h"
-#include "common/Array.h"
-#include "common/ArrayOffsets.h"
-#include "common/ArrowDataWrapper.h"
-#include "common/Channel.h"
-#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
-#include "common/FieldDataInterface.h"
-#include "common/Json.h"
-#include "common/LoadInfo.h"
+#include "common/MolCache.h"
 #include "common/Schema.h"
-#include "common/Span.h"
+#include "common/Json.h"
 #include "common/Types.h"
-#include "common/VectorArray.h"
-#include "glog/logging.h"
-#include "index/Index.h"
-#include "index/TextMatchIndex.h"
-#include "index/Utils.h"
-#include "index/VectorIndex.h"
-#include "knowhere/comp/index_param.h"
+#include "common/Common.h"
+#include "fmt/format.h"
 #include "log/Log.h"
-#include "milvus-storage/common/config.h"
-#include "milvus-storage/common/constants.h"
-#include "milvus-storage/common/metadata.h"
-#include "milvus-storage/filesystem/fs.h"
-#include "milvus-storage/format/parquet/file_reader.h"
-#include "milvus-storage/manifest.h"
-#include "mmap/Types.h"
-#include "pb/schema.pb.h"
-#include "pb/segcore.pb.h"
-#include "query/SearchOnGrowing.h"
-#include "segcore/AckResponder.h"
-#include "segcore/ConcurrentVector.h"
-#include "segcore/DeletedRecord.h"
-#include "segcore/FieldIndexing.h"
-#include "segcore/InsertRecord.h"
-#include "segcore/SegmentGrowingImpl.h"
+#include "nlohmann/json.hpp"
+#include "query/PlanNode.h"
+#include "query/SearchOnSealed.h"
 #include "segcore/Utils.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentGrowing.h"
 #include "segcore/memory_planner.h"
-#include "storage/KeyRetriever.h"
-#include "storage/ThreadPool.h"
-#include "storage/ThreadPools.h"
-#include "storage/Types.h"
-#include "storage/Util.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
+#include "storage/Util.h"
+#include "storage/ThreadPools.h"
+#include "storage/KeyRetriever.h"
+#include "common/TypeTraits.h"
+#include "knowhere/comp/index_param.h"
+
+#include "milvus-storage/format/parquet/file_reader.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/common/constants.h"
 
 namespace milvus::segcore {
 
@@ -406,7 +380,8 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
                     break;
                 case DataType::VARCHAR:
                 case DataType::TEXT:
-                case DataType::GEOMETRY: {
+                case DataType::GEOMETRY:
+                case DataType::MOL: {
                     auto avg_size =
                         SegmentInternalInterface::get_field_avg_size(field_id);
                     field_bytes = num_rows * avg_size;
@@ -627,6 +602,15 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         if (field_meta.get_data_type() == DataType::GEOMETRY &&
             segcore_config_.get_enable_geometry_cache()) {
             BuildGeometryCacheForInsert(
+                field_id,
+                &insert_record_proto->fields_data(data_offset),
+                num_rows);
+        }
+
+        // Initialize lazy mol cache for MOL fields.
+        if (field_meta.get_data_type() == DataType::MOL &&
+            segcore_config_.get_enable_mol_cache()) {
+            BuildMolCacheForInsert(
                 field_id,
                 &insert_record_proto->fields_data(data_offset),
                 num_rows);
@@ -959,6 +943,12 @@ SegmentGrowingImpl::load_column_group_data_internal(
                     DataType::GEOMETRY &&
                 segcore_config_.get_enable_geometry_cache()) {
                 BuildGeometryCacheForLoad(field_id, field_data);
+            }
+            // Initialize lazy mol cache for MOL fields.
+            if (schema_->operator[](field_id).get_data_type() ==
+                    DataType::MOL &&
+                segcore_config_.get_enable_mol_cache()) {
+                BuildMolCacheForLoad(field_id, field_data);
             }
         }
     }
@@ -1402,6 +1392,16 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                                      ->mutable_data());
             break;
         }
+        case DataType::MOL: {
+            bulk_subscript_ptr_impl<std::string>(op_ctx,
+                                                 vec_ptr,
+                                                 seg_offsets,
+                                                 count,
+                                                 result->mutable_scalars()
+                                                     ->mutable_mol_data()
+                                                     ->mutable_data());
+            break;
+        }
         case DataType::ARRAY: {
             // element
             bulk_subscript_array_impl(op_ctx,
@@ -1728,6 +1728,11 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 vec_ptr, seg_offsets, count, static_cast<std::string*>(data));
             break;
         }
+        case DataType::MOL: {
+            bulk_subscript_ptr_impl<std::string>(
+                vec_ptr, seg_offsets, count, static_cast<std::string*>(data));
+            break;
+        }
         case DataType::ARRAY: {
             auto vec = dynamic_cast<const ConcurrentVector<Array>*>(vec_ptr);
             AssertInfo(vec, "Pointer of vec_ptr is nullptr for ARRAY type");
@@ -1829,7 +1834,7 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
 
 void
 SegmentGrowingImpl::CreateTextIndexes() {
-    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+    for (auto [field_id, field_meta] : schema_->get_fields()) {
         if (IsStringDataType(field_meta.get_data_type()) &&
             field_meta.enable_match()) {
             CreateTextIndex(FieldId(field_id));
@@ -1866,7 +1871,7 @@ void
 SegmentGrowingImpl::BulkGetJsonData(
     milvus::OpContext* op_ctx,
     FieldId field_id,
-    const std::function<void(milvus::Json, size_t, bool)>& fn,
+    std::function<void(milvus::Json, size_t, bool)> fn,
     const int64_t* offsets,
     int64_t count) const {
     auto vec_ptr = dynamic_cast<const ConcurrentVector<Json>*>(
@@ -1980,7 +1985,10 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     if (!field_data_info.field_infos.empty()) {
         LoadFieldData(field_data_info);
     }
+}
 
+void
+SegmentGrowingImpl::FinishLoad() {
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
@@ -2015,7 +2023,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
 
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
     std::vector<
         std::future<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>>
         load_group_futures;
@@ -2062,6 +2070,12 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
                     DataType::GEOMETRY &&
                 segcore_config_.get_enable_geometry_cache()) {
                 BuildGeometryCacheForLoad(field_id, field_data);
+            }
+            // Initialize lazy mol cache for MOL fields.
+            if (schema_->operator[](field_id).get_data_type() ==
+                    DataType::MOL &&
+                segcore_config_.get_enable_mol_cache()) {
+                BuildMolCacheForLoad(field_id, field_data);
             }
         }
     }
@@ -2273,6 +2287,69 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
     }
 }
 
+void
+SegmentGrowingImpl::BuildMolCacheForInsert(FieldId field_id,
+                                           const DataArray* data_array,
+                                           int64_t num_rows) {
+    try {
+        auto& mol_cache =
+            milvus::exec::SimpleMolCacheManager::Instance()
+                .GetOrCreateCache(get_segment_id(), field_id);
+
+        const auto& valid_data = data_array->valid_data();
+
+        for (int64_t i = 0; i < num_rows; ++i) {
+            auto valid =
+                valid_data.empty() || (i < valid_data.size() && valid_data[i]);
+            mol_cache.AppendLazySlot(valid);
+        }
+
+        LOG_INFO(
+            "Appended {} lazy mol cache slots for growing segment {} field {}",
+            num_rows,
+            get_segment_id(),
+            field_id.get());
+
+    } catch (const std::exception& e) {
+        LOG_WARN(
+            "Failed to initialize lazy mol cache for growing segment {} field {} "
+            "insert: {}",
+            get_segment_id(),
+            field_id.get(),
+            e.what());
+    }
+}
+
+void
+SegmentGrowingImpl::BuildMolCacheForLoad(
+    FieldId field_id, const std::vector<FieldDataPtr>& field_data) {
+    try {
+        auto& mol_cache =
+            milvus::exec::SimpleMolCacheManager::Instance()
+                .GetOrCreateCache(get_segment_id(), field_id);
+
+        for (const auto& data : field_data) {
+            auto num_rows = data->get_num_rows();
+            for (int64_t i = 0; i < num_rows; ++i) {
+                mol_cache.AppendLazySlot(data->is_valid(i));
+            }
+        }
+
+        LOG_INFO(
+            "Initialized lazy mol cache for growing segment {} field {}",
+            get_segment_id(),
+            field_id.get());
+
+    } catch (const std::exception& e) {
+        LOG_WARN(
+            "Failed to initialize lazy mol cache for growing segment {} field {} "
+            "load: {}",
+            get_segment_id(),
+            field_id.get(),
+            e.what());
+    }
+}
+
 SegmentGrowingImpl::ValidResult
 SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
                                              FieldId field_id,
@@ -2307,7 +2384,7 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
     } else {
         auto vec_base = insert_record_.get_data_base(field_id);
         if (vec_base != nullptr) {
-            auto valid_data_vec = vec_base->get_valid_data();
+            const auto& valid_data_vec = vec_base->get_valid_data();
             bool is_mapping_storage = vec_base->is_mapping_storage();
             if (!valid_data_vec.empty()) {
                 result.valid_data = std::make_unique<bool[]>(count);

@@ -169,6 +169,16 @@ class SegcoreConfig {
     }
 
     void
+    set_enable_mol_cache(bool enable_mol_cache) {
+        enable_mol_cache_ = enable_mol_cache;
+    }
+
+    bool
+    get_enable_mol_cache() const {
+        return enable_mol_cache_;
+    }
+
+    void
     set_interim_index_mem_expansion_rate(float rate) {
         interim_index_mem_expansion_rate_ = rate;
     }
@@ -197,6 +207,7 @@ class SegcoreConfig {
         knowhere::RefineType::DATA_VIEW;
     inline static bool refine_with_quant_flag_ = false;
     inline static bool enable_geometry_cache_ = false;
+    inline static bool enable_mol_cache_ = false;
     inline static float interim_index_mem_expansion_rate_ = 1.15f;
     inline static int64_t max_group_by_groups_ = kDefaultMaxGroupByGroups;
 };

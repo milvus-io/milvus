@@ -71,6 +71,8 @@ namespace milvus::segcore {
 
 using namespace milvus::cachinglayer;
 
+struct SealedIndexingRecord;  // forward declaration
+
 struct SegmentStats {
     // we stat the memory size used by the segment,
     // including the insert data and delete data.
@@ -414,6 +416,13 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual bool
     HasIndex(FieldId field_id) const = 0;
+
+    // Returns the SealedIndexingRecord for vector index access, or nullptr
+    // if not available (e.g. growing segments).
+    virtual const SealedIndexingRecord*
+    GetSealedIndexingRecord() const {
+        return nullptr;
+    }
 
     int64_t
     get_real_count() const override;

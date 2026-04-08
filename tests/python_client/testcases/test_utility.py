@@ -37,7 +37,7 @@ exp_schema = "schema"
 class TestUtilityParams(TestcaseBase):
     """ Test case of index interface """
 
-    @pytest.fixture(scope="function", params=["JACCARD", "Superstructure", "Substructure"])
+    @pytest.fixture(scope="function", params=["JACCARD", "HAMMING"])
     def get_not_support_metric(self, request):
         yield request.param
 
