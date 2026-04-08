@@ -819,22 +819,29 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             return;
         }
         auto executor = [&](size_t i) {
-            auto x = data[i].template at<GetType>(pointer);
-            if (x.error()) {
-                if constexpr (std::is_same_v<GetType, std::int64_t>) {
-                    auto x = data[i].template at<double>(pointer);
-                    if (x.error()) {
-                        return false;
-                    }
-
-                    auto value = x.value();
-                    // if the term set is {1}, and the value is 1.1, we should not return true.
-                    return std::floor(value) == value &&
-                           terms->In(ValueType(x.value()));
+            if constexpr (std::is_same_v<GetType, std::int64_t>) {
+                auto x_num = data[i].at_numeric(pointer);
+                if (x_num.error()) {
+                    return false;
                 }
-                return false;
+                auto n = x_num.value();
+                if (n.is_int64()) {
+                    return terms->In(ValueType(n.get_int64()));
+                }
+                // uint64 or double → compare as double, consistent with
+                // index/stats paths.
+                auto dval = n.is_uint64() ? static_cast<double>(n.get_uint64())
+                                          : n.get_double();
+                // if the term set is {1}, and the value is 1.1, we should
+                // not return true.
+                return std::floor(dval) == dval && terms->In(ValueType(dval));
+            } else {
+                auto x = data[i].template at<GetType>(pointer);
+                if (x.error()) {
+                    return false;
+                }
+                return terms->In(ValueType(x.value()));
             }
-            return terms->In(ValueType(x.value()));
         };
         bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {

@@ -303,6 +303,18 @@ class Json {
         return doc().at_pointer(pointer).get<T>();
     }
 
+    // Extract a JSON number in a single parse, preserving the original type.
+    // Returns simdjson::ondemand::number (a tagged union of int64/uint64/double).
+    // Callers should branch on is_int64()/is_uint64()/is_double() to avoid
+    // precision loss when comparing large integers.
+    value_result<simdjson::ondemand::number>
+    at_numeric(std::string_view pointer) const {
+        if (pointer.empty()) {
+            return doc().get_number();
+        }
+        return doc().at_pointer(pointer).get_number();
+    }
+
     value_result<std::string>
     at_string_any(std::string_view pointer) const {
         if (data_.empty()) {
