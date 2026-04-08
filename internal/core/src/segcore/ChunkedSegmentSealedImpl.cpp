@@ -2833,21 +2833,6 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
         return ret;
     }
 
-    // hold field shared_ptr here, preventing field got destroyed
-    auto [field, exist] = GetFieldDataIfExist(field_id);
-    if (exist) {
-        Assert(get_bit(field_data_ready_bitset_, field_id));
-        return get_raw_data(op_ctx, field_id, field_meta, seg_offsets, count);
-    }
-
-    PinWrapper<const index::IndexBase*> pin_scalar_index_ptr;
-    auto scalar_indexes = PinIndex(op_ctx, field_id);
-    if (!scalar_indexes.empty()) {
-        pin_scalar_index_ptr = std::move(scalar_indexes[0]);
-    }
-
-    auto index_has_raw = HasRawData(field_id.get());
-
     if (!IsVectorDataType(field_meta.get_data_type())) {
         // === Scalar field ===
         // Try index first: if scalar index exists and has raw data, read from index
