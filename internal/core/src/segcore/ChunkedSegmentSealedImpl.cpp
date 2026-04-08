@@ -341,6 +341,28 @@ ChunkedSegmentSealedImpl::init_storage_v2_timestamp_index(
                 id_, column, num_rows, warmup_policy);
     *timestamp_index_slot_.wlock() =
         Manager::GetInstance().CreateCacheSlot(std::move(translator));
+
+    // Provide a callback so DeletedRecord can read insert timestamps
+    // from the column even when insert_record_.timestamps_ is empty
+    // (StorageV2 lazy-init path). This preserves the same-timestamp
+    // correctness check in DeletedRecord::InternalPush.
+    auto ts_col = column;
+    deleted_record_.set_get_insert_timestamp_func(
+        [ts_col](int64_t row_id) -> Timestamp {
+            auto num_chunks = ts_col->num_chunks();
+            int64_t offset = 0;
+            for (int64_t c = 0; c < num_chunks; ++c) {
+                auto chunk_rows = ts_col->chunk_row_nums(c);
+                if (row_id < offset + chunk_rows) {
+                    auto pin = ts_col->GetChunk(nullptr, c);
+                    auto* chunk_data = reinterpret_cast<const Timestamp*>(
+                        pin.get()->RawData());
+                    return chunk_data[row_id - offset];
+                }
+                offset += chunk_rows;
+            }
+            return 0;
+        });
 }
 
 void
