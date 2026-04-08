@@ -67,14 +67,12 @@ TextMatchIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t) const {
     // ignore the cid checking, because there is only one cell
     if (load_info_.enable_mmap) {
-        return {{0, load_info_.index_size},
-                {load_info_.index_size, load_info_.index_size}};
+        return {{0, load_info_.index_size}, {load_info_.index_size, 0}};
     } else {
         // The reason the maximum disk usage is not zero is that the text match index
         // is first written to the disk, then loaded into memory. Only after that are
         // the disk files deleted.
-        return {{load_info_.index_size, 0},
-                {load_info_.index_size, load_info_.index_size}};
+        return {{load_info_.index_size, 0}, {0, load_info_.index_size}};
     }
 }
 
