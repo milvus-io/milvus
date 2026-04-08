@@ -832,6 +832,18 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
 
             indexing->BuildWithDataset(raw_dataset, build_conf);
 
+            // IVF-series indexes need a Serialize/Load round-trip before
+            // GetVectorByIds works (faiss DirectMap is set up on load).
+            {
+                auto vec_indexing_for_serde =
+                    dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
+                ASSERT_NE(vec_indexing_for_serde, nullptr);
+                knowhere::Json load_conf{
+                    {knowhere::meta::METRIC_TYPE, metric_type}};
+                auto binary_set = indexing->Serialize(load_conf);
+                vec_indexing_for_serde->Load(binary_set, load_conf);
+            }
+
             if (nullable) {
                 auto vec_indexing =
                     dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
@@ -1107,6 +1119,18 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
 
             indexing->BuildWithDataset(raw_dataset, build_conf);
 
+            // IVF-series indexes need a Serialize/Load round-trip before
+            // GetVectorByIds works (faiss DirectMap is set up on load).
+            {
+                auto vec_indexing_for_serde =
+                    dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
+                ASSERT_NE(vec_indexing_for_serde, nullptr);
+                knowhere::Json load_conf{
+                    {knowhere::meta::METRIC_TYPE, metric_type}};
+                auto binary_set = indexing->Serialize(load_conf);
+                vec_indexing_for_serde->Load(binary_set, load_conf);
+            }
+
             if (nullable) {
                 auto vec_indexing =
                     dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
@@ -1241,6 +1265,18 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
                            {knowhere::indexparam::NLIST, "64"}};
 
         indexing->BuildWithDataset(raw_dataset, build_conf);
+
+        // IVF-series indexes need a Serialize/Load round-trip before
+        // GetVectorByIds works (faiss DirectMap is set up on load).
+        {
+            auto vec_indexing_for_serde =
+                dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
+            ASSERT_NE(vec_indexing_for_serde, nullptr);
+            knowhere::Json load_conf{
+                {knowhere::meta::METRIC_TYPE, metric_type}};
+            auto binary_set = indexing->Serialize(load_conf);
+            vec_indexing_for_serde->Load(binary_set, load_conf);
+        }
 
         if (nullable) {
             auto vec_indexing =
