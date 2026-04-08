@@ -120,8 +120,6 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
-    // Initialize ArrowFileSystemSingleton for AppendIndexV2 which
-    // loads the filesystem from the singleton rather than FileManagerContext.
     auto arrow_fs_conf = milvus_storage::ArrowFileSystemConfig();
     arrow_fs_conf.storage_type = "local";
     arrow_fs_conf.root_path = root_path;
@@ -445,8 +443,6 @@ TEST(NgramIndex, TestNonLikeExpressionsWithNgram) {
     auto cm = CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
-    // Initialize ArrowFileSystemSingleton for AppendIndexV2 which
-    // loads the filesystem from the singleton rather than FileManagerContext.
     auto arrow_fs_conf = milvus_storage::ArrowFileSystemConfig();
     arrow_fs_conf.storage_type = "local";
     arrow_fs_conf.root_path = root_path;
