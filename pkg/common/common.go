@@ -195,6 +195,10 @@ const (
 	JSONCastFunctionKey = "json_cast_function"
 
 	SchemaVersionConsistencyProportionKey = "schema_version_consistency_proportion"
+	// SchemaVersionConsistentSegmentsKey and SchemaVersionTotalSegmentsKey are emitted by DataCoord
+	// GetCollectionStatistics to surface per-segment schema-version consistency progress.
+	SchemaVersionConsistentSegmentsKey = "schema_version_consistent_segments"
+	SchemaVersionTotalSegmentsKey      = "schema_version_total_segments"
 )
 
 // expr query params
