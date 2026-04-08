@@ -63,10 +63,6 @@ func (c *DDLCallbacks) registerExternalCollectionCallbacks() {
 	registry.RegisterRefreshExternalCollectionV2AckCallback(c.refreshExternalCollectionV2AckCallback)
 }
 
-func (c *DDLCallbacks) registerImportCallbacks() {
-	registry.RegisterImportV1AckCallback(c.importV1AckCallback)
-}
-
 func (c *DDLCallbacks) registerBatchUpdateManifestCallbacks() {
 	registry.RegisterBatchUpdateManifestV2AckCallback(c.batchUpdateManifestV2AckCallback)
 }

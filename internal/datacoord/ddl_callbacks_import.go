@@ -190,6 +190,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 }
 
 func (c *DDLCallbacks) registerImportCallbacks() {
+	registry.RegisterImportV1AckCallback(c.importV1AckCallback)
 	registry.RegisterCommitImportV2AckCallback(c.commitImportV2AckCallback)
 	registry.RegisterRollbackImportV2AckCallback(c.rollbackImportV2AckCallback)
 }

@@ -1072,6 +1072,18 @@ func (s *mockMixCoord) UnpinSnapshotData(ctx context.Context, req *datapb.UnpinS
 	panic("implement me")
 }
 
+func (s *mockMixCoord) CommitImport(ctx context.Context, req *datapb.CommitImportRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) AbortImport(ctx context.Context, req *datapb.AbortImportRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 type mockHandler struct {
 	meta *meta
 }

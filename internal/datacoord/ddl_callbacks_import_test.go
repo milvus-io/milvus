@@ -881,7 +881,7 @@ func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
 	err := importMeta.AddJob(ctx, job)
 	assert.NoError(t, err)
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta.(*importMeta)}}
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
 	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(1))
 	assert.NoError(t, err)
 
@@ -905,7 +905,7 @@ func TestRollbackImportCallback_TransitionToFailed(t *testing.T) {
 	err := importMeta.AddJob(ctx, job)
 	assert.NoError(t, err)
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta.(*importMeta)}}
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
 	err = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(2))
 	assert.NoError(t, err)
 
@@ -930,7 +930,7 @@ func TestCommitImportCallback_AfterAbort_NoOp(t *testing.T) {
 	err := importMeta.AddJob(ctx, job)
 	assert.NoError(t, err)
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta.(*importMeta)}}
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
 	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(3))
 	assert.NoError(t, err)
 
@@ -955,7 +955,7 @@ func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
 	err := importMeta.AddJob(ctx, job)
 	assert.NoError(t, err)
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta.(*importMeta)}}
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
 	err = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(4))
 	assert.NoError(t, err)
 
@@ -981,7 +981,7 @@ func TestConcurrentCommitAndAbortCallbacks(t *testing.T) {
 	err := importMeta.AddJob(ctx, job)
 	assert.NoError(t, err)
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta.(*importMeta)}}
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
 
 	const N = 10
 	var wg sync.WaitGroup
