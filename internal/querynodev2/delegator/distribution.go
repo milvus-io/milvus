@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -672,6 +673,31 @@ func BatchGetFromSegments(pks []storage.PrimaryKey, partitionID int64, sealed []
 			hits[i] = true
 		}
 		return hits
+	}
+
+	// When bloom filter is disabled, skip BF checks entirely and broadcast all deletes.
+	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
+		for _, item := range sealed {
+			for _, entry := range item.Segments {
+				if entry.Offline || entry.Candidate == nil {
+					continue
+				}
+				if partitionID != common.AllPartitionsID && entry.Candidate.Partition() != partitionID {
+					continue
+				}
+				result[entry.SegmentID] = allTrue()
+			}
+		}
+		for _, entry := range growing {
+			if entry.Offline || entry.Candidate == nil {
+				continue
+			}
+			if partitionID != common.AllPartitionsID && entry.PartitionID != partitionID {
+				continue
+			}
+			result[entry.SegmentID] = allTrue()
+		}
+		return result
 	}
 
 	// Check sealed segments from pinned snapshot
