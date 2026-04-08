@@ -481,6 +481,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		},
 	}, 10)
 
+	s.delegator.distribution.Flush()
 	s.False(s.delegator.distribution.Serviceable())
 
 	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
@@ -503,6 +504,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
+	s.delegator.distribution.Flush()
 	s.True(s.delegator.distribution.Serviceable())
 	// Test normal errors with retry and fail
 	worker1.ExpectedCalls = nil
@@ -515,6 +517,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			RowCount:    1,
 		},
 	}, 10)
+	s.delegator.distribution.Flush()
 	s.False(s.delegator.distribution.Serviceable(), "should retry and failed")
 
 	// refresh
@@ -538,6 +541,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 		Version: time.Now().UnixNano(),
 	})
 	s.Require().NoError(err)
+	s.delegator.distribution.Flush()
 	s.True(s.delegator.distribution.Serviceable())
 
 	s.delegator.Close()
