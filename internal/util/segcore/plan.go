@@ -124,13 +124,15 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		return nil, errors.Wrap(err, "get fieldID from plan failed")
 	}
 
+	cl := req.GetReq().GetConsistencyLevel()
+
 	return &SearchRequest{
 		plan:                  plan,
 		cPlaceholderGroup:     cPlaceholderGroup,
 		msgID:                 req.GetReq().GetBase().GetMsgID(),
 		searchFieldID:         int64(fieldID),
 		mvccTimestamp:         req.GetReq().GetMvccTimestamp(),
-		consistencyLevel:      req.GetReq().GetConsistencyLevel(),
+		consistencyLevel:      cl,
 		collectionTTL:         req.GetReq().GetCollectionTtlTimestamps(),
 		entityTTLPhysicalTime: req.GetReq().GetEntityTtlPhysicalTime(),
 		filterOnly:            req.GetFilterOnly(),

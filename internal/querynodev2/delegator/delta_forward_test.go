@@ -419,6 +419,7 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingBF() {
 
 	seg.EXPECT().ID().Return(1)
 	seg.EXPECT().Partition().Return(100)
+	seg.EXPECT().PkCandidateExist().Return(true)
 	seg.EXPECT().BatchPkExist(mock.Anything).Return(lo.RepeatBy(n, func(i int) bool { return true }))
 	seg.EXPECT().LoadDeltaData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dd *storage.DeltaData) error {
 		s.Equal(deltaData.DeletePks(), dd.DeletePks())
