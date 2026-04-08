@@ -133,7 +133,8 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                                  "pk_name": pk_name})
 
         # query output all fields to check the new added nullable vector field is retrieved correctly
-        query_pks = [0, 999, 1000, 1001, 1998, 1999]
+        half_nb = ct.default_nb // 2
+        query_pks = [0, half_nb - 1, half_nb, half_nb + 1, ct.default_nb - 2, ct.default_nb - 1]
         # back fill embeddings_new field value to None for basic rows
         basic_rows_with_null_vector = [row for row in basic_rows if row[pk_name] in query_pks]
         for row in basic_rows_with_null_vector:
@@ -176,13 +177,13 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
                                  "limit": ct.default_limit,
                                  "pk_name": pk_name})
         # search by ids on nullable fields
-        # PKs 0-999: basic rows, embeddings_new is null (backfilled)
-        # PKs 1000-1999: embeddings_new is null if pk%2==0, valid vector if pk%2==1
+        # PKs 0 ~ half_nb-1: basic rows, embeddings_new is null (backfilled)
+        # PKs half_nb ~ default_nb-1: embeddings_new is null if pk%2==0, valid vector if pk%2==1
         res = self.search(client, collection_name, ids=query_pks,
                           anns_field=new_vec_field_name, limit=ct.default_limit)[0]
         assert len(res) == len(query_pks)
         for i in range(len(query_pks)):
-            if query_pks[i] >= 1000 and query_pks[i] % 2 == 1:
+            if query_pks[i] >= half_nb and query_pks[i] % 2 == 1:
                 assert len(res[i]) == ct.default_limit
             else:
                 assert len(res[i]) == 0  # search on null vectors return empty results
