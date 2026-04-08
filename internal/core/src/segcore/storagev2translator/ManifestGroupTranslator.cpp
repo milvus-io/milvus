@@ -170,6 +170,33 @@ ManifestGroupTranslator::ManifestGroupTranslator(
         total_row_groups,
         num_cells,
         kRowGroupsPerCell);
+
+    // Set loading overhead config to cap total overhead reservation.
+    if (!meta_.chunk_memory_size_.empty()) {
+        // Use THREAD_POOL_MAX_THREADS_SIZE as the upper bound for pool size.
+        // This is the global cap applied to all priority pools.
+        int pool_size = milvus::THREAD_POOL_MAX_THREADS_SIZE.load();
+        if (pool_size <= 0) {
+            pool_size = static_cast<int>(std::round(
+                milvus::CPU_NUM *
+                milvus::HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load()));
+        }
+        auto max_inflight = static_cast<int64_t>(
+            pool_size * (1.0 + kChannelCapacityMultiplier) + 1);
+        int64_t max_cell_sz = *std::max_element(
+            meta_.chunk_memory_size_.begin(), meta_.chunk_memory_size_.end());
+        auto ub = static_cast<int64_t>(max_inflight * max_cell_sz *
+                                       kLoadingOverheadInflationRatio);
+        auto upper_bound = use_mmap_
+                               ? milvus::cachinglayer::ResourceUsage{ub, ub}
+                               : milvus::cachinglayer::ResourceUsage{ub, 0};
+        // Group by CellDataType name so all CacheSlots of the same type
+        // share one overhead upper bound via LoadingOverheadTracker.
+        auto group = fmt::format("ManifestGroupTranslator_{}",
+                                 static_cast<int>(meta_.cell_data_type));
+        meta_.loading_overhead =
+            milvus::cachinglayer::LoadingOverheadConfig{upper_bound, group};
+    }
 }
 
 size_t
@@ -246,7 +273,8 @@ ManifestGroupTranslator::get_cells(
     auto& pool = milvus::ThreadPools::GetThreadPool(
         milvus::PriorityForLoad(load_priority_));
     auto channel = std::make_shared<milvus::segcore::CellReaderChannel>(
-        static_cast<size_t>(pool.GetMaxThreadNum() * 1.5));
+        static_cast<size_t>(pool.GetMaxThreadNum() *
+                            milvus::segcore::kChannelCapacityMultiplier));
 
     auto load_futures =
         milvus::segcore::LoadCellBatchAsync(ctx,
