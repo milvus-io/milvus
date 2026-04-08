@@ -804,8 +804,8 @@ github.com/microcosm-cc/bluemonday v1.0.2/go.mod h1:iVP4YcDBq+n/5fb23BhYFvIMq/le
 github.com/miekg/dns v1.0.14/go.mod h1:W1PPwlIAgtquWBMBEV9nkV9Cazfe8ScdGz/Lj7v3Nrg=
 github.com/miekg/dns v1.1.26 h1:gPxPSwALAeHJSjarOs00QjVdV9QoBvc1D2ujQUr5BzU=
 github.com/miekg/dns v1.1.26/go.mod h1:bPDLeHnStXmXAq1m/Ch/hvfNHr14JKNPMBo3VZKjuso=
-github.com/milvus-io/arrow/go/v17 v17.0.0 h1:/3B2KLEzJYLJ5hxwTvBlXAn0uF663tzvbttyobIcR5s=
-github.com/milvus-io/arrow/go/v17 v17.0.0/go.mod h1:jR7QHkODl15PfYyjM2nU+yTLScZ/qfj7OSUZmJ8putc=
+github.com/milvus-io/arrow/go/v17 v17.0.1 h1:juKuEgTNQbe8a+LuBnyt9/UkfllTwtQIB+K7PvK4+Y4=
+github.com/milvus-io/arrow/go/v17 v17.0.1/go.mod h1:jR7QHkODl15PfYyjM2nU+yTLScZ/qfj7OSUZmJ8putc=
 github.com/milvus-io/blobloom v0.0.0-20240603110411-471ae49f3b93 h1:xnIeuG1nuTEHKbbv51OwNGO82U+d6ut08ppTmZVm+VY=
 github.com/milvus-io/blobloom v0.0.0-20240603110411-471ae49f3b93/go.mod h1:mjMJ1hh1wjGVfr93QIHJ6FfDNVrA0IELv8OvMHJxHKs=
 github.com/milvus-io/cgosymbolizer v0.0.0-20250318084424-114f4050c3a6 h1:YHMFI6LHBzFJSudBOjtX8zD0+0NSzS44HHKjR8HspLA=
