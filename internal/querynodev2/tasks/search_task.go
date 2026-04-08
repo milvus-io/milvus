@@ -247,12 +247,13 @@ func (t *SearchTask) Execute() error {
 		metrics.SearchLabel,
 		metrics.ReduceSegments,
 		metrics.BatchReduce).
-		Observe(float64(tr.RecordSpan().Milliseconds()))
+		Observe(float64(tr.RecordSpan().Microseconds()) / 1000.0)
 
 	zeroCopy := paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetAsBool()
 
 	// Phase 1: build all results.
 	var phaseErr error
+
 	for i := range t.originNqs {
 		blob, cost, err := segcore.GetSearchResultDataBlob(t.ctx, blobs, i)
 		if err != nil {

@@ -492,7 +492,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	waitDuration := t.GetDurationInQueue()
 	metrics.ProxyReqInQueueLatency.
 		WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.Type().String()).
-		Observe(float64(waitDuration.Milliseconds()))
+		Observe(float64(waitDuration.Microseconds()) / 1000.0)
 
 	err := t.PreExecute(ctx)
 

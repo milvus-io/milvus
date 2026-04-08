@@ -47,11 +47,11 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 			return err
 		}
 		searchResults[idx] = searchResult
-		elapsed := tr.ElapseSpan().Milliseconds()
+		elapsed := float64(tr.ElapseSpan().Microseconds()) / 1000.0
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(nodeIDStr,
-			metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
+			metrics.SearchLabel, searchLabel).Observe(elapsed)
 		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(nodeIDStr,
-			metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.GetNumOfQuery()))
+			metrics.SearchLabel, searchLabel).Observe(elapsed / float64(searchReq.GetNumOfQuery()))
 		return nil
 	}
 
