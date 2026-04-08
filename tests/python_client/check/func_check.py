@@ -570,10 +570,15 @@ class ResponseChecker:
         if count is not None:
             assert count == query_res[0].get("count(*)", None)
             return True
-        if exp_limit is None and exp_res is None:
+        if exp_limit is None and exp_res is None and check_items.get("output_fields") is None:
             raise Exception(f"No expected values would be checked in the check task")
         if exp_limit is not None:
             assert len(query_res) == exp_limit
+        output_fields = check_items.get("output_fields", None)
+        if output_fields is not None:
+            for row in query_res:
+                assert set(output_fields) == set(row.keys()), \
+                    f"output_fields check failed: expected {output_fields}, got {list(row.keys())}"
         # pk_name = check_items.get("pk_name", ct.default_primary_field_name)
         if exp_res is not None:
             if with_vec is True:
