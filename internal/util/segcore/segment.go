@@ -6,6 +6,7 @@ package segcore
 #include "common/type_c.h"
 #include "futures/future_c.h"
 #include "segcore/collection_c.h"
+#include "segcore/segment_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
 */
@@ -129,6 +130,7 @@ func (s *cSegmentImpl) HasFieldData(fieldID int64) bool {
 }
 
 // Search requests a search on the segment.
+// If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
@@ -152,11 +154,13 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 				C.int32_t(searchReq.consistencyLevel),
 				C.uint64_t(searchReq.collectionTTL),
 				C.uint64_t(physicalTimeUs),
+				C.bool(searchReq.filterOnly),
 			))
 		},
 		cgo.WithName("search"),
 	)
 	defer future.Release()
+
 	result, err := future.BlockAndLeakyGet()
 	if err != nil {
 		return nil, err

@@ -28,6 +28,7 @@
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
 #include "query/PlanImpl.h"
+#include "query/PlanProto.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
 
@@ -396,6 +397,72 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
     AssertInfo(segment, "support SegmentSmallIndex Only");
 
     auto active_count = segment->get_active_count(timestamp_);
+
+    // Handle filter-only mode: execute only the filter and return valid_count
+    if (filter_only_) {
+        SearchResult filter_only_result;
+        filter_only_result.total_nq_ =
+            (placeholder_group_ != nullptr && !placeholder_group_->empty())
+                ? placeholder_group_->at(0).num_of_queries_
+                : 0;
+        filter_only_result.unity_topK_ = 0;
+        filter_only_result.total_data_cnt_ = 0;
+
+        if (active_count == 0) {
+            filter_only_result.valid_count_ = 0;
+            search_result_opt_ = std::move(filter_only_result);
+            return;
+        }
+
+        auto filter_only_plan =
+            ProtoParser::ExtractFilterOnlyPlan(node.plannodes_);
+
+        int64_t valid_count = active_count;
+        if (filter_only_plan == nullptr) {
+            // Unsupported plan structure (e.g. no extractable pre-filter
+            // subtree). Degrade gracefully: assume all active rows pass
+            // the filter so the optimizer stays on the conservative side.
+            LOG_DEBUG(
+                "ExtractFilterOnlyPlan returned nullptr, degrading to "
+                "valid_count = active_count ({})",
+                active_count);
+        } else {
+            auto plan_fragment = plan::PlanFragment(filter_only_plan);
+            auto query_context = std::make_shared<milvus::exec::QueryContext>(
+                DEAFULT_QUERY_ID,
+                segment,
+                active_count,
+                timestamp_,
+                collection_ttl_timestamp_,
+                consistency_level_,
+                node.plan_options_,
+                std::make_shared<milvus::exec::QueryConfig>(),
+                nullptr,
+                std::unordered_map<std::string,
+                                   std::shared_ptr<milvus::exec::BaseConfig>>(),
+                entity_ttl_physical_time_us_);
+
+            auto result = ExecuteTask(plan_fragment, query_context);
+
+            if (result != nullptr && !result->childrens().empty()) {
+                auto col_vec = std::dynamic_pointer_cast<ColumnVector>(
+                    result->childrens()[0]);
+                if (col_vec != nullptr) {
+                    BitsetTypeView view(col_vec->GetRawData(), col_vec->size());
+                    // Bitset convention: bit=1 means the row is filtered OUT
+                    // (excluded). So valid rows = total active rows minus the
+                    // set bits.  Do NOT invert this subtraction.
+                    valid_count = active_count - view.count();
+                }
+            }
+        }
+        LOG_DEBUG("filter only result validCount: {}, activeCount: {}",
+                  valid_count,
+                  active_count);
+        filter_only_result.valid_count_ = valid_count;
+        search_result_opt_ = std::move(filter_only_result);
+        return;
+    }
 
     // PreExecute: skip all calculation
     if (active_count == 0) {

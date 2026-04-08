@@ -278,7 +278,18 @@ DeleteSearchResult(CSearchResult search_result) {
     delete res;
 }
 
-CFuture*  // Future<milvus::SearchResult>
+int64_t
+GetSearchResultValidCount(CSearchResult search_result) {
+    auto res = static_cast<milvus::SearchResult*>(search_result);
+    if (res == nullptr) {
+        return -1;
+    }
+    return res->valid_count_;
+}
+
+//////////////////////////////    public C API wrappers    //////////////////////////////
+
+CFuture*  // Future<milvus::SearchResult*>
 AsyncSearch(CTraceContext c_trace,
             CSegmentInterface c_segment,
             CSearchPlan c_plan,
@@ -286,12 +297,12 @@ AsyncSearch(CTraceContext c_trace,
             uint64_t timestamp,
             int32_t consistency_level,
             uint64_t collection_ttl,
-            uint64_t entity_ttl_physical_time_us) {
+            uint64_t entity_ttl_physical_time_us,
+            bool filter_only) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<milvus::query::Plan*>(c_plan);
     auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
         c_placeholder_group);
-
     auto future = milvus::futures::Future<milvus::SearchResult>::async(
         milvus::futures::getSearchCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
@@ -302,7 +313,8 @@ AsyncSearch(CTraceContext c_trace,
          timestamp,
          consistency_level,
          collection_ttl,
-         entity_ttl_physical_time_us](folly::CancellationToken cancel_token) {
+         entity_ttl_physical_time_us,
+         filter_only](folly::CancellationToken cancel_token) {
             // save trace context into search_info
             auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
             trace_ctx.traceID = c_trace.traceID;
@@ -320,8 +332,10 @@ AsyncSearch(CTraceContext c_trace,
                                                  cancel_token,
                                                  consistency_level,
                                                  collection_ttl,
-                                                 entity_ttl_physical_time_us);
-            if (!milvus::PositivelyRelated(
+                                                 entity_ttl_physical_time_us,
+                                                 filter_only);
+            if (!filter_only &&
+                !milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {
                 for (auto& dis : search_result->distances_) {
                     dis *= -1;
@@ -329,8 +343,10 @@ AsyncSearch(CTraceContext c_trace,
             }
             span->End();
             milvus::tracer::CloseRootSpan();
+
             return search_result.release();
         });
+
     return static_cast<CFuture*>(static_cast<void*>(
         static_cast<milvus::futures::IFuture*>(future.release())));
 }
