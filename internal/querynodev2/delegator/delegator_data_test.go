@@ -950,6 +950,11 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 		return workers[nodeID]
 	}, nil)
 
+	// Mock LoadBloomFilterSet to return metadata-only stubs (BF disabled path)
+	stubCandidate := pkoracle.NewBloomFilterSet(100, 500, commonpb.SegmentState_Sealed)
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, mock.AnythingOfType("int64"), mock.Anything).
+		Return([]*pkoracle.BloomFilterSet{stubCandidate}, nil)
+
 	s.delegator.ProcessDelete([]*DeleteData{
 		{
 			PartitionID: 500,
@@ -985,7 +990,8 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
 	sealed, _ := s.delegator.GetSegmentInfo(false)
 	s.Require().Equal(1, len(sealed))
 	s.Require().Equal(1, len(sealed[0].Segments))
-	s.Nil(sealed[0].Segments[0].Candidate)
+	s.NotNil(sealed[0].Segments[0].Candidate)
+	s.False(sealed[0].Segments[0].Candidate.PkCandidateExist())
 }
 
 func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
