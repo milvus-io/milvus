@@ -595,7 +595,7 @@ ScalarIndexSort<T>::StreamDataToMemory(
         });
 
     AssertInfo(
-        write_offset == index_size,
+        write_offset == index_size * sizeof(IndexStructure<T>),
         "the real index size is not equal to the value parsed from meta");
 }
 
