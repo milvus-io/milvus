@@ -360,6 +360,14 @@ func (sm *snapshotManager) CreateSnapshot(
 		return 0, merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", name)
 	}
 
+	// Block compaction commit for this collection during snapshot creation.
+	// This prevents segment state changes between GenSnapshot (captures segment list)
+	// and SaveSnapshot (sets up per-segment protection).
+	if compactionProtectionSeconds > 0 {
+		sm.snapshotMeta.SetSnapshotPending(collectionID)
+		defer sm.snapshotMeta.ClearSnapshotPending(collectionID)
+	}
+
 	// Allocate snapshot ID
 	snapshotID, err := sm.allocator.AllocID(ctx)
 	if err != nil {

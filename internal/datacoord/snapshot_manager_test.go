@@ -129,9 +129,11 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 	}).Build()
 	defer mockSaveSnapshot.UnPatch()
 
+	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
+
 	sm := NewSnapshotManager(
 		nil,
-		&snapshotMeta{},
+		snapshotMetaInstance,
 		nil,
 		mockAllocator,
 		mockHandler,
@@ -140,6 +142,9 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 	)
 
 	snapshotID, err := sm.CreateSnapshot(ctx, 100, "protected_snap", "with protection", 3600)
+
+	// Verify snapshot pending intent is cleared after CreateSnapshot completes
+	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
 	assert.NoError(t, err)
 	assert.Equal(t, int64(2001), snapshotID)
 }
@@ -286,6 +291,159 @@ func TestSnapshotManager_CreateSnapshot_SaveError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), snapshotID)
 	assert.Equal(t, expectedErr, err)
+}
+
+func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnGenSnapshotError(t *testing.T) {
+	ctx := context.Background()
+
+	mockAllocator := allocator.NewMockAllocator(t)
+	mockHandler := NewNMockHandler(t)
+
+	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
+
+	expectedErr := errors.New("gen snapshot error")
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(nil, expectedErr).Once()
+
+	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+		return nil, errors.New("not found")
+	}).Build()
+	defer mockGetSnapshot.UnPatch()
+
+	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
+
+	sm := NewSnapshotManager(
+		nil,
+		snapshotMetaInstance,
+		nil,
+		mockAllocator,
+		mockHandler,
+		nil,
+		nil,
+	)
+
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
+	assert.Error(t, err)
+
+	// Verify snapshot pending intent is cleared even on error
+	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
+}
+
+func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *testing.T) {
+	ctx := context.Background()
+
+	mockAllocator := allocator.NewMockAllocator(t)
+	mockHandler := NewNMockHandler(t)
+
+	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{CollectionId: 100},
+	}
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(snapshotData, nil).Once()
+
+	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+		return nil, errors.New("not found")
+	}).Build()
+	defer mockGetSnapshot.UnPatch()
+
+	expectedErr := errors.New("save error")
+	mockSaveSnapshot := mockey.Mock((*snapshotMeta).SaveSnapshot).To(func(sm *snapshotMeta, ctx context.Context, data *SnapshotData) error {
+		// While inside SaveSnapshot, snapshot pending should be active
+		assert.True(t, sm.IsCollectionCompactionBlocked(data.SnapshotInfo.GetCollectionId()))
+		return expectedErr
+	}).Build()
+	defer mockSaveSnapshot.UnPatch()
+
+	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
+
+	sm := NewSnapshotManager(
+		nil,
+		snapshotMetaInstance,
+		nil,
+		mockAllocator,
+		mockHandler,
+		nil,
+		nil,
+	)
+
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
+	assert.Error(t, err)
+
+	// Verify snapshot pending intent is cleared after save failure
+	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
+}
+
+func TestSnapshotManager_CreateSnapshot_NoSnapshotPendingWithoutProtection(t *testing.T) {
+	ctx := context.Background()
+
+	mockAllocator := allocator.NewMockAllocator(t)
+	mockHandler := NewNMockHandler(t)
+
+	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{CollectionId: 100},
+		Segments:     []*datapb.SegmentDescription{{SegmentId: 1}},
+	}
+	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100)).Return(snapshotData, nil).Once()
+
+	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+		return nil, errors.New("not found")
+	}).Build()
+	defer mockGetSnapshot.UnPatch()
+
+	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
+
+	// Mock SaveSnapshot to verify snapshot pending is NOT set when compactionProtectionSeconds is 0
+	mockSaveSnapshot := mockey.Mock((*snapshotMeta).SaveSnapshot).To(func(sm *snapshotMeta, ctx context.Context, data *SnapshotData) error {
+		assert.False(t, sm.IsCollectionCompactionBlocked(data.SnapshotInfo.GetCollectionId()))
+		return nil
+	}).Build()
+	defer mockSaveSnapshot.UnPatch()
+
+	sm := NewSnapshotManager(
+		nil,
+		snapshotMetaInstance,
+		nil,
+		mockAllocator,
+		mockHandler,
+		nil,
+		nil,
+	)
+
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 0) // compactionProtectionSeconds = 0
+	assert.NoError(t, err)
+}
+
+func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnAllocError(t *testing.T) {
+	ctx := context.Background()
+
+	mockAllocator := allocator.NewMockAllocator(t)
+	expectedErr := errors.New("alloc error")
+	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(0), expectedErr).Once()
+
+	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+		return nil, errors.New("not found")
+	}).Build()
+	defer mockGetSnapshot.UnPatch()
+
+	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
+
+	sm := NewSnapshotManager(
+		nil,
+		snapshotMetaInstance,
+		nil,
+		mockAllocator,
+		nil,
+		nil,
+		nil,
+	)
+
+	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 3600)
+	assert.Error(t, err)
+
+	// Verify snapshot pending intent is cleared after alloc failure
+	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
 }
 
 // --- Test DropSnapshot ---

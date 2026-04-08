@@ -120,6 +120,7 @@ func createTestSnapshotMeta(t *testing.T) *snapshotMeta {
 		collectionID2Snapshots:       typeutil.NewConcurrentMap[typeutil.UniqueID, typeutil.UniqueSet](),
 		segmentProtectionUntil:       make(map[int64]uint64),
 		compactionBlockedCollections: typeutil.NewUniqueSet(),
+		snapshotPendingCollections:   typeutil.NewUniqueSet(),
 		loaderCtx:                    loaderCtx,
 		loaderCancel:                 loaderCancel,
 		reader:                       NewSnapshotReader(tempChunkManager),
@@ -2496,6 +2497,126 @@ func TestSnapshotMeta_IsCollectionCompactionBlocked(t *testing.T) {
 		sm.rebuildAllSegmentProtection()
 
 		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+	})
+}
+
+func TestSnapshotMeta_SetClearSnapshotPending(t *testing.T) {
+	t.Run("set snapshot pending blocks collection compaction", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+
+		sm.SetSnapshotPending(100)
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+		// Other collections unaffected
+		assert.False(t, sm.IsCollectionCompactionBlocked(200))
+	})
+
+	t.Run("clear snapshot pending unblocks collection compaction", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+
+		sm.SetSnapshotPending(100)
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+
+		sm.ClearSnapshotPending(100)
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("snapshot pending does not interfere with RefIndex blocking", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		futureTs := uint64(time.Now().Unix()) + 3600
+		info := &datapb.SnapshotInfo{
+			Id:                   1,
+			CollectionId:         100,
+			CompactionExpireTime: futureTs,
+		}
+		sm.snapshotID2Info.Insert(1, info)
+		sm.snapshotID2RefIndex.Insert(1, NewSnapshotRefIndex()) // not loaded
+		sm.rebuildAllSegmentProtection()
+
+		// Blocked by RefIndex
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+
+		// Clear snapshot pending should NOT unblock (still blocked by RefIndex)
+		sm.ClearSnapshotPending(100)
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("clear snapshot pending is idempotent", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		// Clear without setting should not panic
+		sm.ClearSnapshotPending(100)
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("multiple collections can be snapshot pending simultaneously", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+
+		sm.SetSnapshotPending(100)
+		sm.SetSnapshotPending(200)
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+		assert.True(t, sm.IsCollectionCompactionBlocked(200))
+		assert.False(t, sm.IsCollectionCompactionBlocked(300))
+
+		sm.ClearSnapshotPending(100)
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+		assert.True(t, sm.IsCollectionCompactionBlocked(200))
+	})
+
+	t.Run("set snapshot pending is idempotent", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+
+		sm.SetSnapshotPending(100)
+		sm.SetSnapshotPending(100) // double set should not panic
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+
+		sm.ClearSnapshotPending(100) // single clear should unblock
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("concurrent set and clear", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		done := make(chan struct{})
+
+		// Concurrent set/clear should not race
+		go func() {
+			for i := 0; i < 100; i++ {
+				sm.SetSnapshotPending(100)
+				sm.ClearSnapshotPending(100)
+			}
+			close(done)
+		}()
+
+		for i := 0; i < 100; i++ {
+			sm.IsCollectionCompactionBlocked(100)
+		}
+		<-done
+		// After all goroutines finish, should be unblocked
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
+	})
+
+	t.Run("blocked by both snapshot pending and RefIndex", func(t *testing.T) {
+		sm := createTestSnapshotMetaLoaded(t)
+		futureTs := uint64(time.Now().Unix()) + 3600
+		info := &datapb.SnapshotInfo{
+			Id:                   1,
+			CollectionId:         100,
+			CompactionExpireTime: futureTs,
+		}
+		sm.snapshotID2Info.Insert(1, info)
+		sm.snapshotID2RefIndex.Insert(1, NewSnapshotRefIndex()) // not loaded
+		sm.rebuildAllSegmentProtection()
+
+		sm.SetSnapshotPending(100)
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+
+		// Clear snapshot pending — still blocked by RefIndex
+		sm.ClearSnapshotPending(100)
+		assert.True(t, sm.IsCollectionCompactionBlocked(100))
+
+		// Load RefIndex — now unblocked
+		sm.snapshotID2RefIndex.Insert(1, NewLoadedSnapshotRefIndex([]int64{1001}, nil))
+		sm.rebuildAllSegmentProtection()
+		assert.False(t, sm.IsCollectionCompactionBlocked(100))
 	})
 }
 

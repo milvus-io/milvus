@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -680,6 +681,129 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			suite.Equal(commonpb.SegmentState_Dropped, seg.GetState())
 			suite.NotEmpty(seg.GetDroppedAt())
 		}
+	})
+}
+
+func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
+	latestSegments := NewSegmentsInfo()
+	for segID, segment := range map[UniqueID]*SegmentInfo{
+		1: {SegmentInfo: &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Flushed,
+		}},
+	} {
+		latestSegments.SetSegment(segID, segment)
+	}
+
+	task := &datapb.CompactionTask{
+		PlanID:        999,
+		InputSegments: []UniqueID{1},
+		CollectionID:  100,
+		Type:          datapb.CompactionType_MixCompaction,
+	}
+
+	suite.Run("rejected by snapshot pending collection", func() {
+		sm := createTestSnapshotMetaLoaded(suite.T())
+		sm.SetSnapshotPending(100)
+
+		m := &meta{
+			segments:     latestSegments,
+			snapshotMeta: sm,
+		}
+
+		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(task)
+		suite.Error(err)
+		suite.Contains(err.Error(), "compaction blocked")
+	})
+
+	suite.Run("rejected by segment protection", func() {
+		sm := createTestSnapshotMetaLoaded(suite.T())
+		futureTs := uint64(time.Now().Unix()) + 3600
+		sm.segmentProtectionMu.Lock()
+		sm.segmentProtectionUntil[1] = futureTs
+		sm.segmentProtectionMu.Unlock()
+
+		m := &meta{
+			segments:     latestSegments,
+			snapshotMeta: sm,
+		}
+
+		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(task)
+		suite.Error(err)
+		suite.Contains(err.Error(), "segment 1")
+	})
+
+	suite.Run("passes when no snapshot", func() {
+		sm := createTestSnapshotMetaLoaded(suite.T())
+
+		m := &meta{
+			segments:     latestSegments,
+			snapshotMeta: sm,
+		}
+
+		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(task)
+		suite.NoError(err)
+	})
+
+	suite.Run("passes when snapshotMeta is nil", func() {
+		m := &meta{
+			segments: latestSegments,
+		}
+
+		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(task)
+		suite.NoError(err)
+	})
+
+	suite.Run("rejected when only middle segment is protected in multi-segment task", func() {
+		multiSegments := NewSegmentsInfo()
+		for segID, segment := range map[UniqueID]*SegmentInfo{
+			1: {SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 100, PartitionID: 10, State: commonpb.SegmentState_Flushed}},
+			2: {SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 100, PartitionID: 10, State: commonpb.SegmentState_Flushed}},
+			3: {SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 100, PartitionID: 10, State: commonpb.SegmentState_Flushed}},
+		} {
+			multiSegments.SetSegment(segID, segment)
+		}
+
+		multiTask := &datapb.CompactionTask{
+			PlanID:        998,
+			InputSegments: []UniqueID{1, 2, 3},
+			CollectionID:  100,
+			Type:          datapb.CompactionType_MixCompaction,
+		}
+
+		sm := createTestSnapshotMetaLoaded(suite.T())
+		futureTs := uint64(time.Now().Unix()) + 3600
+		// Only protect segment 2
+		sm.segmentProtectionMu.Lock()
+		sm.segmentProtectionUntil[2] = futureTs
+		sm.segmentProtectionMu.Unlock()
+
+		m := &meta{
+			segments:     multiSegments,
+			snapshotMeta: sm,
+		}
+
+		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(multiTask)
+		suite.Error(err)
+		suite.Contains(err.Error(), "segment 2")
+	})
+
+	suite.Run("passes when protection expired", func() {
+		sm := createTestSnapshotMetaLoaded(suite.T())
+		pastTs := uint64(time.Now().Unix()) - 100
+		sm.segmentProtectionMu.Lock()
+		sm.segmentProtectionUntil[1] = pastTs
+		sm.segmentProtectionMu.Unlock()
+
+		m := &meta{
+			segments:     latestSegments,
+			snapshotMeta: sm,
+		}
+
+		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(task)
+		suite.NoError(err)
 	})
 }
 

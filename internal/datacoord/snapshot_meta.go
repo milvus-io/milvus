@@ -187,6 +187,10 @@ type snapshotMeta struct {
 	// whose RefIndex hasn't been loaded yet. Fail-closed: block compaction for these
 	// collections until RefIndex loads and we know which segments to protect.
 	compactionBlockedCollections typeutil.UniqueSet
+	// snapshotPendingCollections: collections currently in the process of creating a snapshot.
+	// Blocks compaction commit for these collections to prevent segment state changes
+	// between GenSnapshot (segment list capture) and SaveSnapshot (protection setup).
+	snapshotPendingCollections typeutil.UniqueSet
 
 	// Background RefIndex loader goroutine control
 	loaderCtx    context.Context
@@ -225,6 +229,7 @@ func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 		collectionID2Snapshots:       typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
 		segmentProtectionUntil:       make(map[int64]uint64),
 		compactionBlockedCollections: typeutil.NewUniqueSet(),
+		snapshotPendingCollections:   typeutil.NewUniqueSet(),
 		loaderCtx:                    loaderCtx,
 		loaderCancel:                 loaderCancel,
 		reader:                       NewSnapshotReader(chunkManager),
@@ -993,14 +998,36 @@ func (sm *snapshotMeta) IsRefIndexLoadedForCollection(collectionID int64) bool {
 	return allLoaded
 }
 
-// IsCollectionCompactionBlocked checks if compaction is blocked for a collection
-// because a protected snapshot's RefIndex hasn't been loaded yet.
-// This implements fail-closed semantics: if we don't know which segments to protect,
-// we block compaction for the entire collection until we do.
+// IsCollectionCompactionBlocked checks if compaction is blocked for a collection.
+// Returns true if:
+//   - A protected snapshot's RefIndex hasn't been loaded yet (fail-closed), OR
+//   - The collection is currently in the process of creating a snapshot (intent-based blocking).
 func (sm *snapshotMeta) IsCollectionCompactionBlocked(collectionID int64) bool {
 	sm.segmentProtectionMu.RLock()
 	defer sm.segmentProtectionMu.RUnlock()
-	return sm.compactionBlockedCollections.Contain(collectionID)
+	return sm.compactionBlockedCollections.Contain(collectionID) ||
+		sm.snapshotPendingCollections.Contain(collectionID)
+}
+
+// SetSnapshotPending marks a collection as having a pending snapshot creation.
+// This blocks compaction commit for the collection to prevent segment state changes
+// during the window between GenSnapshot and SaveSnapshot.
+func (sm *snapshotMeta) SetSnapshotPending(collectionID int64) {
+	sm.segmentProtectionMu.Lock()
+	defer sm.segmentProtectionMu.Unlock()
+	sm.snapshotPendingCollections.Insert(collectionID)
+	log.Info("collection marked as snapshot pending, compaction blocked",
+		zap.Int64("collectionID", collectionID))
+}
+
+// ClearSnapshotPending removes the pending snapshot mark for a collection.
+// Called after SaveSnapshot completes (success or failure) to unblock compaction.
+func (sm *snapshotMeta) ClearSnapshotPending(collectionID int64) {
+	sm.segmentProtectionMu.Lock()
+	defer sm.segmentProtectionMu.Unlock()
+	sm.snapshotPendingCollections.Remove(collectionID)
+	log.Info("collection snapshot pending mark cleared, compaction unblocked",
+		zap.Int64("collectionID", collectionID))
 }
 
 // isProtectionActive returns true if the given expiry timestamp represents

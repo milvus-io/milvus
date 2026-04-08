@@ -2030,6 +2030,36 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
 
+	// Check if compaction is blocked for this collection (snapshot pending or RefIndex not loaded).
+	if m.isCollectionCompactionBlocked(t.GetCollectionID()) {
+		log.Info("compaction rejected: collection has pending snapshot or unloaded RefIndex",
+			zap.Int64("planID", t.GetPlanID()),
+			zap.String("type", t.GetType().String()),
+			zap.Int64("collectionID", t.GetCollectionID()),
+			zap.String("channel", t.GetChannel()),
+			zap.Int64s("inputSegments", t.GetInputSegments()),
+		)
+		return merr.WrapErrServiceInternal(
+			fmt.Sprintf("compaction blocked: collection %d has pending snapshot or unloaded snapshot RefIndex",
+				t.GetCollectionID()))
+	}
+
+	// Check if any input segment is protected by a snapshot.
+	for _, segmentID := range t.GetInputSegments() {
+		if m.isSegmentCompactionProtected(segmentID) {
+			log.Info("compaction rejected: input segment is protected by snapshot",
+				zap.Int64("planID", t.GetPlanID()),
+				zap.String("type", t.GetType().String()),
+				zap.Int64("collectionID", t.GetCollectionID()),
+				zap.String("channel", t.GetChannel()),
+				zap.Int64("segmentID", segmentID),
+				zap.Int64s("inputSegments", t.GetInputSegments()),
+			)
+			return merr.WrapErrServiceInternal(
+				fmt.Sprintf("compaction blocked: input segment %d is protected by a snapshot", segmentID))
+		}
+	}
+
 	for _, segmentID := range t.GetInputSegments() {
 		segment := m.segments.GetSegment(segmentID)
 		if !isSegmentHealthy(segment) {
