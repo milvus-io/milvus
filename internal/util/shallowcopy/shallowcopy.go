@@ -43,6 +43,7 @@ func ShallowCopySearchRequest(src *internalpb.SearchRequest, targetID int64) *in
 		AnalyzerName:            src.AnalyzerName,
 		CollectionTtlTimestamps: src.CollectionTtlTimestamps,
 		EntityTtlPhysicalTime:   src.EntityTtlPhysicalTime,
+		PkFilter:                src.PkFilter,
 	}
 }
 
@@ -78,5 +79,6 @@ func ShallowCopyRetrieveRequest(src *internalpb.RetrieveRequest, targetID int64)
 		EntityTtlPhysicalTime:        src.EntityTtlPhysicalTime,
 		OrderByFields:                src.OrderByFields,
 		QueryLabel:                   src.QueryLabel,
+		PkFilter:                     src.PkFilter,
 	}
 }
