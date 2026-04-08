@@ -160,6 +160,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     bool
     HasRawData(int64_t field_id) const override;
 
+    // Returns true only if the index itself contains raw data,
+    // without considering whether field data is loaded.
+    bool
+    IndexHasRawData(FieldId field_id) const;
+
     DataType
     GetFieldDataType(FieldId fieldId) const override;
 
