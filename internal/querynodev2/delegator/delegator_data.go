@@ -529,11 +529,18 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 
+	releaseCandidatesOnErr := func(err error) error {
+		for _, c := range candidates {
+			c.Refund()
+		}
+		return err
+	}
+
 	// Load BM25 stats BEFORE loadStreamDelete so stats are ready before segment becomes visible
 	err = sd.loadBM25Stats(ctx, infos, req)
 	if err != nil {
 		log.Warn("failed to load BM25 stats", zap.Error(err))
-		return err
+		return releaseCandidatesOnErr(err)
 	}
 
 	// Build a map from segmentID to BloomFilterSet
@@ -567,7 +574,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		log.Warn("load stream delete failed", zap.Error(err))
 		// BM25 stats already loaded into idf oracle will be cleaned up
 		// automatically by SyncDistribution when the segment is not in target.
-		return err
+		return releaseCandidatesOnErr(err)
 	}
 
 	return nil
