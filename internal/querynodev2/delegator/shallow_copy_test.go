@@ -22,12 +22,11 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 )
 
 func TestShallowCopySearchRequest_EntityTtlPhysicalTime(t *testing.T) {
-	sd := &shardDelegator{}
-
 	req := &internalpb.SearchRequest{
 		Base:                    &commonpb.MsgBase{TargetID: 1},
 		CollectionID:            1000,
@@ -37,7 +36,7 @@ func TestShallowCopySearchRequest_EntityTtlPhysicalTime(t *testing.T) {
 		EntityTtlPhysicalTime:   1773682085500000,
 	}
 
-	copied := sd.shallowCopySearchRequest(req, 2)
+	copied := shallowcopy.ShallowCopySearchRequest(req, 2)
 
 	assert.Equal(t, req.EntityTtlPhysicalTime, copied.EntityTtlPhysicalTime,
 		"EntityTtlPhysicalTime must be preserved in shallow copy")
