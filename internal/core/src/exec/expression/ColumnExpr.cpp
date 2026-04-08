@@ -128,7 +128,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                 valid_res[processed_rows] = false;
             } else {
                 res_value[processed_rows] =
-                    boost::get<T>(chunk_data_by_offset.value());
+                    segcore::get_from_variant<T>(chunk_data_by_offset);
             }
             processed_rows++;
         }
@@ -159,7 +159,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                 valid_res[i] = false;
                 continue;
             }
-            res_value[i] = boost::get<T>(data.value());
+            res_value[i] = segcore::get_from_variant<T>(data);
         }
         return res_vec;
     } else {
@@ -198,7 +198,9 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                 if (!cda(i).has_value()) {
                     valid_res[processed_rows] = false;
                 } else {
-                    res_value[processed_rows] = boost::get<T>(cda(i).value());
+                    auto tmp = cda(i);
+                    res_value[processed_rows] =
+                        segcore::get_from_variant<T>(tmp);
                 }
                 processed_rows++;
 
