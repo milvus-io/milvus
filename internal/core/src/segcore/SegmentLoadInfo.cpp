@@ -378,12 +378,19 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
         if (!replace_fields.empty()) {
             diff.column_groups_to_replace.emplace_back(i, replace_fields);
         }
-        if (!lazy_fields.empty()) {
-            diff.column_groups_to_lazyload.emplace_back(i, lazy_fields);
+        // Lazy entries are emitted one-per-field on purpose: each entry maps
+        // to a separate single-column projected ChunkReader in
+        // LoadColumnGroup, so touching one lazy field never co-loads chunks
+        // for sibling lazy fields in the same column group. Reader-sharing
+        // policy is therefore encoded in the diff entry shape itself rather
+        // than re-derived inside the loader.
+        for (const auto& fid : lazy_fields) {
+            diff.column_groups_to_lazyload.emplace_back(
+                i, std::vector<FieldId>{fid});
         }
-        if (!lazy_replace_fields.empty()) {
-            diff.column_groups_to_lazyreplace.emplace_back(i,
-                                                           lazy_replace_fields);
+        for (const auto& fid : lazy_replace_fields) {
+            diff.column_groups_to_lazyreplace.emplace_back(
+                i, std::vector<FieldId>{fid});
         }
     }
 
