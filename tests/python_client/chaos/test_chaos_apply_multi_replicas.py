@@ -42,7 +42,7 @@ def build_rg_chaos_config(chaos_type, release_name, namespace, target_rgs,
         "app.kubernetes.io/instance": release_name,
     }
     if component:
-        label_selectors["app.kubernetes.io/component"] = component
+        label_selectors["component"] = component
 
     config = {
         "apiVersion": constants.CHAOS_API_VERSION,
