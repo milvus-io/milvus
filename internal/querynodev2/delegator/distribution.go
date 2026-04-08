@@ -717,6 +717,16 @@ func BatchGetFromSegments(pks []storage.PrimaryKey, partitionID int64, sealed []
 	return result
 }
 
+// Flush synchronously generates a snapshot so that subsequent reads
+// (e.g. PeekSegments) see the latest distribution state.
+// This is useful in tests and in scenarios that require immediate consistency.
+func (d *distribution) Flush() {
+	d.mut.Lock()
+	d.genSnapshot()
+	d.updateServiceable("Flush")
+	d.mut.Unlock()
+}
+
 // Close stops the background snapshot loop and waits for it to exit.
 func (d *distribution) Close() {
 	close(d.snapshotNotifier)

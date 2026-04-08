@@ -2137,11 +2137,14 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	suite.TestWatchDmChannelsInt64()
 	suite.TestLoadSegments_Int64()
 
-	delegator, ok := suite.node.delegators.Get(suite.vchannel)
+	dlg, ok := suite.node.delegators.Get(suite.vchannel)
 	suite.True(ok)
-	sealedSegments, _ := delegator.GetSegmentInfo(false)
-	// 1 level 0 + 3 sealed segments
-	suite.Len(sealedSegments[0].Segments, 3)
+	// snapshot generation is async, wait for it to reflect loaded segments
+	var sealedSegments []delegator.SnapshotItem
+	suite.Require().Eventually(func() bool {
+		sealedSegments, _ = dlg.GetSegmentInfo(false)
+		return len(sealedSegments) > 0 && len(sealedSegments[0].Segments) == 3
+	}, time.Second, 10*time.Millisecond)
 
 	// data
 	req := &querypb.SyncDistributionRequest{
@@ -2164,7 +2167,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	status, err := suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
-	sealedSegments, _ = delegator.GetSegmentInfo(false)
+	sealedSegments, _ = dlg.GetSegmentInfo(false)
 	suite.Len(sealedSegments[0].Segments, 2)
 
 	releaseAction = &querypb.SyncAction{
@@ -2178,7 +2181,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	status, err = suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
-	sealedSegments, _ = delegator.GetSegmentInfo(false)
+	sealedSegments, _ = dlg.GetSegmentInfo(false)
 	suite.Len(sealedSegments[0].Segments, 1)
 }
 

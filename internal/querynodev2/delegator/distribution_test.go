@@ -43,6 +43,9 @@ func (s *DistributionSuite) SetupTest() {
 }
 
 func (s *DistributionSuite) TearDownTest() {
+	if s.dist != nil {
+		s.dist.Close()
+	}
 	s.dist = nil
 }
 
@@ -193,6 +196,7 @@ func (s *DistributionSuite) TestAddDistribution() {
 			_, _, _, version, err := s.dist.PinReadableSegments(1.0, 1)
 			s.Require().NoError(err)
 			s.dist.AddDistributions(tc.input...)
+			s.dist.Flush()
 			sealed, _ := s.dist.PeekSegments(false)
 			s.compareSnapshotItems(tc.expected, sealed)
 			s.dist.Unpin(version)
@@ -628,12 +632,10 @@ func (s *DistributionSuite) TestPeek() {
 			s.SetupTest()
 			defer s.TearDownTest()
 
-			// peek during lock
 			s.dist.AddDistributions(tc.input...)
-			s.dist.mut.Lock()
+			s.dist.Flush()
 			sealed, _ := s.dist.PeekSegments(tc.readable)
 			s.compareSnapshotItems(tc.expected, sealed)
-			s.dist.mut.Unlock()
 		})
 	}
 }
@@ -698,6 +700,7 @@ func (s *DistributionSuite) TestMarkOfflineSegments() {
 				DroppedInTarget:       nil,
 			}, nil)
 			s.dist.MarkOfflineSegments(tc.offlines...)
+			s.dist.Flush()
 			s.Equal(tc.serviceable, s.dist.Serviceable())
 
 			for _, offline := range tc.offlines {

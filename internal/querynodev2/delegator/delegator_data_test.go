@@ -620,6 +620,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 		})
 
 		s.NoError(err)
+		s.delegator.distribution.Flush()
 		sealed, _ := s.delegator.GetSegmentInfo(false)
 		s.Require().Equal(1, len(sealed))
 		s.Equal(int64(1), sealed[0].NodeID)
@@ -680,6 +681,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		})
 
 		s.NoError(err)
+		s.delegator.distribution.Flush()
 		sealed, _ := s.delegator.GetSegmentInfo(false)
 		s.Require().Equal(1, len(sealed))
 		s.Equal(int64(1), sealed[0].NodeID)
@@ -1263,6 +1265,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	})
 	s.Require().NoError(err)
 
+	s.delegator.distribution.Flush()
 	sealed, growing := s.delegator.GetSegmentInfo(false)
 	s.Require().Equal(1, len(sealed))
 	s.Equal(int64(1), sealed[0].NodeID)
