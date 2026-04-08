@@ -117,7 +117,7 @@ class TestOperations(TestBase):
             Op.delete: DeleteChecker(collection_name=c_name),
             Op.drop: CollectionDropChecker(collection_name=c_name),
             Op.alter_collection: AlterCollectionChecker(collection_name=c_name),
-            # Op.add_field: AddFieldChecker(collection_name=c_name),  # disabled: causes schema mismatch for other checkers
+            Op.add_field: AddFieldChecker(collection_name=c_name),
             Op.rename_collection: CollectionRenameChecker(collection_name=c_name),
             Op.restore_snapshot: SnapshotRestoreChecker(collection_name=c_name),
             Op.entity_ttl: EntityTTLChecker(),
