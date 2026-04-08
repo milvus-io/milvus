@@ -33,8 +33,8 @@ using namespace milvus::segcore;
 class VisibilityFilterGuard {
  public:
     explicit VisibilityFilterGuard(bool value)
-        : original_(SegcoreConfig::default_config()
-                        .get_visibility_filter_enabled()) {
+        : original_(
+              SegcoreConfig::default_config().get_visibility_filter_enabled()) {
         SegcoreConfig::default_config().set_visibility_filter_enabled(value);
     }
     ~VisibilityFilterGuard() {
