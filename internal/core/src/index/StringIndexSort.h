@@ -431,6 +431,13 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
                  TargetBitmap& valid_bitset,
                  std::vector<int32_t>& idx_to_offsets) override;
 
+    /// Load from an already-written mmap file (file written externally).
+    void
+    LoadFromFile(size_t data_size,
+                 size_t total_num_rows,
+                 TargetBitmap& valid_bitset,
+                 std::vector<int32_t>& idx_to_offsets);
+
     void
     SetMmapFilePath(const std::string& filepath) {
         mmap_filepath_ = filepath;
@@ -512,6 +519,12 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     }
 
  private:
+    void
+    MmapAndParse(size_t data_size,
+                 size_t total_num_rows,
+                 TargetBitmap& valid_bitset,
+                 std::vector<int32_t>& idx_to_offsets);
+
     char* mmap_data_ = nullptr;
     size_t mmap_size_ = 0;
     size_t data_size_ = 0;  // Actual data size without padding
