@@ -741,8 +741,9 @@ type WoodpeckerConfig struct {
 	FencePolicyConditionWrite      ParamItem `refreshable:"true"`
 
 	// storage
-	StorageType ParamItem `refreshable:"false"`
-	RootPath    ParamItem `refreshable:"false"`
+	StorageType       ParamItem `refreshable:"false"`
+	ForceLocalStorage ParamItem `refreshable:"false"`
+	RootPath          ParamItem `refreshable:"false"`
 }
 
 func (p *WoodpeckerConfig) Init(base *BaseTable) {
@@ -963,6 +964,15 @@ Valid values: [auto, enable, disable]`,
 		Export:       true,
 	}
 	p.StorageType.Init(base.mgr)
+
+	p.ForceLocalStorage = ParamItem{
+		Key:          "woodpecker.storage.forceLocalStorage",
+		Version:      "2.6.14",
+		DefaultValue: "false",
+		Doc:          "Force using local storage in cluster mode. Not recommended unless you know what you are doing.",
+		Export:       false,
+	}
+	p.ForceLocalStorage.Init(base.mgr)
 
 	p.RootPath = ParamItem{
 		Key:          "woodpecker.storage.rootPath",
