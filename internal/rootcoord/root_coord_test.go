@@ -1447,6 +1447,38 @@ func TestRootCoord_AlterCollectionFunction(t *testing.T) {
 	})
 }
 
+func TestRootCoord_AlterCollectionSchema(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetAlterStatus().GetErrorCode())
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionSchema).Return(nil).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetAlterStatus().GetErrorCode())
+	})
+
+	t.Run("run failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionSchema).Return(fmt.Errorf("mock broadcast error")).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetAlterStatus().GetErrorCode())
+	})
+}
+
 func TestRootCoord_CheckHealth(t *testing.T) {
 	// getQueryCoordMetricsFunc := func(tt typeutil.Timestamp) (*milvuspb.GetMetricsResponse, error) {
 	// 	clusterTopology := metricsinfo.QueryClusterTopology{

@@ -20,6 +20,11 @@ import (
 )
 
 // we only overwrite the Execute function
+// TODO: InsertMessageHeader does not carry SchemaVersion, which means the consistency gate
+// in StreamingNode cannot tell whether an insert was produced before or after a schema change.
+// This can cause a deadlock when the gate waits for inserts at the new schema version that
+// will never arrive. The companion PR https://github.com/milvus-io/milvus/pull/48139
+// resolves this by propagating SchemaVersion through the insert path.
 func (it *insertTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-Execute")
 	defer sp.End()
