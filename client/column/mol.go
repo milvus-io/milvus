@@ -19,17 +19,13 @@ package column
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
+var _ Column = (*ColumnMolSmiles)(nil)
+
 type ColumnMolSmiles struct {
 	*genericColumnBase[string]
-}
-
-// Name returns column name.
-func (c *ColumnMolSmiles) Name() string {
-	return c.name
 }
 
 // Type returns column entity.FieldType.
@@ -37,13 +33,8 @@ func (c *ColumnMolSmiles) Type() entity.FieldType {
 	return entity.FieldTypeMol
 }
 
-// Len returns column values length.
-func (c *ColumnMolSmiles) Len() int {
-	return len(c.values)
-}
-
 func (c *ColumnMolSmiles) Slice(start, end int) Column {
-	l := c.Len()
+	l := c.genericColumnBase.Len()
 	if start > l {
 		start = l
 	}
@@ -55,30 +46,9 @@ func (c *ColumnMolSmiles) Slice(start, end int) Column {
 	}
 }
 
-// Get returns value at index as interface{}.
-func (c *ColumnMolSmiles) Get(idx int) (interface{}, error) {
-	if idx < 0 || idx >= c.Len() {
-		return nil, errors.New("index out of range")
-	}
-	return c.values[idx], nil
-}
-
-func (c *ColumnMolSmiles) GetAsString(idx int) (string, error) {
-	return c.ValueByIdx(idx)
-}
-
-// FieldData return column data mapped to schemapb.FieldData.
-func (c *ColumnMolSmiles) FieldData() *schemapb.FieldData {
-	fd := c.genericColumnBase.FieldData()
-	return fd
-}
-
 // ValueByIdx returns value of the provided index.
 func (c *ColumnMolSmiles) ValueByIdx(idx int) (string, error) {
-	if idx < 0 || idx >= c.Len() {
-		return "", errors.New("index out of range")
-	}
-	return c.values[idx], nil
+	return c.Value(idx)
 }
 
 // AppendValue append value into column.
@@ -87,13 +57,7 @@ func (c *ColumnMolSmiles) AppendValue(i interface{}) error {
 	if !ok {
 		return errors.New("expect mol SMILES type(string)")
 	}
-	c.values = append(c.values, s)
-	return nil
-}
-
-// Data returns column data.
-func (c *ColumnMolSmiles) Data() []string {
-	return c.values
+	return c.genericColumnBase.AppendValue(s)
 }
 
 func NewColumnMolSmiles(name string, values []string) *ColumnMolSmiles {
