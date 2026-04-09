@@ -85,15 +85,17 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 }
 
 func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
-	// Handle NOT(TermExpr) before visiting child, so we can split not in → != and
+	// Handle NOT(TermExpr) before visiting child.
 	// Skip bool types here — they are handled via visitTermExpr bool optimization + NOT simplification.
 	if expr.GetOp() == planpb.UnaryExpr_Not {
 		if te := expr.GetChild().GetTermExpr(); te != nil {
 			sortTermValues(te)
-			if v.optimizeEnabled && effectiveDataType(te.GetColumnInfo()) == schemapb.DataType_Bool {
+			col := te.GetColumnInfo()
+			if v.optimizeEnabled && effectiveDataType(col) == schemapb.DataType_Bool {
 				// Let bool NOT IN flow through to visitTermExpr for bool-specific optimization
-			} else if !shouldUseInExprWithPK(te.GetColumnInfo().GetDataType(), len(te.GetValues()), te.GetColumnInfo().GetIsPrimaryKey()) {
-				return splitTermToAndNotEquals(te)
+			} else if col != nil && len(te.GetValues()) == 1 {
+				// Single-value NOT IN → != (avoids SIMD setup overhead for trivial case)
+				return newUnaryRangeExpr(col, planpb.OpType_NotEqual, te.GetValues()[0])
 			}
 		}
 	}
@@ -167,9 +169,9 @@ func (v *visitor) visitTermExpr(expr *planpb.TermExpr) interface{} {
 		}
 	}
 
-	// Split in → == or when shouldUseInExpr returns false
-	if !shouldUseInExprWithPK(expr.GetColumnInfo().GetDataType(), len(expr.GetValues()), expr.GetColumnInfo().GetIsPrimaryKey()) {
-		return splitTermToOrEquals(expr)
+	// Single-value IN → == (avoids SIMD setup overhead for trivial case)
+	if len(expr.GetValues()) == 1 {
+		return newUnaryRangeExpr(expr.GetColumnInfo(), planpb.OpType_Equal, expr.GetValues()[0])
 	}
 
 	return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: expr}}
