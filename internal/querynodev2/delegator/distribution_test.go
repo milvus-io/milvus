@@ -1444,6 +1444,10 @@ func TestPinReadableSegments(t *testing.T) {
 			SealedSegmentRowCount: map[int64]int64{1: 100, 2: 100},
 			GrowingInTarget:       []int64{},
 		}, []int64{1})
+		// Flush pending snapshot and stop background goroutine to avoid
+		// data race with mockey patches in sub-tests.
+		dist.Flush()
+		dist.Close()
 		return dist
 	}
 
@@ -1527,6 +1531,10 @@ func TestPinReadableSegments_ServiceableLogic(t *testing.T) {
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
 
+	// Stop background goroutine to avoid data race with mockey patches.
+	dist.Flush()
+	dist.Close()
+
 	// Test case: requireFullResult=true, Serviceable=false, GetLoadedRatio=1.0
 	// This tests the case where load ratio is satisfied but serviceable is false
 	mockServiceable := mockey.Mock((*channelQueryView).Serviceable).Return(false).Build()
@@ -1559,6 +1567,10 @@ func TestPinReadableSegments_LoadRatioLogic(t *testing.T) {
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
 
+	// Stop background goroutine to avoid data race with mockey patches.
+	dist.Flush()
+	dist.Close()
+
 	// Test case: requireFullResult=false, loadRatioSatisfy=false
 	// This tests the case where partial result is requested but load ratio is insufficient
 	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.3).Build()
@@ -1588,6 +1600,10 @@ func TestPinReadableSegments_EdgeCases(t *testing.T) {
 		SealedSegmentRowCount: map[int64]int64{1: 100},
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
+
+	// Stop background goroutine to avoid data race with mockey patches.
+	dist.Flush()
+	dist.Close()
 
 	// Test case 1: requiredLoadRatio = 0.0 (edge case)
 	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.0).Build()
@@ -1648,6 +1664,10 @@ func TestPinReadableSegments_PartialResultNotEmpty(t *testing.T) {
 		SealedSegmentRowCount: map[int64]int64{1: 100, 2: 100},
 		GrowingInTarget:       []int64{},
 	}, []int64{1})
+
+	// Stop background goroutine to avoid data race with mockey patches.
+	dist.Flush()
+	dist.Close()
 
 	// Call PinReadableSegments with partial result enabled (requiredLoadRatio < 1.0)
 	sealed, growing, _, _, err := dist.PinReadableSegments(0.8, 1)
