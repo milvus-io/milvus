@@ -124,6 +124,8 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
     for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
+    idx_to_offsets_ptr_ = idx_to_offsets_.data();
+    idx_to_offsets_size_ = idx_to_offsets_.size();
     is_built_ = true;
 
     setup_data_pointers();
@@ -173,6 +175,8 @@ ScalarIndexSort<T>::BuildWithFieldData(
         }
         idx_to_offsets_[data_[i].idx_] = i;
     }
+    idx_to_offsets_ptr_ = idx_to_offsets_.data();
+    idx_to_offsets_size_ = idx_to_offsets_.size();
     is_built_ = true;
 
     setup_data_pointers();
@@ -222,6 +226,8 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
     for (size_t i = 0; i < total_num_rows_; ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
+    idx_to_offsets_ptr_ = idx_to_offsets_.data();
+    idx_to_offsets_size_ = idx_to_offsets_.size();
     is_built_ = true;
 
     setup_data_pointers();
@@ -385,6 +391,8 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
         idx_to_offsets_[item.idx_] = i;
         valid_bitset_.set(item.idx_);
     }
+    idx_to_offsets_ptr_ = idx_to_offsets_.data();
+    idx_to_offsets_size_ = idx_to_offsets_.size();
 
     is_built_ = true;
     ComputeByteSize();
@@ -604,13 +612,13 @@ ScalarIndexSort<T>::Range(const T& lower_bound_value,
 template <typename T>
 std::optional<T>
 ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
-    AssertInfo(idx < idx_to_offsets_.size(), "out of range of total count");
+    AssertInfo(idx < idx_to_offsets_size_, "out of range of total count");
     AssertInfo(is_built_, "index has not been built");
 
     if (!valid_bitset_[idx]) {
         return std::nullopt;
     }
-    auto offset = idx_to_offsets_[idx];
+    auto offset = idx_to_offsets_ptr_[idx];
     return operator[](offset).a_;
 }
 
@@ -671,7 +679,7 @@ ScalarIndexSort<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     // Persist idx_to_offsets and valid_bitset to avoid recomputation at load.
     writer->WriteEntry("idx_to_offsets",
                        idx_to_offsets_.data(),
-                       idx_to_offsets_.size() * sizeof(size_t));
+                       idx_to_offsets_.size() * sizeof(int32_t));
     writer->WriteEntry("valid_bitset",
                        reinterpret_cast<const uint8_t*>(valid_bitset_.data()),
                        valid_bitset_.size_in_bytes());
@@ -761,17 +769,64 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
 
     // Load persisted idx_to_offsets and valid_bitset if available,
     // otherwise recompute (backward compat with older V3 files).
-    if (reader.HasEntry("idx_to_offsets")) {
+    if (reader.HasEntry("idx_to_offsets") && is_mmap_) {
+        // mmap path: stream idx_to_offsets + valid_bitset to disk, then mmap
+        mmap_meta_filepath_ =
+            (disk_file_manager_ != nullptr
+                 ? disk_file_manager_->GetLocalIndexObjectPrefix()
+                 : MMAP_PATH_FOR_TEST) +
+            "stlsort-meta";
+        std::filesystem::create_directories(
+            std::filesystem::path(mmap_meta_filepath_).parent_path());
+
+        size_t offsets_bytes = reader.GetEntrySize("idx_to_offsets");
+        size_t bitset_bytes = reader.GetEntrySize("valid_bitset");
+
+        {
+            auto fw = storage::FileWriter(
+                mmap_meta_filepath_,
+                storage::io::GetPriorityFromLoadPriority(load_priority));
+
+            reader.ReadEntryStream(
+                "idx_to_offsets", [&](const uint8_t* d, size_t len) {
+                    fw.Write(d, len);
+                });
+            reader.ReadEntryStream(
+                "valid_bitset", [&](const uint8_t* d, size_t len) {
+                    fw.Write(d, len);
+                });
+            fw.Finish();
+        }
+
+        mmap_meta_size_ = offsets_bytes + bitset_bytes;
+        auto meta_file = File::Open(mmap_meta_filepath_, O_RDONLY);
+        mmap_meta_data_ = static_cast<char*>(
+            mmap(NULL, mmap_meta_size_, PROT_READ, MAP_PRIVATE,
+                 meta_file.Descriptor(), 0));
+        AssertInfo(mmap_meta_data_ != MAP_FAILED,
+                   "failed to mmap meta: {}", strerror(errno));
+        meta_file.Close();
+
+        idx_to_offsets_ptr_ =
+            reinterpret_cast<const int32_t*>(mmap_meta_data_);
+        idx_to_offsets_size_ = offsets_bytes / sizeof(int32_t);
+
+        valid_bitset_ = TargetBitmap(total_num_rows_, false);
+        memcpy(reinterpret_cast<uint8_t*>(valid_bitset_.data()),
+               mmap_meta_data_ + offsets_bytes,
+               bitset_bytes);
+    } else if (reader.HasEntry("idx_to_offsets")) {
+        // memory path: stream into vector
         idx_to_offsets_.resize(total_num_rows_);
-        size_t write_offset = 0;
+        size_t wo = 0;
         reader.ReadEntryStream(
-            "idx_to_offsets", [&](const uint8_t* data, size_t len) {
-                memcpy(reinterpret_cast<uint8_t*>(idx_to_offsets_.data()) +
-                           write_offset,
-                       data,
-                       len);
-                write_offset += len;
+            "idx_to_offsets", [&](const uint8_t* d, size_t len) {
+                memcpy(reinterpret_cast<uint8_t*>(idx_to_offsets_.data()) + wo,
+                       d, len);
+                wo += len;
             });
+        idx_to_offsets_ptr_ = idx_to_offsets_.data();
+        idx_to_offsets_size_ = idx_to_offsets_.size();
 
         valid_bitset_ = TargetBitmap(total_num_rows_, false);
         auto bitset_entry = reader.ReadEntry("valid_bitset");
@@ -779,6 +834,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                bitset_entry.data.data(),
                bitset_entry.data.size());
     } else {
+        // Backward compat: recompute from index_data
         idx_to_offsets_.resize(total_num_rows_);
         valid_bitset_ = TargetBitmap(total_num_rows_, false);
         for (size_t i = 0; i < Size(); ++i) {
@@ -786,6 +842,8 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
             idx_to_offsets_[item.idx_] = i;
             valid_bitset_.set(item.idx_);
         }
+        idx_to_offsets_ptr_ = idx_to_offsets_.data();
+        idx_to_offsets_size_ = idx_to_offsets_.size();
     }
 
     is_built_ = true;
