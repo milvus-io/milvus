@@ -13,6 +13,15 @@ pub fn c_ptr_to_str(ptr: *const c_char) -> Result<&'static str> {
     Ok(unsafe { CStr::from_ptr(ptr) }.to_str()?)
 }
 
+/// Convert a (pointer, length) pair to a `&str`, supporting embedded NUL bytes.
+/// Unlike `c_ptr_to_str` which stops at null terminators, this function uses
+/// explicit length to handle strings containing NUL (`\x00`) bytes.
+#[inline]
+pub fn ptr_len_to_str<'a>(ptr: *const u8, len: usize) -> Result<&'a str> {
+    let bytes = unsafe { slice::from_raw_parts(ptr, len) };
+    Ok(std::str::from_utf8(bytes)?)
+}
+
 pub fn index_exist(path: &str) -> bool {
     let Ok(dir) = MmapDirectory::open(path) else {
         init_log();
@@ -22,7 +31,7 @@ pub fn index_exist(path: &str) -> bool {
         );
         return false;
     };
-    let exists = Index::exists(&dir).unwrap();
+    let exists = Index::exists(&dir).unwrap_or(false);
     if !exists {
         init_log();
         let files: Vec<_> = std::fs::read_dir(path)

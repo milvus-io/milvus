@@ -189,6 +189,11 @@ SegmentLoadInfo::ConvertTextIndexStatsToLoadTextIndexInfo(
         info->set_warmup_policy(field_warmup_policy);
     }
 
+    // Propagate base_path for unified (basePath + relativeFiles) model
+    if (!text_index_stats.base_path().empty()) {
+        info->set_base_path(text_index_stats.base_path());
+    }
+
     return info;
 }
 
@@ -339,8 +344,9 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
                 // Field not in current and not default-filled → new load
                 if (field_id < START_USER_FIELDID ||
                     (schema_->ShouldLoadField(FieldId(field_id)) &&
-                     field_index_has_raw_data_.find(FieldId(field_id)) ==
-                         field_index_has_raw_data_.end())) {
+                     new_info.field_index_has_raw_data_.find(
+                         FieldId(field_id)) ==
+                         new_info.field_index_has_raw_data_.end())) {
                     fields.emplace_back(field_id);
                 } else {
                     lazy_fields.emplace_back(field_id);
@@ -349,10 +355,19 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
                 // Field was default-filled or moved between groups → replace
                 if (field_id < START_USER_FIELDID ||
                     (schema_->ShouldLoadField(FieldId(field_id)) &&
-                     field_index_has_raw_data_.find(FieldId(field_id)) ==
-                         field_index_has_raw_data_.end())) {
+                     new_info.field_index_has_raw_data_.find(
+                         FieldId(field_id)) ==
+                         new_info.field_index_has_raw_data_.end())) {
                     replace_fields.emplace_back(field_id);
                 } else {
+                    lazy_replace_fields.emplace_back(field_id);
+                }
+            } else {
+                // Field at same position — check if needs lazification
+                // (transitioning from no-raw-data-index to raw-data-index)
+                if (new_info.field_index_has_raw_data_.count(
+                        FieldId(field_id)) > 0 &&
+                    field_index_has_raw_data_.count(FieldId(field_id)) == 0) {
                     lazy_replace_fields.emplace_back(field_id);
                 }
             }
@@ -363,12 +378,19 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
         if (!replace_fields.empty()) {
             diff.column_groups_to_replace.emplace_back(i, replace_fields);
         }
-        if (!lazy_fields.empty()) {
-            diff.column_groups_to_lazyload.emplace_back(i, lazy_fields);
+        // Lazy entries are emitted one-per-field on purpose: each entry maps
+        // to a separate single-column projected ChunkReader in
+        // LoadColumnGroup, so touching one lazy field never co-loads chunks
+        // for sibling lazy fields in the same column group. Reader-sharing
+        // policy is therefore encoded in the diff entry shape itself rather
+        // than re-derived inside the loader.
+        for (const auto& fid : lazy_fields) {
+            diff.column_groups_to_lazyload.emplace_back(
+                i, std::vector<FieldId>{fid});
         }
-        if (!lazy_replace_fields.empty()) {
-            diff.column_groups_to_lazyreplace.emplace_back(i,
-                                                           lazy_replace_fields);
+        for (const auto& fid : lazy_replace_fields) {
+            diff.column_groups_to_lazyreplace.emplace_back(
+                i, std::vector<FieldId>{fid});
         }
     }
 
@@ -384,13 +406,68 @@ void
 SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
                                          SegmentLoadInfo& new_info) {
     // Find fields that were previously skipped (index had raw data)
-    // but now need loading (index no longer has raw data or was dropped)
+    // but now need loading (index no longer has raw data or was dropped).
+    // These fields need their raw data restored since the index no longer
+    // provides it. We put them into load paths (binlogs/column_groups) so
+    // that ApplyLoadDiff can rebuild the data from storage.
+    // Collect fields that need reload (index no longer has raw data)
+    std::set<FieldId> fields_to_reload;
     for (const auto& field_id : field_index_has_raw_data_) {
-        // If new_info doesn't have this field in index_has_raw_data_,
-        // we need to reload the field data
         if (new_info.field_index_has_raw_data_.find(field_id) ==
             new_info.field_index_has_raw_data_.end()) {
-            diff.fields_to_reload.emplace_back(field_id);
+            fields_to_reload.emplace(field_id);
+        }
+    }
+
+    if (fields_to_reload.empty()) {
+        return;
+    }
+
+    if (!new_info.HasManifestPath()) {
+        // Binlog mode: find each field's binlog and add to binlogs_to_replace
+        for (const auto& field_id : fields_to_reload) {
+            for (int i = 0; i < new_info.GetBinlogPathCount(); i++) {
+                auto& binlog = new_info.GetBinlogPath(i);
+                std::vector<int64_t> child_fields(binlog.child_fields().begin(),
+                                                  binlog.child_fields().end());
+                if (child_fields.empty()) {
+                    child_fields.emplace_back(binlog.fieldid());
+                }
+                bool found = false;
+                for (auto child_id : child_fields) {
+                    if (FieldId(child_id) == field_id) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) {
+                    // Use replace since the field may still exist
+                    // (e.g. multi-field group where drop was skipped)
+                    diff.binlogs_to_replace.emplace_back(
+                        std::vector<FieldId>{field_id}, binlog);
+                    break;
+                }
+            }
+        }
+    } else {
+        // Manifest mode: collect fields per column group, emplace each
+        // group index only once
+        auto column_groups = new_info.GetColumnGroups();
+        if (column_groups) {
+            std::map<int, std::vector<FieldId>> cg_fields;
+            for (size_t i = 0; i < column_groups->size(); i++) {
+                auto cg = column_groups->at(i);
+                for (const auto& column : cg->columns) {
+                    FieldId fid(std::stoll(column));
+                    if (fields_to_reload.count(fid) > 0) {
+                        cg_fields[static_cast<int>(i)].emplace_back(fid);
+                    }
+                }
+            }
+            for (auto& [cg_idx, fids] : cg_fields) {
+                diff.column_groups_to_replace.emplace_back(cg_idx,
+                                                           std::move(fids));
+            }
         }
     }
 }
@@ -586,17 +663,30 @@ SegmentLoadInfo::GetLoadDiff() {
     // - manifest -> manifest
     // Cross-category changes are not supported.
     if (HasManifestPath()) {
-        // set mock path for null check
-        empty_info.info_.set_manifest_path("mocked manifest path");
-        empty_info.column_groups_ =
-            std::make_shared<milvus_storage::api::ColumnGroups>();
-        empty_info.ComputeDiffColumnGroups(diff, *this);
+        if (schema_->is_external_collection()) {
+            // External collections use parquet field names (e.g., "id",
+            // "value") as column group column names, not numeric field IDs.
+            // ComputeDiffColumnGroups calls std::stoll which would crash.
+            // Flag for direct manifest loading in ApplyLoadDiff.
+            diff.load_external_manifest = true;
+        } else {
+            // set mock path for null check
+            empty_info.info_.set_manifest_path("mocked manifest path");
+            empty_info.column_groups_ =
+                std::make_shared<milvus_storage::api::ColumnGroups>();
+            empty_info.ComputeDiffColumnGroups(diff, *this);
+        }
     } else {
         empty_info.ComputeDiffBinlogs(diff, *this);
     }
 
     // Compute fields that need default value filling (schema evolution)
-    empty_info.ComputeDiffDefaultFields(diff, *this);
+    // Skip for external collections: collect_data_fields() calls std::stoll
+    // on column group names, and external collections don't need default fills
+    // (all fields are either external or virtual PK).
+    if (!schema_->is_external_collection()) {
+        empty_info.ComputeDiffDefaultFields(diff, *this);
+    }
 
     return diff;
 }

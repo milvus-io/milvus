@@ -25,4 +25,9 @@ const (
 	DefaultMultiPartUploadSize = 10 * 1024 * 1024 // 10MB
 	// Arrow will convert these field IDs to a metadata key named PARQUET:field_id on the appropriate field.
 	ArrowFieldIdMetadataKey = "PARQUET:field_id"
+
+	// ManifestLatest points to the latest available version in wanted base path
+	ManifestLatest int64 = -1
+	// ManifestEarliest points to the earliest version(empty), used by write new segment
+	ManifestEarliest int64 = 0
 )

@@ -660,7 +660,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		}
 
 		vs := make([]*storage.Value, r.Len())
-		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, false); err != nil {
+		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, true); err != nil {
 			log.Warn("compact wrong, failed to deserialize data", zap.Error(err))
 			return err
 		}

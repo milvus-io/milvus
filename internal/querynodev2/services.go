@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -723,7 +724,9 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 	}, nil
 }
 
-// only used for shard delegator search segments from worker
+// SearchSegments performs search on segments.
+// If req.FilterOnly is true, only executes filter and returns valid count per segment (Stage 1 of two-stage search).
+// If req.FilterOnly is false, performs normal vector search and returns search results.
 func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
 	channel := req.GetDmlChannels()[0]
 	log := log.Ctx(ctx).With(
@@ -876,11 +879,19 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	msgID := req.Req.Base.GetMsgID()
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
 	channel := req.GetDmlChannels()[0]
+
+	queryLabel := req.GetReq().GetQueryLabel()
+	if queryLabel == "" {
+		queryLabel = metrics.QueryLabel
+	}
+	ctx = contextutil.WithQueryLabel(ctx, queryLabel)
+
 	log := log.Ctx(ctx).With(
 		zap.Int64("msgID", msgID),
 		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
 		zap.String("channel", channel),
 		zap.String("scope", req.GetScope().String()),
+		zap.String("queryLabel", queryLabel),
 	)
 
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
@@ -889,10 +900,10 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	}
 	defer node.lifetime.Done()
 
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.TotalLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 	defer func() {
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.FailLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 		}
 	}()
 
@@ -934,8 +945,8 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 
 	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
 	latency := tr.ElapseSpan()
-	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.SuccessLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 	result := task.Result()
 	result.GetCostAggregation().ResponseTime = latency.Milliseconds()
 	result.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
@@ -993,9 +1004,14 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 
 func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryNode_QueryStreamServer) error {
 	ctx := srv.Context()
+	queryLabel := req.GetReq().GetQueryLabel()
+	if queryLabel == "" {
+		queryLabel = metrics.QueryLabel
+	}
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
 		zap.Strings("shards", req.GetDmlChannels()),
+		zap.String("queryLabel", queryLabel),
 	)
 	concurrentSrv := streamrpc.NewConcurrentQueryStreamServer(srv)
 
@@ -1039,7 +1055,7 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 		return nil
 	}
 
-	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
+	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), queryLabel).Add(float64(proto.Size(req)))
 	return nil
 }
 
@@ -1050,18 +1066,24 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 	channel := req.GetDmlChannels()[0]
 	concurrentSrv := streamrpc.NewConcurrentQueryStreamServer(srv)
 
+	queryLabel := req.GetReq().GetQueryLabel()
+	if queryLabel == "" {
+		queryLabel = metrics.QueryLabel
+	}
+
 	log := log.Ctx(ctx).With(
 		zap.Int64("msgID", msgID),
 		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
 		zap.String("channel", channel),
 		zap.String("scope", req.GetScope().String()),
+		zap.String("queryLabel", queryLabel),
 	)
 
 	resp := &internalpb.RetrieveResults{}
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.TotalLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 	defer func() {
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.FailLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 		}
 	}()
 
@@ -1091,8 +1113,8 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 
 	// TODO QueryNodeSQLatencyInQueue QueryNodeReduceLatency
 	latency := tr.ElapseSpan()
-	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.SuccessLabel, metrics.FromLeader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 	return nil
 }
 

@@ -56,6 +56,7 @@ MemFileManagerImpl::MemFileManagerImpl(
     fs_ = fileManagerContext.fs;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
     plugin_context_ = fileManagerContext.plugin_context;
+    stats_base_path_ = fileManagerContext.stats_base_path;
 }
 
 bool
@@ -324,7 +325,10 @@ MemFileManagerImpl::CacheOptFieldToMemory(const Config& config) {
     auto storage_version =
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
-    if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
+    if (storage_version == STORAGE_V3) {
+        return cache_opt_field_memory_v3(config);
+    }
+    if (storage_version == STORAGE_V2) {
         return cache_opt_field_memory_v2(config);
     }
     return cache_opt_field_memory(config);
@@ -381,39 +385,6 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
             "vector index build with multiple fields is not supported yet");
     }
 
-    auto manifest =
-        index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
-    // use manifest file for storage v2
-    auto manifest_path_str = manifest.value_or("");
-    if (manifest_path_str != "") {
-        AssertInfo(loon_ffi_properties_ != nullptr,
-                   "[StorageV2] loon ffi properties is null when build index "
-                   "with manifest");
-        std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> res;
-        for (auto& [field_id, tup] : fields_map) {
-            const auto& field_type = std::get<1>(tup);
-            const auto& element_type = std::get<2>(tup);
-
-            // compose field schema for optional field
-            proto::schema::FieldSchema field_schema;
-            field_schema.set_fieldid(field_id);
-            field_schema.set_nullable(true);  // use always nullable
-            milvus::storage::FieldDataMeta field_meta{field_meta_.collection_id,
-                                                      field_meta_.partition_id,
-                                                      field_meta_.segment_id,
-                                                      field_id,
-                                                      field_schema};
-            auto field_datas = GetFieldDatasFromManifest(manifest_path_str,
-                                                         loon_ffi_properties_,
-                                                         field_meta_,
-                                                         field_type,
-                                                         1,  // scalar field
-                                                         element_type);
-
-            res[field_id] = GetOptFieldIvfData(field_type, field_datas);
-        }
-        return res;
-    }
     auto segment_insert_files =
         index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
             config, SEGMENT_INSERT_FILES_KEY);
@@ -431,6 +402,58 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
 
         auto field_datas = GetFieldDatasFromStorageV2(
             remote_files, field_id, field_type, element_type, 1, fs_);
+
+        res[field_id] = GetOptFieldIvfData(field_type, field_datas);
+    }
+    return res;
+}
+
+std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>>
+MemFileManagerImpl::cache_opt_field_memory_v3(const Config& config) {
+    auto opt_fields =
+        index::GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
+    if (!opt_fields.has_value()) {
+        return {};
+    }
+    auto fields_map = opt_fields.value();
+    auto num_of_fields = fields_map.size();
+    if (0 == num_of_fields) {
+        return {};
+    } else if (num_of_fields > 1) {
+        ThrowInfo(
+            ErrorCode::NotImplemented,
+            "vector index build with multiple fields is not supported yet");
+    }
+
+    auto manifest =
+        index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
+    AssertInfo(manifest.has_value() && manifest.value() != "",
+               "[StorageV3] manifest path is empty when build index");
+    auto manifest_path_str = manifest.value();
+    AssertInfo(loon_ffi_properties_ != nullptr,
+               "[StorageV3] loon ffi properties is null when build index "
+               "with manifest");
+
+    std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> res;
+    for (auto& [field_id, tup] : fields_map) {
+        const auto& field_type = std::get<1>(tup);
+        const auto& element_type = std::get<2>(tup);
+
+        // compose field schema for optional field
+        proto::schema::FieldSchema field_schema;
+        field_schema.set_fieldid(field_id);
+        field_schema.set_nullable(true);  // use always nullable
+        milvus::storage::FieldDataMeta field_meta{field_meta_.collection_id,
+                                                  field_meta_.partition_id,
+                                                  field_meta_.segment_id,
+                                                  field_id,
+                                                  field_schema};
+        auto field_datas = GetFieldDatasFromManifest(manifest_path_str,
+                                                     loon_ffi_properties_,
+                                                     field_meta,
+                                                     field_type,
+                                                     1,  // scalar field
+                                                     element_type);
 
         res[field_id] = GetOptFieldIvfData(field_type, field_datas);
     }

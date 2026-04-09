@@ -39,7 +39,7 @@ from bm25s.tokenization import Tokenizer
 fake = Faker()
 
 
-from common.common_params import Expr
+from common.common_params import Expr, DefaultIndexSearchParams
 """" Methods of processing data """
 
 
@@ -47,6 +47,45 @@ try:
     RNG = np.random.default_rng(seed=0)
 except ValueError as e:
     RNG = None
+
+
+class NullValue:
+    """Sentinel for SQL NULL semantics in expression evaluation.
+    All comparisons return False (NULL compared to anything is unknown/falsy).
+    Arithmetic propagates NULL. Python's OR short-circuit handles cases like
+    ``int64 == 0 or float == 100`` correctly when float is NULL.
+    """
+    def __eq__(self, other):
+        if isinstance(other, NullValue):
+            return False
+        return False
+
+    def __ne__(self, other): return False
+    def __lt__(self, other): return False
+    def __le__(self, other): return False
+    def __gt__(self, other): return False
+    def __ge__(self, other): return False
+    def __add__(self, other): return self
+    def __radd__(self, other): return self
+    def __sub__(self, other): return self
+    def __rsub__(self, other): return self
+    def __mul__(self, other): return self
+    def __rmul__(self, other): return self
+    def __truediv__(self, other): return self
+    def __rtruediv__(self, other): return self
+    def __mod__(self, other): return self
+    def __rmod__(self, other): return self
+    def __pow__(self, other): return self
+    def __rpow__(self, other): return self
+    def __neg__(self): return self
+    def __pos__(self): return self
+    def __abs__(self): return self
+    def __hash__(self): return id(self)
+    def __bool__(self): return False
+    def __repr__(self): return "NULL"
+
+
+SQL_NULL = NullValue()
 
 
 @singledispatch
@@ -1661,7 +1700,7 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
         dict = {ct.default_int64_field_name: i,
                 ct.default_int32_field_name: i,
                 ct.default_int16_field_name: i,
-                ct.default_int8_field_name: i,
+                ct.default_int8_field_name: int(np.int8(i)),
                 ct.default_bool_field_name: bool(i),
                 ct.default_float_field_name: i*1.0,
                 ct.default_double_field_name: i * 1.0,
@@ -1990,6 +2029,142 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
 
     # log.debug(f"[gen_row_data_by_schema] Generated {len(data)} rows, first row keys: {list(data[0].keys()) if data else []}")
     return data
+
+
+def gen_row_data_by_schema_with_defaults(nb=ct.default_nb, schema=None, start=0, random_pk=False,
+                                         skip_field_names=[], desired_field_names=[],
+                                         desired_dynamic_field_names=[], default_values={}):
+    """
+    Same as gen_row_data_by_schema but supports overriding specific field values via default_values.
+
+    Args:
+        nb (int): Number of rows to generate.
+        schema: Collection schema (dict, CollectionSchema, or None).
+        start (int): Starting value for sequential primary key fields.
+        random_pk (bool): Whether to generate random primary key values.
+        skip_field_names (list): Field names to skip during generation.
+        desired_field_names (list): Only generate data for these field names.
+        desired_dynamic_field_names (list): Additional dynamic field names to generate.
+        default_values (dict): Per-field override values.
+            - key: field name (str)
+            - value: a list of length nb → row i gets default_values[field][i]
+                     any other value (scalar, dict, etc.) → repeated for every row
+
+    Returns:
+        list[dict]: List of row dicts, same format as gen_row_data_by_schema.
+
+    Example:
+        rows = gen_row_data_by_schema_with_defaults(
+            nb=5000, schema=res,
+            default_values={
+                "pk":        list(range(5000)),
+                "varchar_1": [f"str_{i % 50}" for i in range(5000)],
+                "tag":       "fixed_value",   # scalar: same for every row
+            }
+        )
+    """
+    # skip generation for fields covered by default_values to avoid wasted computation
+    effective_skip = list(skip_field_names) + [f for f in default_values if f not in skip_field_names]
+
+    rows = gen_row_data_by_schema(nb=nb, schema=schema, start=start, random_pk=random_pk,
+                                  skip_field_names=effective_skip,
+                                  desired_field_names=desired_field_names,
+                                  desired_dynamic_field_names=desired_dynamic_field_names)
+
+    if not default_values:
+        return rows
+
+    for i, row in enumerate(rows):
+        for field_name, override in default_values.items():
+            if isinstance(override, list) and len(override) == nb:
+                row[field_name] = override[i]
+            else:
+                row[field_name] = override
+
+    return rows
+
+
+def get_mc_field_schema(field_name: str, schema: dict):
+    for f in schema.get("fields", []):
+        if f.get("name", None) == field_name:
+            return f
+    raise ValueError(f"Field {field_name} not found in schema: {schema}")
+
+
+def iter_mc_insert_list_data(data: list, batch: int, nb: int):
+    """
+    Yield successive batches from a list of row dicts for MilvusClient insert.
+
+    :param data: full list of row dicts (length == nb)
+    :param batch: number of rows per insert call
+    :param nb: total number of rows (used to compute range)
+    :return: generator of row-dict sub-lists
+    """
+    for start in range(0, nb, batch):
+        yield data[start:start + batch]
+
+
+def gen_milvus_client_schema(schema, fields: list, field_params: dict = {}):
+    """
+    Add fields to a MilvusClient CollectionSchema by parsing lowercase DataType-prefix field names.
+
+    Field names follow the same lowercase DataType prefix convention used by set_field_schema:
+      "int64_pk"            → INT64
+      "float_vector_1"      → FLOAT_VECTOR
+      "float16_vector_1"    → FLOAT16_VECTOR
+      "bfloat16_vector_1"   → BFLOAT16_VECTOR
+      "sparse_float_vector" → SPARSE_FLOAT_VECTOR
+      "array_bool_1"        → ARRAY, element_type=BOOL
+      "array_varchar_1"     → ARRAY, element_type=VARCHAR
+      "varchar_1"           → VARCHAR
+      "json_1"              → JSON
+
+    Smart defaults applied per DataType (override via field_params):
+      - FLOAT_VECTOR / FLOAT16_VECTOR / BFLOAT16_VECTOR / BINARY_VECTOR: dim=ct.default_dim
+      - VARCHAR / STRING: max_length=ct.default_length
+      - ARRAY: max_capacity=ct.default_max_capacity;
+               element_type inferred from name suffix (e.g. "array_varchar_1" → VARCHAR);
+               ARRAY(VARCHAR) also gets max_length=ct.default_length
+
+    :param schema: MilvusClient CollectionSchema created by client.create_schema()
+    :param fields: list of field name strings following the lowercase DataType prefix convention
+    :param field_params: {field_name: {param_dict}} with any add_field kwargs, e.g.:
+        {
+            "int64_pk":         {"is_primary": True},
+            "float_vector_1":   {"dim": 256, "warmup": "async"},
+            "varchar_1":        {"max_length": 512, "nullable": True},
+            "array_varchar_1":  {"max_length": 64, "max_capacity": 5},
+        }
+    :return: the same CollectionSchema with fields added
+    """
+    for field in fields:
+        _kwargs = {}
+        for k, v in field_types().items():
+            if str(field).upper().startswith(k):
+                _field_element, _data_type = k, DataType.NONE
+                if hasattr(DataType, "ARRAY") and _field_element == DataType.ARRAY.name:
+                    _field_element, _data_type = get_array_element_type(str(field).upper())
+                    _kwargs.update({"max_capacity": ct.default_max_capacity, "element_type": _data_type})
+
+                if _field_element in [DataType.STRING.name, DataType.VARCHAR.name]:
+                    _kwargs.update({"max_length": ct.default_length})
+                elif _field_element in [DataType.BINARY_VECTOR.name, DataType.FLOAT_VECTOR.name,
+                                        DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name]:
+                    _kwargs.update({"dim": ct.default_dim})
+
+                params = field_params.get(field, {})
+                if not isinstance(params, dict):
+                    raise ValueError(
+                        f"[gen_milvus_client_schema] Field `{field}` params is not a dict, "
+                        f"type: {type(params)}, params: {params}")
+                _kwargs.update(params)
+                schema.add_field(field_name=field, datatype=v, **_kwargs)
+                break
+        else:
+            raise ValueError(
+                f"[gen_milvus_client_schema] Cannot infer DataType for field '{field}'. "
+                f"Rename with a lowercase DataType prefix (e.g. 'int64_{field}', 'float_vector_{field}').")
+    return schema
 
 
 def get_fields_map(schema=None):
@@ -4104,6 +4279,13 @@ def field_types() -> dict:
     return dict(sorted(dict(DataType.__members__).items(), key=lambda item: item[0], reverse=True))
 
 
+def get_vector_data_type(name: str):
+    for k, v in field_types().items():
+        if str(name).upper().startswith(k):
+            return v
+    raise ValueError(f"[get_vector_data_type] Can't find element type:{name}")
+
+
 def get_array_element_type(data_type: str):
     if hasattr(DataType, "ARRAY") and data_type.startswith(DataType.ARRAY.name):
         element_type = data_type.lstrip(DataType.ARRAY.name).lstrip("_")
@@ -4446,3 +4628,11 @@ def get_collection_warmup(describe_res, key):
 def get_index_warmup(describe_index_res):
     """Get index warmup value from describe_index result"""
     return describe_index_res.get("warmup", None)
+
+
+def get_search_params_according_to_index_params(describe_index: dict, limit: int):
+    sp = {}
+    sp_obj = getattr(DefaultIndexSearchParams, describe_index.get("index_type", None), None)
+    if sp_obj:
+        sp = sp_obj(limit=limit, **describe_index)
+    return sp

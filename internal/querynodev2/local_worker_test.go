@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
@@ -157,6 +158,31 @@ func (suite *LocalWorkerTestSuite) TestReleaseSegment() {
 	}
 	err := suite.worker.ReleaseSegments(suite.ctx, req)
 	suite.NoError(err)
+}
+
+func (suite *LocalWorkerTestSuite) TestSearchSegments_EmptyResult() {
+	// SearchSegments on an empty node returns a valid response with empty blob.
+	// This exercises the new SearchSegments wrapper: when SlicedBlob is empty,
+	// the unmarshal+release path is skipped.
+	req := &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			Base: &commonpb.MsgBase{
+				TargetID: suite.node.session.GetServerID(),
+			},
+			CollectionID: suite.collectionID,
+			Nq:           1,
+		},
+		DmlChannels: []string{suite.channel},
+	}
+	resp, err := suite.worker.SearchSegments(suite.ctx, req)
+	// May error due to no segments — that's fine, exercises the error path.
+	// If it succeeds (empty result), verify no ResultData is set for empty blob.
+	if err == nil && resp != nil {
+		// Empty blob → should NOT have ResultData
+		if len(resp.GetSlicedBlob()) == 0 {
+			suite.Nil(resp.GetResultData())
+		}
+	}
 }
 
 func TestLocalWorker(t *testing.T) {

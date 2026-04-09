@@ -1148,8 +1148,11 @@ func TestAddFieldTask(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		// more ClusteringKey field
+		// more ClusteringKey field — use a valid type so the duplicate-key check is the gate
 		fSchema = &schemapb.FieldSchema{
+			Name:            "ck_field",
+			DataType:        schemapb.DataType_Int64,
+			Nullable:        true,
 			IsClusteringKey: true,
 		}
 		bytes, err = proto.Marshal(fSchema)
@@ -1162,6 +1165,46 @@ func TestAddFieldTask(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// unsupported clustering key type (JSON, Bool, Array)
+		// Use a fresh schema (no existing clustering key) so the type check is the only gate
+		freshSchema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, int64Field, false)
+		task.oldSchema = freshSchema
+		for _, unsupportedType := range []schemapb.DataType{
+			schemapb.DataType_JSON,
+			schemapb.DataType_Bool,
+			schemapb.DataType_Array,
+		} {
+			fSchema = &schemapb.FieldSchema{
+				Name:            "ck_field",
+				DataType:        unsupportedType,
+				Nullable:        true,
+				IsClusteringKey: true,
+			}
+			if unsupportedType == schemapb.DataType_Array {
+				fSchema.ElementType = schemapb.DataType_Int64
+			}
+			bytes, err = proto.Marshal(fSchema)
+			assert.NoError(t, err)
+			task.Schema = bytes
+			err = task.PreExecute(ctx)
+			assert.Error(t, err, "expected error for unsupported clustering key type %v", unsupportedType)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		}
+
+		// valid clustering key type (Int64) should be accepted
+		fSchema = &schemapb.FieldSchema{
+			Name:            "valid_ck",
+			DataType:        schemapb.DataType_Int64,
+			Nullable:        true,
+			IsClusteringKey: true,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		task.oldSchema = freshSchema // no existing clustering key
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
 
 		// fieldName invalid
 		fSchema = &schemapb.FieldSchema{
@@ -1782,6 +1825,33 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		require.NoError(t, err)
 		err = task.PreExecute(ctx)
 		require.NoError(t, err)
+	})
+
+	t.Run("virtual PK injected after PreExecute", func(t *testing.T) {
+		schema := buildExternalSchema()
+		freshTask := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				CollectionName: collectionName,
+				Schema:         marshal(schema),
+				ShardsNum:      common.DefaultShardsNum,
+			},
+			ctx:      ctx,
+			mixCoord: mix,
+		}
+		err := freshTask.OnEnqueue()
+		require.NoError(t, err)
+		err = freshTask.PreExecute(ctx)
+		require.NoError(t, err)
+
+		// After PreExecute, schema should have virtual PK prepended
+		assert.Equal(t, common.VirtualPKFieldName, freshTask.schema.Fields[0].Name)
+		assert.True(t, freshTask.schema.Fields[0].IsPrimaryKey)
+		assert.True(t, freshTask.schema.Fields[0].AutoID)
+		assert.Equal(t, schemapb.DataType_Int64, freshTask.schema.Fields[0].DataType)
+		// Original fields should follow
+		assert.Equal(t, "text_field", freshTask.schema.Fields[1].Name)
+		assert.Equal(t, "vec_field", freshTask.schema.Fields[2].Name)
 	})
 
 	t.Run("functions forbidden", func(t *testing.T) {
@@ -4522,7 +4592,8 @@ func TestPartitionKey(t *testing.T) {
 		queryTask := &queryTask{
 			ctx: ctx,
 			RetrieveRequest: &internalpb.RetrieveRequest{
-				Base: &commonpb.MsgBase{},
+				QueryLabel: "query",
+				Base:       &commonpb.MsgBase{},
 			},
 			request: &milvuspb.QueryRequest{
 				CollectionName: collectionName,
@@ -5436,12 +5507,12 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 	})
 }
 
-func TestAlterCollectionBigTopKOptimization(t *testing.T) {
+func TestAlterCollectionQueryMode(t *testing.T) {
 	qc := NewMixCoordMock()
 	ctx := context.Background()
 	err := InitMetaCache(ctx, qc)
 	assert.NoError(t, err)
-	prefix := "TestBigTopKOptimization"
+	prefix := "TestQueryMode"
 
 	getSchema := func(colName string) *schemapb.CollectionSchema {
 		fieldName2Type := make(map[string]schemapb.DataType)
@@ -5450,13 +5521,13 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 		return constructCollectionSchemaByDataType(colName, fieldName2Type, "int64_field", false)
 	}
 
-	createCollection := func(colName string, bigTopKEnabled bool) {
+	createCollection := func(colName string, largeTopKEnabled bool) {
 		schema := getSchema(colName)
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 		props := []*commonpb.KeyValuePair{}
-		if bigTopKEnabled {
-			props = append(props, &commonpb.KeyValuePair{Key: common.BigTopKOptimizationEnabledKey, Value: "true"})
+		if largeTopKEnabled {
+			props = append(props, &commonpb.KeyValuePair{Key: common.QueryModeKey, Value: common.QueryModeLargeTopK})
 		}
 		createColReq := &milvuspb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
@@ -5475,14 +5546,14 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, stats.ErrorCode)
 	}
 
-	t.Run("alter bigTopK from false to true without vector index", func(t *testing.T) {
+	t.Run("set query_mode to large_topk without vector index", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, false)
 		alterTask := &alterCollectionTask{
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.BigTopKOptimizationEnabledKey, Value: "true"}},
+				Properties:     []*commonpb.KeyValuePair{{Key: common.QueryModeKey, Value: common.QueryModeLargeTopK}},
 			},
 			mixCoord: qc,
 		}
@@ -5490,14 +5561,14 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("alter bigTopK from true to false without vector index", func(t *testing.T) {
+	t.Run("delete query_mode from collection without vector index", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, true)
 		alterTask := &alterCollectionTask{
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.BigTopKOptimizationEnabledKey, Value: "false"}},
+				DeleteKeys:     []string{common.QueryModeKey},
 			},
 			mixCoord: qc,
 		}
@@ -5505,7 +5576,7 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("alter bigTopK from false to true with vector index should fail", func(t *testing.T) {
+	t.Run("set query_mode to large_topk with vector index should fail", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, false)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
@@ -5513,16 +5584,16 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.BigTopKOptimizationEnabledKey, Value: "true"}},
+				Properties:     []*commonpb.KeyValuePair{{Key: common.QueryModeKey, Value: common.QueryModeLargeTopK}},
 			},
 			mixCoord: qc,
 		}
 		err = alterTask.PreExecute(ctx)
 		assert.ErrorContains(t, err,
-			"can not alter bigtopk_optimization.enabled if the collection already has a vector index. Please drop the index first")
+			"can not alter query_mode if the collection already has a vector index. Please drop the index first")
 	})
 
-	t.Run("alter bigTopK from true to false with vector index should fail", func(t *testing.T) {
+	t.Run("delete query_mode with vector index should fail", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, true)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
@@ -5530,40 +5601,23 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.BigTopKOptimizationEnabledKey, Value: "false"}},
+				DeleteKeys:     []string{common.QueryModeKey},
 			},
 			mixCoord: qc,
 		}
 		err = alterTask.PreExecute(ctx)
 		assert.ErrorContains(t, err,
-			"can not alter bigtopk_optimization.enabled if the collection already has a vector index. Please drop the index first")
+			"can not alter query_mode if the collection already has a vector index. Please drop the index first")
 	})
 
-	t.Run("delete bigTopK property with vector index should fail", func(t *testing.T) {
-		colName := prefix + funcutil.GenRandomStr()
-		createCollection(colName, true)
-		mockVectorIndexForCollection(t, ctx, qc, colName)
-		alterTask := &alterCollectionTask{
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				Base:           &commonpb.MsgBase{},
-				CollectionName: colName,
-				DeleteKeys:     []string{common.BigTopKOptimizationEnabledKey},
-			},
-			mixCoord: qc,
-		}
-		err = alterTask.PreExecute(ctx)
-		assert.ErrorContains(t, err,
-			"can not alter bigtopk_optimization.enabled if the collection already has a vector index. Please drop the index first")
-	})
-
-	t.Run("delete bigTopK property without vector index should succeed", func(t *testing.T) {
+	t.Run("delete query_mode property without vector index should succeed", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, true)
 		alterTask := &alterCollectionTask{
 			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{},
 				CollectionName: colName,
-				DeleteKeys:     []string{common.BigTopKOptimizationEnabledKey},
+				DeleteKeys:     []string{common.QueryModeKey},
 			},
 			mixCoord: qc,
 		}
@@ -5571,7 +5625,7 @@ func TestAlterCollectionBigTopKOptimization(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("alter unrelated property with bigTopK enabled should not check index", func(t *testing.T) {
+	t.Run("alter unrelated property with large_topk query mode should not check index", func(t *testing.T) {
 		colName := prefix + funcutil.GenRandomStr()
 		createCollection(colName, true)
 		mockVectorIndexForCollection(t, ctx, qc, colName)
@@ -6618,5 +6672,493 @@ func TestHasPropInDeletekeys(t *testing.T) {
 
 	t.Run("empty keys", func(t *testing.T) {
 		assert.Equal(t, "", hasPropInDeletekeys([]string{}))
+	})
+}
+
+func TestValidateAddFieldRequest(t *testing.T) {
+	// Build a base schema with one int64 PK and one float vector field.
+	baseSchema := func() *schemapb.CollectionSchema {
+		return &schemapb.CollectionSchema{
+			Name: "test_coll",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{
+					FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
+				},
+			},
+		}
+	}
+
+	t.Run("happy path", func(t *testing.T) {
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:     "new_field",
+			DataType: schemapb.DataType_Int64,
+			Nullable: true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.NoError(t, err)
+	})
+
+	t.Run("field count exceeds MaxFieldNum", func(t *testing.T) {
+		schema := baseSchema()
+		// Build exactly MaxFieldNum fields so that the check triggers.
+		maxFieldNum := Params.ProxyCfg.MaxFieldNum.GetAsInt()
+		for i := len(schema.Fields); i < maxFieldNum; i++ {
+			schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+				FieldID:  int64(200 + i),
+				Name:     fmt.Sprintf("field_%d", i),
+				DataType: schemapb.DataType_Int64,
+			})
+		}
+		newField := &schemapb.FieldSchema{
+			Name:     "overflow_field",
+			DataType: schemapb.DataType_Int64,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("duplicate field name", func(t *testing.T) {
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:     "vec", // already exists
+			DataType: schemapb.DataType_Int64,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("invalid DataType_None", func(t *testing.T) {
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:     "invalid_type_field",
+			DataType: schemapb.DataType_None,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("system field name RowID", func(t *testing.T) {
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:     "RowID",
+			DataType: schemapb.DataType_Int64,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("is_primary_key = true", func(t *testing.T) {
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:         "new_pk",
+			DataType:     schemapb.DataType_Int64,
+			IsPrimaryKey: true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("auto_id = true", func(t *testing.T) {
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:     "auto_field",
+			DataType: schemapb.DataType_Int64,
+			AutoID:   true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("is_partition_key = true", func(t *testing.T) {
+		schema := baseSchema()
+		newField := &schemapb.FieldSchema{
+			Name:           "part_key",
+			DataType:       schemapb.DataType_Int64,
+			IsPartitionKey: true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("clustering key when schema already has one", func(t *testing.T) {
+		schema := baseSchema()
+		// Mark an existing field as clustering key.
+		schema.Fields[0].IsClusteringKey = true
+		newField := &schemapb.FieldSchema{
+			Name:            "new_cluster",
+			DataType:        schemapb.DataType_Int64,
+			IsClusteringKey: true,
+		}
+		err := validateAddFieldRequest(schema, newField)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("vector type with max vector fields exceeded", func(t *testing.T) {
+		schema := baseSchema()
+		// Fill up vector fields to MaxVectorFieldNum.
+		maxVecFieldNum := Params.ProxyCfg.MaxVectorFieldNum.GetAsInt()
+		// schema already has one FloatVector; add more to reach the limit.
+		for i := 1; i < maxVecFieldNum; i++ {
+			schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+				FieldID:  int64(300 + i),
+				Name:     fmt.Sprintf("vec_%d", i),
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "128"},
+				},
+			})
+		}
+		newVecField := &schemapb.FieldSchema{
+			Name:     "extra_vec",
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "128"},
+			},
+		}
+		err := validateAddFieldRequest(schema, newVecField)
+		assert.Error(t, err)
+	})
+}
+
+func TestAlterCollectionSchemaTask(t *testing.T) {
+	rc := NewMixCoordMock()
+	ctx := context.Background()
+	prefix := "TestAlterCollectionSchemaTask"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+	collectionID := int64(1)
+
+	rc.collName2ID[collectionName] = collectionID
+	rc.collID2Meta[collectionID] = collectionMeta{
+		name: collectionName,
+		id:   collectionID,
+		schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, DataType: schemapb.DataType_Int64, AutoID: true, Name: "ID", IsPrimaryKey: true},
+				{
+					FieldID: 101, DataType: schemapb.DataType_VarChar, Name: "text",
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "max_length", Value: "65535"},
+					},
+				},
+			},
+		},
+	}
+
+	// oldSchema matches the collection: has a varchar field "text" used as BM25 input.
+	oldSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, AutoID: true, Name: "ID", IsPrimaryKey: true},
+			{
+				FieldID: 101, DataType: schemapb.DataType_VarChar, Name: "text",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "65535"},
+					{Key: "enable_analyzer", Value: "true"},
+				},
+			},
+		},
+	}
+
+	// sparseOutputField is the output field for the BM25 function.
+	sparseOutputField := &schemapb.FieldSchema{
+		Name:     "sparse_bm25",
+		DataType: schemapb.DataType_SparseFloatVector,
+	}
+
+	// BM25 function schema: input "text", output "sparse_bm25".
+	functionSchema := &schemapb.FunctionSchema{
+		Name:             "bm25_func",
+		Type:             schemapb.FunctionType_BM25,
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"sparse_bm25"},
+	}
+
+	buildValidRequest := func() *milvuspb.AlterCollectionSchemaRequest {
+		return &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: sparseOutputField},
+						},
+						FuncSchema: []*schemapb.FunctionSchema{functionSchema},
+					},
+				},
+			},
+		}
+	}
+
+	buildTask := func(req *milvuspb.AlterCollectionSchemaRequest, schema *schemapb.CollectionSchema) *alterCollectionSchemaTask {
+		return &alterCollectionSchemaTask{
+			Condition:                     NewTaskCondition(ctx),
+			AlterCollectionSchemaRequest:  req,
+			AlterCollectionSchemaResponse: nil,
+			ctx:                           ctx,
+			mixCoord:                      rc,
+			oldSchema:                     schema,
+		}
+	}
+
+	t.Run("OnEnqueue", func(t *testing.T) {
+		task := buildTask(buildValidRequest(), oldSchema)
+		err := task.OnEnqueue()
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.MsgType_AlterCollectionSchema, task.Type())
+	})
+
+	t.Run("ctx", func(t *testing.T) {
+		task := buildTask(buildValidRequest(), oldSchema)
+		assert.NotNil(t, task.TraceCtx())
+	})
+
+	t.Run("id", func(t *testing.T) {
+		task := buildTask(buildValidRequest(), oldSchema)
+		_ = task.OnEnqueue()
+		id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+		task.SetID(id)
+		assert.Equal(t, id, task.ID())
+	})
+
+	t.Run("name", func(t *testing.T) {
+		task := buildTask(buildValidRequest(), oldSchema)
+		assert.Equal(t, AlterCollectionSchemaTaskName, task.Name())
+	})
+
+	t.Run("ts", func(t *testing.T) {
+		task := buildTask(buildValidRequest(), oldSchema)
+		_ = task.OnEnqueue()
+		ts := Timestamp(time.Now().UnixNano())
+		task.SetTs(ts)
+		assert.Equal(t, ts, task.BeginTs())
+		assert.Equal(t, ts, task.EndTs())
+	})
+
+	t.Run("PostExecute", func(t *testing.T) {
+		task := buildTask(buildValidRequest(), oldSchema)
+		assert.NoError(t, task.PostExecute(ctx))
+	})
+
+	t.Run("PreExecute nil oldSchema", func(t *testing.T) {
+		task := buildTask(buildValidRequest(), nil)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("PreExecute nil action", func(t *testing.T) {
+		req := &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action:         nil,
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("PreExecute nil addRequest", func(t *testing.T) {
+		// Action is set but Op is not AddRequest (use nil oneof).
+		req := &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action:         &milvuspb.AlterCollectionSchemaRequest_Action{
+				// Op is nil — GetAddRequest() returns nil.
+			},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("PreExecute zero funcSchemas", func(t *testing.T) {
+		req := &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: sparseOutputField},
+						},
+						FuncSchema: nil, // no functions
+					},
+				},
+			},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("PreExecute multiple funcSchemas", func(t *testing.T) {
+		req := &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: sparseOutputField},
+						},
+						FuncSchema: []*schemapb.FunctionSchema{functionSchema, functionSchema}, // two functions
+					},
+				},
+			},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("PreExecute empty fieldInfos", func(t *testing.T) {
+		req := &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: nil, // empty
+						FuncSchema: []*schemapb.FunctionSchema{functionSchema},
+					},
+				},
+			},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("PreExecute multiple fieldInfos", func(t *testing.T) {
+		req := &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: sparseOutputField},
+							{FieldSchema: &schemapb.FieldSchema{Name: "extra", DataType: schemapb.DataType_Int64}},
+						},
+						FuncSchema: []*schemapb.FunctionSchema{functionSchema},
+					},
+				},
+			},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("PreExecute nil fieldSchema in fieldInfo", func(t *testing.T) {
+		req := &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: nil}, // nil inner schema
+						},
+						FuncSchema: []*schemapb.FunctionSchema{functionSchema},
+					},
+				},
+			},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("PreExecute output field points to existing field", func(t *testing.T) {
+		// OutputFieldNames must only reference newly-added fields, not pre-existing ones.
+		// "text" is already in oldSchema; pointing function output to it must be rejected.
+		req := &milvuspb.AlterCollectionSchemaRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{
+							{FieldSchema: sparseOutputField},
+						},
+						FuncSchema: []*schemapb.FunctionSchema{
+							{
+								Name:             "bm25_func",
+								Type:             schemapb.FunctionType_BM25,
+								InputFieldNames:  []string{"text"},
+								OutputFieldNames: []string{"text"}, // "text" exists in oldSchema — must be rejected
+							},
+						},
+					},
+				},
+			},
+		}
+		task := buildTask(req, oldSchema)
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("PreExecute happy path", func(t *testing.T) {
+		task := buildTask(buildValidRequest(), oldSchema)
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Execute sets IsFunctionOutput and calls AlterCollectionSchema", func(t *testing.T) {
+		req := buildValidRequest()
+		task := buildTask(req, oldSchema)
+
+		// Ensure PreExecute passes first.
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+
+		// After Execute, the output field should have IsFunctionOutput = true.
+		addReq := req.GetAction().GetAddRequest()
+		assert.NotNil(t, addReq)
+		for _, fi := range addReq.GetFieldInfos() {
+			assert.True(t, fi.GetFieldSchema().GetIsFunctionOutput())
+		}
+	})
+
+	t.Run("Execute returns error when mixCoord AlterCollectionSchema fails", func(t *testing.T) {
+		mockey.PatchConvey("mixCoord returns error status", t, func() {
+			mockey.Mock((*MixCoordMock).AlterCollectionSchema).Return(
+				&milvuspb.AlterCollectionSchemaResponse{
+					AlterStatus: merr.Status(merr.ErrServiceUnavailable),
+				}, nil,
+			).Build()
+
+			req := buildValidRequest()
+			task := buildTask(req, oldSchema)
+			err := task.PreExecute(ctx)
+			assert.NoError(t, err)
+
+			err = task.Execute(ctx)
+			assert.Error(t, err)
+		})
 	})
 }

@@ -12227,8 +12227,7 @@ func (_c *MockMixCoordClient_WatchChannels_Call) RunAndReturn(run func(context.C
 func NewMockMixCoordClient(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockMixCoordClient {
+}) *MockMixCoordClient {
 	mock := &MockMixCoordClient{}
 	mock.Mock.Test(t)
 

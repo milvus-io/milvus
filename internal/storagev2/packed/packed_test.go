@@ -173,6 +173,74 @@ func randomString(length int) string {
 	return string(result)
 }
 
+func (suite *PackedTestSuite) TestCloseAndTellOneGroup() {
+	batches := 100
+
+	paths := []string{"/tmp/tell_one_group"}
+	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID}}
+	bufferSize := int64(10 * 1024 * 1024)
+	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, 0, columnGroups, nil, nil)
+	suite.NoError(err)
+	for i := 0; i < batches; i++ {
+		err = pw.WriteRecordBatch(suite.rec)
+		suite.NoError(err)
+	}
+	sizes, err := pw.CloseAndTell(len(columnGroups))
+	suite.NoError(err)
+	suite.Len(sizes, 1)
+	suite.Positive(sizes[0], "file size should be positive after writing data")
+}
+
+func (suite *PackedTestSuite) TestCloseAndTellMultiGroups() {
+	batches := 100
+
+	b := array.NewRecordBuilder(memory.DefaultAllocator, suite.schema)
+	arrLen := 30
+	defer b.Release()
+	for idx := range suite.schema.Fields() {
+		switch idx {
+		case 0:
+			values := make([]int32, arrLen)
+			for i := 0; i < arrLen; i++ {
+				values[i] = int32(i + 1)
+			}
+			b.Field(idx).(*array.Int32Builder).AppendValues(values, nil)
+		case 1:
+			values := make([]int64, arrLen)
+			for i := 0; i < arrLen; i++ {
+				values[i] = int64(i + 1)
+			}
+			b.Field(idx).(*array.Int64Builder).AppendValues(values, nil)
+		case 2:
+			values := make([]string, arrLen)
+			for i := 0; i < arrLen; i++ {
+				values[i] = randomString(100)
+			}
+			b.Field(idx).(*array.StringBuilder).AppendValues(values, nil)
+		}
+	}
+	rec := b.NewRecord()
+	defer rec.Release()
+
+	paths := []string{"/tmp/tell_multi_0", "/tmp/tell_multi_1"}
+	columnGroups := []storagecommon.ColumnGroup{
+		{Columns: []int{2}, GroupID: 2},
+		{Columns: []int{0, 1}, GroupID: storagecommon.DefaultShortColumnGroupID},
+	}
+	pw, err := NewPackedWriter(paths, suite.schema, int64(10*1024*1024), 0, columnGroups, nil, nil)
+	suite.NoError(err)
+	for i := 0; i < batches; i++ {
+		err = pw.WriteRecordBatch(rec)
+		suite.NoError(err)
+	}
+	sizes, err := pw.CloseAndTell(len(columnGroups))
+	suite.NoError(err)
+	suite.Len(sizes, 2)
+	for i, size := range sizes {
+		suite.Positive(size, "size[%d] should be positive", i)
+	}
+}
+
 func (suite *PackedTestSuite) TestFilesystemMetrics() {
 	// Get baseline metrics
 	beforeMetrics, err := storagev2.GetCachedFilesystemMetrics("")

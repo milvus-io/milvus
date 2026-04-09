@@ -425,7 +425,7 @@ func (s *SegmentManager) openNewSegmentWithGivenSegmentID(ctx context.Context, r
 	if req.StorageVersion == storage.StorageV3 {
 		k := metautil.JoinIDPath(req.CollectionID, req.PartitionID, req.SegmentID)
 		basePath := path.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
-		manifestPath = packed.MarshalManifestPath(basePath, -1)
+		manifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 	}
 
 	segmentInfo := &datapb.SegmentInfo{

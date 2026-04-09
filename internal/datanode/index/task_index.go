@@ -214,7 +214,7 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	}
 
 	it.req.CurrentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
-	it.req.CurrentScalarIndexVersion = getCurrentScalarIndexVersion(it.req.GetCurrentScalarIndexVersion())
+	it.req.CurrentScalarIndexVersion = common.ClampScalarIndexVersion(it.req.GetCurrentScalarIndexVersion())
 
 	log.Ctx(ctx).Info("Successfully prepare indexBuildTask", zap.Int64("buildID", it.req.GetBuildID()),
 		zap.Int64("collectionID", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()),
@@ -269,6 +269,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		SslCACert:         it.req.GetStorageConfig().GetSslCACert(),
 		GcpCredentialJSON: it.req.GetStorageConfig().GetGcpCredentialJSON(),
 		SslTlsMinVersion:  it.req.GetStorageConfig().GetSslTlsMinVersion(),
+		UseCrc32CChecksum: it.req.GetStorageConfig().GetUseCrc32CChecksum(),
 	}
 
 	optFields := make([]*indexcgopb.OptionalFieldInfo, 0, len(it.req.GetOptionalScalarFields()))

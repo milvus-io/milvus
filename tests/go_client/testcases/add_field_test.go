@@ -169,7 +169,7 @@ func TestAddCollectionFieldInvalid(t *testing.T) {
 			fieldBuilder: func() *entity.Field {
 				return entity.NewField().WithName(common.DefaultNewField).WithDataType(entity.FieldTypeInt64).WithNullable(true).WithIsClusteringKey(true)
 			},
-			expectedError: "already has another clutering key field, field name: " + common.DefaultNewField + ": invalid parameter",
+			expectedError: "already has another clustering key field, field name: " + common.DefaultNewField + ": invalid parameter",
 		},
 		{
 			name: "addFieldSameOtherName",
@@ -185,7 +185,7 @@ func TestAddCollectionFieldInvalid(t *testing.T) {
 			fieldBuilder: func() *entity.Field {
 				return entity.NewField().WithName(common.DefaultVarcharFieldName).WithDataType(entity.FieldTypeVarChar).WithNullable(true).WithMaxLength(64)
 			},
-			expectedError: "duplicate field name: varchar: invalid parameter",
+			expectedError: "duplicated field name varchar: invalid parameter",
 		},
 	}
 

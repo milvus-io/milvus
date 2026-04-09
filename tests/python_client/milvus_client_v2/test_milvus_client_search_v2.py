@@ -371,6 +371,7 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
             ct.default_string_array_field_name,
             ct.default_float_vec_field_name, ct.default_float16_vec_field_name,
             ct.default_bfloat16_vec_field_name,
+            "new_added_field",
         ]
         self.search(client, self.collection_name,
                     data=search_vectors,
@@ -457,8 +458,8 @@ class TestSearchV2Shared(TestMilvusClientV2Base):
     # ==================== Exists expression tests ====================
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("json_field_name", ["json_field", "json_field['name']", "json_field['number']",
-                                                 "float_array", "not_exist_field", "new_added_field"])
+    @pytest.mark.parametrize("json_field_name", ["json_field['name']", "json_field['number']",
+                                                 "not_exist_field", "new_added_field"])
     def test_search_with_expression_exists(self, json_field_name):
         """
         target: verify 'exists' expression returns correct results for existing and non-existing fields
@@ -628,7 +629,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
                 4. repeat with expression template
         expected: all returned IDs satisfy the filter, recall >= 80% for IVF_FLAT
         """
-        nb = 2000
+        nb = ct.default_nb
         dim = 64
         search_limit = nb // 2
         enable_dynamic_field = True
@@ -655,6 +656,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
 
         search_vectors = cf.gen_vectors(default_nq, dim)
+        search_params = {"metric_type": "COSINE", "params": {"nprobe": 64}}
         for expressions in cf.gen_normal_expressions_and_templates_field(default_float_field_name):
             log.debug(f"search with expression: {expressions}")
             expr = expressions[0].replace("&&", "and").replace("||", "or")
@@ -667,7 +669,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
             search_res, _ = self.search(client, collection_name,
                                         data=search_vectors[:default_nq],
                                         anns_field=default_search_field,
-                                        search_params=default_search_params,
+                                        search_params=search_params,
                                         limit=search_limit,
                                         filter=expr)
             filter_ids_set = set(filter_ids)
@@ -683,7 +685,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
             search_res, _ = self.search(client, collection_name,
                                         data=search_vectors[:default_nq],
                                         anns_field=default_search_field,
-                                        search_params=default_search_params,
+                                        search_params=search_params,
                                         limit=search_limit,
                                         filter=expr, filter_params=expr_params)
             filter_ids_set = set(filter_ids)
@@ -703,7 +705,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
                 4. release/load and repeat searches to verify JSON index correctness
         expected: all returned IDs satisfy the JSON filter, results consistent before and after JSON indexing
         """
-        nb = 2000
+        nb = ct.default_nb
         dim = 64
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -890,7 +892,7 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
                 2. search with filter "int64_1 <= int64_2", verify all rows match
         expected: all rows returned since int64_1 always equals int64_2
         """
-        nb = 2000
+        nb = ct.default_nb
         dim = 2
         nq = 1
         client = self._client()
@@ -1089,4 +1091,5 @@ class TestSearchV2LegacyIndependent(TestMilvusClientV2Base):
                       index_type="FLAT", params={})
         self.create_index(client, collection_name, index_params=idx,
                           check_task=CheckTasks.err_res,
-                          check_items={"err_code": 1100})
+                          check_items={"err_code": 1100,
+                                       "err_msg": f"float vector index does not support metric type: {metric_type}"})

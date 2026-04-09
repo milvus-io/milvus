@@ -88,7 +88,8 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<int32_t>(context);
             break;
         }
-        case DataType::INT64: {
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ: {
             result = ExecVisitorImpl<int64_t>(context);
             break;
         }
@@ -819,22 +820,29 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             return;
         }
         auto executor = [&](size_t i) {
-            auto x = data[i].template at<GetType>(pointer);
-            if (x.error()) {
-                if constexpr (std::is_same_v<GetType, std::int64_t>) {
-                    auto x = data[i].template at<double>(pointer);
-                    if (x.error()) {
-                        return false;
-                    }
-
-                    auto value = x.value();
-                    // if the term set is {1}, and the value is 1.1, we should not return true.
-                    return std::floor(value) == value &&
-                           terms->In(ValueType(x.value()));
+            if constexpr (std::is_same_v<GetType, std::int64_t>) {
+                auto x_num = data[i].at_numeric(pointer);
+                if (x_num.error()) {
+                    return false;
                 }
-                return false;
+                auto n = x_num.value();
+                if (n.is_int64()) {
+                    return terms->In(ValueType(n.get_int64()));
+                }
+                // uint64 or double → compare as double, consistent with
+                // index/stats paths.
+                auto dval = n.is_uint64() ? static_cast<double>(n.get_uint64())
+                                          : n.get_double();
+                // if the term set is {1}, and the value is 1.1, we should
+                // not return true.
+                return std::floor(dval) == dval && terms->In(ValueType(dval));
+            } else {
+                auto x = data[i].template at<GetType>(pointer);
+                if (x.error()) {
+                    return false;
+                }
+                return terms->In(ValueType(x.value()));
             }
-            return terms->In(ValueType(x.value()));
         };
         bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
@@ -1001,14 +1009,78 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                 vals.emplace_back(converted_val);
             }
         }
-        arg_set_ = std::make_shared<SetElement<T>>(vals);
+
+        // Select optimal element type based on data type and IN list size.
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            // Convert to owned strings (T may be string_view into proto data)
+            std::vector<std::string> str_vals;
+            str_vals.reserve(vals.size());
+            for (const auto& v : vals) {
+                str_vals.emplace_back(v);
+            }
+            constexpr size_t kLinearScanThreshold = 4;
+            if (str_vals.size() <= kLinearScanThreshold) {
+                // Small IN: linear scan with length check + memcmp
+                arg_set_ =
+                    std::make_shared<FlatVectorElement<std::string>>(str_vals);
+            } else {
+                arg_set_ = std::make_shared<SetElement<std::string>>(str_vals);
+            }
+        } else if constexpr (std::is_same_v<T, bool>) {
+            // Bool: use specialized SetElement<bool> (two flags, O(1)).
+            arg_set_ = std::make_shared<SetElement<T>>(vals);
+        } else {
+            // All numeric types: SIMD for small IN, hash for large IN.
+            // Crossover benchmarked with ankerl hash at load_factor=0.5.
+            // Automatically adapts to all architectures:
+            //   AVX512 int32 (kLanes=16): threshold=128
+            //   AVX2   int32 (kLanes=8):  threshold=64
+            //   AVX2   int64 (kLanes=4):  threshold=32
+            //   NEON   int32 (kLanes=4):  threshold=32
+            //   NEON   int64 (kLanes=2):  threshold=16
+            const size_t kSimdThreshold =
+                static_cast<size_t>(simdLaneCount<T>()) * 8;
+            if (vals.size() <= kSimdThreshold) {
+                arg_set_ = std::make_shared<SimdBatchElement<T>>(vals);
+            } else {
+                arg_set_ = std::make_shared<SetElement<T>>(vals);
+            }
+        }
+        // Cache SIMD FilterChunk dispatch (numeric types only).
+        // SIMD path runs batch filter first, then applies validity/bitmap
+        // masks — avoids per-row variant construction entirely.
+        if constexpr (!std::is_same_v<T, bool> &&
+                      !std::is_same_v<T, std::string> &&
+                      !std::is_same_v<T, std::string_view>) {
+            if (auto simd_elem =
+                    std::dynamic_pointer_cast<SimdBatchElement<T>>(arg_set_)) {
+                cached_filter_chunk_ = [simd_elem](const void* data,
+                                                   int size,
+                                                   TargetBitmapView res) {
+                    simd_elem->FilterChunk(
+                        static_cast<const T*>(data), size, res);
+                };
+            }
+        }
+        // Cache string SetElement pointer for per-row direct lookup.
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            cached_str_set_elem_ =
+                dynamic_cast<SetElement<std::string>*>(arg_set_.get());
+        }
+        // Cache element values for skip_index (avoids per-chunk copy)
+        cached_skip_elements_ = GetElementValues<T>(arg_set_);
         arg_inited_ = true;
     }
 
+    const auto& simd_filter_fn = cached_filter_chunk_;
+    const auto str_set_elem = cached_str_set_elem_;
+
     int processed_cursor = 0;
     auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &bitmap_input, &simd_filter_fn,
+         str_set_elem ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -1016,14 +1088,40 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::shared_ptr<MultiElement>& vals) {
-        // If data is nullptr, this chunk was skipped by SkipIndex.
-        // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
             processed_cursor += size;
             return;
         }
         bool has_bitmap_input = !bitmap_input.empty();
-        for (size_t i = 0; i < size; ++i) {
+
+        // ── Path 1: SIMD batch (numeric, sequential, within threshold) ──
+        if constexpr (filter_type == FilterType::sequential) {
+            if (simd_filter_fn) {
+                simd_filter_fn(data, size, res);
+                // Apply validity mask
+                if (valid_data != nullptr) {
+                    for (int i = 0; i < size; ++i) {
+                        if (!valid_data[i]) {
+                            res[i] = valid_res[i] = false;
+                        }
+                    }
+                }
+                // Apply bitmap mask
+                if (has_bitmap_input) {
+                    for (int i = 0; i < size; ++i) {
+                        if (!bitmap_input[i + processed_cursor]) {
+                            res[i] = false;
+                        }
+                    }
+                }
+                processed_cursor += size;
+                return;
+            }
+        }
+
+        // ── Path 2: Per-row (string, bool, large numeric, random access) ──
+        // Check validity and bitmap first, then direct lookup without variant.
+        for (int i = 0; i < size; ++i) {
             auto offset = i;
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
@@ -1035,16 +1133,34 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             if (has_bitmap_input && !bitmap_input[i + processed_cursor]) {
                 continue;
             }
-            res[i] = vals->In(data[offset]);
+            // Direct lookup: skip variant construction
+            if constexpr (std::is_same_v<T, std::string> ||
+                          std::is_same_v<T, std::string_view>) {
+                if (str_set_elem) {
+                    // Hash lookup via string_view (zero copy)
+                    res[i] = str_set_elem->values_.find(std::string_view(
+                                 data[offset])) != str_set_elem->values_.end();
+                } else {
+                    // FlatVectorElement path (small IN ≤4)
+                    res[i] = vals->In(MultiElement::ValueType(
+                        std::string_view(data[offset])));
+                }
+            } else {
+                res[i] = vals->In(MultiElement::ValueType(std::in_place_type<T>,
+                                                          data[offset]));
+            }
         }
         processed_cursor += size;
     };
 
-    auto set = std::static_pointer_cast<SetElement<T>>(arg_set_);
     auto skip_index_func =
-        [set](const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            return skip_index.CanSkipInQuery<T>(
-                field_id, chunk_id, set->GetElements());
+        [&cached_elements = cached_skip_elements_](
+            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
+            auto* elements = std::any_cast<std::vector<T>>(&cached_elements);
+            if (elements == nullptr) {
+                return false;
+            }
+            return skip_index.CanSkipInQuery<T>(field_id, chunk_id, *elements);
         };
 
     int64_t processed_size;

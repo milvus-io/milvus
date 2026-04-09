@@ -730,7 +730,7 @@ func (suite *RowParserSuite) TestParseError() {
 			{name: "dim error bf16_vector", content: suite.genAllTypesRowData("bf16_vector", []any{json.Number("0.3")})},
 			{name: "dim error int8_vector", content: suite.genAllTypesRowData("int8_vector", []any{json.Number("1")})},
 			{name: "format error sparse_vector", content: suite.genAllTypesRowData("sparse_vector", map[string]any{"indices": []int64{}})},
-			{name: "function output no need provide", content: suite.genAllTypesRowData("function_sparse_vector", map[string]float64{"1": 0.1, "2": 0.2})},
+			{name: "function output not allowed", content: suite.genAllTypesRowData("function_sparse_vector", map[string]float64{"1": 0.1, "2": 0.2})},
 		}
 	}
 
@@ -750,6 +750,84 @@ func (suite *RowParserSuite) TestParseError() {
 		}
 		suite.runParseError(&testCase{name: "_ " + c.name, content: c.content})
 	}
+}
+
+func TestReconstructArrayForStructArray_InconsistentFields(t *testing.T) {
+	subFields := []string{"sub_int", "sub_str"}
+
+	// Element missing a field should produce an error
+	raw := []any{
+		map[string]any{"sub_int": 1, "sub_str": "hello"},
+		map[string]any{"sub_int": 2}, // missing "sub_str"
+	}
+	_, err := reconstructArrayForStructArray(raw, subFields)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "inconsistent field count in StructArray")
+
+	// Element with an extra field should produce an error
+	raw = []any{
+		map[string]any{"sub_int": 1, "sub_str": "hello", "sub_extra": true},
+	}
+	_, err = reconstructArrayForStructArray(raw, subFields)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "inconsistent field count in StructArray")
+
+	// Consistent fields should succeed
+	raw = []any{
+		map[string]any{"sub_int": 1, "sub_str": "hello1"},
+		map[string]any{"sub_int": 2, "sub_str": "hello2"},
+	}
+	result, err := reconstructArrayForStructArray(raw, subFields)
+	assert.NoError(t, err)
+	assert.Len(t, result, 2)
+
+	// Empty array should succeed
+	raw = []any{}
+	result, err = reconstructArrayForStructArray(raw, subFields)
+	assert.NoError(t, err)
+	assert.Len(t, result, 0)
+
+	// Single element should succeed
+	raw = []any{
+		map[string]any{"sub_int": 1, "sub_str": "hello"},
+	}
+	result, err = reconstructArrayForStructArray(raw, subFields)
+	assert.NoError(t, err)
+	assert.Len(t, result, 2)
+}
+
+func TestArrayOfVectorToFieldData_DimensionMismatch(t *testing.T) {
+	dim := 3
+	fieldID := int64(100)
+	field := &schemapb.FieldSchema{
+		FieldID:     fieldID,
+		Name:        "test_vec",
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "3"},
+		},
+	}
+	parser := &rowParser{
+		id2Dim:   map[int64]int{fieldID: dim},
+		id2Field: map[int64]*schemapb.FieldSchema{fieldID: field},
+	}
+
+	// Mismatched dimension: expect 3, got 2
+	vectors := []any{
+		[]any{json.Number("1.0"), json.Number("2.0")}, // dim=2, expected 3
+	}
+	_, err := parser.arrayOfVectorToFieldData(vectors, field)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "dimension")
+
+	// Correct dimension should succeed
+	vectors = []any{
+		[]any{json.Number("1.0"), json.Number("2.0"), json.Number("3.0")},
+	}
+	result, err := parser.arrayOfVectorToFieldData(vectors, field)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(dim), result.Dim)
 }
 
 func TestJsonRowParser(t *testing.T) {

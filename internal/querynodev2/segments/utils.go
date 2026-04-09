@@ -1,16 +1,5 @@
 package segments
 
-/*
-#cgo pkg-config: milvus_core
-
-#include "segcore/collection_c.h"
-#include "segcore/segment_c.h"
-#include "segcore/segcore_init_c.h"
-#include "common/init_c.h"
-
-*/
-import "C"
-
 import (
 	"bytes"
 	"encoding/binary"
@@ -179,15 +168,6 @@ func mergeRequestCost(requestCosts []*internalpb.CostAggregation) *internalpb.Co
 	return result
 }
 
-func getIndexEngineVersion() (minimal, current int32) {
-	GetDynamicPool().Submit(func() (any, error) {
-		cMinimal, cCurrent := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion()
-		minimal, current = int32(cMinimal), int32(cCurrent)
-		return nil, nil
-	}).Await()
-	return minimal, current
-}
-
 // getSegmentMetricLabel returns the label for segment metrics.
 func getSegmentMetricLabel(segment Segment) metricsutil.SegmentLabel {
 	return metricsutil.SegmentLabel{
@@ -353,4 +333,36 @@ func getScalarDataWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
 		return policy
 	}
 	return params.Params.QueryNodeCfg.TieredWarmupScalarField.GetValue()
+}
+
+// GetVirtualPK generates a virtual primary key from segmentID and offset.
+// Virtual PK format: (truncated_segmentID << 32) | offset
+// Only the lower 32 bits of segmentID are preserved. Milvus segment IDs are
+// TSO-allocated 64-bit values that typically exceed 32 bits, so truncation
+// is expected. Use IsVirtualPKFromSegment for safe comparison.
+func GetVirtualPK(segmentID int64, offset int64) int64 {
+	return ((segmentID & 0xFFFFFFFF) << 32) | (offset & 0xFFFFFFFF)
+}
+
+// ExtractSegmentIDFromVirtualPK extracts the segmentID from a virtual PK.
+// Uses unsigned right shift to avoid sign-extension for large segment IDs.
+func ExtractSegmentIDFromVirtualPK(virtualPK int64) int64 {
+	return int64(uint64(virtualPK) >> 32)
+}
+
+// ExtractOffsetFromVirtualPK extracts the offset from a virtual PK.
+func ExtractOffsetFromVirtualPK(virtualPK int64) int64 {
+	return virtualPK & 0xFFFFFFFF
+}
+
+// IsVirtualPKFromSegment checks if a virtual PK belongs to the given segment.
+// Note: Only the lower 32 bits of segmentID are preserved in the virtual PK,
+// so we compare with the truncated segment ID.
+func IsVirtualPKFromSegment(virtualPK int64, segmentID int64) bool {
+	return ExtractSegmentIDFromVirtualPK(virtualPK) == (segmentID & 0xFFFFFFFF)
+}
+
+// IsExternalField checks if a field is an external field (data stored externally).
+func IsExternalField(field *schemapb.FieldSchema) bool {
+	return field.GetExternalField() != ""
 }

@@ -711,13 +711,37 @@ func (suite *RowParserSuite) TestParseError() {
 	suite.Error(err)
 	suite.Nil(parser)
 
-	// function output no need provide
+	// function output field rejected when allowInsertNonBM25FunctionOutputs is not enabled
 	content = suite.genAllTypesRowData("x", "2")
 	content["function_sparse_vector"] = "{\"1\":0.5,\"10\":1.5,\"100\":2.5}"
 	header, _ = suite.genRowContent(schema, content)
 	parser, err = NewRowParser(schema, header, suite.nullKey)
 	suite.Error(err)
 	suite.Nil(parser)
+
+	// BM25 function output field in header should always be rejected
+	{
+		bm25Schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 1, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{
+					FieldID: 2, Name: "text", DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}},
+				},
+				{FieldID: 3, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Id: 1000, Name: "bm25", Type: schemapb.FunctionType_BM25,
+					InputFieldIds: []int64{2}, InputFieldNames: []string{"text"},
+					OutputFieldIds: []int64{3}, OutputFieldNames: []string{"sparse"},
+				},
+			},
+		}
+		_, err := NewRowParser(bm25Schema, []string{"id", "text", "sparse"}, "")
+		suite.Error(err)
+		suite.Contains(err.Error(), "not allowed to provide data for BM25 function output field")
+	}
 
 	genCases := func() []*testCase {
 		return []*testCase{
@@ -779,6 +803,53 @@ func (suite *RowParserSuite) TestParseError() {
 		}
 		suite.runParseError(&testCase{name: "_ " + c.name, content: c.content})
 	}
+}
+
+func (suite *RowParserSuite) TestFunctionOutputField() {
+	// Non-BM25 function output in header with property enabled should succeed
+	embeddingSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{
+				FieldID: 2, Name: "text", DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}},
+			},
+			{
+				FieldID: 3, Name: "embedding", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Id: 1000, Name: "text_embedding", Type: schemapb.FunctionType_TextEmbedding,
+				InputFieldIds: []int64{2}, InputFieldNames: []string{"text"},
+				OutputFieldIds: []int64{3}, OutputFieldNames: []string{"embedding"},
+			},
+		},
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionAllowInsertNonBM25FunctionOutputs, Value: "true"},
+		},
+	}
+
+	// parser creation should succeed
+	parser, err := NewRowParser(embeddingSchema, []string{"id", "text", "embedding"}, "")
+	suite.NoError(err)
+	suite.NotNil(parser)
+
+	// parse a row with function output data should succeed
+	row, err := parser.Parse([]string{"1", "hello", "[0.1, 0.2]"})
+	suite.NoError(err)
+	suite.NotNil(row[3]) // embedding field should be populated
+
+	// non-BM25 function output NOT in header should also succeed (field is optional)
+	parser2, err := NewRowParser(embeddingSchema, []string{"id", "text"}, "")
+	suite.NoError(err)
+	suite.NotNil(parser2)
+
+	row2, err := parser2.Parse([]string{"1", "hello"})
+	suite.NoError(err)
+	_, hasEmbedding := row2[3]
+	suite.False(hasEmbedding) // embedding not provided, should not be in row
 }
 
 func TestCsvRowParser(t *testing.T) {

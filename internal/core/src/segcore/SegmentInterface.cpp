@@ -20,6 +20,7 @@
 #include <type_traits>
 #include <unordered_set>
 
+#include "ChunkedSegmentSealedImpl.h"
 #include "NamedType/named_type_impl.hpp"
 #include "Utils.h"
 #include "bitset/bitset.h"
@@ -122,9 +123,11 @@ SegmentInternalInterface::Search(
     const folly::CancellationToken& cancel_token,
     int32_t consistency_level,
     Timestamp collection_ttl,
-    int64_t entity_ttl_physical_time_us) const {
+    int64_t entity_ttl_physical_time_us,
+    bool filter_only) const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
+
     check_search(plan);
     query::ExecPlanNodeVisitor visitor(*this,
                                        timestamp,
@@ -133,6 +136,7 @@ SegmentInternalInterface::Search(
                                        consistency_level,
                                        collection_ttl,
                                        entity_ttl_physical_time_us);
+    visitor.SetFilterOnly(filter_only);
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;
@@ -192,6 +196,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                        collection_ttl,
                                        entity_ttl_physical_time_us);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
+
     retrieve_results.segment_ = (void*)this;
     results->set_has_more_result(retrieve_results.has_more_result);
     results->set_scanned_remote_bytes(
@@ -255,6 +260,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                 .count();
     milvus::monitor::internal_core_retrieve_get_target_entry_latency.Observe(
         get_entry_cost / 1000);
+
     milvus::futures::throwIfCancelled(cancel_token);
     return results;
 }
@@ -414,6 +420,16 @@ SegmentInternalInterface::FillTargetEntry(
     bool ignore_non_pk,
     bool fill_ids) const {
     tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
+
+    // Fast path: use take() API for external tables with small result sets.
+    // Use dynamic_cast to avoid adding new virtual methods (vtable layout
+    // change causes SIGSEGV in cgo boundary).
+    if (auto* chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(this)) {
+        if (chunked->TryTakeForRetrieve(
+                plan, results, offsets, size, ignore_non_pk, fill_ids)) {
+            return;
+        }
+    }
 
     auto fields_data = results->mutable_fields_data();
     auto ids = results->mutable_ids();

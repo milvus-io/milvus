@@ -100,8 +100,9 @@ SealedIndexTranslator::estimated_byte_size_of_cell(
     // this is an estimation, error could be up to 20%.
     return {milvus::cachinglayer::ResourceUsage(request.final_memory_cost,
                                                 request.final_disk_cost),
-            milvus::cachinglayer::ResourceUsage(request.max_memory_cost,
-                                                request.max_disk_cost * 2)};
+            milvus::cachinglayer::ResourceUsage(
+                request.max_memory_cost - request.final_memory_cost,
+                request.max_disk_cost * 2 - request.final_disk_cost)};
 }
 
 const std::string&

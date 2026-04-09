@@ -239,13 +239,19 @@ func collectSegmentFiles(
 			zap.Int64("storageVersion", source.GetStorageVersion()))
 	}
 
-	// Other types always from pb (not yet in manifest)
+	// Other types from pb
 	files.DeltaBinlogs = extractFromPb(source.GetDeltaBinlogs())
 	files.StatsBinlogs = extractFromPb(source.GetStatsBinlogs())
 	files.Bm25Binlogs = extractFromPb(source.GetBm25Binlogs())
 	files.VectorScalarIndex = extractIndexFiles(source.GetIndexFiles())
-	files.TextIndex = extractTextIndexFiles(source.GetTextIndexFiles())
-	files.JsonKeyIndex, files.JsonStats = extractJsonFiles(source.GetJsonKeyIndexFiles())
+
+	// For V3, text/json stats files live under basePath/_stats/ and are already
+	// included in InsertBinlogs via listAllFiles(). Skip pb extraction to avoid
+	// using potentially stale or wrong-format paths from etcd metadata.
+	if source.GetStorageVersion() < storage.StorageV3 {
+		files.TextIndex = extractTextIndexFiles(source.GetTextIndexFiles())
+		files.JsonKeyIndex, files.JsonStats = extractJsonFiles(source.GetJsonKeyIndexFiles())
+	}
 
 	return files, nil
 }
@@ -602,7 +608,7 @@ func generateTargetPath(sourcePath string, source *datapb.CopySegmentSource, tar
 //   - mappings: Pre-calculated source->target path mappings
 //
 // Returns:
-//   - Vector/Scalar index metadata (fieldID -> VectorScalarIndexInfo)
+//   - Vector/Scalar index metadata (buildID -> VectorScalarIndexInfo)
 //   - Text index metadata (fieldID -> TextIndexStats)
 //   - JSON Key index metadata (fieldID -> JsonKeyStats)
 //   - error: Non-nil if any index file path has no mapping (fail-fast on missing mappings)
@@ -629,52 +635,88 @@ func buildIndexInfoFromSource(
 			targetPaths = append(targetPaths, targetPath)
 		}
 
-		indexInfos[srcIndex.GetFieldID()] = &datapb.VectorScalarIndexInfo{
+		// Use new buildID if available, otherwise fall back to source buildID
+		buildID := srcIndex.GetBuildID()
+		if newID, ok := target.GetNewBuildIds()[buildID]; ok {
+			buildID = newID
+		}
+
+		indexInfos[buildID] = &datapb.VectorScalarIndexInfo{
 			FieldId:                   srcIndex.GetFieldID(),
 			IndexId:                   srcIndex.GetIndexID(),
-			BuildId:                   srcIndex.GetBuildID(),
+			BuildId:                   buildID,
 			Version:                   srcIndex.GetIndexVersion(),
 			IndexFilePaths:            targetPaths,
 			IndexSize:                 int64(srcIndex.GetSerializedSize()),
 			CurrentIndexVersion:       srcIndex.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: srcIndex.GetCurrentScalarIndexVersion(),
+			IndexName:                 srcIndex.GetIndexName(),
 		}
 	}
 
-	// Process text indexes - transform file paths
+	// Process text indexes
+	// For V3, text files are already copied via manifest basePath/_stats/;
+	// pass metadata as placeholders (etcd paths may be stale or wrong format).
+	// For V2, transform file paths using mappings.
 	textIndexInfos := make(map[int64]*datapb.TextIndexStats)
-	for fieldID, srcText := range source.GetTextIndexFiles() {
-		// Transform text index file paths using mappings
-		targetFiles := make([]string, 0, len(srcText.GetFiles()))
-		for _, srcFile := range srcText.GetFiles() {
-			targetFile, ok := mappings[srcFile]
-			if !ok {
-				return nil, nil, nil, fmt.Errorf("no mapping found for text index file: %s", srcFile)
+	if source.GetStorageVersion() >= storage.StorageV3 {
+		for fieldID, srcText := range source.GetTextIndexFiles() {
+			dstText := proto.Clone(srcText).(*datapb.TextIndexStats)
+			if newID, ok := target.GetNewBuildIds()[dstText.GetBuildID()]; ok {
+				dstText.BuildID = newID
 			}
-			targetFiles = append(targetFiles, targetFile)
+			textIndexInfos[fieldID] = dstText
 		}
+	} else {
+		for fieldID, srcText := range source.GetTextIndexFiles() {
+			targetFiles := make([]string, 0, len(srcText.GetFiles()))
+			for _, srcFile := range srcText.GetFiles() {
+				targetFile, ok := mappings[srcFile]
+				if !ok {
+					return nil, nil, nil, fmt.Errorf("no mapping found for text index file: %s", srcFile)
+				}
+				targetFiles = append(targetFiles, targetFile)
+			}
 
-		dstText := proto.Clone(srcText).(*datapb.TextIndexStats)
-		dstText.Files = targetFiles
-		textIndexInfos[fieldID] = dstText
+			dstText := proto.Clone(srcText).(*datapb.TextIndexStats)
+			dstText.Files = targetFiles
+			if newID, ok := target.GetNewBuildIds()[dstText.GetBuildID()]; ok {
+				dstText.BuildID = newID
+			}
+			textIndexInfos[fieldID] = dstText
+		}
 	}
 
-	// Process JSON Key indexes - transform file paths
+	// Process JSON Key indexes
+	// For V3, json files are already copied via manifest basePath/_stats/;
+	// pass metadata as placeholders. For V2, transform file paths using mappings.
 	jsonKeyIndexInfos := make(map[int64]*datapb.JsonKeyStats)
-	for fieldID, srcJson := range source.GetJsonKeyIndexFiles() {
-		// Transform JSON index file paths using mappings
-		targetFiles := make([]string, 0, len(srcJson.GetFiles()))
-		for _, srcFile := range srcJson.GetFiles() {
-			targetFile, ok := mappings[srcFile]
-			if !ok {
-				return nil, nil, nil, fmt.Errorf("no mapping found for JSON index file: %s", srcFile)
+	if source.GetStorageVersion() >= storage.StorageV3 {
+		for fieldID, srcJson := range source.GetJsonKeyIndexFiles() {
+			dstJson := proto.Clone(srcJson).(*datapb.JsonKeyStats)
+			if newID, ok := target.GetNewBuildIds()[dstJson.GetBuildID()]; ok {
+				dstJson.BuildID = newID
 			}
-			targetFiles = append(targetFiles, targetFile)
+			jsonKeyIndexInfos[fieldID] = dstJson
 		}
+	} else {
+		for fieldID, srcJson := range source.GetJsonKeyIndexFiles() {
+			targetFiles := make([]string, 0, len(srcJson.GetFiles()))
+			for _, srcFile := range srcJson.GetFiles() {
+				targetFile, ok := mappings[srcFile]
+				if !ok {
+					return nil, nil, nil, fmt.Errorf("no mapping found for JSON index file: %s", srcFile)
+				}
+				targetFiles = append(targetFiles, targetFile)
+			}
 
-		dstJson := proto.Clone(srcJson).(*datapb.JsonKeyStats)
-		dstJson.Files = targetFiles
-		jsonKeyIndexInfos[fieldID] = dstJson
+			dstJson := proto.Clone(srcJson).(*datapb.JsonKeyStats)
+			dstJson.Files = targetFiles
+			if newID, ok := target.GetNewBuildIds()[dstJson.GetBuildID()]; ok {
+				dstJson.BuildID = newID
+			}
+			jsonKeyIndexInfos[fieldID] = dstJson
+		}
 	}
 
 	return indexInfos, textIndexInfos, jsonKeyIndexInfos, nil
@@ -781,6 +823,22 @@ func generateTargetIndexPath(
 	if keywordIdx+segmentOffset >= len(parts) {
 		return "", fmt.Errorf("invalid %s path structure: %s (expected '%s' with at least %d components after it)",
 			indexType, sourcePath, indexType, segmentOffset+1)
+	}
+
+	// Replace buildID if a mapping exists in target.NewBuildIds
+	// All index types have buildID at offset 1, except JSONStats which has it at offset 2
+	buildIDOffset := 1
+	if indexType == IndexTypeJSONStats {
+		buildIDOffset = 2
+	}
+	if keywordIdx+buildIDOffset < len(parts) {
+		oldBuildIDStr := parts[keywordIdx+buildIDOffset]
+		oldBuildID, parseErr := strconv.ParseInt(oldBuildIDStr, 10, 64)
+		if parseErr == nil {
+			if newBuildID, ok := target.GetNewBuildIds()[oldBuildID]; ok {
+				parts[keywordIdx+buildIDOffset] = strconv.FormatInt(newBuildID, 10)
+			}
+		}
 	}
 
 	// Replace IDs at specified offsets

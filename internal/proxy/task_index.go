@@ -119,15 +119,15 @@ func adjustAutoIndexParamsByDataType(config map[string]string, dataType schemapb
 	return adjusted
 }
 
-func getDenseFloatAutoIndexParams(collectionProperties []*commonpb.KeyValuePair) (map[string]string, error) {
-	bigTopKOptimizationEnabled, err := common.IsBigTopKOptimizationEnabled(collectionProperties...)
-	if err != nil {
-		return nil, err
+func getDenseFloatAutoIndexParams(collectionProperties []*commonpb.KeyValuePair) map[string]string {
+	// autoindex is enabled only for cloud instance.
+	// and large_topk query mode is set in collection properties.
+	// we will use large_topk index params for dense float vector index when these two conditions are met.
+	if Params.AutoIndexConfig.Enable.GetAsBool() && common.IsQueryModeLargeTopK(collectionProperties...) {
+		return Params.AutoIndexConfig.LargeTopKIndexParams.GetAsJSONMap()
 	}
-	if bigTopKOptimizationEnabled {
-		return Params.AutoIndexConfig.BigTopKIndexParams.GetAsJSONMap(), nil
-	}
-	return Params.AutoIndexConfig.IndexParams.GetAsJSONMap(), nil
+
+	return Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
 }
 
 type createIndexTask struct {
@@ -347,10 +347,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsDenseFloatVectorType(cit.fieldSchema.ElementType)) {
-				autoIndexParams, err := getDenseFloatAutoIndexParams(cit.collectionProperties)
-				if err != nil {
-					return err
-				}
+				autoIndexParams := getDenseFloatAutoIndexParams(cit.collectionProperties)
 				// override float vector index params by autoindex
 				// filter incompatible refine_type for fp16/bf16 vectors
 				dataType := cit.fieldSchema.DataType
@@ -447,11 +444,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			var config map[string]string
 			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) ||
 				(typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && typeutil.IsDenseFloatVectorType(cit.fieldSchema.ElementType)) {
-				var err error
-				config, err = getDenseFloatAutoIndexParams(cit.collectionProperties)
-				if err != nil {
-					return err
-				}
+				config = getDenseFloatAutoIndexParams(cit.collectionProperties)
 				// filter incompatible refine_type for fp16/bf16 vectors
 				dataType := cit.fieldSchema.DataType
 				if typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {

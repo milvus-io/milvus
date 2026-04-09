@@ -27,6 +27,7 @@
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
 #include "common/RegexQuery.h"
+#include "common/Utils.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
@@ -243,19 +244,15 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                 return PrefixMatch(pattern);
             }
             case proto::plan::OpType::PostfixMatch: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(fmt::format("%{}", pattern));
-                return RegexQuery(regex_pattern);
+                return PatternQuery(
+                    fmt::format("%{}", EscapeLikePattern(pattern)));
             }
             case proto::plan::OpType::InnerMatch: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(fmt::format("%{}%", pattern));
-                return RegexQuery(regex_pattern);
+                return PatternQuery(
+                    fmt::format("%{}%", EscapeLikePattern(pattern)));
             }
             case proto::plan::OpType::Match: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(pattern);
-                return RegexQuery(regex_pattern);
+                return PatternQuery(pattern);
             }
             default:
                 ThrowInfo(
@@ -267,22 +264,22 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     bool
     SupportPatternMatch() const override {
-        return SupportRegexQuery();
-    }
-
-    bool
-    SupportRegexQuery() const override {
         return std::is_same_v<T, std::string>;
     }
 
     bool
-    TryUseRegexQuery() const override {
-        // for inverted index, not use regex query to implement match
+    SupportPatternQuery() const override {
+        return std::is_same_v<T, std::string>;
+    }
+
+    bool
+    TryUsePatternQuery() const override {
+        // for inverted index, not use pattern query to implement match
         return false;
     }
 
     const TargetBitmap
-    RegexQuery(const std::string& regex_pattern) override;
+    PatternQuery(const std::string& pattern) override;
 
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;

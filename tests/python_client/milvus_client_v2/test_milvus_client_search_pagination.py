@@ -1,64 +1,36 @@
-import logging
-
-
 from utils.util_pymilvus import *
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
 from utils.util_log import test_log as log
 from base.client_v2_base import TestMilvusClientV2Base
-import random
 import pytest
-import pandas as pd
-from faker import Faker
 
-Faker.seed(19530)
-fake_en = Faker("en_US")
-fake_zh = Faker("zh_CN")
-
-# patch faker to generate text with specific distribution
-cf.patch_faker_text(fake_en, cf.en_vocabularies_distribution)
-cf.patch_faker_text(fake_zh, cf.zh_vocabularies_distribution)
-
-pd.set_option("expand_frame_repr", False)
-
-prefix = "search_collection"
 default_nb = ct.default_nb
 default_nq = ct.default_nq
 default_dim = ct.default_dim
 default_limit = ct.default_limit
-default_search_exp = "int64 >= 0"
-default_search_string_exp = "varchar >= \"0\""
-default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
-default_json_search_exp = "json_field[\"number\"] >= 0"
-perfix_expr = 'varchar like "0%"'
-default_search_field = ct.default_float_vec_field_name
-default_search_params = ct.default_search_params
 default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
 default_string_field_name = ct.default_string_field_name
-default_json_field_name = ct.default_json_field_name
-vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-nq = 1
-field_name = default_float_vec_field_name
-search_param = {"nprobe": 1}
-entity = gen_entities(1, is_normal=True)
-entities = gen_entities(default_nb, is_normal=True)
-raw_vectors, binary_entities = gen_binary_entities(default_nb)
-default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
-half_nb = ct.default_nb // 2
 
-default_primary_key_field_name = "id"
-default_vector_field_name = "vector"
+default_primary_key_field_name = ct.default_primary_key_field_name
+default_vector_field_name = ct.default_float_vec_field_name
 
 
 @pytest.mark.xdist_group("TestMilvusClientSearchPagination")
+@pytest.mark.tags(CaseLabel.GPU)
 class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
-    """Test search with pagination functionality"""
+    """Shared collection for pagination search tests.
+    Schema: id(PK), float_vector(128), bfloat16_vector(200), sparse_vector, binary_vector(256),
+            float, varchar(256), int64, dynamic=False
+    Data: 30000 rows (10 batches × 3000), distributed across 3 partitions
+    Index: IVF_FLAT/COSINE, DISKANN/L2, SPARSE_INVERTED_INDEX/IP, BIN_IVF_FLAT/JACCARD
+    """
 
     def setup_class(self):
         super().setup_class(self)
-        self.collection_name = "TestMilvusClientSearchPagination" + cf.gen_unique_str("_")
+        self.collection_name = "TestMilvusClientSearchPagination" + cf.gen_unique_str("pagination")
         self.partition_names = ["partition_1", "partition_2"]
         self.float_vector_field_name = "float_vector"
         self.bfloat16_vector_field_name = "bfloat16_vector" 
@@ -266,6 +238,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
                              "limit": limit,
+                             "metric": "L2",
                              "pk_name": default_primary_key_field_name
                              }
             )
@@ -282,14 +255,17 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
             limit=limit * pages
         )
 
-        # 4. Compare results - verify pagination results equal the results in full search with offsets
+        # 4. Compare results - verify pagination results overlap with full search results
         for p in range(pages):
             page_res = all_pages_results[p]
             for i in range(default_nq):
                 page_ids = [page_res[i][j].get('id') for j in range(limit)]
                 ids_in_full = [search_res_full[i][p * limit:p * limit + limit][j].get('id') for j in range(limit)]
                 intersection_ids = set(ids_in_full).intersection(set(page_ids))
-                log.debug(f"page[{p}], nq[{i}], intersection_ids: {len(intersection_ids)}")
+                overlap_ratio = len(intersection_ids) / limit * 100
+                log.debug(f"page[{p}], nq[{i}], overlap: {overlap_ratio}%")
+                assert overlap_ratio >= 80, \
+                    f"bfloat16 pagination overlap too low: {overlap_ratio}% (page={p}, nq={i})"
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_sparse_with_pagination_default(self):
@@ -324,6 +300,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
                              "limit": limit,
+                             "metric": "IP",
                              "pk_name": default_primary_key_field_name
                              }
             )
@@ -381,6 +358,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
                              "limit": limit,
+                             "metric": "JACCARD",
                              "pk_name": default_primary_key_field_name
                              }
             )
@@ -429,14 +407,15 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
         # 2. Search with pagination 
         topK=16384
         offset = topK - limit
-        search_param = {"nprobe": 10, "offset": offset}
+        search_param = {"metric_type": "COSINE", "nprobe": 128, "offset": offset}
         vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
-        client.search(collection_name, vectors_to_search[:default_nq], anns_field=self.float_vector_field_name,
-                      search_params=search_param, limit=limit, check_task=CheckTasks.check_search_results,
-                      check_items={"enable_milvus_client_api": True,
-                                   "nq": default_nq,
-                                   "limit": limit,
-                                   "pk_name": default_primary_key_field_name}) 
+        self.search(client, collection_name, vectors_to_search[:default_nq], anns_field=self.float_vector_field_name,
+                    search_params=search_param, limit=limit, check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": default_nq,
+                                 "limit": limit,
+                                 "metric": "COSINE",
+                                 "pk_name": default_primary_key_field_name}) 
     
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", [0, 100])
@@ -490,6 +469,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
                              "limit": limit,
+                             "metric": "COSINE",
                              "pk_name": default_primary_key_field_name}
             )
 
@@ -534,6 +514,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
                              "limit": limit,
+                             "metric": "COSINE",
                              "pk_name": default_primary_key_field_name}
             )
 
@@ -590,6 +571,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
                              "limit": limit,
+                             "metric": "COSINE",
                              "pk_name": default_primary_key_field_name})
             
             # assert every id in search_res_with_offset %3 ==1
@@ -613,6 +595,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                 check_items={"enable_milvus_client_api": True,
                              "nq": default_nq,
                              "limit": limit,
+                             "metric": "COSINE",
                              "pk_name": default_primary_key_field_name})
 
             # assert every id in search_res_with_offset %3 ==1 or ==2
@@ -641,7 +624,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": default_nq,
                                  "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+                                 "metric": "COSINE",
+                             "pk_name": default_primary_key_field_name})
         # search with offset = 0
         offset = 0
         search_params = {"offset": offset}
@@ -652,7 +636,8 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                     check_items={"enable_milvus_client_api": True,
                                  "nq": default_nq,
                                  "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
+                                 "metric": "COSINE",
+                             "pk_name": default_primary_key_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("offset", [0, 20, 100, 200])
@@ -677,9 +662,10 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                               check_items={"enable_milvus_client_api": True,
                                            "nq": default_nq,
                                            "limit": limit,
+                                           "metric": "COSINE",
                                            "pk_name": default_primary_key_field_name})
 
-        # 2. search with offset in search 
+        # 2. search with offset in search
         search_params = {}
         res2, _ = self.search(client, collection_name, vectors_to_search[:default_nq],
                               anns_field=self.float_vector_field_name,
@@ -690,6 +676,7 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
                               check_items={"enable_milvus_client_api": True,
                                            "nq": default_nq,
                                            "limit": limit,
+                                           "metric": "COSINE",
                                            "pk_name": default_primary_key_field_name})
         # 3. compare results
         assert res1 == res2
@@ -828,11 +815,11 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize('vector_dtype', ct.all_dense_vector_types)
-    @pytest.mark.parametrize('index', ct.all_index_types[:8])
+    @pytest.mark.parametrize('index', ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
+                                       "IVF_RABITQ", "HNSW", "SCANN", "DISKANN"])
     @pytest.mark.parametrize('metric_type', ct.dense_metrics)
-    @pytest.mark.skip("wait for debug")
+    @pytest.mark.skip(reason="unstable: pagination consistency varies across index types, needs investigation")
     def test_search_pagination_dense_vectors_indices_metrics_growing(self, vector_dtype, index, metric_type):
         """
         target: test search pagination with growing data
@@ -886,7 +873,7 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
             # search and assert
             limit = 50
             pages = 5
-            expected_overlap_ratio = 20
+            expected_overlap_ratio = 50
             self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
                                                  vector_dtype=vector_dtype, index=index, metric_type=metric_type,
                                                  expected_overlap_ratio=expected_overlap_ratio)
@@ -956,7 +943,7 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
         # search and assert
         limit = 50
         pages = 5
-        expected_overlap_ratio = 20
+        expected_overlap_ratio = 50
         self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
                                              vector_dtype=vector_dtype, index=index, metric_type=metric_type,
                                              expected_overlap_ratio=expected_overlap_ratio)
@@ -1023,7 +1010,7 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
         # search and assert
         limit = 50
         pages = 5
-        expected_overlap_ratio = 20
+        expected_overlap_ratio = 50
         self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
                                              vector_dtype=vector_dtype, index=index, metric_type=metric_type,
                                              expected_overlap_ratio=expected_overlap_ratio)

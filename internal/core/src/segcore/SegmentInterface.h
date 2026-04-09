@@ -98,7 +98,8 @@ class SegmentInterface {
            const folly::CancellationToken& cancel_token,
            int32_t consistency_level,
            Timestamp collection_ttl,
-           int64_t entity_ttl_physical_time_us = 0) const = 0;
+           int64_t entity_ttl_physical_time_us = 0,
+           bool filter_only = false) const = 0;
 
     // Only used for test
     std::unique_ptr<SearchResult>
@@ -111,7 +112,8 @@ class SegmentInterface {
                       folly::CancellationToken(),
                       0,
                       0,
-                      0);
+                      0,
+                      false);
     }
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
@@ -251,7 +253,8 @@ class SegmentInterface {
     Reopen(SchemaPtr sch) = 0;
 
     virtual void
-    Reopen(const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
+    Reopen(milvus::OpContext* op_ctx,
+           const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
 
     virtual void
     SetLoadInfo(const milvus::proto::segcore::SegmentLoadInfo& load_info) = 0;
@@ -381,7 +384,8 @@ class SegmentInternalInterface : public SegmentInterface {
            const folly::CancellationToken& cancel_token,
            int32_t consistency_level,
            Timestamp collection_ttl,
-           int64_t entity_ttl_physical_time_us = 0) const override;
+           int64_t entity_ttl_physical_time_us = 0,
+           bool filter_only = false) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
@@ -520,6 +524,9 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual int64_t
     get_active_count(Timestamp ts) const = 0;
+
+    virtual Timestamp
+    get_max_timestamp() const = 0;
 
     /**
      * search offset by possible pk values and mvcc timestamp

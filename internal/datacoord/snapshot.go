@@ -123,7 +123,7 @@ func getManifestSchemaByVersion(version int) (avro.Schema, error) {
 //   - Collection: Full collection schema and properties
 //   - Segments: Detailed segment information including binlog paths
 //   - Indexes: Index definitions for the collection
-//   - SegmentIDs/IndexIDs: Pre-computed ID lists for fast reload without reading Avro files
+//   - SegmentIDs/BuildIDs: Pre-computed ID lists for fast reload without reading Avro files
 type SnapshotData struct {
 	// SnapshotInfo contains core snapshot metadata from protobuf definition.
 	SnapshotInfo *datapb.SnapshotInfo
@@ -138,9 +138,6 @@ type SnapshotData struct {
 	// Populated from metadata.json when includeSegments=false to avoid reading heavy Avro files.
 	// This enables quick DataCoord startup by deferring full segment loading.
 	SegmentIDs []int64
-	// IndexIDs is a pre-computed list of index IDs for fast reload.
-	// Similar purpose as SegmentIDs for optimizing startup performance.
-	IndexIDs []int64
 	// BuildIDs is a pre-computed list of index build IDs for precise GC protection.
 	// Each buildID uniquely identifies an index build task, enabling GC to check
 	// if specific index files are referenced by a snapshot without path parsing.
@@ -289,6 +286,8 @@ type AvroTextIndexStats struct {
 	MemorySize int64 `avro:"memory_size"`
 	// BuildID is the index build task identifier.
 	BuildID int64 `avro:"build_id"`
+	// CurrentScalarIndexVersion is the scalar index version used for this text index.
+	CurrentScalarIndexVersion int32 `avro:"current_scalar_index_version"`
 }
 
 // AvroJsonKeyStats represents datapb.JsonKeyStats in Avro-compatible format.
@@ -580,7 +579,6 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, metadataPath str
 		ManifestList:          manifestPaths,
 		Storagev2ManifestList: storagev2Manifests,
 		SegmentIds:            snapshot.SegmentIDs,
-		IndexIds:              snapshot.IndexIDs,
 		BuildIds:              snapshot.BuildIDs,
 	}
 
@@ -777,7 +775,6 @@ func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath stri
 		Indexes:      metadata.GetIndexes(),
 		// Pre-computed ID lists available even without full segment loading
 		SegmentIDs: metadata.GetSegmentIds(),
-		IndexIDs:   metadata.GetIndexIds(),
 		BuildIDs:   metadata.GetBuildIds(),
 	}
 
@@ -1197,12 +1194,13 @@ func convertTextIndexStatsToAvro(stats *datapb.TextIndexStats) *AvroTextIndexSta
 		return nil
 	}
 	return &AvroTextIndexStats{
-		FieldID:    stats.GetFieldID(),
-		Version:    stats.GetVersion(),
-		Files:      stats.GetFiles(),
-		LogSize:    stats.GetLogSize(),
-		MemorySize: stats.GetMemorySize(),
-		BuildID:    stats.GetBuildID(),
+		FieldID:                   stats.GetFieldID(),
+		Version:                   stats.GetVersion(),
+		Files:                     stats.GetFiles(),
+		LogSize:                   stats.GetLogSize(),
+		MemorySize:                stats.GetMemorySize(),
+		BuildID:                   stats.GetBuildID(),
+		CurrentScalarIndexVersion: stats.GetCurrentScalarIndexVersion(),
 	}
 }
 
@@ -1212,12 +1210,13 @@ func convertAvroToTextIndexStats(avroStats *AvroTextIndexStats) *datapb.TextInde
 		return nil
 	}
 	return &datapb.TextIndexStats{
-		FieldID:    avroStats.FieldID,
-		Version:    avroStats.Version,
-		Files:      avroStats.Files,
-		LogSize:    avroStats.LogSize,
-		MemorySize: avroStats.MemorySize,
-		BuildID:    avroStats.BuildID,
+		FieldID:                   avroStats.FieldID,
+		Version:                   avroStats.Version,
+		Files:                     avroStats.Files,
+		LogSize:                   avroStats.LogSize,
+		MemorySize:                avroStats.MemorySize,
+		BuildID:                   avroStats.BuildID,
+		CurrentScalarIndexVersion: avroStats.CurrentScalarIndexVersion,
 	}
 }
 
@@ -1431,7 +1430,8 @@ func getProperAvroSchema() string {
 								{"name": "index_version", "type": "long"},
 								{"name": "num_rows", "type": "long"},
 								{"name": "current_index_version", "type": "int"},
-								{"name": "mem_size", "type": "long"}
+								{"name": "mem_size", "type": "long"},
+								{"name": "current_scalar_index_version", "type": "int", "default": 0}
 							]
 						}
 					}

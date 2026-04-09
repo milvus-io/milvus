@@ -337,11 +337,6 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 				res += int(fs.GetVectors().GetDim())
 			}
 		case schemapb.DataType_ArrayOfVector:
-			validData := fs.GetValidData()
-			isNullRow := len(validData) > 0 && rowOffset < len(validData) && !validData[rowOffset]
-			if isNullRow {
-				continue
-			}
 			arrayVector := fs.GetVectors().GetVectorArray()
 			if int(fieldIdx) >= len(arrayVector.GetData()) {
 				return 0, errors.New("offset out range of field datas")
@@ -2100,6 +2095,8 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 				} else {
 					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data...)
 				}
+			case nil:
+				// nullable vector field where all rows are null — no vector data to merge
 			default:
 				return errors.New("unsupported data type: " + srcFieldData.Type.String())
 			}
@@ -2204,8 +2201,9 @@ func ValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
 	}
 
 	for _, field := range schema.GetFields() {
-		// Skip system fields (RowID and Timestamp)
-		if field.GetName() == common.RowIDFieldName || field.GetName() == common.TimeStampFieldName {
+		// Skip system fields (RowID, Timestamp) and virtual PK (injected by proxy)
+		if field.GetName() == common.RowIDFieldName || field.GetName() == common.TimeStampFieldName ||
+			field.GetName() == common.VirtualPKFieldName {
 			continue
 		}
 
@@ -2344,15 +2342,13 @@ func GetFieldByName(schema *schemapb.CollectionSchema, fieldName string) *schema
 
 // GetFieldByID returns the field schema with the given field ID, or nil if not found.
 func GetFieldByID(schema *schemapb.CollectionSchema, fieldID int64) *schemapb.FieldSchema {
-	for _, field := range schema.GetFields() {
-		if field.GetFieldID() == fieldID {
-			return field
-		}
+	predicate := func(field *schemapb.FieldSchema) bool {
+		return field.GetFieldID() == fieldID
+	}
+	if field := lo.FindOrElse(schema.GetFields(), nil, predicate); field != nil {
+		return field
 	}
 	for _, structField := range schema.GetStructArrayFields() {
-		predicate := func(field *schemapb.FieldSchema) bool {
-			return field.GetFieldID() == fieldID
-		}
 		if field := lo.FindOrElse(structField.Fields, nil, predicate); field != nil {
 			return field
 		}
@@ -2512,13 +2508,26 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 
 func GetDataIterator(field *schemapb.FieldData) func(int) any {
 	if field.GetValidData() != nil {
-		// unpack valid data
-		idxs := make([]int, len(field.ValidData))
-		validCnt := 0
-		for i, valid := range field.ValidData {
+		validData := field.GetValidData()
+		dataLen := getScalarDataLen(field)
+		if dataLen == len(validData) {
+			// Full-size format: data array has the same length as ValidData,
+			// values at invalid positions are zero-filled. Use direct indexing.
+			return func(idx int) any {
+				if !validData[idx] {
+					return nil
+				}
+				return getData(field, idx)
+			}
+		}
+		// Compact format: data array only contains valid entries.
+		// Build a mapping from logical index to physical index.
+		idxs := make([]int, len(validData))
+		cnt := 0
+		for i, valid := range validData {
 			if valid {
-				idxs[i] = validCnt
-				validCnt++
+				idxs[i] = cnt
+				cnt++
 			} else {
 				idxs[i] = -1
 			}
@@ -2533,6 +2542,28 @@ func GetDataIterator(field *schemapb.FieldData) func(int) any {
 	return func(idx int) any {
 		return getData(field, idx)
 	}
+}
+
+// getScalarDataLen returns the length of the scalar data array in a FieldData.
+// For vector types or unrecognized types, returns -1.
+func getScalarDataLen(field *schemapb.FieldData) int {
+	switch field.GetType() {
+	case schemapb.DataType_Bool:
+		return len(field.GetScalars().GetBoolData().GetData())
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		return len(field.GetScalars().GetIntData().GetData())
+	case schemapb.DataType_Int64:
+		return len(field.GetScalars().GetLongData().GetData())
+	case schemapb.DataType_Float:
+		return len(field.GetScalars().GetFloatData().GetData())
+	case schemapb.DataType_Double:
+		return len(field.GetScalars().GetDoubleData().GetData())
+	case schemapb.DataType_Timestamptz:
+		return len(field.GetScalars().GetTimestamptzData().GetData())
+	case schemapb.DataType_VarChar, schemapb.DataType_Text:
+		return len(field.GetScalars().GetStringData().GetData())
+	}
+	return -1
 }
 
 func getData(field *schemapb.FieldData, idx int) any {

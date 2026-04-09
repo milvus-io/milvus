@@ -129,6 +129,7 @@ const std::string ELEMENT_TYPE_KEY = "element_type";
 const std::string INDEX_NUM_ROWS_KEY = "index_num_rows";
 const std::string SEGMENT_MANIFEST_KEY = "segment_manifest";
 const std::string LOON_FFI_PROPERTIES_KEY = "loon_ffi_properties";
+const std::string STATS_BASE_PATH_KEY = "stats_base_path";
 
 // storage version
 const int64_t STORAGE_V1 = 1;

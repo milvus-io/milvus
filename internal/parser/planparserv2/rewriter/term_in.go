@@ -42,7 +42,7 @@ func (v *visitor) combineOrEqualsToIn(parts []*planpb.Expr) []*planpb.Expr {
 	out := make([]*planpb.Expr, 0, len(parts))
 	out = append(out, others...)
 	for _, g := range groups {
-		if shouldMergeToIn(g.col.GetDataType(), len(g.values)) {
+		if len(g.values) >= 2 {
 			g.values = sortGenericValues(g.values)
 			out = append(out, newTermExpr(g.col, g.values))
 		} else {
@@ -92,7 +92,7 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 	out := make([]*planpb.Expr, 0, len(parts))
 	out = append(out, others...)
 	for _, g := range groups {
-		if shouldMergeToIn(g.col.GetDataType(), len(g.values)) {
+		if len(g.values) >= 2 {
 			g.values = sortGenericValues(g.values)
 			in := newTermExpr(g.col, g.values)
 			out = append(out, notExpr(in))
@@ -267,8 +267,8 @@ func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 		if g.term == nil || len(g.eqIdxs) == 0 {
 			continue
 		}
-		// union all equal values into term set
-		union := g.term.GetValues()
+		// union all equal values into term set; copy to avoid aliasing proto's backing array
+		union := append([]*planpb.GenericValue(nil), g.term.GetValues()...)
 		for i, ev := range g.eqVals {
 			union = append(union, ev)
 			used[g.eqIdxs[i]] = true

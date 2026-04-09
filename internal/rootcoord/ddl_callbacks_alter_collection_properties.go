@@ -334,7 +334,14 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 			ReplicaNumber:  body.Updates.AlterLoadConfig.ReplicaNumber,
 			ResourceGroups: body.Updates.AlterLoadConfig.ResourceGroups,
 		})
+		if err != nil {
+			return errors.Wrap(err, "failed to update load config")
+		}
 		if err := merr.CheckRPCCall(resp, err); err != nil {
+			if errors.Is(err, merr.ErrResourceGroupNotFound) {
+				log.Ctx(ctx).Warn("failed to update load config due to missing resource group, stop retrying", zap.Error(err))
+				return nil
+			}
 			return errors.Wrap(err, "failed to update load config")
 		}
 	}

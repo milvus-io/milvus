@@ -2,6 +2,7 @@ package rewriter
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -92,15 +93,6 @@ func isNumericType(dt schemapb.DataType) bool {
 	return typeutil.IsArithmetic(dt)
 }
 
-const defaultConvertOrToInNumericLimit = 150
-
-func shouldMergeToIn(dt schemapb.DataType, count int) bool {
-	if isNumericType(dt) {
-		return count > defaultConvertOrToInNumericLimit
-	}
-	return count > 1
-}
-
 func sortTermValues(term *planpb.TermExpr) {
 	if term == nil || len(term.GetValues()) <= 1 {
 		return
@@ -136,7 +128,15 @@ func sortGenericValues(values []*planpb.GenericValue) []*planpb.GenericValue {
 		values = lo.UniqBy(values, func(v *planpb.GenericValue) int64 { return v.GetInt64Val() })
 	case "float":
 		sort.Slice(values, func(i, j int) bool {
-			return values[i].GetFloatVal() < values[j].GetFloatVal()
+			a, b := values[i].GetFloatVal(), values[j].GetFloatVal()
+			// NaN sorts last to maintain strict weak ordering required by sort.Slice
+			if math.IsNaN(a) {
+				return false
+			}
+			if math.IsNaN(b) {
+				return true
+			}
+			return a < b
 		})
 		values = lo.UniqBy(values, func(v *planpb.GenericValue) float64 { return v.GetFloatVal() })
 	case "string":
@@ -180,6 +180,17 @@ func newBoolConstExpr(v bool) *planpb.Expr {
 						BoolVal: v,
 					},
 				},
+			},
+		},
+	}
+}
+
+func newNullExpr(col *planpb.ColumnInfo, op planpb.NullExpr_NullOp) *planpb.Expr {
+	return &planpb.Expr{
+		Expr: &planpb.Expr_NullExpr{
+			NullExpr: &planpb.NullExpr{
+				ColumnInfo: col,
+				Op:         op,
 			},
 		},
 	}

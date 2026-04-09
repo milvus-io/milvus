@@ -89,10 +89,15 @@ type Segment interface {
 	Release(ctx context.Context, opts ...releaseOption)
 	Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error
 
-	// Bloom filter related
-	SetBloomFilter(bf *pkoracle.BloomFilterSet)
-	BloomFilterExist() bool
-	UpdateBloomFilter(pks []storage.PrimaryKey)
+	// PK candidate related (BloomFilterSet for regular segments, ExternalSegmentCandidate for external)
+	// Segment implements pkoracle.Candidate: MayPkExist, BatchPkExist, ID, Partition, Type,
+	// PkCandidateExist, UpdatePkCandidate, Stats, Charge, Refund — with protective guards (e.g. skipGrowingBF).
+	SetPKCandidate(candidate pkoracle.Candidate)
+	PkCandidateExist() bool
+	UpdatePkCandidate(pks []storage.PrimaryKey)
+	Stats() *storage.PkStatistics
+	Charge()
+	Refund()
 	MayPkExist(lc *storage.LocationsCache) bool
 	BatchPkExist(lc *storage.BatchLocationsCache) []bool
 
@@ -105,6 +110,8 @@ type Segment interface {
 	GetBM25Stats() map[int64]*storage.BM25Stats
 
 	// Read operations
+	// Search executes a search on the segment.
+	// If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 	Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error)
 	Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)
 	RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error)

@@ -16,19 +16,34 @@
  * limitations under the License.
  */
 
-package hookutil
+package metrics
 
-import "sync"
+import (
+	"testing"
 
-// initMutex shall protect the call of plugin.Open(...)
-// there might be concurrent issue for opening go plugin
-// causing empty pluginpath panicking
-var initMutex sync.Mutex
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
+)
 
-func LockHookInit() {
-	initMutex.Lock()
+func TestMilvusRegistryGather_NilGoRegistry(t *testing.T) {
+	r := &MilvusRegistry{
+		GoRegistry: nil,
+		CRegistry:  nil,
+	}
+	res, err := r.Gather()
+	assert.NoError(t, err)
+	assert.Nil(t, res)
 }
 
-func UnlockHookInit() {
-	initMutex.Unlock()
+func TestMilvusRegistryGather_NilCRegistry(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(prometheus.NewGoCollector())
+	r := &MilvusRegistry{
+		GoRegistry: reg,
+		CRegistry:  nil,
+	}
+	res, err := r.Gather()
+	assert.NoError(t, err)
+	assert.NotNil(t, res)
+	assert.Greater(t, len(res), 0)
 }

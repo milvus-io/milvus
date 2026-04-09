@@ -163,14 +163,17 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
     EXPECT_EQ(meta->chunk_memory_size_.size(), saved_num_cells);
     EXPECT_EQ(expected_total_size, chunked_column_group->memory_size());
 
-    // Verify mmap files if in mmap mode
+    // Verify mmap files if in mmap mode (file names include generation suffix)
     if (use_mmap) {
-        for (size_t i = 0; i < saved_num_cells; ++i) {
-            auto mmap_path = std::filesystem::path(mmap_dir_) /
-                             ("seg_0_cg_0_" + std::to_string(i));
-            EXPECT_TRUE(std::filesystem::exists(mmap_path))
-                << "mmap file missing: " << mmap_path;
+        size_t mmap_file_count = 0;
+        for (const auto& entry :
+             std::filesystem::directory_iterator(mmap_dir_)) {
+            auto name = entry.path().filename().string();
+            if (name.rfind("seg_0_cg_0_", 0) == 0) {
+                mmap_file_count++;
+            }
         }
+        EXPECT_EQ(mmap_file_count, saved_num_cells);
     }
 }
 
@@ -225,14 +228,17 @@ TEST_P(ManifestGroupTranslatorTest, TestVectorColumnGroup) {
     EXPECT_EQ(chunked_column_group->num_chunks(), saved_num_cells);
     EXPECT_GT(chunked_column_group->memory_size(), 0);
 
-    // Verify mmap files if in mmap mode
+    // Verify mmap files if in mmap mode (file names include generation suffix)
     if (use_mmap) {
-        for (size_t i = 0; i < saved_num_cells; ++i) {
-            auto mmap_path = std::filesystem::path(mmap_dir_) /
-                             ("seg_0_cg_1_" + std::to_string(i));
-            EXPECT_TRUE(std::filesystem::exists(mmap_path))
-                << "mmap file missing: " << mmap_path;
+        size_t mmap_file_count = 0;
+        for (const auto& entry :
+             std::filesystem::directory_iterator(mmap_dir_)) {
+            auto name = entry.path().filename().string();
+            if (name.rfind("seg_0_cg_1_", 0) == 0) {
+                mmap_file_count++;
+            }
         }
+        EXPECT_EQ(mmap_file_count, saved_num_cells);
     }
 }
 

@@ -118,8 +118,9 @@ main(int argc, char** argv) {
         true,
         true,
         {10, true, 30},
-        std::chrono::milliseconds(0));
+        std::chrono::milliseconds(0),
+        std::chrono::milliseconds(-1));
 
-    milvus::index::kScalarIndexUseV3 = false;
+    milvus::index::kOverrideRootPathForUT = "files";
     return RUN_ALL_TESTS();
 }

@@ -216,6 +216,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 			ReqID:            paramtable.GetNodeID(),
 			PartitionIDs:     partitionIDs,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+			QueryLabel:       metrics.UpsertQueryLabel,
 		},
 		request:        queryReq,
 		plan:           plan,
@@ -1062,7 +1063,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder("applyPK")
 	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
 	rowIDBegin, rowIDEnd, allocateErr := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
-	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 	if allocateErr != nil {
 		log.Ctx(ctx).Warn("failed to allocate auto id for upsert",
 			zap.String("collectionName", collectionName),

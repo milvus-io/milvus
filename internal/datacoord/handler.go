@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"path"
 	"strconv"
@@ -171,7 +170,8 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
 		}
-		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil {
+		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil && s.GetManifestPath() == "" {
+			// External collection segments may not have start/DML positions but have ManifestPath
 			continue
 		}
 		if s.GetIsImporting() {
@@ -826,9 +826,9 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 }
 
 func uncompressJsonStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStats *datapb.JsonKeyStats) *datapb.JsonKeyStats {
-	prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d/%d", h.s.meta.chunkManager.RootPath(), common.JSONStatsPath, jsonStats.GetJsonKeyStatsDataFormat(),
+	prefix := metautil.BuildJSONKeyStatsPrefix(h.s.meta.chunkManager.RootPath(), jsonStats.GetJsonKeyStatsDataFormat(),
 		jsonStats.GetBuildID(), jsonStats.GetVersion(), segInfo.GetCollectionID(), segInfo.GetPartitionID(), segInfo.GetID(), jsonStats.GetFieldID())
-	uncompressedFiles := make([]string, 0)
+	uncompressedFiles := make([]string, 0, len(jsonStats.GetFiles()))
 	for _, file := range jsonStats.GetFiles() {
 		uncompressedFiles = append(uncompressedFiles, path.Join(prefix, file))
 	}

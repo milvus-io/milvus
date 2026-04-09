@@ -18,7 +18,6 @@ package segments
 
 import (
 	"context"
-	"fmt"
 	"math"
 
 	"github.com/samber/lo"
@@ -29,12 +28,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -53,7 +49,7 @@ func ReduceSearchOnQueryNode(ctx context.Context, results []*internalpb.SearchRe
 
 func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResults, info *reduce.ResultInfo) (*internalpb.SearchResults, error) {
 	results = lo.Filter(results, func(result *internalpb.SearchResults, _ int) bool {
-		return result != nil && result.GetSlicedBlob() != nil
+		return result != nil && (result.GetSlicedBlob() != nil || result.GetResultData() != nil)
 	})
 
 	if len(results) == 1 {
@@ -168,6 +164,7 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 			NumQueries:     result.GetNumQueries(),
 			TopK:           result.GetTopK(),
 			SlicedBlob:     result.GetSlicedBlob(),
+			ResultData:     result.GetResultData(),
 			SlicedNumCount: result.GetSlicedNumCount(),
 			SlicedOffset:   result.GetSlicedOffset(),
 			ReqIndex:       int64(index),
@@ -233,16 +230,17 @@ func DecodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 
 	results := make([]*schemapb.SearchResultData, 0)
 	for _, partialSearchResult := range searchResults {
-		if partialSearchResult.SlicedBlob == nil {
-			continue
+		if partialSearchResult.ResultData != nil {
+			// Pre-decoded by delegator — use directly, no unmarshal needed.
+			results = append(results, partialSearchResult.ResultData)
+		} else if partialSearchResult.SlicedBlob != nil {
+			var partialResultData schemapb.SearchResultData
+			err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, &partialResultData)
 		}
-
-		var partialResultData schemapb.SearchResultData
-		err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
-		if err != nil {
-			return nil, err
-		}
-		results = append(results, &partialResultData)
 	}
 	return results, nil
 }
@@ -258,482 +256,19 @@ func EncodeSearchResultData(ctx context.Context, searchResultData *schemapb.Sear
 		NumQueries: nq,
 		TopK:       topk,
 		MetricType: metricType,
-		SlicedBlob: nil,
 	}
-	slicedBlob, err := proto.Marshal(searchResultData)
-	if err != nil {
-		return nil, err
-	}
-	if searchResultData != nil && searchResultData.Ids != nil && typeutil.GetSizeOfIDs(searchResultData.Ids) != 0 {
+
+	hasData := searchResultData != nil && searchResultData.Ids != nil && typeutil.GetSizeOfIDs(searchResultData.Ids) != 0
+	if hasData && paramtable.Get().QueryNodeCfg.EnableResultZeroCopy.GetAsBool() {
+		// New path: embed struct directly, skip marshal
+		searchResults.ResultData = searchResultData
+	} else if hasData {
+		// Legacy path: marshal to SlicedBlob
+		slicedBlob, err := proto.Marshal(searchResultData)
+		if err != nil {
+			return nil, err
+		}
 		searchResults.SlicedBlob = slicedBlob
 	}
 	return
-}
-
-func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, param *mergeParam) (*internalpb.RetrieveResults, error) {
-	log := log.Ctx(ctx)
-	log.Debug("mergeInternelRetrieveResults",
-		zap.Int64("limit", param.limit),
-		zap.Int("resultNum", len(retrieveResults)),
-	)
-	// For doc-level with single result, return directly (no merge/limit needed)
-	// For element-level, need to continue to apply element-count limit
-	if len(retrieveResults) == 1 && !retrieveResults[0].GetElementLevel() {
-		return retrieveResults[0], nil
-	}
-	var (
-		ret = &internalpb.RetrieveResults{
-			Status: merr.Success(),
-			Ids:    &schemapb.IDs{},
-		}
-		skipDupCnt int64
-		loopEnd    int
-	)
-
-	_, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeInternalRetrieveResult")
-	defer sp.End()
-
-	// Detect if this is an element-level query
-	isElementLevel := len(retrieveResults) > 0 && retrieveResults[0].GetElementLevel()
-	ret.ElementLevel = isElementLevel
-
-	validRetrieveResults := []*TimestampedRetrieveResult[*internalpb.RetrieveResults]{}
-	relatedDataSize := int64(0)
-	hasMoreResult := false
-	for _, r := range retrieveResults {
-		ret.AllRetrieveCount += r.GetAllRetrieveCount()
-		ret.ScannedRemoteBytes += r.GetScannedRemoteBytes()
-		ret.ScannedTotalBytes += r.GetScannedTotalBytes()
-		relatedDataSize += r.GetCostAggregation().GetTotalRelatedDataSize()
-		size := typeutil.GetSizeOfIDs(r.GetIds())
-		if r == nil || len(r.GetFieldsData()) == 0 || size == 0 {
-			continue
-		}
-		// Validate element-level consistency: if any result is element-level, all must be
-		if isElementLevel && !r.GetElementLevel() {
-			return nil, fmt.Errorf("inconsistent element-level flag: expected all results to be element-level")
-		}
-		// Validate element_indices length matches ids length for element-level
-		if isElementLevel && len(r.GetElementIndices()) != size {
-			return nil, fmt.Errorf("element_indices length (%d) does not match ids length (%d)", len(r.GetElementIndices()), size)
-		}
-		tr, err := NewTimestampedRetrieveResult(r)
-		if err != nil {
-			return nil, err
-		}
-		validRetrieveResults = append(validRetrieveResults, tr)
-		loopEnd += size
-		hasMoreResult = hasMoreResult || r.GetHasMoreResult()
-	}
-	ret.HasMoreResult = hasMoreResult
-
-	if len(validRetrieveResults) == 0 {
-		return ret, nil
-	}
-
-	var limit int = -1
-	if param.limit != typeutil.Unlimited && reduce.ShouldUseInputLimit(param.reduceType) {
-		limit = int(param.limit)
-		if !isElementLevel {
-			loopEnd = int(param.limit)
-		}
-	}
-
-	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(loopEnd))
-	idTsMap := make(map[interface{}]int64)
-	cursors := make([]int64, len(validRetrieveResults))
-
-	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(validRetrieveResults))
-	for i, vr := range validRetrieveResults {
-		idxComputers[i] = typeutil.NewFieldDataIdxComputer(vr.Result.GetFieldsData())
-	}
-
-	// Track element indices for element-level query
-	type docSelection struct {
-		batchIndex     int
-		resultIndex    int64
-		elementIndices *internalpb.ElementIndices
-	}
-	docSelections := make([]docSelection, 0, loopEnd)
-	idxInSelections := make(map[interface{}]int) // pk -> index in docSelections
-
-	var availableCount int // for doc-level: doc count; for element-level: element count
-	var retSize int64
-	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for j := 0; j < loopEnd && (limit == -1 || availableCount < limit); {
-		sel, drainOneResult := typeutil.SelectMinPKWithTimestamp(validRetrieveResults, cursors)
-		if sel == -1 || (reduce.ShouldStopWhenDrained(param.reduceType) && drainOneResult) {
-			break
-		}
-
-		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
-		ts := validRetrieveResults[sel].Timestamps[cursors[sel]]
-
-		// Get element indices for element-level query
-		var elemIndices *internalpb.ElementIndices
-		var elemCount int = 1 // default for doc-level
-		if isElementLevel {
-			elemIndicesList := validRetrieveResults[sel].Result.GetElementIndices()
-			if int(cursors[sel]) < len(elemIndicesList) {
-				elemIndices = elemIndicesList[cursors[sel]]
-				elemCount = len(elemIndices.GetIndices())
-			}
-		}
-
-		fieldsData := validRetrieveResults[sel].Result.GetFieldsData()
-		fieldIdxs := idxComputers[sel].Compute(cursors[sel])
-		if _, ok := idTsMap[pk]; !ok {
-			typeutil.AppendPKs(ret.Ids, pk)
-			retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, cursors[sel], fieldIdxs...)
-			idTsMap[pk] = ts
-			if isElementLevel {
-				idxInSelections[pk] = len(docSelections)
-				docSelections = append(docSelections, docSelection{
-					batchIndex:     sel,
-					resultIndex:    cursors[sel],
-					elementIndices: elemIndices,
-				})
-			}
-			availableCount += elemCount
-			j++
-		} else {
-			// primary keys duplicate
-			skipDupCnt++
-			if ts != 0 && ts > idTsMap[pk] {
-				idTsMap[pk] = ts
-				typeutil.DeleteFieldData(ret.FieldsData)
-				retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, cursors[sel], fieldIdxs...)
-				if isElementLevel {
-					idx := idxInSelections[pk]
-					oldElemCount := len(docSelections[idx].elementIndices.GetIndices())
-					availableCount = availableCount - oldElemCount + elemCount
-					docSelections[idx] = docSelection{
-						batchIndex:     sel,
-						resultIndex:    cursors[sel],
-						elementIndices: elemIndices,
-					}
-				}
-			}
-		}
-
-		// limit retrieve result to avoid oom
-		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
-		}
-
-		cursors[sel]++
-	}
-
-	if skipDupCnt > 0 {
-		log.Debug("skip duplicated query result while reducing internal.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
-	}
-
-	// Fill ElementIndices for element-level query
-	if isElementLevel {
-		for _, sel := range docSelections {
-			ret.ElementIndices = append(ret.ElementIndices, sel.elementIndices)
-		}
-	}
-
-	return ret, nil
-}
-
-func getTS(i *internalpb.RetrieveResults, idx int64) uint64 {
-	if i.FieldsData == nil {
-		return 0
-	}
-	for _, fieldData := range i.FieldsData {
-		fieldID := fieldData.FieldId
-		if fieldID == common.TimeStampField {
-			res := fieldData.GetScalars().GetLongData().Data
-			return uint64(res[idx])
-		}
-	}
-	return 0
-}
-
-func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcorepb.RetrieveResults, param *mergeParam, segments []Segment, plan *RetrievePlan, manager *Manager) (*segcorepb.RetrieveResults, error) {
-	ctx, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults")
-	defer span.End()
-
-	log := log.Ctx(ctx)
-	log.Debug("mergeSegcoreRetrieveResults",
-		zap.Int64("limit", param.limit),
-		zap.Int("resultNum", len(retrieveResults)),
-	)
-	var (
-		ret = &segcorepb.RetrieveResults{
-			Ids: &schemapb.IDs{},
-		}
-
-		skipDupCnt int64
-		loopEnd    int
-	)
-
-	// Detect if this is an element-level query
-	isElementLevel := len(retrieveResults) > 0 && retrieveResults[0].GetElementLevel()
-	ret.ElementLevel = isElementLevel
-
-	validRetrieveResults := []*TimestampedRetrieveResult[*segcorepb.RetrieveResults]{}
-	validSegments := make([]Segment, 0, len(segments))
-	hasMoreResult := false
-	for i, r := range retrieveResults {
-		size := typeutil.GetSizeOfIDs(r.GetIds())
-		ret.AllRetrieveCount += r.GetAllRetrieveCount()
-		ret.ScannedRemoteBytes += r.GetScannedRemoteBytes()
-		ret.ScannedTotalBytes += r.GetScannedTotalBytes()
-		if r == nil || len(r.GetOffset()) == 0 || size == 0 {
-			log.Debug("filter out invalid retrieve result")
-			continue
-		}
-		// Validate element-level consistency: if any result is element-level, all must be
-		if isElementLevel && !r.GetElementLevel() {
-			return nil, fmt.Errorf("inconsistent element-level flag: expected all results to be element-level")
-		}
-		// Validate element_indices length matches ids length for element-level
-		if isElementLevel && len(r.GetElementIndices()) != size {
-			return nil, fmt.Errorf("element_indices length (%d) does not match ids length (%d)", len(r.GetElementIndices()), size)
-		}
-		tr, err := NewTimestampedRetrieveResult(r)
-		if err != nil {
-			return nil, err
-		}
-		validRetrieveResults = append(validRetrieveResults, tr)
-		if plan.IsIgnoreNonPk() {
-			validSegments = append(validSegments, segments[i])
-		}
-		loopEnd += size
-		hasMoreResult = r.GetHasMoreResult() || hasMoreResult
-	}
-	ret.HasMoreResult = hasMoreResult
-
-	if len(validRetrieveResults) == 0 {
-		return ret, nil
-	}
-
-	var limit int = -1
-	if param.limit != typeutil.Unlimited && reduce.ShouldUseInputLimit(param.reduceType) {
-		limit = int(param.limit)
-	}
-
-	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(loopEnd))
-	cursors := make([]int64, len(validRetrieveResults))
-	mapCap := 0
-	if limit > 0 {
-		mapCap = limit * len(validRetrieveResults)
-	}
-	idTsMap := make(map[any]int64, mapCap)
-
-	var availableCount int // for doc-level: doc count; for element-level: element count
-	var retSize int64
-	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-
-	type selection struct {
-		batchIndex     int                       // index of validate retrieve results
-		resultIndex    int64                     // index of selection in selected result item
-		offset         int64                     // offset of the result
-		elementIndices *segcorepb.ElementIndices // element indices for element-level query
-	}
-
-	var selections []selection
-
-	for j := 0; j < loopEnd && (limit == -1 || availableCount < limit); j++ {
-		sel, drainOneResult := typeutil.SelectMinPKWithTimestamp(validRetrieveResults, cursors)
-		if sel == -1 || (reduce.ShouldStopWhenDrained(param.reduceType) && drainOneResult) {
-			break
-		}
-
-		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
-		ts := validRetrieveResults[sel].Timestamps[cursors[sel]]
-
-		// Get element indices for element-level query
-		var elemIndices *segcorepb.ElementIndices
-		// For doc-level filter, we always count 1 for each document
-		// For element-level filter, we count the number of elements for each document
-		var elemCount int = 1
-		if isElementLevel {
-			elemIndicesList := validRetrieveResults[sel].Result.GetElementIndices()
-			if int(cursors[sel]) < len(elemIndicesList) {
-				elemIndices = elemIndicesList[cursors[sel]]
-				elemCount = len(elemIndices.GetIndices())
-			}
-		}
-
-		if _, ok := idTsMap[pk]; !ok {
-			typeutil.AppendPKs(ret.Ids, pk)
-			selections = append(selections, selection{
-				batchIndex:     sel,
-				resultIndex:    cursors[sel],
-				offset:         validRetrieveResults[sel].Result.GetOffset()[cursors[sel]],
-				elementIndices: elemIndices,
-			})
-			idTsMap[pk] = ts
-			availableCount += elemCount
-		} else {
-			// primary keys duplicate
-			skipDupCnt++
-			if ts != 0 && ts > idTsMap[pk] {
-				idTsMap[pk] = ts
-				idx := len(selections) - 1
-				for ; idx >= 0; idx-- {
-					selection := selections[idx]
-					pkValue := typeutil.GetPK(validRetrieveResults[selection.batchIndex].GetIds(), selection.resultIndex)
-					if pk == pkValue {
-						break
-					}
-				}
-				if idx >= 0 {
-					// For element-level: adjust availableCount
-					if isElementLevel {
-						oldElemCount := len(selections[idx].elementIndices.GetIndices())
-						availableCount = availableCount - oldElemCount + elemCount
-					}
-					selections[idx] = selection{
-						batchIndex:     sel,
-						resultIndex:    cursors[sel],
-						offset:         validRetrieveResults[sel].Result.GetOffset()[cursors[sel]],
-						elementIndices: elemIndices,
-					}
-				}
-			}
-		}
-
-		cursors[sel]++
-	}
-
-	if skipDupCnt > 0 {
-		log.Debug("skip duplicated query result while reducing segcore.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
-	}
-
-	if !plan.IsIgnoreNonPk() {
-		// target entry already retrieved, don't do this after AppendPKs for better performance. Save the cost everytime
-		// judge the `!plan.ignoreNonPk` condition.
-		_, span2 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-AppendFieldData")
-		defer span2.End()
-		ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(len(selections)))
-
-		idxComputers := make([]*typeutil.FieldDataIdxComputer, len(validRetrieveResults))
-		for i, vr := range validRetrieveResults {
-			idxComputers[i] = typeutil.NewFieldDataIdxComputer(vr.Result.GetFieldsData())
-		}
-
-		for _, selection := range selections {
-			// cannot use `cursors[sel]` directly, since some of them may be skipped.
-			fieldsData := validRetrieveResults[selection.batchIndex].Result.GetFieldsData()
-			fieldIdxs := idxComputers[selection.batchIndex].Compute(selection.resultIndex)
-			retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, selection.resultIndex, fieldIdxs...)
-
-			// limit retrieve result to avoid oom
-			if retSize > maxOutputSize {
-				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
-			}
-		}
-	} else {
-		// target entry not retrieved.
-		ctx, span2 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-RetrieveByOffsets-AppendFieldData")
-		defer span2.End()
-		segmentResults := make([]*segcorepb.RetrieveResults, len(validRetrieveResults))
-		groups := lo.GroupBy(selections, func(sel selection) int {
-			return sel.batchIndex
-		})
-		futures := make([]*conc.Future[any], 0, len(groups))
-		for i, selections := range groups {
-			idx, theOffsets := i, lo.Map(selections, func(sel selection, _ int) int64 { return sel.offset })
-			future := GetSQPool().Submit(func() (any, error) {
-				var r *segcorepb.RetrieveResults
-				var err error
-				if err := doOnSegment(ctx, manager, validSegments[idx], func(ctx context.Context, segment Segment) error {
-					r, err = segment.RetrieveByOffsets(ctx, &segcore.RetrievePlanWithOffsets{
-						RetrievePlan: plan,
-						Offsets:      theOffsets,
-					})
-					return err
-				}); err != nil {
-					return nil, err
-				}
-				segmentResults[idx] = r
-				return nil, nil
-			})
-			futures = append(futures, future)
-		}
-		// Must be BlockOnAll operation here.
-		// If we perform a fast fail here, the cgo struct like `plan` will be used after free, unsafe memory access happens.
-		if err := conc.BlockOnAll(futures...); err != nil {
-			return nil, err
-		}
-
-		for _, r := range segmentResults {
-			if len(r.GetFieldsData()) != 0 {
-				ret.FieldsData = typeutil.PrepareResultFieldData(r.GetFieldsData(), int64(len(selections)))
-				break
-			}
-		}
-
-		_, span3 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-AppendFieldData")
-		defer span3.End()
-
-		idxComputers := make([]*typeutil.FieldDataIdxComputer, len(segmentResults))
-		for i, r := range segmentResults {
-			idxComputers[i] = typeutil.NewFieldDataIdxComputer(r.GetFieldsData())
-		}
-
-		// retrieve result is compacted, use 0,1,2...end
-		segmentResOffset := make([]int64, len(segmentResults))
-		for _, selection := range selections {
-			fieldsData := segmentResults[selection.batchIndex].GetFieldsData()
-			fieldIdxs := idxComputers[selection.batchIndex].Compute(segmentResOffset[selection.batchIndex])
-			retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, segmentResOffset[selection.batchIndex], fieldIdxs...)
-			segmentResOffset[selection.batchIndex]++
-			// limit retrieve result to avoid oom
-			if retSize > maxOutputSize {
-				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
-			}
-		}
-	}
-
-	// Fill ElementIndices for element-level query
-	if isElementLevel {
-		for _, sel := range selections {
-			ret.ElementIndices = append(ret.ElementIndices, sel.elementIndices)
-		}
-	}
-
-	return ret, nil
-}
-
-func mergeInternalRetrieveResultsAndFillIfEmpty(
-	ctx context.Context,
-	retrieveResults []*internalpb.RetrieveResults,
-	param *mergeParam,
-) (*internalpb.RetrieveResults, error) {
-	mergedResult, err := MergeInternalRetrieveResult(ctx, retrieveResults, param)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewInternalResult(mergedResult), param.outputFieldsId, param.schema); err != nil {
-		return nil, fmt.Errorf("failed to fill internal retrieve results: %s", err.Error())
-	}
-
-	return mergedResult, nil
-}
-
-func mergeSegcoreRetrieveResultsAndFillIfEmpty(
-	ctx context.Context,
-	retrieveResults []*segcorepb.RetrieveResults,
-	param *mergeParam,
-	segments []Segment,
-	plan *RetrievePlan,
-	manager *Manager,
-) (*segcorepb.RetrieveResults, error) {
-	mergedResult, err := MergeSegcoreRetrieveResults(ctx, retrieveResults, param, segments, plan, manager)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := typeutil2.FillRetrieveResultIfEmpty(typeutil2.NewSegcoreResults(mergedResult), param.outputFieldsId, param.schema); err != nil {
-		return nil, fmt.Errorf("failed to fill segcore retrieve results: %s", err.Error())
-	}
-
-	return mergedResult, nil
 }

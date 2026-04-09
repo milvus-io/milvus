@@ -173,9 +173,11 @@ func TestQueryIteratorInvalid(t *testing.T) {
 	_, errPar = mc.QueryIterator(ctx, client.NewQueryIteratorOption(schema.CollectionName).WithPartitions(common.GenRandomString("p", 5), common.DefaultPartition))
 	common.CheckErr(t, errPar, false, "partition name", "not found")
 
-	// query iterator with count(*)
+	// query iterator with count(*) — SDK appends PK to output_fields,
+	// resulting in ["count(*)", "int64"]. Server rejects because aggregation
+	// queries cannot mix regular columns with aggregate expressions.
 	_, errOutput := mc.QueryIterator(ctx, client.NewQueryIteratorOption(schema.CollectionName).WithOutputFields(common.QueryCountFieldName))
-	common.CheckErr(t, errOutput, false, "count entities with pagination is not allowed", "count(*)")
+	common.CheckErr(t, errOutput, false, "is not allowed")
 
 	// query iterator with invalid batch size
 	for _, batch := range []int{-1, 0} {

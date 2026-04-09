@@ -139,7 +139,7 @@ func (j *reader) Init() error {
 }
 
 func (j *reader) Read() (*storage.InsertData, error) {
-	insertData, err := storage.NewInsertData(j.schema)
+	insertData, err := storage.NewInsertDataWithFunctionOutputField(j.schema)
 	if err != nil {
 		return nil, err
 	}
@@ -156,6 +156,8 @@ func (j *reader) Read() (*storage.InsertData, error) {
 			return nil, err
 		}
 	}
+
+	common.RemoveUnpopulatedFunctionOutputFields(j.schema, insertData)
 
 	return insertData, nil
 }

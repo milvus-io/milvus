@@ -84,7 +84,7 @@ func TestQuerySegmentAccessMetric(t *testing.T) {
 	m := NewQuerySegmentAccessRecord(SegmentLabel{
 		DatabaseName:  "db1",
 		ResourceGroup: "rg1",
-	})
+	}, "query")
 	m.CacheMissing()
 	m.Finish(nil)
 	assert.NotZero(t, m.getDuration())

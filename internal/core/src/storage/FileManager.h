@@ -26,6 +26,7 @@
 
 #include "common/Consts.h"
 #include "common/type_c.h"
+#include "index/Meta.h"
 #include "filemanager/FileManager.h"
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -103,6 +104,11 @@ struct FileManagerContext {
         loon_ffi_properties = std::move(properties);
     }
 
+    void
+    set_stats_base_path(const std::string& path) {
+        stats_base_path = path;
+    }
+
     FieldDataMeta fieldDataMeta;
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
@@ -110,6 +116,7 @@ struct FileManagerContext {
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
+    std::string stats_base_path;
 };
 
 #define FILEMANAGER_TRY try {
@@ -185,8 +192,8 @@ class FileManagerImpl : public milvus::FileManager {
     OpenInputStream(const std::string& filename, bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
         auto local_file_name = GetFileName(filename);
-        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefixV2()
-                                              : GetRemoteTextLogPrefixV2();
+        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
+                                              : GetRemoteTextLogPrefix();
         remote_file_path += "/" + local_file_name;
         auto remote_file = fs_->OpenInputFile(remote_file_path);
         AssertInfo(remote_file.ok(),
@@ -201,8 +208,8 @@ class FileManagerImpl : public milvus::FileManager {
     OpenOutputStream(const std::string& filename, bool is_index_file) {
         AssertInfo(fs_, "fs_ is nullptr, cannot open output stream");
         auto local_file_name = GetFileName(filename);
-        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefixV2()
-                                              : GetRemoteTextLogPrefixV2();
+        auto remote_file_path = is_index_file ? GetRemoteIndexObjectPrefix()
+                                              : GetRemoteTextLogPrefix();
         remote_file_path += "/" + local_file_name;
         // Ensure parent directory exists before opening the output stream.
         // Only needed for local filesystems; object stores don't require
@@ -233,9 +240,8 @@ class FileManagerImpl : public milvus::FileManager {
             auto cipher_plugin = PluginLoader::GetInstance().getCipherPlugin();
             if (cipher_plugin) {
                 auto local_file_name = GetFileName(filename);
-                auto remote_path = is_index_file
-                                       ? GetRemoteIndexObjectPrefixV2()
-                                       : GetRemoteTextLogPrefixV2();
+                auto remote_path = is_index_file ? GetRemoteIndexObjectPrefix()
+                                                 : GetRemoteTextLogPrefix();
                 remote_path += "/" + local_file_name;
                 return std::make_unique<IndexEntryEncryptedLocalWriter>(
                     remote_path,
@@ -271,7 +277,9 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
-        boost::filesystem::path prefix = rcm_->GetRootPath();
+        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
+                                             ? rcm_->GetRootPath()
+                                             : index::kOverrideRootPathForUT;
         boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
         boost::filesystem::path path1 =
             std::to_string(index_meta_.build_id) + "/" +
@@ -282,17 +290,13 @@ class FileManagerImpl : public milvus::FileManager {
     }
 
     virtual std::string
-    GetRemoteIndexObjectPrefixV2() const {
-        return std::string(INDEX_ROOT_PATH) + "/" +
-               std::to_string(index_meta_.build_id) + "/" +
-               std::to_string(index_meta_.index_version) + "/" +
-               std::to_string(field_meta_.partition_id) + "/" +
-               std::to_string(field_meta_.segment_id);
-    }
-
-    virtual std::string
     GetRemoteTextLogPrefix() const {
-        boost::filesystem::path prefix = rcm_->GetRootPath();
+        if (!stats_base_path_.empty()) {
+            return stats_base_path_;
+        }
+        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
+                                             ? rcm_->GetRootPath()
+                                             : index::kOverrideRootPathForUT;
         boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
         boost::filesystem::path path1 =
             std::to_string(index_meta_.build_id) + "/" +
@@ -302,17 +306,6 @@ class FileManagerImpl : public milvus::FileManager {
             std::to_string(field_meta_.segment_id) + "/" +
             std::to_string(field_meta_.field_id);
         return NormalizePath(prefix / path / path1);
-    }
-
-    virtual std::string
-    GetRemoteTextLogPrefixV2() const {
-        return std::string(TEXT_LOG_ROOT_PATH) + "/" +
-               std::to_string(index_meta_.build_id) + "/" +
-               std::to_string(index_meta_.index_version) + "/" +
-               std::to_string(field_meta_.collection_id) + "/" +
-               std::to_string(field_meta_.partition_id) + "/" +
-               std::to_string(field_meta_.segment_id) + "/" +
-               std::to_string(field_meta_.field_id);
     }
 
     static std::string
@@ -340,6 +333,10 @@ class FileManagerImpl : public milvus::FileManager {
     milvus_storage::ArrowFileSystemPtr fs_;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
+
+    // stats base path computed by Go caller; when non-empty, overrides
+    // the internally computed remote prefix for text/json stats files.
+    std::string stats_base_path_;
 };
 
 using FileManagerImplPtr = std::shared_ptr<FileManagerImpl>;

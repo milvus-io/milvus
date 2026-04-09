@@ -26,6 +26,7 @@ func newMockBalancerForTest(t *testing.T) *mock_balancer.MockBalancer {
 		return ctx.Err()
 	}).Maybe()
 	mb.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{}, nil).Maybe()
+	mb.EXPECT().GetAvailableStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{}, nil).Maybe()
 	return mb
 }
 
@@ -36,6 +37,7 @@ func TestStartBroadcastWithSecondaryClusterResourceKey(t *testing.T) {
 		snmanager.ResetStreamingNodeManager()
 
 		mb := newMockBalancerForTest(t)
+
 		mb.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
 		balance.Register(mb)
 
@@ -59,6 +61,7 @@ func TestStartBroadcastWithSecondaryClusterResourceKey(t *testing.T) {
 		snmanager.ResetStreamingNodeManager()
 
 		mb := newMockBalancerForTest(t)
+
 		mb.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
 		balance.Register(mb)
 
@@ -79,6 +82,7 @@ func TestStartBroadcastWithSecondaryClusterResourceKey(t *testing.T) {
 		snmanager.ResetStreamingNodeManager()
 
 		mb := newMockBalancerForTest(t)
+
 		mb.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(errors.New("balance error")).Maybe()
 		balance.Register(mb)
 
@@ -100,6 +104,7 @@ func TestStartBroadcastWithResourceKeys(t *testing.T) {
 		snmanager.ResetStreamingNodeManager()
 
 		mb := newMockBalancerForTest(t)
+
 		mb.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
 		balance.Register(mb)
 
@@ -123,6 +128,7 @@ func TestStartBroadcastWithResourceKeys(t *testing.T) {
 		snmanager.ResetStreamingNodeManager()
 
 		mb := newMockBalancerForTest(t)
+
 		mb.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
 		balance.Register(mb)
 

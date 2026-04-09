@@ -123,6 +123,7 @@ minio:
     # When set to "default", the SDK/runtime default is used (typically TLS 1.2).
     # We recommend using version 1.2 and above.
     tlsMinVersion: default
+    useCRC32C: false # Whether to use CRC32C checksum for data integrity validation on MinIO/S3 PutObject requests.
   # Name of the bucket where Milvus stores data in MinIO or S3.
   # Milvus 2.0.0 does not support storing data in multiple buckets.
   # Bucket with this name will be created if it does not exist. If the bucket already exists and is accessible, it will be used directly. Otherwise, there will be an error.
@@ -163,7 +164,7 @@ minio:
   useVirtualHost: false # Whether use virtual host mode for bucket. WARNING: For Aliyun OSS and Tencent COS, this parameter is useless and is set to true by default
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
   # The maximum number of objects requested per batch in minio ListObjects rpc, 
-  # 0 means using oss client by default, decrease these configration if ListObjects timeout
+  # 0 means using oss client by default, decrease these configuration if ListObjects timeout
   listObjectsMaxKeys: 0
 
 # Milvus supports four message queues (MQ): rocksmq (based on RocksDB), Pulsar, Kafka, and Woodpecker.
@@ -566,6 +567,8 @@ queryNode:
   grouping:
     maxNQ: 1000
     topKMergeRatio: 20
+  search:
+    enableResultZeroCopy: false # When true, delegator passes reduced SearchResultData directly instead of re-marshaling to SlicedBlob. Toggle at runtime for instant fallback.
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]
   streamingDeltaForwardPolicy: FilterByBF # delegator streaming deletion forward policy, possible option["FilterByBF", "Direct"]
   forwardBatchSize: 4194304 # the batch size delegator uses for forwarding stream delete in loading procedure
@@ -579,11 +582,12 @@ queryNode:
   enableSegmentPrune: false # use partition stats to prune data in search/query on shard delegator
   queryStreamBatchSize: 4194304 # return min batch size of stream query
   queryStreamMaxBatchSize: 134217728 # return max batch size of stream query
+  enableSegmentFilter: true # Enable delegator-side segment filtering using PK predicates (min/max + bloom filter).
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool
   idfOracle:
-    enableDisk: true
+    preload: true # Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:
@@ -654,6 +658,11 @@ dataCoord:
   # if param forceRebuildSegmentIndex is not enabled, the newly created vector index will be aligned with the newer one of index engine's version and targetVecIndexVersion.
   # if param targetVecIndexVersion is not set, the default value is -1, which means no target vec index version, then the vector index will be aligned with index engine's version 
   targetVecIndexVersion: -1
+  forceRebuildScalarSegmentIndex: false # force rebuild scalar segment index to specified scalar index engine's version
+  # if param forceRebuildScalarSegmentIndex is enabled, the scalar index will be rebuilt to aligned with targetScalarIndexVersion.
+  # if param forceRebuildScalarSegmentIndex is not enabled, the newly created scalar index will be aligned with the newer one of scalar index engine's version and targetScalarIndexVersion.
+  # if param targetScalarIndexVersion is not set, the default value is -1, which means no target scalar index version, then the scalar index will be aligned with scalar index engine's version
+  targetScalarIndexVersion: -1
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flushing operation on same segment
   # Switch value to control if to enable segment compaction.
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
@@ -929,6 +938,7 @@ common:
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority pool
     bm25Load: 1 # This parameter specify how many times the number of threads is the number of cores in BM25 load pool
+    maxThreadsSize: 16 # The maximum number of threads in the thread pool, only effective when greater than 0
   buildIndexThreadPoolRatio: 0.75
   DiskIndex:
     MaxDegree: 56
@@ -943,6 +953,16 @@ common:
   parquetStatsSkipIndex:
     enabled: false # whether to skip parquet stats index when reading; set true to enable skipping.
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote, opendal], value minio is deprecated, use remote instead
+  storage:
+    manifestTransactionRetryLimit: 10 # Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts
+    stv2:
+      splitSystemColumn:
+        enabled: true # enable split system column policy in storage v2
+        includePK: true # whether split system column policy include pk field
+      splitByAvgSize:
+        enabled: true # enable split by average size policy in storage v2
+        threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
+    useLoonFFI: true
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
@@ -1021,16 +1041,9 @@ common:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
-  storage:
-    stv2:
-      splitSystemColumn:
-        enabled: true # enable split system column policy in storage v2
-        includePK: true # whether split system column policy include pk field
-      splitByAvgSize:
-        enabled: true # enable split by average size policy in storage v2
-        threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
-    useLoonFFI: true
   traceLogMode: 0 # trace request info
+  visibilityFilterEnabled: true # whether to apply row visibility filtering (timestamp, delete, and TTL) on querynode. When disabled, all rows are returned regardless of insert/delete timestamps.
+  bloomFilterEnabled: true # whether to load and apply bloom filter/pk stats on querynode
   bloomFilterSize: 100000 # bloom filter initial size
   bloomFilterType: BlockedBloomFilter # bloom filter type, support BasicBloomFilter and BlockedBloomFilter
   maxBloomFalsePositive: 0.001 # max false positive rate for bloom filter
@@ -1055,6 +1068,8 @@ common:
     mode:
       queryNode: sync # File resource mode for query node, options: [sync, close]. Default is sync.
       dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
+  groupBy:
+    maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

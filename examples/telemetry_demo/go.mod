@@ -1,8 +1,8 @@
 module github.com/milvus-io/milvus/examples/telemetry_demo
 
-go 1.24.11
+go 1.25.8
 
-toolchain go1.24.12
+toolchain go1.25.8
 
 require github.com/milvus-io/milvus/client/v2 v2.6.4-0.20251104142533-a2ce70d25256
 

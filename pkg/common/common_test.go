@@ -395,48 +395,73 @@ func TestWarmupPolicy(t *testing.T) {
 	})
 }
 
-func TestIsBigTopKOptimizationEnabled(t *testing.T) {
-	t.Run("returns true when enabled", func(t *testing.T) {
+func TestQueryMode(t *testing.T) {
+	t.Run("GetQueryMode returns mode when set", func(t *testing.T) {
 		kvs := []*commonpb.KeyValuePair{
-			{Key: BigTopKOptimizationEnabledKey, Value: "true"},
+			{Key: QueryModeKey, Value: "large_topk"},
 		}
-		enabled, err := IsBigTopKOptimizationEnabled(kvs...)
-		assert.NoError(t, err)
-		assert.True(t, enabled)
+		assert.Equal(t, QueryModeLargeTopK, GetQueryMode(kvs...))
 	})
 
-	t.Run("returns false when disabled", func(t *testing.T) {
+	t.Run("GetQueryMode case insensitive", func(t *testing.T) {
 		kvs := []*commonpb.KeyValuePair{
-			{Key: BigTopKOptimizationEnabledKey, Value: "false"},
+			{Key: QueryModeKey, Value: "Large_TopK"},
 		}
-		enabled, err := IsBigTopKOptimizationEnabled(kvs...)
-		assert.NoError(t, err)
-		assert.False(t, enabled)
+		assert.Equal(t, QueryModeLargeTopK, GetQueryMode(kvs...))
 	})
 
-	t.Run("returns false when not present", func(t *testing.T) {
+	t.Run("GetQueryMode returns empty when not present", func(t *testing.T) {
 		kvs := []*commonpb.KeyValuePair{
-			{Key: "other.key", Value: "true"},
+			{Key: "other.key", Value: "large_topk"},
 		}
-		enabled, err := IsBigTopKOptimizationEnabled(kvs...)
-		assert.NoError(t, err)
-		assert.False(t, enabled)
+		assert.Equal(t, "", GetQueryMode(kvs...))
 	})
 
-	t.Run("returns false for empty kvs", func(t *testing.T) {
-		enabled, err := IsBigTopKOptimizationEnabled()
-		assert.NoError(t, err)
-		assert.False(t, enabled)
+	t.Run("GetQueryMode returns empty for no kvs", func(t *testing.T) {
+		assert.Equal(t, "", GetQueryMode())
 	})
 
-	t.Run("returns false for invalid value", func(t *testing.T) {
+	t.Run("IsQueryModeLargeTopK returns true", func(t *testing.T) {
 		kvs := []*commonpb.KeyValuePair{
-			{Key: BigTopKOptimizationEnabledKey, Value: "invalid"},
+			{Key: QueryModeKey, Value: "large_topk"},
 		}
-		enabled, err := IsBigTopKOptimizationEnabled(kvs...)
-		assert.Error(t, err)
-		assert.False(t, enabled)
+		assert.True(t, IsQueryModeLargeTopK(kvs...))
 	})
+
+	t.Run("IsQueryModeLargeTopK returns false when not set", func(t *testing.T) {
+		assert.False(t, IsQueryModeLargeTopK())
+	})
+
+	t.Run("ValidateQueryMode accepts large_topk", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: QueryModeKey, Value: "large_topk"},
+		}
+		assert.NoError(t, ValidateQueryMode(kvs...))
+	})
+
+	t.Run("ValidateQueryMode accepts missing key", func(t *testing.T) {
+		assert.NoError(t, ValidateQueryMode())
+	})
+
+	t.Run("ValidateQueryMode rejects invalid value", func(t *testing.T) {
+		kvs := []*commonpb.KeyValuePair{
+			{Key: QueryModeKey, Value: "invalid"},
+		}
+		assert.Error(t, ValidateQueryMode(kvs...))
+	})
+}
+
+func TestClampScalarIndexVersion(t *testing.T) {
+	max := MaximumScalarIndexEngineVersion
+
+	// Values at or below maximum pass through unchanged
+	assert.Equal(t, int32(0), ClampScalarIndexVersion(0))
+	assert.Equal(t, int32(1), ClampScalarIndexVersion(1))
+	assert.Equal(t, max, ClampScalarIndexVersion(max))
+
+	// Values above maximum are clamped
+	assert.Equal(t, max, ClampScalarIndexVersion(max+1))
+	assert.Equal(t, max, ClampScalarIndexVersion(max+100))
 }
 
 func TestWKTWKBConversion(t *testing.T) {

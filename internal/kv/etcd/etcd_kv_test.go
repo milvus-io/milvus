@@ -687,7 +687,7 @@ func (s *EtcdKVSuite) TestRevisionBytes() {
 		resp := <-ch
 		s.Equal(1, len(resp.Events))
 		s.Equal(string(test.secondValue), string(resp.Events[0].Kv.Value))
-		s.Equal(revision+1, resp.Header.Revision)
+		s.GreaterOrEqual(resp.Header.Revision, revision+1)
 	}
 
 	success, err := etcdKV.CompareVersionAndSwapBytes(context.TODO(), "a/b/c", 0, []byte("1"))

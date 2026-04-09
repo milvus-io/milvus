@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -61,6 +62,7 @@ type nodeDef struct {
 
 type Node struct {
 	name    string
+	opName  string
 	inputs  []string
 	outputs []string
 
@@ -140,6 +142,7 @@ var opFactory = map[string]func(t *searchTask, params map[string]any) (operator,
 func NewNode(info *nodeDef, t *searchTask) (*Node, error) {
 	n := Node{
 		name:    info.name,
+		opName:  info.opName,
 		inputs:  info.inputs,
 		outputs: info.outputs,
 	}
@@ -236,6 +239,7 @@ func (op *hybridSearchReduceOperator) run(ctx context.Context, span trace.Span, 
 				NumQueries:     subResult.GetNumQueries(),
 				TopK:           subResult.GetTopK(),
 				SlicedBlob:     subResult.GetSlicedBlob(),
+				ResultData:     subResult.GetResultData(),
 				SlicedNumCount: subResult.GetSlicedNumCount(),
 				SlicedOffset:   subResult.GetSlicedOffset(),
 				IsAdvanced:     false,
@@ -435,6 +439,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 			ReqID:            paramtable.GetNodeID(),
 			PartitionIDs:     op.partitionIDs, // use search partitionIDs
 			ConsistencyLevel: op.consistencyLevel,
+			QueryLabel:       metrics.ReQueryLabel,
 		},
 		request:        queryReq,
 		plan:           plan,
@@ -1561,8 +1566,9 @@ func mergeIDsFunc(ctx context.Context, span trace.Span, inputs ...any) ([]any, e
 }
 
 type pipeline struct {
-	name  string
-	nodes []*Node
+	name         string
+	nodes        []*Node
+	traceEnabled bool
 }
 
 func newPipeline(pipeDef *pipelineDef, t *searchTask) (*pipeline, error) {
@@ -1574,7 +1580,7 @@ func newPipeline(pipeDef *pipelineDef, t *searchTask) (*pipeline, error) {
 		}
 		nodes[i] = node
 	}
-	return &pipeline{name: pipeDef.name, nodes: nodes}, nil
+	return &pipeline{name: pipeDef.name, nodes: nodes, traceEnabled: t.traceEnabled}, nil
 }
 
 func (p *pipeline) AddNodes(t *searchTask, nodes ...*nodeDef) error {
@@ -1589,7 +1595,8 @@ func (p *pipeline) AddNodes(t *searchTask, nodes ...*nodeDef) error {
 }
 
 func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*internalpb.SearchResults, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {
-	log.Ctx(ctx).Debug("SearchPipeline run", zap.String("pipeline", p.name))
+	log.Ctx(ctx).Debug("SearchPipeline run", zap.Stringer("pipeline", p))
+	pTrace := newPipelineTrace(p.traceEnabled)
 	msg := opMsg{}
 	msg[pipelineInput] = toReduceResults
 	msg[pipelineStorageCost] = storageCost
@@ -1601,7 +1608,9 @@ func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*
 			log.Ctx(ctx).Error("Run node failed: ", zap.String("err", err.Error()))
 			return nil, storageCost, err
 		}
+		pTrace.TraceMsg(node.opName, msg)
 	}
+	pTrace.LogIfEnabled(ctx, p.name)
 	return msg[pipelineOutput].(*milvuspb.SearchResults), msg[pipelineStorageCost].(segcore.StorageCost), nil
 }
 
@@ -2007,12 +2016,7 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 			},
 			opName: lambdaOp,
 		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result", "reduced"},
-			outputs: []string{pipelineOutput},
-			opName:  endOp,
-		},
+		// endOp node is appended by newSearchPipeline; do not add one here.
 	},
 }
 

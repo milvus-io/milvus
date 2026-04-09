@@ -77,6 +77,42 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// Helper function to validate resource groups
+func (c *Core) validateResourceGroups(ctx context.Context, properties []*commonpb.KeyValuePair, level string) error {
+	var rgs []string
+	var err error
+
+	if level == "database" {
+		rgs, err = common.DatabaseLevelResourceGroups(properties)
+	} else if level == "collection" {
+		rgs, err = common.CollectionLevelResourceGroups(properties)
+	} else {
+		return fmt.Errorf("invalid level %s for resource group validation", level)
+	}
+
+	if err != nil || len(rgs) == 0 {
+		// If the property is not found or empty, it's valid (no changes or removed)
+		return nil
+	}
+
+	resp, err := c.broker.ShowResourceGroups(ctx)
+	if err != nil {
+		return err
+	}
+
+	existingRGs := make(map[string]bool)
+	for _, rg := range resp {
+		existingRGs[rg] = true
+	}
+
+	for _, rg := range rgs {
+		if !existingRGs[rg] {
+			return merr.WrapErrResourceGroupNotFound(rg)
+		}
+	}
+	return nil
+}
+
 // UniqueID is an alias of typeutil.UniqueID.
 type UniqueID = typeutil.UniqueID
 
@@ -988,6 +1024,37 @@ func (c *Core) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectio
 	return merr.Success(), nil
 }
 
+func (c *Core) AlterCollectionSchema(ctx context.Context, in *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionSchema", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("AlterCollectionSchema")
+
+	log := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("collectionName", in.GetCollectionName()))
+	log.Info("received request to add function field")
+
+	if err := c.broadcastAlterCollectionSchema(ctx, in); err != nil {
+		log.Info("failed to add function field", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionSchema", metrics.FailLabel).Inc()
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionSchema", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollectionSchema").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Info("done to alter collection schema")
+	return &milvuspb.AlterCollectionSchemaResponse{
+		AlterStatus: merr.Success(),
+	}, nil
+}
+
 // DropCollection drop collection
 func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
@@ -1088,7 +1155,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("HasCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("HasCollection").Observe(float64(t.queueDur.Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("HasCollection").Observe(float64(t.queueDur.Microseconds()) / 1000.0)
 
 	return t.Rsp, nil
 }
@@ -1136,6 +1203,8 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		ExternalSource:     collInfo.ExternalSource,
 		ExternalSpec:       collInfo.ExternalSpec,
 		DbName:             dbName, // Use dbName parameter for consistency with resp.DbName
+		Version:            collInfo.SchemaVersion,
+		DoPhysicalBackfill: collInfo.DoPhysicalBackfill,
 	}
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
@@ -1204,7 +1273,7 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DescribeCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DescribeCollection").Observe(float64(t.queueDur.Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("DescribeCollection").Observe(float64(t.queueDur.Microseconds()) / 1000.0)
 
 	return t.Rsp, nil
 }
@@ -1263,7 +1332,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowCollections").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowCollections").Observe(float64(t.queueDur.Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowCollections").Observe(float64(t.queueDur.Microseconds()) / 1000.0)
 
 	return t.Rsp, nil
 }
@@ -1352,6 +1421,12 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 		zap.Strings("deleteKeys", in.DeleteKeys),
 	)
 	log.Info("received request to alter collection")
+
+	if err := c.validateResourceGroups(ctx, in.GetProperties(), "collection"); err != nil {
+		log.Warn("failed to validate resource groups", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
 
 	if err := c.broadcastAlterCollectionForAlterCollection(ctx, in); err != nil {
 		if errors.Is(err, errIgnoredAlterCollection) {
@@ -1498,29 +1573,6 @@ func (c *Core) AlterCollectionField(ctx context.Context, in *milvuspb.AlterColle
 	return merr.Success(), nil
 }
 
-func (c *Core) AlterCollectionSchema(ctx context.Context, in *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &milvuspb.AlterCollectionSchemaResponse{}, nil
-	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionSchema", metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder("AlterCollectionSchema")
-
-	log := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
-		zap.String("dbName", in.GetDbName()),
-		zap.String("collectionName", in.GetCollectionName()),
-	)
-	log.Info("received request to alter collection schema")
-
-	// AlterCollectionSchema is currently a placeholder implementation
-	// The actual logic should handle schema alterations similar to AlterCollection
-	// For now, return success to satisfy the interface
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionSchema", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollectionSchema").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	log.Info("done to alter collection schema")
-	return &milvuspb.AlterCollectionSchemaResponse{}, nil
-}
-
 func (c *Core) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -1535,6 +1587,12 @@ func (c *Core) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseR
 		zap.Any("props", in.Properties),
 		zap.Strings("deleteKeys", in.DeleteKeys))
 	log.Info("received request to alter database")
+
+	if err := c.validateResourceGroups(ctx, in.GetProperties(), "database"); err != nil {
+		log.Warn("failed to validate resource groups", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
 
 	if err := c.broadcastAlterDatabase(ctx, in); err != nil {
 		if errors.Is(err, errIgnoredAlterDatabase) {
@@ -1656,7 +1714,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("HasPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("HasPartition").Observe(float64(t.queueDur.Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("HasPartition").Observe(float64(t.queueDur.Microseconds()) / 1000.0)
 
 	return t.Rsp, nil
 }
@@ -1703,7 +1761,7 @@ func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitio
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowPartitions").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowPartitions").Observe(float64(t.queueDur.Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("ShowPartitions").Observe(float64(t.queueDur.Microseconds()) / 1000.0)
 
 	return t.Rsp, nil
 }

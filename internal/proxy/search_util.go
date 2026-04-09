@@ -100,11 +100,27 @@ type OrderByField struct {
 }
 
 type SearchInfo struct {
-	planInfo      *planpb.QueryInfo
-	offset        int64
-	isIterator    bool
-	collectionID  int64
-	orderByFields []OrderByField
+	planInfo        *planpb.QueryInfo
+	offset          int64
+	isIterator      bool
+	collectionID    int64
+	orderByFields   []OrderByField
+	iterativeFilter bool
+}
+
+// DetermineSearchType classifies the search based on the parsed search info
+// and whether a filter expression is present. The caller supplies hasFilter
+// because the DSL/expression is not available inside parseSearchInfo.
+func (s *SearchInfo) DetermineSearchType(hasFilter bool) internalpb.SearchType {
+	isRangeSearch := strings.Contains(s.planInfo.GetSearchParams(), radiusKey)
+	hasGroupBy := s.planInfo.GetGroupByFieldId() > 0
+	if isRangeSearch || hasGroupBy || s.isIterator || s.iterativeFilter {
+		return internalpb.SearchType_DEFAULT
+	}
+	if hasFilter {
+		return internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER
+	}
+	return internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER
 }
 
 // parseOrderByFields parses the order_by_fields parameter from search params.
@@ -323,7 +339,7 @@ func isSortableFieldType(dataType schemapb.DataType) bool {
 	}
 }
 
-func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupByFieldId int64, isIterator bool, offset int64, queryTopK *int64, bigTopKEnabled bool) (*planpb.SearchIteratorV2Info, error) {
+func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupByFieldId int64, isIterator bool, offset int64, queryTopK *int64, largeTopKEnabled bool) (*planpb.SearchIteratorV2Info, error) {
 	isIteratorV2Str, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterV2Key, searchParamsPair)
 	isIteratorV2, _ := strconv.ParseBool(isIteratorV2Str)
 	if !isIteratorV2 {
@@ -373,7 +389,7 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 		return nil, fmt.Errorf("batch size is invalid, %w", err)
 	}
 	// use the same validation logic as topk
-	if err := validateLimit(batchSize, bigTopKEnabled); err != nil {
+	if err := validateLimit(batchSize, largeTopKEnabled); err != nil {
 		return nil, fmt.Errorf("batch size is invalid, %w", err)
 	}
 	*queryTopK = batchSize // for compatibility
@@ -399,7 +415,7 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 }
 
 // parseSearchInfo returns QueryInfo and offset
-func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams, bigTopKEnabled bool) (*SearchInfo, error) {
+func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, rankParams *rankParams, largeTopKEnabled bool) (*SearchInfo, error) {
 	var topK int64
 	isAdvanced := rankParams != nil
 	externalLimit := rankParams.GetLimit() + rankParams.GetOffset()
@@ -427,12 +443,12 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	collectionIDStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(CollectionID, searchParamsPair)
 	collectionId, _ := strconv.ParseInt(collectionIDStr, 0, 64)
 
-	if err := validateLimit(topK, bigTopKEnabled); err != nil {
+	if err := validateLimit(topK, largeTopKEnabled); err != nil {
 		if isIterator {
 			// 1. if the request is from iterator, we set topK to QuotaLimit as the iterator can resolve too large topK problem
 			// 2. GetAsInt64 has cached inside, no need to worry about cpu cost for parsing here
-			if bigTopKEnabled {
-				topK = Params.QuotaConfig.BigTopKLimit.GetAsInt64()
+			if largeTopKEnabled {
+				topK = Params.QuotaConfig.LargeTopKLimit.GetAsInt64()
 			} else {
 				topK = Params.QuotaConfig.TopKLimit.GetAsInt64()
 			}
@@ -452,7 +468,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			}
 
 			if offset != 0 {
-				if err := validateLimit(offset, bigTopKEnabled); err != nil {
+				if err := validateLimit(offset, largeTopKEnabled); err != nil {
 					return nil, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
 				}
 			}
@@ -460,7 +476,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	}
 
 	queryTopK := topK + offset
-	if err := validateLimit(queryTopK, bigTopKEnabled); err != nil {
+	if err := validateLimit(queryTopK, largeTopKEnabled); err != nil {
 		return nil, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
 	}
 
@@ -502,6 +518,8 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	var jsonPath string
 	var jsonType schemapb.DataType
 	var strictCast bool
+	var isRangeSearch bool
+	var isIterativeFilter bool
 	if isAdvanced {
 		groupByFieldId, groupSize, strictGroupSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupSize(), rankParams.GetStrictGroupSize()
 	} else {
@@ -524,12 +542,15 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do groupBy when doing iteration")
 	}
-	if strings.Contains(searchParamStr, radiusKey) && groupByFieldId > 0 {
+
+	isRangeSearch = strings.Contains(searchParamStr, radiusKey)
+	isIterativeFilter = (hints == iterativeFilterKey) || strings.Contains(searchParamStr, iterativeFilterKey)
+	if isRangeSearch && groupByFieldId > 0 {
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do range-search when doing search-group-by")
 	}
 
-	planSearchIteratorV2Info, err := parseSearchIteratorV2Info(searchParamsPair, groupByFieldId, isIterator, offset, &queryTopK, bigTopKEnabled)
+	planSearchIteratorV2Info, err := parseSearchIteratorV2Info(searchParamsPair, groupByFieldId, isIterator, offset, &queryTopK, largeTopKEnabled)
 	if err != nil {
 		return nil, fmt.Errorf("parse iterator v2 info failed: %w", err)
 	}
@@ -539,12 +560,15 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	if annsFieldName != "" {
 		annField := typeutil.GetFieldByName(schema, annsFieldName)
 		if annField != nil && annField.GetDataType() == schemapb.DataType_ArrayOfVector {
-			if strings.Contains(searchParamStr, radiusKey) {
+			if isRangeSearch {
 				return nil, merr.WrapErrParameterInvalid("", "",
 					"range search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
 			}
 
-			if groupByFieldId > 0 {
+			// For hybrid search (rankInfo != nil), group by on vector array is not supported.
+			// For simple search, group by validation is handled in initSearchRequest()
+			// where placeholder type is available to distinguish element-level vs embedding list.
+			if groupByFieldId > 0 && rankParams != nil {
 				return nil, merr.WrapErrParameterInvalid("", "",
 					"group by search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
 			}
@@ -583,10 +607,11 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			JsonType:             jsonType,
 			StrictCast:           strictCast,
 		},
-		offset:        offset,
-		isIterator:    isIterator,
-		collectionID:  collectionId,
-		orderByFields: orderByFields,
+		offset:          offset,
+		isIterator:      isIterator,
+		collectionID:    collectionId,
+		orderByFields:   orderByFields,
+		iterativeFilter: isIterativeFilter,
 	}, nil
 }
 
@@ -883,7 +908,7 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 }
 
 // parseRankParams get limit and offset from rankParams, both are optional.
-func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, bigTopKEnabled bool) (*rankParams, error) {
+func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, largeTopKEnabled bool) (*rankParams, error) {
 	var (
 		limit        int64
 		offset       int64
@@ -909,7 +934,7 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 	}
 
 	// validate max result window.
-	if err = validateMaxQueryResultWindow(offset, limit, bigTopKEnabled); err != nil {
+	if err = validateMaxQueryResultWindow(offset, limit, largeTopKEnabled); err != nil {
 		return nil, fmt.Errorf("invalid max query result window, %w", err)
 	}
 

@@ -499,14 +499,14 @@ func TestBuildIndexInfoFromSource(t *testing.T) {
 		indexInfos, textIndexInfos, jsonKeyIndexInfos, err := buildIndexInfoFromSource(source, target, mappings)
 		assert.NoError(t, err)
 
-		// Verify vector/scalar index info
+		// Verify vector/scalar index info (keyed by buildID, not fieldID)
 		assert.Equal(t, 1, len(indexInfos))
-		assert.NotNil(t, indexInfos[100])
-		assert.Equal(t, int64(100), indexInfos[100].FieldId)
-		assert.Equal(t, int64(1001), indexInfos[100].IndexId)
-		assert.Equal(t, int64(1002), indexInfos[100].BuildId)
-		assert.Equal(t, int64(5000), indexInfos[100].IndexSize)
-		assert.Equal(t, "files/index_files/1002/1/555/666/index1", indexInfos[100].IndexFilePaths[0])
+		assert.NotNil(t, indexInfos[1002])
+		assert.Equal(t, int64(100), indexInfos[1002].FieldId)
+		assert.Equal(t, int64(1001), indexInfos[1002].IndexId)
+		assert.Equal(t, int64(1002), indexInfos[1002].BuildId)
+		assert.Equal(t, int64(5000), indexInfos[1002].IndexSize)
+		assert.Equal(t, "files/index_files/1002/1/555/666/index1", indexInfos[1002].IndexFilePaths[0])
 
 		// Verify text index info
 		assert.Equal(t, 1, len(textIndexInfos))
@@ -803,6 +803,70 @@ func TestGenerateSegmentInfoFromSource_EmptySource(t *testing.T) {
 	assert.Equal(t, 0, len(segmentInfo.Statslogs))
 	assert.Equal(t, 0, len(segmentInfo.Deltalogs))
 	assert.Equal(t, 0, len(segmentInfo.Bm25Logs))
+}
+
+// TestBuildIndexInfoFromSource_MultipleIndexesPerField verifies that multiple indexes
+// on the same field (e.g., JSON path indexes) are all preserved in the result map.
+// This is the core scenario for the fix: using buildID as map key instead of fieldID.
+func TestBuildIndexInfoFromSource_MultipleIndexesPerField(t *testing.T) {
+	source := &datapb.CopySegmentSource{
+		CollectionId: 111,
+		PartitionId:  222,
+		SegmentId:    333,
+		IndexFiles: []*indexpb.IndexFilePathInfo{
+			{
+				FieldID:        100, // Same field
+				IndexID:        1001,
+				BuildID:        2001,
+				IndexName:      "idx_category",
+				IndexFilePaths: []string{"files/index_files/2001/1/222/333/index1"},
+				SerializedSize: 3000,
+			},
+			{
+				FieldID:        100, // Same field, different path index
+				IndexID:        1002,
+				BuildID:        2002,
+				IndexName:      "idx_price",
+				IndexFilePaths: []string{"files/index_files/2002/1/222/333/index2"},
+				SerializedSize: 4000,
+			},
+		},
+	}
+
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+		NewBuildIds: map[int64]int64{
+			2001: 3001, // old buildID -> new buildID
+			2002: 3002,
+		},
+	}
+
+	mappings := map[string]string{
+		"files/index_files/2001/1/222/333/index1": "files/index_files/3001/1/555/666/index1",
+		"files/index_files/2002/1/222/333/index2": "files/index_files/3002/1/555/666/index2",
+	}
+
+	indexInfos, _, _, err := buildIndexInfoFromSource(source, target, mappings)
+	assert.NoError(t, err)
+
+	// Both indexes should be present (keyed by new buildID)
+	assert.Equal(t, 2, len(indexInfos), "Both JSON path indexes should be in the result")
+
+	// Verify first index (idx_category)
+	assert.NotNil(t, indexInfos[3001])
+	assert.Equal(t, int64(100), indexInfos[3001].FieldId)
+	assert.Equal(t, int64(1001), indexInfos[3001].IndexId)
+	assert.Equal(t, int64(3001), indexInfos[3001].BuildId)
+	assert.Equal(t, "idx_category", indexInfos[3001].IndexName)
+
+	// Verify second index (idx_price)
+	assert.NotNil(t, indexInfos[3002])
+	assert.Equal(t, int64(100), indexInfos[3002].FieldId)
+	assert.Equal(t, int64(1002), indexInfos[3002].IndexId)
+	assert.Equal(t, int64(3002), indexInfos[3002].BuildId)
+	assert.Equal(t, "idx_price", indexInfos[3002].IndexName)
 }
 
 func TestBuildIndexInfoFromSource_EmptySource(t *testing.T) {
@@ -1706,4 +1770,101 @@ func TestListAllFiles(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, files)
 	})
+}
+
+// TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats verifies that V3 segments
+// with text index and JSON key stats succeed during copy. Before the fix, V3
+// segments had wrong-format paths in TextIndexFiles/JsonKeyIndexFiles (etcd
+// metadata), causing "no mapping found" errors during buildIndexInfoFromSource.
+// The fix skips pb path extraction for V3 (files already copied via manifest
+// basePath/_stats/) and passes metadata as placeholders.
+func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("files/insert_log/111/222/333", 2)
+
+	source := &datapb.CopySegmentSource{
+		CollectionId:   111,
+		PartitionId:    222,
+		SegmentId:      333,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   manifestPath,
+		InsertBinlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{
+					{EntriesNum: 500, LogPath: "files/insert_log/111/222/333/100/10001", LogSize: 1024},
+				},
+			},
+		},
+		// Text index with relative paths (as stored in etcd after dual-write fix)
+		TextIndexFiles: map[int64]*datapb.TextIndexStats{
+			101: {
+				FieldID: 101,
+				BuildID: 7000,
+				Version: 1,
+				Files:   []string{"tokenizer.json", "index.data"},
+			},
+		},
+		// JSON key stats with relative paths (as stored in etcd after dual-write fix)
+		JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
+			102: {
+				FieldID:                102,
+				BuildID:                8000,
+				Version:                1,
+				Files:                  []string{"shared_key_index/.managed.json_0", "shared_key_index/.managed.json_1"},
+				JsonKeyStatsDataFormat: 3,
+			},
+		},
+	}
+
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 444,
+		PartitionId:  555,
+		SegmentId:    666,
+		NewBuildIds:  map[int64]int64{7000: 7777, 8000: 9000},
+	}
+
+	mList := mockey.Mock(listAllFiles).To(func(_ context.Context, _ storage.ChunkManager, basePath string) ([]string, error) {
+		// Simulate listing all files under basePath including _stats/
+		return []string{
+			"files/insert_log/111/222/333/_data/0",
+			"files/insert_log/111/222/333/_metadata/manifest.json",
+			"files/insert_log/111/222/333/_stats/text_index.101/tokenizer.json",
+			"files/insert_log/111/222/333/_stats/text_index.101/index.data",
+			"files/insert_log/111/222/333/_stats/json_key_index.102/shared_key_index/.managed.json_0",
+			"files/insert_log/111/222/333/_stats/json_key_index.102/shared_key_index/.managed.json_1",
+		}, nil
+	}).Build()
+	defer mList.UnPatch()
+
+	mCopy := mockey.Mock(copyFile).Return(nil).Build()
+	defer mCopy.UnPatch()
+
+	cm := &struct{ storage.ChunkManager }{}
+	result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, int64(666), result.SegmentId)
+
+	// Verify text index metadata is passed through as placeholder
+	assert.Len(t, result.TextIndexInfos, 1)
+	assert.Contains(t, result.TextIndexInfos, int64(101))
+	// Files are passed through as-is (placeholder, not mapped)
+	assert.Equal(t, []string{"tokenizer.json", "index.data"}, result.TextIndexInfos[101].GetFiles())
+	assert.Equal(t, int64(7777), result.TextIndexInfos[101].GetBuildID(), "text index buildID should be remapped")
+
+	// Verify JSON key stats metadata is passed through as placeholder with new buildID
+	assert.Len(t, result.JsonKeyIndexInfos, 1)
+	assert.Contains(t, result.JsonKeyIndexInfos, int64(102))
+	assert.Equal(t, int64(9000), result.JsonKeyIndexInfos[102].GetBuildID(), "buildID should be remapped")
+	// Files are passed through as-is (placeholder, not mapped)
+	assert.Equal(t, []string{"shared_key_index/.managed.json_0", "shared_key_index/.managed.json_1"},
+		result.JsonKeyIndexInfos[102].GetFiles())
+
+	// Verify manifest path is transformed
+	expectedManifestPath := packed.MarshalManifestPath("files/insert_log/444/555/666", 2)
+	assert.Equal(t, expectedManifestPath, result.ManifestPath)
+
+	// Verify _stats files are included in the copy (from listAllFiles, part of InsertBinlogs)
+	assert.True(t, len(copiedFiles) >= 6, "should copy all files including _stats/")
 }

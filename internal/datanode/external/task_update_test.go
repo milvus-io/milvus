@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -195,6 +196,8 @@ func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_SingleFragment(
 	s.NoError(err)
 	s.Len(result, 1)
 	s.Equal(int64(500), result[0].GetNumOfRows())
+	s.Equal(int64(storage.StorageV3), result[0].GetStorageVersion(),
+		"external segments should have StorageVersion=V3")
 }
 
 func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_MultipleFragments() {
@@ -229,6 +232,12 @@ func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_MultipleFragmen
 
 	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
 	s.NoError(err)
+
+	// Verify all segments have StorageVersion=V3
+	for i, seg := range result {
+		s.Equal(int64(storage.StorageV3), seg.GetStorageVersion(),
+			"segment %d should have StorageVersion=V3", i)
+	}
 
 	// Verify total rows are preserved
 	var totalRows int64
@@ -840,15 +849,15 @@ func (s *UpdateExternalTaskSuite) TestParseExternalSpec() {
 	s.NoError(err)
 	s.Equal("parquet", spec.Format)
 
-	// Explicit format
-	spec, err = ParseExternalSpec(`{"format":"csv"}`)
+	// Lance-table format
+	spec, err = ParseExternalSpec(`{"format":"lance-table"}`)
 	s.NoError(err)
-	s.Equal("csv", spec.Format)
+	s.Equal("lance-table", spec.Format)
 
-	// JSON format
-	spec, err = ParseExternalSpec(`{"format":"json"}`)
+	// Vortex format
+	spec, err = ParseExternalSpec(`{"format":"vortex"}`)
 	s.NoError(err)
-	s.Equal("json", spec.Format)
+	s.Equal("vortex", spec.Format)
 
 	// Missing format defaults to parquet
 	spec, err = ParseExternalSpec(`{}`)

@@ -16,6 +16,75 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+func mkColumnInfo(isPK bool) *planpb.ColumnInfo {
+	return &planpb.ColumnInfo{IsPrimaryKey: isPK, DataType: schemapb.DataType_Int64}
+}
+
+func mkTermExpr(isPK bool) *planpb.Expr {
+	return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: &planpb.TermExpr{
+		ColumnInfo: mkColumnInfo(isPK),
+		Values:     []*planpb.GenericValue{{Val: &planpb.GenericValue_Int64Val{Int64Val: 1}}},
+	}}}
+}
+
+func mkUnaryRangeExpr(isPK bool) *planpb.Expr {
+	return &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+		ColumnInfo: mkColumnInfo(isPK),
+		Op:         planpb.OpType_Equal,
+		Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 5}},
+	}}}
+}
+
+func mkBinaryRangeExpr(isPK bool) *planpb.Expr {
+	return &planpb.Expr{Expr: &planpb.Expr_BinaryRangeExpr{BinaryRangeExpr: &planpb.BinaryRangeExpr{
+		ColumnInfo:     mkColumnInfo(isPK),
+		LowerValue:     &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 1}},
+		UpperValue:     &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 10}},
+		LowerInclusive: true,
+		UpperInclusive: false,
+	}}}
+}
+
+func mkBinaryExpr(op planpb.BinaryExpr_BinaryOp, left, right *planpb.Expr) *planpb.Expr {
+	return &planpb.Expr{Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{
+		Op: op, Left: left, Right: right,
+	}}}
+}
+
+func mkUnaryExpr(child *planpb.Expr) *planpb.Expr {
+	return &planpb.Expr{Expr: &planpb.Expr_UnaryExpr{UnaryExpr: &planpb.UnaryExpr{
+		Op:    planpb.UnaryExpr_Not,
+		Child: child,
+	}}}
+}
+
+func TestHasOptimizablePkPredicate(t *testing.T) {
+	tests := []struct {
+		name   string
+		expr   *planpb.Expr
+		expect bool
+	}{
+		{"nil", nil, false},
+		{"term on pk", mkTermExpr(true), true},
+		{"term on non-pk", mkTermExpr(false), false},
+		{"unary range on pk", mkUnaryRangeExpr(true), true},
+		{"unary range on non-pk", mkUnaryRangeExpr(false), false},
+		{"binary range on pk", mkBinaryRangeExpr(true), true},
+		{"binary range on non-pk", mkBinaryRangeExpr(false), false},
+		{"AND: pk left, non-pk right", mkBinaryExpr(planpb.BinaryExpr_LogicalAnd, mkTermExpr(true), mkTermExpr(false)), true},
+		{"AND: non-pk left, pk right", mkBinaryExpr(planpb.BinaryExpr_LogicalAnd, mkTermExpr(false), mkTermExpr(true)), true},
+		{"AND: neither pk", mkBinaryExpr(planpb.BinaryExpr_LogicalAnd, mkTermExpr(false), mkTermExpr(false)), false},
+		{"OR: both pk", mkBinaryExpr(planpb.BinaryExpr_LogicalOr, mkTermExpr(true), mkTermExpr(true)), true},
+		{"OR: one non-pk", mkBinaryExpr(planpb.BinaryExpr_LogicalOr, mkTermExpr(true), mkTermExpr(false)), false},
+		{"NOT wrapping pk", mkUnaryExpr(mkTermExpr(true)), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expect, HasOptimizablePkPredicate(tc.expr))
+		})
+	}
+}
+
 func TestParsePartitionKeys(t *testing.T) {
 	prefix := "TestParsePartitionKeys"
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -79,7 +148,7 @@ func TestParsePartitionKeys(t *testing.T) {
 		},
 		{
 			name:                 "binary_expr_and with partition key in range",
-			expr:                 "partition_key_field in [7, 8] && partition_key_field > 9",
+			expr:                 "partition_key_field in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] && partition_key_field > 11",
 			expected:             0,
 			validPartitionKeys:   []int64{},
 			invalidPartitionKeys: []int64{},
@@ -249,17 +318,17 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 		},
 		{
 			name:                "partition key isolation term",
-			expr:                "key_field in [10]",
+			expr:                "key_field in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]",
 			expectedErrorString: "partition key isolation does not support IN",
 		},
 		{
 			name:                "partition key isolation term multiple",
-			expr:                "key_field in [10, 20]",
+			expr:                "key_field in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]",
 			expectedErrorString: "partition key isolation does not support IN",
 		},
 		{
 			name:                "partition key isolation NOT term",
-			expr:                "key_field not in [10]",
+			expr:                "key_field not in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]",
 			expectedErrorString: "partition key isolation does not support IN",
 		},
 		{
@@ -290,7 +359,7 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 		{
 			name:                "partition key isolation NOT equal",
 			expr:                "not(key_field == 10)",
-			expectedErrorString: "partition key isolation does not support NOT",
+			expectedErrorString: "partition key isolation does not support NotEqual",
 		},
 		{
 			name:                "partition key isolation equal AND with same field term",
@@ -300,32 +369,35 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 		{
 			name:                "partition key isolation equal OR with same field equal",
 			expr:                "key_field == 10 || key_field == 11",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "partition key isolation does not support",
 		},
 		{
 			name:                "partition key isolation equal OR with same field equal Reversed",
 			expr:                "key_field == 11 || key_field == 10",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "partition key isolation does not support",
 		},
 		{
 			name:                "partition key isolation equal OR with other field equal",
 			expr:                "key_field == 10 || varChar_field == 'a'",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "partition key isolation does not support",
 		},
 		{
 			name:                "partition key isolation equal OR with other field equal Reversed",
 			expr:                "varChar_field == 'a' || key_field == 10",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "partition key isolation does not support",
 		},
 		{
 			name:                "partition key isolation equal OR with other field equal",
 			expr:                "key_field == 10 || varChar_field == 'a'",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "partition key isolation does not support",
 		},
 		{
+			// Rewriter merges OR into IN, then AND+IN+Equal simplifies:
+			// key_field == 10 && key_field in [10, 11] → key_field == 10
+			// Final plan is just ==, so isolation validation passes.
 			name:                "partition key isolation equal AND",
 			expr:                "key_field == 10 && (key_field == 10 || key_field == 11)",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "",
 		},
 		{
 			name:                "partition key isolation other field equal",
@@ -340,7 +412,7 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 		{
 			name:                "partition key isolation complex OR",
 			expr:                "(key_field == 10 and int64_field == 11) or (key_field == 10 and varChar_field == 'a')",
-			expectedErrorString: "partition key isolation does not support OR",
+			expectedErrorString: "partition key isolation does not support",
 		},
 	}
 

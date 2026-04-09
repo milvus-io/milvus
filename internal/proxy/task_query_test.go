@@ -122,6 +122,7 @@ func TestQueryTask_all(t *testing.T) {
 		task := &queryTask{
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
+				QueryLabel: "query",
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: paramtable.GetNodeID(),
@@ -268,6 +269,7 @@ func TestQueryTask_all(t *testing.T) {
 		qt := &queryTask{
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
+				QueryLabel: "query",
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: paramtable.GetNodeID(),
@@ -319,6 +321,7 @@ func TestQueryTask_all(t *testing.T) {
 		qt = &queryTask{
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
+				QueryLabel: "query",
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: paramtable.GetNodeID(),
@@ -386,6 +389,7 @@ func TestQueryTask_all(t *testing.T) {
 			task := &queryTask{
 				Condition: NewTaskCondition(ctx),
 				RetrieveRequest: &internalpb.RetrieveRequest{
+					QueryLabel: "query",
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Retrieve,
 						SourceID: paramtable.GetNodeID(),
@@ -477,6 +481,92 @@ func TestQueryTask_all(t *testing.T) {
 			assert.Error(t, err, "non-aggregation with empty expr and no limit should fail")
 			assert.Contains(t, err.Error(), "empty expression should be used with limit")
 		}
+	})
+
+	t.Run("test order by without limit", func(t *testing.T) {
+		// ORDER BY without explicit limit should fail with an error
+		task := &queryTask{
+			Condition: NewTaskCondition(ctx),
+			RetrieveRequest: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Retrieve,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionID:   collectionID,
+				OutputFieldsId: make([]int64, len(fieldName2Types)),
+			},
+			ctx: ctx,
+			request: &milvuspb.QueryRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Retrieve,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionName: collectionName,
+				Expr:           expr,
+				QueryParams: []*commonpb.KeyValuePair{
+					{
+						Key:   IgnoreGrowingKey,
+						Value: "false",
+					},
+					{
+						Key:   OrderByFieldsKey,
+						Value: testInt64Field + ":asc",
+					},
+					// No limit specified
+				},
+			},
+			mixCoord:       qc,
+			lb:             lb,
+			shardclientMgr: mgr,
+		}
+		assert.NoError(t, task.OnEnqueue())
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ORDER BY requires explicit limit")
+	})
+
+	t.Run("test order by with limit succeeds", func(t *testing.T) {
+		// ORDER BY with explicit limit should pass the validation
+		task := &queryTask{
+			Condition: NewTaskCondition(ctx),
+			RetrieveRequest: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Retrieve,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionID:   collectionID,
+				OutputFieldsId: make([]int64, len(fieldName2Types)),
+			},
+			ctx: ctx,
+			request: &milvuspb.QueryRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Retrieve,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionName: collectionName,
+				Expr:           expr,
+				QueryParams: []*commonpb.KeyValuePair{
+					{
+						Key:   IgnoreGrowingKey,
+						Value: "false",
+					},
+					{
+						Key:   OrderByFieldsKey,
+						Value: testInt64Field + ":asc",
+					},
+					{
+						Key:   LimitKey,
+						Value: "10",
+					},
+				},
+			},
+			mixCoord:       qc,
+			lb:             lb,
+			shardclientMgr: mgr,
+		}
+		assert.NoError(t, task.OnEnqueue())
+		err := task.PreExecute(ctx)
+		assert.NoError(t, err)
 	})
 }
 

@@ -127,6 +127,7 @@ get_storage_config(const milvus::proto::indexcgo::StorageConfig& config) {
         std::string(config.gcpcredentialjson());
     storage_config.max_connections = config.max_connections();
     storage_config.tls_min_version = std::string(config.ssl_tls_min_version());
+    storage_config.use_crc32c_checksum = config.use_crc32c_checksum();
     return storage_config;
 }
 
@@ -198,6 +199,13 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     config[DIM_KEY] = info->dim();
     config[DATA_TYPE_KEY] = info->field_schema().data_type();
     config[ELEMENT_TYPE_KEY] = info->field_schema().element_type();
+    if (!info->stats_base_path().empty()) {
+        config[STATS_BASE_PATH_KEY] = info->stats_base_path();
+    }
+
+    if (!info->analyzer_extra_info().empty()) {
+        config["analyzer_extra_info"] = info->analyzer_extra_info();
+    }
 
     return config;
 }
@@ -268,6 +276,10 @@ CreateIndex(CIndex* res_index,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
+        if (!build_index_info->stats_base_path().empty()) {
+            fileManagerContext.set_stats_base_path(
+                build_index_info->stats_base_path());
+        }
         if (build_index_info->manifest() != "") {
             auto loon_properties = MakeInternalPropertiesFromStorageConfig(
                 ToCStorageConfig(storage_config));
@@ -374,6 +386,8 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
+        fileManagerContext.set_stats_base_path(
+            build_index_info->stats_base_path());
 
         if (build_index_info->manifest() != "") {
             auto loon_properties = MakeInternalPropertiesFromStorageConfig(
@@ -472,6 +486,8 @@ BuildTextIndex(ProtoLayoutInterface result,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
+        fileManagerContext.set_stats_base_path(
+            build_index_info->stats_base_path());
 
         if (build_index_info->manifest() != "") {
             auto loon_properties = MakeInternalPropertiesFromStorageConfig(

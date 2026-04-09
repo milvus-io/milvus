@@ -80,8 +80,9 @@ generateConfig(const StorageConfig& storage_config) {
 AwsChunkManager::AwsChunkManager(const StorageConfig& storage_config) {
     default_bucket_name_ = storage_config.bucket_name;
     remote_root_path_ = storage_config.root_path;
+    use_crc32c_checksum_ = storage_config.use_crc32c_checksum;
 
-    InitSDKAPIDefault(storage_config.log_level);
+    InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
     if (storage_config.useIAM) {
@@ -108,22 +109,27 @@ AwsChunkManager::AwsChunkManager(const StorageConfig& storage_config) {
 
     LOG_INFO(
         "init AwsChunkManager with "
-        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]",
+        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]"
+        "[tls_min_version={}]",
         storage_config.address,
         storage_config.bucket_name,
         storage_config.root_path,
-        storage_config.useSSL);
+        storage_config.useSSL,
+        storage_config.tls_min_version.empty()
+            ? "default"
+            : storage_config.tls_min_version);
 }
 
 GcpChunkManager::GcpChunkManager(const StorageConfig& storage_config) {
     default_bucket_name_ = storage_config.bucket_name;
     remote_root_path_ = storage_config.root_path;
+    use_crc32c_checksum_ = storage_config.use_crc32c_checksum;
 
     if (storage_config.useIAM) {
         ConfigureGoogleCloudIAMHttpClientFactory(sdk_options_);
     }
 
-    InitSDKAPIDefault(storage_config.log_level);
+    InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
     if (storage_config.useIAM) {
@@ -140,18 +146,23 @@ GcpChunkManager::GcpChunkManager(const StorageConfig& storage_config) {
 
     LOG_INFO(
         "init GcpChunkManager with "
-        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]",
+        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]"
+        "[tls_min_version={}]",
         storage_config.address,
         storage_config.bucket_name,
         storage_config.root_path,
-        storage_config.useSSL);
+        storage_config.useSSL,
+        storage_config.tls_min_version.empty()
+            ? "default"
+            : storage_config.tls_min_version);
 }
 
 AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
     default_bucket_name_ = storage_config.bucket_name;
     remote_root_path_ = storage_config.root_path;
+    use_crc32c_checksum_ = storage_config.use_crc32c_checksum;
 
-    InitSDKAPIDefault(storage_config.log_level);
+    InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
 
@@ -181,19 +192,24 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
 
     LOG_INFO(
         "init AliyunChunkManager with "
-        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]",
+        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]"
+        "[tls_min_version={}]",
         storage_config.address,
         storage_config.bucket_name,
         storage_config.root_path,
-        storage_config.useSSL);
+        storage_config.useSSL,
+        storage_config.tls_min_version.empty()
+            ? "default"
+            : storage_config.tls_min_version);
 }
 
 TencentCloudChunkManager::TencentCloudChunkManager(
     const StorageConfig& storage_config) {
     default_bucket_name_ = storage_config.bucket_name;
     remote_root_path_ = storage_config.root_path;
+    use_crc32c_checksum_ = storage_config.use_crc32c_checksum;
 
-    InitSDKAPIDefault(storage_config.log_level);
+    InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
 
@@ -223,18 +239,23 @@ TencentCloudChunkManager::TencentCloudChunkManager(
 
     LOG_INFO(
         "init TencentCloudChunkManager with "
-        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]",
+        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]"
+        "[tls_min_version={}]",
         storage_config.address,
         storage_config.bucket_name,
         storage_config.root_path,
-        storage_config.useSSL);
+        storage_config.useSSL,
+        storage_config.tls_min_version.empty()
+            ? "default"
+            : storage_config.tls_min_version);
 }
 
 HuaweiCloudChunkManager::HuaweiCloudChunkManager(
     const StorageConfig& storage_config) {
     default_bucket_name_ = storage_config.bucket_name;
     remote_root_path_ = storage_config.root_path;
-    InitSDKAPIDefault(storage_config.log_level);
+    use_crc32c_checksum_ = storage_config.use_crc32c_checksum;
+    InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
     StorageConfig mutable_config = storage_config;
     mutable_config.useVirtualHost = true;
@@ -262,11 +283,15 @@ HuaweiCloudChunkManager::HuaweiCloudChunkManager(
 
     LOG_INFO(
         "init HuaweiCloudChunkManager with "
-        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]",
+        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]"
+        "[tls_min_version={}]",
         storage_config.address,
         storage_config.bucket_name,
         storage_config.root_path,
-        storage_config.useSSL);
+        storage_config.useSSL,
+        storage_config.tls_min_version.empty()
+            ? "default"
+            : storage_config.tls_min_version);
 }
 
 std::shared_ptr<

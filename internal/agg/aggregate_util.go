@@ -496,7 +496,7 @@ func (aggMap *AggregationFieldMap) NameAt(idx int) string {
 	return aggMap.userOriginalOutputFields[idx]
 }
 
-func NewAggregationFieldMap(originalUserOutputFields []string, groupByFields []string, aggs []AggregateBase) *AggregationFieldMap {
+func NewAggregationFieldMap(originalUserOutputFields []string, groupByFields []string, aggs []AggregateBase) (*AggregationFieldMap, error) {
 	numGroupingKeys := len(groupByFields)
 
 	groupByFieldMap := make(map[string]int, len(groupByFields))
@@ -538,12 +538,27 @@ func NewAggregationFieldMap(originalUserOutputFields []string, groupByFields []s
 			// Aggregate field may map to multiple indices (for avg: sum and count)
 			userOriginalOutputFieldIdxes[i] = indices
 		} else {
-			// Field not found, set empty slice
-			userOriginalOutputFieldIdxes[i] = []int{}
+			// Field is neither a group_by field nor an aggregation — reject early.
+			// This covers two cases:
+			// 1. GROUP BY query: output_fields can only contain group_by columns or aggregation expressions
+			// 2. Global aggregation (no GROUP BY): output_fields can only contain aggregation expressions
+			//    (e.g., "SELECT count(*), int64 FROM t" is invalid SQL — cannot mix aggregates with raw columns)
+			if numGroupingKeys > 0 {
+				return nil, fmt.Errorf(
+					"output field '%s' is not allowed: when using GROUP BY, output_fields can only contain "+
+						"group_by fields (%v) or aggregation expressions",
+					outputField, groupByFields,
+				)
+			}
+			return nil, fmt.Errorf(
+				"output field '%s' is not allowed: when using aggregation functions (e.g., count(*)), "+
+					"output_fields can only contain aggregation expressions, not regular columns",
+				outputField,
+			)
 		}
 	}
 
-	return &AggregationFieldMap{originalUserOutputFields, userOriginalOutputFieldIdxes}
+	return &AggregationFieldMap{originalUserOutputFields, userOriginalOutputFieldIdxes}, nil
 }
 
 // ComputeAvgFromSumAndCount computes average from sum and count field data.

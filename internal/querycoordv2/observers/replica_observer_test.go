@@ -226,7 +226,7 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	b.EXPECT().GetAllStreamingNodes(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
+	b.EXPECT().GetAvailableStreamingNodes(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
 		pchans := []map[int64]*types.StreamingNodeInfo{
 			{
 				1: {ServerID: 1, Address: "localhost:1"},

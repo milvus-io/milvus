@@ -111,6 +111,7 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetImportProgress.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListImport.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAddCollectionField.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAlterCollectionSchema.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String()),
 		},
 		commonpb.ObjectType_Global.String(): {
@@ -343,6 +344,7 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeCreatePartition.String(),
 			commonpb.ObjectPrivilege_PrivilegeDropPartition.String(),
 			commonpb.ObjectPrivilege_PrivilegeAddCollectionField.String(),
+			commonpb.ObjectPrivilege_PrivilegeAlterCollectionSchema.String(),
 			commonpb.ObjectPrivilege_PrivilegeRefreshExternalCollection.String(),
 		})...,
 	)

@@ -61,7 +61,7 @@ func (s *CopySegmentCheckerSuite) SetupTest() {
 	s.catalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
@@ -81,7 +81,7 @@ func (s *CopySegmentCheckerSuite) SetupTest() {
 		Schema: newTestSchema(),
 	})
 
-	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil)
+	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil, nil)
 	s.NoError(err)
 
 	s.checker = NewCopySegmentChecker(

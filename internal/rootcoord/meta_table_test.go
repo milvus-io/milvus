@@ -621,6 +621,79 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
 		assert.Equal(t, Params.CommonCfg.DefaultPartitionName.GetValue(), coll.Partitions[0].PartitionName)
 	})
+
+	t.Run("UpdateTimestamp > ts triggers catalog fallback (time-travel correctness)", func(t *testing.T) {
+		// Regression test for the bug fix in getCollectionByIDInternal:
+		// cache invalidation was changed from CreateTime to UpdateTimestamp.
+		// Scenario: collection created at T=50, schema altered at T=100.
+		// A time-travel query at ts=80 (50 < 80 < 100) must NOT use the in-memory
+		// cache (which holds the post-alteration schema) — it must fall back to catalog.
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByID",
+			mock.Anything,
+			mock.Anything,
+			uint64(80),
+			int64(100),
+		).Return(&model.Collection{
+			State:           pb.CollectionState_CollectionCreated,
+			CreateTime:      50,
+			UpdateTimestamp: 100,
+			Partitions: []*model.Partition{
+				{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
+			},
+		}, nil)
+
+		meta := &MetaTable{
+			catalog: catalog,
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
+			},
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					State:           pb.CollectionState_CollectionCreated,
+					CreateTime:      50,
+					UpdateTimestamp: 100, // schema was altered at T=100
+					Partitions: []*model.Partition{
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
+					},
+				},
+			},
+		}
+		ctx := context.Background()
+
+		// ts=80 is between CreateTime(50) and UpdateTimestamp(100):
+		// UpdateTimestamp(100) > ts(80) → cache bypass → catalog must be called.
+		coll, err := meta.getCollectionByIDInternal(ctx, util.DefaultDBName, 100, 80, false)
+		assert.NoError(t, err)
+		assert.NotNil(t, coll)
+		catalog.AssertCalled(t, "GetCollectionByID", mock.Anything, mock.Anything, uint64(80), int64(100))
+	})
+
+	t.Run("UpdateTimestamp <= ts uses in-memory cache (no catalog call)", func(t *testing.T) {
+		// ts=150 >= UpdateTimestamp(100) → the in-memory cache is fresh enough → no catalog call.
+		catalog := mocks.NewRootCoordCatalog(t)
+		// No expectations set — testify mock will fail if GetCollectionByID is called.
+
+		meta := &MetaTable{
+			catalog: catalog,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					State:           pb.CollectionState_CollectionCreated,
+					CreateTime:      50,
+					UpdateTimestamp: 100,
+					Partitions: []*model.Partition{
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
+					},
+				},
+			},
+		}
+		ctx := context.Background()
+
+		coll, err := meta.getCollectionByIDInternal(ctx, "", 100, 150, false)
+		assert.NoError(t, err)
+		assert.NotNil(t, coll)
+		catalog.AssertNotCalled(t, "GetCollectionByID")
+	})
 }
 
 func TestMetaTable_GetCollectionByName(t *testing.T) {
@@ -1101,7 +1174,7 @@ func Test_filterUnavailable(t *testing.T) {
 		}
 		coll.Partitions = append(coll.Partitions, partition)
 	}
-	clone := filterUnavailable(coll)
+	clone := filterUnavailablePartition(coll)
 	assert.Equal(t, nAvailablePartition, len(clone.Partitions))
 	for _, p := range clone.Partitions {
 		assert.True(t, p.Available())

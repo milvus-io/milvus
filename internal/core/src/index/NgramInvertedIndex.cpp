@@ -207,9 +207,6 @@ NgramInvertedIndex::Serialize(const Config& config) {
 
 IndexStatsPtr
 NgramInvertedIndex::Upload(const Config& config) {
-    if (kScalarIndexUseV3) {
-        return UploadV3(config);
-    }
     finish();
     auto index_build_end = std::chrono::system_clock::now();
     auto index_build_duration =
@@ -301,10 +298,6 @@ NgramInvertedIndex::RetainTantivyIndexFiles(
 void
 NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
                          const Config& config) {
-    if (kScalarIndexUseV3) {
-        this->LoadV3(config);
-        return;
-    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
@@ -614,9 +607,8 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
                 break;
             }
             case proto::plan::OpType::Match: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(literal);
-                RegexMatcher matcher(regex_pattern);
+                // Use LikePatternMatcher optimized for LIKE patterns
+                LikePatternMatcher matcher(literal);
                 apply_predicate([&matcher, this](const milvus::Json& data) {
                     auto x =
                         data.template at<std::string_view>(this->nested_path_);
@@ -667,9 +659,8 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
                 break;
             }
             case proto::plan::OpType::Match: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(literal);
-                RegexMatcher matcher(regex_pattern);
+                // Use LikePatternMatcher optimized for LIKE patterns
+                LikePatternMatcher matcher(literal);
                 apply_predicate([&matcher](const std::string_view& data) {
                     return matcher(data);
                 });

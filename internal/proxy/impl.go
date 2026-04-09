@@ -30,6 +30,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -60,6 +61,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
@@ -965,6 +968,11 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 			"add field operation is not supported for external collection %s", request.GetCollectionName())), nil
 	}
 
+	// TODO(#48808): gate AddCollectionField against in-progress backfill once segment schema-version
+	// propagation for DoPhysicalBackfill=false DDLs is synchronous.  Currently the backfill
+	// policy updates segment schema versions on a tick, so a rapid second AddCollectionField
+	// can arrive before the tick fires and be incorrectly rejected by the gate.
+
 	task := &addCollectionFieldTask{
 		ctx:                       ctx,
 		Condition:                 NewTaskCondition(ctx),
@@ -1013,6 +1021,181 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return task.result, nil
+}
+
+func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollectionSchema")
+	defer sp.End()
+
+	dresp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: request.DbName, CollectionName: request.CollectionName})
+	if err := merr.CheckRPCCall(dresp, err); err != nil {
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+
+	// Check for external collection - alter collection schema is not supported
+	if typeutil.IsExternalCollection(dresp.GetSchema()) {
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg(
+				"alter collection schema operation is not supported for external collection %s", request.GetCollectionName())),
+		}, nil
+	}
+
+	// Prevent concurrent AlterCollectionSchema requests on the same collection from
+	// racing past the schema version consistency gate. Only one request per collection
+	// is allowed to proceed at a time; others are rejected immediately.
+	collKey := request.GetDbName() + "/" + request.GetCollectionName()
+	if _, loaded := node.alterSchemaInFlight.LoadOrStore(collKey, struct{}{}); loaded {
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg(
+				"another AlterCollectionSchema request is already in progress for collection %s", request.GetCollectionName())),
+		}, nil
+	}
+	defer node.alterSchemaInFlight.Delete(collKey)
+
+	// Check schema version consistency before proceeding with alter collection schema
+	if err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName); err != nil {
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+
+	task := &alterCollectionSchemaTask{
+		ctx:                          ctx,
+		Condition:                    NewTaskCondition(ctx),
+		AlterCollectionSchemaRequest: request,
+		mixCoord:                     node.mixCoord,
+		oldSchema:                    dresp.GetSchema(),
+	}
+	method := "AlterCollectionSchema"
+	tr := timerecord.NewTimeRecorder(method)
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
+	log.Info(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+
+	log.Info(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	if err := task.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", task.BeginTs()),
+			zap.Uint64("EndTs", task.EndTs()))
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+	log.Info(
+		rpcDone(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return task.AlterCollectionSchemaResponse, nil
+}
+
+// checkSchemaVersionConsistency checks if all segments have consistent schema version
+// Returns error if schema version consistency proportion is less than 100%
+func (node *Proxy) checkSchemaVersionConsistency(ctx context.Context, dbName, collectionName string) error {
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", dbName),
+		zap.String("collection", collectionName))
+
+	// Get collection statistics to check schema version consistency
+	statsResp, err := node.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{
+		Base:           commonpbutil.NewMsgBase(),
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	if err := merr.CheckRPCCall(statsResp, err); err != nil {
+		log.Warn("failed to get collection statistics for schema version consistency check", zap.Error(err))
+		return err
+	}
+
+	// Find schema_version_consistent_segments and schema_version_total_segments from Stats.
+	// DataCoord emits these two integer keys only when the collection's schema version > 0
+	// (i.e. AlterCollectionSchema has been called at least once).  Absent keys mean the
+	// schema version is still 0 — no function field has ever been added — so there is no
+	// in-flight backfill and no DDL can be racing with one.  This does NOT open a window
+	// for concurrent DDL to slip through: RootCoord serializes all schema-change DDLs through
+	// a single DDL queue, so a second AlterCollectionSchema call can only enter this check
+	// after the first has already bumped the schema version and DataCoord has started reporting
+	// the count keys.
+	//
+	// Integer counts are used instead of a floating-point proportion to avoid the rounding
+	// hazard where e.g. 99999/100000 = 99.999% would format as "100.00" with "%.2f" and
+	// falsely satisfy the 100% gate check.
+	consistentSegments := -1
+	totalSegments := -1
+	for _, stat := range statsResp.GetStats() {
+		switch stat.GetKey() {
+		case common.SchemaVersionConsistentSegmentsKey:
+			v, err := strconv.Atoi(stat.GetValue())
+			if err != nil || v < 0 {
+				log.Warn("failed to parse schema_version_consistent_segments",
+					zap.String("value", stat.GetValue()), zap.Error(err))
+				return merr.WrapErrParameterInvalidMsg(
+					"invalid schema_version_consistent_segments value: %s", stat.GetValue())
+			}
+			consistentSegments = v
+		case common.SchemaVersionTotalSegmentsKey:
+			v, err := strconv.Atoi(stat.GetValue())
+			if err != nil || v < 0 {
+				log.Warn("failed to parse schema_version_total_segments",
+					zap.String("value", stat.GetValue()), zap.Error(err))
+				return merr.WrapErrParameterInvalidMsg(
+					"invalid schema_version_total_segments value: %s", stat.GetValue())
+			}
+			totalSegments = v
+		}
+	}
+
+	log.Info("checked schema version consistency",
+		zap.Int("consistentSegments", consistentSegments),
+		zap.Int("totalSegments", totalSegments))
+
+	if consistentSegments < 0 && totalSegments < 0 {
+		// Both keys absent: schema version is 0, no backfill has ever been triggered.
+		return nil
+	}
+	if consistentSegments < 0 || totalSegments < 0 {
+		// Exactly one key present — should never happen since DataCoord emits both atomically.
+		// Treat as a data corruption signal and block the DDL rather than silently passing.
+		log.Warn("incomplete schema version consistency stats, blocking DDL",
+			zap.Int("consistentSegments", consistentSegments),
+			zap.Int("totalSegments", totalSegments))
+		return merr.WrapErrParameterInvalidMsg("incomplete schema version consistency stats from DataCoord")
+	}
+	if consistentSegments < totalSegments {
+		return merr.WrapErrParameterInvalidMsg(
+			"schema version consistency check failed: %d/%d segments are consistent, required 100%%",
+			consistentSegments, totalSegments)
+	}
+	return nil
 }
 
 // GetStatistics get the statistics, such as `num_rows`.
@@ -1444,6 +1627,10 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "alter field"); err != nil {
 		return merr.Status(err), nil
 	}
+
+	// TODO(#48808): gate AlterCollectionField against in-progress backfill once segment schema-version
+	// propagation for DoPhysicalBackfill=false DDLs is synchronous.  Same timing issue as
+	// AddCollectionField — backfill tick may not have fired before the next DDL arrives.
 
 	act := &alterCollectionFieldTask{
 		ctx:                         ctx,
@@ -3644,6 +3831,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			),
 			ReqID:            paramtable.GetNodeID(),
 			ConsistencyLevel: request.ConsistencyLevel,
+			QueryLabel:       metrics.QueryLabel,
 		},
 		request:             queryReq,
 		plan:                plan,
@@ -3814,6 +4002,10 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	request := qt.request
 	method := "Query"
+	queryLabel := qt.getQueryLabel()
+	if sp != nil {
+		sp.SetAttributes(attribute.String("queryLabel", queryLabel))
+	}
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.QueryResults{
@@ -3828,6 +4020,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		zap.Strings("partitions", request.PartitionNames),
 		zap.String("ConsistencyLevel", request.GetConsistencyLevel().String()),
 		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
+		zap.String("queryLabel", queryLabel),
 	)
 
 	log.Debug(
@@ -3858,13 +4051,15 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			if sp != nil {
 				traceID = sp.SpanContext().TraceID().String()
 			}
-			if node.slowQueries != nil {
+			if node.slowQueries != nil && queryLabel == metrics.QueryLabel {
 				node.slowQueries.Add(qt.BeginTs(), metricsinfo.NewSlowQueryWithQueryRequest(request, user, span, traceID))
 			}
-			metrics.ProxySlowQueryCount.WithLabelValues(
-				strconv.FormatInt(paramtable.GetNodeID(), 10),
-				metrics.QueryLabel,
-			).Inc()
+			if queryLabel == metrics.QueryLabel {
+				metrics.ProxySlowQueryCount.WithLabelValues(
+					strconv.FormatInt(paramtable.GetNodeID(), 10),
+					queryLabel,
+				).Inc()
+			}
 		}
 	}()
 
@@ -3896,19 +4091,19 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		span := tr.CtxRecord(ctx, "wait query result")
 		metrics.ProxyWaitForSearchResultLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			metrics.QueryLabel,
+			queryLabel,
 		).Observe(float64(span.Milliseconds()))
 
 		metrics.ProxySQLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			metrics.QueryLabel,
+			queryLabel,
 			request.GetDbName(),
 			request.GetCollectionName(),
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 		metrics.ProxyCollectionSQLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			metrics.QueryLabel,
+			queryLabel,
 			request.DbName,
 			request.CollectionName,
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -3930,6 +4125,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			),
 			ReqID:            paramtable.GetNodeID(),
 			ConsistencyLevel: request.ConsistencyLevel,
+			QueryLabel:       metrics.QueryLabel,
 		},
 		request:             request,
 		mixCoord:            node.mixCoord,
@@ -7169,8 +7365,24 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 	if err != nil {
 		return nil, err
 	}
+
+	// Get the salvage checkpoint for the specified source cluster.
+	// Returns nil if source_cluster_id is not provided or no checkpoint exists for that cluster.
+	var salvageCheckpointProto *commonpb.ReplicateCheckpoint
+	salvageCheckpoints, err := streaming.WAL().Replicate().GetSalvageCheckpoint(ctx, req.GetTargetPchannel())
+	if err != nil {
+		return nil, err
+	}
+	for _, cp := range salvageCheckpoints {
+		if cp.ClusterID == req.GetSourceClusterId() {
+			salvageCheckpointProto = cp.IntoProto()
+			break
+		}
+	}
+
 	return &milvuspb.GetReplicateInfoResponse{
-		Checkpoint: checkpoint.IntoProto(),
+		Checkpoint:        checkpoint.IntoProto(),
+		SalvageCheckpoint: salvageCheckpointProto,
 	}, nil
 }
 
@@ -7198,6 +7410,120 @@ func (node *Proxy) CreateReplicateStream(stream milvuspb.MilvusService_CreateRep
 		return err
 	}
 	return s.Execute()
+}
+
+// shouldDumpMessage returns true if the message should be included in dump output.
+// Filters out system messages that are not useful for data salvage.
+func shouldDumpMessage(msgType message.MessageType) bool {
+	// Self-controlled messages (TimeTick, CreateSegment, Flush) are internal system messages
+	if msgType.IsSelfControlled() {
+		return false
+	}
+	// RollbackTxn is also not useful for data salvage
+	if msgType == message.MessageTypeRollbackTxn {
+		return false
+	}
+	return true
+}
+
+// DumpMessages streams messages from a WAL range for data salvage.
+func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvuspb.MilvusService_DumpMessagesServer) error {
+	ctx := stream.Context()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DumpMessages")
+	defer sp.End()
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return err
+	}
+
+	logger := log.Ctx(ctx).With(
+		zap.String("pchannel", req.GetPchannel()),
+		zap.Uint64("startTimetick", req.GetStartTimetick()),
+		zap.Uint64("endTimetick", req.GetEndTimetick()),
+	)
+	logger.Info("DumpMessages received")
+
+	// Validate request
+	if req.GetPchannel() == "" {
+		return merr.WrapErrParameterMissing("pchannel")
+	}
+	if req.GetStartMessageId() == nil || len(req.GetStartMessageId().GetId()) == 0 {
+		return merr.WrapErrParameterMissing("start_message_id")
+	}
+
+	startMsgID := message.MustUnmarshalMessageID(req.GetStartMessageId())
+
+	// Use exclusive start position (dump messages AFTER start_message_id)
+	// This is appropriate for salvage scenarios where start_message_id is the last synced message
+	deliverPolicy := options.DeliverPolicyStartAfter(startMsgID)
+
+	// Create a channel-based message handler
+	msgCh := make(adaptor.ChanMessageHandler, 16)
+
+	// Open scanner
+	scanner := streaming.WAL().Read(ctx, streaming.ReadOption{
+		PChannel:       req.GetPchannel(),
+		DeliverPolicy:  deliverPolicy,
+		MessageHandler: msgCh,
+	})
+	defer scanner.Close()
+
+	// Get timetick filters
+	startTimetick := req.GetStartTimetick()
+	endTimetick := req.GetEndTimetick()
+
+	msgCount := 0
+	// Stream messages
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("DumpMessages context canceled", zap.Int("messageCount", msgCount))
+			return ctx.Err()
+		case <-scanner.Done():
+			// Scanner closed
+			if err := scanner.Error(); err != nil {
+				logger.Warn("DumpMessages scanner error", zap.Error(err), zap.Int("messageCount", msgCount))
+				return err
+			}
+			logger.Info("DumpMessages completed", zap.Int("messageCount", msgCount))
+			return nil
+		case msg, ok := <-msgCh:
+			if !ok {
+				// Channel closed
+				logger.Info("DumpMessages channel closed", zap.Int("messageCount", msgCount))
+				return nil
+			}
+
+			msgTimetick := msg.TimeTick()
+
+			// Check start timetick filter
+			if startTimetick > 0 && msgTimetick < startTimetick {
+				continue
+			}
+
+			// Check end timetick condition
+			if endTimetick > 0 && msgTimetick > endTimetick {
+				logger.Info("DumpMessages reached end timetick", zap.Int("messageCount", msgCount))
+				return nil
+			}
+
+			// Filter system messages
+			if !shouldDumpMessage(msg.MessageType()) {
+				continue
+			}
+
+			// Send message to stream (using oneof - only message, no status)
+			if err := stream.Send(&milvuspb.DumpMessagesResponse{
+				Response: &milvuspb.DumpMessagesResponse_Message{
+					Message: msg.IntoImmutableMessageProto(),
+				},
+			}); err != nil {
+				logger.Warn("DumpMessages send failed", zap.Error(err))
+				return err
+			}
+			msgCount++
+		}
+	}
 }
 
 func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.ComputePhraseMatchSlopRequest) (*milvuspb.ComputePhraseMatchSlopResponse, error) {

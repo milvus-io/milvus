@@ -439,6 +439,11 @@ func (s *Server) fillMetricsWithNodes(topo *metricsinfo.QueryClusterTopology, no
 			})
 			continue
 		}
+		// If this query node is embedded in a streaming node, relabel it as streamingnode.
+		if nodeInfo := s.nodeMgr.Get(infos.ID); nodeInfo != nil && nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
+			infos.Type = typeutil.StreamingNodeRole
+			infos.Name = metricsinfo.ConstructComponentName(typeutil.StreamingNodeRole, infos.ID)
+		}
 		topo.ConnectedNodes = append(topo.ConnectedNodes, infos)
 	}
 }

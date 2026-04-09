@@ -17,6 +17,53 @@ func (_m *MockQueryHook) EXPECT() *MockQueryHook_Expecter {
 	return &MockQueryHook_Expecter{mock: &_m.Mock}
 }
 
+// CalculateEffectiveSegmentNum provides a mock function with given fields: rowCounts, topk
+func (_m *MockQueryHook) CalculateEffectiveSegmentNum(rowCounts []int64, topk int64) int {
+	ret := _m.Called(rowCounts, topk)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CalculateEffectiveSegmentNum")
+	}
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func([]int64, int64) int); ok {
+		r0 = rf(rowCounts, topk)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// MockQueryHook_CalculateEffectiveSegmentNum_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CalculateEffectiveSegmentNum'
+type MockQueryHook_CalculateEffectiveSegmentNum_Call struct {
+	*mock.Call
+}
+
+// CalculateEffectiveSegmentNum is a helper method to define mock.On call
+//   - rowCounts []int64
+//   - topk int64
+func (_e *MockQueryHook_Expecter) CalculateEffectiveSegmentNum(rowCounts interface{}, topk interface{}) *MockQueryHook_CalculateEffectiveSegmentNum_Call {
+	return &MockQueryHook_CalculateEffectiveSegmentNum_Call{Call: _e.mock.On("CalculateEffectiveSegmentNum", rowCounts, topk)}
+}
+
+func (_c *MockQueryHook_CalculateEffectiveSegmentNum_Call) Run(run func(rowCounts []int64, topk int64)) *MockQueryHook_CalculateEffectiveSegmentNum_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockQueryHook_CalculateEffectiveSegmentNum_Call) Return(_a0 int) *MockQueryHook_CalculateEffectiveSegmentNum_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockQueryHook_CalculateEffectiveSegmentNum_Call) RunAndReturn(run func([]int64, int64) int) *MockQueryHook_CalculateEffectiveSegmentNum_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteTuningConfig provides a mock function with given fields: _a0
 func (_m *MockQueryHook) DeleteTuningConfig(_a0 string) error {
 	ret := _m.Called(_a0)

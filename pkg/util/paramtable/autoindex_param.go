@@ -40,7 +40,7 @@ type AutoIndexConfig struct {
 	SparseIndexParams      ParamItem  `refreshable:"true"`
 	BinaryIndexParams      ParamItem  `refreshable:"true"`
 	DeduplicateIndexParams ParamItem  `refreshable:"true"`
-	BigTopKIndexParams     ParamItem  `refreshable:"true"`
+	LargeTopKIndexParams   ParamItem  `refreshable:"true"`
 	EnableDeduplicateIndex ParamItem  `refreshable:"true"`
 	PrepareParams          ParamItem  `refreshable:"true"`
 	LoadAdaptParams        ParamItem  `refreshable:"true"`
@@ -62,6 +62,11 @@ type AutoIndexConfig struct {
 	ScalarTimestampTzIndexType ParamItem `refreshable:"true"`
 
 	BitmapCardinalityLimit ParamItem `refreshable:"true"`
+
+	// two-stage search
+	TwoStageSearchEnabled        ParamItem `refreshable:"true"`
+	TwoStageSearchMinTopk        ParamItem `refreshable:"true"`
+	TwoStageSearchMinNumSegments ParamItem `refreshable:"true"`
 }
 
 const (
@@ -140,14 +145,14 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	}
 	p.EnableDeduplicateIndex.Init(base.mgr)
 
-	p.BigTopKIndexParams = ParamItem{
-		Key:          "autoIndex.params.bigTopK.build",
-		Version:      "2.6.13",
+	p.LargeTopKIndexParams = ParamItem{
+		Key:          "autoIndex.params.largeTopK.build",
+		Version:      "2.6.14",
 		DefaultValue: `{"nlist": 128, "index_type": "IVF_SQ8", "metric_type": "COSINE"}`,
-		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.bigTopK.build"),
+		Formatter:    GetBuildParamFormatter(FloatVectorDefaultMetricType, "autoIndex.params.largeTopK.build"),
 		Export:       true,
 	}
-	p.BigTopKIndexParams.Init(base.mgr)
+	p.LargeTopKIndexParams.Init(base.mgr)
 
 	p.PrepareParams = ParamItem{
 		Key:     "autoIndex.params.prepare",
@@ -316,6 +321,33 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		},
 	}
 	p.ScalarBoolIndexType.Init(base.mgr)
+
+	p.TwoStageSearchEnabled = ParamItem{
+		Key:          "autoIndex.twoStageSearch.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          `Enable two-stage search optimization. When enabled, search first executes filter-only to get actual filter selectivity, then uses this info to optimize search parameters before executing vector search.`,
+		Export:       true,
+	}
+	p.TwoStageSearchEnabled.Init(base.mgr)
+
+	p.TwoStageSearchMinTopk = ParamItem{
+		Key:          "autoIndex.twoStageSearch.minTopk",
+		Version:      "3.0.0",
+		DefaultValue: "2000",
+		Doc:          `Minimum topk for two-stage search.`,
+		Export:       true,
+	}
+	p.TwoStageSearchMinTopk.Init(base.mgr)
+
+	p.TwoStageSearchMinNumSegments = ParamItem{
+		Key:          "autoIndex.twoStageSearch.minNumSegments",
+		Version:      "3.0.0",
+		DefaultValue: "5",
+		Doc:          `Minimum number of segments for two-stage search.`,
+		Export:       true,
+	}
+	p.TwoStageSearchMinNumSegments.Init(base.mgr)
 }
 
 func setDefaultIfNotExist(params map[string]string, key string, defaultValue string) {

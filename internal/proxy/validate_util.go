@@ -659,7 +659,7 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 			}
 			sd.TimestamptzData.Data, err = fillWithDefaultValueImpl(sd.TimestamptzData.Data, defaultValue, field.GetValidData())
 			if err != nil {
-				return nil
+				return err
 			}
 
 		case *schemapb.ScalarField_StringData:

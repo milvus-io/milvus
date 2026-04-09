@@ -49,6 +49,7 @@ const (
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
 	DefaultBM25LoadThreadCoreCoefficient       = 1
+	DefaultThreadPoolMaxThreadsSize            = 16
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -230,6 +231,7 @@ type commonConfig struct {
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
 	BM25LoadThreadCoreCoefficient       ParamItem `refreshable:"true"`
+	ThreadPoolMaxThreadsSize            ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -243,8 +245,9 @@ type commonConfig struct {
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
 	ParquetStatsSkipIndex               ParamItem `refreshable:"true"`
 
-	StorageType ParamItem `refreshable:"false"`
-	SimdType    ParamItem `refreshable:"false"`
+	StorageType                   ParamItem `refreshable:"false"`
+	ManifestTransactionRetryLimit ParamItem `refreshable:"true"`
+	SimdType                      ParamItem `refreshable:"false"`
 
 	DiskWriteMode         ParamItem `refreshable:"true"`
 	DiskWriteBufferSizeKb ParamItem `refreshable:"true"`
@@ -300,6 +303,8 @@ type commonConfig struct {
 	StorageReadRetryAttempts ParamItem `refreshable:"true"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
+	VisibilityFilterEnabled   ParamItem `refreshable:"false"`
+	BloomFilterEnabled        ParamItem `refreshable:"false"`
 	BloomFilterSize           ParamItem `refreshable:"true"`
 	BloomFilterType           ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
@@ -342,6 +347,9 @@ type commonConfig struct {
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
 	QNFileResourceMode        ParamItem `refreshable:"true"`
 	DNFileResourceMode        ParamItem `refreshable:"true"`
+
+	// group by
+	GroupByMaxGroups ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -637,6 +645,15 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.StorageType.Init(base.mgr)
 
+	p.ManifestTransactionRetryLimit = ParamItem{
+		Key:          "common.storage.manifestTransactionRetryLimit",
+		Version:      "2.6.10",
+		DefaultValue: "10",
+		Doc:          "Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts",
+		Export:       true,
+	}
+	p.ManifestTransactionRetryLimit.Init(base.mgr)
+
 	p.HighPriorityThreadCoreCoefficient = ParamItem{
 		Key:          "common.threadCoreCoefficient.highPriority",
 		Version:      "2.0.0",
@@ -676,6 +693,15 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 	}
 	p.BM25LoadThreadCoreCoefficient.Init(base.mgr)
+
+	p.ThreadPoolMaxThreadsSize = ParamItem{
+		Key:          "common.threadCoreCoefficient.maxThreadsSize",
+		Version:      "2.6.13",
+		DefaultValue: strconv.Itoa(DefaultThreadPoolMaxThreadsSize),
+		Doc:          "The maximum number of threads in the thread pool, only effective when greater than 0",
+		Export:       true,
+	}
+	p.ThreadPoolMaxThreadsSize.Init(base.mgr)
 
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",
@@ -1071,6 +1097,24 @@ The default value is 1, which is enough for most cases.`,
 	}
 	p.TraceLogMode.Init(base.mgr)
 
+	p.VisibilityFilterEnabled = ParamItem{
+		Key:          "common.visibilityFilterEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "whether to apply row visibility filtering (timestamp, delete, and TTL) on querynode. When disabled, all rows are returned regardless of insert/delete timestamps.",
+		Export:       true,
+	}
+	p.VisibilityFilterEnabled.Init(base.mgr)
+
+	p.BloomFilterEnabled = ParamItem{
+		Key:          "common.bloomFilterEnabled",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc:          "whether to load and apply bloom filter/pk stats on querynode",
+		Export:       true,
+	}
+	p.BloomFilterEnabled.Init(base.mgr)
+
 	p.BloomFilterSize = ParamItem{
 		Key:          "common.bloomFilterSize",
 		Version:      "2.3.2",
@@ -1345,6 +1389,21 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export:       true,
 	}
 	p.DNFileResourceMode.Init(base.mgr)
+
+	p.GroupByMaxGroups = ParamItem{
+		Key:          "common.groupBy.maxGroups",
+		Version:      "2.6.0",
+		DefaultValue: "100000",
+		Doc:          "Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt64(v) <= 0 {
+				return "100000"
+			}
+			return v
+		},
+	}
+	p.GroupByMaxGroups.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -3309,11 +3368,10 @@ type queryNodeConfig struct {
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
 	EnableGeometryCache           ParamItem `refreshable:"false"`
 
-	// TODO(tiered storage 2) this should be refreshable?
-	TieredWarmupScalarField         ParamItem `refreshable:"false"`
-	TieredWarmupScalarIndex         ParamItem `refreshable:"false"`
-	TieredWarmupVectorField         ParamItem `refreshable:"false"`
-	TieredWarmupVectorIndex         ParamItem `refreshable:"false"`
+	TieredWarmupScalarField         ParamItem `refreshable:"true"`
+	TieredWarmupScalarIndex         ParamItem `refreshable:"true"`
+	TieredWarmupVectorField         ParamItem `refreshable:"true"`
+	TieredWarmupVectorIndex         ParamItem `refreshable:"true"`
 	TieredMemoryLowWatermarkRatio   ParamItem `refreshable:"false"`
 	TieredMemoryHighWatermarkRatio  ParamItem `refreshable:"false"`
 	TieredDiskLowWatermarkRatio     ParamItem `refreshable:"false"`
@@ -3326,8 +3384,9 @@ type queryNodeConfig struct {
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
 	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
 	TieredLoadingResourceFactor     ParamItem `refreshable:"false"`
-	TieredLoadingTimeoutMs          ParamItem `refreshable:"false"`
-	StorageUsageTrackingEnabled     ParamItem `refreshable:"false"`
+	TieredLoadingTimeoutMs          ParamItem `refreshable:"true"`
+	TieredWarmupLoadingTimeoutMs    ParamItem `refreshable:"true"`
+	StorageUsageTrackingEnabled     ParamItem `refreshable:"true"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -3371,6 +3430,8 @@ type queryNodeConfig struct {
 	TopKMergeRatio        ParamItem `refreshable:"true"`
 	CPURatio              ParamItem `refreshable:"true"`
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
+
+	EnableResultZeroCopy ParamItem `refreshable:"true"`
 
 	// tsafe
 	MaxTimestampLag           ParamItem `refreshable:"true"`
@@ -3429,7 +3490,7 @@ type queryNodeConfig struct {
 	QueryStreamMaxBatchSize                 ParamItem `refreshable:"false"`
 
 	// BF
-	EnableSparseFilterInQuery      ParamItem `refreshable:"true"`
+	EnableSegmentFilter            ParamItem `refreshable:"true"`
 	SkipGrowingSegmentBF           ParamItem `refreshable:"true"`
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
@@ -3440,19 +3501,20 @@ type queryNodeConfig struct {
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 
 	// Idf Oracle
-	IDFEnableDisk ParamItem `refreshable:"true"`
+	IDFPreload ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
-	p.IDFEnableDisk = ParamItem{
-		Key:          "queryNode.idfOracle.enableDisk",
-		Version:      "2.6.0",
+	p.IDFPreload = ParamItem{
+		Key:          "queryNode.idfOracle.preload",
+		Version:      "2.6.8",
 		Export:       true,
 		DefaultValue: "true",
+		Doc:          "Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.",
 	}
-	p.IDFEnableDisk.Init(base.mgr)
+	p.IDFPreload.Init(base.mgr)
 
 	p.SoPath = ParamItem{
 		Key:          "queryNode.soPath",
@@ -3492,7 +3554,6 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Key:          "queryNode.segcore.tieredStorage.warmup.scalarField",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
-		Forbidden:    true,
 		Doc: `options: sync, async, disable.
 Specifies the timing for warming up the Tiered Storage cache.
 - "sync": data will be loaded into the cache before a segment is considered loaded.
@@ -3507,7 +3568,6 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.warmup.scalarIndex",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
-		Forbidden:    true,
 		Export:       true,
 	}
 	p.TieredWarmupScalarIndex.Init(base.mgr)
@@ -3516,7 +3576,6 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.warmup.vectorField",
 		Version:      "2.6.0",
 		DefaultValue: "disable",
-		Forbidden:    true,
 		Doc:          `cache warmup for vector field raw data is by default disabled.`,
 		Export:       true,
 	}
@@ -3526,7 +3585,6 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.warmup.vectorIndex",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
-		Forbidden:    true,
 		Export:       true,
 	}
 	p.TieredWarmupVectorIndex.Init(base.mgr)
@@ -3724,7 +3782,6 @@ If set to 0, time based eviction is disabled.`,
 		Key:          "queryNode.segcore.tieredStorage.storageUsageTrackingEnabled",
 		Version:      "2.6.3",
 		DefaultValue: "false",
-		Forbidden:    true,
 		Doc:          "Enable storage usage tracking for Tiered Storage. Defaults to false.",
 		Export:       true,
 	}
@@ -3751,18 +3808,19 @@ If set to 0, time based eviction is disabled.`,
 		Key:          "queryNode.segcore.tieredStorage.loadingTimeoutMs",
 		Version:      "2.6.10",
 		DefaultValue: "0",
-		Forbidden:    true,
-		Formatter: func(v string) string {
-			timeout := getAsInt64(v)
-			if timeout < 0 {
-				return "0"
-			}
-			return fmt.Sprintf("%d", timeout)
-		},
-		Doc:    "Loading timeout in milliseconds for cache slot loading. 0 means no timeout.",
-		Export: false,
+		Doc:          "Loading timeout in milliseconds for cache slot loading. -1 means no timeout, 0 means immediate failure if resource cannot be reserved, >0 means a specific timeout.",
+		Export:       false,
 	}
 	p.TieredLoadingTimeoutMs.Init(base.mgr)
+
+	p.TieredWarmupLoadingTimeoutMs = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.warmupLoadingTimeoutMs",
+		Version:      "2.6.13",
+		DefaultValue: "0",
+		Doc:          "Loading timeout in milliseconds for cache warmup loading. -1 means no timeout, 0 means immediate failure if resource cannot be reserved, >0 means a specific timeout.",
+		Export:       false,
+	}
+	p.TieredWarmupLoadingTimeoutMs.Init(base.mgr)
 
 	p.EnableDisk = ParamItem{
 		Key:          "queryNode.enableDisk",
@@ -4228,6 +4286,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.TopKMergeRatio.Init(base.mgr)
 
+	p.EnableResultZeroCopy = ParamItem{
+		Key:          "queryNode.search.enableResultZeroCopy",
+		Version:      "2.6.14",
+		DefaultValue: "false",
+		Doc:          "When true, delegator passes reduced SearchResultData directly instead of re-marshaling to SlicedBlob. Toggle at runtime for instant fallback.",
+		Export:       true,
+	}
+	p.EnableResultZeroCopy.Init(base.mgr)
+
 	p.CPURatio = ParamItem{
 		Key:          "queryNode.scheduler.cpuRatio",
 		Version:      "2.0.0",
@@ -4580,13 +4647,15 @@ user-task-polling:
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
 
-	p.EnableSparseFilterInQuery = ParamItem{
-		Key:          "queryNode.enableSparseFilterInQuery",
-		Version:      "2.6.2",
+	p.EnableSegmentFilter = ParamItem{
+		Key:          "queryNode.enableSegmentFilter",
+		FallbackKeys: []string{"queryNode.enableSparseFilterInQuery"},
+		Version:      "2.6.11",
 		DefaultValue: "true",
-		Doc:          "Enable use sparse filter in query.",
+		Doc:          "Enable delegator-side segment filtering using PK predicates (min/max + bloom filter).",
+		Export:       true,
 	}
-	p.EnableSparseFilterInQuery.Init(base.mgr)
+	p.EnableSegmentFilter.Init(base.mgr)
 
 	p.SkipGrowingSegmentBF = ParamItem{
 		Key:          "queryNode.skipGrowingSegmentBF",
@@ -4641,6 +4710,8 @@ type dataCoordConfig struct {
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 	ForceRebuildSegmentIndex       ParamItem `refreshable:"true"`
 	TargetVecIndexVersion          ParamItem `refreshable:"true"`
+	ForceRebuildScalarSegmentIndex ParamItem `refreshable:"true"`
+	TargetScalarIndexVersion       ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 	BlockingL0EntryNum             ParamItem `refreshable:"true"`
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
@@ -5147,8 +5218,8 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.CompactionForceMergeDataNodeMemoryFactor = ParamItem{
 		Key:          "dataCoord.compaction.forceMerge.dataNodeMemoryFactor",
 		Version:      "2.6.8",
-		DefaultValue: "3.0",
-		Doc:          "Memory safety factor for DataNode during force merge compaction. Max segment size = DataNode memory / factor. Default 3.0 means segments can use up to 1/3 of DataNode memory. Must be >= 1.0.",
+		DefaultValue: "4.0",
+		Doc:          "Memory safety factor for DataNode during force merge compaction. Max segment size = DataNode memory / factor. Default 4.0 means segments can use up to 1/4 of DataNode memory. Must be >= 1.0.",
 		Export:       false,
 		Formatter: func(value string) string {
 			factor, err := strconv.ParseFloat(value, 64)
@@ -5163,8 +5234,8 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.CompactionForceMergeQueryNodeMemoryFactor = ParamItem{
 		Key:          "dataCoord.compaction.forceMerge.queryNodeMemoryFactor",
 		Version:      "2.6.8",
-		DefaultValue: "3.0",
-		Doc:          "Memory safety factor for QueryNode when loading segments after force merge. Max segment size = QueryNode memory / factor. Default 3.0 means segments can use up to 40% of QueryNode memory. Must be >= 1.0.",
+		DefaultValue: "4.0",
+		Doc:          "Memory safety factor for QueryNode when loading segments after force merge. Max segment size = QueryNode memory / factor. Default 4.0 means segments can use up to 1/4 of QueryNode memory. Must be >= 1.0.",
 		Export:       false,
 		Formatter: func(value string) string {
 			factor, err := strconv.ParseFloat(value, 64)
@@ -5716,6 +5787,28 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Export: true,
 	}
 	p.TargetVecIndexVersion.Init(base.mgr)
+
+	p.ForceRebuildScalarSegmentIndex = ParamItem{
+		Key:          "dataCoord.forceRebuildScalarSegmentIndex",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		PanicIfEmpty: true,
+		Doc:          "force rebuild scalar segment index to specified scalar index engine's version",
+		Export:       true,
+	}
+	p.ForceRebuildScalarSegmentIndex.Init(base.mgr)
+
+	p.TargetScalarIndexVersion = ParamItem{
+		Key:          "dataCoord.targetScalarIndexVersion",
+		Version:      "3.0.0",
+		DefaultValue: "-1",
+		PanicIfEmpty: true,
+		Doc: `if param forceRebuildScalarSegmentIndex is enabled, the scalar index will be rebuilt to aligned with targetScalarIndexVersion.
+if param forceRebuildScalarSegmentIndex is not enabled, the newly created scalar index will be aligned with the newer one of scalar index engine's version and targetScalarIndexVersion.
+if param targetScalarIndexVersion is not set, the default value is -1, which means no target scalar index version, then the scalar index will be aligned with scalar index engine's version`,
+		Export: true,
+	}
+	p.TargetScalarIndexVersion.Init(base.mgr)
 
 	p.SegmentFlushInterval = ParamItem{
 		Key:          "dataCoord.segmentFlushInterval",
@@ -6790,7 +6883,7 @@ type streamingConfig struct {
 	// Old version message lastConfirmedMessageID window size
 	OldVersionLastConfirmedWindowSize ParamItem `refreshable:"true"`
 
-	// Empty TimeTick Filtering configration
+	// Empty TimeTick Filtering configuration
 	DelegatorEmptyTimeTickMaxFilterInterval ParamItem `refreshable:"true"`
 	FlushEmptyTimeTickMaxFilterInterval     ParamItem `refreshable:"true"`
 

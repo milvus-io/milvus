@@ -140,6 +140,28 @@ func (t *refreshExternalCollectionTask) UpdateStateWithMeta(state indexpb.JobSta
 		return err
 	}
 	t.SetState(state, failReason)
+
+	// When task reaches a terminal state, aggregate and persist job state immediately.
+	// This eliminates the race window where HasActiveJob still sees InProgress
+	// while all tasks have already completed (checker loop updates every 10s).
+	if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
+		jobState, _ := t.refreshMeta.AggregateJobStateFromTasks(t.GetJobId())
+		if jobState == indexpb.JobState_JobStateFinished || jobState == indexpb.JobState_JobStateFailed {
+			jobFailReason := ""
+			if jobState == indexpb.JobState_JobStateFailed {
+				jobFailReason = failReason
+			}
+			if err := t.refreshMeta.UpdateJobState(t.GetJobId(), jobState, jobFailReason); err != nil {
+				log.Warn("failed to eagerly update job state after task completion",
+					zap.Int64("taskID", t.GetTaskId()),
+					zap.Int64("jobID", t.GetJobId()),
+					zap.String("jobState", jobState.String()),
+					zap.Error(err))
+				// Non-fatal: checker loop will eventually update the job state
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -231,8 +253,30 @@ func (t *refreshExternalCollectionTask) SetJobInfo(ctx context.Context, resp *da
 
 	// DataNode already used pre-allocated segment IDs and wrote manifests to final paths.
 	// Just set the segment state to Flushed — no second ID allocation needed.
+	// Also populate InsertChannel and PartitionID which DataNode doesn't set for external segments.
+	// These are required for QueryCoord to include segments in its loading target.
+	collInfo := t.mt.GetCollection(t.GetCollectionId())
+	if collInfo == nil {
+		return fmt.Errorf("collection %d not found in meta", t.GetCollectionId())
+	}
+	// External collections are single-shard, single-partition (enforced at creation).
+	// Assert exactly-one here to catch any invariant violation from data corruption or legacy data.
+	if len(collInfo.VChannelNames) != 1 {
+		return fmt.Errorf("external collection %d expected exactly 1 VChannel, got %d", t.GetCollectionId(), len(collInfo.VChannelNames))
+	}
+	if len(collInfo.Partitions) != 1 {
+		return fmt.Errorf("external collection %d expected exactly 1 partition, got %d", t.GetCollectionId(), len(collInfo.Partitions))
+	}
+	insertChannel := collInfo.VChannelNames[0]
+	partitionID := collInfo.Partitions[0]
 	for _, seg := range updatedSegments {
 		seg.State = commonpb.SegmentState_Flushed
+		if seg.InsertChannel == "" {
+			seg.InsertChannel = insertChannel
+		}
+		if seg.PartitionID == 0 {
+			seg.PartitionID = partitionID
+		}
 	}
 
 	// Build update operators

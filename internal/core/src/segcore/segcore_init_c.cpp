@@ -57,6 +57,13 @@ SegcoreSetEnableGeometryCache(const bool value) {
 }
 
 extern "C" void
+SegcoreSetVisibilityFilterEnabled(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_visibility_filter_enabled(value);
+}
+
+extern "C" void
 SegcoreSetNlist(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
@@ -112,6 +119,13 @@ SegcoreSetInterimIndexMemExpansionRate(const float value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_interim_index_mem_expansion_rate(value);
+}
+
+extern "C" void
+SegcoreSetMaxGroupByGroups(const int64_t value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_max_group_by_groups(value);
 }
 
 extern "C" void
@@ -228,6 +242,7 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                        const float max_disk_usage_percentage,
                        const char* disk_path,
                        const int64_t loading_timeout_ms,
+                       const int64_t warmup_loading_timeout_ms,
                        const uint32_t prefetch_pool_threads) {
     std::string disk_path_str(disk_path);
     milvus::cachinglayer::Manager::ConfigureTieredStorage(
@@ -252,7 +267,27 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
          disk_path_str,
          loading_resource_factor},
         std::chrono::milliseconds(loading_timeout_ms),
+        std::chrono::milliseconds(warmup_loading_timeout_ms),
         prefetch_pool_threads);
+}
+
+extern "C" void
+UpdateTieredStorageConfig(
+    const int64_t loading_timeout_ms,
+    const int64_t warmup_loading_timeout_ms,
+    const bool storage_usage_tracking_enabled,
+    const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
+    const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
+    const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
+    const CacheWarmupPolicy vectorIndexCacheWarmupPolicy) {
+    milvus::cachinglayer::Manager::UpdateConfig(
+        std::chrono::milliseconds(loading_timeout_ms),
+        std::chrono::milliseconds(warmup_loading_timeout_ms),
+        storage_usage_tracking_enabled,
+        {scalarFieldCacheWarmupPolicy,
+         vectorFieldCacheWarmupPolicy,
+         scalarIndexCacheWarmupPolicy,
+         vectorIndexCacheWarmupPolicy});
 }
 
 }  // namespace milvus::segcore

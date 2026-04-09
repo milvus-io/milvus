@@ -533,8 +533,8 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 			// set manifest path when creating segment
 			k := metautil.JoinIDPath(wb.collectionID, partitionID, segmentID)
 			basePath := path.Join(paramtable.Get().ServiceParam.MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
-			// -1 for first write
-			manifestPath = packed.MarshalManifestPath(basePath, -1)
+			// ManifestEarliest for first write
+			manifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 		}
 		segmentInfo := &datapb.SegmentInfo{
 			ID:             segmentID,

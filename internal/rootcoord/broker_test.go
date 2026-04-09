@@ -25,11 +25,13 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -283,6 +285,102 @@ func TestServerBroker_GcConfirm(t *testing.T) {
 		broker := newServerBroker(c)
 		assert.True(t, broker.GcConfirm(context.Background(), 100, 10000))
 	})
+}
+
+func TestServerBroker_ShowResourceGroups(t *testing.T) {
+	t.Run("rpc error", func(t *testing.T) {
+		mixc := mocks.NewMixCoord(t)
+		mixc.On("ListResourceGroups", mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
+
+		c := newTestCore(withMixCoord(mixc))
+		b := newServerBroker(c)
+		_, err := b.ShowResourceGroups(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("non success status", func(t *testing.T) {
+		mixc := mocks.NewMixCoord(t)
+		mixc.On("ListResourceGroups", mock.Anything, mock.Anything).Return(
+			&milvuspb.ListResourceGroupsResponse{Status: merr.Status(errors.New("mock error"))},
+			nil,
+		)
+
+		c := newTestCore(withMixCoord(mixc))
+		b := newServerBroker(c)
+		_, err := b.ShowResourceGroups(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		mixc := mocks.NewMixCoord(t)
+		mixc.On("ListResourceGroups", mock.Anything, mock.Anything).Return(
+			&milvuspb.ListResourceGroupsResponse{
+				Status:         merr.Success(),
+				ResourceGroups: []string{"rg1", "rg2"},
+			},
+			nil,
+		)
+
+		c := newTestCore(withMixCoord(mixc))
+		b := newServerBroker(c)
+		rgs, err := b.ShowResourceGroups(context.Background())
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []string{"rg1", "rg2"}, rgs)
+	})
+}
+
+func TestServerBroker_GetSegmentIndexState(t *testing.T) {
+	t.Run("rpc error", func(t *testing.T) {
+		mixc := mocks.NewMixCoord(t)
+		mixc.On("GetSegmentIndexState", mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
+
+		c := newTestCore(withMixCoord(mixc))
+		b := newServerBroker(c)
+		_, err := b.GetSegmentIndexState(context.Background(), 1, "idx", []UniqueID{1, 2})
+		assert.Error(t, err)
+	})
+
+	t.Run("non success status", func(t *testing.T) {
+		mixc := mocks.NewMixCoord(t)
+		mixc.On("GetSegmentIndexState", mock.Anything, mock.Anything).Return(
+			&indexpb.GetSegmentIndexStateResponse{Status: merr.Status(errors.New("mock error"))},
+			nil,
+		)
+
+		c := newTestCore(withMixCoord(mixc))
+		b := newServerBroker(c)
+		_, err := b.GetSegmentIndexState(context.Background(), 1, "idx", []UniqueID{1, 2})
+		assert.Error(t, err)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		mixc := mocks.NewMixCoord(t)
+		mixc.On("GetSegmentIndexState", mock.Anything, mock.Anything).Return(
+			&indexpb.GetSegmentIndexStateResponse{
+				Status: merr.Success(),
+				States: []*indexpb.SegmentIndexState{{SegmentID: 1}},
+			},
+			nil,
+		)
+
+		c := newTestCore(withMixCoord(mixc))
+		b := newServerBroker(c)
+		states, err := b.GetSegmentIndexState(context.Background(), 1, "idx", []UniqueID{1, 2})
+		assert.NoError(t, err)
+		assert.Len(t, states, 1)
+		assert.Equal(t, int64(1), states[0].SegmentID)
+	})
+}
+
+func TestKeyDataPairsConversions(t *testing.T) {
+	m := map[string][]byte{
+		"k1": []byte("v1"),
+		"k2": []byte("v2"),
+	}
+
+	pairs := toKeyDataPairs(m)
+	roundTrip := toMap(pairs)
+	assert.Equal(t, m, roundTrip)
 }
 
 func mockGetDatabase(meta *mockrootcoord.IMetaTable) {

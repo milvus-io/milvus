@@ -155,9 +155,6 @@ InvertedIndexTantivy<T>::Serialize(const Config& config) {
 template <typename T>
 IndexStatsPtr
 InvertedIndexTantivy<T>::Upload(const Config& config) {
-    if (kScalarIndexUseV3) {
-        return this->UploadV3(config);
-    }
     finish();
 
     boost::filesystem::path p(path_);
@@ -218,10 +215,6 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                               const Config& config) {
-    if (kScalarIndexUseV3) {
-        this->LoadV3(config);
-        return;
-    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
@@ -537,9 +530,11 @@ InvertedIndexTantivy<std::string>::Query(const DatasetPtr& dataset) {
 
 template <typename T>
 const TargetBitmap
-InvertedIndexTantivy<T>::RegexQuery(const std::string& regex_pattern) {
-    tracer::AutoSpan span("InvertedIndexTantivy::RegexQuery",
+InvertedIndexTantivy<T>::PatternQuery(const std::string& pattern) {
+    tracer::AutoSpan span("InvertedIndexTantivy::PatternQuery",
                           tracer::GetRootSpan());
+    PatternMatchTranslator translator;
+    auto regex_pattern = translator(pattern);
     TargetBitmap bitset(Count());
     wrapper_->regex_query(regex_pattern, &bitset);
     return bitset;

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -376,12 +377,10 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 	refundCandidates(toRefund)
 }
 
-// refundCandidates refunds resources for candidates that implement Refundable.
+// refundCandidates refunds resources for removed candidates.
 func refundCandidates(candidates []pkoracle.Candidate) {
 	for _, c := range candidates {
-		if r, ok := c.(pkoracle.Refundable); ok {
-			r.Refund()
-		}
+		c.Refund()
 	}
 }
 
@@ -668,6 +667,39 @@ func BatchGetFromSegments(pks []storage.PrimaryKey, partitionID int64, sealed []
 	result := make(map[int64][]bool)
 	lc := storage.NewBatchLocationsCache(pks)
 
+	allTrue := func() []bool {
+		hits := make([]bool, lc.Size())
+		for i := range hits {
+			hits[i] = true
+		}
+		return hits
+	}
+
+	// When bloom filter is disabled, skip BF checks entirely and broadcast all deletes.
+	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
+		for _, item := range sealed {
+			for _, entry := range item.Segments {
+				if entry.Offline || entry.Candidate == nil {
+					continue
+				}
+				if partitionID != common.AllPartitionsID && entry.Candidate.Partition() != partitionID {
+					continue
+				}
+				result[entry.SegmentID] = allTrue()
+			}
+		}
+		for _, entry := range growing {
+			if entry.Offline || entry.Candidate == nil {
+				continue
+			}
+			if partitionID != common.AllPartitionsID && entry.PartitionID != partitionID {
+				continue
+			}
+			result[entry.SegmentID] = allTrue()
+		}
+		return result
+	}
+
 	// Check sealed segments from pinned snapshot
 	for _, item := range sealed {
 		for _, entry := range item.Segments {
@@ -677,16 +709,24 @@ func BatchGetFromSegments(pks []storage.PrimaryKey, partitionID int64, sealed []
 			if partitionID != common.AllPartitionsID && entry.Candidate.Partition() != partitionID {
 				continue
 			}
+			if !entry.Candidate.PkCandidateExist() {
+				result[entry.SegmentID] = allTrue()
+				continue
+			}
 			result[entry.SegmentID] = entry.Candidate.BatchPkExist(lc)
 		}
 	}
 
 	// Check growing segments from pinned snapshot
 	for _, entry := range growing {
-		if entry.Candidate == nil {
+		if entry.Offline || entry.Candidate == nil {
 			continue
 		}
 		if partitionID != common.AllPartitionsID && entry.Candidate.Partition() != partitionID {
+			continue
+		}
+		if !entry.Candidate.PkCandidateExist() {
+			result[entry.SegmentID] = allTrue()
 			continue
 		}
 		result[entry.SegmentID] = entry.Candidate.BatchPkExist(lc)

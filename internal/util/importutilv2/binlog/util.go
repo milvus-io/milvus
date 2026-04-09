@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -73,20 +74,25 @@ func newBinlogReader(ctx context.Context, cm storage.ChunkManager, path string) 
 	return reader, nil
 }
 
-func listInsertLogs(ctx context.Context, cm storage.ChunkManager, insertPrefix string) (map[int64][]string, error) {
-	insertLogs := make(map[int64][]string)
+func listInsertLogs(ctx context.Context, cm storage.ChunkManager, insertPrefix string, retryAttempts uint) (map[int64][]string, error) {
+	var insertLogs map[int64][]string
 	var walkErr error
-	if err := cm.WalkWithPrefix(ctx, insertPrefix, true, func(insertLog *storage.ChunkObjectInfo) bool {
-		fieldPath := path.Dir(insertLog.FilePath)
-		fieldStrID := path.Base(fieldPath)
-		fieldID, err := strconv.ParseInt(fieldStrID, 10, 64)
-		if err != nil {
-			walkErr = merr.WrapErrImportFailed(fmt.Sprintf("failed to parse field id from log, error: %v", err))
-			return false
-		}
-		insertLogs[fieldID] = append(insertLogs[fieldID], insertLog.FilePath)
-		return true
-	}); err != nil {
+	if err := importcommon.WalkWithPrefixRetry(ctx, cm, insertPrefix, true, retryAttempts,
+		func() {
+			insertLogs = make(map[int64][]string)
+			walkErr = nil
+		},
+		func(insertLog *storage.ChunkObjectInfo) bool {
+			fieldPath := path.Dir(insertLog.FilePath)
+			fieldStrID := path.Base(fieldPath)
+			fieldID, err := strconv.ParseInt(fieldStrID, 10, 64)
+			if err != nil {
+				walkErr = merr.WrapErrImportFailed(fmt.Sprintf("failed to parse field id from log, error: %v", err))
+				return false
+			}
+			insertLogs[fieldID] = append(insertLogs[fieldID], insertLog.FilePath)
+			return true
+		}); err != nil {
 		return nil, err
 	}
 

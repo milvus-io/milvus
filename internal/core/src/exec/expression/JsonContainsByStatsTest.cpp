@@ -125,6 +125,14 @@ BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
     load_config["index_files"] = index_files;
     load_config[milvus::LOAD_PRIORITY] =
         milvus::proto::common::LoadPriority::HIGH;
+    load_config[STATS_BASE_PATH_KEY] =
+        storage::GenRemoteJsonStatsPathPrefix(chunk_manager,
+                                              build_id,
+                                              version_id,
+                                              collection_id,
+                                              partition_id,
+                                              segment_id,
+                                              field_id);
 
     auto reader = std::make_shared<JsonKeyStats>(ctx, true);
     reader->Load(milvus::tracer::TraceContext{}, load_config);

@@ -46,14 +46,6 @@ func getCurrentIndexVersion(v int32) int32 {
 	return v
 }
 
-func getCurrentScalarIndexVersion(v int32) int32 {
-	cCurrent := common.CurrentScalarIndexEngineVersion
-	if cCurrent < v {
-		return cCurrent
-	}
-	return v
-}
-
 func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType) (uint64, error) {
 	switch dataType {
 	case schemapb.DataType_BinaryVector:

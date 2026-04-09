@@ -14,7 +14,7 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( KNOWHERE_VERSION b20270cf507d6d3fb943a9c1d89a4093762a7b53 )
+set( KNOWHERE_VERSION 3b330dd0 )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
@@ -39,6 +39,12 @@ if ( MILVUS_GPU_VERSION STREQUAL "ON" )
     set(WITH_CUVS ON CACHE BOOL "" FORCE )
 endif ()
 
+if ( WITH_SVS STREQUAL "ON" )
+    set(WITH_SVS ON CACHE BOOL "" FORCE )
+else ()
+    set(WITH_SVS OFF CACHE BOOL "" FORCE )
+endif()
+
 set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
 FetchContent_Declare(
         knowhere
@@ -56,6 +62,22 @@ if ( NOT knowhere_POPULATED )
     # knowhere
     add_subdirectory( ${knowhere_SOURCE_DIR}
                       ${knowhere_BINARY_DIR} )
+endif()
+
+# Install the SVS runtime shared library alongside libknowhere.so so that
+# the Go linker (and the final binary at runtime) can find it.
+# svs_SOURCE_DIR is set inside knowhere's subdirectory scope and does not
+# propagate here, so we derive the path from FETCHCONTENT_BASE_DIR which
+# is in the CMake cache (set by internal/core/CMakeLists.txt).
+if ( WITH_SVS STREQUAL "ON" )
+    set( _SVS_LIB_DIR "${FETCHCONTENT_BASE_DIR}/svs-src/lib" )
+    if ( EXISTS "${_SVS_LIB_DIR}" )
+        install(DIRECTORY ${_SVS_LIB_DIR}/
+                DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
+                FILES_MATCHING PATTERN "libsvs_runtime.so*")
+    else()
+        message(WARNING "SVS enabled but ${_SVS_LIB_DIR} not found \u2014 libsvs_runtime.so will not be installed")
+    endif()
 endif()
 
 # get prometheus COMPILE_OPTIONS

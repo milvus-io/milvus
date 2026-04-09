@@ -32,7 +32,6 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"plugin"
 	"strings"
 	"sync"
 	"time"
@@ -162,10 +161,13 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 }
 
 func (node *QueryNode) initSession() error {
-	minimalIndexVersion, currentIndexVersion := getIndexEngineVersion()
+	minimalIndexVersion, currentIndexVersion, maximumIndexVersion := getIndexEngineVersion()
 	node.session = sessionutil.NewSession(node.ctx,
-		sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion),
-		sessionutil.WithScalarIndexEngineVersion(common.MinimalScalarIndexEngineVersion, common.CurrentScalarIndexEngineVersion),
+		sessionutil.WithIndexEngineVersion(minimalIndexVersion, currentIndexVersion, maximumIndexVersion),
+		sessionutil.WithScalarIndexEngineVersion(
+			common.MinimalScalarIndexEngineVersion,
+			common.CurrentScalarIndexEngineVersion,
+			common.MaximumScalarIndexEngineVersion),
 		sessionutil.WithIndexNonEncoding())
 	if node.session == nil {
 		return errors.New("session is nil, the etcd client connection may have failed")
@@ -194,6 +196,33 @@ func ResizeHighPriorityPool(evt *config.Event) {
 	}
 }
 
+func ResizeMiddlePriorityPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newRatio := pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsFloat()
+		C.ResizeTheadPool(C.int64_t(1), C.float(newRatio))
+	}
+}
+
+func ResizeLowPriorityPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newRatio := pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat()
+		C.ResizeTheadPool(C.int64_t(2), C.float(newRatio))
+	}
+}
+
+func ResizeAllPools(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		// Update the max threads size first to ensure the new limit is applied during resize
+		C.SetThreadPoolMaxThreadsSize(C.int(pt.CommonCfg.ThreadPoolMaxThreadsSize.GetAsInt()))
+		C.ResizeTheadPool(C.int64_t(0), C.float(pt.CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat()))
+		C.ResizeTheadPool(C.int64_t(1), C.float(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsFloat()))
+		C.ResizeTheadPool(C.int64_t(2), C.float(pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat()))
+	}
+}
+
 func (node *QueryNode) ReconfigDiskFileWriterParams(evt *config.Event) {
 	if evt.HasUpdated {
 		if err := initcore.InitDiskFileWriterConfig(paramtable.Get()); err != nil {
@@ -217,6 +246,12 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 	pt := paramtable.Get()
 	pt.Watch(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key,
 		config.NewHandler("common.threadCoreCoefficient.highPriority", ResizeHighPriorityPool))
+	pt.Watch(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key,
+		config.NewHandler("common.threadCoreCoefficient.middlePriority", ResizeMiddlePriorityPool))
+	pt.Watch(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key,
+		config.NewHandler("common.threadCoreCoefficient.lowPriority", ResizeLowPriorityPool))
+	pt.Watch(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key,
+		config.NewHandler("common.threadCoreCoefficient.maxThreadsSize", ResizeAllPools))
 	pt.Watch(pt.CommonCfg.DiskWriteMode.Key,
 		config.NewHandler("common.diskWriteMode", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteBufferSizeKb.Key,
@@ -237,9 +272,9 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.diskWriteRateLimiter.lowPriorityRatio", node.ReconfigDiskFileWriterParams))
 }
 
-func getIndexEngineVersion() (minimal, current int32) {
-	cMinimal, cCurrent := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion()
-	return int32(cMinimal), int32(cCurrent)
+func getIndexEngineVersion() (minimal, current, maximum int32) {
+	cMinimal, cCurrent, cMaximum := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion(), C.GetMaximumIndexVersion()
+	return int32(cMinimal), int32(cCurrent), int32(cMaximum)
 }
 
 func (node *QueryNode) GetNodeID() int64 {
@@ -519,30 +554,16 @@ func (node *QueryNode) SetAddress(address string) {
 
 // initHook initializes parameter tuning hook.
 func (node *QueryNode) initHook() error {
-	log := log.Ctx(node.ctx)
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
 	if path == "" {
 		return errors.New("fail to set the plugin path")
 	}
-	log.Info("start to load plugin", zap.String("path", path))
 
-	hookutil.LockHookInit()
-	defer hookutil.UnlockHookInit()
-	p, err := plugin.Open(path)
+	hoo, err := hookutil.LoadPlugin[optimizers.QueryHook](path, "QueryNodePlugin")
 	if err != nil {
-		return fmt.Errorf("fail to open the plugin, error: %s", err.Error())
-	}
-	log.Info("plugin open")
-
-	h, err := p.Lookup("QueryNodePlugin")
-	if err != nil {
-		return fmt.Errorf("fail to find the 'QueryNodePlugin' object in the plugin, error: %s", err.Error())
+		return err
 	}
 
-	hoo, ok := h.(optimizers.QueryHook)
-	if !ok {
-		return errors.New("fail to convert the `Hook` interface")
-	}
 	if err = hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
 		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
 	}

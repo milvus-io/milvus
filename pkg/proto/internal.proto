@@ -84,6 +84,12 @@ message CreateIndexRequest {
   repeated common.KeyValuePair extra_params = 8;
 }
 
+// search type will used by optimizer to determine the optimization rule in delegator
+enum SearchType {
+  DEFAULT = 0;                     // default search type
+  PURE_ANN_SEARCH_NO_FILTER = 1;   // pure ann search without filter, excluding range search/groupby/iterator/iterative_filter cases
+  PURE_ANN_SEARCH_WITH_FILTER = 2; // pure ann search with filter, excluding range search/groupby/iterator/iterative_filter cases
+}
 
 message SubSearchRequest {
   string dsl = 1;
@@ -101,6 +107,7 @@ message SubSearchRequest {
   int64 field_id = 12;
   bool ignore_growing = 13;
   string analyzer_name = 14;
+  SearchType search_type = 15;
 }
 
 message SearchRequest {
@@ -136,6 +143,10 @@ message SearchRequest {
   string analyzer_name = 29;
   uint64 collection_ttl_timestamps = 30;
   uint64 entity_ttl_physical_time = 31;
+  // PK filter from proxy: 0 = not checked (backward compat), 1 = has optimizable PK predicate, 2 = no PK predicate.
+  // When 2, delegator can skip plan unmarshal for segment filter optimization.
+  int32 pk_filter = 32;
+  SearchType search_type = 33;
 }
 
 message SubSearchResults {
@@ -148,6 +159,8 @@ message SubSearchResults {
   int64 sliced_offset = 6;
   // to indicate it belongs to which sub request
   int64 req_index = 7;
+  // pre-decoded SearchResultData, avoids re-marshal/unmarshal between delegator and proxy
+  schema.SearchResultData result_data = 8;
 }
 
 message SearchResults {
@@ -175,6 +188,11 @@ message SearchResults {
   bool is_recall_evaluation = 19;
   int64 scanned_remote_bytes = 20;
   int64 scanned_total_bytes = 21;
+  // pre-decoded SearchResultData, avoids re-marshal/unmarshal between delegator and proxy
+  schema.SearchResultData result_data = 22;
+  // Per-segment filter valid counts for two-stage search (filter-only mode).
+  // Index corresponds to sealed_segmentIDs_searched.
+  repeated int64 filter_valid_counts = 23;
 }
 
 message CostAggregation {
@@ -209,6 +227,13 @@ message RetrieveRequest {
   repeated int64 group_by_field_ids = 21;
   repeated plan.Aggregate aggregates = 22;
   uint64 entity_ttl_physical_time = 23;
+  // ORDER BY fields — populated by proxy, consumed by QN/Delegator
+  // to avoid re-parsing serialized_expr_plan on the hot path.
+  repeated plan.OrderByField order_by_fields = 24;
+  string query_label = 25; // "query" or "upsert_query", used for metrics differentiation
+  // PK filter from proxy: 0 = not checked (backward compat), 1 = has optimizable PK predicate, 2 = no PK predicate.
+  // When 2, delegator can skip plan unmarshal for segment filter optimization.
+  int32 pk_filter = 26;
 }
 
 // Element indices for element-level query results

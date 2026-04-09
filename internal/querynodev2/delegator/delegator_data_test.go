@@ -17,9 +17,9 @@
 package delegator
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"path"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
@@ -336,6 +337,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			ms.EXPECT().MayPkExist(mock.Anything).RunAndReturn(func(lc *storage.LocationsCache) bool {
 				return lc.GetPk().EQ(storage.NewInt64PrimaryKey(10))
 			})
+			ms.EXPECT().PkCandidateExist().Return(true)
 			ms.EXPECT().BatchPkExist(mock.Anything).RunAndReturn(func(lc *storage.BatchLocationsCache) []bool {
 				hits := make([]bool, lc.Size())
 				for i, pk := range lc.PKs() {
@@ -580,13 +582,7 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 			s.loader.ExpectedCalls = nil
 		}()
 
-		statsMap := typeutil.NewConcurrentMap[int64, map[int64]*storage.BM25Stats]()
-		stats := storage.NewBM25Stats()
-		stats.Append(map[uint32]float32{1: 1})
-
-		statsMap.Insert(1, map[int64]*storage.BM25Stats{101: stats})
-
-		s.loader.EXPECT().LoadBM25Stats(mock.Anything, s.collectionID, mock.Anything).Return(statsMap, nil)
+		s.loader.EXPECT().GetChunkManager().Return(nil)
 		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).
 			Call.Return(func(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) []*pkoracle.BloomFilterSet {
 			return lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *pkoracle.BloomFilterSet {
@@ -637,46 +633,6 @@ func (s *DelegatorDataSuite) TestLoadSegmentsWithBm25() {
 				Level:         datapb.SegmentLevel_L1,
 			},
 		}, segmentEntryCoreFields(sealed[0].Segments))
-	})
-
-	s.Run("loadBM25_failed", func() {
-		defer func() {
-			s.workerManager.ExpectedCalls = nil
-			s.loader.ExpectedCalls = nil
-		}()
-
-		s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, s.collectionID, mock.Anything).Return(nil, nil)
-		s.loader.EXPECT().LoadBM25Stats(mock.Anything, s.collectionID, mock.Anything).Return(nil, errors.New("mock error"))
-
-		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		workers[1] = worker1
-
-		worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
-			Return(nil)
-		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
-			return workers[nodeID]
-		}, nil)
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
-			Base:         commonpbutil.NewMsgBase(),
-			DstNodeID:    1,
-			CollectionID: s.collectionID,
-			Infos: []*querypb.SegmentLoadInfo{
-				{
-					SegmentID:     100,
-					PartitionID:   500,
-					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
-					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
-					Level:         datapb.SegmentLevel_L1,
-					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
-				},
-			},
-		})
-
-		s.Error(err)
 	})
 }
 
@@ -973,6 +929,72 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
+func (s *DelegatorDataSuite) TestLoadSegmentsWithoutBloomFilter() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
+
+	workers := make(map[int64]*cluster.MockWorker)
+	worker1 := &cluster.MockWorker{}
+	workers[1] = worker1
+
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		Return(nil)
+	worker1.EXPECT().Delete(mock.Anything, mock.AnythingOfType("*querypb.DeleteRequest")).
+		RunAndReturn(func(ctx context.Context, req *querypb.DeleteRequest) error {
+			s.Equal(int64(100), req.GetSegmentId())
+			s.Equal(querypb.DataScope_Historical, req.GetScope())
+			s.ElementsMatch([]int64{1, 10}, req.GetPrimaryKeys().GetIntId().GetData())
+			s.ElementsMatch([]uint64{10, 10}, req.GetTimestamps())
+			return nil
+		}).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
+		return workers[nodeID]
+	}, nil)
+
+	// Mock LoadBloomFilterSet to return metadata-only stubs (BF disabled path)
+	stubCandidate := pkoracle.NewBloomFilterSet(100, 500, commonpb.SegmentState_Sealed)
+	s.loader.EXPECT().LoadBloomFilterSet(mock.Anything, mock.AnythingOfType("int64"), mock.Anything).
+		Return([]*pkoracle.BloomFilterSet{stubCandidate}, nil)
+
+	s.delegator.ProcessDelete([]*DeleteData{
+		{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{
+				storage.NewInt64PrimaryKey(1),
+				storage.NewInt64PrimaryKey(10),
+			},
+			Timestamps: []uint64{10, 10},
+			RowCount:   2,
+		},
+	}, 10)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     100,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				Level:         datapb.SegmentLevel_L1,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
+			},
+		},
+	})
+
+	s.NoError(err)
+	sealed, _ := s.delegator.GetSegmentInfo(false)
+	s.Require().Equal(1, len(sealed))
+	s.Require().Equal(1, len(sealed[0].Segments))
+	s.NotNil(sealed[0].Segments[0].Candidate)
+	s.False(sealed[0].Segments[0].Candidate.PkCandidateExist())
+}
+
 func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
 	for {
 		if s.delegator.idfOracle.TargetVersion() >= targetVersion {
@@ -985,14 +1007,27 @@ func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
 func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 	s.genCollectionWithFunction()
 
-	genBM25Stats := func(start uint32, end uint32) map[int64]*storage.BM25Stats {
-		result := make(map[int64]*storage.BM25Stats)
-		result[101] = storage.NewBM25Stats()
+	registerSealedStats := func(oracle *idfOracle, segID int64, start uint32, end uint32) {
+		stats := storage.NewBM25Stats()
 		for i := start; i < end; i++ {
-			row := map[uint32]float32{i: 1}
-			result[101].Append(row)
+			stats.Append(map[uint32]float32{i: 1})
 		}
-		return result
+		data, err := stats.Serialize()
+		s.Require().NoError(err)
+
+		cm := mocks.NewChunkManager(s.T())
+		remotePath := fmt.Sprintf("bm25stats/seg_%d/field_101/0", segID)
+		cm.EXPECT().Reader(mock.Anything, remotePath).Return(
+			&bytesFileReader{bytes.NewReader(data)}, nil,
+		).Maybe()
+
+		bm25Logs := []*datapb.FieldBinlog{{
+			FieldID: 101,
+			Binlogs: []*datapb.Binlog{{LogPath: remotePath}},
+		}}
+
+		err = oracle.LoadSealed(context.Background(), segID, &querypb.SegmentLoadInfo{Bm25Logs: bm25Logs}, cm)
+		s.Require().NoError(err)
 	}
 
 	genSnapShot := func(seals, grows []int64, targetVersion int64) *snapshot {
@@ -1037,7 +1072,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			s.delegator.idfOracle.RegisterSealed(segID, genBM25Stats(uint32(segID), uint32(segID)+1))
+			registerSealedStats(s.delegator.idfOracle.(*idfOracle), segID, uint32(segID), uint32(segID)+1)
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
@@ -1194,7 +1229,7 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		sealedSegs := []int64{1, 2, 3, 4}
 		for _, segID := range sealedSegs {
 			// every segment stats only has one token, avgdl = 1
-			s.delegator.idfOracle.RegisterSealed(segID, genBM25Stats(uint32(segID), uint32(segID)+1))
+			registerSealedStats(s.delegator.idfOracle.(*idfOracle), segID, uint32(segID), uint32(segID)+1)
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
@@ -1403,8 +1438,8 @@ func (s *DelegatorDataSuite) TestLoadPartitionStats() {
 	s.NoError(err)
 	partitionID1 := int64(1001)
 	idPath1 := metautil.JoinIDPath(s.collectionID, partitionID1)
-	idPath1 = path.Join(idPath1, s.delegator.vchannelName)
-	statsPath1 := path.Join(s.chunkManager.RootPath(), common.PartitionStatsPath, idPath1, strconv.Itoa(1))
+	idPath1 = filepath.Join(idPath1, s.delegator.vchannelName)
+	statsPath1 := filepath.Join(s.chunkManager.RootPath(), common.PartitionStatsPath, idPath1, strconv.Itoa(1))
 	s.chunkManager.Write(context.Background(), statsPath1, statsData1)
 	defer s.chunkManager.Remove(context.Background(), statsPath1)
 
@@ -1521,8 +1556,16 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	}
 	s.ElementsMatch(rawPks, []storage.PrimaryKey{partitionDeleteData.DeletePks().Get(0), allPartitionDeleteData.DeletePks().Get(0)})
 
+	stubCandidate := pkoracle.NewBloomFilterSet(3, l0.Partition(), commonpb.SegmentState_Sealed)
+	pks, _ = delegator.GetLevel0Deletions(partitionID, stubCandidate)
+	rawPks = rawPks[:0]
+	for i := 0; i < pks.Len(); i++ {
+		rawPks = append(rawPks, pks.Get(i))
+	}
+	s.ElementsMatch(rawPks, []storage.PrimaryKey{partitionDeleteData.DeletePks().Get(0), allPartitionDeleteData.DeletePks().Get(0)})
+
 	bfs := pkoracle.NewBloomFilterSet(3, l0.Partition(), commonpb.SegmentState_Sealed)
-	bfs.UpdateBloomFilter([]storage.PrimaryKey{allPartitionDeleteData.DeletePks().Get(0)})
+	bfs.UpdatePkCandidate([]storage.PrimaryKey{allPartitionDeleteData.DeletePks().Get(0)})
 
 	pks, _ = delegator.GetLevel0Deletions(partitionID, bfs)
 	// bf filtered segment

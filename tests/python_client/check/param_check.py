@@ -457,9 +457,13 @@ def output_field_value_check(search_res, original, pk_name):
                     for order in range(0, len(entity[field]), 4):
                         assert abs(original[field][_id][order] - entity[field][order]) < ct.epsilon
                 elif isinstance(entity[field], dict) and field != ct.default_json_field_name:
-                    # sparse checking, sparse vector must be the last, this is a bit hacky,
-                    # but sparse only supports list data type insertion for now
-                    assert entity[field].keys() == original[-1][_id].keys()
+                    # sparse vector checking: compare keys (indices) of the sparse vector
+                    num = original[original[pk_name] == _id].index.to_list()[0]
+                    assert entity[field].keys() == original[field][num].keys()
+                elif isinstance(entity[field], bytes):
+                    # bfloat16/float16/binary vectors returned as bytes — skip value check
+                    # (numpy dtype 'E' cannot be compared via ufunc 'equal' or converted to buffer)
+                    continue
                 else:
                     num = original[original[pk_name] == _id].index.to_list()[0]
                     expected_val = original[field][num]

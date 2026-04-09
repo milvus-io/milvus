@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -91,7 +92,8 @@ func TestMilvusAggReduceSingleColumn(t *testing.T) {
 	sumAggs, err := agg.NewAggregate("sum", 102, "sum(c2)", schemapb.DataType_Int64)
 	assert.NoError(t, err)
 	aggs := []agg.AggregateBase{sumAggs[0]}
-	aggFieldMap := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	aggFieldMap, err := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	require.NoError(t, err)
 
 	// Create schema matching FieldData: field 101 (Int16) for groupBy, field 102 (Int64) for aggregate
 	schema := &schemapb.CollectionSchema{
@@ -232,7 +234,8 @@ func TestMilvusAggReduceMultiColumn(t *testing.T) {
 	sumAgg, err := agg.NewAggregate("sum", 103, "sum(c3)", schemapb.DataType_Int64)
 	assert.NoError(t, err)
 	aggs := []agg.AggregateBase{sumAgg[0]}
-	aggFieldMap := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	aggFieldMap, err := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	require.NoError(t, err)
 
 	// Schema: field 101 (Int16), field 102 (VarChar), field 103 (Int64)
 	schema := &schemapb.CollectionSchema{
@@ -385,7 +388,8 @@ func TestMilvusAggReducePartialOutput(t *testing.T) {
 	sumAgg, err := agg.NewAggregate("sum", 103, "sum(c3)", schemapb.DataType_Int64)
 	assert.NoError(t, err)
 	aggs := []agg.AggregateBase{sumAgg[0]}
-	aggFieldMap := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	aggFieldMap, err := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	require.NoError(t, err)
 
 	// Schema: field 101 (Int16), field 102 (VarChar), field 103 (Int64)
 	schema := &schemapb.CollectionSchema{
@@ -526,7 +530,8 @@ func TestMilvusAggReduceFloatDouble(t *testing.T) {
 	sumAgg, err := agg.NewAggregate("sum", 103, "sum(c3)", schemapb.DataType_Int64)
 	assert.NoError(t, err)
 	aggs := []agg.AggregateBase{sumAgg[0]}
-	aggFieldMap := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	aggFieldMap, err := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	require.NoError(t, err)
 
 	// Schema: field 101 (Float), field 102 (Double), field 103 (Double)
 	schema := &schemapb.CollectionSchema{
@@ -649,7 +654,8 @@ func TestMilvusAggReduceMinSingleColumn(t *testing.T) {
 	minAggs, err := agg.NewAggregate("min", 102, "min(c2)", schemapb.DataType_Int64)
 	assert.NoError(t, err)
 	aggs := []agg.AggregateBase{minAggs[0]}
-	aggFieldMap := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	aggFieldMap, err := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	require.NoError(t, err)
 
 	// Schema: field 101 (Int16), field 102 (Int64)
 	schema := &schemapb.CollectionSchema{
@@ -758,7 +764,8 @@ func TestMilvusAggReduceMaxSingleColumn(t *testing.T) {
 	maxAggs, err := agg.NewAggregate("max", 102, "max(c2)", schemapb.DataType_Int64)
 	assert.NoError(t, err)
 	aggs := []agg.AggregateBase{maxAggs[0]}
-	aggFieldMap := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	aggFieldMap, err := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	require.NoError(t, err)
 
 	// Schema: field 101 (Int16), field 102 (Int64)
 	schema := &schemapb.CollectionSchema{
@@ -892,7 +899,8 @@ func TestMilvusAggReduceMinMultiColumn(t *testing.T) {
 	minAgg, err := agg.NewAggregate("min", 103, "min(c3)", schemapb.DataType_Int64)
 	assert.NoError(t, err)
 	aggs := []agg.AggregateBase{minAgg[0]}
-	aggFieldMap := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	aggFieldMap, err := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	require.NoError(t, err)
 
 	// Schema: field 101 (Int16), field 102 (VarChar), field 103 (Int64)
 	schema := &schemapb.CollectionSchema{
@@ -1046,7 +1054,8 @@ func TestMilvusAggReduceMaxMultiColumn(t *testing.T) {
 	maxAgg, err := agg.NewAggregate("max", 103, "max(c3)", schemapb.DataType_Int64)
 	assert.NoError(t, err)
 	aggs := []agg.AggregateBase{maxAgg[0]}
-	aggFieldMap := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	aggFieldMap, err := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	require.NoError(t, err)
 
 	// Schema: field 101 (Int16), field 102 (VarChar), field 103 (Int64)
 	schema := &schemapb.CollectionSchema{
@@ -1198,7 +1207,8 @@ func TestMilvusAggReduceAvgSingleColumn(t *testing.T) {
 	// avg returns two aggregates: sum and count
 	assert.Equal(t, 2, len(avgAggs))
 	aggs := []agg.AggregateBase{avgAggs[0], avgAggs[1]}
-	aggFieldMap := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	aggFieldMap, err := agg.NewAggregationFieldMap(userOutputFields, groupByFields, aggs)
+	require.NoError(t, err)
 
 	// Schema: field 101 (Int16), field 102 (Int64)
 	schema := &schemapb.CollectionSchema{

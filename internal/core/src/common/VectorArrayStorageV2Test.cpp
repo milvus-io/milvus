@@ -386,6 +386,13 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
 }
 
 TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
+#ifdef __APPLE__
+    // faiss MmappedFileMappingOwner is not implemented on macOS:
+    // knowhere/thirdparty/faiss/impl/mapped_io.cpp only has Linux/FreeBSD
+    // and Windows branches; the #else falls through to FAISS_THROW_MSG.
+    // Skip until faiss adds __APPLE__ support upstream.
+    GTEST_SKIP() << "faiss mmap not implemented on macOS (mapped_io.cpp)";
+#endif
     ASSERT_NE(segment_, nullptr);
     ASSERT_EQ(segment_->get_row_count(), test_data_count_ * chunk_num_);
 

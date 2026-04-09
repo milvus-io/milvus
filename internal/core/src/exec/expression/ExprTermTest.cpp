@@ -455,3 +455,63 @@ TEST_P(ExprTest, TestTermNullable) {
         }
     }
 }
+
+// Verify that TermExpr supports TIMESTAMPTZ data type (stored as int64).
+// Before the fix, TermExpr.cpp had no case for DataType::TIMESTAMPTZ,
+// which caused "unsupported data type: TIMESTAMPTZ" when any term/IN
+// expression was executed on a Timestamptz field.
+TEST_P(ExprTest, TestTermTimestamptz) {
+    std::vector<std::tuple<std::string, std::function<bool(int64_t)>>>
+        testcases = {
+            {"ts in [100, 200]",
+             [](int64_t v) { return v == 100 || v == 200; }},
+            {"ts in [100]", [](int64_t v) { return v == 100; }},
+            {"ts in []", [](int64_t v) { return false; }},
+            {"ts in [0, 1, 2, 3, 4, 5]",
+             [](int64_t v) { return v >= 0 && v <= 5; }},
+        };
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("fakevec", data_type, 16, metric_type);
+    auto i64_fid = schema->AddDebugField("id", DataType::INT64);
+    auto ts_fid = schema->AddDebugField("ts", DataType::TIMESTAMPTZ);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    std::vector<int64_t> ts_col;
+    int num_iters = 1;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        auto new_ts_col = raw_data.get_col<int64_t>(ts_fid);
+        ts_col.insert(ts_col.end(), new_ts_col.begin(), new_ts_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    SetSchema(schema);
+    for (auto [expr_str, ref_func] : testcases) {
+        auto plan_str = create_search_plan_from_expr(expr_str);
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+        BitsetType final;
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            auto val = ts_col[i];
+            auto ref = ref_func(val);
+            ASSERT_EQ(ans, ref) << expr_str << "@" << i << "!!" << val;
+        }
+    }
+}

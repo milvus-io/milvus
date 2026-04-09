@@ -291,6 +291,52 @@ func TestGetColumnNamesFromSchema_WithExternalField(t *testing.T) {
 	assert.Equal(t, []string{"external_id", "vector", "raw_text"}, columns)
 }
 
+func TestGetColumnNamesFromSchema_ExternalCollectionSkipsSystemFields(t *testing.T) {
+	// External collection: ExternalSource is set.
+	// Fields without ExternalField (like __virtual_pk__) should be skipped.
+	schema := &schemapb.CollectionSchema{
+		ExternalSource: "s3://bucket/data",
+		Fields: []*schemapb.FieldSchema{
+			{Name: "__virtual_pk__", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "id_field", ExternalField: "id"},
+			{Name: "vec_field", ExternalField: "embedding"},
+		},
+	}
+	columns := GetColumnNamesFromSchema(schema)
+	// Only external field mappings should be returned, __virtual_pk__ is skipped
+	assert.Equal(t, []string{"id", "embedding"}, columns)
+}
+
+func TestGetColumnNamesFromSchema_ExternalCollectionAllFieldsMapped(t *testing.T) {
+	// All user fields have ExternalField mappings
+	schema := &schemapb.CollectionSchema{
+		ExternalSource: "s3://bucket/data",
+		Fields: []*schemapb.FieldSchema{
+			{Name: "__virtual_pk__", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "a", ExternalField: "col_a"},
+			{Name: "b", ExternalField: "col_b"},
+			{Name: "c", ExternalField: "col_c"},
+		},
+	}
+	columns := GetColumnNamesFromSchema(schema)
+	assert.Equal(t, []string{"col_a", "col_b", "col_c"}, columns)
+}
+
+func TestGetColumnNamesFromSchema_MixedExternalAndNonExternal(t *testing.T) {
+	// Non-external collection with some fields having ExternalField set
+	// (edge case: ExternalSource not set, but some fields have ExternalField)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", DataType: schemapb.DataType_Int64},
+			{Name: "ext_field", ExternalField: "ext_col"},
+			{Name: "normal_field"},
+		},
+	}
+	columns := GetColumnNamesFromSchema(schema)
+	// Non-external collection: all fields included, external field uses mapping name
+	assert.Equal(t, []string{"pk", "ext_col", "normal_field"}, columns)
+}
+
 func TestGetColumnNamesFromSchema_EmptyFields(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{},

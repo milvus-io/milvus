@@ -73,6 +73,7 @@ InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config) {
             conf.tls_min_version =
                 std::string(c_storage_config.tls_min_version);
         }
+        conf.use_crc32c_checksum = c_storage_config.use_crc32c_checksum;
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
 
         milvus::storage::LoonFFIPropertiesSingleton::GetInstance().Init(

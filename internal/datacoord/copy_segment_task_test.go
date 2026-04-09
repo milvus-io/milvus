@@ -17,15 +17,28 @@
 package datacoord
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metastore"
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type CopySegmentTaskSuite struct {
@@ -450,4 +463,359 @@ func (s *CopySegmentTaskSuite) TestTaskType() {
 	})
 
 	s.Equal(taskcommon.CopySegment, task.GetTaskType())
+}
+
+// createTestIndexMeta creates an indexMeta with pre-registered index definitions for testing.
+// If catalog is nil, a default mock catalog (CreateSegmentIndex returns nil) is used.
+func createTestIndexMeta(t *testing.T, collectionID int64, indexes map[int64]*model.Index, catalog ...metastore.DataCoordCatalog) *indexMeta {
+	var cat metastore.DataCoordCatalog
+	if len(catalog) > 0 && catalog[0] != nil {
+		cat = catalog[0]
+	} else {
+		mockCat := catalogmocks.NewDataCoordCatalog(t)
+		mockCat.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Maybe()
+		cat = mockCat
+	}
+
+	im := &indexMeta{
+		ctx:              context.Background(),
+		catalog:          cat,
+		keyLock:          lock.NewKeyLock[UniqueID](),
+		indexes:          map[UniqueID]map[UniqueID]*model.Index{collectionID: indexes},
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
+		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+	}
+	return im
+}
+
+// createTestCopyTask creates a minimal CopySegmentTask for testing syncVectorScalarIndexes.
+func createTestCopyTask(collectionID int64, segmentID int64) CopySegmentTask {
+	task := &copySegmentTask{
+		tr:    timerecord.NewTimeRecorder("test"),
+		times: taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: collectionID,
+		State:        datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 1, TargetSegmentId: segmentID, PartitionId: 10},
+		},
+	})
+	return task
+}
+
+func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_EmptyResult() {
+	result := &datapb.CopySegmentResult{
+		SegmentId:  100,
+		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{},
+	}
+	task := createTestCopyTask(1, 100)
+	err := syncVectorScalarIndexes(context.Background(), result, task, &meta{}, nil)
+	s.NoError(err)
+}
+
+func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_SingleIndex() {
+	collectionID := int64(1)
+	segmentID := int64(100)
+
+	indexes := map[int64]*model.Index{
+		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
+	}
+	im := createTestIndexMeta(s.T(), collectionID, indexes)
+	m := &meta{indexMeta: im}
+
+	result := &datapb.CopySegmentResult{
+		SegmentId:    segmentID,
+		ImportedRows: 1000,
+		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+			5001: {
+				FieldId:        101,
+				IndexId:        200, // source indexID
+				BuildId:        5001,
+				IndexName:      "vec_idx",
+				IndexFilePaths: []string{"HNSW"},
+				IndexSize:      10000,
+			},
+		},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	s.NoError(err)
+
+	// Verify the segment index was added with target indexID and Finished state
+	segIdx, ok := im.segmentBuildInfo.Get(5001)
+	s.True(ok)
+	s.Equal(int64(300), segIdx.IndexID) // target indexID, not source 200
+	s.Equal(commonpb.IndexState_Finished, segIdx.IndexState)
+}
+
+func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_MultipleIndexesPerField() {
+	collectionID := int64(1)
+	segmentID := int64(100)
+
+	// Two JSON path indexes on the same field (fieldID=101)
+	indexes := map[int64]*model.Index{
+		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "idx_category"},
+		301: {CollectionID: collectionID, FieldID: 101, IndexID: 301, IndexName: "idx_price"},
+		302: {CollectionID: collectionID, FieldID: 102, IndexID: 302, IndexName: "vec_idx"},
+	}
+	im := createTestIndexMeta(s.T(), collectionID, indexes)
+	m := &meta{indexMeta: im}
+
+	// Result keyed by buildID (not fieldID), with IndexName for matching
+	result := &datapb.CopySegmentResult{
+		SegmentId:    segmentID,
+		ImportedRows: 1000,
+		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+			5001: {
+				FieldId:        101,
+				IndexId:        200, // source indexID
+				BuildId:        5001,
+				IndexName:      "idx_category",
+				IndexFilePaths: []string{"inverted1"},
+				IndexSize:      3000,
+			},
+			5002: {
+				FieldId:        101, // same field!
+				IndexId:        201, // different source indexID
+				BuildId:        5002,
+				IndexName:      "idx_price",
+				IndexFilePaths: []string{"inverted2"},
+				IndexSize:      4000,
+			},
+			5003: {
+				FieldId:        102,
+				IndexId:        202,
+				BuildId:        5003,
+				IndexName:      "vec_idx",
+				IndexFilePaths: []string{"HNSW"},
+				IndexSize:      10000,
+			},
+		},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	s.NoError(err)
+
+	// All three indexes should be synced with correct target indexIDs
+	for buildID, expectedIndexID := range map[int64]int64{5001: 300, 5002: 301, 5003: 302} {
+		segIdx, ok := im.segmentBuildInfo.Get(buildID)
+		s.True(ok, "buildID %d should exist", buildID)
+		s.Equal(expectedIndexID, segIdx.IndexID, "buildID %d should map to indexID %d", buildID, expectedIndexID)
+		s.Equal(commonpb.IndexState_Finished, segIdx.IndexState)
+	}
+}
+
+func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_IndexNameNotFound() {
+	collectionID := int64(1)
+	segmentID := int64(100)
+
+	indexes := map[int64]*model.Index{
+		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
+	}
+	im := createTestIndexMeta(s.T(), collectionID, indexes)
+	m := &meta{indexMeta: im}
+
+	// Source has an index name that doesn't exist in target -> should skip
+	result := &datapb.CopySegmentResult{
+		SegmentId:    segmentID,
+		ImportedRows: 1000,
+		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+			5001: {
+				FieldId:   101,
+				BuildId:   5001,
+				IndexName: "nonexistent_idx",
+			},
+		},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, nil)
+	s.NoError(err)
+
+	// Should not be added
+	_, ok := im.segmentBuildInfo.Get(5001)
+	s.False(ok)
+}
+
+func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_AddSegmentIndexError() {
+	collectionID := int64(1)
+	segmentID := int64(100)
+
+	errCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	errCatalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).
+		Return(errors.New("catalog error"))
+
+	indexes := map[int64]*model.Index{
+		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
+	}
+	im := createTestIndexMeta(s.T(), collectionID, indexes, errCatalog)
+	m := &meta{indexMeta: im}
+
+	result := &datapb.CopySegmentResult{
+		SegmentId:    segmentID,
+		ImportedRows: 1000,
+		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+			5001: {FieldId: 101, BuildId: 5001, IndexName: "vec_idx", IndexFilePaths: []string{"HNSW"}},
+		},
+	}
+	task := createTestCopyTask(collectionID, segmentID)
+
+	// Mock copyMeta for error path (UpdateTask and UpdateJobStateAndReleaseRef)
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyCatalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyMeta, cmErr := NewCopySegmentMeta(context.TODO(), copyCatalog, nil, nil, nil)
+	s.NoError(cmErr)
+
+	syncErr := syncVectorScalarIndexes(context.Background(), result, task, m, copyMeta)
+	s.Error(syncErr)
+	s.Contains(syncErr.Error(), "catalog error")
+}
+
+func TestAssembleCopySegmentRequest_SourceSegmentNotFound(t *testing.T) {
+	// Arrange: snapshot data has segment 1, but task maps from segment 999 which doesn't exist
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:           1,
+			CollectionId: 100,
+			Name:         "test_snapshot",
+		},
+		Segments: []*datapb.SegmentDescription{
+			{SegmentId: 1, PartitionId: 10},
+		},
+	}
+
+	sm := &snapshotMeta{}
+	// Mock ReadSnapshotData to return our test data
+	mock1 := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(snapshotData, nil).Build()
+	defer mock1.UnPatch()
+
+	task := &copySegmentTask{
+		snapshotMeta: sm,
+		tr:           timerecord.NewTimeRecorder("test"),
+		times:        taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: 100,
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 999, TargetSegmentId: 2001, PartitionId: 10}, // 999 not in snapshot
+		},
+	})
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: 100,
+			SnapshotName: "test_snapshot",
+		},
+		tr: timerecord.NewTimeRecorder("test_job"),
+	}
+
+	// Act
+	req, err := AssembleCopySegmentRequest(task, job)
+
+	// Assert
+	assert.Nil(t, req)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "source segment 999 not found")
+}
+
+func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {
+	// Arrange: snapshot data with segment that has vector, text, and JSON key indexes
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:           1,
+			CollectionId: 100,
+			Name:         "test_snapshot",
+		},
+		Segments: []*datapb.SegmentDescription{
+			{
+				SegmentId:   1,
+				PartitionId: 10,
+				IndexFiles: []*indexpb.IndexFilePathInfo{
+					{BuildID: 3001, FieldID: 100, IndexID: 1001},
+				},
+				TextIndexFiles: map[int64]*datapb.TextIndexStats{
+					200: {FieldID: 200, BuildID: 4001},
+				},
+				JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{
+					300: {FieldID: 300, BuildID: 5001},
+				},
+			},
+		},
+	}
+
+	sm := &snapshotMeta{}
+	mock1 := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(snapshotData, nil).Build()
+	defer mock1.UnPatch()
+
+	// Mock allocator to return sequential IDs starting from 9001
+	nextID := int64(9001)
+	alloc := &struct{ allocator.Allocator }{}
+	mock2 := mockey.Mock((*struct{ allocator.Allocator }).AllocID).To(func(ctx context.Context) (typeutil.UniqueID, error) {
+		id := nextID
+		nextID++
+		return id, nil
+	}).Build()
+	defer mock2.UnPatch()
+
+	// Mock Params access
+	mock3 := mockey.Mock(createStorageConfig).Return(nil).Build()
+	defer mock3.UnPatch()
+
+	task := &copySegmentTask{
+		snapshotMeta: sm,
+		alloc:        alloc,
+		tr:           timerecord.NewTimeRecorder("test"),
+		times:        taskcommon.NewTimes(),
+	}
+	task.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: 100,
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 1, TargetSegmentId: 2001, PartitionId: 10},
+		},
+	})
+
+	job := &copySegmentJob{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: 100,
+			SnapshotName: "test_snapshot",
+		},
+		tr: timerecord.NewTimeRecorder("test_job"),
+	}
+
+	// Act
+	req, err := AssembleCopySegmentRequest(task, job)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, req)
+	assert.Len(t, req.Targets, 1)
+
+	newBuildIDs := req.Targets[0].GetNewBuildIds()
+	// Should have 3 entries: one for vector index (3001), one for text (4001), one for JSON (5001)
+	assert.Len(t, newBuildIDs, 3)
+	assert.Contains(t, newBuildIDs, int64(3001))
+	assert.Contains(t, newBuildIDs, int64(4001))
+	assert.Contains(t, newBuildIDs, int64(5001))
+
+	// All new IDs should be distinct and >= 9001
+	seenIDs := make(map[int64]bool)
+	for _, newID := range newBuildIDs {
+		assert.True(t, newID >= 9001, "new build ID should be allocated by allocator")
+		assert.False(t, seenIDs[newID], "new build IDs should be unique")
+		seenIDs[newID] = true
+	}
 }

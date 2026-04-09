@@ -167,7 +167,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder("applyPK")
 	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
 	rowIDBegin, rowIDEnd, AllocErr := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
-	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 	if AllocErr != nil {
 		log.Ctx(ctx).Warn("failed to allocate auto id",
 			zap.String("collectionName", collectionName),
