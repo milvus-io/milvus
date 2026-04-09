@@ -98,7 +98,6 @@ func UpdateJobCompleteTime(completeTime string) UpdateJobAction {
 	}
 }
 
-
 type ImportJob interface {
 	GetJobID() int64
 	GetCollectionID() int64
