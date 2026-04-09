@@ -677,21 +677,76 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
     is_nested_index_ = reader.GetMeta<bool>("is_nested");
 
-    auto data_entry = reader.ReadEntry("index_data");
-
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+
     if (is_mmap_) {
-        auto load_priority =
-            GetValueFromConfig<milvus::proto::common::LoadPriority>(
-                config, milvus::LOAD_PRIORITY)
-                .value_or(milvus::proto::common::LoadPriority::HIGH);
-        SetupMmapFromData(
-            data_entry.data.data(), data_entry.data.size(), load_priority);
+        // Stream index_data entry to disk file, then mmap
+        mmap_filepath_ = disk_file_manager_ != nullptr
+                             ? disk_file_manager_->GetLocalIndexObjectPrefix() +
+                                   STLSORT_INDEX_FILE_NAME
+                             : MMAP_PATH_FOR_TEST;
+        std::filesystem::create_directories(
+            std::filesystem::path(mmap_filepath_).parent_path());
+
+        size_t total_data_size = 0;
+        {
+            auto file_writer = storage::FileWriter(
+                mmap_filepath_,
+                storage::io::GetPriorityFromLoadPriority(load_priority));
+
+            reader.ReadEntryStream(
+                "index_data", [&](const uint8_t* data, size_t len) {
+                    file_writer.Write(data, len);
+                    total_data_size += len;
+                });
+
+            auto aligned_size =
+                ((total_data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+            if (aligned_size > total_data_size) {
+                std::vector<uint8_t> padding(
+                    aligned_size - total_data_size, 0);
+                file_writer.Write(padding.data(), padding.size());
+            }
+            std::vector<uint8_t> mmap_pad(MMAP_INDEX_PADDING, 0);
+            file_writer.Write(mmap_pad.data(), mmap_pad.size());
+            file_writer.Finish();
+
+            data_size_ = total_data_size;
+            mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
+        }
+
+        auto file = File::Open(mmap_filepath_, O_RDONLY);
+        mmap_data_ = static_cast<char*>(
+            mmap(NULL, mmap_size_, PROT_READ, MAP_PRIVATE,
+                 file.Descriptor(), 0));
+        if (mmap_data_ == MAP_FAILED) {
+            file.Close();
+            remove(mmap_filepath_.c_str());
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "failed to mmap: {}",
+                      strerror(errno));
+        }
+        file.Close();
     } else {
+        // Stream index_data entry to pre-allocated memory
         data_.resize(index_size);
-        std::memcpy(
-            data_.data(), data_entry.data.data(), data_entry.data.size());
+        size_t write_offset = 0;
+        reader.ReadEntryStream(
+            "index_data", [&](const uint8_t* data, size_t len) {
+                memcpy(reinterpret_cast<uint8_t*>(data_.data()) + write_offset,
+                       data,
+                       len);
+                write_offset += len;
+            });
+        AssertInfo(write_offset == index_size * sizeof(IndexStructure<T>),
+                   "stream read size mismatch: got {}, expected {}",
+                   write_offset,
+                   index_size * sizeof(IndexStructure<T>));
     }
 
     setup_data_pointers();
