@@ -791,6 +791,15 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
     // Write str_ids
     auto str_ids_len = str_ids_.size() * sizeof(size_t);
     writer->WriteEntry(MARISA_STR_IDS, str_ids_.data(), str_ids_len);
+
+    // Persist CSR index + offsets
+    writer->WriteEntry(MARISA_CSR_INDEX,
+                       csr_index_.data(),
+                       csr_index_.size() * sizeof(size_t));
+    writer->WriteEntry(MARISA_CSR_OFFSETS,
+                       csr_offsets_.data(),
+                       csr_offsets_.size() * sizeof(size_t));
+    writer->PutMeta("csr_num_keys", csr_num_keys_);
 }
 
 void
@@ -875,7 +884,75 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
         str_ids_size_ = str_ids_.size();
     }
 
-    fill_offsets();
+    // Load persisted CSR or rebuild from str_ids
+    if (reader.HasEntry(MARISA_CSR_INDEX)) {
+        csr_num_keys_ = reader.GetMeta<size_t>("csr_num_keys");
+
+        if (config.contains(MMAP_FILE_PATH)) {
+            // mmap path: stream csr_index + csr_offsets to disk, then mmap
+            auto csr_path = file_name + ".csr";
+            size_t idx_bytes = reader.GetEntrySize(MARISA_CSR_INDEX);
+            size_t off_bytes = reader.GetEntrySize(MARISA_CSR_OFFSETS);
+
+            {
+                auto fw = storage::FileWriter(
+                    csr_path,
+                    storage::io::GetPriorityFromLoadPriority(load_priority));
+                reader.ReadEntryStream(
+                    MARISA_CSR_INDEX, [&](const uint8_t* d, size_t len) {
+                        fw.Write(d, len);
+                    });
+                reader.ReadEntryStream(
+                    MARISA_CSR_OFFSETS, [&](const uint8_t* d, size_t len) {
+                        fw.Write(d, len);
+                    });
+                fw.Finish();
+            }
+
+            csr_mmap_size_ = idx_bytes + off_bytes;
+            auto csr_file = File::Open(csr_path, O_RDONLY);
+            auto* mapped = mmap(NULL, csr_mmap_size_, PROT_READ, MAP_PRIVATE,
+                                csr_file.Descriptor(), 0);
+            AssertInfo(mapped != MAP_FAILED,
+                       "failed to mmap CSR: {}", strerror(errno));
+            csr_file.Close();
+            csr_mmap_data_ = static_cast<char*>(mapped);
+            csr_mmap_raii_ = std::make_unique<MmapFileRAII>(csr_path);
+
+            csr_index_ptr_ = reinterpret_cast<const size_t*>(csr_mmap_data_);
+            csr_offsets_ptr_ =
+                reinterpret_cast<const size_t*>(csr_mmap_data_ + idx_bytes);
+        } else {
+            // memory path: stream into vectors
+            auto idx_bytes = reader.GetEntrySize(MARISA_CSR_INDEX);
+            csr_index_.resize(idx_bytes / sizeof(size_t));
+            size_t wo = 0;
+            reader.ReadEntryStream(
+                MARISA_CSR_INDEX, [&](const uint8_t* d, size_t len) {
+                    memcpy(reinterpret_cast<uint8_t*>(csr_index_.data()) + wo,
+                           d, len);
+                    wo += len;
+                });
+
+            auto off_bytes = reader.GetEntrySize(MARISA_CSR_OFFSETS);
+            csr_offsets_.resize(off_bytes / sizeof(size_t));
+            wo = 0;
+            reader.ReadEntryStream(
+                MARISA_CSR_OFFSETS, [&](const uint8_t* d, size_t len) {
+                    memcpy(
+                        reinterpret_cast<uint8_t*>(csr_offsets_.data()) + wo,
+                        d, len);
+                    wo += len;
+                });
+
+            csr_index_ptr_ = csr_index_.data();
+            csr_offsets_ptr_ = csr_offsets_.data();
+        }
+    } else {
+        // Backward compat: rebuild CSR from str_ids
+        fill_offsets();
+    }
+
     built_ = true;
     total_size_ = CalculateTotalSize();
     ComputeByteSize();
