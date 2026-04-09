@@ -19,6 +19,7 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
+#include "common/ChunkDataView.h"
 #include "common/Types.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
@@ -55,13 +56,14 @@ class TimestampData {
         chunk_data_.reserve(pins_.size());
         num_rows_until_chunk_.reserve(pins_.size() + 1);
         num_rows_until_chunk_.push_back(0);
+        data_views_.reserve(pins_.size());
         for (auto& pin : pins_) {
-            auto* fixed_chunk = static_cast<FixedWidthChunk*>(pin.get());
-            auto span = fixed_chunk->Span();
-            chunk_data_.push_back(static_cast<const Timestamp*>(span.data()));
-            num_rows_until_chunk_.push_back(
-                num_rows_until_chunk_.back() +
-                static_cast<int64_t>(span.row_count()));
+            auto data_view = pin.get()->GetDataView<int64_t>();
+            chunk_data_.push_back(
+                reinterpret_cast<const Timestamp*>(data_view->Data()));
+            num_rows_until_chunk_.push_back(num_rows_until_chunk_.back() +
+                                            data_view->RowCount());
+            data_views_.push_back(std::move(data_view));
         }
         total_size_ = num_rows_until_chunk_.back();
         build_virtual_chunk_index();
@@ -136,6 +138,7 @@ class TimestampData {
         total_size_ = 0;
         column_.reset();
         pins_.clear();
+        data_views_.clear();
         owned_.clear();
         owned_.shrink_to_fit();
     }
@@ -161,9 +164,10 @@ class TimestampData {
     std::vector<int64_t> vcid_to_cid_arr_;
     int64_t total_size_ = 0;
 
-    // Pin mode: hold column reference and pins to prevent eviction
+    // Pin mode: hold column reference, pins, and data views to prevent eviction
     std::shared_ptr<ChunkedColumnInterface> column_;
     std::vector<cachinglayer::PinWrapper<Chunk*>> pins_;
+    std::vector<std::shared_ptr<ChunkDataView<int64_t>>> data_views_;
     // Own mode: self-owned data
     std::vector<Timestamp> owned_;
 };

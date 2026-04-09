@@ -332,8 +332,8 @@ class SlowChunkTranslator : public cachinglayer::Translator<milvus::Chunk> {
             }
             std::this_thread::sleep_for(delay_);
             auto guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
-            auto chunk = std::make_unique<FixedWidthChunk>(
-                100, 1, nullptr, 0, sizeof(int64_t), false, guard);
+            auto chunk = std::make_unique<FixedWidthChunk<int64_t>>(
+                100, nullptr, 0, sizeof(int64_t), false, guard);
             res.emplace_back(cid, std::move(chunk));
             chunks_loaded_++;
         }

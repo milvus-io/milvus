@@ -25,8 +25,8 @@ TEST(test_chunked_column, test_get_chunkid) {
         auto row_num = num_rows_per_chunk[i];
         auto chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
-        auto chunk = std::make_unique<FixedWidthChunk>(
-            row_num, 1, nullptr, 0, 4, false, chunk_mmap_guard);
+        auto chunk = std::make_unique<FixedWidthChunk<int64_t>>(
+            row_num, nullptr, 0, sizeof(int64_t), false, chunk_mmap_guard);
         chunks.push_back(std::move(chunk));
     }
     auto translator = std::make_unique<TestChunkTranslator>(
@@ -85,8 +85,8 @@ TEST(test_chunked_column, test_nullable_build_valid_row_ids) {
         auto row_num = num_rows_per_chunk[i];
         auto chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
-        auto chunk = std::make_unique<FixedWidthChunk>(row_num,
-                                                       1,
+        auto chunk =
+            std::make_unique<FixedWidthChunk<int32_t>>(row_num,
                                                        buffers[i].data(),
                                                        buffers[i].size(),
                                                        element_size,
@@ -148,8 +148,8 @@ TEST(test_chunked_column, test_nullable_get_num_valid_rows_non_nullable) {
         auto row_num = num_rows_per_chunk[i];
         auto chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
-        auto chunk = std::make_unique<FixedWidthChunk>(
-            row_num, 1, nullptr, 0, 4, false, chunk_mmap_guard);
+        auto chunk = std::make_unique<FixedWidthChunk<int64_t>>(
+            row_num, nullptr, 0, sizeof(int64_t), false, chunk_mmap_guard);
         chunks.push_back(std::move(chunk));
     }
     auto translator = std::make_unique<TestChunkTranslator>(
@@ -196,8 +196,8 @@ TEST(test_chunked_column, test_nullable_all_valid) {
         auto row_num = num_rows_per_chunk[i];
         auto chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
-        auto chunk = std::make_unique<FixedWidthChunk>(row_num,
-                                                       1,
+        auto chunk =
+            std::make_unique<FixedWidthChunk<int32_t>>(row_num,
                                                        buffers[i].data(),
                                                        buffers[i].size(),
                                                        element_size,
@@ -251,8 +251,8 @@ TEST(test_chunked_column, test_nullable_all_null) {
         auto row_num = num_rows_per_chunk[i];
         auto chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
-        auto chunk = std::make_unique<FixedWidthChunk>(row_num,
-                                                       1,
+        auto chunk =
+            std::make_unique<FixedWidthChunk<int32_t>>(row_num,
                                                        buffers[i].data(),
                                                        buffers[i].size(),
                                                        element_size,

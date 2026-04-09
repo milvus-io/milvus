@@ -21,6 +21,7 @@
 #include <mutex>
 #include <vector>
 
+#include "common/ChunkDataView.h"
 #include "common/EasyAssert.h"
 #include "common/VirtualPK.h"
 #include "mmap/ChunkedColumnInterface.h"
@@ -96,70 +97,38 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
         return num_rows_;
     }
 
-    PinWrapper<SpanBase>
-    Span(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
-        EnsureMaterialized();
-        return PinWrapper<SpanBase>(
-            SpanBase(materialized_pks_.data(), num_rows_, sizeof(int64_t)));
-    }
-
     void
     PrefetchChunks(milvus::OpContext* op_ctx,
                    const std::vector<int64_t>& chunk_ids) const override {
         // No-op - no data to prefetch
     }
 
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    StringViews(milvus::OpContext* op_ctx,
-                int64_t chunk_id,
-                std::optional<std::pair<int64_t, int64_t>> offset_len =
-                    std::nullopt) const override {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "StringViews not supported for VirtualPKChunkedColumn");
+    PinWrapper<AnyDataView>
+    ChunkDataView(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
+        EnsureMaterialized();
+        return PinWrapper<AnyDataView>(
+            AnyDataView(std::make_shared<ContiguousDataView<int64_t>>(
+                materialized_pks_.data(), num_rows_)));
     }
 
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    ArrayViews(
-        milvus::OpContext* op_ctx,
-        int64_t chunk_id,
-        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "ArrayViews not supported for VirtualPKChunkedColumn");
-    }
-
-    PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
-    VectorArrayViews(
-        milvus::OpContext* op_ctx,
-        int64_t chunk_id,
-        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "VectorArrayViews not supported for VirtualPKChunkedColumn");
-    }
-
-    PinWrapper<const size_t*>
-    VectorArrayOffsets(milvus::OpContext* op_ctx,
-                       int64_t chunk_id) const override {
-        ThrowInfo(
-            ErrorCode::Unsupported,
-            "VectorArrayOffsets not supported for VirtualPKChunkedColumn");
-    }
-
-    PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    StringViewsByOffsets(milvus::OpContext* op_ctx,
+    PinWrapper<AnyDataView>
+    ChunkDataViewByRange(milvus::OpContext* op_ctx,
                          int64_t chunk_id,
-                         const FixedVector<int32_t>& offsets) const override {
-        ThrowInfo(
-            ErrorCode::Unsupported,
-            "StringViewsByOffsets not supported for VirtualPKChunkedColumn");
+                         int64_t start_offset,
+                         int64_t length) const override {
+        EnsureMaterialized();
+        return PinWrapper<AnyDataView>(
+            AnyDataView(std::make_shared<ContiguousDataView<int64_t>>(
+                materialized_pks_.data() + start_offset, length)));
     }
 
-    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    ArrayViewsByOffsets(milvus::OpContext* op_ctx,
-                        int64_t chunk_id,
-                        const FixedVector<int32_t>& offsets) const override {
-        ThrowInfo(
-            ErrorCode::Unsupported,
-            "ArrayViewsByOffsets not supported for VirtualPKChunkedColumn");
+    PinWrapper<AnyDataView>
+    ChunkDataViewByOffsets(milvus::OpContext* op_ctx,
+                           int64_t chunk_id,
+                           const FixedVector<int32_t>& offsets) const override {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "ChunkDataViewByOffsets not supported for "
+                  "VirtualPKChunkedColumn");
     }
 
     std::pair<size_t, size_t>

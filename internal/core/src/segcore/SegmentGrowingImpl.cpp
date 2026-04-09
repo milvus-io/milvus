@@ -44,7 +44,6 @@
 #include "common/Json.h"
 #include "common/LoadInfo.h"
 #include "common/Schema.h"
-#include "common/Span.h"
 #include "common/Types.h"
 #include "common/VectorArray.h"
 #include "glog/logging.h"
@@ -1035,63 +1034,32 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     deleted_record_.LoadPush(pks, timestamps);
 }
 
-PinWrapper<SpanBase>
-SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
+PinWrapper<AnyDataView>
+SegmentGrowingImpl::chunk_view_impl(milvus::OpContext* op_ctx,
                                     FieldId field_id,
                                     int64_t chunk_id) const {
-    return PinWrapper<SpanBase>(
-        get_insert_record().get_span_base(field_id, chunk_id));
+    return PinWrapper<AnyDataView>(
+        get_insert_record().get_data_view(field_id, chunk_id));
 }
 
-PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-SegmentGrowingImpl::chunk_string_view_impl(
-    milvus::OpContext* op_ctx,
-    FieldId field_id,
-    int64_t chunk_id,
-    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
-    ThrowInfo(ErrorCode::NotImplemented,
-              "chunk string view impl not implement for growing segment");
+PinWrapper<AnyDataView>
+SegmentGrowingImpl::chunk_view_impl(milvus::OpContext* op_ctx,
+                                    FieldId field_id,
+                                    int64_t chunk_id,
+                                    int64_t start_offset,
+                                    int64_t length) const {
+    ThrowInfo(NotImplemented,
+              "chunk_view_impl with range not implemented for growing segment");
 }
 
-PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-SegmentGrowingImpl::chunk_array_view_impl(
-    milvus::OpContext* op_ctx,
-    FieldId field_id,
-    int64_t chunk_id,
-    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
-    ThrowInfo(ErrorCode::NotImplemented,
-              "chunk array view impl not implement for growing segment");
-}
-
-PinWrapper<std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
-SegmentGrowingImpl::chunk_vector_array_view_impl(
-    milvus::OpContext* op_ctx,
-    FieldId field_id,
-    int64_t chunk_id,
-    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
-    ThrowInfo(ErrorCode::NotImplemented,
-              "chunk vector array view impl not implement for growing segment");
-}
-
-PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-SegmentGrowingImpl::chunk_string_views_by_offsets(
-    milvus::OpContext* op_ctx,
-    FieldId field_id,
-    int64_t chunk_id,
-    const FixedVector<int32_t>& offsets) const {
-    ThrowInfo(ErrorCode::NotImplemented,
-              "chunk view by offsets not implemented for growing segment");
-}
-
-PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-SegmentGrowingImpl::chunk_array_views_by_offsets(
-    milvus::OpContext* op_ctx,
-    FieldId field_id,
-    int64_t chunk_id,
-    const FixedVector<int32_t>& offsets) const {
+PinWrapper<AnyDataView>
+SegmentGrowingImpl::chunk_view_impl(milvus::OpContext* op_ctx,
+                                    FieldId field_id,
+                                    int64_t chunk_id,
+                                    const FixedVector<int32_t>& offsets) const {
     ThrowInfo(
-        ErrorCode::NotImplemented,
-        "chunk array views by offsets not implemented for growing segment");
+        NotImplemented,
+        "chunk_view_impl with offsets not implemented for growing segment");
 }
 
 int64_t
