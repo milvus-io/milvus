@@ -125,6 +125,7 @@ type distribution struct {
 	// async snapshot generation
 	snapshotNotifier chan struct{} // capacity 1, notify background goroutine to regenerate snapshot
 	snapshotDone     chan struct{} // closed when background goroutine exits
+	closeOnce        sync.Once
 
 	// distribution info
 	channelName string
@@ -729,7 +730,9 @@ func (d *distribution) Flush() {
 
 // Close stops the background snapshot loop and waits for it to exit.
 func (d *distribution) Close() {
-	close(d.snapshotNotifier)
+	d.closeOnce.Do(func() {
+		close(d.snapshotNotifier)
+	})
 	<-d.snapshotDone
 }
 
