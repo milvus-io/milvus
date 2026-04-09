@@ -562,6 +562,7 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
 
     idx_to_offsets_.resize(total_num_rows_);
 
+    // valid_bitset is small (num_rows/8 bytes), keep as ReadEntry
     auto valid_bitset_entry = reader.ReadEntry("valid_bitset");
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
     for (size_t i = 0; i < total_num_rows_; ++i) {
@@ -571,7 +572,10 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
         }
     }
 
-    auto index_data_entry = reader.ReadEntry("index_data");
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
 
     if (config.contains(MMAP_FILE_PATH)) {
         LOG_INFO("StringIndexSort::LoadEntries: loading with mmap strategy");
@@ -579,17 +583,50 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
         auto mmap_path =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
         mmap_impl->SetMmapFilePath(mmap_path);
-        mmap_impl->LoadFromData(index_data_entry.data.data(),
-                                index_data_entry.data.size(),
+
+        // Stream index_data directly to mmap file (MmapImpl::LoadFromData
+        // would write to file anyway, skip the intermediate buffer)
+        std::filesystem::create_directories(
+            std::filesystem::path(mmap_path).parent_path());
+        auto data_size = reader.GetEntrySize("index_data");
+        {
+            auto fw = storage::FileWriter(
+                mmap_path,
+                storage::io::GetPriorityFromLoadPriority(load_priority));
+            reader.ReadEntryStream(
+                "index_data", [&](const uint8_t* d, size_t len) {
+                    fw.Write(d, len);
+                });
+
+            auto aligned =
+                ((data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+            if (aligned > data_size) {
+                std::vector<uint8_t> padding(aligned - data_size, 0);
+                fw.Write(padding.data(), padding.size());
+            }
+            std::vector<uint8_t> mmap_pad(MMAP_INDEX_PADDING, 0);
+            fw.Write(mmap_pad.data(), mmap_pad.size());
+            fw.Finish();
+        }
+        mmap_impl->LoadFromFile(data_size,
                                 total_num_rows_,
                                 valid_bitset_,
                                 idx_to_offsets_);
         impl_ = std::move(mmap_impl);
     } else {
         LOG_INFO("StringIndexSort::LoadEntries: loading with memory strategy");
+        // Memory path: stream to buffer, then LoadFromData
+        auto data_size = reader.GetEntrySize("index_data");
+        std::vector<uint8_t> buf(data_size);
+        size_t wo = 0;
+        reader.ReadEntryStream(
+            "index_data", [&](const uint8_t* d, size_t len) {
+                memcpy(buf.data() + wo, d, len);
+                wo += len;
+            });
         impl_ = std::make_unique<StringIndexSortMemoryImpl>();
-        impl_->LoadFromData(index_data_entry.data.data(),
-                            index_data_entry.data.size(),
+        impl_->LoadFromData(buf.data(),
+                            buf.size(),
                             total_num_rows_,
                             valid_bitset_,
                             idx_to_offsets_);
@@ -1258,6 +1295,26 @@ StringIndexSortMmapImpl::LoadFromData(const uint8_t* data,
         file_writer.Write(padding.data(), padding.size());
         file_writer.Finish();
     }
+
+    MmapAndParse(data_size, total_num_rows, valid_bitset, idx_to_offsets);
+}
+
+void
+StringIndexSortMmapImpl::LoadFromFile(size_t data_size,
+                                      size_t total_num_rows,
+                                      TargetBitmap& valid_bitset,
+                                      std::vector<int32_t>& idx_to_offsets) {
+    AssertInfo(!mmap_filepath_.empty(), "mmap filepath is not set");
+    MmapAndParse(data_size, total_num_rows, valid_bitset, idx_to_offsets);
+}
+
+void
+StringIndexSortMmapImpl::MmapAndParse(
+    size_t data_size,
+    size_t total_num_rows,
+    TargetBitmap& valid_bitset,
+    std::vector<int32_t>& idx_to_offsets) {
+    auto aligned_size = ((data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
 
     auto fd = open(mmap_filepath_.c_str(), O_RDONLY);
     if (fd == -1) {
