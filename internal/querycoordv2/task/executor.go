@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -899,33 +900,58 @@ func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int
 		indexes = nil
 	}
 
-	// Get collection index info
 	indexInfos, err := ex.broker.ListIndexes(ctx, collectionID)
 	if err != nil {
 		log.Warn("fail to get index meta of collection", zap.Error(err))
 		return nil, nil, err
 	}
-	// update the field index params
+
+	// 1. Standardize and determine the final priority
+	// Use strings.ToUpper and TrimSpace to handle cases like "high " or "Low"
+	finalPriority := priority
+	rawForcePriority := Params.QueryCoordCfg.ForceLoadPriority.GetValue()
+	standardizedPriority := strings.ToUpper(strings.TrimSpace(rawForcePriority))
+
+	if val, ok := commonpb.LoadPriority_value[standardizedPriority]; ok {
+		finalPriority = commonpb.LoadPriority(val)
+		log.Debug("load priority is overridden by config",
+			zap.String("rawConfig", rawForcePriority),
+			zap.String("finalPriority", finalPriority.String()))
+	}
+
+	// 2. Update the field index params
 	for _, segmentIndex := range indexes[segment.GetID()] {
 		index, found := lo.Find(indexInfos, func(indexInfo *indexpb.IndexInfo) bool {
 			return indexInfo.IndexID == segmentIndex.IndexID
 		})
-		if !found {
-			log.Warn("no collection index info for the given segment index", zap.String("indexName", segmentIndex.GetIndexName()))
-		}
 
 		params := funcutil.KeyValuePair2Map(segmentIndex.GetIndexParams())
-		for _, kv := range index.GetUserIndexParams() {
-			if indexparams.IsConfigableIndexParam(kv.GetKey()) {
-				params[kv.GetKey()] = kv.GetValue()
+
+		if !found {
+			log.Warn("no collection index info for the given segment index",
+				zap.String("indexName", segmentIndex.GetIndexName()))
+		} else {
+			// Merge user index params only if index metadata is found to avoid nil pointer panic
+			for _, kv := range index.GetUserIndexParams() {
+				if indexparams.IsConfigableIndexParam(kv.GetKey()) {
+					params[kv.GetKey()] = kv.GetValue()
+				}
 			}
 		}
 		segmentIndex.IndexParams = funcutil.Map2KeyValuePair(params)
+
+		// Append the determined finalPriority to index params
 		segmentIndex.IndexParams = append(segmentIndex.IndexParams,
-			&commonpb.KeyValuePair{Key: common.LoadPriorityKey, Value: priority.String()})
+			&commonpb.KeyValuePair{
+				Key:   common.LoadPriorityKey,
+				Value: finalPriority.String(),
+			})
 	}
 
 	loadInfo := utils.PackSegmentLoadInfo(segment, channel.GetSeekPosition(), indexes[segment.GetID()])
-	loadInfo.Priority = priority
+
+	// 3. Keep loadInfo.Priority consistent with finalPriority
+	loadInfo.Priority = finalPriority
+
 	return loadInfo, indexInfos, nil
 }
