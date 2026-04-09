@@ -22,7 +22,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/pkg/v2/kv/predicates"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // CompareFailedError is a helper type for checking MetaKv CompareAndSwap series func error type
@@ -83,16 +82,4 @@ type WatchKV interface {
 	Watch(ctx context.Context, key string) clientv3.WatchChan
 	WatchWithPrefix(ctx context.Context, key string) clientv3.WatchChan
 	WatchWithRevision(ctx context.Context, key string, revision int64) clientv3.WatchChan
-}
-
-// SnapShotKV is TxnKV for snapshot data. It must save timestamp.
-//
-//go:generate mockery --name=SnapShotKV --with-expecter
-type SnapShotKV interface {
-	Save(ctx context.Context, key string, value string, ts typeutil.Timestamp) error
-	Load(ctx context.Context, key string, ts typeutil.Timestamp) (string, error)
-	MultiSave(ctx context.Context, kvs map[string]string, ts typeutil.Timestamp) error
-	LoadWithPrefix(ctx context.Context, key string, ts typeutil.Timestamp) ([]string, []string, error)
-	MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, ts typeutil.Timestamp) error
-	MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, ts typeutil.Timestamp) error
 }
