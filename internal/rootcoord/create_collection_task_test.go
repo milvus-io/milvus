@@ -1468,6 +1468,9 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 			ResourceIds: []int64{1, 2, 3},
 		}, nil)
 
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
+
 		collectionName := funcutil.GenRandomStr()
 		field1 := funcutil.GenRandomStr()
 		field2 := funcutil.GenRandomStr()
@@ -1498,7 +1501,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
-			Core: newTestCore(withMixCoord(mixcoord)),
+			Core: newTestCore(withMixCoord(mixcoord), withMeta(meta)),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -1522,6 +1525,9 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 			ResourceIds: []int64{1, 2, 3},
 		}, nil)
 
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
+
 		collectionName := funcutil.GenRandomStr()
 		field1 := funcutil.GenRandomStr()
 		field2 := funcutil.GenRandomStr()
@@ -1552,7 +1558,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
-			Core: newTestCore(withMixCoord(mixcoord)),
+			Core: newTestCore(withMixCoord(mixcoord), withMeta(meta)),
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,

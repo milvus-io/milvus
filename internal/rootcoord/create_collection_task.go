@@ -50,6 +50,19 @@ type createCollectionTask struct {
 	header          *message.CreateCollectionMessageHeader
 	body            *message.CreateCollectionRequest
 	preserveFieldID bool
+
+	// heldFileResourceIds tracks file resources whose refCnt was incremented
+	// during validation, to be released if the task fails before Broadcast.
+	heldFileResourceIds []int64
+}
+
+// releaseFileResources decrements refCnt for file resources that were
+// incremented during validation. Called when the task fails before Broadcast.
+func (t *createCollectionTask) releaseFileResources() {
+	if len(t.heldFileResourceIds) > 0 {
+		t.meta.DecFileResourceRefCnt(t.heldFileResourceIds)
+		t.heldFileResourceIds = nil
+	}
 }
 
 func (t *createCollectionTask) validate(ctx context.Context) error {
@@ -233,6 +246,15 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 			return err
 		}
 		schema.FileResourceIds = resp.GetResourceIds()
+
+		// Bind file resources to collection lifecycle: refCnt++ now, refCnt-- on
+		// drop. Under ddLock, atomic with RemoveFileResource. See #48612.
+		if len(schema.FileResourceIds) > 0 {
+			if err := t.meta.IncFileResourceRefCnt(schema.FileResourceIds); err != nil {
+				return err
+			}
+			t.heldFileResourceIds = schema.FileResourceIds
+		}
 	}
 
 	return validateFieldDataType(schema.GetFields())
