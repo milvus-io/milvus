@@ -357,10 +357,19 @@ IndexFactory::ScalarIndexLoadResource(
     request.has_raw_data = false;
 
     if (index_type == milvus::index::ASCENDING_SORT) {
-        request.final_memory_cost = index_size_in_bytes;
-        request.final_disk_cost = 0;
-        request.max_memory_cost = 2 * index_size_in_bytes;
-        request.max_disk_cost = 0;
+        if (mmap_enable) {
+            // V3 streaming: chunks streamed to disk + mmap, no resident memory
+            request.final_memory_cost = 0;
+            request.final_disk_cost = index_size_in_bytes;
+            request.max_memory_cost = 0;
+            request.max_disk_cost = index_size_in_bytes;
+        } else {
+            // V3 streaming: pre-allocate target, stream into it
+            request.final_memory_cost = index_size_in_bytes;
+            request.final_disk_cost = 0;
+            request.max_memory_cost = index_size_in_bytes;
+            request.max_disk_cost = 0;
+        }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::MARISA_TRIE ||
                index_type == milvus::index::MARISA_TRIE_UPPER) {
