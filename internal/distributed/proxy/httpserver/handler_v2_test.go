@@ -2954,6 +2954,121 @@ func TestAddCollectionFieldSuite(t *testing.T) {
 	suite.Run(t, new(AddCollectionFieldSuite))
 }
 
+type AlterCollectionSchemaSuite struct {
+	suite.Suite
+	testEngine *gin.Engine
+	mp         *mocks.MockProxy
+}
+
+func (s *AlterCollectionSchemaSuite) SetupSuite() {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+}
+
+func (s *AlterCollectionSchemaSuite) TearDownSuite() {
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+}
+
+func (s *AlterCollectionSchemaSuite) SetupTest() {
+	s.mp = mocks.NewMockProxy(s.T())
+	s.testEngine = initHTTPServerV2(s.mp, false)
+}
+
+func (s *AlterCollectionSchemaSuite) TestAlterCollectionSchemaNormal() {
+	testCases := []requestBodyTestCase{
+		{
+			path: versionalV2(CollectionCategory, AlterSchemaAction),
+			requestBody: []byte(`{
+				"collectionName": "book",
+				"fieldSchema": {"fieldName": "sparse_bm25", "dataType": "SparseFloatVector"},
+				"function": {"name": "bm25_func", "type": "BM25", "inputFieldNames": ["text"], "outputFieldNames": ["sparse_bm25"]}
+			}`),
+		},
+		{
+			path: versionalV2(CollectionCategory, AlterSchemaAction),
+			requestBody: []byte(`{
+				"collectionName": "book",
+				"fieldSchema": {"fieldName": "sparse_bm25", "dataType": "SparseFloatVector"},
+				"function": {"name": "bm25_func", "type": "BM25", "inputFieldNames": ["text"], "outputFieldNames": ["sparse_bm25"]},
+				"doPhysicalBackfill": true
+			}`),
+		},
+	}
+	s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.Anything).Return(&milvuspb.AlterCollectionSchemaResponse{
+		AlterStatus: merr.Success(),
+	}, nil)
+	validateRequestBodyTestCases(s.T(), s.testEngine, testCases, false)
+}
+
+func (s *AlterCollectionSchemaSuite) TestAlterCollectionSchemaFail() {
+	s.Run("bad_request", func() {
+		testCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, AlterSchemaAction),
+				requestBody: []byte(`{"collectionName": "book"}`),
+				errCode:     1802,
+				errMsg:      "missing required parameters",
+			},
+			{
+				path:        versionalV2(CollectionCategory, AlterSchemaAction),
+				requestBody: []byte(`{"collectionName": "book", "fieldSchema": {"fieldName": "f", "dataType": "SparseFloatVector"}}`),
+				errCode:     1802,
+				errMsg:      "missing required parameters",
+			},
+			{
+				path:        versionalV2(CollectionCategory, AlterSchemaAction),
+				requestBody: []byte(`{"collectionName": "book"`),
+				errCode:     1801,
+				errMsg:      "can only accept json format request",
+			},
+			{
+				path: versionalV2(CollectionCategory, AlterSchemaAction),
+				requestBody: []byte(`{
+					"collectionName": "book",
+					"fieldSchema": {"fieldName": "f", "dataType": "INVALIDTYPE"},
+					"function": {"name": "fn", "type": "BM25", "inputFieldNames": ["text"], "outputFieldNames": ["f"]}
+				}`),
+				errCode: 1100,
+				errMsg:  "data type INVALIDTYPE is invalid",
+			},
+			{
+				path: versionalV2(CollectionCategory, AlterSchemaAction),
+				requestBody: []byte(`{
+					"collectionName": "book",
+					"fieldSchema": {"fieldName": "f", "dataType": "SparseFloatVector"},
+					"function": {"name": "fn", "type": "INVALIDFUNC", "inputFieldNames": ["text"], "outputFieldNames": ["f"]}
+				}`),
+				errCode: 1100,
+				errMsg:  "Unsupported function type",
+			},
+		}
+		validateRequestBodyTestCases(s.T(), s.testEngine, testCases, false)
+	})
+
+	s.Run("server_error", func() {
+		testCases := []requestBodyTestCase{
+			{
+				path: versionalV2(CollectionCategory, AlterSchemaAction),
+				requestBody: []byte(`{
+					"collectionName": "book",
+					"fieldSchema": {"fieldName": "sparse_bm25", "dataType": "SparseFloatVector"},
+					"function": {"name": "bm25_func", "type": "BM25", "inputFieldNames": ["text"], "outputFieldNames": ["sparse_bm25"]}
+				}`),
+				errCode: 5,
+				errMsg:  "service internal error: mock error",
+			},
+		}
+		s.mp.EXPECT().AlterCollectionSchema(mock.Anything, mock.Anything).Return(&milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(merr.WrapErrServiceInternal("mock error")),
+		}, nil).Maybe()
+		validateRequestBodyTestCases(s.T(), s.testEngine, testCases, false)
+	})
+}
+
+func TestAlterCollectionSchemaSuite(t *testing.T) {
+	suite.Run(t, new(AlterCollectionSchemaSuite))
+}
+
 func TestCollectionFunctionSuite(t *testing.T) {
 	suite.Run(t, new(CollectionFunctionSuite))
 }

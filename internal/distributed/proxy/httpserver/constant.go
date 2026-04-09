@@ -84,7 +84,8 @@ const (
 	RemovePrivilegesFromGroupAction = "remove_privileges_from_group"
 	TransferReplicaAction           = "transfer_replica"
 
-	RunAnalyzerAction = "run_analyzer"
+	RunAnalyzerAction    = "run_analyzer"
+	AlterSchemaAction    = "alter_schema"
 )
 
 const (

@@ -240,6 +240,19 @@ func (req *CollectionFieldReqWithSchema) GetFieldName() string {
 	return req.Schema.FieldName
 }
 
+// AlterCollectionSchemaReq represents a request to alter collection schema
+// by adding a function field (e.g., BM25 sparse vector) with its output field.
+type AlterCollectionSchemaReq struct {
+	DbName             string         `json:"dbName"`
+	CollectionName     string         `json:"collectionName" binding:"required"`
+	FieldSchema        FieldSchema    `json:"fieldSchema" binding:"required"`
+	Function           FunctionSchema `json:"function" binding:"required"`
+	DoPhysicalBackfill bool           `json:"doPhysicalBackfill,omitempty"`
+}
+
+func (req *AlterCollectionSchemaReq) GetDbName() string         { return req.DbName }
+func (req *AlterCollectionSchemaReq) GetCollectionName() string { return req.CollectionName }
+
 type PartitionReq struct {
 	// CollectionNameReq
 	DbName         string `json:"dbName"`
