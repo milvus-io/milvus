@@ -483,7 +483,7 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
         index_params.add_index(vec_field, index_type="FLAT", metric_type="L2")
         self.create_index(client, col, index_params)
         self.load_collection(client, col)
-        nb = 2000  # > 1024 to trigger index build
+        nb = ct.default_nb  # > 2048 to trigger index build
         rows = [{vec_field: cf.gen_vectors(1, default_dim)[0]} for _ in range(nb)]
         self.insert(client, col, rows)
         self.flush(client, col)

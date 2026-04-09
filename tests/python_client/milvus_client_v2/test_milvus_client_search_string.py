@@ -562,7 +562,7 @@ class TestSearchStringIndependent(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        nb = 2000
+        nb = ct.default_nb
         dim = 64
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=True)

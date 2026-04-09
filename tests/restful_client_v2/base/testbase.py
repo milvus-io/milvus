@@ -105,7 +105,7 @@ class TestBase(Base):
             self.partition_client.api_key = None
         connections.connect(uri=endpoint, token=token)
 
-    def init_collection(self, collection_name, pk_field="id", metric_type="L2", dim=128, nb=100, batch_size=1000, return_insert_id=False):
+    def init_collection(self, collection_name, pk_field="id", metric_type="L2", dim=128, nb=3000, batch_size=1000, return_insert_id=False):
         # create collection
         schema_payload = {
             "collectionName": collection_name,
