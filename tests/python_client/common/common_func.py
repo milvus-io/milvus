@@ -1700,7 +1700,7 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
         dict = {ct.default_int64_field_name: i,
                 ct.default_int32_field_name: i,
                 ct.default_int16_field_name: i,
-                ct.default_int8_field_name: i,
+                ct.default_int8_field_name: int(np.int8(i)),
                 ct.default_bool_field_name: bool(i),
                 ct.default_float_field_name: i*1.0,
                 ct.default_double_field_name: i * 1.0,
