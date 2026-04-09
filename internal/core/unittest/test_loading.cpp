@@ -240,8 +240,8 @@ static const auto kIndexLoadTestValues = ::testing::Values(
         {2UL * 1024 * 1024 * 1024, 0UL, 1UL * 1024 * 1024 * 1024, 0UL, false}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "BITMAP"}, {"mmap", "true"}, {"field_type", "array"}},
-        {1UL * 1024 * 1024 * 1024,
-         1UL * 1024 * 1024 * 1024,
+        {0UL,
+         2UL * 1024 * 1024 * 1024,
          0UL,
          1UL * 1024 * 1024 * 1024,
          false}),

@@ -398,11 +398,14 @@ IndexFactory::ScalarIndexLoadResource(
         request.has_raw_data = false;
     } else if (index_type == milvus::index::BITMAP_INDEX_TYPE) {
         if (mmap_enable) {
+            // V3 streaming: stream to temp file (mmap'd, no heap), then
+            // MMapIndexData writes frozen format to final file
             request.final_memory_cost = 0;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = index_size_in_bytes;
-            request.max_disk_cost = index_size_in_bytes;
+            request.max_memory_cost = 0;
+            request.max_disk_cost = 2 * index_size_in_bytes;  // temp + final
         } else {
+            // V3 streaming: pre-allocate buffer + deserialize
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
             request.max_memory_cost = 2 * index_size_in_bytes;
