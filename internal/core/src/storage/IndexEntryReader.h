@@ -75,6 +75,12 @@ class IndexEntryReader {
     size_t
     GetEntrySize(const std::string& name) const;
 
+    /// Check if an entry exists in the index file.
+    bool
+    HasEntry(const std::string& name) const {
+        return entry_index_.find(name) != entry_index_.end();
+    }
+
     template <typename T>
     T
     GetMeta(const std::string& key) const {

@@ -667,6 +667,14 @@ ScalarIndexSort<T>::WriteEntries(storage::IndexEntryWriter* writer) {
 
     writer->WriteEntry(
         "index_data", data_.data(), data_.size() * sizeof(IndexStructure<T>));
+
+    // Persist idx_to_offsets and valid_bitset to avoid recomputation at load.
+    writer->WriteEntry("idx_to_offsets",
+                       idx_to_offsets_.data(),
+                       idx_to_offsets_.size() * sizeof(size_t));
+    writer->WriteEntry("valid_bitset",
+                       reinterpret_cast<const uint8_t*>(valid_bitset_.data()),
+                       valid_bitset_.size_in_bytes());
 }
 
 template <typename T>
@@ -751,13 +759,33 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
 
     setup_data_pointers();
 
-    idx_to_offsets_.resize(total_num_rows_);
-    valid_bitset_ = TargetBitmap(total_num_rows_, false);
+    // Load persisted idx_to_offsets and valid_bitset if available,
+    // otherwise recompute (backward compat with older V3 files).
+    if (reader.HasEntry("idx_to_offsets")) {
+        idx_to_offsets_.resize(total_num_rows_);
+        size_t write_offset = 0;
+        reader.ReadEntryStream(
+            "idx_to_offsets", [&](const uint8_t* data, size_t len) {
+                memcpy(reinterpret_cast<uint8_t*>(idx_to_offsets_.data()) +
+                           write_offset,
+                       data,
+                       len);
+                write_offset += len;
+            });
 
-    for (size_t i = 0; i < Size(); ++i) {
-        const auto& item = operator[](i);
-        idx_to_offsets_[item.idx_] = i;
-        valid_bitset_.set(item.idx_);
+        valid_bitset_ = TargetBitmap(total_num_rows_, false);
+        auto bitset_entry = reader.ReadEntry("valid_bitset");
+        memcpy(reinterpret_cast<uint8_t*>(valid_bitset_.data()),
+               bitset_entry.data.data(),
+               bitset_entry.data.size());
+    } else {
+        idx_to_offsets_.resize(total_num_rows_);
+        valid_bitset_ = TargetBitmap(total_num_rows_, false);
+        for (size_t i = 0; i < Size(); ++i) {
+            const auto& item = operator[](i);
+            idx_to_offsets_[item.idx_] = i;
+            valid_bitset_.set(item.idx_);
+        }
     }
 
     is_built_ = true;
