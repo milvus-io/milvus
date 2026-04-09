@@ -22,6 +22,7 @@
 
 #include "glog/logging.h"
 #include "log/Log.h"
+#include "monitor/Monitor.h"
 #include "storage/ThreadPool.h"
 
 namespace milvus {
@@ -61,7 +62,38 @@ ThreadPools::GetThreadPool(milvus::ThreadPoolPriority priority) {
         std::string name = name_map()[priority];
         auto result = thread_pool_map.emplace(
             priority, std::make_unique<ThreadPool>(coefficient, name));
-        return *(result.first->second);
+        auto& pool = *(result.first->second);
+        switch (priority) {
+            case HIGH:
+                pool.SetMetrics(
+                    &monitor::internal_storage_pool_capacity_high,
+                    &monitor::internal_storage_pool_active_threads_high,
+                    &monitor::internal_storage_pool_idle_threads_high,
+                    &monitor::internal_storage_pool_queue_depth_high,
+                    &monitor::internal_storage_pool_task_submitted_total_high,
+                    &monitor::internal_storage_pool_task_completed_total_high);
+                break;
+            case MIDDLE:
+                pool.SetMetrics(
+                    &monitor::internal_storage_pool_capacity_middle,
+                    &monitor::internal_storage_pool_active_threads_middle,
+                    &monitor::internal_storage_pool_idle_threads_middle,
+                    &monitor::internal_storage_pool_queue_depth_middle,
+                    &monitor::internal_storage_pool_task_submitted_total_middle,
+                    &monitor::
+                        internal_storage_pool_task_completed_total_middle);
+                break;
+            case LOW:
+                pool.SetMetrics(
+                    &monitor::internal_storage_pool_capacity_low,
+                    &monitor::internal_storage_pool_active_threads_low,
+                    &monitor::internal_storage_pool_idle_threads_low,
+                    &monitor::internal_storage_pool_queue_depth_low,
+                    &monitor::internal_storage_pool_task_submitted_total_low,
+                    &monitor::internal_storage_pool_task_completed_total_low);
+                break;
+        }
+        return pool;
     }
 }
 
