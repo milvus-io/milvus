@@ -2350,10 +2350,10 @@ func GetFieldByID(schema *schemapb.CollectionSchema, fieldID int64) *schemapb.Fi
 		}
 	}
 	for _, structField := range schema.GetStructArrayFields() {
-		preficate := func(field *schemapb.FieldSchema) bool {
+		predicate := func(field *schemapb.FieldSchema) bool {
 			return field.GetFieldID() == fieldID
 		}
-		if field := lo.FindOrElse(structField.Fields, nil, preficate); field != nil {
+		if field := lo.FindOrElse(structField.Fields, nil, predicate); field != nil {
 			return field
 		}
 	}

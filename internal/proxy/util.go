@@ -698,6 +698,8 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	return nil
 }
 
+// ValidateStructArrayField validates the struct array field schema.
+// When the struct is nullable, sub-field schemas are mutated in-place to set Nullable=true.
 func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema, schema *schemapb.CollectionSchema) error {
 	if len(structArrayField.Fields) == 0 {
 		return fmt.Errorf("struct array field %s has no sub-fields", structArrayField.Name)
@@ -2088,24 +2090,15 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 	}
 
 	// Verify all required (non-nullable) struct array fields are provided
-	requiredStructCount := 0
-	for _, sf := range schema.GetStructArrayFields() {
-		if !sf.GetNullable() {
-			requiredStructCount++
+	seenStructs := make(map[string]bool, structFieldCount)
+	for _, fieldData := range insertMsg.GetFieldsData() {
+		if _, ok := structSchemaMap[fieldData.FieldName]; ok {
+			seenStructs[fieldData.FieldName] = true
 		}
 	}
-	if requiredStructCount > structFieldCount {
-		// Some required structs are missing — find which ones
-		seenStructs := make(map[string]bool, structFieldCount)
-		for _, fieldData := range insertMsg.GetFieldsData() {
-			if _, ok := structSchemaMap[fieldData.FieldName]; ok {
-				seenStructs[fieldData.FieldName] = true
-			}
-		}
-		for _, sf := range schema.GetStructArrayFields() {
-			if !sf.GetNullable() && !seenStructs[sf.Name] {
-				return fmt.Errorf("required struct array field '%s' is missing in insert data", sf.Name)
-			}
+	for _, sf := range schema.GetStructArrayFields() {
+		if !sf.GetNullable() && !seenStructs[sf.Name] {
+			return fmt.Errorf("required struct array field '%s' is missing in insert data", sf.Name)
 		}
 	}
 

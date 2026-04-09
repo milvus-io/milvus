@@ -5609,6 +5609,100 @@ func TestCheckAndFlattenStructFieldData_RequiredStructMustBePresent(t *testing.T
 	assert.Contains(t, err.Error(), "required struct array field")
 }
 
+func TestCheckAndFlattenStructFieldData_RequiredMissingButNullablePresent(t *testing.T) {
+	// Regression: required struct A missing while nullable struct B is present.
+	// Previously the count-based guard (requiredCount > structFieldCount) would
+	// pass because structFieldCount included the nullable struct.
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID:  200,
+				Name:     "required_struct",
+				Nullable: false,
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     201,
+						Name:        "required_struct[sub_a]",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+					},
+				},
+			},
+			{
+				FieldID:  300,
+				Name:     "nullable_struct",
+				Nullable: true,
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     301,
+						Name:        "nullable_struct[sub_b]",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+						Nullable:    true,
+					},
+				},
+			},
+		},
+	}
+
+	// Only provide nullable_struct, omit required_struct
+	insertMsg := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "pk",
+					Type:      schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{1, 2}},
+							},
+						},
+					},
+				},
+				{
+					FieldName: "nullable_struct",
+					Type:      schemapb.DataType_ArrayOfStruct,
+					Field: &schemapb.FieldData_StructArrays{
+						StructArrays: &schemapb.StructArrayField{
+							Fields: []*schemapb.FieldData{
+								{
+									FieldName: "sub_b",
+									FieldId:   301,
+									Type:      schemapb.DataType_Array,
+									ValidData: []bool{true, false},
+									Field: &schemapb.FieldData_Scalars{
+										Scalars: &schemapb.ScalarField{
+											Data: &schemapb.ScalarField_ArrayData{
+												ArrayData: &schemapb.ArrayArray{
+													Data: []*schemapb.ScalarField{
+														{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1}}}},
+														{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{}}}},
+													},
+													ElementType: schemapb.DataType_Int32,
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := checkAndFlattenStructFieldData(schema, insertMsg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "required struct array field")
+	assert.Contains(t, err.Error(), "required_struct")
+}
+
 func TestCheckAndFlattenStructFieldData_AllNullWithInitializedVectorsOneof(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Name: "test_collection",
