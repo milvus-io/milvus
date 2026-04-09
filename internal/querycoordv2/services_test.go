@@ -251,7 +251,6 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.taskScheduler,
 		suite.nodeMgr,
 		suite.dist,
-		suite.meta,
 		suite.targetMgr,
 	)
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()

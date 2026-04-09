@@ -124,7 +124,6 @@ func (suite *OpsServiceSuite) SetupTest() {
 		suite.taskScheduler,
 		suite.nodeMgr,
 		suite.dist,
-		suite.meta,
 		suite.targetMgr,
 	)
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
@@ -595,7 +594,7 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 
 	// test segment not exist in current target, expect no task assign and success
 	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
-	balance.InitGlobalBalancerFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
+	balance.InitGlobalBalancerFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.targetMgr)
 	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
 		SourceNodeID: nodes[0],
 		TargetNodeID: nodes[1],
@@ -848,7 +847,7 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 
 	// test channel not exist in current target, expect no task assign and success
 	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
-	balance.InitGlobalBalancerFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
+	balance.InitGlobalBalancerFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.targetMgr)
 	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
 		SourceNodeID: nodes[0],
 		TargetNodeID: nodes[1],
