@@ -323,11 +323,8 @@ TEST(LoadCellBatchAsync, CancellationStopsMidBatchPush) {
     folly::CancellationSource source;
     milvus::OpContext op_ctx(source.getToken());
     auto channel = std::make_shared<CellReaderChannel>(1);
-    auto futures = LoadCellBatchAsync(&op_ctx,
-                                      specs,
-                                      MakeMockReaderFactory(),
-                                      channel,
-                                      128 * MB);
+    auto futures = LoadCellBatchAsync(
+        &op_ctx, specs, MakeMockReaderFactory(), channel, 128 * MB);
 
     ASSERT_EQ(futures.size(), 1);
 
