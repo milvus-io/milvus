@@ -300,6 +300,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                const int64_t* ids,
                int64_t count) const override;
 
+    std::unique_ptr<DataArray>
+    get_emb_list(milvus::OpContext* op_ctx,
+                 FieldId field_id,
+                 const FieldMeta& field_meta,
+                 const int64_t* seg_offsets,
+                 int64_t count) const;
+
     bool
     is_nullable(FieldId field_id) const override {
         auto& field_meta = schema_->operator[](field_id);

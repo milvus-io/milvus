@@ -83,6 +83,21 @@ class VectorIndex : public IndexBase {
     virtual std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const = 0;
 
+    /**
+     * @brief Retrieve embedding lists by their IDs from the index.
+     *
+     * @param dataset Contains the embedding list IDs (rows = count, ids = el_ids)
+     * @param metric_type The metric type (e.g., MAX_SIM, MAX_SIM_IP)
+     * @return A pair of (raw_vector_data, offsets) where offsets has size count+1
+     *         and raw_vector_data contains all vectors concatenated.
+     */
+    virtual std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    GetEmbListByIds(const DatasetPtr dataset,
+                    const std::string& metric_type) const {
+        ThrowInfo(NotImplemented,
+                  "GetEmbListByIds not supported for current index type");
+    }
+
     virtual std::unique_ptr<
         const knowhere::sparse::SparseRow<SparseValueType>[]>
     GetSparseVector(const DatasetPtr dataset) const = 0;

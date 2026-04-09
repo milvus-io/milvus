@@ -522,6 +522,39 @@ VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
+std::pair<std::vector<uint8_t>, std::vector<size_t>>
+VectorDiskAnnIndex<T>::GetEmbListByIds(const DatasetPtr dataset,
+                                       const std::string& metric_type) const {
+    if (dataset->GetRows() == 0) {
+        return {{}, {0}};
+    }
+
+    auto res = index_.GetEmbListByIds(dataset, metric_type);
+    if (!res.has_value()) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  fmt::format("failed to get emb list: {}: {}",
+                              KnowhereStatusString(res.error()),
+                              res.what()));
+    }
+
+    auto result = res.value();
+    auto tensor = result->GetTensor();
+    auto dim = result->GetDim();
+    auto num_el_ids = result->GetRows();
+    const size_t* offsets_ptr =
+        result->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
+    AssertInfo(offsets_ptr != nullptr, "EMB_LIST_OFFSET not found in result");
+
+    size_t total_vecs = offsets_ptr[num_el_ids];
+    int64_t data_size = milvus::GetVecRowSize<T>(dim) * total_vecs;
+    std::vector<uint8_t> raw_data(data_size);
+    memcpy(raw_data.data(), tensor, data_size);
+
+    std::vector<size_t> offsets(offsets_ptr, offsets_ptr + num_el_ids + 1);
+    return {std::move(raw_data), std::move(offsets)};
+}
+
+template <typename T>
 void
 VectorDiskAnnIndex<T>::CleanLocalData() {
     auto local_chunk_manager =
