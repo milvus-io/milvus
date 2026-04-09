@@ -1304,6 +1304,10 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         milvus::tracer::AddEvent(
             "finish_searching_vector_temperate_binlog_index");
     } else if (get_bit(index_ready_bitset_, field_id)) {
+        if (search_info.global_refine_enable_ &&
+            IsIndexRefineEnabled(field_id)) {
+            search_info.topk_ = GetEffectiveSearchTopk(search_info);
+        }
         AssertInfo(vector_indexings_.is_ready(field_id),
                    "vector indexes isn't ready for field " +
                        std::to_string(field_id.get()));
@@ -3018,6 +3022,51 @@ ChunkedSegmentSealedImpl::IndexHasRawData(FieldId field_id) const {
         return false;
     }
     return it->second;
+}
+
+bool
+ChunkedSegmentSealedImpl::CalcDistByIDs(
+    FieldId field_id,
+    const knowhere::DataSetPtr& query_dataset,
+    const int64_t* seg_offsets,
+    size_t count,
+    bool is_cosine,
+    float* distances) const {
+    if (!vector_indexings_.is_ready(field_id)) {
+        return false;
+    }
+    auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+    auto accessor =
+        SemiInlineGet(field_indexing->indexing_->PinCells(nullptr, {0}));
+    auto vec_index =
+        dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
+    if (vec_index == nullptr) {
+        return false;
+    }
+    auto res = vec_index->CalcDistByIDs(
+        query_dataset, BitsetView(), seg_offsets, count, is_cosine, nullptr);
+    if (!res.has_value()) {
+        return false;
+    }
+    auto result_distances = res.value()->GetDistance();
+    if (result_distances == nullptr) {
+        return false;
+    }
+    std::memcpy(distances, result_distances, count * sizeof(float));
+    return true;
+}
+
+bool
+ChunkedSegmentSealedImpl::IsIndexRefineEnabled(FieldId field_id) const {
+    if (!vector_indexings_.is_ready(field_id)) {
+        return false;
+    }
+    auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+    auto accessor =
+        SemiInlineGet(field_indexing->indexing_->PinCells(nullptr, {0}));
+    auto vec_index =
+        dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
+    return vec_index != nullptr && vec_index->IsIndexRefineEnabled();
 }
 
 DataType

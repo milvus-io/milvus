@@ -1998,7 +1998,9 @@ class ScopedSchemaHandle {
                 const std::string& search_params = "{}",
                 int64_t round_decimal = -1,
                 const std::string& hints = "",
-                bool materialized_view_involved = false) const {
+                bool materialized_view_involved = false,
+                float search_topk_ratio = 0,
+                float refine_topk_ratio = 0) const {
         // Build QueryInfo protobuf
         milvus::proto::plan::QueryInfo query_info;
         query_info.set_topk(topk);
@@ -2009,6 +2011,12 @@ class ScopedSchemaHandle {
             query_info.set_hints(hints);
         }
         query_info.set_materialized_view_involved(materialized_view_involved);
+        if (search_topk_ratio > 0) {
+            query_info.set_search_topk_ratio(search_topk_ratio);
+        }
+        if (refine_topk_ratio > 0) {
+            query_info.set_refine_topk_ratio(refine_topk_ratio);
+        }
 
         // Serialize QueryInfo
         std::string query_info_bytes;

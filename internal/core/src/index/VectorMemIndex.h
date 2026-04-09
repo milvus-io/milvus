@@ -97,6 +97,9 @@ class VectorMemIndex : public VectorIndex {
     const bool
     HasRawData() const override;
 
+    bool
+    IsIndexRefineEnabled() const override;
+
     std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const override;
 
@@ -110,6 +113,14 @@ class VectorMemIndex : public VectorIndex {
     VectorIterators(const DatasetPtr dataset,
                     const knowhere::Json& json,
                     const BitsetView& bitset) const override;
+
+    knowhere::expected<knowhere::DataSetPtr>
+    CalcDistByIDs(const knowhere::DataSetPtr query_dataset,
+                  const BitsetView& bitset,
+                  const int64_t* labels,
+                  size_t labels_len,
+                  bool is_cosine,
+                  milvus::OpContext* op_context = nullptr) const override;
 
  protected:
     virtual void

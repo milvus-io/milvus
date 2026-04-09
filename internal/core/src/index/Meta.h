@@ -113,6 +113,9 @@ constexpr const char* DISK_ANN_PREPARE_USE_BFS_CACHE = "use_bfs_cache";
 constexpr const char* DISK_ANN_QUERY_LIST = "search_list";
 constexpr const char* DISK_ANN_QUERY_BEAMWIDTH = "beamwidth";
 
+// HNSW query params
+constexpr const char* HNSW_QUERY_EF = "ef";
+
 // UT-only: when non-empty, overrides rcm_->GetRootPath() in
 // GetRemoteIndexObjectPrefix/GetRemoteTextLogPrefix to avoid
 // absolute path duplication with SubTreeFileSystem in tests.

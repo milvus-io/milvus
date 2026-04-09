@@ -25,6 +25,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"unsafe"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -1077,7 +1078,7 @@ func genHNSWDSL(schema *schemapb.CollectionSchema, ef int, topK int64, roundDeci
             >`, nil
 }
 
-func CheckSearchResult(ctx context.Context, nq int64, plan *segcore.SearchPlan, searchResult *segcore.SearchResult) error {
+func CheckSearchResult(ctx context.Context, nq int64, plan *segcore.SearchPlan, placeholderGroup unsafe.Pointer, searchResult *segcore.SearchResult) error {
 	searchResults := make([]*segcore.SearchResult, 0)
 	searchResults = append(searchResults, searchResult)
 
@@ -1086,7 +1087,7 @@ func CheckSearchResult(ctx context.Context, nq int64, plan *segcore.SearchPlan, 
 	sliceTopKs := []int64{topK, topK / 2, topK, topK, topK / 2}
 	sInfo := segcore.ParseSliceInfo(sliceNQs, sliceTopKs, nq)
 
-	res, err := segcore.ReduceSearchResultsAndFillData(ctx, plan, searchResults, 1, sInfo.SliceNQs, sInfo.SliceTopKs)
+	res, err := segcore.ReduceSearchResultsAndFillData(ctx, plan, placeholderGroup, searchResults, 1, sInfo.SliceNQs, sInfo.SliceTopKs)
 	if err != nil {
 		return err
 	}

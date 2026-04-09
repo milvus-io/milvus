@@ -245,6 +245,23 @@ class SegmentInterface {
     virtual std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
 
+    // Compute exact distances from the index for given query vectors and candidate IDs.
+    // Used for refine step in reduce phase. Returns false if not supported (e.g., no index).
+    virtual bool
+    CalcDistByIDs(FieldId field_id,
+                  const knowhere::DataSetPtr& query_dataset,
+                  const int64_t* seg_offsets,
+                  size_t count,
+                  bool is_cosine,
+                  float* distances) const {
+        return false;
+    }
+
+    virtual bool
+    IsIndexRefineEnabled(FieldId field_id) const {
+        return false;
+    }
+
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
 
