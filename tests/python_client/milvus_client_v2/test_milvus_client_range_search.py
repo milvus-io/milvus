@@ -1248,8 +1248,9 @@ class TestRangeSearchIndependent(TestMilvusClientV2Base):
 
         # 3. range search
         search_vectors = cf.gen_vectors(ct.default_nq, dim)
-        search_params = cf.get_search_params_params(index)
-        search_params["params"].update({"radius": 2, "range_filter": 0.1})
+        params = cf.get_search_params_params(index)
+        params.update({"radius": 2, "range_filter": 0.1})
+        search_params = {"params": params}
         self.search(client, collection_name,
                     data=search_vectors,
                     anns_field=default_search_field,
