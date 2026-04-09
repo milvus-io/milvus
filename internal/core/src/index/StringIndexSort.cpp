@@ -615,7 +615,8 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
         impl_ = std::move(mmap_impl);
     } else {
         LOG_INFO("StringIndexSort::LoadEntries: loading with memory strategy");
-        // Memory path: stream to buffer, then LoadFromData
+        // Stream to buffer, then use MmapImpl with owned buffer
+        // (zero-copy pointer access, no data duplication)
         auto data_size = reader.GetEntrySize("index_data");
         std::vector<uint8_t> buf(data_size);
         size_t wo = 0;
@@ -624,12 +625,12 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                 memcpy(buf.data() + wo, d, len);
                 wo += len;
             });
-        impl_ = std::make_unique<StringIndexSortMemoryImpl>();
-        impl_->LoadFromData(buf.data(),
-                            buf.size(),
-                            total_num_rows_,
-                            valid_bitset_,
-                            idx_to_offsets_);
+        auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
+        mmap_impl->LoadFromBuffer(std::move(buf),
+                                  total_num_rows_,
+                                  valid_bitset_,
+                                  idx_to_offsets_);
+        impl_ = std::move(mmap_impl);
     }
 
     is_built_ = true;
@@ -1249,12 +1250,15 @@ StringIndexSortMemoryImpl::ByteSize() const {
 }
 
 StringIndexSortMmapImpl::~StringIndexSortMmapImpl() {
-    if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
+    if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED &&
+        mmap_size_ > 0) {
+        // Only munmap if actually mmap'd (not heap buffer from LoadFromBuffer)
         munmap(mmap_data_, mmap_size_);
-        if (!mmap_filepath_.empty()) {
-            unlink(mmap_filepath_.c_str());
-        }
     }
+    if (!mmap_filepath_.empty()) {
+        unlink(mmap_filepath_.c_str());
+    }
+    // owned_data_ is automatically freed by vector destructor
 }
 
 void
@@ -1306,6 +1310,35 @@ StringIndexSortMmapImpl::LoadFromFile(size_t data_size,
                                       std::vector<int32_t>& idx_to_offsets) {
     AssertInfo(!mmap_filepath_.empty(), "mmap filepath is not set");
     MmapAndParse(data_size, total_num_rows, valid_bitset, idx_to_offsets);
+}
+
+void
+StringIndexSortMmapImpl::LoadFromBuffer(
+    std::vector<uint8_t>&& buffer,
+    size_t total_num_rows,
+    TargetBitmap& valid_bitset,
+    std::vector<int32_t>& idx_to_offsets) {
+    owned_data_ = std::move(buffer);
+    data_size_ = owned_data_.size();
+    // Point mmap_data_ to owned buffer (not actually mmap'd)
+    mmap_data_ = reinterpret_cast<char*>(owned_data_.data());
+    mmap_size_ = 0;  // signals: don't munmap in destructor
+
+    const uint8_t* data_start = reinterpret_cast<const uint8_t*>(mmap_data_);
+    auto parsed = ParseBinaryData(data_start, data_size_);
+    unique_count_ = parsed.unique_count;
+    string_offsets_ = parsed.string_offsets;
+    string_data_start_ = parsed.string_data_start;
+    post_list_offsets_ = parsed.post_list_offsets;
+    post_list_data_start_ = parsed.post_list_data_start;
+
+    std::fill(idx_to_offsets.begin(), idx_to_offsets.end(), -1);
+    for (uint32_t unique_idx = 0; unique_idx < unique_count_; ++unique_idx) {
+        MmapEntry entry = GetEntry(unique_idx);
+        entry.for_each_row_id([&idx_to_offsets, unique_idx](uint32_t row_id) {
+            idx_to_offsets[row_id] = unique_idx;
+        });
+    }
 }
 
 void
