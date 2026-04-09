@@ -233,7 +233,13 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetGeometryWktData().GetData(), begin, end, validData, NewColumnGeometryWKT, NewNullableColumnGeometryWKT)
 
 	case schemapb.DataType_Mol:
-		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetMolSmilesData().GetData(), begin, end, validData, NewColumnMolSmiles, NewNullableColumnMolSmiles)
+		if data := fd.GetScalars().GetMolSmilesData().GetData(); data != nil {
+			return parseScalarData(fd.GetFieldName(), data, begin, end, validData, NewColumnMolSmiles, NewNullableColumnMolSmiles)
+		}
+		data := lo.Map(fd.GetScalars().GetMolData().GetData(), func(item []byte, _ int) string {
+			return string(item)
+		})
+		return parseScalarData(fd.GetFieldName(), data, begin, end, validData, NewColumnMolSmiles, NewNullableColumnMolSmiles)
 
 	case schemapb.DataType_FloatVector:
 		vectors := fd.GetVectors()

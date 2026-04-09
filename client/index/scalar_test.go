@@ -39,6 +39,7 @@ func (s *ScalarIndexSuite) TestConstructors() {
 		{tag: "Sorted", input: NewSortedIndex(), expectIndexType: Sorted},
 		{tag: "Inverted", input: NewInvertedIndex(), expectIndexType: Inverted},
 		{tag: "Bitmap", input: NewBitmapIndex(), expectIndexType: BITMAP},
+		{tag: "Pattern", input: scalarIndex{indexType: PATTERN}, expectIndexType: PATTERN},
 	}
 
 	for _, tc := range testcases {

@@ -50,6 +50,27 @@ func (s *RowsSuite) TestRowsToColumns() {
 		s.Equal(3, len(columns))
 	})
 
+	s.Run("mol", func() {
+		type MolStruct struct {
+			ID  int64  `milvus:"primary_key"`
+			Mol string
+		}
+		schema := entity.NewSchema().
+			WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("Mol").WithDataType(entity.FieldTypeMol))
+		columns, err := AnyToColumns([]any{&MolStruct{ID: 1, Mol: "CCO"}}, false, schema)
+		s.NoError(err)
+		s.Require().Len(columns, 2)
+		for _, col := range columns {
+			if col.Name() == "Mol" {
+				s.Equal(entity.FieldTypeMol, col.Type())
+				val, err := col.Get(0)
+				s.NoError(err)
+				s.Equal("CCO", val)
+			}
+		}
+	})
+
 	s.Run("auto_id_pk", func() {
 		type AutoPK struct {
 			ID     int64     `milvus:"primary_key;auto_id"`
