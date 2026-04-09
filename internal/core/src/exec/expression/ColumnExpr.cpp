@@ -195,12 +195,12 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             for (int i = chunk_id == current_chunk_id_ ? current_chunk_pos_ : 0;
                  i < chunk_size;
                  ++i) {
-                if (!cda(i).has_value()) {
+                auto val = cda(i);
+                if (!val.has_value()) {
                     valid_res[processed_rows] = false;
                 } else {
-                    auto tmp = cda(i);
                     res_value[processed_rows] =
-                        segcore::get_from_variant<T>(tmp);
+                        segcore::get_from_variant<T>(val);
                 }
                 processed_rows++;
 
