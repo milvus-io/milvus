@@ -299,10 +299,9 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
     }
 
     if (null_offset_files.size() > 0) {
-        // slice meta is only needed when there are null_offset slices to compact.
-        if (slice_meta_file.has_value()) {
-            null_offset_files.push_back(slice_meta_file.value());
-        }
+        AssertInfo(slice_meta_file.has_value(),
+                   "null offset slices found but _meta_slice is missing");
+        null_offset_files.push_back(slice_meta_file.value());
         // null offset file is sliced
         auto index_datas = this->file_manager_->LoadIndexToMemory(
             null_offset_files, load_priority);
