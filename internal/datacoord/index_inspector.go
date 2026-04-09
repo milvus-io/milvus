@@ -160,6 +160,13 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 	indexIDToSegIndexes := i.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 	for _, index := range indexes {
 		if _, ok := indexIDToSegIndexes[index.IndexID]; !ok {
+			// TODO: check index.MinSchemaVersion > segment.GetSchemaVersion() to skip indexing
+			// for function-output columns (e.g. BM25 sparse vector) before backfill writes the data.
+			// The condition must also verify that the schema change requires physical backfill
+			// (doPhysicalBackfill=true); for non-physical changes (e.g. add field with default_value),
+			// index creation should proceed immediately since data is filled at query time.
+			// This requires either a per-index NeedPhysicalBackfill flag or a schema-version-to-backfill
+			// mapping. Tracked as a follow-up.
 			if err := i.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
 				log.Ctx(ctx).Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
 					zap.Int64("indexID", index.IndexID))

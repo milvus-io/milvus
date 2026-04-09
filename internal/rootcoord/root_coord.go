@@ -1024,6 +1024,37 @@ func (c *Core) AddCollectionField(ctx context.Context, in *milvuspb.AddCollectio
 	return merr.Success(), nil
 }
 
+func (c *Core) AlterCollectionSchema(ctx context.Context, in *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionSchema", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("AlterCollectionSchema")
+
+	log := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("collectionName", in.GetCollectionName()))
+	log.Info("received request to add function field")
+
+	if err := c.broadcastAlterCollectionSchema(ctx, in); err != nil {
+		log.Info("failed to add function field", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionSchema", metrics.FailLabel).Inc()
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionSchema", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollectionSchema").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Info("done to alter collection schema")
+	return &milvuspb.AlterCollectionSchemaResponse{
+		AlterStatus: merr.Success(),
+	}, nil
+}
+
 // DropCollection drop collection
 func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
@@ -1172,6 +1203,8 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		ExternalSource:     collInfo.ExternalSource,
 		ExternalSpec:       collInfo.ExternalSpec,
 		DbName:             dbName, // Use dbName parameter for consistency with resp.DbName
+		Version:            collInfo.SchemaVersion,
+		DoPhysicalBackfill: collInfo.DoPhysicalBackfill,
 	}
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
@@ -1538,29 +1571,6 @@ func (c *Core) AlterCollectionField(ctx context.Context, in *milvuspb.AlterColle
 	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollectionField").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Info("done to alter collection field")
 	return merr.Success(), nil
-}
-
-func (c *Core) AlterCollectionSchema(ctx context.Context, in *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &milvuspb.AlterCollectionSchemaResponse{}, nil
-	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionSchema", metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder("AlterCollectionSchema")
-
-	log := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
-		zap.String("dbName", in.GetDbName()),
-		zap.String("collectionName", in.GetCollectionName()),
-	)
-	log.Info("received request to alter collection schema")
-
-	// AlterCollectionSchema is currently a placeholder implementation
-	// The actual logic should handle schema alterations similar to AlterCollection
-	// For now, return success to satisfy the interface
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollectionSchema", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollectionSchema").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	log.Info("done to alter collection schema")
-	return &milvuspb.AlterCollectionSchemaResponse{}, nil
 }
 
 func (c *Core) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseRequest) (*commonpb.Status, error) {

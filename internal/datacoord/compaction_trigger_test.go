@@ -2003,6 +2003,45 @@ func Test_compactionTrigger_new(t *testing.T) {
 	}
 }
 
+func TestCheckGroupSchemaVersionMatchesCollection(t *testing.T) {
+	m := &meta{
+		channelCPs:  newChannelCps(),
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
+	tr := newCompactionTrigger(m, &compactionInspector{}, newMockAllocator(t),
+		newMockHandlerWithMeta(m), newMockVersionManager())
+
+	coll := &collectionInfo{
+		ID:     1,
+		Schema: &schemapb.CollectionSchema{Version: 5},
+	}
+
+	// empty group: trivially matches
+	assert.True(t, tr.checkGroupSchemaVersionMatchesCollection(
+		chanPartSegments{segments: nil}, coll))
+
+	// all segments with the same schema version as collection → matches
+	assert.True(t, tr.checkGroupSchemaVersionMatchesCollection(
+		chanPartSegments{segments: []*SegmentInfo{
+			{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
+			{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
+		}}, coll))
+
+	// any segment with a different schema version → no match
+	assert.False(t, tr.checkGroupSchemaVersionMatchesCollection(
+		chanPartSegments{segments: []*SegmentInfo{
+			{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 5}},
+			{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 4}},
+		}}, coll))
+
+	// all segments with schema version 0 (pre-alter) → no match when collection version > 0
+	assert.False(t, tr.checkGroupSchemaVersionMatchesCollection(
+		chanPartSegments{segments: []*SegmentInfo{
+			{SegmentInfo: &datapb.SegmentInfo{SchemaVersion: 0}},
+		}}, coll))
+}
+
 func Test_compactionTrigger_getCompactTime(t *testing.T) {
 	coll := &collectionInfo{
 		ID:         1,

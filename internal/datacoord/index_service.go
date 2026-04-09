@@ -270,12 +270,19 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		CreateTime:      req.GetTimestamp(),
 		IsAutoIndex:     req.GetIsAutoIndex(),
 		UserIndexParams: req.GetUserIndexParams(),
+		// MinSchemaVersion prevents building an index on a function-output column (e.g. BM25 sparse
+		// vector) before backfill has written that column into old segments.  The inspector skips any
+		// segment whose SchemaVersion is still below this value.
+		MinSchemaVersion: schema.GetVersion(),
 	}
 	// Validate the index params.
 	if err := ValidateIndexParams(index); err != nil {
 		return nil, err
 	}
 
+	channels := make([]string, 0, len(coll.GetVirtualChannelNames())+1)
+	channels = append(channels, streaming.WAL().ControlChannel())
+	channels = append(channels, coll.GetVirtualChannelNames()...)
 	if _, err = broadcaster.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
 		WithHeader(&message.CreateIndexMessageHeader{
 			DbId:         coll.GetDbId(),
@@ -287,7 +294,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		WithBody(&message.CreateIndexMessageBody{
 			FieldIndex: model.MarshalIndexModel(index),
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithBroadcast(channels).
 		MustBuildBroadcast(),
 	); err != nil {
 		log.Error("CreateIndex fail", zap.Error(err))
@@ -296,7 +303,8 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 	log.Info("CreateIndex successfully",
 		zap.String("IndexName", index.IndexName), zap.Int64("fieldID", index.FieldID),
-		zap.Int64("IndexID", index.IndexID))
+		zap.Int64("IndexID", index.IndexID), zap.Int32("MinSchemaVersion", index.MinSchemaVersion),
+		zap.Strings("channels", channels))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
 }

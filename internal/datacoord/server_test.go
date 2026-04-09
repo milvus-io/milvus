@@ -256,6 +256,150 @@ func TestGetCollectionStatistics(t *testing.T) {
 	})
 }
 
+func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
+	// All subtests share one server to avoid spawning 6 etcd connections.
+	// Each subtest uses a unique collectionID and segmentID range to stay isolated.
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+
+	statsMap := func(resp *datapb.GetCollectionStatisticsResponse) map[string]string {
+		m := map[string]string{}
+		for _, kv := range resp.GetStats() {
+			m[kv.Key] = kv.Value
+		}
+		return m
+	}
+
+	// schema version == 0: no consistency stats emitted
+	t.Run("schema version 0 emits no consistency stats", func(t *testing.T) {
+		collectionID := int64(9001)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     collectionID,
+			Schema: &schemapb.CollectionSchema{Version: 0},
+		})
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9100, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
+		})))
+
+		resp, err := svr.GetCollectionStatistics(svr.ctx, &datapb.GetCollectionStatisticsRequest{CollectionID: collectionID})
+		assert.NoError(t, err)
+		m := statsMap(resp)
+		assert.NotContains(t, m, common.SchemaVersionConsistentSegmentsKey)
+		assert.NotContains(t, m, common.SchemaVersionTotalSegmentsKey)
+	})
+
+	// schema version > 0 but no healthy segments: no consistency stats emitted
+	t.Run("no healthy segments emits no consistency stats", func(t *testing.T) {
+		collectionID := int64(9002)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     collectionID,
+			Schema: &schemapb.CollectionSchema{Version: 1},
+		})
+		// Dropped segment is not healthy — should be excluded
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9101, CollectionID: collectionID, State: commonpb.SegmentState_Dropped,
+		})))
+
+		resp, err := svr.GetCollectionStatistics(svr.ctx, &datapb.GetCollectionStatisticsRequest{CollectionID: collectionID})
+		assert.NoError(t, err)
+		m := statsMap(resp)
+		assert.NotContains(t, m, common.SchemaVersionConsistentSegmentsKey)
+		assert.NotContains(t, m, common.SchemaVersionTotalSegmentsKey)
+	})
+
+	// L0 segment must not be counted in the consistency gate
+	t.Run("L0 segment excluded from consistency gate", func(t *testing.T) {
+		collectionID := int64(9003)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     collectionID,
+			Schema: &schemapb.CollectionSchema{Version: 2},
+		})
+		// L0 segment with outdated schema version — must not contribute to total
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9102, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
+			Level: datapb.SegmentLevel_L0, SchemaVersion: 1,
+		})))
+		// Normal L1 flushed segment that IS consistent
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9103, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
+			Level: datapb.SegmentLevel_L1, SchemaVersion: 2,
+		})))
+
+		resp, err := svr.GetCollectionStatistics(svr.ctx, &datapb.GetCollectionStatisticsRequest{CollectionID: collectionID})
+		assert.NoError(t, err)
+		m := statsMap(resp)
+		assert.Equal(t, "1", m[common.SchemaVersionConsistentSegmentsKey])
+		assert.Equal(t, "1", m[common.SchemaVersionTotalSegmentsKey])
+	})
+
+	// importing segment must not affect the consistency gate
+	t.Run("importing segment excluded from consistency gate", func(t *testing.T) {
+		collectionID := int64(9004)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     collectionID,
+			Schema: &schemapb.CollectionSchema{Version: 3},
+		})
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9104, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
+			IsImporting: true, SchemaVersion: 1,
+		})))
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9105, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
+			SchemaVersion: 3,
+		})))
+
+		resp, err := svr.GetCollectionStatistics(svr.ctx, &datapb.GetCollectionStatisticsRequest{CollectionID: collectionID})
+		assert.NoError(t, err)
+		m := statsMap(resp)
+		assert.Equal(t, "1", m[common.SchemaVersionConsistentSegmentsKey])
+		assert.Equal(t, "1", m[common.SchemaVersionTotalSegmentsKey])
+	})
+
+	// all segments consistent: consistent == total
+	t.Run("all segments consistent", func(t *testing.T) {
+		collectionID := int64(9005)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     collectionID,
+			Schema: &schemapb.CollectionSchema{Version: 5},
+		})
+		for _, id := range []int64{9200, 9201, 9202} {
+			assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+				ID: id, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, SchemaVersion: 5,
+			})))
+		}
+
+		resp, err := svr.GetCollectionStatistics(svr.ctx, &datapb.GetCollectionStatisticsRequest{CollectionID: collectionID})
+		assert.NoError(t, err)
+		m := statsMap(resp)
+		assert.Equal(t, "3", m[common.SchemaVersionConsistentSegmentsKey])
+		assert.Equal(t, "3", m[common.SchemaVersionTotalSegmentsKey])
+	})
+
+	// partial segments consistent: consistent < total
+	t.Run("partial segments consistent", func(t *testing.T) {
+		collectionID := int64(9006)
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     collectionID,
+			Schema: &schemapb.CollectionSchema{Version: 7},
+		})
+		for _, id := range []int64{9300, 9301} {
+			assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+				ID: id, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, SchemaVersion: 7,
+			})))
+		}
+		// 1 stale segment (not yet backfilled)
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 9302, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, SchemaVersion: 6,
+		})))
+
+		resp, err := svr.GetCollectionStatistics(svr.ctx, &datapb.GetCollectionStatisticsRequest{CollectionID: collectionID})
+		assert.NoError(t, err)
+		m := statsMap(resp)
+		assert.Equal(t, "2", m[common.SchemaVersionConsistentSegmentsKey])
+		assert.Equal(t, "3", m[common.SchemaVersionTotalSegmentsKey])
+	})
+}
+
 func TestGetPartitionStatistics(t *testing.T) {
 	t.Run("normal cases", func(t *testing.T) {
 		svr := newTestServer(t)

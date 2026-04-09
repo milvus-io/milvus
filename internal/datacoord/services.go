@@ -302,7 +302,6 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 	if req.GetCollectionId() == 0 || req.GetPartitionId() == 0 || req.GetVchannel() == "" || req.GetSegmentId() == 0 {
 		return &datapb.AllocSegmentResponse{Status: merr.Status(merr.ErrParameterInvalid)}, nil
 	}
-
 	// Alloc new growing segment and return the segment info.
 	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(
 		ctx,
@@ -313,6 +312,7 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 			ChannelName:          req.GetVchannel(),
 			StorageVersion:       req.GetStorageVersion(),
 			IsCreatedByStreaming: req.GetIsCreatedByStreaming(),
+			SchemaVersion:        req.GetSchemaVersion(),
 		},
 	)
 	if err != nil {
@@ -414,6 +414,52 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	}
 	nums := s.meta.GetNumRowsOfCollection(ctx, req.CollectionID)
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
+
+	// Calculate schema version consistency proportion
+	// Only report when schema version > 0 (i.e., AlterCollectionSchema has been called)
+	collection := s.meta.GetCollection(req.CollectionID)
+	if collection != nil && collection.Schema != nil && collection.Schema.GetVersion() > 0 {
+		collectionSchemaVersion := collection.Schema.GetVersion()
+		// Growing segments are included: pre-alter ones get sealed and eventually backfilled;
+		// post-alter ones carry the new schema version from creation (companion PR).
+		// L0 segments only contain delete logs and are excluded from backfill processing,
+		// so they must not be counted in the consistency gate either.
+		segments := s.meta.SelectSegments(ctx, WithCollection(req.CollectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
+			return isSegmentHealthy(si) &&
+				!si.GetIsImporting() &&
+				!si.GetIsInvisible() &&
+				si.GetLevel() != datapb.SegmentLevel_L0
+		}))
+
+		// When there are no segments the collection is trivially consistent; emit nothing so the
+		// proxy treats the absent keys as "no backfill in progress" and allows the DDL through.
+		if len(segments) > 0 {
+			consistentCount := 0
+			for _, segment := range segments {
+				if segment.GetSchemaVersion() == collectionSchemaVersion {
+					consistentCount++
+				}
+			}
+			log.Info("calculated schema version consistency",
+				zap.Int32("collectionSchemaVersion", collectionSchemaVersion),
+				zap.Int("totalSegments", len(segments)),
+				zap.Int("consistentSegments", consistentCount))
+			// Emit raw integer counts instead of a floating-point proportion to avoid the rounding
+			// hazard where e.g. 99999/100000 = 99.999% formats as "100.00" with "%.2f" and would
+			// falsely satisfy a 100% gate check.  Proxy compares these as exact integers.
+			resp.Stats = append(resp.Stats,
+				&commonpb.KeyValuePair{
+					Key:   common.SchemaVersionConsistentSegmentsKey,
+					Value: strconv.Itoa(consistentCount),
+				},
+				&commonpb.KeyValuePair{
+					Key:   common.SchemaVersionTotalSegmentsKey,
+					Value: strconv.Itoa(len(segments)),
+				},
+			)
+		}
+	}
+
 	log.Info("success to get collection statistics", zap.Any("response", resp))
 	return resp, nil
 }

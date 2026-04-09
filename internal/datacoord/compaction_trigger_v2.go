@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -48,6 +49,17 @@ const (
 	TriggerTypeSort
 	TriggerTypeForceMerge
 	TriggerTypeStorageVersionUpgrade
+	TriggerTypeBackfill
+)
+
+type TickerType int8
+
+const (
+	L0Ticker TickerType = iota + 1
+	ClusteringTicker
+	SingleTicker
+	BackfillTicker
+	StorageVersionTicker
 )
 
 func (t CompactionTriggerType) GetCompactionType() datapb.CompactionType {
@@ -62,6 +74,8 @@ func (t CompactionTriggerType) GetCompactionType() datapb.CompactionType {
 		return datapb.CompactionType_SortCompaction
 	case TriggerTypeStorageVersionUpgrade:
 		return datapb.CompactionType_MixCompaction
+	case TriggerTypeBackfill:
+		return datapb.CompactionType_BackfillCompaction
 	default:
 		return datapb.CompactionType_MixCompaction
 	}
@@ -87,9 +101,21 @@ func (t CompactionTriggerType) String() string {
 		return "ForceMerge"
 	case TriggerTypeStorageVersionUpgrade:
 		return "StorageVersionUpgrade"
+	case TriggerTypeBackfill:
+		return "Backfill"
 	default:
 		return ""
 	}
+}
+
+// CompactionPolicy defines the interface for different compaction policies
+type CompactionPolicy interface {
+	// Enable returns whether this compaction policy is enabled
+	Enable() bool
+	// Trigger triggers compaction for all collections and returns compaction views grouped by trigger type
+	Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error)
+	// Name returns the name of this compaction policy
+	Name() string
 }
 
 type TriggerManager interface {
@@ -110,7 +136,9 @@ type CompactionTriggerManager struct {
 	handler   Handler
 	allocator allocator.Allocator
 
-	meta                        *meta
+	meta     *meta
+	policies map[TickerType]CompactionPolicy
+
 	l0Policy                    *l0CompactionPolicy
 	clusteringPolicy            *clusteringCompactionPolicy
 	singlePolicy                *singleCompactionPolicy
@@ -121,18 +149,32 @@ type CompactionTriggerManager struct {
 	closeWg sync.WaitGroup
 }
 
-func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, inspector CompactionInspector, meta *meta, versionManager IndexEngineVersionManager) *CompactionTriggerManager {
+func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, inspector CompactionInspector, meta *meta,
+	versionManager IndexEngineVersionManager,
+) *CompactionTriggerManager {
 	m := &CompactionTriggerManager{
 		allocator: alloc,
 		handler:   handler,
 		inspector: inspector,
 		meta:      meta,
+		policies:  make(map[TickerType]CompactionPolicy),
 	}
+	// Initialize policies and keep separate pointers for frequently accessed ones
+
 	m.l0Policy = newL0CompactionPolicy(meta, alloc)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
 	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
+
 	m.forceMergePolicy = newForceMergeCompactionPolicy(meta, m.allocator, m.handler)
 	m.upgradeStorageVersionPolicy = newStorageVersionUpgradePolicy(meta, m.allocator, m.handler, versionManager)
+	backfillPolicy := newBackfillCompactionPolicy(meta, m.allocator, m.handler)
+
+	// Initialize policies map for ticker handling
+	m.policies[L0Ticker] = m.l0Policy
+	m.policies[ClusteringTicker] = m.clusteringPolicy
+	m.policies[SingleTicker] = m.singlePolicy
+	m.policies[BackfillTicker] = backfillPolicy
+	m.policies[StorageVersionTicker] = m.upgradeStorageVersionPolicy
 	return m
 }
 
@@ -179,6 +221,8 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	defer singleTicker.Stop()
 	storageVersionTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer storageVersionTicker.Stop()
+	backfillTicker := time.NewTicker(Params.DataCoordCfg.BackfillCompactionTriggerInterval.GetAsDuration(time.Second))
+	defer backfillTicker.Stop()
 	log.Info("Compaction trigger manager start")
 	for {
 		select {
@@ -186,77 +230,15 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			log.Info("Compaction trigger manager checkLoop quit")
 			return
 		case <-l0Ticker.C:
-			if !m.l0Policy.Enable() {
-				continue
-			}
-			if m.inspector.isFull() {
-				log.RatedInfo(10, "Skip trigger l0 compaction since inspector is full")
-				continue
-			}
-			events, err := m.l0Policy.Trigger(ctx)
-			if err != nil {
-				log.Warn("Fail to trigger L0 policy", zap.Error(err))
-				continue
-			}
-			if len(events) > 0 {
-				for triggerType, views := range events {
-					m.notify(ctx, triggerType, views)
-				}
-			}
+			m.handleTicker(ctx, L0Ticker)
 		case <-clusteringTicker.C:
-			if !m.clusteringPolicy.Enable() {
-				continue
-			}
-			if m.inspector.isFull() {
-				log.RatedInfo(10, "Skip trigger clustering compaction since inspector is full")
-				continue
-			}
-			events, err := m.clusteringPolicy.Trigger(ctx)
-			if err != nil {
-				log.Warn("Fail to trigger clustering policy", zap.Error(err))
-				continue
-			}
-			if len(events) > 0 {
-				for triggerType, views := range events {
-					m.notify(ctx, triggerType, views)
-				}
-			}
+			m.handleTicker(ctx, ClusteringTicker)
 		case <-singleTicker.C:
-			if !m.singlePolicy.Enable() {
-				continue
-			}
-			if m.inspector.isFull() {
-				log.RatedInfo(10, "Skip trigger single compaction since inspector is full")
-				continue
-			}
-			events, err := m.singlePolicy.Trigger(ctx)
-			if err != nil {
-				log.Warn("Fail to trigger single policy", zap.Error(err))
-				continue
-			}
-			if len(events) > 0 {
-				for triggerType, views := range events {
-					m.notify(ctx, triggerType, views)
-				}
-			}
+			m.handleTicker(ctx, SingleTicker)
 		case <-storageVersionTicker.C:
-			if !m.upgradeStorageVersionPolicy.Enable() {
-				continue
-			}
-			if m.inspector.isFull() {
-				log.RatedInfo(10, "Skip trigger storage version compaction since inspector is full")
-				continue
-			}
-			events, err := m.upgradeStorageVersionPolicy.Trigger(ctx)
-			if err != nil {
-				log.Warn("Fail to trigger storage version policy", zap.Error(err))
-				continue
-			}
-			if len(events) > 0 {
-				for triggerType, views := range events {
-					m.notify(ctx, triggerType, views)
-				}
-			}
+			m.handleTicker(ctx, StorageVersionTicker)
+		case <-backfillTicker.C:
+			m.handleTicker(ctx, BackfillTicker)
 		case segID := <-getStatsTaskChSingleton():
 			log.Info("receive new segment to trigger sort compaction", zap.Int64("segmentID", segID))
 			view := m.singlePolicy.triggerSegmentSortCompaction(ctx, segID)
@@ -269,6 +251,35 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 				continue
 			}
 			m.notify(ctx, TriggerTypeSort, []CompactionView{view})
+		}
+	}
+}
+
+func (m *CompactionTriggerManager) handleTicker(ctx context.Context, tickerType TickerType) {
+	policy, exists := m.policies[tickerType]
+	if !exists {
+		log.Warn("Policy not found for ticker type", zap.Any("tickerType", tickerType))
+		return
+	}
+
+	if !policy.Enable() {
+		return
+	}
+
+	if m.inspector.isFull() {
+		log.RatedInfo(10, "Skip trigger compaction since inspector is full", zap.String("policy", policy.Name()))
+		return
+	}
+
+	events, err := policy.Trigger(ctx)
+	if err != nil {
+		log.Warn("Fail to trigger policy", zap.String("policy", policy.Name()), zap.Error(err))
+		return
+	}
+
+	if len(events) > 0 {
+		for triggerType, views := range events {
+			m.notify(ctx, triggerType, views)
 		}
 	}
 }
@@ -356,6 +367,8 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 					m.SubmitSingleViewToScheduler(ctx, outView, eventType)
 				case TriggerTypeForceMerge:
 					m.SubmitForceMergeViewToScheduler(ctx, outView)
+				case TriggerTypeBackfill:
+					m.SubmitBackfillViewToScheduler(ctx, outView)
 				}
 			}
 		}
@@ -626,6 +639,75 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 		zap.Int64("triggerID", task.GetTriggerID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
 		zap.Int64("targetSize", task.GetMaxSize()),
+	)
+}
+
+func (m *CompactionTriggerManager) SubmitBackfillViewToScheduler(ctx context.Context, view CompactionView) {
+	log := log.Ctx(ctx).With(zap.String("view", view.String()))
+	planID, _, err := m.allocator.AllocN(1)
+	if err != nil {
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
+		return
+	}
+	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
+	if err != nil {
+		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.Error(err))
+		return
+	}
+	if collection == nil {
+		log.Warn("Failed to submit compaction view to scheduler because collection is nil")
+		return
+	}
+	if collection.IsExternal() {
+		log.Info("skip submitting backfill compaction for external collection", zap.Int64("collectionID", collection.ID))
+		return
+	}
+	var totalRows int64 = 0
+	for _, s := range view.GetSegmentsView() {
+		totalRows += s.NumOfRows
+	}
+	expectedSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
+	bfView, ok := view.(*BackfillSegmentsView)
+	if !ok {
+		log.Warn("unexpected view type for backfill trigger, expected *BackfillSegmentsView",
+			zap.String("actualType", fmt.Sprintf("%T", view)))
+		return
+	}
+	if bfView.funcDiff == nil || len(bfView.funcDiff.Added) != 1 {
+		log.Warn("backfill view must have exactly one function to backfill",
+			zap.Int("funcCount", lo.If(bfView.funcDiff == nil, 0).Else(len(bfView.funcDiff.Added))))
+		return
+	}
+	task := &datapb.CompactionTask{
+		PlanID:             planID,
+		TriggerID:          bfView.triggerID,
+		State:              datapb.CompactionTaskState_pipelining,
+		StartTime:          time.Now().Unix(),
+		Type:               datapb.CompactionType_BackfillCompaction,
+		CollectionID:       view.GetGroupLabel().CollectionID,
+		PartitionID:        view.GetGroupLabel().PartitionID,
+		Channel:            view.GetGroupLabel().Channel,
+		Schema:             collection.Schema,
+		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
+		ResultSegments:     []int64{},
+		TotalRows:          totalRows,
+		LastStateStartTime: time.Now().Unix(),
+		MaxSize:            expectedSize,
+		DiffFunctions:      bfView.funcDiff.Added,
+	}
+	err = m.inspector.enqueueCompaction(task)
+	if err != nil {
+		log.Warn("Failed to execute compaction task",
+			zap.Int64("triggerID", task.GetTriggerID()),
+			zap.Int64("planID", task.GetPlanID()),
+			zap.Int64s("segmentIDs", task.GetInputSegments()),
+			zap.Error(err))
+		return
+	}
+	log.Info("Finish to submit a backfill compaction task",
+		zap.Int64("triggerID", task.GetTriggerID()),
+		zap.Int64("planID", task.GetPlanID()),
+		zap.String("type", task.GetType().String()),
 	)
 }
 
