@@ -426,14 +426,16 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     // 20 nulls + 20 non-exist → 160 bytes each, well above 64.
     std::vector<milvus::Json> jsons;
     for (int i = 0; i < 20; i++) {
-        jsons.push_back(
-            milvus::Json(simdjson::padded_string(R"({"a": null})")));
+        jsons.push_back(milvus::Json(
+            simdjson::padded_string(std::string_view(R"({"a": null})"))));
     }
     for (int i = 0; i < 20; i++) {
-        jsons.push_back(milvus::Json(simdjson::padded_string(R"({"b": 1})")));
+        jsons.push_back(milvus::Json(
+            simdjson::padded_string(std::string_view(R"({"b": 1})"))));
     }
     for (int i = 0; i < 10; i++) {
-        jsons.push_back(milvus::Json(simdjson::padded_string(R"({"a": 1.0})")));
+        jsons.push_back(milvus::Json(
+            simdjson::padded_string(std::string_view(R"({"a": 1.0})"))));
     }
 
     auto json_field =
