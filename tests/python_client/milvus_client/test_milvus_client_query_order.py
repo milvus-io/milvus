@@ -261,17 +261,18 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
                 f"price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_order_by_with_small_limit(self):
-        """OB-006: ORDER BY with small limit"""
+    @pytest.mark.parametrize("limit", [1, 5, 50, 100, 500])
+    def test_query_order_by_different_limit(self, limit):
+        """OB-006: ORDER BY with different limit values"""
         client = self._client()
         res = self.query(client, VALID_COLLECTION_NAME,
                          filter="",
                          output_fields=["id", "price"],
-                         limit=5,
+                         limit=limit,
                          order_by_fields=[{"field": "price", "order": "asc"}],
                          consistency_level="Strong")[0]
 
-        assert len(res) == 5
+        assert len(res) == limit
         prices = [r["price"] for r in res]
         for i in range(len(prices) - 1):
             assert prices[i] <= prices[i + 1]
@@ -733,6 +734,29 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
             assert prices[i] <= prices[i + 1], \
                 f"price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_order_by_output_fields_complete(self):
+        """OB-061: All specified output_fields are present in every result row"""
+        client = self._client()
+        output_fields = ["id", "price", "rating", "category", "int32_field"]
+        res = self.query(client, VALID_COLLECTION_NAME,
+                         filter="",
+                         output_fields=output_fields,
+                         limit=20,
+                         order_by_fields=[{"field": "price", "order": "asc"}],
+                         consistency_level="Strong")[0]
+
+        assert len(res) == 20
+        for r in res:
+            for field in output_fields:
+                assert field in r, \
+                    f"Field '{field}' missing in result row, got keys: {list(r.keys())}"
+        # Verify sorting is also correct
+        prices = [r["price"] for r in res]
+        for i in range(len(prices) - 1):
+            assert prices[i] <= prices[i + 1], \
+                f"price not ascending at index {i}: {prices[i]} > {prices[i + 1]}"
+
     # ==================== 5.7 L1: No Filter / Empty Results ====================
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -917,6 +941,33 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
             if client.has_collection(collection_name):
                 client.drop_collection(collection_name)
 
+    # ==================== 5.10b L2: Empty Collection ====================
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_order_by_empty_collection(self):
+        """OB-060: ORDER BY on empty collection — should return empty result, not error"""
+        client = self._client()
+        collection_name = "test_query_order_empty_" + cf.gen_unique_str("_")
+        try:
+            schema = build_query_order_schema(client)
+            index_params = client.prepare_index_params()
+            index_params.add_index(field_name="embeddings", index_type="HNSW",
+                                   metric_type="COSINE", M=16, efConstruction=200)
+            client.create_collection(collection_name=collection_name, schema=schema,
+                                     index_params=index_params, consistency_level="Strong")
+
+            res = self.query(client, collection_name,
+                             filter="",
+                             output_fields=["id", "price"],
+                             limit=10,
+                             order_by_fields=[{"field": "price", "order": "asc"}],
+                             consistency_level="Strong")[0]
+
+            assert len(res) == 0, f"Expected empty result on empty collection, got {len(res)} rows"
+        finally:
+            if client.has_collection(collection_name):
+                client.drop_collection(collection_name)
+
     # ==================== 5.11 L2: Error Handling ====================
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1012,6 +1063,20 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
                    output_fields=["id"],
                    limit=10,
                    order_by_fields=[{"field": "", "order": "asc"}],
+                   check_task=CheckTasks.err_res,
+                   check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_order_by_missing_field_key(self):
+        """OB-062: Malformed dict missing 'field' key — error"""
+        client = self._client()
+        error = {ct.err_code: 1100,
+                 ct.err_msg: "order_by field '' does not exist in collection schema"}
+        self.query(client, VALID_COLLECTION_NAME,
+                   filter="",
+                   output_fields=["id"],
+                   limit=10,
+                   order_by_fields=[{"order": "asc"}],
                    check_task=CheckTasks.err_res,
                    check_items=error)
 
@@ -1237,3 +1302,70 @@ class TestMilvusClientQueryOrderValid(TestMilvusClientV2Base):
                             order_by_fields=[{"field": "price", "order": "asc"}],
                             check_task=CheckTasks.err_res,
                             check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_order_by_group_by_positive(self):
+        """OB-057: ORDER BY on a GROUP BY column with aggregation — should work correctly.
+        OB-052 tests ORDER BY on non-GROUP BY column (expects error).
+        This tests the positive case: ORDER BY references the GROUP BY column."""
+        client = self._client()
+        res = self.query(client, VALID_COLLECTION_NAME,
+                         filter="",
+                         output_fields=["category", "count(*)"],
+                         limit=20,
+                         group_by_fields=["category"],
+                         order_by_fields=[{"field": "category", "order": "desc"}],
+                         consistency_level="Strong")[0]
+
+        assert len(res) > 0
+        # Each category should appear exactly once (aggregation GROUP BY)
+        categories = [r["category"] for r in res]
+        assert len(categories) == len(set(categories)), \
+            f"Duplicate categories in GROUP BY result: {categories}"
+        # Categories should be sorted descending (not default order)
+        for i in range(len(categories) - 1):
+            assert categories[i] >= categories[i + 1], \
+                f"category not descending at index {i}: '{categories[i]}' < '{categories[i + 1]}'"
+        # Each row should have a count
+        for r in res:
+            assert r["count(*)"] > 0, \
+                f"count(*) should be > 0 for category '{r['category']}'"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_order_by_offset_last_row(self):
+        """OB-058: ORDER BY + offset = total - 1 — should return exactly 1 row"""
+        client = self._client()
+        # Total rows = default_nb = 3200, offset = 3199, limit = 10
+        # Should return only 1 row (the last one)
+        res = self.query(client, VALID_COLLECTION_NAME,
+                         filter="",
+                         output_fields=["id", "price"],
+                         limit=10, offset=default_nb - 1,
+                         order_by_fields=[{"field": "price", "order": "asc"}],
+                         consistency_level="Strong")[0]
+
+        assert len(res) == 1, \
+            f"Expected 1 row at offset={default_nb - 1}, got {len(res)}"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_order_by_float_field_with_duplicates(self):
+        """OB-059: ORDER BY float field with many duplicate values — verify stable sort with PK tie-breaking.
+        float_field = round((idx % 1000) * 0.1, 1), so 3200 rows produce many duplicates."""
+        client = self._client()
+        res = self.query(client, VALID_COLLECTION_NAME,
+                         filter="float_field == 0.5",
+                         output_fields=["id", "float_field"],
+                         limit=100,
+                         order_by_fields=[{"field": "float_field", "order": "asc"}],
+                         consistency_level="Strong")[0]
+
+        assert len(res) > 1, "Need multiple rows with same float value to test tie-breaking"
+        # All float values should be identical
+        for r in res:
+            assert r["float_field"] == 0.5, \
+                f"Expected float_field=0.5, got {r['float_field']}"
+        # PK (id) should be ascending as tie-breaker
+        ids = [r["id"] for r in res]
+        for i in range(len(ids) - 1):
+            assert ids[i] < ids[i + 1], \
+                f"id not ascending as tie-breaker at index {i}: {ids[i]} >= {ids[i + 1]}"
