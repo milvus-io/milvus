@@ -407,14 +407,17 @@ func refundCandidates(candidates []pkoracle.Candidate) {
 }
 
 // AddGrowing adds growing segment distribution.
+// genSnapshot is called synchronously so that the growing segment is
+// immediately visible to searches. Growing segments are created
+// infrequently (only on the first insert for each segment), so this
+// does not regress the lock-contention optimization.
 func (d *distribution) AddGrowing(entries ...SegmentEntry) {
 	d.mut.Lock()
 	for _, entry := range entries {
 		d.growingSegments[entry.SegmentID] = entry
 	}
+	d.genSnapshot()
 	d.mut.Unlock()
-
-	d.notifySnapshotUpdate()
 }
 
 // AddOffline set segmentIDs to offlines.
