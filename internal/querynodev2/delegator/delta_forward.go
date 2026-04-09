@@ -271,8 +271,8 @@ func (sd *shardDelegator) forwardStreamingByBF(ctx context.Context, deleteData [
 		sd.markSegmentOffline(offlineSegIDs...)
 	}
 
-	metrics.QueryNodeApplyBFCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(bfCost.Milliseconds()))
-	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(forwardDeleteCost.Milliseconds()))
+	metrics.QueryNodeApplyBFCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(bfCost.Microseconds()) / 1000.0)
+	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(forwardDeleteCost.Microseconds()) / 1000.0)
 }
 
 func (sd *shardDelegator) forwardStreamingDirect(ctx context.Context, deleteData []*DeleteData) {
@@ -349,7 +349,7 @@ func (sd *shardDelegator) forwardStreamingDirect(ctx context.Context, deleteData
 		sd.markSegmentOffline(offlineSegIDs...)
 	}
 
-	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(forwardDeleteCost.Milliseconds()))
+	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(forwardDeleteCost.Microseconds()) / 1000.0)
 }
 
 // applyDeleteBatch handles delete record and apply them to corresponding workers in batch.

@@ -245,7 +245,7 @@ func (t *SearchTask) Execute() error {
 		metrics.SearchLabel,
 		metrics.ReduceSegments,
 		metrics.BatchReduce).
-		Observe(float64(tr.RecordSpan().Milliseconds()))
+		Observe(float64(tr.RecordSpan().Microseconds()) / 1000.0)
 	for i := range t.originNqs {
 		blob, cost, err := segcore.GetSearchResultDataBlob(t.ctx, blobs, i)
 		if err != nil {
@@ -524,7 +524,7 @@ func (t *StreamingSearchTask) Execute() error {
 			metrics.SearchLabel,
 			metrics.ReduceSegments,
 			metrics.BatchReduce).
-			Observe(float64(tr.RecordSpan().Milliseconds()))
+			Observe(float64(tr.RecordSpan().Microseconds()) / 1000.0)
 		relatedDataSize = lo.Reduce(pinnedSegments, func(acc int64, seg segments.Segment, _ int) int64 {
 			return acc + segments.GetSegmentRelatedDataSize(seg)
 		}, 0)
