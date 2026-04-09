@@ -17,5 +17,5 @@
 #include "index/Meta.h"
 
 namespace milvus::index {
-bool kScalarIndexUseV3 = false;
+std::string kOverrideRootPathForUT;
 }  // namespace milvus::index

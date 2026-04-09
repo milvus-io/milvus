@@ -129,10 +129,6 @@ template <typename T>
 void
 RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     LOG_DEBUG("Load RTreeIndex with config {}", config.dump());
-    if (kScalarIndexUseV3) {
-        this->LoadV3(config);
-        return;
-    }
 
     auto index_files_opt =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
@@ -338,9 +334,6 @@ RTreeIndex<T>::finish() {
 template <typename T>
 IndexStatsPtr
 RTreeIndex<T>::Upload(const Config& config) {
-    if (kScalarIndexUseV3) {
-        return this->UploadV3(config);
-    }
     // 1. Ensure all buffered data flushed to disk
     finish();
 
