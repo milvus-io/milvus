@@ -374,15 +374,17 @@ IndexFactory::ScalarIndexLoadResource(
     } else if (index_type == milvus::index::MARISA_TRIE ||
                index_type == milvus::index::MARISA_TRIE_UPPER) {
         if (mmap_enable) {
+            // V3 streaming: trie streamed to disk + mmap, str_ids in memory
             request.final_memory_cost = 0;
             request.final_disk_cost = index_size_in_bytes;
-            request.max_memory_cost = index_size_in_bytes;
+            request.max_memory_cost = 0;
             request.max_disk_cost = index_size_in_bytes;
         } else {
+            // V3 streaming: trie via temp file + read, str_ids pre-allocated
             request.final_memory_cost = index_size_in_bytes;
             request.final_disk_cost = 0;
-            request.max_memory_cost = 2 * index_size_in_bytes;
-            request.max_disk_cost = index_size_in_bytes;
+            request.max_memory_cost = index_size_in_bytes;
+            request.max_disk_cost = index_size_in_bytes;  // trie temp file
         }
         request.has_raw_data = true;
     } else if (index_type == milvus::index::INVERTED_INDEX_TYPE ||

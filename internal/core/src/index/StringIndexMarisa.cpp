@@ -82,8 +82,12 @@ StringIndexMarisa::ComputeByteSize() {
     // Size of the trie structure (marisa trie uses io_size() for serialized/memory size)
     total += trie_.io_size();
 
-    // str_ids_: vector<int64_t>
-    total += str_ids_.capacity() * sizeof(int64_t);
+    // str_ids
+    if (str_ids_mmap_data_ != nullptr) {
+        total += str_ids_mmap_size_;
+    } else {
+        total += str_ids_.capacity() * sizeof(int64_t);
+    }
 
     // str_ids_to_offsets_: map<size_t, vector<size_t>>
     for (const auto& [key, vec] : str_ids_to_offsets_) {
@@ -172,7 +176,8 @@ StringIndexMarisa::BuildWithFieldData(
         }
     }
 
-    // fill str_ids_to_offsets_
+    str_ids_ptr_ = str_ids_.data();
+    str_ids_size_ = str_ids_.size();
     fill_offsets();
 
     built_ = true;
@@ -200,6 +205,8 @@ StringIndexMarisa::Build(size_t n,
 
     trie_.build(keyset, MARISA_LABEL_ORDER);
     fill_str_ids(n, values, valid_data);
+    str_ids_ptr_ = str_ids_.data();
+    str_ids_size_ = str_ids_.size();
     fill_offsets();
 
     built_ = true;
@@ -287,6 +294,8 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     auto str_ids_len = str_ids->size;
     str_ids_.resize(str_ids_len / sizeof(size_t), MARISA_NULL_KEY_ID);
     memcpy(str_ids_.data(), str_ids->data.get(), str_ids_len);
+    str_ids_ptr_ = str_ids_.data();
+    str_ids_size_ = str_ids_.size();
 
     fill_offsets();
     built_ = true;
@@ -368,7 +377,7 @@ void
 StringIndexMarisa::SetNull(TargetBitmap& bitset) {
     tracer::AutoSpan span("StringIndexMarisa::SetNull", tracer::GetRootSpan());
     for (size_t i = 0; i < bitset.size(); i++) {
-        if (str_ids_[i] == MARISA_NULL_KEY_ID) {
+        if (str_ids_ptr_[i] == MARISA_NULL_KEY_ID) {
             bitset.set(i);
         }
     }
@@ -379,7 +388,7 @@ StringIndexMarisa::ResetNull(TargetBitmap& bitset) {
     tracer::AutoSpan span("StringIndexMarisa::ResetNull",
                           tracer::GetRootSpan());
     for (size_t i = 0; i < bitset.size(); i++) {
-        if (str_ids_[i] == MARISA_NULL_KEY_ID) {
+        if (str_ids_ptr_[i] == MARISA_NULL_KEY_ID) {
             bitset.reset(i);
         }
     }
@@ -389,9 +398,9 @@ TargetBitmap
 StringIndexMarisa::IsNotNull() {
     tracer::AutoSpan span("StringIndexMarisa::IsNotNull",
                           tracer::GetRootSpan());
-    TargetBitmap bitset(str_ids_.size());
+    TargetBitmap bitset(str_ids_size_);
     for (size_t i = 0; i < bitset.size(); i++) {
-        if (str_ids_[i] != MARISA_NULL_KEY_ID) {
+        if (str_ids_ptr_[i] != MARISA_NULL_KEY_ID) {
             bitset.set(i);
         }
     }
@@ -660,8 +669,8 @@ StringIndexMarisa::fill_str_ids(size_t n,
 
 void
 StringIndexMarisa::fill_offsets() {
-    for (size_t offset = 0; offset < str_ids_.size(); offset++) {
-        auto str_id = str_ids_[offset];
+    for (size_t offset = 0; offset < str_ids_size_; offset++) {
+        auto str_id = str_ids_ptr_[offset];
         str_ids_to_offsets_[str_id].push_back(offset);
     }
 }
@@ -694,12 +703,12 @@ std::optional<std::string>
 StringIndexMarisa::Reverse_Lookup(size_t offset) const {
     tracer::AutoSpan span("StringIndexMarisa::Reverse_Lookup",
                           tracer::GetRootSpan());
-    AssertInfo(offset < str_ids_.size(), "out of range of total count");
+    AssertInfo(offset < str_ids_size_, "out of range of total count");
     marisa::Agent agent;
-    if (str_ids_[offset] < 0) {
+    if (str_ids_ptr_[offset] < 0) {
         return std::nullopt;
     }
-    agent.set_query(str_ids_[offset]);
+    agent.set_query(str_ids_ptr_[offset]);
     trie_.reverse_lookup(agent);
     return std::string(agent.key().ptr(), agent.key().length());
 }
@@ -752,8 +761,6 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
 void
 StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                                const Config& config) {
-    auto trie_entry = reader.ReadEntry(MARISA_TRIE_INDEX);
-
     auto local_cm =
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string tmp_dir =
@@ -767,10 +774,14 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
 
+    // Stream trie entry directly to temp file (no full-size temp buffer)
     {
         auto file_writer = storage::FileWriter(
             file_name, storage::io::GetPriorityFromLoadPriority(load_priority));
-        file_writer.Write(trie_entry.data.data(), trie_entry.data.size());
+        reader.ReadEntryStream(
+            MARISA_TRIE_INDEX, [&](const uint8_t* data, size_t len) {
+                file_writer.Write(data, len);
+            });
         file_writer.Finish();
     }
 
@@ -787,11 +798,47 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
         unlink(file_name.c_str());
     }
 
-    auto str_ids_entry = reader.ReadEntry(MARISA_STR_IDS);
-
-    auto str_ids_len = str_ids_entry.data.size();
-    str_ids_.resize(str_ids_len / sizeof(size_t), MARISA_NULL_KEY_ID);
-    memcpy(str_ids_.data(), str_ids_entry.data.data(), str_ids_len);
+    // Stream str_ids entry
+    auto str_ids_bytes = reader.GetEntrySize(MARISA_STR_IDS);
+    if (config.contains(MMAP_FILE_PATH)) {
+        // mmap path: stream to disk file, then mmap
+        auto str_ids_path = file_name + ".str_ids";
+        {
+            auto fw = storage::FileWriter(
+                str_ids_path,
+                storage::io::GetPriorityFromLoadPriority(load_priority));
+            reader.ReadEntryStream(
+                MARISA_STR_IDS, [&](const uint8_t* d, size_t len) {
+                    fw.Write(d, len);
+                });
+            fw.Finish();
+        }
+        auto str_ids_file = File::Open(str_ids_path, O_RDONLY);
+        auto* mapped = mmap(NULL, str_ids_bytes, PROT_READ, MAP_PRIVATE,
+                            str_ids_file.Descriptor(), 0);
+        AssertInfo(mapped != MAP_FAILED,
+                   "failed to mmap str_ids: {}", strerror(errno));
+        str_ids_file.Close();
+        str_ids_mmap_data_ = static_cast<char*>(mapped);
+        str_ids_mmap_size_ = str_ids_bytes;
+        str_ids_mmap_raii_ = std::make_unique<MmapFileRAII>(str_ids_path);
+        str_ids_ptr_ = reinterpret_cast<const int64_t*>(str_ids_mmap_data_);
+        str_ids_size_ = str_ids_bytes / sizeof(int64_t);
+    } else {
+        // memory path: stream to pre-allocated vector
+        str_ids_.resize(str_ids_bytes / sizeof(int64_t), MARISA_NULL_KEY_ID);
+        size_t write_offset = 0;
+        reader.ReadEntryStream(
+            MARISA_STR_IDS, [&](const uint8_t* d, size_t len) {
+                memcpy(reinterpret_cast<uint8_t*>(str_ids_.data()) +
+                           write_offset,
+                       d,
+                       len);
+                write_offset += len;
+            });
+        str_ids_ptr_ = str_ids_.data();
+        str_ids_size_ = str_ids_.size();
+    }
 
     fill_offsets();
     built_ = true;

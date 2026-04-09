@@ -32,6 +32,12 @@ class StringIndexMarisa : public StringIndex {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
+    ~StringIndexMarisa() {
+        if (str_ids_mmap_data_ != nullptr && str_ids_mmap_data_ != MAP_FAILED) {
+            munmap(str_ids_mmap_data_, str_ids_mmap_size_);
+        }
+    }
+
     int64_t
     Size() override;
 
@@ -49,7 +55,7 @@ class StringIndexMarisa : public StringIndex {
 
     int64_t
     Count() override {
-        return str_ids_.size();
+        return str_ids_size_;
     }
 
     ScalarIndexType
@@ -151,7 +157,16 @@ class StringIndexMarisa : public StringIndex {
  private:
     Config config_;
     marisa::Trie trie_;
-    std::vector<int64_t> str_ids_;  // used to retrieve.
+
+    // str_ids: maps offset → trie key id.
+    // Build/memory-load paths use the vector; mmap-load points into mmap'd file.
+    std::vector<int64_t> str_ids_;              // memory mode owner
+    const int64_t* str_ids_ptr_ = nullptr;      // read accessor (vec or mmap)
+    size_t str_ids_size_ = 0;
+    char* str_ids_mmap_data_ = nullptr;         // mmap region
+    int64_t str_ids_mmap_size_ = 0;
+    std::unique_ptr<MmapFileRAII> str_ids_mmap_raii_;  // file cleanup
+
     std::map<size_t, std::vector<size_t>> str_ids_to_offsets_;
     bool built_ = false;
     int64_t total_size_ = 0;  // Cached total size to avoid runtime calculation
