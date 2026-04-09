@@ -2,6 +2,7 @@ import random
 import time
 from utils.utils import gen_collection_name
 from utils.util_log import test_log as logger
+from utils.constant import default_nb
 import pytest
 from base.testbase import TestBase
 from pymilvus import (
@@ -125,7 +126,7 @@ class TestRestfulSdkCompatibility(TestBase):
         """
         # 1. create collection by sdk
         dim = 128
-        nb = 100
+        nb = default_nb
         name = gen_collection_name()
         default_fields = [
             FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),
@@ -168,7 +169,7 @@ class TestRestfulSdkCompatibility(TestBase):
         """
         """
         dim = 128
-        nb = 100
+        nb = default_nb
         name = gen_collection_name()
         default_fields = [
             FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),
@@ -203,7 +204,7 @@ class TestRestfulSdkCompatibility(TestBase):
         """
         """
         dim = 128
-        nb = 100
+        nb = default_nb
         name = gen_collection_name()
         default_fields = [
             FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),
@@ -289,7 +290,7 @@ class TestRestfulSdkCompatibility(TestBase):
         """
         """
         dim = 128
-        nb = 100
+        nb = default_nb
         name = gen_collection_name()
         default_fields = [
             FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),

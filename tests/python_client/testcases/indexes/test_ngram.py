@@ -15,7 +15,7 @@ vector_field_name = 'vector'
 content_field_name = 'content_ngram'
 json_field_name = 'json_field'
 dim = 32
-default_nb = 2000
+default_nb = ct.default_nb
 default_build_params = {"min_gram": 2, "max_gram": 3}
 
 

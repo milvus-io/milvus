@@ -687,7 +687,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
 
-        data = cf.gen_row_data_by_schema(nb=2000, schema=schema)
+        data = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
         self.insert(client, collection_name, data=data)
         self.flush(client, collection_name)
 
@@ -1640,7 +1640,7 @@ class TestSearchInvalidIndependent(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema = self._create_standard_schema(client)
         self.create_collection(client, collection_name, schema=schema)
-        data = cf.gen_row_data_by_schema(nb=2000, schema=schema)
+        data = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
         self.insert(client, collection_name, data=data)
         self.flush(client, collection_name)
 

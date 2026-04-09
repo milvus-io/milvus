@@ -397,7 +397,7 @@ class TestTextEmbeddingSearch(TestBase):
         rsp = self.collection_client.collection_create(payload)
         assert rsp['code'] == 0
 
-        # Insert text data
+        # Insert text data (small nb for embedding function tests to avoid API limits)
         nb = 100
         documents = [
             "Machine learning is a subset of artificial intelligence",

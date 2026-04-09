@@ -377,7 +377,7 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize without data
-        nb = 2000
+        nb = ct.default_nb
         dim = 64
         auto_id = True
         collection_w, _, _, insert_ids, time_stamp = \
