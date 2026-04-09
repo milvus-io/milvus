@@ -137,11 +137,10 @@ JsonInvertedIndex<T>::LoadIndexMetas(
         }
     }
     if (non_exist_offset_files.size() > 0) {
-        // slice meta is only needed when there are non_exist_offset slices to compact.
-        if (slice_meta_file.has_value()) {
-            non_exist_offset_files.push_back(slice_meta_file.value());
-        }
-        // null offset file is sliced
+        AssertInfo(slice_meta_file.has_value(),
+                   "non_exist_offset slices found but _meta_slice is missing");
+        non_exist_offset_files.push_back(slice_meta_file.value());
+        // non_exist offset file is sliced
         auto index_datas = this->mem_file_manager_->LoadIndexToMemory(
             non_exist_offset_files, load_priority);
 
