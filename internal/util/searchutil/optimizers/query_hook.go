@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -22,9 +23,14 @@ type QueryHook interface {
 	Init(string) error
 	InitTuningConfig(map[string]string) error
 	DeleteTuningConfig(string) error
+	CalculateEffectiveSegmentNum(rowCounts []int64, topk int64) int
 }
 
-func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int) (*querypb.SearchRequest, error) {
+// OptimizeSearchParams optimizes search parameters using the query hook.
+// numSegments is the effective segment number, pre-computed by the caller via CalculateEffectiveSegmentNum.
+// isSecondStageSearch is true for the vector search stage of two-stage search, refer to delegator_twostage.go.
+// At this time, we need to set WithFilterKey to false to allow some aggressive optimizations.
+func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int, isSecondStageSearch bool) (*querypb.SearchRequest, error) {
 	// no hook applied or disabled, just return
 	if queryHook == nil || !paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
 		req.Req.IsTopkReduce = false
@@ -67,7 +73,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			common.TopKKey:         queryInfo.GetTopk(),
 			common.SearchParamKey:  queryInfo.GetSearchParams(),
 			common.SegmentNumKey:   estSegmentNum,
-			common.WithFilterKey:   withFilter,
+			common.WithFilterKey:   withFilter && !isSecondStageSearch,
 			common.DataTypeKey:     int32(plan.GetVectorAnns().GetVectorType()),
 			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool() && req.GetReq().GetIsTopkReduce() && queryInfo.GetGroupByFieldId() < 0,
 			common.CollectionKey:   req.GetReq().GetCollectionID(),
@@ -82,7 +88,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			return nil, merr.WrapErrServiceUnavailable(err.Error(), "queryHook execution failed")
 		}
 		finalTopk := params[common.TopKKey].(int64)
-		isTopkReduce := req.GetReq().GetIsTopkReduce() && (finalTopk < queryInfo.GetTopk())
+		isTopkReduce := req.GetReq().GetIsTopkReduce() && (finalTopk < queryInfo.GetTopk()) && !isSecondStageSearch
 		queryInfo.Topk = finalTopk
 		queryInfo.SearchParams = params[common.SearchParamKey].(string)
 		serializedExprPlan, err := proto.Marshal(&plan)
@@ -102,4 +108,25 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		log.Warn("not supported node type", zap.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))
 	}
 	return req, nil
+}
+
+// CalculateEffectiveSegmentNum delegates to queryHook.CalculateEffectiveSegmentNum when
+// a hook is available; otherwise returns len(rowCounts) (the raw sealed segment count).
+func CalculateEffectiveSegmentNum(queryHook QueryHook, rowCounts []int64, topk int64) int {
+	if queryHook != nil && paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
+		return queryHook.CalculateEffectiveSegmentNum(rowCounts, topk)
+	}
+	return len(rowCounts)
+}
+
+// ShouldUseTwoStageSearch determines if two-stage search should be used for this request
+// based on paramtable config, segment count, topk, and search type.
+func ShouldUseTwoStageSearch(req *querypb.SearchRequest, effectiveSegmentNum int) bool {
+	if !paramtable.Get().AutoIndexConfig.TwoStageSearchEnabled.GetAsBool() {
+		return false
+	}
+	if effectiveSegmentNum < paramtable.Get().AutoIndexConfig.TwoStageSearchMinNumSegments.GetAsInt() && req.GetReq().GetTopk() < paramtable.Get().AutoIndexConfig.TwoStageSearchMinTopk.GetAsInt64() {
+		return false
+	}
+	return req.GetReq().GetSearchType() == internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER
 }

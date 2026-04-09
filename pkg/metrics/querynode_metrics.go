@@ -826,6 +826,42 @@ var (
 			queryTypeLabelName,
 			collectionIDLabelName,
 		})
+
+	QueryNodeTwoStageFilterLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "two_stage_search_stage1_latency",
+			Help:      "latency of the filter-only stage (stage 1) in two-stage search in milliseconds",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+		})
+
+	QueryNodeTwoStageSearchLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "two_stage_search_stage2_latency",
+			Help:      "latency of the vector search stage (stage 2) in two-stage search in milliseconds",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+		})
+
+	QueryNodeTwoStageSearchFallbackCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "two_stage_search_fallback_total",
+			Help:      "total number of two-stage search fallbacks to single-stage search",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			reasonLabelName,
+		})
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -898,6 +934,9 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeDeleteBufferRowNum)
 	registry.MustRegister(QueryNodeCGOCallLatency)
 	registry.MustRegister(QueryNodePartialResultCount)
+	registry.MustRegister(QueryNodeTwoStageFilterLatency)
+	registry.MustRegister(QueryNodeTwoStageSearchLatency)
+	registry.MustRegister(QueryNodeTwoStageSearchFallbackCount)
 	// Add cgo metrics
 	RegisterCGOMetrics(registry)
 
@@ -923,4 +962,7 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 	QueryNodeSegmentPruneBias.DeletePartialMatch(labels)
 	QueryNodeSegmentPruneLatency.DeletePartialMatch(labels)
 	QueryNodeLevelZeroSize.DeletePartialMatch(labels)
+	QueryNodeTwoStageFilterLatency.DeletePartialMatch(labels)
+	QueryNodeTwoStageSearchLatency.DeletePartialMatch(labels)
+	QueryNodeTwoStageSearchFallbackCount.DeletePartialMatch(labels)
 }
