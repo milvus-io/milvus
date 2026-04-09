@@ -3175,7 +3175,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong",
                               enable_dynamic_field=enable_dynamic_field)
         # 2. insert data
-        nb = 2000
+        nb = ct.default_nb
         rows = cf.gen_row_data_by_schema(nb=nb, schema=schema)
         self.insert(client, collection_name, rows)
         #assert self.num_entities(client, collection_name)[0] == nb

@@ -854,7 +854,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, default_dim, id_type=id_type, max_length=128,
                                consistency_level="Strong")
         # 2. insert
-        default_nb = 2000
+        default_nb = ct.default_nb
         if id_type == 'int':
             rows = [{default_primary_key_field_name: i,
                      default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
