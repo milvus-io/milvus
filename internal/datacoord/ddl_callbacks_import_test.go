@@ -963,5 +963,3 @@ func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
 	assert.NotNil(t, updatedJob)
 	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
 }
-
-
