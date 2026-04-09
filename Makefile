@@ -26,10 +26,8 @@ mode = Release
 # macOS (Darwin) does not support aio, so disable disk_index
 ifeq ($(OS),Darwin)
     use_disk_index = OFF
-    planparser_rpath_flag = -Wl,-rpath,@loader_path
 else
     use_disk_index = ON
-    planparser_rpath_flag = -Wl,-rpath,'$$ORIGIN'
 endif
 
 # Allow manual override via disk_index variable
@@ -214,7 +212,7 @@ lint-fix: getdeps
 	@$(INSTALL_PATH)/gci write client/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@$(INSTALL_PATH)/gci write tests/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@echo "Running golangci-lint auto-fix for core"
-	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --fix --timeout=30m --config $(PWD)/.golangci.yml; 
+	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --fix --timeout=30m --config $(PWD)/.golangci.yml;
 	@echo "Running golangci-lint auto-fix for pkg"
 	@source $(PWD)/scripts/setenv.sh && cd pkg && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --fix --timeout=30m --config $(PWD)/.golangci.yml
 	@echo "Running golangci-lint auto-fix for client"
@@ -294,19 +292,19 @@ generated-proto: download-milvus-proto build-3rdparty get-proto-deps
 	@echo "Generate proto ..."
 	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
 
-build-cpp: generated-proto plan-parser-so
+build-cpp: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 
-build-cpp-gpu: generated-proto plan-parser-so
+build-cpp-gpu: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp gpu library ... "
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 
-build-cpp-with-unittest: generated-proto plan-parser-so
+build-cpp-with-unittest: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with unittest ... "
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 
-build-cpp-with-coverage: generated-proto plan-parser-so
+build-cpp-with-coverage: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with coverage and unittest ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 
@@ -414,18 +412,8 @@ run-test-cpp:
 	@echo $(PWD)/scripts/run_cpp_unittest.sh arg=${filter}
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh arg=${filter})
 
-plan-parser-so:
-	@echo "Building plan parser shared library ..."
-	@source $(PWD)/scripts/setenv.sh && \
-		mkdir -p $(PWD)/internal/core/output/lib $(PWD)/internal/core/output/include && \
-		go env -w CGO_ENABLED="1" && \
-		GO111MODULE=on $(GO) build -buildmode=c-shared -o $(PWD)/internal/core/output/lib/libmilvus-planparser.so $(PWD)/internal/parser/planparserv2/cwrapper && \
-		mv $(PWD)/internal/core/output/lib/libmilvus-planparser.h $(PWD)/internal/core/output/include/libmilvus-planparser.h && \
-		cp $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.h $(PWD)/internal/core/output/include/ && \
-		$${CXX:-g++} -std=c++17 -shared -fPIC -o $(PWD)/internal/core/output/lib/libmilvus-planparser-cpp.so $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.cpp \
-			-I$(PWD)/internal/core/output/include \
-			-L$(PWD)/internal/core/output/lib -lmilvus-planparser \
-			$(planparser_rpath_flag)
+plan-parser-lib:
+	@(env bash $(PWD)/scripts/build_plan_parser.sh)
 
 # Run code coverage.
 codecov: codecov-go codecov-cpp

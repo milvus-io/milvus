@@ -485,6 +485,8 @@ RustResult tantivy_create_text_writer(const char *field_name,
                                       uintptr_t overall_memory_budget_in_bytes,
                                       bool in_ram);
 
+void tantivy_set_log_level(const char *level);
+
 void free_rust_string(const char *ptr);
 
 void *tantivy_create_token_stream(void *tokenizer, const char *text);

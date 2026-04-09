@@ -50,8 +50,8 @@ case "${unameOut}" in
       else
         echo "WARN: Cannot find $LIBJEMALLOC"
       fi
-      export PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:$ROOT_DIR/internal/core/output/lib/pkgconfig:$ROOT_DIR/internal/core/output/lib64/pkgconfig"
-      export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:$ROOT_DIR/internal/core/output/lib:$ROOT_DIR/internal/core/output/lib64"
+      export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}:$ROOT_DIR/internal/core/output/lib/pkgconfig:$ROOT_DIR/internal/core/output/lib64/pkgconfig"
+      export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$ROOT_DIR/internal/core/output/lib:$ROOT_DIR/internal/core/output/lib64"
       export RPATH=$LD_LIBRARY_PATH;;
     Darwin*)
       # detect llvm version by valid list
@@ -73,8 +73,8 @@ case "${unameOut}" in
       export CXXFLAGS=${CFLAGS}
       export LDFLAGS="-L$(brew --prefix libomp)/lib"
 
-      export PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:$ROOT_DIR/internal/core/output/lib/pkgconfig"
-      export DYLD_LIBRARY_PATH=$ROOT_DIR/internal/core/output/lib
+      export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}:$ROOT_DIR/internal/core/output/lib/pkgconfig"
+      export DYLD_LIBRARY_PATH=$ROOT_DIR/cmake_build/lib:$ROOT_DIR/internal/core/output/lib
       export RPATH=$DYLD_LIBRARY_PATH;;
     MINGW*)
       extra_path=$(cygpath -w "$ROOT_DIR/internal/core/output/lib")
