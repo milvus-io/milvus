@@ -1979,6 +1979,7 @@ func TestSnapshotMeta_IsAllRefIndexLoaded(t *testing.T) {
 	sm.snapshotID2RefIndex.Insert(info2.GetId(), NewSnapshotRefIndex())
 	assert.False(t, sm.IsAllRefIndexLoaded())
 }
+
 func TestSnapshotMeta_SaveSnapshot_CollectsBuildIDs_AllIndexTypes(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
