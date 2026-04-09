@@ -58,6 +58,8 @@ func (t FieldType) Name() string {
 		return "JSON"
 	case FieldTypeGeometry:
 		return "Geometry"
+	case FieldTypeMol:
+		return "Mol"
 	case FieldTypeBinaryVector:
 		return "BinaryVector"
 	case FieldTypeFloatVector:
@@ -102,6 +104,8 @@ func (t FieldType) String() string {
 		return "JSON"
 	case FieldTypeGeometry:
 		return "Geometry"
+	case FieldTypeMol:
+		return "Mol"
 	case FieldTypeBinaryVector:
 		return "[]byte"
 	case FieldTypeFloatVector:
@@ -144,6 +148,8 @@ func (t FieldType) PbFieldType() (string, string) {
 		return "JSON", "JSON"
 	case FieldTypeGeometry:
 		return "Geometry", "Geometry"
+	case FieldTypeMol:
+		return "Mol", "string"
 	case FieldTypeBinaryVector:
 		return "[]byte", ""
 	case FieldTypeFloatVector:
@@ -187,6 +193,8 @@ const (
 	FieldTypeJSON FieldType = 23
 	// FieldTypeGeometry field type Geometry
 	FieldTypeGeometry FieldType = 24
+	// FieldTypeMol field type Mol
+	FieldTypeMol FieldType = 27
 	// FieldTypeTimestamptz field type timestamptz
 	FieldTypeTimestamptz FieldType = 26
 	// FieldTypeBinaryVector field type binary vector

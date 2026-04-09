@@ -68,4 +68,5 @@ const (
 	Inverted IndexType = "INVERTED"
 	BITMAP   IndexType = "BITMAP"
 	RTREE    IndexType = "RTREE"
+	PATTERN  IndexType = "PATTERN"
 )

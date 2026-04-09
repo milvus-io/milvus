@@ -30,9 +30,10 @@ type FunctionType = schemapb.FunctionType
 const (
 	FunctionTypeUnknown       = schemapb.FunctionType_Unknown
 	FunctionTypeBM25          = schemapb.FunctionType_BM25
-	FunctionTypeMinHash       = schemapb.FunctionType_MinHash
-	FunctionTypeTextEmbedding = schemapb.FunctionType_TextEmbedding
-	FunctionTypeRerank        = schemapb.FunctionType_Rerank
+	FunctionTypeMinHash        = schemapb.FunctionType_MinHash
+	FunctionTypeTextEmbedding  = schemapb.FunctionType_TextEmbedding
+	FunctionTypeRerank         = schemapb.FunctionType_Rerank
+	FunctionTypeMolFingerprint = schemapb.FunctionType_MolFingerprint
 )
 
 type Function struct {
