@@ -388,7 +388,7 @@ class TestSearchNoneDefaultIndependent(TestMilvusClientV2Base):
         expected: search returns correct results after re-load, distances in COSINE order
         """
         nq = 200
-        nb = 2000
+        nb = ct.default_nb
         dim = 64
         auto_id = True
         null_data_percent = 0.5

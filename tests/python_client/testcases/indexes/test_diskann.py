@@ -12,7 +12,7 @@ success = "success"
 pk_field_name = 'id'
 vector_field_name = 'vector'
 dim = ct.default_dim
-default_nb = 2000
+default_nb = ct.default_nb
 default_build_params = {"search_list_size": 100, "beamwidth": 10, "pq_code_budget_gb": 1.0, "num_threads": 8, "max_degree": 64, "indexing_list_size": 100, "build_dram_budget_gb": 2.0, "search_dram_budget_gb": 1.0}
 default_search_params = {"search_list_size": 100, "beamwidth": 10, "search_dram_budget_gb": 1.0}
 
