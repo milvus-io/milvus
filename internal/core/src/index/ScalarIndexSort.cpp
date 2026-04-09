@@ -260,9 +260,6 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
 template <typename T>
 IndexStatsPtr
 ScalarIndexSort<T>::Upload(const Config& config) {
-    if (kScalarIndexUseV3) {
-        return this->UploadV3(config);
-    }
     auto index_build_duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now() - index_build_begin_)
@@ -408,10 +405,6 @@ template <typename T>
 void
 ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
                          const Config& config) {
-    if (kScalarIndexUseV3) {
-        this->LoadV3(config);
-        return;
-    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),

@@ -269,8 +269,9 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
-        boost::filesystem::path prefix =
-            index::kScalarIndexUseV3 ? "files" : rcm_->GetRootPath();
+        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
+                                             ? rcm_->GetRootPath()
+                                             : index::kOverrideRootPathForUT;
         boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
         boost::filesystem::path path1 =
             std::to_string(index_meta_.build_id) + "/" +
@@ -305,8 +306,9 @@ class FileManagerImpl : public milvus::FileManager {
         if (!stats_base_path_.empty()) {
             return stats_base_path_;
         }
-        boost::filesystem::path prefix =
-            index::kScalarIndexUseV3 ? "files" : rcm_->GetRootPath();
+        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
+                                             ? rcm_->GetRootPath()
+                                             : index::kOverrideRootPathForUT;
         boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
         boost::filesystem::path path1 =
             std::to_string(index_meta_.build_id) + "/" +

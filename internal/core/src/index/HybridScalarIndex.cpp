@@ -299,9 +299,6 @@ HybridScalarIndex<T>::SerializeIndexType() {
 template <typename T>
 IndexStatsPtr
 HybridScalarIndex<T>::Upload(const Config& config) {
-    if (kScalarIndexUseV3) {
-        return this->UploadV3(config);
-    }
     auto internal_index = GetInternalIndex();
     auto index_ret = internal_index->Upload(config);
 
@@ -357,10 +354,6 @@ template <typename T>
 void
 HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
                            const Config& config) {
-    if (kScalarIndexUseV3) {
-        this->LoadV3(config);
-        return;
-    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),

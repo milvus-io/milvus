@@ -135,7 +135,7 @@ class JsonFlatIndexTest : public ::testing::Test {
             auto index = std::make_shared<index::JsonFlatIndex>(*ctx_, "");
             index->Build(config);
 
-            auto create_index_result = index->Upload();
+            auto create_index_result = index->UploadV3({});
             auto memSize = create_index_result->GetMemSize();
             auto serializedSize = create_index_result->GetSerializedSize();
             ASSERT_GT(memSize, 0);
@@ -155,7 +155,7 @@ class JsonFlatIndexTest : public ::testing::Test {
 
         ctx_->set_for_loading_index(true);
         json_index_ = std::make_shared<index::JsonFlatIndex>(*ctx_, "");
-        json_index_->Load(milvus::tracer::TraceContext{}, load_config);
+        json_index_->LoadV3(load_config);
 
         auto cnt = json_index_->Count();
         ASSERT_EQ(cnt, json_data_.size());

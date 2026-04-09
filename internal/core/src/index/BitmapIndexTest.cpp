@@ -165,6 +165,7 @@ class BitmapIndexTest : public testing::Test {
         config["index_type"] = milvus::index::BITMAP_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         config[INDEX_NUM_ROWS_KEY] = nb_;
+        config[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
         if (has_lack_binlog_row_) {
             config[INDEX_NUM_ROWS_KEY] = nb_ + lack_binlog_row_;
         }
@@ -201,7 +202,7 @@ class BitmapIndexTest : public testing::Test {
             milvus::proto::common::LoadPriority::HIGH;
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        index_->Load(milvus::tracer::TraceContext{}, config);
+        index_->LoadV3(config);
     }
 
     virtual void
