@@ -438,6 +438,14 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
                  TargetBitmap& valid_bitset,
                  std::vector<int32_t>& idx_to_offsets);
 
+    /// Load from a heap buffer (takes ownership). Uses same zero-copy
+    /// pointer access as mmap path — no data duplication.
+    void
+    LoadFromBuffer(std::vector<uint8_t>&& buffer,
+                   size_t total_num_rows,
+                   TargetBitmap& valid_bitset,
+                   std::vector<int32_t>& idx_to_offsets);
+
     void
     SetMmapFilePath(const std::string& filepath) {
         mmap_filepath_ = filepath;
@@ -529,6 +537,7 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     size_t mmap_size_ = 0;
     size_t data_size_ = 0;  // Actual data size without padding
     std::string mmap_filepath_;
+    std::vector<uint8_t> owned_data_;  // heap buffer for non-mmap path
     size_t unique_count_ = 0;
 
     // Pointers to different sections in mmap'd data
