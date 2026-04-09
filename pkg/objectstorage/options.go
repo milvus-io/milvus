@@ -22,6 +22,8 @@ type Config struct {
 	GcpCredentialJSON    string
 	GcpNativeWithoutAuth bool // used for Unit Testing
 	ReadRetryAttempts    uint
+	SslClientCert        string // path to client certificate for mTLS
+	SslClientKey         string // path to client key for mTLS
 }
 
 func NewDefaultConfig() *Config {
@@ -126,5 +128,18 @@ func RequestTimeout(requestTimeoutMs int64) Option {
 func GcpCredentialJSON(gcpCredentialJSON string) Option {
 	return func(c *Config) {
 		c.GcpCredentialJSON = gcpCredentialJSON
+	}
+}
+
+
+func SslClientCert(sslClientCert string) Option {
+	return func(c *Config) {
+		c.SslClientCert = sslClientCert
+	}
+}
+
+func SslClientKey(sslClientKey string) Option {
+	return func(c *Config) {
+		c.SslClientKey = sslClientKey
 	}
 }

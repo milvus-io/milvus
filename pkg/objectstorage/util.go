@@ -134,17 +134,36 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 		Region:       c.Region,
 	}
 
-	if c.UseSSL && c.SslTLSMinVersion != "" && c.SslTLSMinVersion != "default" {
-		tr, err := minio.DefaultTransport(true)
-		if err != nil {
-			return nil, err
+	if c.UseSSL {
+		// Warn if only one of SslClientCert/SslClientKey is configured
+		if (len(c.SslClientCert) > 0) != (len(c.SslClientKey) > 0) {
+			log.Warn("incomplete mTLS configuration: both SslClientCert and SslClientKey must be set, mTLS will be disabled",
+				zap.String("SslClientCert", c.SslClientCert), zap.String("SslClientKey", c.SslClientKey))
 		}
-		minVer, err := parseTLSMinVersion(c.SslTLSMinVersion)
-		if err != nil {
-			return nil, err
+		needsCustomTransport := (c.SslTLSMinVersion != "" && c.SslTLSMinVersion != "default") ||
+			(len(c.SslClientCert) > 0 && len(c.SslClientKey) > 0)
+		if needsCustomTransport {
+			tr, err := minio.DefaultTransport(true)
+			if err != nil {
+				return nil, err
+			}
+			if c.SslTLSMinVersion != "" && c.SslTLSMinVersion != "default" {
+				minVer, err := parseTLSMinVersion(c.SslTLSMinVersion)
+				if err != nil {
+					return nil, err
+				}
+				tr.TLSClientConfig.MinVersion = minVer
+			}
+			// Add mTLS client certificate if configured
+			if len(c.SslClientCert) > 0 && len(c.SslClientKey) > 0 {
+				cert, err := tls.LoadX509KeyPair(c.SslClientCert, c.SslClientKey)
+				if err != nil {
+					return nil, fmt.Errorf("failed to load S3 client cert/key: %w", err)
+				}
+				tr.TLSClientConfig.Certificates = []tls.Certificate{cert}
+			}
+			minioOpts.Transport = tr
 		}
-		tr.TLSClientConfig.MinVersion = minVer
-		minioOpts.Transport = tr
 	}
 
 	minIOClient, err := newMinioFn(c.Address, minioOpts)
