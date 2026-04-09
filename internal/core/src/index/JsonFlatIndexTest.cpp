@@ -82,7 +82,8 @@ struct ChunkManagerWrapper {
             cm_->Remove(file);
         }
 
-        boost::filesystem::remove_all(cm_->GetRootPath());
+        boost::system::error_code ec;
+        boost::filesystem::remove_all(cm_->GetRootPath(), ec);
     }
 
     void
