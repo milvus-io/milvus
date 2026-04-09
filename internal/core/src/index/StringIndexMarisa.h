@@ -36,6 +36,9 @@ class StringIndexMarisa : public StringIndex {
         if (str_ids_mmap_data_ != nullptr && str_ids_mmap_data_ != MAP_FAILED) {
             munmap(str_ids_mmap_data_, str_ids_mmap_size_);
         }
+        if (csr_mmap_data_ != nullptr && csr_mmap_data_ != MAP_FAILED) {
+            munmap(csr_mmap_data_, csr_mmap_size_);
+        }
     }
 
     int64_t
@@ -168,14 +171,15 @@ class StringIndexMarisa : public StringIndex {
     std::unique_ptr<MmapFileRAII> str_ids_mmap_raii_;  // file cleanup
 
     // CSR (Compressed Sparse Row) format for str_id → offsets mapping.
-    // Replaces map<size_t, vector<size_t>> for better memory/cache efficiency
-    // and mmap support.
     // csr_index_[key_id] .. csr_index_[key_id+1] = range in csr_offsets_
-    std::vector<size_t> csr_index_;       // size = num_keys + 1
-    std::vector<size_t> csr_offsets_;     // size = total_num_rows (flattened offsets)
-    const size_t* csr_index_ptr_ = nullptr;
-    const size_t* csr_offsets_ptr_ = nullptr;
+    std::vector<size_t> csr_index_;       // size = num_keys + 1 (memory mode)
+    std::vector<size_t> csr_offsets_;     // size = total_num_rows (memory mode)
+    const size_t* csr_index_ptr_ = nullptr;   // read accessor (vec or mmap)
+    const size_t* csr_offsets_ptr_ = nullptr;  // read accessor (vec or mmap)
     size_t csr_num_keys_ = 0;
+    char* csr_mmap_data_ = nullptr;       // mmap region for csr_index + csr_offsets
+    int64_t csr_mmap_size_ = 0;
+    std::unique_ptr<MmapFileRAII> csr_mmap_raii_;  // file cleanup
     bool built_ = false;
     int64_t total_size_ = 0;  // Cached total size to avoid runtime calculation
 };
