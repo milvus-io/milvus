@@ -137,6 +137,7 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.FencePolicyConditionWrite.GetValue(), "auto")
 
 		assert.Equal(t, wpCfg.StorageType.GetValue(), "minio")
+		assert.Equal(t, wpCfg.ForceLocalStorage.GetAsBool(), false)
 		assert.Equal(t, wpCfg.RootPath.GetValue(), "default")
 	})
 
