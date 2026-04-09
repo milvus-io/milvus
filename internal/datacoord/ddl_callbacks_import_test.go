@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -934,7 +933,7 @@ func TestCommitImportCallback_AfterAbort_NoOp(t *testing.T) {
 	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(3))
 	assert.NoError(t, err)
 
-	// CAS guard: state != Uncommitted → no-op.
+	// UpdateJob skips jobs in Failed state → no-op.
 	updatedJob := importMeta.GetJob(ctx, 3)
 	assert.NotNil(t, updatedJob)
 	assert.Equal(t, internalpb.ImportJobState_Failed, updatedJob.GetState())
@@ -965,51 +964,4 @@ func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
 }
 
-func TestConcurrentCommitAndAbortCallbacks(t *testing.T) {
-	ctx := context.Background()
-	importMeta, _ := newTestImportMeta(t)
 
-	const jobID int64 = 100
-	job := &importJob{
-		ImportJob: &datapb.ImportJob{
-			JobID:      jobID,
-			State:      internalpb.ImportJobState_Uncommitted,
-			AutoCommit: false,
-		},
-		tr: timerecord.NewTimeRecorder("test"),
-	}
-	err := importMeta.AddJob(ctx, job)
-	assert.NoError(t, err)
-
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-
-	const N = 10
-	var wg sync.WaitGroup
-	errs := make([]error, N)
-
-	for i := 0; i < N; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			if idx%2 == 0 {
-				errs[idx] = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(jobID))
-			} else {
-				errs[idx] = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(jobID))
-			}
-		}(i)
-	}
-	wg.Wait()
-
-	// All callbacks should return nil (winner transitions, losers are no-ops).
-	for i, e := range errs {
-		assert.NoError(t, e, "goroutine %d returned unexpected error", i)
-	}
-
-	// Exactly one side wins the CAS: final state is either Committing or Failed.
-	finalJob := importMeta.GetJob(ctx, jobID)
-	assert.NotNil(t, finalJob)
-	finalState := finalJob.GetState()
-	assert.True(t,
-		finalState == internalpb.ImportJobState_Committing || finalState == internalpb.ImportJobState_Failed,
-		"expected Committing or Failed, got %s", finalState.String())
-}

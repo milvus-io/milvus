@@ -197,39 +197,42 @@ func (c *DDLCallbacks) registerImportCallbacks() {
 
 // commitImportV2AckCallback handles the ack callback for CommitImport WAL message.
 // It transitions the import job from Uncommitted → Committing state.
-// If the job is already in a terminal or non-Uncommitted state (e.g. abort won the race),
-// this is a no-op.
+// Concurrency safety is guaranteed by the broadcaster framework's resource key lock
+// (exclusive collection-level lock), so no CAS is needed here.
 func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result message.BroadcastResultCommitImportMessageV2) error {
 	header := result.Message.Header()
 	jobID := header.GetJobId()
 	log.Ctx(ctx).Info("CommitImport broadcast ack received", zap.Int64("jobID", jobID))
 
-	// CAS: Uncommitted → Committing; no-op if job already left Uncommitted (abort won the race)
+	job := c.importMeta.GetJob(ctx, jobID)
+	if job == nil {
+		log.Ctx(ctx).Warn("CommitImport: job not found, skipping", zap.Int64("jobID", jobID))
+		return nil
+	}
+	if job.GetState() != internalpb.ImportJobState_Uncommitted {
+		log.Ctx(ctx).Info("CommitImport: job not in Uncommitted state, no-op",
+			zap.Int64("jobID", jobID), zap.String("state", job.GetState().String()))
+		return nil
+	}
+
 	if err := c.importMeta.UpdateJob(ctx, jobID,
-		UpdateJobStateWithCAS(
-			internalpb.ImportJobState_Uncommitted,
-			internalpb.ImportJobState_Committing,
-		),
+		UpdateJobState(internalpb.ImportJobState_Committing),
 	); err != nil {
 		return err
 	}
 
-	// Log timecost for the Uncommitted → Committing transition.
-	job := c.importMeta.GetJob(ctx, jobID)
-	if job != nil && job.GetState() == internalpb.ImportJobState_Committing {
-		uncommittedDuration := job.GetTR().RecordSpan()
-		log.Ctx(ctx).Info("import job uncommitted stage done",
-			zap.Int64("jobID", jobID),
-			zap.Duration("jobTimeCost/uncommitted", uncommittedDuration))
-	}
+	uncommittedDuration := job.GetTR().RecordSpan()
+	log.Ctx(ctx).Info("import job uncommitted stage done",
+		zap.Int64("jobID", jobID),
+		zap.Duration("jobTimeCost/uncommitted", uncommittedDuration))
 	return nil
 }
 
 // rollbackImportV2AckCallback handles the ack callback for RollbackImport WAL message.
-// It transitions the import job to Failed state and drops all import segments for the job.
-// If the job is already Committing, Completed, or Failed (commit won the race or already
-// rolled back), this is a no-op. The CAS on UpdateJob ensures that a concurrent state
-// change between the pre-read and the update is handled safely.
+// It transitions the import job to Failed state.
+// Concurrency safety is guaranteed by the broadcaster framework's resource key lock
+// (exclusive collection-level lock), so no CAS is needed here.
+// Segment cleanup is handled by the import inspector (processFailed), not here.
 func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result message.BroadcastResultRollbackImportMessageV2) error {
 	header := result.Message.Header()
 	jobID := header.GetJobId()
@@ -249,9 +252,5 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 		return nil
 	}
 
-	// CAS: transition from the pre-read state → Failed.
-	// If state changed concurrently (e.g. commit won the race), UpdateJobStateWithCAS is a
-	// no-op and UpdateJob returns nil.
-	// Segment cleanup is handled by the import inspector (processFailed), not here.
-	return c.importMeta.UpdateJob(ctx, jobID, UpdateJobStateWithCAS(state, internalpb.ImportJobState_Failed))
+	return c.importMeta.UpdateJob(ctx, jobID, UpdateJobState(internalpb.ImportJobState_Failed))
 }
