@@ -191,14 +191,14 @@ static const auto kIndexLoadTestValues = ::testing::Values(
          true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "TRIE"}, {"mmap", "false"}, {"field_type", "string"}},
-        {2UL * 1024 * 1024 * 1024,
+        {1UL * 1024 * 1024 * 1024,
          1UL * 1024 * 1024 * 1024,
          1UL * 1024 * 1024 * 1024,
          0UL,
          true}),
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "TRIE"}, {"mmap", "true"}, {"field_type", "string"}},
-        {1UL * 1024 * 1024 * 1024,
+        {0UL,
          1UL * 1024 * 1024 * 1024,
          0UL,
          1UL * 1024 * 1024 * 1024,
