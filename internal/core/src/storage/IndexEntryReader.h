@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <future>
 #include <memory>
 #include <string>
@@ -27,6 +28,7 @@
 #include "common/EasyAssert.h"
 #include "filemanager/InputStream.h"
 #include "nlohmann/json.hpp"
+#include "storage/ChunkStreamUtils.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/plugin/PluginInterface.h"
@@ -57,6 +59,21 @@ class IndexEntryReader {
     void
     ReadEntriesToFiles(const std::vector<std::pair<std::string, std::string>>&
                            name_path_pairs);
+
+    /// Stream entry data via bounded channel with sliding window.
+    /// Downloads are concurrent (full bandwidth). Chunks delivered in order
+    /// to the callback. Global ChunkInflightBudget controls total inflight
+    /// chunks across all concurrent scalar index loads.
+    /// CRC32c is verified incrementally.
+    void
+    ReadEntryStream(
+        const std::string& name,
+        std::function<void(const uint8_t* data, size_t len)> callback,
+        size_t chunk_size = kDefaultStreamChunkSize);
+
+    /// Return the uncompressed data size of an entry without reading it.
+    size_t
+    GetEntrySize(const std::string& name) const;
 
     template <typename T>
     T
@@ -113,6 +130,17 @@ class IndexEntryReader {
     ReadPlainEntry(const EntryMeta& meta);
     Entry
     ReadEncryptedEntry(const EntryMeta& meta);
+
+    void
+    ReadPlainEntryStream(
+        const PlainEntryMeta& pm,
+        const std::function<void(const uint8_t* data, size_t len)>& callback,
+        size_t chunk_size);
+
+    void
+    ReadEncryptedEntryStream(
+        const EncryptedEntryMeta& em,
+        const std::function<void(const uint8_t* data, size_t len)>& callback);
 
     void
     VerifyCrc32c(uint32_t expected,

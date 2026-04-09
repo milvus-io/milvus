@@ -915,3 +915,117 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedFdEntryMultiSlice) {
 
     ::unlink(tmp_absolute.c_str());
 }
+
+// ---- ReadEntryStream tests ----
+
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamLarge) {
+    const std::string file_path = kV3FilePath + "_stream_large";
+    const size_t entry_size = 4 * 1024 * 1024;  // 4MB
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("test_data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    std::vector<uint8_t> reassembled;
+    size_t callback_count = 0;
+    reader->ReadEntryStream(
+        "test_data",
+        [&](const uint8_t* d, size_t len) {
+            reassembled.insert(reassembled.end(), d, d + len);
+            callback_count++;
+        },
+        1 * 1024 * 1024);  // 1MB chunks
+
+    ASSERT_EQ(reassembled.size(), entry_size);
+    VerifyPattern(reassembled, entry_size);
+    ASSERT_EQ(callback_count, 4);  // 4MB / 1MB = 4 chunks
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamSmall) {
+    const std::string file_path = kV3FilePath + "_stream_small";
+    const size_t entry_size = 1024;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("small_data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    std::vector<uint8_t> reassembled;
+    size_t callback_count = 0;
+    reader->ReadEntryStream(
+        "small_data",
+        [&](const uint8_t* d, size_t len) {
+            reassembled.insert(reassembled.end(), d, d + len);
+            callback_count++;
+        });
+
+    ASSERT_EQ(reassembled.size(), entry_size);
+    VerifyPattern(reassembled, entry_size);
+    ASSERT_EQ(callback_count, 1);  // single chunk (1KB < 2MB default)
+}
+
+TEST_F(IndexEntryWriterV3Test, ReadEntryStreamMatchesReadEntry) {
+    const std::string file_path = kV3FilePath + "_stream_match";
+    const size_t entry_size = 5 * 1024 * 1024;  // 5MB, non-aligned
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    // Read via ReadEntry
+    auto entry = reader->ReadEntry("data");
+
+    // Read via ReadEntryStream
+    std::vector<uint8_t> streamed;
+    reader->ReadEntryStream(
+        "data",
+        [&](const uint8_t* d, size_t len) {
+            streamed.insert(streamed.end(), d, d + len);
+        },
+        512 * 1024);  // 512KB chunks
+
+    ASSERT_EQ(entry.data.size(), streamed.size());
+    EXPECT_EQ(entry.data, streamed);
+}
+
+TEST_F(IndexEntryWriterV3Test, GetEntrySize) {
+    const std::string file_path = kV3FilePath + "_entry_size";
+    const size_t entry_size = 3 * 1024 * 1024;
+    auto data = GeneratePattern(entry_size);
+
+    {
+        auto output = CreateOutputStream(file_path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.WriteEntry("sized_entry", data.data(), data.size());
+        writer.Finish();
+    }
+
+    auto input = CreateInputStream(file_path);
+    int64_t file_size = GetFileSize(file_path);
+    auto reader = IndexEntryReader::Open(input, file_size);
+
+    ASSERT_EQ(reader->GetEntrySize("sized_entry"), entry_size);
+}
