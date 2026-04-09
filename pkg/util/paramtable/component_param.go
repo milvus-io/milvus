@@ -2585,6 +2585,10 @@ type queryCoordConfig struct {
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 
 	AutoWarmupForNonPKIsolationCollection ParamItem `refreshable:"false"`
+
+	// ForceLoadPriority overrides the task priority.
+	// Supports "HIGH", "LOW" or "" (disabled).
+	ForceLoadPriority ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -3291,6 +3295,15 @@ Set to 0 to disable the penalty period.`,
 		Export:       false,
 	}
 	p.AutoWarmupForNonPKIsolationCollection.Init(base.mgr)
+
+	p.ForceLoadPriority = ParamItem{
+		Key:          "queryCoord.forceLoadPriority",
+		Version:      "2.6.12",
+		DefaultValue: "", // Default is empty, meaning no override
+		Doc:          "Global override for segment load priority. Options: HIGH, LOW. If empty, uses the original priority.",
+		Export:       true,
+	}
+	p.ForceLoadPriority.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
