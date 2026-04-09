@@ -7,10 +7,10 @@
 package messagespb
 
 import (
-	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	rgpb "github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
-	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	rgpb "github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
+	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
