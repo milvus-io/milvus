@@ -152,6 +152,9 @@ type IMetaTable interface {
 	AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error
 	RemoveFileResource(ctx context.Context, name string) (error, bool)
 	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64)
+	IncFileResourceRefCnt(ids []int64) error
+	DecFileResourceRefCnt(ids []int64)
+	RecoverFileResourceRefCnt(pendingCollections map[int64][]int64)
 }
 
 // MetaTable is a persistent meta set of all databases, collections and partitions.
@@ -557,9 +560,6 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 
 	mt.collID2Meta[coll.CollectionID] = coll.Clone()
 	mt.names.insert(coll.DBName, coll.Name, coll.CollectionID)
-	for _, fileResourceID := range coll.FileResourceIds {
-		mt.fileResourceRefCnt[fileResourceID]++
-	}
 
 	pn := coll.GetPartitionNum(true)
 	mt.generalCnt += pn * int(coll.ShardsNum)
@@ -2315,4 +2315,49 @@ func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileRe
 	defer mt.ddLock.RUnlock()
 
 	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
+}
+
+// IncFileResourceRefCnt increments refCnt for file resources, binding them to a
+// collection being created. Under ddLock, atomic with RemoveFileResource.
+// Returns error if any resource ID does not exist.
+func (mt *MetaTable) IncFileResourceRefCnt(ids []int64) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	for _, id := range ids {
+		if _, ok := mt.fileResourceID2Meta[id]; !ok {
+			return merr.WrapErrParameterInvalidMsg("file resource %d not found", id)
+		}
+	}
+	for _, id := range ids {
+		mt.fileResourceRefCnt[id]++
+	}
+	return nil
+}
+
+// DecFileResourceRefCnt decrements refCnt. Used for early release when
+// CreateCollection fails after validation.
+func (mt *MetaTable) DecFileResourceRefCnt(ids []int64) {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	for _, id := range ids {
+		mt.fileResourceRefCnt[id]--
+	}
+}
+
+// RecoverFileResourceRefCnt re-increments refCnt for file resources referenced by
+// pending CreateCollection broadcast tasks whose collections have not yet been
+// persisted. Called during startup before rootcoord becomes Healthy.
+func (mt *MetaTable) RecoverFileResourceRefCnt(pendingCollections map[int64][]int64) {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	for collID, resourceIds := range pendingCollections {
+		if _, exists := mt.collID2Meta[collID]; exists {
+			continue // collection already persisted, reload already counted it
+		}
+		for _, id := range resourceIds {
+			if _, ok := mt.fileResourceID2Meta[id]; ok {
+				mt.fileResourceRefCnt[id]++
+			}
+		}
+	}
 }
