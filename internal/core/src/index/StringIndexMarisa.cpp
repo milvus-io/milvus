@@ -89,14 +89,9 @@ StringIndexMarisa::ComputeByteSize() {
         total += str_ids_.capacity() * sizeof(int64_t);
     }
 
-    // str_ids_to_offsets_: map<size_t, vector<size_t>>
-    for (const auto& [key, vec] : str_ids_to_offsets_) {
-        total += sizeof(size_t);                   // key
-        total += vec.capacity() * sizeof(size_t);  // vector capacity
-        total += sizeof(std::vector<size_t>);      // vector object overhead
-    }
-    // Map node overhead (rough estimate: ~40 bytes per node for std::map)
-    total += str_ids_to_offsets_.size() * 40;
+    // CSR index + offsets
+    total += csr_index_.capacity() * sizeof(size_t);
+    total += csr_offsets_.capacity() * sizeof(size_t);
 
     cached_byte_size_ = total;
 }
@@ -113,11 +108,9 @@ StringIndexMarisa::CalculateTotalSize() const {
     // Size of str_ids_ vector (main data structure)
     size += str_ids_.size() * sizeof(int64_t);
 
-    // Size of str_ids_to_offsets_ map data
-    for (const auto& [key, vec] : str_ids_to_offsets_) {
-        size += sizeof(size_t);               // key
-        size += vec.size() * sizeof(size_t);  // vector data
-    }
+    // CSR index + offsets
+    size += csr_index_.size() * sizeof(size_t);
+    size += csr_offsets_.size() * sizeof(size_t);
 
     return size;
 }
@@ -337,8 +330,10 @@ StringIndexMarisa::In(size_t n, const std::string* values) {
         const auto& str = values[i];
         auto str_id = lookup(str);
         if (valid_str_id(str_id)) {
-            auto& offsets = str_ids_to_offsets_[str_id];
-            for (auto offset : offsets) {
+            for (size_t j = csr_index_ptr_[str_id];
+                 j < csr_index_ptr_[str_id + 1];
+                 j++) {
+                auto offset = csr_offsets_ptr_[j];
                 bitset[offset] = true;
             }
         }
@@ -354,8 +349,10 @@ StringIndexMarisa::NotIn(size_t n, const std::string* values) {
         const auto& str = values[i];
         auto str_id = lookup(str);
         if (valid_str_id(str_id)) {
-            auto& offsets = str_ids_to_offsets_[str_id];
-            for (auto offset : offsets) {
+            for (size_t j = csr_index_ptr_[str_id];
+                 j < csr_index_ptr_[str_id + 1];
+                 j++) {
+                auto offset = csr_offsets_ptr_[j];
                 bitset[offset] = false;
             }
         }
@@ -519,8 +516,10 @@ StringIndexMarisa::Range(const std::string& value, OpType op) {
     }
 
     for (const auto str_id : ids) {
-        auto& offsets = str_ids_to_offsets_[str_id];
-        for (auto offset : offsets) {
+        for (size_t j = csr_index_ptr_[str_id];
+             j < csr_index_ptr_[str_id + 1];
+             j++) {
+            auto offset = csr_offsets_ptr_[j];
             bitset[offset] = true;
         }
     }
@@ -573,8 +572,10 @@ StringIndexMarisa::Range(const std::string& lower_bound_value,
         }
     }
     for (const auto str_id : ids) {
-        auto& offsets = str_ids_to_offsets_[str_id];
-        for (auto offset : offsets) {
+        for (size_t j = csr_index_ptr_[str_id];
+             j < csr_index_ptr_[str_id + 1];
+             j++) {
+            auto offset = csr_offsets_ptr_[j];
             bitset[offset] = true;
         }
     }
@@ -589,8 +590,10 @@ StringIndexMarisa::PrefixMatch(std::string_view prefix) {
     TargetBitmap bitset(str_ids_.size());
     auto matched = prefix_match(prefix);
     for (const auto str_id : matched) {
-        auto& offsets = str_ids_to_offsets_[str_id];
-        for (auto offset : offsets) {
+        for (size_t j = csr_index_ptr_[str_id];
+             j < csr_index_ptr_[str_id + 1];
+             j++) {
+            auto offset = csr_offsets_ptr_[j];
             bitset[offset] = true;
         }
     }
@@ -630,20 +633,26 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
 
     if (op == proto::plan::OpType::Match) {
         LikePatternMatcher matcher(pattern);
-        for (const auto& [str_id, offsets] : str_ids_to_offsets_) {
-            auto val = Reverse_Lookup(offsets[0]);
+        for (size_t kid = 0; kid < csr_num_keys_; kid++) {
+            auto start = csr_index_ptr_[kid];
+            auto end = csr_index_ptr_[kid + 1];
+            if (start == end) continue;
+            auto val = Reverse_Lookup(csr_offsets_ptr_[start]);
             if (val.has_value() && matcher(val.value())) {
-                for (auto offset : offsets) {
-                    bitset[offset] = true;
+                for (size_t j = start; j < end; j++) {
+                    bitset[csr_offsets_ptr_[j]] = true;
                 }
             }
         }
     } else {
-        for (const auto& [str_id, offsets] : str_ids_to_offsets_) {
-            auto val = Reverse_Lookup(offsets[0]);
+        for (size_t kid = 0; kid < csr_num_keys_; kid++) {
+            auto start = csr_index_ptr_[kid];
+            auto end = csr_index_ptr_[kid + 1];
+            if (start == end) continue;
+            auto val = Reverse_Lookup(csr_offsets_ptr_[start]);
             if (val.has_value() && match_fn(val.value())) {
-                for (auto offset : offsets) {
-                    bitset[offset] = true;
+                for (size_t j = start; j < end; j++) {
+                    bitset[csr_offsets_ptr_[j]] = true;
                 }
             }
         }
@@ -669,10 +678,36 @@ StringIndexMarisa::fill_str_ids(size_t n,
 
 void
 StringIndexMarisa::fill_offsets() {
+    csr_num_keys_ = trie_.num_keys();
+
+    // Pass 1: count occurrences per key_id
+    csr_index_.resize(csr_num_keys_ + 1, 0);
     for (size_t offset = 0; offset < str_ids_size_; offset++) {
         auto str_id = str_ids_ptr_[offset];
-        str_ids_to_offsets_[str_id].push_back(offset);
+        if (valid_str_id(str_id)) {
+            csr_index_[str_id + 1]++;
+        }
     }
+
+    // Prefix sum to get CSR index
+    for (size_t i = 1; i <= csr_num_keys_; i++) {
+        csr_index_[i] += csr_index_[i - 1];
+    }
+
+    // Pass 2: fill offsets
+    csr_offsets_.resize(csr_index_[csr_num_keys_]);
+    // Use a temporary copy of starts for scatter
+    std::vector<size_t> write_pos(csr_index_.begin(),
+                                  csr_index_.begin() + csr_num_keys_);
+    for (size_t offset = 0; offset < str_ids_size_; offset++) {
+        auto str_id = str_ids_ptr_[offset];
+        if (valid_str_id(str_id)) {
+            csr_offsets_[write_pos[str_id]++] = offset;
+        }
+    }
+
+    csr_index_ptr_ = csr_index_.data();
+    csr_offsets_ptr_ = csr_offsets_.data();
 }
 
 size_t
