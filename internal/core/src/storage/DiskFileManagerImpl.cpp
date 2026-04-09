@@ -672,6 +672,47 @@ DiskFileManagerImpl::GetLocalRawDataObjectPrefix() {
         local_chunk_manager, field_meta_.segment_id, field_meta_.field_id);
 }
 
+std::string
+DiskFileManagerImpl::GetLocalTempTextIndexPrefix() {
+    auto identifier = GetTextIndexIdentifier();
+    return std::string("/tmp/milvus/text-log/") + identifier;
+}
+
+std::string
+DiskFileManagerImpl::GetLocalTempJsonKeyIndexPrefix() {
+    auto identifier = GetJsonKeyIndexIdentifier();
+    return std::string("/tmp/milvus/json-key-inverted-index-log/") + identifier;
+}
+
+void
+DiskFileManagerImpl::RemoveIndexFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto prefix = GetLocalIndexObjectPrefix();
+    if (local_chunk_manager->Exist(prefix)) {
+        local_chunk_manager->RemoveDir(prefix);
+        LOG_INFO("removed local index files: {}", prefix);
+    }
+}
+
+void
+DiskFileManagerImpl::RemoveTextLogFiles() {
+    auto prefix = GetLocalTextIndexPrefix();
+    if (boost::filesystem::exists(prefix)) {
+        boost::filesystem::remove_all(prefix);
+        LOG_INFO("removed local text index files: {}", prefix);
+    }
+}
+
+void
+DiskFileManagerImpl::RemoveJsonKeyIndexFiles() {
+    auto prefix = GetLocalJsonKeyIndexPrefix();
+    if (boost::filesystem::exists(prefix)) {
+        boost::filesystem::remove_all(prefix);
+        LOG_INFO("removed local json key index files: {}", prefix);
+    }
+}
+
 bool
 DiskFileManagerImpl::RemoveFile(const std::string& file) noexcept {
     // TODO: implement this interface

@@ -1186,6 +1186,7 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 		Schema:       f,
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),
+		EnableMmap:   isDataMmapEnable(f),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
@@ -1242,6 +1243,7 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		Schema:       f,
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),
+		EnableMmap:   isDataMmapEnable(f),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
