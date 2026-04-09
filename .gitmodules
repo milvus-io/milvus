@@ -1,0 +1,8 @@
+[submodule "internal/core/thirdparty/knowhere"]
+	path = internal/core/thirdparty/knowhere
+	url = https://github.com/zilliztech/knowhere.git
+	tag = v2.6.11
+[submodule "internal/core/thirdparty/milvus-common"]
+	path = internal/core/thirdparty/milvus-common
+	url = https://github.com/zilliztech/milvus-common.git
+	tag = 9dc0923
