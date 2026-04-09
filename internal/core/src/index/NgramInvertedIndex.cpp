@@ -207,9 +207,6 @@ NgramInvertedIndex::Serialize(const Config& config) {
 
 IndexStatsPtr
 NgramInvertedIndex::Upload(const Config& config) {
-    if (kScalarIndexUseV3) {
-        return UploadV3(config);
-    }
     finish();
     auto index_build_end = std::chrono::system_clock::now();
     auto index_build_duration =
@@ -301,10 +298,6 @@ NgramInvertedIndex::RetainTantivyIndexFiles(
 void
 NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
                          const Config& config) {
-    if (kScalarIndexUseV3) {
-        this->LoadV3(config);
-        return;
-    }
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),

@@ -21,8 +21,33 @@
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "index/ScalarIndexSort.h"
+#include "pb/common.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "test_utils/AssertUtils.h"
+#include "test_utils/Constants.h"
 #include "test_utils/indexbuilder_test_utils.h"
+
+namespace {
+
+milvus::storage::FileManagerContext
+CreateBoolTestFileManagerContext() {
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto chunk_manager = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 101};
+    field_meta.field_schema.set_data_type(
+        milvus::proto::schema::DataType::Bool);
+    milvus::storage::IndexMeta index_meta{3, 101, 1000, 10000};
+    milvus::storage::FileManagerContext ctx(
+        field_meta, index_meta, chunk_manager, fs);
+    return ctx;
+}
+
+}  // namespace
 
 class BoolIndexTest : public ::testing::Test {
  protected:
@@ -171,11 +196,18 @@ TEST_F(BoolIndexTest, Codec) {
     auto false_test = std::make_unique<bool>(false);
 
     {
-        auto index = milvus::index::CreateBoolIndex();
+        auto file_manager_ctx = CreateBoolTestFileManagerContext();
+        auto index = milvus::index::CreateBoolIndex(file_manager_ctx);
         index->Build(all_true.data_size(), all_true.data().data());
 
-        auto copy_index = milvus::index::CreateBoolIndex();
-        copy_index->Load(index->Serialize(nullptr));
+        auto copy_index = milvus::index::CreateBoolIndex(file_manager_ctx);
+        auto create_index_result = index->UploadV3({});
+        auto index_files = create_index_result->GetIndexFiles();
+        milvus::Config load_config;
+        load_config["index_files"] = index_files;
+        load_config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
+        copy_index->LoadV3(load_config);
 
         auto bitset1 = copy_index->NotIn(1, true_test.get());
         ASSERT_TRUE(bitset1.none());
@@ -185,11 +217,18 @@ TEST_F(BoolIndexTest, Codec) {
     }
 
     {
-        auto index = milvus::index::CreateBoolIndex();
+        auto file_manager_ctx = CreateBoolTestFileManagerContext();
+        auto index = milvus::index::CreateBoolIndex(file_manager_ctx);
         index->Build(all_false.data_size(), all_false.data().data());
 
-        auto copy_index = milvus::index::CreateBoolIndex();
-        copy_index->Load(index->Serialize(nullptr));
+        auto copy_index = milvus::index::CreateBoolIndex(file_manager_ctx);
+        auto create_index_result = index->UploadV3({});
+        auto index_files = create_index_result->GetIndexFiles();
+        milvus::Config load_config;
+        load_config["index_files"] = index_files;
+        load_config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
+        copy_index->LoadV3(load_config);
 
         auto bitset1 = copy_index->NotIn(1, true_test.get());
         ASSERT_TRUE(bitset1.any());
@@ -199,11 +238,18 @@ TEST_F(BoolIndexTest, Codec) {
     }
 
     {
-        auto index = milvus::index::CreateBoolIndex();
+        auto file_manager_ctx = CreateBoolTestFileManagerContext();
+        auto index = milvus::index::CreateBoolIndex(file_manager_ctx);
         index->Build(half.data_size(), half.data().data());
 
-        auto copy_index = milvus::index::CreateBoolIndex();
-        copy_index->Load(index->Serialize(nullptr));
+        auto copy_index = milvus::index::CreateBoolIndex(file_manager_ctx);
+        auto create_index_result = index->UploadV3({});
+        auto index_files = create_index_result->GetIndexFiles();
+        milvus::Config load_config;
+        load_config["index_files"] = index_files;
+        load_config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
+        copy_index->LoadV3(load_config);
 
         auto bitset1 = copy_index->NotIn(1, true_test.get());
         for (size_t i = 0; i < n; i++) {
