@@ -417,6 +417,11 @@ func (node *QueryNode) Start() error {
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
+		metrics.SetPoolCollectFn(
+			fmt.Sprint(node.GetNodeID()),
+			segments.CollectPoolStats,
+		)
+
 		registry.GetInMemoryResolver().RegisterQueryNode(node.GetNodeID(), node)
 		log.Info("query node start successfully",
 			zap.Int64("queryNodeID", node.GetNodeID()),

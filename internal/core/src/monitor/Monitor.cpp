@@ -315,4 +315,81 @@ DEFINE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_all,
                         internal_cgo_executing_task_total,
                         {});
 
+// storage thread pool metrics
+std::map<std::string, std::string> highPoolLabel = {{"priority", "high"}};
+std::map<std::string, std::string> middlePoolLabel = {{"priority", "middle"}};
+std::map<std::string, std::string> lowPoolLabel = {{"priority", "low"}};
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_storage_pool_capacity,
+                               "[cpp]storage thread pool max threads");
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_high,
+                        internal_storage_pool_capacity,
+                        highPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_middle,
+                        internal_storage_pool_capacity,
+                        middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_low,
+                        internal_storage_pool_capacity,
+                        lowPoolLabel);
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_storage_pool_active_threads,
+                               "[cpp]storage thread pool active threads");
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_high,
+                        internal_storage_pool_active_threads,
+                        highPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_middle,
+                        internal_storage_pool_active_threads,
+                        middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_low,
+                        internal_storage_pool_active_threads,
+                        lowPoolLabel);
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_storage_pool_idle_threads,
+                               "[cpp]storage thread pool idle threads");
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_high,
+                        internal_storage_pool_idle_threads,
+                        highPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_middle,
+                        internal_storage_pool_idle_threads,
+                        middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_low,
+                        internal_storage_pool_idle_threads,
+                        lowPoolLabel);
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_storage_pool_queue_depth,
+                               "[cpp]storage thread pool queue depth");
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_high,
+                        internal_storage_pool_queue_depth,
+                        highPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_middle,
+                        internal_storage_pool_queue_depth,
+                        middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_low,
+                        internal_storage_pool_queue_depth,
+                        lowPoolLabel);
+
+DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_storage_pool_task_submitted_total,
+                                 "[cpp]storage thread pool tasks submitted");
+DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_submitted_total_high,
+                          internal_storage_pool_task_submitted_total,
+                          highPoolLabel);
+DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_submitted_total_middle,
+                          internal_storage_pool_task_submitted_total,
+                          middlePoolLabel);
+DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_submitted_total_low,
+                          internal_storage_pool_task_submitted_total,
+                          lowPoolLabel);
+
+DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_storage_pool_task_completed_total,
+                                 "[cpp]storage thread pool tasks completed");
+DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_high,
+                          internal_storage_pool_task_completed_total,
+                          highPoolLabel);
+DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_middle,
+                          internal_storage_pool_task_completed_total,
+                          middlePoolLabel);
+DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_low,
+                          internal_storage_pool_task_completed_total,
+                          lowPoolLabel);
+
 }  // namespace milvus::monitor
