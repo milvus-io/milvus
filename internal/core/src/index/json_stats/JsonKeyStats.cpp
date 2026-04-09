@@ -58,12 +58,14 @@
 #include "parquet/metadata.h"
 #include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "segcore/Utils.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/MmapManager.h"
+#include "folly/ScopeGuard.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -998,15 +1000,37 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
         milvus_field_ids.push_back(FieldId(field_id_list.Get(i)));
     }
 
+    // Fetch row group metadata from all files in parallel using HIGH POOL
+    // to avoid blocking the caller thread with serial S3 I/O
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    std::vector<std::future<int64_t>> futures;
+    futures.reserve(files.size());
     for (const auto& file : files) {
-        auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
-        AssertInfo(result.ok(),
-                   "[StorageV2] Failed to create file row group reader: " +
-                       result.status().ToString());
-        auto reader = result.ValueOrDie();
-        auto row_group_meta_vector =
-            reader->file_metadata()->GetRowGroupMetadataVector();
-        num_rows += row_group_meta_vector.row_num();
+        futures.push_back(pool.Submit([&fs, file]() {
+            auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
+            AssertInfo(result.ok(),
+                       "[StorageV2] Failed to create file row group reader: " +
+                           result.status().ToString());
+            auto reader = result.ValueOrDie();
+            auto row_group_meta_vector =
+                reader->file_metadata()->GetRowGroupMetadataVector();
+            return static_cast<int64_t>(row_group_meta_vector.row_num());
+        }));
+    }
+    // Ensure all futures are awaited even if one throws, to prevent
+    // use-after-free on captured references (&fs) in background tasks.
+    auto futures_guard = folly::makeGuard([&futures]() {
+        for (auto& f : futures) {
+            if (f.valid()) {
+                try {
+                    f.get();
+                } catch (...) {
+                }
+            }
+        }
+    });
+    for (auto& f : futures) {
+        num_rows += f.get();
     }
 
     if (num_rows_ == 0) {
