@@ -610,6 +610,7 @@ TEST(GroupBY, Reduce) {
         status = ReduceSearchResultsAndFillData({},
                                                 &cSearchResultData,
                                                 c_plan,
+                                                c_ph_group,
                                                 results.data(),
                                                 results.size(),
                                                 slice_nqs.data(),

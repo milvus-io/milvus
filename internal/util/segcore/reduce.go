@@ -27,6 +27,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"unsafe"
 
 	"github.com/cockroachdb/errors"
 )
@@ -68,7 +69,7 @@ func ParseSliceInfo(originNQs []int64, originTopKs []int64, nqPerSlice int64) *S
 	return sInfo
 }
 
-func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searchResults []*SearchResult,
+func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, placeholderGroup unsafe.Pointer, searchResults []*SearchResult,
 	numSegments int64, sliceNQs []int64, sliceTopKs []int64,
 ) (SearchResultDataBlobs, error) {
 	if plan.cSearchPlan == nil {
@@ -97,7 +98,7 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searc
 	cNumSlices := C.int64_t(len(sliceNQs))
 	var cSearchResultDataBlobs SearchResultDataBlobs
 	traceCtx := ParseCTraceContext(ctx)
-	status := C.ReduceSearchResultsAndFillData(traceCtx.ctx, &cSearchResultDataBlobs, plan.cSearchPlan, cSearchResultPtr,
+	status := C.ReduceSearchResultsAndFillData(traceCtx.ctx, &cSearchResultDataBlobs, plan.cSearchPlan, C.CPlaceholderGroup(placeholderGroup), cSearchResultPtr,
 		cNumSegments, cSliceNQSPtr, cSliceTopKSPtr, cNumSlices)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, errors.Wrap(err, "ReduceSearchResultsAndFillData failed")
