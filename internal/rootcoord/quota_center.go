@@ -1413,10 +1413,8 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 					updateLimiterHasUpdated(partitionLimiter)
 				}
 			}
-			if len(collections) == 0 {
-				dbLimiter := q.rateLimiter.GetOrCreateDatabaseLimiters(dbID, newParamLimiterFunc(internalpb.RateScope_Database, allOps))
-				updateLimiterHasUpdated(dbLimiter)
-			}
+			dbLimiter := q.rateLimiter.GetOrCreateDatabaseLimiters(dbID, newParamLimiterFunc(internalpb.RateScope_Database, allOps))
+			updateLimiterHasUpdated(dbLimiter)
 		}
 	}
 	partitions := q.meta.ListAllAvailPartitions(q.ctx)
