@@ -217,7 +217,6 @@ func NewRoundRobinBalancer(
 	scheduler task.Scheduler,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
-	meta *meta.Meta,
 	targetMgr meta.TargetManagerInterface,
 ) *RoundRobinBalancer {
 	policy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeRoundRobin)

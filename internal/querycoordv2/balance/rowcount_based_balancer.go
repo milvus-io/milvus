@@ -218,7 +218,6 @@ func NewRowCountBasedBalancer(
 	scheduler task.Scheduler,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
-	meta *meta.Meta,
 	targetMgr meta.TargetManagerInterface,
 ) *RowCountBasedBalancer {
 	policy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeRowCount)

@@ -86,7 +86,7 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 	assign.InitGlobalAssignPolicyFactory(suite.mockScheduler, nodeManager, distManager, testMeta, testTarget)
 
 	suite.meta = testMeta
-	suite.balancer = NewRowCountBasedBalancer(suite.mockScheduler, nodeManager, distManager, testMeta, testTarget)
+	suite.balancer = NewRowCountBasedBalancer(suite.mockScheduler, nodeManager, distManager, testTarget)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 

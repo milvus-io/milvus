@@ -59,7 +59,7 @@ func (suite *BalanceTestSuite) SetupTest() {
 	// Initialize global assign policy factory before creating balancer
 	assign.InitGlobalAssignPolicyFactory(suite.mockScheduler, suite.nodeManager, suite.dist, nil, suite.targetMgr)
 
-	suite.roundRobinBalancer = NewRoundRobinBalancer(suite.mockScheduler, suite.nodeManager, suite.dist, nil, suite.targetMgr)
+	suite.roundRobinBalancer = NewRoundRobinBalancer(suite.mockScheduler, suite.nodeManager, suite.dist, suite.targetMgr)
 
 	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()

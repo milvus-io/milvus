@@ -50,7 +50,6 @@ type ScoreBasedBalancer struct {
 func NewScoreBasedBalancer(scheduler task.Scheduler,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
-	meta *meta.Meta,
 	targetMgr meta.TargetManagerInterface,
 ) *ScoreBasedBalancer {
 	policy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeScoreBased).(assign.ScoreAwareAssignPolicy)

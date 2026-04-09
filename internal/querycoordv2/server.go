@@ -338,7 +338,7 @@ func (s *Server) initQueryCoord() error {
 
 	// Init global balancer factory
 	log.Info("init global balancer factory")
-	balance.InitGlobalBalancerFactory(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
+	balance.InitGlobalBalancerFactory(s.taskScheduler, s.nodeMgr, s.dist, s.targetMgr)
 
 	// Init checker controller
 	log.Info("init checker controller")

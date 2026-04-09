@@ -629,9 +629,9 @@ func (b *MultiTargetBalancer) genPlanByDistributions(nodeSegments, globalNodeSeg
 
 // NewMultiTargetBalancer creates a new MultiTargetBalancer instance.
 // It embeds a ScoreBasedBalancer and adds multi-objective optimization capabilities.
-func NewMultiTargetBalancer(scheduler task.Scheduler, nodeManager *session.NodeManager, dist *meta.DistributionManager, meta *meta.Meta, targetMgr meta.TargetManagerInterface) *MultiTargetBalancer {
+func NewMultiTargetBalancer(scheduler task.Scheduler, nodeManager *session.NodeManager, dist *meta.DistributionManager, targetMgr meta.TargetManagerInterface) *MultiTargetBalancer {
 	return &MultiTargetBalancer{
-		ScoreBasedBalancer: NewScoreBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
+		ScoreBasedBalancer: NewScoreBasedBalancer(scheduler, nodeManager, dist, targetMgr),
 		dist:               dist,
 		targetMgr:          targetMgr,
 	}

@@ -84,7 +84,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) SetupTest() {
 	assign.InitGlobalAssignPolicyFactory(suite.mockScheduler, nodeManager, distManager, testMeta, testTarget)
 
 	suite.meta = testMeta
-	suite.balancer = NewChannelLevelScoreBalancer(suite.mockScheduler, nodeManager, distManager, testMeta, testTarget)
+	suite.balancer = NewChannelLevelScoreBalancer(suite.mockScheduler, nodeManager, distManager, testTarget)
 
 	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
