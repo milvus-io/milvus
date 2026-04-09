@@ -63,6 +63,11 @@ func mustSelectWALName(standalone bool, mqType string, enable walEnable) message
 		return message.WALNameKafka
 	}
 	if enable.Woodpecker {
+		// woodpecker with local storage cannot work in cluster mode,
+		// because local storage is not shared across nodes.
+		if !standalone && paramtable.Get().WoodpeckerCfg.StorageType.GetValue() == "local" && !paramtable.Get().WoodpeckerCfg.ForceLocalStorage.GetAsBool() {
+			panic(errors.Newf("woodpecker with local storage is not supported in cluster mode, set woodpecker.storage.forceLocalStorage to true to override"))
+		}
 		return message.WALNameWoodpecker
 	}
 	panic(errors.Errorf("no available wal config found, %s, enable: %+v", mqType, enable))
@@ -80,6 +85,11 @@ func validateWALName(standalone bool, mqType string) (message.WALName, error) {
 	// only check standalone type.
 	if !standalone && mqName == message.WALNameRocksmq {
 		return mqName, errors.Newf("mq %s is only valid in standalone mode", mqType)
+	}
+	// woodpecker with local storage cannot work in cluster mode,
+	// because local storage is not shared across nodes.
+	if !standalone && mqName == message.WALNameWoodpecker && paramtable.Get().WoodpeckerCfg.StorageType.GetValue() == "local" && !paramtable.Get().WoodpeckerCfg.ForceLocalStorage.GetAsBool() {
+		return mqName, errors.Newf("woodpecker with local storage is not supported in cluster mode, set woodpecker.storage.forceLocalStorage to true to override")
 	}
 	return mqName, nil
 }
