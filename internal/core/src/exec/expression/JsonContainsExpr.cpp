@@ -330,7 +330,7 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     if (!arg_inited_) {
-        arg_set_ = std::make_shared<SortVectorElement<GetType>>(expr_->vals_);
+        arg_set_ = std::make_shared<SetElement<GetType>>(expr_->vals_);
         arg_inited_ = true;
     }
 
@@ -435,7 +435,7 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
-        arg_set_ = std::make_shared<SortVectorElement<GetType>>(expr_->vals_);
+        arg_set_ = std::make_shared<SetElement<GetType>>(expr_->vals_);
         arg_inited_ = true;
     }
 
@@ -542,18 +542,17 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
     std::unordered_set<GetType> elements;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
-        arg_set_ = std::make_shared<SortVectorElement<GetType>>(expr_->vals_);
+        arg_set_ = std::make_shared<SetElement<GetType>>(expr_->vals_);
         if constexpr (std::is_same_v<GetType, int64_t>) {
             // for int64_t, we need to a double vector to store the values
-            auto sort_arg_set =
-                std::dynamic_pointer_cast<SortVectorElement<int64_t>>(arg_set_);
+            auto int_arg_set =
+                std::dynamic_pointer_cast<SetElement<int64_t>>(arg_set_);
             std::vector<double> double_vals;
-            double_vals.reserve(sort_arg_set->GetElements().size());
-            for (const auto& val : sort_arg_set->GetElements()) {
+            double_vals.reserve(int_arg_set->GetElements().size());
+            for (const auto& val : int_arg_set->GetElements()) {
                 double_vals.emplace_back(static_cast<double>(val));
             }
-            arg_set_double_ =
-                std::make_shared<SortVectorElement<double>>(double_vals);
+            arg_set_double_ = std::make_shared<SetElement<double>>(double_vals);
         } else if constexpr (std::is_same_v<GetType, double>) {
             arg_set_double_ = arg_set_;
         }

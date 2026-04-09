@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <any>
+#include <functional>
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -163,6 +165,19 @@ class PhyTermFilterExpr : public SegmentExpr {
     std::shared_ptr<MultiElement> arg_set_double_;
     SingleElement arg_val_;
     PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
+
+    // Type-safe cached FilterChunk dispatch (avoids per-call dynamic_cast).
+    // Set once during arg_inited_; empty when arg_set_ is not SimdBatch.
+    // Captures a typed SimdBatchElement<T>* inside the lambda at init time.
+    using FilterChunkFn =
+        std::function<void(const void* data, int size, TargetBitmapView res)>;
+    FilterChunkFn cached_filter_chunk_;
+    // Cached SetElement<string> pointer for per-row string lookup without
+    // variant construction. Set once during init; nullptr when arg_set_ is not
+    // SetElement<string> (e.g. FlatVectorElement for small IN).
+    SetElement<std::string>* cached_str_set_elem_{nullptr};
+    // Cached element values for skip_index (avoids per-chunk vector copy).
+    std::any cached_skip_elements_;
 };
 }  //namespace exec
 }  // namespace milvus

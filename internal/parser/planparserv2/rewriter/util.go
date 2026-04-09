@@ -2,6 +2,7 @@ package rewriter
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -92,30 +93,6 @@ func isNumericType(dt schemapb.DataType) bool {
 	return typeutil.IsArithmetic(dt)
 }
 
-// shouldUseInExpr determines whether a multi-value equality match should use
-// TermExpr (IN) or individual UnaryRangeExpr (== or).
-// Used bidirectionally:
-//   - combineOrEqualsToIn: merge == or → in when returns true
-//   - combineAndNotEqualsToNotIn: merge != and → not in when returns true
-//   - visitTermExpr: split in → == or when returns false
-func shouldUseInExpr(dt schemapb.DataType, count int) bool {
-	return shouldUseInExprWithPK(dt, count, false)
-}
-
-func shouldUseInExprWithPK(dt schemapb.DataType, count int, isPrimaryKey bool) bool {
-	if isPrimaryKey {
-		return true
-	}
-	switch {
-	case typeutil.IsIntegerType(dt):
-		return count >= 10
-	case typeutil.IsFloatingType(dt):
-		return count >= 15
-	default:
-		return count >= 3
-	}
-}
-
 func sortTermValues(term *planpb.TermExpr) {
 	if term == nil || len(term.GetValues()) <= 1 {
 		return
@@ -151,7 +128,15 @@ func sortGenericValues(values []*planpb.GenericValue) []*planpb.GenericValue {
 		values = lo.UniqBy(values, func(v *planpb.GenericValue) int64 { return v.GetInt64Val() })
 	case "float":
 		sort.Slice(values, func(i, j int) bool {
-			return values[i].GetFloatVal() < values[j].GetFloatVal()
+			a, b := values[i].GetFloatVal(), values[j].GetFloatVal()
+			// NaN sorts last to maintain strict weak ordering required by sort.Slice
+			if math.IsNaN(a) {
+				return false
+			}
+			if math.IsNaN(b) {
+				return true
+			}
+			return a < b
 		})
 		values = lo.UniqBy(values, func(v *planpb.GenericValue) float64 { return v.GetFloatVal() })
 	case "string":
