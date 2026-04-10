@@ -36,7 +36,7 @@ type teiProvider struct {
 	params map[string]any
 }
 
-func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (modelProvider, error) {
+func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (ModelProvider, error) {
 	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "", &models.ModelExtraInfo{})
 	if err != nil {
 		return nil, err
@@ -84,7 +84,7 @@ func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 	return &provider, nil
 }
 
-func (provider *teiProvider) rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
+func (provider *teiProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
 	rerankResp, err := provider.client.Rerank(query, docs, provider.params, 30)
 	if err != nil {
 		return nil, err
