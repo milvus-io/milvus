@@ -142,7 +142,7 @@ func TestEmbeddingNode_Operator(t *testing.T) {
 			metaCache.EXPECT().GetSchema(mock.Anything).Return(collSchema)
 
 			t.Run("normal case", func(t *testing.T) {
-				node, err := newEmbeddingNode("test-channel", metaCache)
+				node, err := newEmbeddingNode("test-channel", metaCache, nil)
 				assert.NoError(t, err)
 				defer node.Free()
 
@@ -184,7 +184,7 @@ func TestEmbeddingNode_Operator(t *testing.T) {
 			})
 
 			t.Run("with close msg", func(t *testing.T) {
-				node, err := newEmbeddingNode("test-channel", metaCache)
+				node, err := newEmbeddingNode("test-channel", metaCache, nil)
 				assert.NoError(t, err)
 				defer node.Free()
 
@@ -202,7 +202,7 @@ func TestEmbeddingNode_Operator(t *testing.T) {
 			})
 
 			t.Run("prepare insert failed", func(t *testing.T) {
-				node, err := newEmbeddingNode("test-channel", metaCache)
+				node, err := newEmbeddingNode("test-channel", metaCache, nil)
 				assert.NoError(t, err)
 				defer node.Free()
 
@@ -224,7 +224,7 @@ func TestEmbeddingNode_Operator(t *testing.T) {
 			})
 
 			t.Run("embedding failed", func(t *testing.T) {
-				node, err := newEmbeddingNode("test-channel", metaCache)
+				node, err := newEmbeddingNode("test-channel", metaCache, nil)
 				assert.NoError(t, err)
 				defer node.Free()
 

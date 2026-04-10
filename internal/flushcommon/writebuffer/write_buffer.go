@@ -379,19 +379,18 @@ func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp, policies ...
 	return segments.Collect()
 }
 
-func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64, timetick uint64) *segmentBuffer {
+func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64, timetick uint64) (*segmentBuffer, error) {
 	buffer, ok := wb.buffers[segmentID]
 	if !ok {
 		var err error
 		buffer, err = newSegmentBuffer(segmentID, wb.metaCache.GetSchema(timetick))
 		if err != nil {
-			// TODO avoid panic here
-			panic(err)
+			return nil, err
 		}
 		wb.buffers[segmentID] = buffer
 	}
 
-	return buffer
+	return buffer, nil
 }
 
 func (wb *writeBufferBase) yieldBuffer(segmentID int64) ([]*storage.InsertData, map[int64]*storage.BM25Stats, *storage.DeleteData, *schemapb.CollectionSchema, *TimeRange, *msgpb.MsgPosition) {
@@ -554,10 +553,14 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 }
 
 // bufferDelete buffers DeleteMsg into DeleteData.
-func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKey, tss []typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) {
-	segBuf := wb.getOrCreateBuffer(segmentID, tss[0])
+func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKey, tss []typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) error {
+	segBuf, err := wb.getOrCreateBuffer(segmentID, tss[0])
+	if err != nil {
+		return err
+	}
 	bufSize := segBuf.deltaBuffer.Buffer(pks, tss, startPos, endPos)
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(paramtable.GetStringNodeID(), fmt.Sprint(wb.collectionID)).Add(float64(bufSize))
+	return nil
 }
 
 func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (syncmgr.Task, error) {
@@ -686,14 +689,14 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 	err := conc.AwaitAll(futures...)
 	if err != nil {
 		log.Error("failed to sink write buffer data", zap.Error(err))
-		// TODO change to remove channel in the future
-		panic(err)
+		wb.errHandler(err)
+		return
 	}
 	err = wb.metaWriter.DropChannel(ctx, wb.channelName)
 	if err != nil {
 		log.Error("failed to drop channel", zap.Error(err))
-		// TODO change to remove channel in the future
-		panic(err)
+		wb.errHandler(err)
+		return
 	}
 }
 

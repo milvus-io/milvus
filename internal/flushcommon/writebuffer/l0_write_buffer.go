@@ -48,15 +48,21 @@ func NewL0WriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syn
 	}, nil
 }
 
-func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) {
+func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
 	for _, msg := range deleteMsgs {
-		l0SegmentID := wb.getL0SegmentID(msg.GetPartitionID(), startPos)
+		l0SegmentID, err := wb.getL0SegmentID(msg.GetPartitionID(), startPos)
+		if err != nil {
+			return err
+		}
 		pks := storage.ParseIDs2PrimaryKeys(msg.GetPrimaryKeys())
 		pkTss := msg.GetTimestamps()
 		if len(pks) > 0 {
-			wb.bufferDelete(l0SegmentID, pks, pkTss, startPos, endPos)
+			if err := wb.bufferDelete(l0SegmentID, pks, pkTss, startPos, endPos); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error {
@@ -74,7 +80,9 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 	// In streaming service mode, flushed segments no longer maintain a bloom filter.
 	// So, here we skip generating BF (growing segment's BF will be regenerated during the sync phase)
 	// and also skip filtering delete entries by bf.
-	wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos)
+	if err := wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos); err != nil {
+		return err
+	}
 	// update buffer last checkpoint
 	wb.checkpoint = endPos
 
@@ -93,7 +101,10 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 // bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.
 func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition) error {
 	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos)
-	segBuf := wb.getOrCreateBuffer(inData.segmentID, startPos.GetTimestamp())
+	segBuf, err := wb.getOrCreateBuffer(inData.segmentID, startPos.GetTimestamp())
+	if err != nil {
+		return err
+	}
 
 	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)
 	wb.metaCache.UpdateSegments(metacache.SegmentActions(
@@ -106,7 +117,7 @@ func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgp
 	return nil
 }
 
-func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPosition) int64 {
+func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPosition) (int64, error) {
 	log := wb.logger
 	segmentID, ok := wb.l0Segments[partitionID]
 	if !ok {
@@ -117,7 +128,7 @@ func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPo
 		})
 		if err != nil {
 			log.Error("failed to allocate l0 segment ID", zap.Error(err))
-			panic(err)
+			return 0, err
 		}
 		wb.l0Segments[partitionID] = segmentID
 		wb.l0partition[segmentID] = partitionID
@@ -136,5 +147,5 @@ func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPo
 			zap.Any("start position", startPos),
 		)
 	}
-	return segmentID
+	return segmentID, nil
 }
