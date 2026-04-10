@@ -13,7 +13,7 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from pymilvus import DataType, MilvusException
+from pymilvus import DataType, MilvusException, AnnSearchRequest, RRFRanker
 
 prefix = "large_topk"
 default_nb = 3000          # > 1024 to trigger IVF index build
@@ -180,6 +180,46 @@ class TestLargeTopkShared(TestMilvusClientV2Base):
                     anns_field=vec_field, limit=large_topk_first,
                     check_task=CheckTasks.err_res,
                     check_items=error)
+
+    # Note: search_iterator and query_iterator are NOT affected by query_mode=large_topk.
+    # The SDK enforces batch_size <= 16384 client-side (ParamError, unrelated to large_topk).
+    # The iterator `limit` (total result count) uses internal pagination with batch_size <= 16384,
+    # so per-request topk never exceeds 16384. No large_topk-specific iterator tests are needed.
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_large_limit(self):
+        """
+        target: verify query() with limit > 16384 works when query_mode=large_topk is set
+        method: query col_large_topk with limit=large_topk_first, verify results returned
+        expected: returns large_topk_first results without error
+        """
+        client = self._client()
+        res = client.query(
+            self.col_large_topk,
+            filter="",
+            output_fields=["id"],
+            limit=large_topk_first,
+        )
+        assert len(res) == large_topk_first, \
+            f"Expected {large_topk_first} results, got {len(res)}"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_without_property_fails(self):
+        """
+        target: verify query() with limit > 16384 is rejected when query_mode=large_topk is NOT set
+        method: query col_normal with limit=large_topk_first
+        expected: MilvusException with invalid topk message
+        """
+        client = self._client()
+        with pytest.raises(MilvusException) as exc_info:
+            client.query(
+                self.col_normal,
+                filter="",
+                output_fields=["id"],
+                limit=large_topk_first,
+            )
+        assert str(large_topk_first) in str(exc_info.value), \
+            f"Expected topk error, got: {exc_info.value}"
 
 
 # ---------------------------------------------------------------------------
@@ -537,4 +577,105 @@ class TestLargeTopkIndependent(TestMilvusClientV2Base):
                     anns_field=vec_field, limit=large_topk_first,
                     check_task=CheckTasks.err_res,
                     check_items=error)
+
+    # Note: search_iterator and query_iterator are NOT affected by query_mode=large_topk.
+    # The SDK enforces batch_size <= 16384 client-side (ParamError code=1, regardless of property).
+    # Iterator `limit` (total results) uses internal pagination with batch_size <= 16384 per request,
+    # so per-request topk never exceeds 16384. No large_topk-specific iterator tests are needed.
+
+    # -------------------------------------------------------------------------
+    # Hybrid search interface tests
+    # -------------------------------------------------------------------------
+
+    def _setup_dual_vec_col(self, client, enable_large_topk=True, nb=default_nb):
+        """Create collection with two float vector fields for hybrid search tests.
+        Uses IVF_FLAT index to keep index-build time reasonable for large nb."""
+        col = cf.gen_collection_name_by_testcase_name(module_index=2)
+        schema = self.create_schema(client)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
+        schema.add_field(vec_field, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("vec2", DataType.FLOAT_VECTOR, dim=default_dim)
+        query_mode_props = {"query_mode": "large_topk"} if enable_large_topk else None
+        self.create_collection(client, col, schema=schema,
+                               properties=query_mode_props, force_teardown=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(vec_field, index_type="IVF_FLAT", metric_type="L2",
+                               params={"nlist": 64})
+        index_params.add_index("vec2", index_type="IVF_FLAT", metric_type="L2",
+                               params={"nlist": 64})
+        self.create_index(client, col, index_params)
+        self.load_collection(client, col)
+        if nb > 0:
+            rows = [{vec_field: cf.gen_vectors(1, default_dim)[0],
+                     "vec2": cf.gen_vectors(1, default_dim)[0]} for _ in range(nb)]
+            self.insert(client, col, rows)
+            self.flush(client, col)
+        return col
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_hybrid_search_large_topk(self):
+        """
+        target: verify hybrid_search with limit > 16384 works when query_mode=large_topk is set
+        method:
+            1. create collection with two float vector fields and query_mode=large_topk
+            2. insert large_topk_total rows with IVF_FLAT index
+            3. hybrid_search with limit=large_topk_first using RRFRanker
+        expected: hybrid_search completes without error; returns > 0 results; no error code
+        """
+        client = self._client()
+        col = self._setup_dual_vec_col(client, enable_large_topk=True, nb=large_topk_total)
+        req_list = [
+            AnnSearchRequest(
+                data=cf.gen_vectors(default_nq, default_dim),
+                anns_field=vec_field,
+                param={"metric_type": "L2", "nprobe": 16},
+                limit=large_topk_first,
+            ),
+            AnnSearchRequest(
+                data=cf.gen_vectors(default_nq, default_dim),
+                anns_field="vec2",
+                param={"metric_type": "L2", "nprobe": 16},
+                limit=large_topk_first,
+            ),
+        ]
+        res, _ = self.hybrid_search(client, col,
+                                    reqs=req_list, ranker=RRFRanker(),
+                                    limit=large_topk_first)
+        assert len(res) == default_nq, f"Expected {default_nq} query results, got {len(res)}"
+        for hits in res:
+            assert len(hits) > 0, "Expected non-empty hybrid search results"
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_hybrid_search_without_property_fails(self):
+        """
+        target: verify hybrid_search with limit > 16384 is rejected when query_mode=large_topk is NOT set
+        method:
+            1. create collection with two float vector fields and NO query_mode property
+            2. hybrid_search with limit=large_topk_first
+        expected: MilvusException with invalid topk message
+        """
+        client = self._client()
+        col = self._setup_dual_vec_col(client, enable_large_topk=False)
+        req_list = [
+            AnnSearchRequest(
+                data=cf.gen_vectors(default_nq, default_dim),
+                anns_field=vec_field,
+                param={"metric_type": "L2"},
+                limit=large_topk_first,
+            ),
+            AnnSearchRequest(
+                data=cf.gen_vectors(default_nq, default_dim),
+                anns_field="vec2",
+                param={"metric_type": "L2"},
+                limit=large_topk_first,
+            ),
+        ]
+        # hybrid_search uses "invalid max query result window" (not "topk [N] is invalid")
+        error = {ct.err_code: 65535,
+                 ct.err_msg: f"invalid max query result window, (offset+limit) should be in range [1, 16384], but got {large_topk_first}"}
+        self.hybrid_search(client, col,
+                           reqs=req_list, ranker=RRFRanker(),
+                           limit=large_topk_first,
+                           check_task=CheckTasks.err_res,
+                           check_items=error)
 
