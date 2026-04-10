@@ -1595,6 +1595,37 @@ func getMinPosition(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
 	return minPos
 }
 
+func getMaxPosition(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
+	var maxPos *msgpb.MsgPosition
+	for _, pos := range positions {
+		if maxPos == nil ||
+			pos != nil && pos.GetTimestamp() > maxPos.GetTimestamp() {
+			maxPos = pos
+		}
+	}
+	return maxPos
+}
+
+// recalculateSegmentPosition recalculates StartPosition and DmlPosition from
+// actual binlog timestamps on the compaction result segment. This makes compaction
+// self-healing: wrong positions from import or prior compaction are corrected.
+// Also fixes the DmlPosition bug where getMinPosition was used instead of max.
+// Falls back to the provided fallback positions if binlog timestamps are unavailable
+// (e.g., legacy segments without TimestampFrom/TimestampTo populated).
+func recalculateSegmentPosition(binlogs []*datapb.FieldBinlog, channel string, fallbackStart, fallbackDml *msgpb.MsgPosition) (startPos, dmlPos *msgpb.MsgPosition) {
+	minTs, maxTs := extractTimestampFromBinlogs(binlogs)
+	if minTs > 0 && minTs != math.MaxUint64 && maxTs > 0 {
+		return &msgpb.MsgPosition{
+				ChannelName: channel,
+				Timestamp:   minTs,
+			}, &msgpb.MsgPosition{
+				ChannelName: channel,
+				Timestamp:   maxTs,
+			}
+	}
+	return fallbackStart, fallbackDml
+}
+
 func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
 	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetPlanID()),
 		zap.String("type", t.GetType().String()),
@@ -1620,7 +1651,16 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		compactFromSegIDs = append(compactFromSegIDs, cloned.GetID())
 	}
 
+	// Compute fallback positions from source segments (used when binlog timestamps unavailable)
+	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+		return info.GetStartPosition()
+	}))
+	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+		return info.GetDmlPosition()
+	}))
+
 	for _, seg := range result.GetSegments() {
+		startPos, dmlPos := recalculateSegmentPosition(seg.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
 		segmentInfo := &datapb.SegmentInfo{
 			ID:                  seg.GetSegmentID(),
 			CollectionID:        compactFromSegInfos[0].CollectionID,
@@ -1635,12 +1675,8 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			CompactionFrom:      compactFromSegIDs,
 			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
 			Level:               datapb.SegmentLevel_L2,
-			StartPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-				return info.GetStartPosition()
-			})),
-			DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-				return info.GetDmlPosition()
-			})),
+			StartPosition:       startPos,
+			DmlPosition:         dmlPos,
 			// visible after stats and index
 			IsInvisible: true,
 		}
@@ -1702,8 +1738,17 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 
 	log = log.With(zap.Int64s("compactFrom", compactFromSegIDs))
 
+	// Compute fallback positions from source segments (used when binlog timestamps unavailable)
+	fallbackStart := getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+		return info.GetStartPosition()
+	}))
+	fallbackDml := getMaxPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+		return info.GetDmlPosition()
+	}))
+
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {
+		startPos, dmlPos := recalculateSegmentPosition(compactToSegment.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
 		compactToSegmentInfo := NewSegmentInfo(
 			&datapb.SegmentInfo{
 				ID:            compactToSegment.GetSegmentID(),
@@ -1723,13 +1768,9 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
 				Level:               datapb.SegmentLevel_L1,
 
-				StartPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-					return info.GetStartPosition()
-				})),
-				DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
-					return info.GetDmlPosition()
-				})),
-				IsSorted: compactToSegment.GetIsSorted(),
+				StartPosition: startPos,
+				DmlPosition:   dmlPos,
+				IsSorted:      compactToSegment.GetIsSorted(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -2163,14 +2204,17 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 		resultInvisible = false
 	}
 
+	startPos, dmlPos := recalculateSegmentPosition(result.GetInsertLogs(), oldSegment.GetInsertChannel(),
+		oldSegment.GetStartPosition(), oldSegment.GetDmlPosition())
+
 	segmentInfo := &datapb.SegmentInfo{
 		CollectionID:   oldSegment.GetCollectionID(),
 		PartitionID:    oldSegment.GetPartitionID(),
 		InsertChannel:  oldSegment.GetInsertChannel(),
 		MaxRowNum:      oldSegment.GetMaxRowNum(),
 		LastExpireTime: oldSegment.GetLastExpireTime(),
-		StartPosition:  oldSegment.GetStartPosition(),
-		DmlPosition:    oldSegment.GetDmlPosition(),
+		StartPosition:  startPos,
+		DmlPosition:    dmlPos,
 		IsImporting:    oldSegment.GetIsImporting(),
 		StorageVersion: oldSegment.GetStorageVersion(),
 		// only flushed segment can do sort stats

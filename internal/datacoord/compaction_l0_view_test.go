@@ -1,6 +1,7 @@
 package datacoord
 
 import (
+	"math"
 	"testing"
 
 	"github.com/samber/lo"
@@ -11,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestLevelZeroSegmentsViewSuite(t *testing.T) {
@@ -254,4 +256,84 @@ func (s *LevelZeroSegmentsViewSuite) TestForceTrigger() {
 			log.Info("test forceTrigger", zap.Any("trigger reason", reason))
 		})
 	}
+}
+
+func (s *LevelZeroSegmentsViewSuite) TestResolveLatestDeletePos() {
+	paramtable.Init()
+	dmlPos := &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 12345}
+
+	s.Run("default_returns_dml_pos", func() {
+		paramtable.Get().Save("dataCoord.compaction.levelzero.forceSelectAllSegments", "false")
+		defer paramtable.Get().Reset("dataCoord.compaction.levelzero.forceSelectAllSegments")
+
+		got := resolveLatestDeletePos(dmlPos)
+		s.Equal(dmlPos, got)
+	})
+
+	s.Run("force_select_returns_max_timestamp", func() {
+		paramtable.Get().Save("dataCoord.compaction.levelzero.forceSelectAllSegments", "true")
+		defer paramtable.Get().Reset("dataCoord.compaction.levelzero.forceSelectAllSegments")
+
+		got := resolveLatestDeletePos(dmlPos)
+		s.Equal(uint64(math.MaxUint64), got.GetTimestamp())
+		s.Equal("ch-1", got.GetChannelName())
+	})
+
+	s.Run("force_select_with_nil_pos", func() {
+		paramtable.Get().Save("dataCoord.compaction.levelzero.forceSelectAllSegments", "true")
+		defer paramtable.Get().Reset("dataCoord.compaction.levelzero.forceSelectAllSegments")
+
+		got := resolveLatestDeletePos(nil)
+		s.Equal(uint64(math.MaxUint64), got.GetTimestamp())
+		s.Equal("", got.GetChannelName())
+	})
+
+	s.Run("trigger_uses_resolved_pos_when_force_select_enabled", func() {
+		paramtable.Get().Save("dataCoord.compaction.levelzero.forceSelectAllSegments", "true")
+		defer paramtable.Get().Reset("dataCoord.compaction.levelzero.forceSelectAllSegments")
+
+		label := s.v.GetGroupLabel()
+		views := []*SegmentView{
+			genTestL0SegmentView(100, label, 20000),
+			genTestL0SegmentView(101, label, 10000),
+			genTestL0SegmentView(102, label, 30000),
+		}
+		for _, v := range views {
+			v.DeltalogCount = 100
+			v.DeltaSize = 1
+			v.DeltaRowCount = 1
+		}
+		s.v.segments = views
+		s.v.earliestGrowingSegmentPos = &msgpb.MsgPosition{Timestamp: 100000}
+
+		gotView, _ := s.v.Trigger()
+		s.Require().NotNil(gotView)
+		levelZeroView, ok := gotView.(*LevelZeroSegmentsView)
+		s.Require().True(ok)
+		s.Equal(uint64(math.MaxUint64), levelZeroView.earliestGrowingSegmentPos.GetTimestamp())
+	})
+
+	s.Run("force_trigger_uses_resolved_pos_when_force_select_enabled", func() {
+		paramtable.Get().Save("dataCoord.compaction.levelzero.forceSelectAllSegments", "true")
+		defer paramtable.Get().Reset("dataCoord.compaction.levelzero.forceSelectAllSegments")
+
+		label := s.v.GetGroupLabel()
+		views := []*SegmentView{
+			genTestL0SegmentView(100, label, 20000),
+			genTestL0SegmentView(101, label, 10000),
+		}
+		for _, v := range views {
+			v.DeltalogCount = 1
+			v.DeltaSize = 1
+			v.DeltaRowCount = 1
+		}
+		s.v.segments = views
+		s.v.earliestGrowingSegmentPos = &msgpb.MsgPosition{Timestamp: 100000}
+
+		gotView, _ := s.v.ForceTrigger()
+		s.Require().NotNil(gotView)
+		levelZeroView, ok := gotView.(*LevelZeroSegmentsView)
+		s.Require().True(ok)
+		s.Equal(uint64(math.MaxUint64), levelZeroView.earliestGrowingSegmentPos.GetTimestamp())
+	})
 }
