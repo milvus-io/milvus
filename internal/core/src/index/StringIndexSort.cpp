@@ -131,7 +131,15 @@ StringIndexSort::StringIndexSort(
     }
 }
 
-StringIndexSort::~StringIndexSort() = default;
+StringIndexSort::~StringIndexSort() {
+    if (mmap_meta_data_ != nullptr && mmap_meta_data_ != MAP_FAILED &&
+        mmap_meta_size_ > 0) {
+        munmap(mmap_meta_data_, mmap_meta_size_);
+    }
+    if (!mmap_meta_filepath_.empty()) {
+        unlink(mmap_meta_filepath_.c_str());
+    }
+}
 
 int64_t
 StringIndexSort::Count() {
@@ -160,6 +168,8 @@ StringIndexSort::Build(size_t n,
     // Let MemoryImpl handle the building process
     memory_impl->BuildFromRawData(
         n, values, valid_data, valid_bitset_, idx_to_offsets_);
+    idx_to_offsets_ptr_ = idx_to_offsets_.data();
+    idx_to_offsets_size_ = idx_to_offsets_.size();
 
     is_built_ = true;
     total_size_ = CalculateTotalSize();
@@ -224,6 +234,8 @@ StringIndexSort::BuildWithFieldData(
             ->BuildFromFieldData(
                 field_datas, total_num_rows_, valid_bitset_, idx_to_offsets_);
     }
+    idx_to_offsets_ptr_ = idx_to_offsets_.data();
+    idx_to_offsets_size_ = idx_to_offsets_.size();
 
     is_built_ = true;
     total_size_ = CalculateTotalSize();
@@ -389,6 +401,8 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
         impl_->LoadFromBinary(
             binary_set, total_num_rows_, valid_bitset_, idx_to_offsets_);
     }
+    idx_to_offsets_ptr_ = idx_to_offsets_.data();
+    idx_to_offsets_size_ = idx_to_offsets_.size();
 
     is_built_ = true;
     total_size_ = CalculateTotalSize();
@@ -471,7 +485,8 @@ std::optional<std::string>
 StringIndexSort::Reverse_Lookup(size_t offset) const {
     assert(impl_ != nullptr);
     return impl_->Reverse_Lookup(
-        offset, total_num_rows_, valid_bitset_, idx_to_offsets_);
+        offset, total_num_rows_, valid_bitset_,
+        idx_to_offsets_ptr_, idx_to_offsets_size_);
 }
 
 int64_t
@@ -485,7 +500,7 @@ StringIndexSort::CalculateTotalSize() const {
 
     size += impl_->Size();
     // Add common structures (always present)
-    size += idx_to_offsets_.size() * sizeof(int32_t);
+    size += idx_to_offsets_size_ * sizeof(int32_t);
     size += valid_bitset_.size() / 8;
 
     // Add object overhead
@@ -499,9 +514,12 @@ StringIndexSort::ComputeByteSize() {
     StringIndex::ComputeByteSize();
     int64_t total = cached_byte_size_;
 
-    // Common structures (always in memory)
-    // idx_to_offsets_: vector<int32_t>
-    total += idx_to_offsets_.capacity() * sizeof(int32_t);
+    // idx_to_offsets_: vector (non-mmap) or mmap'd (mmap mode)
+    if (mmap_meta_data_ == nullptr) {
+        total += idx_to_offsets_.capacity() * sizeof(int32_t);
+    } else {
+        total += mmap_meta_size_;
+    }
 
     // valid_bitset_: TargetBitmap
     total += valid_bitset_.size_in_bytes();
@@ -542,6 +560,9 @@ StringIndexSort::WriteEntries(storage::IndexEntryWriter* writer) {
     writer->WriteEntry("index_data", data_buffer.data(), total_size);
     writer->WriteEntry(
         "valid_bitset", valid_bitset_data.data(), valid_bitset_size);
+    writer->WriteEntry("idx_to_offsets",
+                       idx_to_offsets_.data(),
+                       idx_to_offsets_.size() * sizeof(int32_t));
 }
 
 void
@@ -559,8 +580,6 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
     }
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
     is_nested_index_ = reader.GetMeta<bool>("is_nested");
-
-    idx_to_offsets_.resize(total_num_rows_);
 
     // valid_bitset is small (num_rows/8 bytes), keep as ReadEntry
     auto valid_bitset_entry = reader.ReadEntry("valid_bitset");
@@ -584,8 +603,7 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
         mmap_impl->SetMmapFilePath(mmap_path);
 
-        // Stream index_data directly to mmap file (MmapImpl::LoadFromData
-        // would write to file anyway, skip the intermediate buffer)
+        // Stream index_data directly to mmap file
         std::filesystem::create_directories(
             std::filesystem::path(mmap_path).parent_path());
         auto data_size = reader.GetEntrySize("index_data");
@@ -608,15 +626,56 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
             fw.Write(mmap_pad.data(), mmap_pad.size());
             fw.Finish();
         }
-        mmap_impl->LoadFromFile(data_size,
-                                total_num_rows_,
-                                valid_bitset_,
-                                idx_to_offsets_);
+
+        if (reader.HasEntry("idx_to_offsets")) {
+            // Stream idx_to_offsets to meta file, then mmap it
+            mmap_meta_filepath_ = mmap_path + "-meta";
+            size_t offsets_bytes = reader.GetEntrySize("idx_to_offsets");
+            {
+                auto fw = storage::FileWriter(
+                    mmap_meta_filepath_,
+                    storage::io::GetPriorityFromLoadPriority(load_priority));
+                reader.ReadEntryStream(
+                    "idx_to_offsets", [&](const uint8_t* d, size_t len) {
+                        fw.Write(d, len);
+                    });
+                fw.Finish();
+            }
+            mmap_meta_size_ = offsets_bytes;
+            auto meta_file = File::Open(mmap_meta_filepath_, O_RDONLY);
+            mmap_meta_data_ = static_cast<char*>(
+                mmap(NULL, mmap_meta_size_, PROT_READ, MAP_PRIVATE,
+                     meta_file.Descriptor(), 0));
+            AssertInfo(mmap_meta_data_ != MAP_FAILED,
+                       "failed to mmap idx_to_offsets meta: {}",
+                       strerror(errno));
+            meta_file.Close();
+
+            idx_to_offsets_ptr_ =
+                reinterpret_cast<const int32_t*>(mmap_meta_data_);
+            idx_to_offsets_size_ = offsets_bytes / sizeof(int32_t);
+
+            mmap_impl->LoadFromFile(data_size,
+                                    total_num_rows_,
+                                    valid_bitset_,
+                                    idx_to_offsets_,
+                                    /*skip_idx_to_offsets=*/true);
+        } else {
+            // Backward compat: old V3 file without persisted idx_to_offsets
+            idx_to_offsets_.resize(total_num_rows_);
+            mmap_impl->LoadFromFile(data_size,
+                                    total_num_rows_,
+                                    valid_bitset_,
+                                    idx_to_offsets_);
+            idx_to_offsets_ptr_ = idx_to_offsets_.data();
+            idx_to_offsets_size_ = idx_to_offsets_.size();
+        }
         impl_ = std::move(mmap_impl);
     } else {
         LOG_INFO("StringIndexSort::LoadEntries: loading with memory strategy");
         // Stream to buffer, then use MmapImpl with owned buffer
         // (zero-copy pointer access, no data duplication)
+        idx_to_offsets_.resize(total_num_rows_);
         auto data_size = reader.GetEntrySize("index_data");
         std::vector<uint8_t> buf(data_size);
         size_t wo = 0;
@@ -630,6 +689,8 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                                   total_num_rows_,
                                   valid_bitset_,
                                   idx_to_offsets_);
+        idx_to_offsets_ptr_ = idx_to_offsets_.data();
+        idx_to_offsets_size_ = idx_to_offsets_.size();
         impl_ = std::move(mmap_impl);
     }
 
@@ -1187,13 +1248,14 @@ StringIndexSortMemoryImpl::Reverse_Lookup(
     size_t offset,
     size_t total_num_rows,
     const TargetBitmap& valid_bitset,
-    const std::vector<int32_t>& idx_to_offsets) const {
+    const int32_t* idx_to_offsets_ptr,
+    size_t idx_to_offsets_size) const {
     if (offset >= total_num_rows || !valid_bitset[offset]) {
         return std::nullopt;
     }
 
-    if (offset < idx_to_offsets.size()) {
-        size_t unique_idx = idx_to_offsets[offset];
+    if (offset < idx_to_offsets_size) {
+        size_t unique_idx = idx_to_offsets_ptr[offset];
         if (unique_idx < unique_values_.size()) {
             return unique_values_[unique_idx];
         }
@@ -1307,9 +1369,12 @@ void
 StringIndexSortMmapImpl::LoadFromFile(size_t data_size,
                                       size_t total_num_rows,
                                       TargetBitmap& valid_bitset,
-                                      std::vector<int32_t>& idx_to_offsets) {
+                                      std::vector<int32_t>& idx_to_offsets,
+                                      bool skip_idx_to_offsets) {
     AssertInfo(!mmap_filepath_.empty(), "mmap filepath is not set");
-    MmapAndParse(data_size, total_num_rows, valid_bitset, idx_to_offsets);
+    MmapAndParse(
+        data_size, total_num_rows, valid_bitset, idx_to_offsets,
+        skip_idx_to_offsets);
 }
 
 void
@@ -1346,7 +1411,8 @@ StringIndexSortMmapImpl::MmapAndParse(
     size_t data_size,
     size_t total_num_rows,
     TargetBitmap& valid_bitset,
-    std::vector<int32_t>& idx_to_offsets) {
+    std::vector<int32_t>& idx_to_offsets,
+    bool skip_idx_to_offsets) {
     auto aligned_size = ((data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
 
     auto fd = open(mmap_filepath_.c_str(), O_RDONLY);
@@ -1373,16 +1439,17 @@ StringIndexSortMmapImpl::MmapAndParse(
     post_list_offsets_ = parsed.post_list_offsets;
     post_list_data_start_ = parsed.post_list_data_start;
 
-    // Initialize idx_to_offsets
-    std::fill(idx_to_offsets.begin(), idx_to_offsets.end(), -1);
-    // Rebuild idx_to_offsets by iterating through entries
-    for (uint32_t unique_idx = 0; unique_idx < unique_count_; ++unique_idx) {
-        MmapEntry entry = GetEntry(unique_idx);
-
-        // Map each row_id in posting list to this unique index
-        entry.for_each_row_id([&idx_to_offsets, unique_idx](uint32_t row_id) {
-            idx_to_offsets[row_id] = unique_idx;
-        });
+    if (!skip_idx_to_offsets) {
+        // Rebuild idx_to_offsets by iterating through posting lists
+        std::fill(idx_to_offsets.begin(), idx_to_offsets.end(), -1);
+        for (uint32_t unique_idx = 0; unique_idx < unique_count_;
+             ++unique_idx) {
+            MmapEntry entry = GetEntry(unique_idx);
+            entry.for_each_row_id(
+                [&idx_to_offsets, unique_idx](uint32_t row_id) {
+                    idx_to_offsets[row_id] = unique_idx;
+                });
+        }
     }
 }
 
@@ -1668,13 +1735,14 @@ StringIndexSortMmapImpl::Reverse_Lookup(
     size_t offset,
     size_t total_num_rows,
     const TargetBitmap& valid_bitset,
-    const std::vector<int32_t>& idx_to_offsets) const {
+    const int32_t* idx_to_offsets_ptr,
+    size_t idx_to_offsets_size) const {
     if (offset >= total_num_rows || !valid_bitset[offset]) {
         return std::nullopt;
     }
 
-    if (offset < idx_to_offsets.size()) {
-        int32_t unique_idx = idx_to_offsets[offset];
+    if (offset < idx_to_offsets_size) {
+        int32_t unique_idx = idx_to_offsets_ptr[offset];
         if (unique_idx >= 0 &&
             static_cast<size_t>(unique_idx) < unique_count_) {
             MmapEntry entry = GetEntry(unique_idx);
