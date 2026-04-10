@@ -3833,3 +3833,50 @@ func NewIMetaTable(t interface {
 
 	return mock
 }
+
+// MigrateDynamicFieldNullable provides a mock function with given fields: ctx, coll
+func (_m *IMetaTable) MigrateDynamicFieldNullable(ctx context.Context, coll *model.Collection) (bool, error) {
+	ret := _m.Called(ctx, coll)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(context.Context, *model.Collection) bool); ok {
+		r0 = rf(ctx, coll)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *model.Collection) error); ok {
+		r1 = rf(ctx, coll)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_MigrateDynamicFieldNullable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MigrateDynamicFieldNullable'
+type IMetaTable_MigrateDynamicFieldNullable_Call struct {
+	*mock.Call
+}
+
+func (_e *IMetaTable_Expecter) MigrateDynamicFieldNullable(ctx interface{}, coll interface{}) *IMetaTable_MigrateDynamicFieldNullable_Call {
+	return &IMetaTable_MigrateDynamicFieldNullable_Call{Call: _e.mock.On("MigrateDynamicFieldNullable", ctx, coll)}
+}
+
+func (_c *IMetaTable_MigrateDynamicFieldNullable_Call) Run(run func(ctx context.Context, coll *model.Collection)) *IMetaTable_MigrateDynamicFieldNullable_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.Collection))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_MigrateDynamicFieldNullable_Call) Return(_a0 bool, _a1 error) *IMetaTable_MigrateDynamicFieldNullable_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_MigrateDynamicFieldNullable_Call) RunAndReturn(run func(context.Context, *model.Collection) (bool, error)) *IMetaTable_MigrateDynamicFieldNullable_Call {
+	_c.Call.Return(run)
+	return _c
+}

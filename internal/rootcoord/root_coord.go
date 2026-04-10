@@ -695,6 +695,19 @@ func (c *Core) restore(ctx context.Context) error {
 					c.tombstoneSweeper.AddTombstone(newPartitionTombstone(c.meta, c.broker, coll.CollectionID, part.PartitionID))
 				}
 			}
+
+			// Migrate 2.5-style $meta to nullable with default value.
+			// TODO: remove after 3.0 — all collections will have been migrated by then.
+			if changed, err := c.meta.MigrateDynamicFieldNullable(ctx, coll); err != nil {
+				log.Ctx(ctx).Warn("failed to migrate dynamic field schema, will retry on next restart",
+					zap.Int64("collectionID", coll.CollectionID),
+					zap.String("collection", coll.Name),
+					zap.Error(err))
+			} else if changed {
+				log.Ctx(ctx).Info("migrated dynamic field to nullable",
+					zap.Int64("collectionID", coll.CollectionID),
+					zap.String("collection", coll.Name))
+			}
 		}
 	}
 	return nil

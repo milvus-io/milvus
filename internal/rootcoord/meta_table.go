@@ -28,6 +28,7 @@ import (
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -152,6 +153,9 @@ type IMetaTable interface {
 	AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error
 	RemoveFileResource(ctx context.Context, name string) (error, bool)
 	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64)
+
+	// MigrateDynamicFieldNullable upgrades a 2.5-style $meta field to nullable with default "{}".
+	MigrateDynamicFieldNullable(ctx context.Context, coll *model.Collection) (bool, error)
 }
 
 // MetaTable is a persistent meta set of all databases, collections and partitions.
@@ -2322,4 +2326,64 @@ func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileRe
 	defer mt.ddLock.RUnlock()
 
 	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
+}
+
+// MigrateDynamicFieldNullable upgrades a 2.5-style $meta field (non-nullable, no
+// default) to the 2.6 format (nullable=true, default="{}"). Returns true if the
+// schema was modified and persisted.
+//
+// TODO: remove after 3.0 — all collections will have been migrated by then.
+func (mt *MetaTable) MigrateDynamicFieldNullable(ctx context.Context, coll *model.Collection) (bool, error) {
+	if !coll.EnableDynamicField {
+		return false, nil
+	}
+
+	// Find the dynamic field.
+	var hasDynamic bool
+	for _, f := range coll.Fields {
+		if f.IsDynamic {
+			hasDynamic = true
+			// Already migrated — idempotent.
+			if f.Nullable && f.DefaultValue != nil {
+				return false, nil
+			}
+			break
+		}
+	}
+	if !hasDynamic {
+		return false, nil
+	}
+
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	// Clone-mutate-swap: never modify the live object before persistence succeeds.
+	oldColl := coll.Clone()
+	newColl := coll.Clone()
+
+	for _, f := range newColl.Fields {
+		if f.IsDynamic {
+			f.Nullable = true
+			f.DefaultValue = &schemapb.ValueField{
+				Data: &schemapb.ValueField_BytesData{BytesData: []byte("{}")},
+			}
+			break
+		}
+	}
+
+	ts, err := mt.tsoAllocator.GenerateTSO(1)
+	if err != nil {
+		return false, err
+	}
+	newColl.UpdateTimestamp = ts
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, ts, true); err != nil {
+		return false, err
+	}
+
+	// Persistence succeeded — swap into live cache.
+	mt.collID2Meta[coll.CollectionID] = newColl
+
+	return true, nil
 }

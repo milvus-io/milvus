@@ -1858,6 +1858,10 @@ func (s *RootCoordSuite) TestRestore() {
 			},
 		}, nil)
 
+	// MigrateDynamicFieldNullable is called for CollectionCreated collections.
+	// These test collections have EnableDynamicField=false, so the method returns (false, nil).
+	meta.EXPECT().MigrateDynamicFieldNullable(mock.Anything, mock.Anything).Return(false, nil).Maybe()
+
 	// ticker := newTickerWithMockNormalStream()
 	tsoAllocator := newMockTsoAllocator()
 	tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {

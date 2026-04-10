@@ -28,7 +28,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -2691,4 +2693,174 @@ func TestMetaTable_TruncateCollection(t *testing.T) {
 	require.False(t, ok)
 	require.Equal(t, 1, len(coll.ShardInfos))
 	require.Equal(t, uint64(1000), coll.ShardInfos["vchannel1"].LastTruncateTimeTick)
+}
+
+func TestMetaTable_MigrateDynamicFieldNullable(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("migrates non-nullable $meta to nullable with default", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.EXPECT().AlterCollection(
+			mock.Anything, // ctx
+			mock.Anything, // oldColl
+			mock.Anything, // newColl
+			metastore.MODIFY,
+			mock.AnythingOfType("uint64"), // ts
+			true,                          // fieldModify
+		).Return(nil)
+
+		tso := mocktso.NewAllocator(t)
+		tso.On("GenerateTSO", mock.Anything).Return(uint64(100), nil)
+
+		dynField := &model.Field{
+			FieldID:   101,
+			Name:      common.MetaFieldName,
+			IsDynamic: true,
+			Nullable:  false,
+		}
+		coll := &model.Collection{
+			CollectionID:       1,
+			Name:               "test_coll",
+			EnableDynamicField: true,
+			Fields:             []*model.Field{dynField},
+		}
+
+		mt := &MetaTable{
+			catalog:      catalog,
+			tsoAllocator: tso,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				1: coll,
+			},
+		}
+
+		changed, err := mt.MigrateDynamicFieldNullable(context.Background(), coll)
+		assert.NoError(t, err)
+		assert.True(t, changed)
+
+		// Clone-mutate-swap: the original dynField should NOT be mutated.
+		// The cache should contain a new cloned collection.
+		assert.False(t, dynField.Nullable, "original field pointer must not be mutated")
+		assert.Nil(t, dynField.DefaultValue, "original field pointer must not be mutated")
+
+		// The swapped collection in cache should be migrated.
+		newColl := mt.collID2Meta[1]
+		assert.NotSame(t, coll, newColl, "cache should hold a new clone, not the original")
+		var newDynField *model.Field
+		for _, f := range newColl.Fields {
+			if f.IsDynamic {
+				newDynField = f
+				break
+			}
+		}
+		assert.NotNil(t, newDynField)
+		assert.True(t, newDynField.Nullable)
+		assert.Equal(t, []byte("{}"), newDynField.DefaultValue.GetBytesData())
+		assert.Equal(t, uint64(100), newColl.UpdateTimestamp)
+	})
+
+	t.Run("skips already-migrated collection", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		// AlterCollection should NOT be called.
+
+		tso := mocktso.NewAllocator(t)
+
+		coll := &model.Collection{
+			CollectionID:       2,
+			Name:               "migrated_coll",
+			EnableDynamicField: true,
+			Fields: []*model.Field{
+				{
+					FieldID:   101,
+					Name:      common.MetaFieldName,
+					IsDynamic: true,
+					Nullable:  true,
+					DefaultValue: &schemapb.ValueField{
+						Data: &schemapb.ValueField_BytesData{BytesData: []byte("{}")},
+					},
+				},
+			},
+		}
+
+		mt := &MetaTable{
+			catalog:      catalog,
+			tsoAllocator: tso,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				2: coll,
+			},
+		}
+
+		changed, err := mt.MigrateDynamicFieldNullable(context.Background(), coll)
+		assert.NoError(t, err)
+		assert.False(t, changed)
+	})
+
+	t.Run("skips collection without dynamic field", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		tso := mocktso.NewAllocator(t)
+
+		coll := &model.Collection{
+			CollectionID:       3,
+			Name:               "no_dynamic",
+			EnableDynamicField: false,
+		}
+
+		mt := &MetaTable{
+			catalog:      catalog,
+			tsoAllocator: tso,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				3: coll,
+			},
+		}
+
+		changed, err := mt.MigrateDynamicFieldNullable(context.Background(), coll)
+		assert.NoError(t, err)
+		assert.False(t, changed)
+	})
+
+	t.Run("catalog error is propagated", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.EXPECT().AlterCollection(
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			metastore.MODIFY,
+			mock.AnythingOfType("uint64"),
+			true,
+		).Return(errors.New("catalog failure"))
+
+		tso := mocktso.NewAllocator(t)
+		tso.On("GenerateTSO", mock.Anything).Return(uint64(200), nil)
+
+		coll := &model.Collection{
+			CollectionID:       4,
+			Name:               "error_coll",
+			EnableDynamicField: true,
+			Fields: []*model.Field{
+				{
+					FieldID:   101,
+					Name:      common.MetaFieldName,
+					IsDynamic: true,
+					Nullable:  false,
+				},
+			},
+		}
+
+		mt := &MetaTable{
+			catalog:      catalog,
+			tsoAllocator: tso,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				4: coll,
+			},
+		}
+
+		changed, err := mt.MigrateDynamicFieldNullable(context.Background(), coll)
+		assert.Error(t, err)
+		assert.False(t, changed)
+		assert.Contains(t, err.Error(), "catalog failure")
+
+		// Clone-mutate-swap: original coll must NOT be modified on failure.
+		dynField := coll.Fields[0]
+		assert.False(t, dynField.Nullable, "original field must not be mutated on catalog failure")
+		assert.Nil(t, dynField.DefaultValue, "original field must not be mutated on catalog failure")
+	})
 }
