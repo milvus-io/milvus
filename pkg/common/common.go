@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/mol"
 )
 
 // system field id:
@@ -805,4 +806,24 @@ func ConvertWKBToWKT(wkbData []byte) (string, error) {
 		return "", err
 	}
 	return wkt.Marshal(geomT)
+}
+
+// ConvertSMILESToPickle converts SMILES string to RDKit pickle format for storage
+// This function is called during data insertion to convert user-provided SMILES strings
+// into binary pickle format that can be efficiently stored and later reconstructed
+func ConvertSMILESToPickle(molData string) ([]byte, error) {
+	if len(molData) == 0 {
+		return nil, fmt.Errorf("empty SMILES string")
+	}
+	return mol.ConvertSMILESToPickle(molData)
+}
+
+// ConvertPickleToSMILES converts RDKit pickle format back to SMILES string
+// This function is called when retrieving data to convert stored pickle format
+// back to human-readable SMILES strings for display or further processing
+func ConvertPickleToSMILES(pickleData []byte) (string, error) {
+	if len(pickleData) == 0 {
+		return "", fmt.Errorf("empty pickle data")
+	}
+	return mol.ConvertPickleToSMILES(pickleData)
 }

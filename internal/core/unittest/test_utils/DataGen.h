@@ -46,9 +46,7 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "storage/Util.h"
 #include "milvus-storage/common/constants.h"
-#include "milvus_plan_parser.h"
-#include "pb/plan.pb.h"
-#include "query/Plan.h"
+#include "common/mol_c.h"
 
 using boost::algorithm::starts_with;
 
@@ -265,6 +263,16 @@ struct GeneratedData {
                                 reinterpret_cast<std::string*>(ret.data());
                             auto src_data = target_field_data.scalars()
                                                 .geometry_data()
+                                                .data();
+                            std::copy(
+                                src_data.begin(), src_data.end(), ret_data);
+                            break;
+                        }
+                        case DataType::MOL: {
+                            auto ret_data =
+                                reinterpret_cast<std::string*>(ret.data());
+                            auto src_data = target_field_data.scalars()
+                                                .mol_data()
                                                 .data();
                             std::copy(
                                 src_data.begin(), src_data.end(), ret_data);
@@ -531,6 +539,31 @@ GenRandomGeometry() {
         default:
             return generateRandomPoint();
     }
+}
+
+// Generate a random MOL pickle from a predefined set of SMILES strings
+inline std::string
+GenRandomMolPickle() {
+    static const std::vector<std::string> smiles_list = {
+        "CCO",                    // ethanol
+        "c1ccccc1",              // benzene
+        "CC(=O)O",               // acetic acid
+        "CC(=O)Oc1ccccc1C(=O)O", // aspirin
+        "CC(C)CC1=CC=C(C=C1)C(C)C(=O)O", // ibuprofen
+        "C1CCCCC1",              // cyclohexane
+        "CC",                    // ethane
+        "CCCC",                  // butane
+        "c1ccc(O)cc1",          // phenol
+        "CC(=O)NC1=CC=C(O)C=C1", // acetaminophen
+    };
+    int idx = rand() % smiles_list.size();
+    auto result = ConvertSMILESToPickle(smiles_list[idx].c_str());
+    std::string pickle;
+    if (result.error_code == MOL_SUCCESS && result.data != nullptr) {
+        pickle.assign(reinterpret_cast<const char*>(result.data), result.size);
+    }
+    FreeMolDataResult(&result);
+    return pickle;
 }
 
 inline GeneratedData
@@ -1002,6 +1035,17 @@ DataGen(SchemaPtr schema,
                     }
                 }
                 GEOS_finish_r(ctx);
+                insert_cols(data, N, field_meta, random_valid);
+                break;
+            }
+            case DataType::MOL: {
+                vector<std::string> data(N);
+                for (int i = 0; i < N / repeat_count; i++) {
+                    std::string pickle = GenRandomMolPickle();
+                    for (int j = 0; j < repeat_count; j++) {
+                        data[i * repeat_count + j] = pickle;
+                    }
+                }
                 insert_cols(data, N, field_meta, random_valid);
                 break;
             }
@@ -1642,6 +1686,24 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                                             dim);
                 } else {
                     createFieldData(data_raw.data(), DataType::GEOMETRY, dim);
+                }
+                break;
+            }
+            case DataType::MOL: {
+                auto src_data = data->scalars().mol_data().data();
+                std::vector<std::string> data_raw(src_data.size());
+                for (int i = 0; i < src_data.size(); i++) {
+                    auto str = src_data.Get(i);
+                    data_raw[i] = std::move(std::string(str));
+                }
+                if (field_meta.is_nullable()) {
+                    auto raw_valid_data = data->valid_data().data();
+                    createNullableFieldData(data_raw.data(),
+                                            raw_valid_data,
+                                            DataType::MOL,
+                                            dim);
+                } else {
+                    createFieldData(data_raw.data(), DataType::MOL, dim);
                 }
                 break;
             }

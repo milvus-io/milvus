@@ -82,7 +82,7 @@ func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFiel
 			return 0, fmt.Errorf("unrecognized getVariableFieldLengthPolicy %v", policy)
 		}
 		// geometry field max length now consider the same as json field, which is 512 bytes
-	case schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry:
+	case schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_Geometry, schemapb.DataType_Mol:
 		return GetDynamicFieldEstimateLength(), nil
 	default:
 		return 0, fmt.Errorf("field %s is not a variable-length type", fieldSchema.DataType.String())
@@ -239,6 +239,10 @@ func CalcScalarSize(column *schemapb.FieldData) int {
 		for _, str := range column.GetScalars().GetGeometryData().GetData() {
 			res += len(str)
 		}
+	case schemapb.DataType_Mol:
+		for _, data := range column.GetScalars().GetMolData().GetData() {
+			res += len(data)
+		}
 	default:
 		panic("Unknown data type:" + column.Type.String())
 	}
@@ -308,6 +312,11 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int, fieldId
 				return 0, fmt.Errorf("offset out range of field datas")
 			}
 			res += len(fs.GetScalars().GetGeometryData().GetData()[rowOffset])
+		case schemapb.DataType_Mol:
+			if rowOffset >= len(fs.GetScalars().GetMolData().GetData()) {
+				return 0, errors.New("offset out range of field datas")
+			}
+			res += len(fs.GetScalars().GetMolData().GetData()[rowOffset])
 		case schemapb.DataType_BinaryVector,
 			schemapb.DataType_FloatVector,
 			schemapb.DataType_Float16Vector,
@@ -668,6 +677,10 @@ func IsGeometryType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Geometry
 }
 
+func IsMolType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Mol
+}
+
 func IsTimestamptzType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Timestamptz
 }
@@ -800,10 +813,10 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 						Data: make([][]byte, 0, topK),
 					},
 				}
-			case *schemapb.ScalarField_GeometryWktData:
-				scalar.Scalars.Data = &schemapb.ScalarField_GeometryWktData{
-					GeometryWktData: &schemapb.GeometryWktArray{
-						Data: make([]string, 0, topK),
+			case *schemapb.ScalarField_MolData:
+				scalar.Scalars.Data = &schemapb.ScalarField_MolData{
+					MolData: &schemapb.MolArray{
+						Data: make([][]byte, 0, topK),
 					},
 				}
 			case *schemapb.ScalarField_ArrayData:
@@ -1082,6 +1095,27 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64, fieldIdxs ...int
 				} else {
 					dstScalar.GetGeometryWktData().Data = append(dstScalar.GetGeometryWktData().Data, srcScalar.GeometryWktData.Data[idx])
 				}
+			case *schemapb.ScalarField_MolData:
+				if dstScalar.GetMolData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: [][]byte{srcScalar.MolData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetMolData().Data = append(dstScalar.GetMolData().Data, srcScalar.MolData.Data[idx])
+				}
+				appendSize += int64(unsafe.Sizeof(srcScalar.MolData.Data[idx]))
+			case *schemapb.ScalarField_MolSmilesData:
+				if dstScalar.GetMolSmilesData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_MolSmilesData{
+						MolSmilesData: &schemapb.MolSmilesArray{
+							Data: []string{srcScalar.MolSmilesData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetMolSmilesData().Data = append(dstScalar.GetMolSmilesData().Data, srcScalar.MolSmilesData.Data[idx])
+				}
 			}
 		case *schemapb.FieldData_Vectors:
 			dim := fieldType.Vectors.Dim
@@ -1212,7 +1246,6 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 		return
 	}
 
-	// Handle ValidData: use rowIndices if provided, otherwise use dataIndices
 	if len(src.GetValidData()) > 0 {
 		validIndices := dataIndices
 		if len(rowIndices) > 0 {
@@ -1226,7 +1259,6 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 		}
 	}
 
-	// Return early if no data to copy
 	if len(dataIndices) == 0 {
 		return
 	}
@@ -1341,6 +1373,15 @@ func AppendFieldDataByColumn(dst, src *schemapb.FieldData, dataIndices []int64, 
 			}
 			for _, idx := range dataIndices {
 				dstScalar.GetTimestamptzData().Data = append(dstScalar.GetTimestamptzData().Data, srcScalar.TimestamptzData.Data[idx])
+			}
+		case *schemapb.ScalarField_MolData:
+			if dstScalar.GetMolData() == nil {
+				dstScalar.Data = &schemapb.ScalarField_MolData{
+					MolData: &schemapb.MolArray{Data: make([][]byte, 0, len(dataIndices))},
+				}
+			}
+			for _, idx := range dataIndices {
+				dstScalar.GetMolData().Data = append(dstScalar.GetMolData().Data, srcScalar.MolData.Data[idx])
 			}
 		}
 	case *schemapb.FieldData_Vectors:
@@ -1461,6 +1502,8 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 				dstScalar.GetJsonData().Data = dstScalar.GetJsonData().Data[:len(dstScalar.GetJsonData().Data)-1]
 			case *schemapb.ScalarField_GeometryData:
 				dstScalar.GetGeometryData().Data = dstScalar.GetGeometryData().Data[:len(dstScalar.GetGeometryData().Data)-1]
+			case *schemapb.ScalarField_MolData:
+				dstScalar.GetMolData().Data = dstScalar.GetMolData().Data[:len(dstScalar.GetMolData().Data)-1]
 			}
 		case *schemapb.FieldData_Vectors:
 			if dst[i] == nil || dst[i].GetVectors() == nil {
@@ -1613,6 +1656,13 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
 					baseData.Data[baseIdx] = updateData.Data[updateIdx]
 				}
+			case *schemapb.ScalarField_MolData:
+				updateData := updateScalar.GetMolData()
+				baseData := baseScalar.GetMolData()
+				if updateData != nil && baseData != nil &&
+					int(updateIdx) < len(updateData.Data) && int(baseIdx) < len(baseData.Data) {
+					baseData.Data[baseIdx] = updateData.Data[updateIdx]
+				}
 			case *schemapb.ScalarField_GeometryWktData:
 				updateData := updateScalar.GetGeometryWktData()
 				baseData := baseScalar.GetGeometryWktData()
@@ -1720,7 +1770,6 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 		return fmt.Errorf("baseIndices and updateIndices length mismatch: %d vs %d", len(baseIndices), len(updateIndices))
 	}
 
-	// Handle ValidData
 	if len(update.GetValidData()) > 0 && len(base.GetValidData()) > 0 {
 		for i, baseIdx := range baseIndices {
 			updateIdx := updateIndices[i]
@@ -1781,24 +1830,19 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 			baseData := baseScalar.GetJsonData().Data
 			updateData := updateScalar.GetJsonData().Data
 			if base.GetIsDynamic() {
-				// dynamic field is a json with only 1 level nested struct,
-				// so we need to unmarshal and iterate updateData's key value, and update the baseData's key value
 				for i, baseIdx := range baseIndices {
 					updateIdx := updateIndices[i]
 					var baseMap map[string]interface{}
 					var updateMap map[string]interface{}
-					// unmarshal base and update
 					if err := json.Unmarshal(baseData[baseIdx], &baseMap); err != nil {
 						return fmt.Errorf("failed to unmarshal base json: %v", err)
 					}
 					if err := json.Unmarshal(updateData[updateIdx], &updateMap); err != nil {
 						return fmt.Errorf("failed to unmarshal update json: %v", err)
 					}
-					// merge
 					for k, v := range updateMap {
 						baseMap[k] = v
 					}
-					// marshal back
 					newJSON, err := json.Marshal(baseMap)
 					if err != nil {
 						return fmt.Errorf("failed to marshal merged json: %v", err)
@@ -1825,6 +1869,12 @@ func UpdateFieldDataByColumn(base, update *schemapb.FieldData, baseIndices, upda
 		case *schemapb.ScalarField_TimestamptzData:
 			baseData := baseScalar.GetTimestamptzData().Data
 			updateData := updateScalar.GetTimestamptzData().Data
+			for i, baseIdx := range baseIndices {
+				baseData[baseIdx] = updateData[updateIndices[i]]
+			}
+		case *schemapb.ScalarField_MolData:
+			baseData := baseScalar.GetMolData().Data
+			updateData := updateScalar.GetMolData().Data
 			for i, baseIdx := range baseIndices {
 				baseData[baseIdx] = updateData[updateIndices[i]]
 			}
@@ -2006,6 +2056,16 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 					}
 				} else {
 					dstScalar.GetGeometryData().Data = append(dstScalar.GetGeometryData().Data, srcScalar.GeometryData.Data...)
+				}
+			case *schemapb.ScalarField_MolData:
+				if dstScalar.GetMolData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_MolData{
+						MolData: &schemapb.MolArray{
+							Data: srcScalar.MolData.Data,
+						},
+					}
+				} else {
+					dstScalar.GetMolData().Data = append(dstScalar.GetMolData().Data, srcScalar.MolData.Data...)
 				}
 			case *schemapb.ScalarField_BytesData:
 				if dstScalar.GetBytesData() == nil {
@@ -3124,6 +3184,49 @@ func IsMinHashFunctionOutputField(field *schemapb.FieldSchema, collSchema *schem
 		}
 	}
 	return false
+}
+
+func IsMolFingerprintFunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
+	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_BinaryVector) {
+		return false
+	}
+
+	for _, fSchema := range collSchema.Functions {
+		if fSchema.Type == schemapb.FunctionType_MolFingerprint {
+			if len(fSchema.OutputFieldNames) != 0 && field.Name == fSchema.OutputFieldNames[0] {
+				return true
+			}
+			if len(fSchema.OutputFieldIds) != 0 && field.FieldID == fSchema.OutputFieldIds[0] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// GetMolFingerprintFunctionByInputFieldID finds the MolFingerprint function schema
+// and its output field for a given MOL input field ID. Returns nil, nil if not found.
+func (helper *SchemaHelper) GetMolFingerprintFunctionByInputFieldID(inputFieldID int64) (*schemapb.FunctionSchema, *schemapb.FieldSchema) {
+	for _, fSchema := range helper.schema.GetFunctions() {
+		if fSchema.GetType() != schemapb.FunctionType_MolFingerprint {
+			continue
+		}
+		for _, id := range fSchema.GetInputFieldIds() {
+			if id == inputFieldID {
+				if len(fSchema.GetOutputFieldIds()) == 0 {
+					return nil, nil
+				}
+				outID := fSchema.GetOutputFieldIds()[0]
+				for _, field := range helper.schema.GetFields() {
+					if field.GetFieldID() == outID {
+						return fSchema, field
+					}
+				}
+				return nil, nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 // ConcatStructFieldName transforms struct field names to structName[fieldName] format

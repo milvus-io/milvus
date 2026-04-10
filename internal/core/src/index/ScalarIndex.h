@@ -46,6 +46,7 @@ enum class ScalarIndexType {
     JSONSTATS,
     RTREE,
     NGRAM,
+    MOL_PATTERN,
 };
 
 inline std::string
@@ -67,6 +68,8 @@ ToString(ScalarIndexType type) {
             return "RTREE";
         case ScalarIndexType::NGRAM:
             return "NGRAM";
+        case ScalarIndexType::MOL_PATTERN:
+            return "PATTERN";
         default:
             return "UNKNOWN";
     }

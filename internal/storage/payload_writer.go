@@ -259,6 +259,25 @@ func (w *NativePayloadWriter) AddDataToPayloadForUT(data interface{}, validData 
 			isValid = validData[0]
 		}
 		return w.AddOneGeometryToPayload(val, isValid)
+	case schemapb.DataType_Mol:
+		val, ok := data.([]byte)
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("incorrect data type")
+		}
+		isValid := true
+		if len(validData) > 1 {
+			return merr.WrapErrParameterInvalidMsg("wrong input length when add data to payload")
+		}
+		if len(validData) == 0 && w.nullable {
+			return merr.WrapErrParameterInvalidMsg("need pass valid_data when nullable==true")
+		}
+		if len(validData) == 1 {
+			if !w.nullable {
+				return merr.WrapErrParameterInvalidMsg("no need pass valid_data when nullable==false")
+			}
+			isValid = validData[0]
+		}
+		return w.AddOneMolToPayload(val, isValid)
 	case schemapb.DataType_BinaryVector:
 		val, ok := data.([]byte)
 		if !ok {
@@ -651,6 +670,29 @@ func (w *NativePayloadWriter) AddOneGeometryToPayload(data []byte, isValid bool)
 	builder, ok := w.builder.(*array.BinaryBuilder)
 	if !ok {
 		return errors.New("failed to cast geometryBuilder")
+	}
+
+	if !isValid {
+		builder.AppendNull()
+	} else {
+		builder.Append(data)
+	}
+
+	return nil
+}
+
+func (w *NativePayloadWriter) AddOneMolToPayload(data []byte, isValid bool) error {
+	if w.finished {
+		return errors.New("can't append data to finished mol payload")
+	}
+
+	if !w.nullable && !isValid {
+		return merr.WrapErrParameterInvalidMsg("not support null when nullable is false")
+	}
+
+	builder, ok := w.builder.(*array.BinaryBuilder)
+	if !ok {
+		return errors.New("failed to cast molBuilder")
 	}
 
 	if !isValid {
@@ -1146,6 +1188,8 @@ func MilvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 	case schemapb.DataType_JSON:
 		return &arrow.BinaryType{}
 	case schemapb.DataType_Geometry:
+		return &arrow.BinaryType{}
+	case schemapb.DataType_Mol:
 		return &arrow.BinaryType{}
 	case schemapb.DataType_FloatVector:
 		return &arrow.FixedSizeBinaryType{

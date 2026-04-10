@@ -43,6 +43,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
+#include "common/MolCache.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/Types.h"
@@ -406,7 +407,8 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
                     break;
                 case DataType::VARCHAR:
                 case DataType::TEXT:
-                case DataType::GEOMETRY: {
+                case DataType::GEOMETRY:
+                case DataType::MOL: {
                     auto avg_size =
                         SegmentInternalInterface::get_field_avg_size(field_id);
                     field_bytes = num_rows * avg_size;
@@ -627,6 +629,15 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         if (field_meta.get_data_type() == DataType::GEOMETRY &&
             segcore_config_.get_enable_geometry_cache()) {
             BuildGeometryCacheForInsert(
+                field_id,
+                &insert_record_proto->fields_data(data_offset),
+                num_rows);
+        }
+
+        // Initialize lazy mol cache for MOL fields.
+        if (field_meta.get_data_type() == DataType::MOL &&
+            segcore_config_.get_enable_mol_cache()) {
+            BuildMolCacheForInsert(
                 field_id,
                 &insert_record_proto->fields_data(data_offset),
                 num_rows);
@@ -959,6 +970,12 @@ SegmentGrowingImpl::load_column_group_data_internal(
                     DataType::GEOMETRY &&
                 segcore_config_.get_enable_geometry_cache()) {
                 BuildGeometryCacheForLoad(field_id, field_data);
+            }
+            // Initialize lazy mol cache for MOL fields.
+            if (schema_->operator[](field_id).get_data_type() ==
+                    DataType::MOL &&
+                segcore_config_.get_enable_mol_cache()) {
+                BuildMolCacheForLoad(field_id, field_data);
             }
         }
     }
@@ -1402,6 +1419,16 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                                      ->mutable_data());
             break;
         }
+        case DataType::MOL: {
+            bulk_subscript_ptr_impl<std::string>(op_ctx,
+                                                 vec_ptr,
+                                                 seg_offsets,
+                                                 count,
+                                                 result->mutable_scalars()
+                                                     ->mutable_mol_data()
+                                                     ->mutable_data());
+            break;
+        }
         case DataType::ARRAY: {
             // element
             bulk_subscript_array_impl(op_ctx,
@@ -1724,6 +1751,11 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::GEOMETRY: {
+            bulk_subscript_ptr_impl<std::string>(
+                vec_ptr, seg_offsets, count, static_cast<std::string*>(data));
+            break;
+        }
+        case DataType::MOL: {
             bulk_subscript_ptr_impl<std::string>(
                 vec_ptr, seg_offsets, count, static_cast<std::string*>(data));
             break;
@@ -2063,6 +2095,12 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
                 segcore_config_.get_enable_geometry_cache()) {
                 BuildGeometryCacheForLoad(field_id, field_data);
             }
+            // Initialize lazy mol cache for MOL fields.
+            if (schema_->operator[](field_id).get_data_type() ==
+                    DataType::MOL &&
+                segcore_config_.get_enable_mol_cache()) {
+                BuildMolCacheForLoad(field_id, field_data);
+            }
         }
     }
 
@@ -2270,6 +2308,69 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
                   get_segment_id(),
                   field_id.get(),
                   e.what());
+    }
+}
+
+void
+SegmentGrowingImpl::BuildMolCacheForInsert(FieldId field_id,
+                                           const DataArray* data_array,
+                                           int64_t num_rows) {
+    try {
+        auto& mol_cache =
+            milvus::exec::SimpleMolCacheManager::Instance()
+                .GetOrCreateCache(get_segment_id(), field_id);
+
+        const auto& valid_data = data_array->valid_data();
+
+        for (int64_t i = 0; i < num_rows; ++i) {
+            auto valid =
+                valid_data.empty() || (i < valid_data.size() && valid_data[i]);
+            mol_cache.AppendLazySlot(valid);
+        }
+
+        LOG_INFO(
+            "Appended {} lazy mol cache slots for growing segment {} field {}",
+            num_rows,
+            get_segment_id(),
+            field_id.get());
+
+    } catch (const std::exception& e) {
+        LOG_WARN(
+            "Failed to initialize lazy mol cache for growing segment {} field {} "
+            "insert: {}",
+            get_segment_id(),
+            field_id.get(),
+            e.what());
+    }
+}
+
+void
+SegmentGrowingImpl::BuildMolCacheForLoad(
+    FieldId field_id, const std::vector<FieldDataPtr>& field_data) {
+    try {
+        auto& mol_cache =
+            milvus::exec::SimpleMolCacheManager::Instance()
+                .GetOrCreateCache(get_segment_id(), field_id);
+
+        for (const auto& data : field_data) {
+            auto num_rows = data->get_num_rows();
+            for (int64_t i = 0; i < num_rows; ++i) {
+                mol_cache.AppendLazySlot(data->is_valid(i));
+            }
+        }
+
+        LOG_INFO(
+            "Initialized lazy mol cache for growing segment {} field {}",
+            get_segment_id(),
+            field_id.get());
+
+    } catch (const std::exception& e) {
+        LOG_WARN(
+            "Failed to initialize lazy mol cache for growing segment {} field {} "
+            "load: {}",
+            get_segment_id(),
+            field_id.get(),
+            e.what());
     }
 }
 

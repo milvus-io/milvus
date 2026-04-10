@@ -47,6 +47,7 @@ class MilvusConan(ConanFile):
         "geos/3.12.0#0b177c90c25a8ca210578fb9e2899c37",
         "icu/74.2#cd1937b9561b8950a2ae6311284c5813",
         "libavrocpp/1.12.1.1@milvus/dev#a77043b1b435c3abef7b45710d05b300",
+        "rdkit/2025.09.1@milvus/dev",
     )
 
     generators = ("cmake", "cmake_find_package")

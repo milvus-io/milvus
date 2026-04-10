@@ -26,6 +26,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
+func TestIsScalarIndexType(t *testing.T) {
+	t.Run("mol pattern index", func(t *testing.T) {
+		assert.True(t, IsScalarIndexType(IndexMolPattern))
+	})
+}
+
 func TestIsScalarMmapIndex(t *testing.T) {
 	t.Run("inverted index", func(t *testing.T) {
 		assert.True(t, IsScalarMmapIndex(IndexINVERTED))

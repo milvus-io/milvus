@@ -821,6 +821,15 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				Nullable:  field.GetNullable(),
 			}
 
+		case schemapb.DataType_Mol:
+			srcData := srcField.GetScalars().GetMolData().GetData()
+			validData := srcField.GetValidData()
+			fieldData = &MolFieldData{
+				Data:      srcData,
+				ValidData: validData,
+				Nullable:  field.GetNullable(),
+			}
+
 		default:
 			return nil, merr.WrapErrServiceInternal("data type not handled", field.GetDataType().String())
 		}
@@ -1034,6 +1043,20 @@ func mergeJSONField(data *InsertData, fid FieldID, field *JSONFieldData) {
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
+func mergeMolField(data *InsertData, fid FieldID, field *MolFieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &MolFieldData{
+			Data:      nil,
+			ValidData: nil,
+			Nullable:  field.Nullable,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*MolFieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
+}
+
 func mergeBinaryVectorField(data *InsertData, fid FieldID, field *BinaryVectorFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &BinaryVectorFieldData{
@@ -1162,6 +1185,8 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 		mergeArrayField(data, fid, field)
 	case *JSONFieldData:
 		mergeJSONField(data, fid, field)
+	case *MolFieldData:
+		mergeMolField(data, fid, field)
 	case *BinaryVectorFieldData:
 		mergeBinaryVectorField(data, fid, field)
 	case *FloatVectorFieldData:
@@ -1466,6 +1491,21 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_GeometryData{
 							GeometryData: &schemapb.GeometryArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+				ValidData: rawData.ValidData,
+			}
+		case *MolFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Mol,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_MolData{
+							MolData: &schemapb.MolArray{
 								Data: rawData.Data,
 							},
 						},
