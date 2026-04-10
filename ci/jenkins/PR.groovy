@@ -10,7 +10,7 @@ pipeline {
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         preserveStashes(buildCount: 5)
         disableConcurrentBuilds(abortPrevious: true)
-        timeout(time: 3, unit: 'HOURS')
+        timeout(time: 4, unit: 'HOURS')
         throttleJobProperty(
             categories: ['cpu-e2e'],
             throttleEnabled: true,

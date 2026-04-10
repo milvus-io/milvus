@@ -15,7 +15,7 @@ ARG TARGETARCH
 
 RUN dnf install -y wget g++ gcc gdb libatomic libstdc++-static ninja-build git make zip unzip tar which \
     autoconf automake python3 python3-pip perl-FindBin texinfo \
-    pkg-config libuuid-devel libaio perl-IPC-Cmd libasan openblas-devel tzdata && \
+    pkg-config libuuid-devel libaio perl-IPC-Cmd perl-Digest-SHA libasan openblas-devel tzdata && \
     rm -rf /var/cache/yum/*
 
 ENV GOPATH /go
@@ -27,7 +27,7 @@ RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.25.8.linux-$TARGE
     go clean --modcache && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
 
-RUN pip3 install conan==1.64.1
+RUN pip3 install conan==1.66.0
 
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local

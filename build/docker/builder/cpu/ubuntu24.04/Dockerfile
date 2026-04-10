@@ -9,13 +9,13 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM ubuntu:jammy-20240530
+FROM ubuntu:noble-20240530
 
 ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
     g++ gcc gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
-    clang-format-12 clang-tidy-12 lcov libtool m4 autoconf automake python3 python3-pip \
+    clang-format-18 clang-tidy-18 lcov libtool m4 autoconf automake python3 python3-pip pipx \
     pkg-config uuid-dev libaio-dev libopenblas-dev && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
@@ -23,13 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-# upgrade gcc to 12
-RUN apt-get update && apt-get install -y gcc-12 g++-12 && cd /usr/bin \
-    && unlink gcc && ln -s gcc-12 gcc \
-    && unlink g++ && ln -s g++-12 g++ \
-    && unlink gcov && ln -s gcov-12 gcov
+# Ubuntu 24.04 ships GCC 13 by default, no upgrade needed
 
-RUN pip3 install conan==1.66.0
+RUN pip3 install --break-system-packages conan==1.66.0
 
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.31/cmake-3.31.8-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
@@ -39,7 +35,7 @@ ENV GOPATH /go
 ENV GOROOT /usr/local/go
 ENV GO111MODULE on
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.25.8.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.12.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
     mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
     go clean --modcache && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)

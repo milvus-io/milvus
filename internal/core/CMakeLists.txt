@@ -109,6 +109,11 @@ set( MILVUS_THIRDPARTY_SRC  ${PROJECT_SOURCE_DIR}/thirdparty )
 # self-installed dynamic libraries will be correctly linked by excutable
 set( CMAKE_INSTALL_RPATH "/usr/lib" "${CMAKE_INSTALL_PREFIX}/lib" "${CMAKE_INSTALL_PREFIX}/lib64" )
 set( CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE )
+# FetchContent-built shared libs (libbson, libbsoncxx, etc.) are placed in
+# ${CMAKE_BINARY_DIR}/lib. The linker needs -rpath-link to resolve transitive
+# shared library dependencies (e.g. libbsoncxx.so -> libbson-1.0.so) when
+# linking test binaries.
+set( CMAKE_BUILD_RPATH "${CMAKE_BINARY_DIR}/lib" )
 
 # **************************** Dependencies ****************************
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR}/conan )
@@ -176,6 +181,17 @@ if ( APPLE )
     # Disable fixup chains to avoid __DATA_CONST segment issues with third-party libraries
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-no_fixup_chains")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-no_fixup_chains")
+
+    # Folly's Exception.cpp references __cxa_increment/decrement_exception_refcount
+    # from libc++abi, which lives in <llvm-root>/lib/c++/ and is not on the default
+    # linker search path. Derive the path from CMAKE_CXX_COMPILER.
+    get_filename_component(_CXX_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component(_LLVM_ROOT "${_CXX_BIN_DIR}" DIRECTORY)
+    set(_LLVM_CXXABI_DIR "${_LLVM_ROOT}/lib/c++")
+    if(EXISTS "${_LLVM_CXXABI_DIR}/libc++abi.dylib")
+        link_directories("${_LLVM_CXXABI_DIR}")
+        link_libraries(c++abi)
+    endif()
 endif ()
 
 # **************************** Coding style check tools ****************************

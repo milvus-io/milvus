@@ -24,7 +24,6 @@
 
 using namespace milvus::segcore;
 using namespace milvus;
-namespace pb = milvus::proto;
 
 TEST(Growing, DeleteCount) {
     auto schema = std::make_shared<Schema>();

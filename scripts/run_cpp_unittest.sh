@@ -35,6 +35,12 @@ if [ -d "${CORE_INSTALL_PREFIX}/lib" ]; then
     export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${CORE_INSTALL_PREFIX}/lib
 fi
 
+# Suppress known LeakSanitizer false positives from uninstrumented shared libraries
+LSAN_SUPPRESSIONS="${MILVUS_CORE_DIR}/lsan_suppressions.txt"
+if [ -f "${LSAN_SUPPRESSIONS}" ]; then
+    export LSAN_OPTIONS="suppressions=${LSAN_SUPPRESSIONS}"
+fi
+
 # run unittest
 arg="$1"
 filter_value="${arg#*=}"

@@ -21,8 +21,8 @@
 using namespace milvus;
 
 TEST(VectorArray, TestSchema) {
-    namespace pb = milvus::proto;
-    pb::schema::CollectionSchema proto;
+    namespace milvus_pb = milvus::proto;
+    milvus_pb::schema::CollectionSchema proto;
     proto.set_name("col");
     proto.set_description("asdfhsalkgfhsadg");
     auto dim = 16;
@@ -40,7 +40,7 @@ TEST(VectorArray, TestSchema) {
         field->set_fieldid(100);
         field->set_is_primary_key(true);
         field->set_description("asdgfsagf");
-        field->set_data_type(pb::schema::DataType::Int64);
+        field->set_data_type(milvus_pb::schema::DataType::Int64);
     }
 
     {
@@ -52,14 +52,14 @@ TEST(VectorArray, TestSchema) {
         field->set_name("struct_key");
         field->set_nullable(false);
         field->set_fieldid(102);
-        field->set_data_type(pb::schema::DataType::Array);
-        field->set_element_type(pb::schema::DataType::Int64);
+        field->set_data_type(milvus_pb::schema::DataType::Array);
+        field->set_element_type(milvus_pb::schema::DataType::Int64);
 
         auto field2 = struct_field->add_fields();
         field2->set_name("struct_float_vec");
         field2->set_fieldid(103);
-        field2->set_data_type(pb::schema::DataType::ArrayOfVector);
-        field2->set_element_type(pb::schema::DataType::FloatVector);
+        field2->set_data_type(milvus_pb::schema::DataType::ArrayOfVector);
+        field2->set_element_type(milvus_pb::schema::DataType::FloatVector);
         auto param = field2->add_type_params();
         param->set_key("dim");
         param->set_value("16");

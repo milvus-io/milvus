@@ -19,8 +19,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     sed -i 's/http:/https:/g' /etc/apt/sources.list && \
     apt-get update && \
-    apt-get upgrade -y gpgv && \
-    apt-get install -y --no-install-recommends curl libaio-dev libgomp1 libopenblas-dev && \
+    apt-get install -y --no-install-recommends gpgv curl libaio-dev libgomp1 libopenblas-dev && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
         echo "Etc/UTC" > /etc/timezone && \
@@ -42,11 +41,16 @@ ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:/milvus/lib/libjemalloc.so
 ENV MALLOC_CONF=background_thread:true
-ENV OPENSSL_MODULES=/milvus/lib/ossl-modules
 
-# Generate fipsmodule.cnf for FIPS module integrity self-test.
-# FIPS activation is handled programmatically at startup — no OPENSSL_CONF needed.
-RUN openssl fipsinstall -out /milvus/configs/ssl/fipsmodule.cnf -module /milvus/lib/ossl-modules/fips.so
+# Change user to milvus
+# protobuf 5.x RepeatedField adds container annotations that trigger ASAN
+# container-overflow false positives during static initialization, disable it.
+ENV ASAN_OPTIONS=detect_leaks=0:detect_container_overflow=0
+RUN groupadd -r milvus && useradd -r -g milvus milvus && \
+    mkdir -p /var/lib/milvus && \
+    chown -R milvus:milvus /milvus /var/lib/milvus
+ENV ASAN_OPTIONS=detect_leaks=1:detect_container_overflow=0
+USER milvus:milvus
 
 ENTRYPOINT ["/tini", "--"]
 

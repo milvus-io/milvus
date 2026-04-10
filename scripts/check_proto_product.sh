@@ -29,7 +29,9 @@ if [[ $(uname -s) == "Darwin" ]]; then
   export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
 fi
 
-check_result=$(git status | grep -E ".*pb.go|.*pb.cc|.*pb.h")
+# Use -I to ignore hunks where all changed lines are protoc version comments.
+# This avoids false failures when CI protoc version differs from the committer's.
+check_result=$(git diff -I '//.*protoc' --name-only -- '*.pb.go' '*.pb.cc' '*.pb.h')
 echo "check_result: $check_result"
 if test -z "$check_result"; then
   exit 0

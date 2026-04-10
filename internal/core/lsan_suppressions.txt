@@ -1,0 +1,12 @@
+# LeakSanitizer suppressions for Milvus C++ unit tests
+#
+# These suppress known false positives caused by C++ runtime exception
+# object caching in uninstrumented shared libraries (protobuf, abseil,
+# grpc, etc.). The exception objects are properly caught and handled
+# during execution, but their thread-local caches appear as leaks
+# at program exit because LeakSanitizer cannot track allocations
+# across shared library boundaries without frame pointers.
+#
+# See: https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer#suppressions
+
+leak:__cxa_allocate_exception

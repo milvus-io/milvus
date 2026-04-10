@@ -29,7 +29,7 @@ runs:
     uses: actions/cache/save@v4
     with:
       path: /var/tmp/ccache
-      key: macos15-ccache-${{ env.corehash }}
+      key: macos15-arm-ccache-${{ env.corehash }}
   - name: Generate Go Mod Hash
     id: go-mod-hash
     run: |
@@ -43,7 +43,7 @@ runs:
     uses: actions/cache/save@v4
     with:
       path: ~/go/pkg/mod
-      key: macos15-go-mod-${{ steps.go-mod-hash.outputs.hash }}
+      key: macos15-arm-go-mod-${{ steps.go-mod-hash.outputs.hash }}
   - name: Generate Conan Hash
     id: conan-hash
     run: |
@@ -57,5 +57,5 @@ runs:
     uses: actions/cache/save@v4
     with:
       path: ~/.conan
-      key: macos15-conan-${{ steps.conan-hash.outputs.hash }}
+      key: macos15-arm-conan-${{ steps.conan-hash.outputs.hash }}
 

@@ -198,7 +198,8 @@ PhyRescoresNode::GetOutput() {
             break;
         default:
             ThrowInfo(ErrorCode::UnexpectedError,
-                      fmt::format("unknown boost boost mode: {}", boost_mode));
+                      fmt::format("unknown boost boost mode: {}",
+                                  static_cast<int>(boost_mode)));
     }
 
     knowhere::MetricType metric_type = query_context_->get_metric_type();

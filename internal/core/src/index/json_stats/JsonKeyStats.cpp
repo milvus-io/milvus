@@ -1072,7 +1072,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     load_priority_ = config[milvus::LOAD_PRIORITY];
     LOG_INFO("load json stats for segment {} with load priority: {}",
              segment_id_,
-             load_priority_);
+             static_cast<int>(load_priority_));
 
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");

@@ -119,10 +119,11 @@ target_link_libraries(all_tests
         knowhere
         milvus-storage
         milvus-common
-        milvus-planparser-cpp
         )
 
-# Add RPATH for plan parser library to find libmilvus-planparser.so at runtime
+# Link plan parser library using full path and set RPATH
+target_link_options(all_tests PRIVATE "-L${PLANPARSER_LIB_DIR}")
+target_link_libraries(all_tests milvus-planparser-cpp)
 set_target_properties(all_tests PROPERTIES
         BUILD_RPATH "${PLANPARSER_LIB_DIR}"
         INSTALL_RPATH "${PLANPARSER_LIB_DIR}"
@@ -157,4 +158,10 @@ target_link_libraries(bitset_test
         gtest
         ${CONAN_LIBS}
 )
+if (LINUX)
+    # folly shared library requires libaio; use --no-as-needed to ensure
+    # the linker pulls it in even when bitset_test doesn't reference aio directly
+    target_link_options(bitset_test PRIVATE "LINKER:--no-as-needed")
+    target_link_libraries(bitset_test aio)
+endif()
 install(TARGETS bitset_test DESTINATION unittest)

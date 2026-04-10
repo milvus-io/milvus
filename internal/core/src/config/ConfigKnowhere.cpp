@@ -16,6 +16,8 @@
 
 #include <mutex>
 
+#include <gflags/gflags.h>
+
 #include "ConfigKnowhere.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"

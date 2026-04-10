@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 as builder
+FROM nvidia/cuda:12.9.1-devel-ubuntu22.04 as builder
 
 ARG TARGETARCH
 
@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
 # Install go
 RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.25.8.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
 # Install conan
-RUN pip3 install conan==1.64.1
+RUN pip3 install conan==1.66.0
 # Install rust
 RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --default-toolchain=1.89 -y

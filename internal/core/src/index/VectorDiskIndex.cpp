@@ -92,8 +92,10 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
     {
         auto read_file_span =
             milvus::tracer::StartSpan("SegCoreReadDiskIndexFile", &ctx);
+        opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
+            read_file_nostd_span(read_file_span);
         auto read_scope =
-            milvus::tracer::GetTracer()->WithActiveSpan(read_file_span);
+            opentelemetry::trace::Tracer::WithActiveSpan(read_file_nostd_span);
         auto index_files =
             GetValueFromConfig<std::vector<std::string>>(config, "index_files");
         AssertInfo(index_files.has_value(),
@@ -112,8 +114,10 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
     // start engine load index span
     auto span_load_engine =
         milvus::tracer::StartSpan("SegCoreEngineLoadDiskIndex", &ctx);
+    opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>
+        nostd_span_load_engine(span_load_engine);
     auto engine_scope =
-        milvus::tracer::GetTracer()->WithActiveSpan(span_load_engine);
+        opentelemetry::trace::Tracer::WithActiveSpan(nostd_span_load_engine);
     auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::UnexpectedError,

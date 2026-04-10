@@ -31,6 +31,12 @@ source ${ROOT_DIR}/scripts/setenv.sh
 MILVUS_CORE_DIR="${ROOT_DIR}/internal/core"
 MILVUS_CORE_UNITTEST_DIR="${MILVUS_CORE_DIR}/output/unittest"
 
+# Suppress known LeakSanitizer false positives from uninstrumented shared libraries
+LSAN_SUPPRESSIONS="${MILVUS_CORE_DIR}/lsan_suppressions.txt"
+if [ -f "${LSAN_SUPPRESSIONS}" ]; then
+    export LSAN_OPTIONS="suppressions=${LSAN_SUPPRESSIONS}"
+fi
+
 echo "ROOT_DIR = ${ROOT_DIR}"
 echo "MILVUS_CORE_DIR = ${MILVUS_CORE_DIR}"
 echo "MILVUS_CORE_UNITTEST_DIR = ${MILVUS_CORE_UNITTEST_DIR}"
@@ -67,6 +73,10 @@ for test in $(ls ${MILVUS_CORE_UNITTEST_DIR}); do
     # run unittest
     if [ -n "$MILVUS_ENABLE_ASAN_LIB" ]; then
         echo "ASAN is enabled with env MILVUS_ENABLE_ASAN_LIB, set {$MILVUS_ENABLE_ASAN_LIB} at the front of LD_PRELOAD"
+        # protobuf 5.x RepeatedField triggers ASAN container-overflow false positives during static init
+        # LSAN suppression: __cxa_allocate_exception false positives from uninstrumented shared libs
+        ASAN_OPTIONS="${ASAN_OPTIONS:+${ASAN_OPTIONS}:}detect_container_overflow=0" \
+        LSAN_OPTIONS="${LSAN_OPTIONS:+${LSAN_OPTIONS}:}suppressions=${MILVUS_CORE_DIR}/lsan_suppressions.txt" \
         LD_PRELOAD="$MILVUS_ENABLE_ASAN_LIB:$LD_PRELOAD" ${MILVUS_CORE_UNITTEST_DIR}/${test}
     else
         ${MILVUS_CORE_UNITTEST_DIR}/${test}

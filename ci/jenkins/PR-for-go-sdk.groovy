@@ -11,7 +11,7 @@ pipeline {
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         preserveStashes(buildCount: 5)
         disableConcurrentBuilds(abortPrevious: true)
-        timeout(time: 2, unit: 'HOURS')
+        timeout(time: 4, unit: 'HOURS')
         throttleJobProperty(
             categories: ['go-sdk'],
             throttleEnabled: true,
@@ -57,7 +57,7 @@ pipeline {
                                               gitBaseRef: gitBaseRef,
                                               pullRequestNumber: "$env.CHANGE_ID",
                                               suppress_suffix_of_image_tag: true,
-                                              make_cmd: "make clean && make jobs=8 install mode=RelWithDebInfo use_disk_index=ON",
+                                              make_cmd: "make clean && make jobs=8 install use_disk_index=ON",
                                               images: '["milvus","gotestsum","helm"]',
                                               tekton_log_timeout: '30m',
                                               tekton_pipeline_timeout: '3h'
@@ -106,7 +106,9 @@ pipeline {
                                               milvus_sdk_go_image: milvus_sdk_go_image,
                                               helm_image: helm_image,
                                               milvus_deployment_option: milvus_deployment_option,
-                                              verbose: 'false'
+                                              verbose: 'false',
+                                              tekton_log_timeout: '30m',
+                                              tekton_pipeline_timeout: '3h'
                                 }
                             }
                         }

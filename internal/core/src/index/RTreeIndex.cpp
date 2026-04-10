@@ -9,14 +9,40 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <boost/filesystem.hpp>
-#include "common/Slice.h"  // for INDEX_FILE_SLICE_META and Disassemble
+#include <string.h>
+#include <algorithm>
+#include <cstdint>
+#include <exception>
+#include <list>
+#include <map>
+#include <mutex>
+#include <shared_mutex>
+#include <utility>
+
+#include "boost/filesystem/directory.hpp"
+#include "boost/filesystem/operations.hpp"
+#include "boost/filesystem/path.hpp"
+#include "boost/iterator/iterator_facade.hpp"
 #include "common/EasyAssert.h"
-#include "log/Log.h"
-#include "storage/LocalChunkManagerSingleton.h"
-#include "pb/schema.pb.h"
-#include "index/Utils.h"
+#include "common/FieldDataInterface.h"
+#include "common/Geometry.h"
+#include "common/Slice.h"  // for INDEX_FILE_SLICE_META and Disassemble
+#include "common/Tracer.h"
+#include "folly/SharedMutex.h"
+#include "geos_c.h"
+#include "glog/logging.h"
 #include "index/RTreeIndex.h"
+#include "index/Utils.h"
+#include "knowhere/dataset.h"
+#include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "pb/common.pb.h"
+#include "pb/schema.pb.h"
+#include "storage/DataCodec.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
+#include "storage/ThreadPools.h"
+#include "storage/Types.h"
 
 namespace milvus::index {
 
@@ -115,7 +141,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         };
 
         auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
-            folly::SharedMutexWritePriority::WriteHolder lock(mutex_);
+            std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
             null_offset_.resize((size_t)size / sizeof(size_t));
             memcpy(null_offset_.data(), data, (size_t)size);
         };
@@ -271,7 +297,7 @@ RTreeIndex<T>::BuildWithFieldData(
                 total_rows += n;
             }
             if (!local_nulls.empty()) {
-                folly::SharedMutexWritePriority::WriteHolder lock(mutex_);
+                std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
                 null_offset_.reserve(null_offset_.size() + local_nulls.size());
                 null_offset_.insert(
                     null_offset_.end(), local_nulls.begin(), local_nulls.end());
@@ -349,7 +375,7 @@ RTreeIndex<T>::Upload(const Config& config) {
 template <typename T>
 BinarySet
 RTreeIndex<T>::Serialize(const Config& config) {
-    folly::SharedMutexWritePriority::ReadHolder lock(mutex_);
+    std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
     auto bytes = null_offset_.size() * sizeof(size_t);
     BinarySet res_set;
     if (bytes > 0) {
@@ -388,7 +414,7 @@ const TargetBitmap
 RTreeIndex<T>::IsNull() {
     int64_t count = Count();
     TargetBitmap bitset(count);
-    folly::SharedMutexWritePriority::ReadHolder lock(mutex_);
+    std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
     auto end = std::lower_bound(
         null_offset_.begin(), null_offset_.end(), static_cast<size_t>(count));
     for (auto it = null_offset_.begin(); it != end; ++it) {
@@ -402,7 +428,7 @@ TargetBitmap
 RTreeIndex<T>::IsNotNull() {
     int64_t count = Count();
     TargetBitmap bitset(count, true);
-    folly::SharedMutexWritePriority::ReadHolder lock(mutex_);
+    std::shared_lock<folly::SharedMutexWritePriority> lock(mutex_);
     auto end = std::lower_bound(
         null_offset_.begin(), null_offset_.end(), static_cast<size_t>(count));
     for (auto it = null_offset_.begin(); it != end; ++it) {
@@ -440,7 +466,7 @@ RTreeIndex<T>::NotIn(size_t n, const T* values) {
 
 template <typename T>
 const TargetBitmap
-RTreeIndex<T>::Range(T value, OpType op) {
+RTreeIndex<T>::Range(const T& value, OpType op) {
     ThrowInfo(ErrorCode::NotImplemented,
               "Range(value, op) not supported for RTreeIndex");
     return {};
@@ -448,9 +474,9 @@ RTreeIndex<T>::Range(T value, OpType op) {
 
 template <typename T>
 const TargetBitmap
-RTreeIndex<T>::Range(T lower_bound_value,
+RTreeIndex<T>::Range(const T& lower_bound_value,
                      bool lb_inclusive,
-                     T upper_bound_value,
+                     const T& upper_bound_value,
                      bool ub_inclusive) {
     ThrowInfo(ErrorCode::NotImplemented,
               "Range(lower, upper) not supported for RTreeIndex");
@@ -579,7 +605,7 @@ RTreeIndex<T>::AddGeometry(const std::string& wkb_data, int64_t row_offset) {
         LOG_DEBUG("Added geometry at row offset {}", row_offset);
     } else {
         // Handle null geometry
-        folly::SharedMutexWritePriority::WriteHolder lock(mutex_);
+        std::unique_lock<folly::SharedMutexWritePriority> lock(mutex_);
         null_offset_.push_back(static_cast<size_t>(row_offset));
 
         // Update total row count

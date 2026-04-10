@@ -20,6 +20,13 @@
 
 #include "folly/init/Init.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "pb/cgo_msg.pb.h"
+#include "pb/clustering.pb.h"
+#include "pb/common.pb.h"
+#include "pb/index_cgo_msg.pb.h"
+#include "pb/plan.pb.h"
+#include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -34,6 +41,20 @@ int
 main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     folly::Init follyInit(&argc, &argv, false);
+
+    // Force eager initialization of all protobuf descriptors.
+    // Protobuf 5.x uses lazy descriptor initialization via absl::call_once.
+    // Under ASAN, this lazy init can intermittently fail with
+    // "Check failed: file != nullptr" in AssignDescriptorsImpl.
+    // Initializing descriptors here (single-threaded, before any tests)
+    // eliminates the flaky failure.
+    ::milvus::proto::common::SegmentStats::descriptor();
+    ::milvus::proto::schema::CollectionSchema::descriptor();
+    ::milvus::proto::plan::PlanNode::descriptor();
+    ::milvus::proto::segcore::RetrieveResults::descriptor();
+    ::milvus::proto::indexcgo::TypeParams::descriptor();
+    ::milvus::proto::cgo::SerializedIndexFileInfo::descriptor();
+    ::milvus::proto::clustering::StorageConfig::descriptor();
 
     // Determine the base directory for test output.
     // Priority: MILVUS_TEST_ROOT_DIR env var > compile-time MILVUS_CPPUT_OUTPUT_DIR

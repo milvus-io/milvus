@@ -13,7 +13,7 @@
 
 milvus_add_pkg_config("milvus-common")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( MILVUS-COMMON-VERSION 9dc0923 )
+set( MILVUS-COMMON-VERSION e16257c98c8cbae7ca2d4b993838cdd95388fa62 )
 set( GIT_REPOSITORY "https://github.com/zilliztech/milvus-common.git")
 
 message(STATUS "milvus-common repo: ${GIT_REPOSITORY}")
@@ -32,7 +32,6 @@ FetchContent_Declare(
         GIT_TAG         ${MILVUS-COMMON-VERSION}
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/milvus-common-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/milvus-common-build
-        SOURCE_SUBDIR   cpp
         DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )
 
 FetchContent_GetProperties( milvus-common )

@@ -11,45 +11,47 @@ class MilvusConan(ConanFile):
         "nlohmann_json/3.11.3#ffb9e9236619f1c883e36662f944345d",
         "zstd/1.5.5#34e9debe03bf0964834a09dfbc31a5dd",
         "lz4/1.9.4#c5afb86edd69ac0df30e3a9e192e43db",
-        "snappy/1.1.9#0519333fef284acd04806243de7d3070",
+        "snappy/1.2.1#dfb7f7e837525210762d74e96eb4a3fc",
         "arrow/17.0.0@milvus/dev-2.6#7af258a853e20887f9969f713110aac8",
-        "openssl/3.1.2#02594c4c0a6e2b4feb3cd15119993597",
-        "aws-sdk-cpp/1.11.352@milvus/dev",
+        "openssl/3.3.2#9f9f130d58e7c13e76bb8a559f0a6a8b",
         "googleapis/cci.20221108#65604e1b3b9a6b363044da625b201a2a",
         "gtest/1.13.0#f9548be18a41ccc6367efcb8146e92be",
         "benchmark/1.7.0#459f3bb1a64400a886ba43047576df3c",
-        "protobuf/3.21.4#fd372371d994b8585742ca42c12337f9",
+        "protobuf/5.27.0@milvus/dev#6fff8583e2fe32babef04a9097f1d581",
         "yaml-cpp/0.7.0#9c87b3998de893cf2e5a08ad09a7a6e0",
         "marisa/0.2.6#68446854f5a420672d21f21191f8e5af",
-        "zlib/1.2.13#df233e6bed99052f285331b9f54d9070",
-        "libcurl/7.86.0#bbc887fae3341b3cb776c601f814df05",
-        "glog/0.6.0#d22ebf9111fed68de86b0fa6bf6f9c3f",
-        "fmt/9.1.0#95259249fb7ef8c6b5674a40b00abba3",
+        "zlib/1.3.1#f52e03ae3d251dec704634230cd806a2",
+        "libcurl/8.10.1#a3113369c86086b0e84231844e7ed0a9",
+        "libevent/2.1.12#b6333a128075d75a3614bd8418bf2099",
+        "glog/0.7.1#83889ae482004d816ecac59dfef0d65a",
+        "fmt/11.0.2#5c7438ef4d5d69ab106a41e460ce11f3",
         "gflags/2.2.2#b15c28c567c7ade7449cf994168a559f",
-        "double-conversion/3.2.1#640e35791a4bac95b0545e2f54b7aceb",
+        "double-conversion/3.3.0#33321c201741cc32b51169c6d2d05e60",
         "libsodium/cci.20220430#7429a9e5351cc67bea3537229921714d",
         "xsimd/9.0.1#ac9fd02a381698c4e08c5c4ca03b73e1",
-        "xz_utils/5.4.0#a6d90890193dc851fa0d470163271c7a",
-        "prometheus-cpp/1.1.0#ea9b101cb785943adb40ad82eda7856c",
+        "xz_utils/5.4.5#b885d1d79c9d30cff3803f7f551dbe66",
+        "prometheus-cpp/1.2.4#0918d66c13f97acb7809759f9de49b3f",
         "re2/20230301#f8efaf45f98d0193cd0b2ea08b6b4060",
-        "folly/2023.10.30.08@milvus/dev#81d7729cd4013a1b708af3340a3b04d9",
-        "google-cloud-cpp/2.5.0@milvus/2.4#c5591ab30b26b53ea6068af6f07128d3",
-        "opentelemetry-cpp/1.8.1.1@milvus/2.4#7345034855d593047826b0c74d9a0ced",
+        "folly/2024.08.12.00@milvus/dev#e09fc71826ce6b4568441910665f0889",
+        "google-cloud-cpp/2.28.0@milvus/dev#25e69d743269d6c9ae5bf676af2174dc",
+        "opentelemetry-cpp/1.23.0@milvus/dev#bcd65b63b8db8447178ed93bbc94dcc0",
         "librdkafka/1.9.1#e24dcbb0a1684dcf5a56d8d0692ceef3",
-        "abseil/20230125.3#dad7cc4c83bbd44c1f1cc9cc4d97ac88",
+        "abseil/20250127.0#e6c46096070cc3fd060e95a837cd3fb2",
         "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
-        "grpc/1.50.1@milvus/dev#75103960d1cac300cf425ccfccceac08",
+        "grpc/1.67.1@milvus/dev#5aa62c51bced448b83d7db9e5b3a13c7",
         "rapidjson/cci.20230929#624c0094d741e6a3749d2e44d834b96c",
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
         "xxhash/0.8.3#199e63ab9800302c232d030b27accec0",
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
         "geos/3.12.0#0b177c90c25a8ca210578fb9e2899c37",
-        "libavrocpp/1.12.1@milvus/dev",
+        "icu/74.2#cd1937b9561b8950a2ae6311284c5813",
+        "libavrocpp/1.12.1.1@milvus/dev#a77043b1b435c3abef7b45710d05b300",
     )
 
     generators = ("cmake", "cmake_find_package")
     default_options = {
-        "openssl:shared": True,
+        "openssl:shared": False,
+        "openssl:no_apps": True,
         "libevent:shared": True,
         "double-conversion:shared": True,
         "folly:shared": True,
@@ -66,12 +68,13 @@ class MilvusConan(ConanFile):
         "arrow:with_zstd": True,
         "arrow:with_boost": True,
         "arrow:with_thrift": True,
-        "arrow:with_jemalloc": False,
+        "arrow:with_jemalloc": True,
         "arrow:with_openssl": True,
         "arrow:shared": False,
         "arrow:with_azure": True,
         "arrow:with_s3": True,
         "arrow:encryption": True,
+        "protobuf:shared": True,
         "aws-sdk-cpp:config": True,
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,
@@ -82,24 +85,31 @@ class MilvusConan(ConanFile):
         "glog:with_gflags": True,
         "glog:shared": True,
         "prometheus-cpp:with_pull": False,
-        "fmt:header_only": True,
+        "fmt:header_only": False,
         "onetbb:tbbmalloc": False,
         "onetbb:tbbproxy": False,
-        "gdal:shared": True,
+        "gflags:shared": True,
+        "gdal:shared": False,
         "gdal:fPIC": True,
+        "icu:shared": False,
+        "icu:data_packaging": "library",
+        "xz_utils:shared": True,
+        "opentelemetry-cpp:with_stl": True,
     }
 
     def configure(self):
         if self.settings.arch not in ("x86_64", "x86"):
             del self.options["folly"].use_sse4_2
         if self.settings.os == "Macos":
-            # By default abseil use static link but can not be compatible with macos X86
-            self.options["abseil"].shared = True
+            # abseil static linking on macOS (previously shared for X86 compat)
             self.options["arrow"].with_jemalloc = False
+            # Use OpenSSL for libcurl on macOS
+            self.options["libcurl"].with_ssl = "openssl"
 
     def requirements(self):
         if self.settings.os != "Macos":
-            self.requires("libunwind/1.7.2")
+            self.requires("libunwind/1.8.1#97965ef7da98cf1662e14219b14134f7")
+        self.requires("aws-sdk-cpp/1.11.692@milvus/dev#1e17deac19383217d291a01c23147b33")
         # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection
         if self.settings.os in ["Linux", "FreeBSD"]:
             self.requires("s2n/1.6.0")

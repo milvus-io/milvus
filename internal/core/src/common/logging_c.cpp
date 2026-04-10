@@ -120,6 +120,6 @@ InitGoogleLoggingWithoutZapSink() {
 
 void
 GoogleLoggingAtLevel(int severity, const char* msg) {
-    google::LogAtLevel(severity, msg);
+    google::LogAtLevel(static_cast<google::LogSeverity>(severity), msg);
 }
 }

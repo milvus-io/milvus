@@ -20,8 +20,8 @@ runs:
     uses: actions/cache/restore@v4
     with:
       path: /var/tmp/ccache
-      key: macos15-ccache-${{ env.corehash }}
-      restore-keys: macos15-ccache-
+      key: macos15-arm-ccache-${{ env.corehash }}
+      restore-keys: macos15-arm-ccache-
   - name: Mac Cache Go Mod Volumes
     id: go-mod-cache
     run: |
@@ -35,8 +35,8 @@ runs:
     uses: actions/cache/restore@v4
     with:
       path: ~/go/pkg/mod
-      key: macos15-go-mod-${{ steps.go-mod-cache.outputs.hash }}
-      restore-keys: macos15-go-mod-
+      key: macos15-arm-go-mod-${{ steps.go-mod-cache.outputs.hash }}
+      restore-keys: macos15-arm-go-mod-
   - name: Mac Cache Conan Packages
     id: conan-cache
     run: |
@@ -50,5 +50,5 @@ runs:
     uses: actions/cache/restore@v4
     with:
       path: ~/.conan
-      key: macos15-conan-${{ steps.conan-cache.outputs.hash }}
-      restore-keys: macos15-conan-
+      key: macos15-arm-conan-${{ steps.conan-cache.outputs.hash }}
+      restore-keys: macos15-arm-conan-
