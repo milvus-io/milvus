@@ -79,7 +79,7 @@ func createSiliconflowProvider(url string, schema *schemapb.FieldSchema, provide
 	case siliconflowProvider:
 		return NewSiliconflowEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 5})
 	default:
-		return nil, errors.New("Unknow provider")
+		return nil, errors.New("Unknown provider")
 	}
 }
 

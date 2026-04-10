@@ -76,7 +76,7 @@ func createBedrockProvider(schema *schemapb.FieldSchema, providerName string, di
 	case bedrockProvider:
 		return NewBedrockEmbeddingProvider(schema, functionSchema, &MockBedrockClient{dim: dim}, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.access_key_id": "mock", "mock.secret_access_key": "mock"}), &models.ModelExtraInfo{BatchFactor: 5})
 	default:
-		return nil, errors.New("Unknow provider")
+		return nil, errors.New("Unknown provider")
 	}
 }
 

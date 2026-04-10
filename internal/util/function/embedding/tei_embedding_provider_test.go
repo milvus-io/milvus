@@ -79,7 +79,7 @@ func createTEIProvider(url string, schema *schemapb.FieldSchema, providerName st
 	case teiProvider:
 		return NewTEIEmbeddingProvider(schema, functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 5})
 	default:
-		return nil, errors.New("Unknow provider")
+		return nil, errors.New("Unknown provider")
 	}
 }
 

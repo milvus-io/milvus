@@ -7,13 +7,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var ErrTimeTickVoilation = errors.New("time tick violation")
+var ErrTimeTickViolation = errors.New("time tick violation")
 
 // ReOrderByTimeTickBuffer is a buffer that stores messages and pops them in order of time tick.
 type ReOrderByTimeTickBuffer struct {
 	messageIDs typeutil.Set[string] // After enabling write ahead buffer, we has two stream to consume,
 	// write ahead buffer works with the timetick order, but the walscannerimpl works with the message order.
-	// so repeated message may generate when the swithing between the two stream.
+	// so repeated message may generate when the switching between the two stream.
 	// The deduplicate is used to avoid the repeated message.
 	messageHeap     typeutil.Heap[message.ImmutableMessage]
 	lastPopTimeTick uint64
@@ -33,7 +33,7 @@ func (r *ReOrderByTimeTickBuffer) Push(msg message.ImmutableMessage) error {
 	// !!! Drop the unexpected broken timetick rule message.
 	// It will be enabled until the first timetick coming.
 	if msg.TimeTick() < r.lastPopTimeTick {
-		return errors.Wrapf(ErrTimeTickVoilation, "message time tick is less than last pop time tick: %d", r.lastPopTimeTick)
+		return errors.Wrapf(ErrTimeTickViolation, "message time tick is less than last pop time tick: %d", r.lastPopTimeTick)
 	}
 	msgID := msg.MessageID().Marshal()
 	if r.messageIDs.Contain(msgID) {

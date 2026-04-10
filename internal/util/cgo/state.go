@@ -8,7 +8,7 @@ const (
 	stateUnready state = iota
 	stateReady
 	stateConsumed
-	stateDestoryed
+	stateDestroyed
 )
 
 // newFutureState creates a new futureState.
@@ -65,7 +65,7 @@ func (s *futureState) LockForRelease() *lockGuard {
 	}
 	return &lockGuard{
 		locker: s,
-		target: stateDestoryed,
+		target: stateDestroyed,
 	}
 }
 

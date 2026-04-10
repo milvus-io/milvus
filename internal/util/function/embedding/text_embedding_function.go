@@ -352,5 +352,5 @@ func (runner *TextEmbeddingFunction) ProcessBulkInsert(ctx context.Context, inpu
 			runner.outputFields[0].FieldID: field,
 		}, nil
 	}
-	return nil, errors.New("Unknow embedding type")
+	return nil, errors.New("Unknown embedding type")
 }

@@ -80,7 +80,7 @@ func createVoyageAIProvider(url string, schema *schemapb.FieldSchema, providerNa
 	case voyageAIProvider:
 		return NewVoyageAIEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db", BatchFactor: 5})
 	default:
-		return nil, errors.New("Unknow provider")
+		return nil, errors.New("Unknown provider")
 	}
 }
 

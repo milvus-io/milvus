@@ -95,11 +95,11 @@ func newProvider(params []*commonpb.KeyValuePair, extraInfo *models.ModelExtraIn
 				conf := paramtable.Get().FunctionCfg.ZillizProviders.GetValue()
 				return newZillizProvider(params, conf, extraInfo)
 			default:
-				return nil, fmt.Errorf("Unknow rerank model provider:%s", param.Value)
+				return nil, fmt.Errorf("Unknown rerank model provider: %s", param.Value)
 			}
 		}
 	}
-	return nil, fmt.Errorf("Lost rerank params:%s ", providerParamName)
+	return nil, fmt.Errorf("Missing rerank params: %s", providerParamName)
 }
 
 type ModelFunction[T PKType] struct {
