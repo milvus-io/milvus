@@ -333,6 +333,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		buildIndexParams.StoragePluginContext = it.pluginContext
 	}
 
+	var err error
 	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
 	if err != nil {
 		if it.index != nil && it.index.CleanLocalData() != nil {
