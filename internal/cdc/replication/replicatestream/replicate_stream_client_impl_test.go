@@ -26,7 +26,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -331,4 +333,20 @@ func (m *mockReplicateStreamClient) Close() {
 	m.closeOnce.Do(func() {
 		close(m.closeCh)
 	})
+}
+
+func TestIsStreamIdleTimeout(t *testing.T) {
+	// nil error
+	assert.False(t, isStreamIdleTimeout(nil))
+
+	// Exact error from envoy sidecar stream_idle_timeout
+	assert.True(t, isStreamIdleTimeout(status.Error(codes.Unknown, "stream timeout")))
+
+	// Other gRPC errors should not match
+	assert.False(t, isStreamIdleTimeout(status.Error(codes.Unavailable, "connection refused")))
+	assert.False(t, isStreamIdleTimeout(status.Error(codes.Unknown, "some other error")))
+	assert.False(t, isStreamIdleTimeout(status.Error(codes.DeadlineExceeded, "stream timeout")))
+
+	// Non-gRPC errors should not match
+	assert.False(t, isStreamIdleTimeout(assert.AnError))
 }
