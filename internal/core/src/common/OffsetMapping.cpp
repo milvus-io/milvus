@@ -46,13 +46,16 @@ OffsetMapping::Build(const bool* valid_data,
             l2p_vec_.resize(required_size, -1);
         }
 
+        // Pre-size p2l_vec to avoid repeated resizing inside the loop
+        int64_t required_p2l_size = start_physical + valid_count;
+        if (static_cast<int64_t>(p2l_vec_.size()) < required_p2l_size) {
+            p2l_vec_.resize(required_p2l_size, -1);
+        }
+
         int64_t physical_idx = start_physical;
         for (int64_t i = 0; i < total_count; ++i) {
             if (valid_data[i]) {
                 l2p_vec_[start_logical + i] = physical_idx;
-                if (physical_idx >= static_cast<int64_t>(p2l_vec_.size())) {
-                    p2l_vec_.resize(physical_idx + 1, -1);
-                }
                 p2l_vec_[physical_idx] = start_logical + i;
                 physical_idx++;
             } else {

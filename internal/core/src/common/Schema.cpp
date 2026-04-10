@@ -72,7 +72,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         auto warmup_policy =
             GetStringFromRepeatedKVs(child.type_params(), WARMUP_KEY);
         if (warmup_policy.has_value()) {
-            schema->warmup_fields_[field_id] = warmup_policy.value();
+            schema->warmup_fields_[field_id] = std::move(warmup_policy).value();
         }
     };
 

@@ -635,8 +635,9 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
     } else {
         for (size_t i = 0; i < n; ++i) {
             const auto& val = values[i];
-            if (bitsets_.find(val) != bitsets_.end()) {
-                res |= bitsets_.at(val);
+            auto it = bitsets_.find(val);
+            if (it != bitsets_.end()) {
+                res |= it->second;
             }
         }
     }
@@ -683,8 +684,9 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
         TargetBitmap res(total_num_rows_, false);
         for (size_t i = 0; i < n; ++i) {
             const auto& val = values[i];
-            if (bitsets_.find(val) != bitsets_.end()) {
-                res |= bitsets_.at(val);
+            auto it = bitsets_.find(val);
+            if (it != bitsets_.end()) {
+                res |= it->second;
             }
         }
         res.flip();

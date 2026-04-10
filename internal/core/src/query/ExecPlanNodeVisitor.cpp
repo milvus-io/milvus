@@ -82,7 +82,7 @@ ExecPlanNodeVisitor::ExecuteTask(
         }
         processed_num += result->size();
         if (ret) {
-            auto childrens = result->childrens();
+            const auto& childrens = result->childrens();
             AssertInfo(childrens.size() == ret->childrens().size(),
                        "column count of row vectors in different rounds"
                        "should be consistent, ret_column_count:{}, "

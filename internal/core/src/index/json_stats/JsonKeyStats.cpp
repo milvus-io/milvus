@@ -150,7 +150,7 @@ JsonKeyStats::AddKeyStatsInfo(const std::vector<std::string>& paths,
                               JSONType type,
                               uint8_t* value,
                               std::map<JsonKey, KeyStatsInfo>& infos) {
-    std::string key = "";
+    std::string key;
     if (!paths.empty()) {
         key = JsonPointer(paths);
     }
@@ -800,7 +800,7 @@ JsonKeyStats::BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas,
 
     auto writer_context =
         ParquetWriterFactory::CreateContext(key_types_, remote_prefix);
-    parquet_writer_->Init(writer_context);
+    parquet_writer_->Init(std::move(writer_context));
     BuildKeyStats(field_datas, nullable);
     parquet_writer_->Close();
     bson_inverted_index_->BuildIndex();
@@ -816,8 +816,8 @@ JsonKeyStats::GetColumnSchemaFromParquet(int64_t column_group_id,
                   .GetArrowFileSystem();
     auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
     AssertInfo(result.ok(),
-               "[StorageV2] Failed to create file row group reader: " +
-                   result.status().ToString());
+               "[StorageV2] Failed to create file row group reader: {}",
+               result.status().ToString());
     auto file_reader = result.ValueOrDie();
     std::shared_ptr<arrow::Schema> file_schema = file_reader->schema();
     LOG_DEBUG("get column schema: [{}] for segment {}",
@@ -880,8 +880,8 @@ JsonKeyStats::GetCommonMetaFromParquet(const std::string& file) {
                   .GetArrowFileSystem();
     auto result = milvus_storage::FileRowGroupReader::Make(fs, file);
     AssertInfo(result.ok(),
-               "[StorageV2] Failed to create file row group reader: " +
-                   result.status().ToString());
+               "[StorageV2] Failed to create file row group reader: {}",
+               result.status().ToString());
     auto file_reader = result.ValueOrDie();
     // get key value metadata from parquet file
     std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
@@ -988,8 +988,8 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
                   .GetArrowFileSystem();
     auto result = milvus_storage::FileRowGroupReader::Make(fs, files[0]);
     AssertInfo(result.ok(),
-               "[StorageV2] Failed to create file row group reader: " +
-                   result.status().ToString());
+               "[StorageV2] Failed to create file row group reader: {}",
+               result.status().ToString());
     auto file_reader = result.ValueOrDie();
     std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
         file_reader->file_metadata();

@@ -80,7 +80,7 @@ IndexStats::GetMemSize() const {
 int64_t
 IndexStats::GetSerializedSize() const {
     int64_t size = 0;
-    for (auto& info : serialized_index_infos_) {
+    for (const auto& info : serialized_index_infos_) {
         size += info.file_size;
     }
     return size;

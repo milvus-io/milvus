@@ -481,8 +481,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
             // Note: Distance is not used for bounding box intersection query
         } else {
             // For other operations, use original geometry
-            ds->Set(milvus::index::MATCH_VALUE,
-                    Geometry(ctx, expr_->geometry_wkt_.c_str()));
+            ds->Set(milvus::index::MATCH_VALUE, query_geometry);
         }
 
         // Query segment-level R-Tree index **once** since each chunk shares the same index

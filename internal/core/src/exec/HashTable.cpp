@@ -39,7 +39,7 @@ BaseHashTable::prepareForGroupProbe(HashLookup& lookup,
             std::dynamic_pointer_cast<ColumnVector>(input->child(column_idx));
         AssertInfo(column_ptr != nullptr,
                    "Failed to get column vector from row vector input");
-        hashers[i]->setColumnData(column_ptr);
+        hasher->setColumnData(column_ptr);
     }
     lookup.reset(input->size());
 
