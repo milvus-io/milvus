@@ -407,6 +407,7 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
         milvus::proto::schema::JSON);
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
     index::CreateIndexInfo cii;
@@ -420,14 +421,14 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
 
     // Build with enough rows to produce large null_offset and
     // non_exist_offset arrays (each > FILE_SLICE_SIZE = 64 bytes).
-    // - {"a": null}  → null_offset  (8 bytes per entry)
-    // - {"b": 1}     → non_exist_offset (key "a" doesn't exist)
-    // - {"a": 1.0}   → valid data (neither offset)
-    // 20 nulls + 20 non-exist → 160 bytes each, well above 64.
+    // - invalid row   → null_offset + non_exist_offset (8 bytes per entry)
+    // - {"b": 1}      → non_exist_offset only (key "a" doesn't exist)
+    // - {"a": 1.0}    → valid data (neither offset)
+    // 20 invalid + 20 missing-path rows make both files slice reliably.
     std::vector<milvus::Json> jsons;
     for (int i = 0; i < 20; i++) {
         jsons.push_back(milvus::Json(
-            simdjson::padded_string(std::string_view(R"({"a": null})"))));
+            simdjson::padded_string(std::string_view(R"({"a": 1.0})"))));
     }
     for (int i = 0; i < 20; i++) {
         jsons.push_back(milvus::Json(
@@ -439,8 +440,15 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     }
 
     auto json_field =
-        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
-    json_field->add_json_data(jsons);
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
+    std::vector<uint8_t> valid_data((jsons.size() + 7) / 8, 0xFF);
+    for (size_t i = 0; i < 20; ++i) {
+        valid_data[i / 8] &= ~(1U << (i % 8));
+    }
+    json_field->FillFieldData(jsons.data(),
+                              valid_data.data(),
+                              jsons.size(),
+                              0);
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
 
@@ -455,16 +463,31 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     ASSERT_FALSE(binary_set.Contains(INDEX_NON_EXIST_OFFSET_FILE_NAME))
         << "non_exist_offset should be sliced into parts";
 
+    auto slice_meta_bin = binary_set.binary_map_.at(INDEX_FILE_SLICE_META);
+    auto slice_meta = Config::parse(std::string(
+        reinterpret_cast<const char*>(slice_meta_bin->data.get()),
+        slice_meta_bin->size));
+
+    auto slice_num_for = [&](const std::string& target_key) {
+        for (const auto& item : slice_meta[META]) {
+            if (item[NAME] == target_key) {
+                return static_cast<int>(item[SLICE_NUM]);
+            }
+        }
+        return 0;
+    };
+
     // Helper: build a partial index_datas map containing only slices for
     // the given key plus _meta_slice (simulates LoadIndexToMemory).
     auto make_partial_datas = [&](const std::string& target_key) {
         std::map<std::string, std::unique_ptr<storage::DataCodec>> result;
-        for (auto& [name, bin] : binary_set.binary_map_) {
-            if (name == INDEX_FILE_SLICE_META ||
-                name.find(target_key) != std::string::npos) {
-                result[name] = std::make_unique<storage::IndexData>(
-                    bin->data.get(), bin->size);
-            }
+        result[INDEX_FILE_SLICE_META] = std::make_unique<storage::IndexData>(
+            slice_meta_bin->data.get(), slice_meta_bin->size);
+        for (int i = 0; i < slice_num_for(target_key); ++i) {
+            auto slice_name = GenSlicedFileName(target_key, i);
+            auto bin = binary_set.binary_map_.at(slice_name);
+            result[slice_name] =
+                std::make_unique<storage::IndexData>(bin->data.get(), bin->size);
         }
         return result;
     };
@@ -495,7 +518,7 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         auto result = CompactIndexDatasByKey(
             INDEX_NON_EXIST_OFFSET_FILE_NAME, std::move(slice_meta), partial);
         EXPECT_GT(result.codecs_.size(), 0);
-        EXPECT_EQ(result.size_, 20 * sizeof(size_t));
+        EXPECT_EQ(result.size_, 40 * sizeof(size_t));
     }
 }
 
