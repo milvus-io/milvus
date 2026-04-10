@@ -776,6 +776,31 @@ func TestForcePromoteFailover(t *testing.T) {
 	})
 }
 
+func TestForcePromoteLockContention(t *testing.T) {
+	// Verifies that doForcePromoteFixIncompleteBroadcasts succeeds even when the
+	// resource key lock is temporarily held by another goroutine (e.g., a concurrent
+	// ack callback for a replicated DropLoadConfig). Previously this panicked with
+	// "FastLock failed during force promote with zero contenders".
+	initForcePromoteTestGlobals(t)
+
+	vchannels := []string{"cc_vcchan", "v1", "v2"}
+
+	// An incomplete DropCollection task holds the Cluster resource key lock
+	// via its ack callback. The force promote task needs the same lock.
+	env := setupForcePromoteTest(t,
+		[]*streamingpb.BroadcastTask{
+			createReplicatedDropCollectionTask(10, vchannels, []string{"cc_vcchan"}), // cc acked, v1/v2 pending
+			createReplicatedForcePromoteTask(100, vchannels, vchannels),              // all acked
+		},
+		nil,
+	)
+	defer env.close()
+
+	// Both tasks should complete without panic. Task 10's ack callback holds the
+	// resource key lock while running; force promote must wait for it instead of panicking.
+	env.waitForTombstone(t, 30*time.Second, 10, 100)
+}
+
 // --- Record filtering helpers ---
 
 func filterRecords(records []appendRecord, broadcastID uint64) []appendRecord {

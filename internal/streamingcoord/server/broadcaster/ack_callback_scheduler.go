@@ -184,15 +184,7 @@ func (s *ackCallbackScheduler) doForcePromoteFixIncompleteBroadcasts(bt *broadca
 	logger.Info("completed fixing incomplete broadcasts for force promote")
 
 	// Acquire resource key lock before executing ack callback.
-	// Force promote runs on a secondary cluster. By step 3, all incomplete tasks have reached
-	// tombstone (their ack callbacks finished, resource key locks released), and no new broadcasts
-	// can arrive (cluster is still secondary). So rkLocker has zero contenders — FastLock always succeeds.
-	s.rkLockerMu.Lock()
-	g, err := s.rkLocker.FastLock(bt.Header().ResourceKeys.Collect()...)
-	s.rkLockerMu.Unlock()
-	if err != nil {
-		panic(fmt.Sprintf("unreachable: FastLock failed during force promote with zero contenders: %v", err))
-	}
+	g := s.rkLocker.Lock(bt.Header().ResourceKeys.Collect()...)
 	s.doAckCallback(bt, g)
 }
 
@@ -331,4 +323,3 @@ func sortByControlChannelTimeTick(tasks []*broadcastTask) {
 		return tasks[i].ControlChannelTimeTick() < tasks[j].ControlChannelTimeTick()
 	})
 }
-

@@ -154,3 +154,12 @@ func TestCheckIfMessageFromStreaming(t *testing.T) {
 
 func TestReplicateHeader(t *testing.T) {
 }
+
+func TestWithWALTermIdempotent(t *testing.T) {
+	msg := NewMutableMessageBeforeAppend([]byte("payload"), map[string]string{})
+	// Setting WAL term twice should not panic (was a panic before the fix).
+	msg.WithWALTerm(1)
+	assert.NotPanics(t, func() {
+		msg.WithWALTerm(2)
+	})
+}
