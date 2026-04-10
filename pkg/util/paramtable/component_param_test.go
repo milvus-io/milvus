@@ -156,6 +156,24 @@ func TestComponentParam(t *testing.T) {
 			params.CommonCfg.ClusterID.GetAsInt()
 		})
 		params.Save("common.clusterID", "0")
+
+		// HashAlgorithm: default is sha256
+		assert.Equal(t, "sha256", params.CommonCfg.HashAlgorithm.GetValue())
+
+		// HashAlgorithm: setting sha3 should return sha3
+		params.Save("common.security.hashAlgorithm", "sha3")
+		assert.Equal(t, "sha3", params.CommonCfg.HashAlgorithm.GetValue())
+
+		// HashAlgorithm: invalid values should fall back to sha256
+		for _, invalid := range []string{"", "md5", "SHA256", "SHA3", "sha512", "unknown"} {
+			params.Save("common.security.hashAlgorithm", invalid)
+			assert.Equal(t, "sha256", params.CommonCfg.HashAlgorithm.GetValue(),
+				"invalid value %q should fall back to sha256", invalid)
+		}
+
+		// HashAlgorithm: restore to default
+		params.Save("common.security.hashAlgorithm", "sha256")
+		assert.Equal(t, "sha256", params.CommonCfg.HashAlgorithm.GetValue())
 	})
 
 	t.Run("test logConfig", func(t *testing.T) {
