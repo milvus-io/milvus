@@ -735,7 +735,6 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	var rerankInputFieldIDs []int64
 	if t.rerankMeta != nil {
 		rerankInputFieldIDs = t.rerankMeta.GetInputFieldIDs()
-		t.needRequery = t.needRequery || len(t.rerankMeta.GetInputFieldNames()) > 0
 	}
 	if t.needRequery {
 		plan.OutputFieldIds = rerankInputFieldIDs

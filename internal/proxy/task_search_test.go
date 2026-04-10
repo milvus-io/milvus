@@ -45,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
-	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -5928,50 +5927,6 @@ func TestSearchTask_SearchRequeryPolicy(t *testing.T) {
 			assert.Equal(t, tt.expectedRequery, task.needRequery, tt.name)
 		})
 	}
-
-	t.Run("functionScore_forces_requery", func(t *testing.T) {
-		Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "outputvector")
-		defer Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")
-
-		task := buildTask([]string{"pk", "title"}) // no vector → policy says false
-		task.functionScore = &rerank.FunctionScore{}
-
-		m1 := mockey.Mock(mockey.GetMethod(&rerank.FunctionScore{}, "GetAllInputFieldNames")).
-			Return([]string{"title"}).Build()
-		defer m1.UnPatch()
-		m2 := mockey.Mock(mockey.GetMethod(&rerank.FunctionScore{}, "GetAllInputFieldIDs")).
-			Return([]int64{102}).Build()
-		defer m2.UnPatch()
-		m3 := mockey.Mock(mockey.GetMethod(&rerank.FunctionScore{}, "IsSupportGroup")).
-			Return(true).Build()
-		defer m3.UnPatch()
-
-		err := task.initSearchRequest(ctx)
-		assert.NoError(t, err)
-		assert.True(t, task.needRequery, "functionScore with input fields should force requery")
-	})
-
-	t.Run("functionScore_no_input_fields_no_force", func(t *testing.T) {
-		Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "outputvector")
-		defer Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")
-
-		task := buildTask([]string{"pk", "title"}) // no vector → policy says false
-		task.functionScore = &rerank.FunctionScore{}
-
-		m1 := mockey.Mock(mockey.GetMethod(&rerank.FunctionScore{}, "GetAllInputFieldNames")).
-			Return([]string{}).Build()
-		defer m1.UnPatch()
-		m2 := mockey.Mock(mockey.GetMethod(&rerank.FunctionScore{}, "GetAllInputFieldIDs")).
-			Return([]int64{}).Build()
-		defer m2.UnPatch()
-		m3 := mockey.Mock(mockey.GetMethod(&rerank.FunctionScore{}, "IsSupportGroup")).
-			Return(true).Build()
-		defer m3.UnPatch()
-
-		err := task.initSearchRequest(ctx)
-		assert.NoError(t, err)
-		assert.False(t, task.needRequery, "functionScore with no input fields should not force requery")
-	})
 
 	t.Run("case_insensitive_policy", func(t *testing.T) {
 		Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "Always")
