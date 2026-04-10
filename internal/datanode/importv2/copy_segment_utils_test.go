@@ -1830,8 +1830,8 @@ func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
 			"files/insert_log/111/222/333/_metadata/manifest.json",
 			"files/insert_log/111/222/333/_stats/text_index.101/tokenizer.json",
 			"files/insert_log/111/222/333/_stats/text_index.101/index.data",
-			"files/insert_log/111/222/333/_stats/json_key_index.102/shared_key_index/.managed.json_0",
-			"files/insert_log/111/222/333/_stats/json_key_index.102/shared_key_index/.managed.json_1",
+			"files/insert_log/111/222/333/_stats/json_stats.102/shared_key_index/.managed.json_0",
+			"files/insert_log/111/222/333/_stats/json_stats.102/shared_key_index/.managed.json_1",
 		}, nil
 	}).Build()
 	defer mList.UnPatch()

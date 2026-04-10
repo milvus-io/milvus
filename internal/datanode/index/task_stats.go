@@ -742,7 +742,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 				JSONStatsShreddingRatio:      jsonStatsShreddingRatioThreshold,
 				JSONStatsWriteBatchSize:      jsonStatsWriteBatchSize,
 			}
-			statsBasePath, err := computeStatsBasePath(req, st.manifestPath, "json_key_index", field.GetFieldID())
+			statsBasePath, err := computeStatsBasePath(req, st.manifestPath, "json_stats", field.GetFieldID())
 			if err != nil {
 				return err
 			}
@@ -794,7 +794,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		manifestStats := make(map[int64]*datapb.JsonKeyStats, len(jsonKeyIndexStats))
 		for fieldID, stats := range jsonKeyIndexStats {
 			cloned := proto.Clone(stats).(*datapb.JsonKeyStats)
-			basePath, err := computeStatsBasePath(st.req, st.manifestPath, "json_key_index", stats.GetFieldID())
+			basePath, err := computeStatsBasePath(st.req, st.manifestPath, "json_stats", stats.GetFieldID())
 			if err != nil {
 				return err
 			}
@@ -851,7 +851,7 @@ func computeStatsBasePath(req *workerpb.CreateStatsRequest, manifestPath string,
 		return metautil.BuildTextIndexPrefix(rootPath,
 			req.GetTaskID(), req.GetTaskVersion(),
 			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil
-	case "json_key_index":
+	case "json_stats":
 		return metautil.BuildJSONKeyStatsPrefix(rootPath, common.JSONStatsDataFormatVersion,
 			req.GetTaskID(), req.GetTaskVersion(),
 			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil
