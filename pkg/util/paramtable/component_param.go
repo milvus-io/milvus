@@ -4849,6 +4849,7 @@ type dataCoordConfig struct {
 	LevelZeroCompactionTriggerMaxSize        ParamItem `refreshable:"true"`
 	LevelZeroCompactionTriggerDeltalogMinNum ParamItem `refreshable:"true"`
 	LevelZeroCompactionTriggerDeltalogMaxNum ParamItem `refreshable:"true"`
+	LevelZeroCompactionForceSelectAll        ParamItem `refreshable:"true"`
 
 	// Garbage Collection
 	EnableGarbageCollection                ParamItem `refreshable:"false"`
@@ -5482,6 +5483,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
+
+	p.LevelZeroCompactionForceSelectAll = ParamItem{
+		Key:          "dataCoord.compaction.levelzero.forceSelectAllSegments",
+		Version:      "2.6.15",
+		DefaultValue: "false",
+		Doc: "When enabled, L0 compaction selects all L1/L2 segments regardless of position filtering. " +
+			"Use during repair to bypass wrong StartPosition metadata from the import position bug.",
+		Export: false,
+	}
+	p.LevelZeroCompactionForceSelectAll.Init(base.mgr)
 
 	p.IndexMemSizeEstimateMultiplier = ParamItem{
 		Key:          "dataCoord.index.memSizeEstimateMultiplier",
