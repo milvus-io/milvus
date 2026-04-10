@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
+	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -5818,5 +5819,177 @@ func TestSearchTask_ArrayOfVectorGroupBy(t *testing.T) {
 		task := makeTask("regular_vec", "scalar_field", commonpb.PlaceholderType_FloatVector)
 		err := task.initSearchRequest(ctx)
 		assert.NoError(t, err)
+	})
+}
+
+func TestSearchTask_SearchRequeryPolicy(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+			{FieldID: 102, Name: "title", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "256"}}},
+		},
+	}
+	schemaInfo := newSchemaInfo(schema)
+
+	buildTask := func(outputFields []string) *searchTask {
+		return &searchTask{
+			ctx:            ctx,
+			collectionName: "test_collection",
+			SearchRequest: &internalpb.SearchRequest{
+				CollectionID:   1,
+				PartitionIDs:   []int64{1},
+				DslType:        commonpb.DslType_BoolExprV1,
+				OutputFieldsId: []int64{},
+			},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "test_collection",
+				OutputFields:   outputFields,
+				SearchParams: []*commonpb.KeyValuePair{
+					{Key: AnnsFieldKey, Value: "vec"},
+					{Key: TopKKey, Value: "10"},
+					{Key: common.MetricTypeKey, Value: metric.L2},
+					{Key: ParamsKey, Value: `{"nprobe": 10}`},
+				},
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+					PlaceholderGroup: nil,
+				},
+				ConsistencyLevel: commonpb.ConsistencyLevel_Session,
+			},
+			schema:                 schemaInfo,
+			translatedOutputFields: outputFields,
+			tr:                     timerecord.NewTimeRecorder("test"),
+			queryInfos:             []*planpb.QueryInfo{{}},
+		}
+	}
+
+	tests := []struct {
+		name            string
+		policy          string
+		outputFields    []string
+		expectedRequery bool
+	}{
+		{
+			name:            "always_policy_no_output",
+			policy:          "always",
+			outputFields:    []string{"pk"},
+			expectedRequery: true,
+		},
+		{
+			name:            "always_policy_with_vector",
+			policy:          "always",
+			outputFields:    []string{"pk", "vec"},
+			expectedRequery: true,
+		},
+		{
+			name:            "outputvector_policy_with_vector",
+			policy:          "outputvector",
+			outputFields:    []string{"pk", "vec"},
+			expectedRequery: true,
+		},
+		{
+			name:            "outputvector_policy_without_vector",
+			policy:          "outputvector",
+			outputFields:    []string{"pk", "title"},
+			expectedRequery: false,
+		},
+		{
+			name:            "outputfields_policy_with_scalar",
+			policy:          "outputfields",
+			outputFields:    []string{"pk", "title"},
+			expectedRequery: true,
+		},
+		{
+			name:            "outputfields_policy_no_output",
+			policy:          "outputfields",
+			outputFields:    []string{},
+			expectedRequery: false,
+		},
+		{
+			name:            "default_fallback_to_outputfields",
+			policy:          "unknown_value",
+			outputFields:    []string{"pk", "title"},
+			expectedRequery: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, tt.policy)
+			defer Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")
+
+			task := buildTask(tt.outputFields)
+			err := task.initSearchRequest(ctx)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedRequery, task.needRequery, tt.name)
+		})
+	}
+
+	t.Run("functionScore_forces_requery", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "outputvector")
+		defer Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")
+
+		task := buildTask([]string{"pk", "title"}) // no vector → policy says false
+		task.functionScore = &rerank.FunctionScore{}
+
+		m1 := mockey.Mock(mockey.GetMethod(&rerank.FunctionScore{}, "GetAllInputFieldNames")).
+			Return([]string{"title"}).Build()
+		defer m1.UnPatch()
+		m2 := mockey.Mock(mockey.GetMethod(&rerank.FunctionScore{}, "GetAllInputFieldIDs")).
+			Return([]int64{102}).Build()
+		defer m2.UnPatch()
+		m3 := mockey.Mock(mockey.GetMethod(&rerank.FunctionScore{}, "IsSupportGroup")).
+			Return(true).Build()
+		defer m3.UnPatch()
+
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+		assert.True(t, task.needRequery, "functionScore with input fields should force requery")
+	})
+
+	t.Run("functionScore_no_input_fields_no_force", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "outputvector")
+		defer Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")
+
+		task := buildTask([]string{"pk", "title"}) // no vector → policy says false
+		task.functionScore = &rerank.FunctionScore{}
+
+		m1 := mockey.Mock(mockey.GetMethod(&rerank.FunctionScore{}, "GetAllInputFieldNames")).
+			Return([]string{}).Build()
+		defer m1.UnPatch()
+		m2 := mockey.Mock(mockey.GetMethod(&rerank.FunctionScore{}, "GetAllInputFieldIDs")).
+			Return([]int64{}).Build()
+		defer m2.UnPatch()
+		m3 := mockey.Mock(mockey.GetMethod(&rerank.FunctionScore{}, "IsSupportGroup")).
+			Return(true).Build()
+		defer m3.UnPatch()
+
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+		assert.False(t, task.needRequery, "functionScore with no input fields should not force requery")
+	})
+
+	t.Run("case_insensitive_policy", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "Always")
+		defer Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")
+
+		task := buildTask([]string{"pk"})
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+		assert.True(t, task.needRequery, "policy should be case-insensitive")
+	})
+
+	t.Run("outputvector_policy_only_scalar_no_requery", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")
+		defer Params.Save(Params.CommonCfg.SearchRequeryPolicy.Key, "OutputVector")
+
+		task := buildTask([]string{"pk"}) // only pk, no vector, no extra output
+		err := task.initSearchRequest(ctx)
+		assert.NoError(t, err)
+		assert.False(t, task.needRequery, "only pk output should not trigger requery under outputvector policy")
 	})
 }
