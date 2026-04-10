@@ -1758,12 +1758,12 @@ func recalculateSegmentPosition(binlogs []*datapb.FieldBinlog, channel string, f
 	minTs, maxTs := extractTimestampFromBinlogs(binlogs)
 	if minTs > 0 && minTs != math.MaxUint64 && maxTs > 0 {
 		return &msgpb.MsgPosition{
-			ChannelName: channel,
-			Timestamp:   minTs,
-		}, &msgpb.MsgPosition{
-			ChannelName: channel,
-			Timestamp:   maxTs,
-		}
+				ChannelName: channel,
+				Timestamp:   minTs,
+			}, &msgpb.MsgPosition{
+				ChannelName: channel,
+				Timestamp:   maxTs,
+			}
 	}
 	return fallbackStart, fallbackDml
 }
@@ -1944,10 +1944,10 @@ func (m *meta) completeMixCompactionMutation(
 				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
 				Level:               datapb.SegmentLevel_L1,
 				StorageVersion:      compactToSegment.GetStorageVersion(),
-				StartPosition: startPos,
-				DmlPosition:   dmlPos,
-				IsSorted:      compactToSegment.GetIsSorted(),
-				ManifestPath:  compactToSegment.GetManifest(),
+				StartPosition:       startPos,
+				DmlPosition:         dmlPos,
+				IsSorted:            compactToSegment.GetIsSorted(),
+				ManifestPath:        compactToSegment.GetManifest(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
