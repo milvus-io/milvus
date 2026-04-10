@@ -566,7 +566,6 @@ generate-mockery-kv: getdeps
 	$(INSTALL_PATH)/mockery --name=TxnKV --dir=$(PWD)/pkg/kv --output=$(PWD)/internal/kv/mocks --filename=txn_kv.go --with-expecter
 	$(INSTALL_PATH)/mockery --name=MetaKv --dir=$(PWD)/pkg/kv --output=$(PWD)/internal/kv/mocks --filename=meta_kv.go --with-expecter
 	$(INSTALL_PATH)/mockery --name=WatchKV --dir=$(PWD)/pkg/kv --output=$(PWD)/internal/kv/mocks --filename=watch_kv.go --with-expecter
-	$(INSTALL_PATH)/mockery --name=SnapShotKV --dir=$(PWD)/pkg/kv --output=$(PWD)/internal/kv/mocks --filename=snapshot_kv.go --with-expecter
 	$(INSTALL_PATH)/mockery --name=Predicate --dir=$(PWD)/pkg/kv/predicates --output=$(PWD)/internal/kv/predicates --filename=mock_predicate.go --with-expecter --inpackage
 
 generate-mockery-chunk-manager: getdeps

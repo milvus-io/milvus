@@ -83,15 +83,13 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	path := funcutil.RandomString(10) + "/meta"
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
 
-	ss, err := rootcoord.NewSuffixSnapshot(catalogKV, rootcoord.SnapshotsSep, path, rootcoord.SnapshotPrefix)
-	require.NoError(t, err)
 	testDB := newNameDb()
 	collID2Meta := make(map[typeutil.UniqueID]*model.Collection)
 	tso := mocktso.NewAllocator(t)
 	tso.EXPECT().GenerateTSO(mock.Anything).Return(uint64(1), nil).Maybe()
 	core := newTestCore(withHealthyCode(),
 		withMeta(&MetaTable{
-			catalog:     rootcoord.NewCatalog(catalogKV, ss),
+			catalog:     rootcoord.NewCatalog(catalogKV),
 			names:       testDB,
 			aliases:     newNameDb(),
 			dbName2Meta: make(map[string]*model.Database),
