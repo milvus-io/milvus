@@ -4817,6 +4817,7 @@ type dataCoordConfig struct {
 	GCSlowDownCPUUsageThreshold            ParamItem `refreshable:"false"`
 	SnapshotPendingTimeout                 ParamItem `refreshable:"true"`
 	SnapshotRefIndexLoadInterval           ParamItem `refreshable:"true"`
+	SnapshotRefIndexLoadTimeout            ParamItem `refreshable:"true"`
 	SnapshotMaxCompactionProtectionSeconds ParamItem `refreshable:"true"`
 	EnableActiveStandby                    ParamItem `refreshable:"false"`
 
@@ -5684,6 +5685,18 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Doc:          "The interval for loading snapshot RefIndex from S3",
 	}
 	p.SnapshotRefIndexLoadInterval.Init(base.mgr)
+
+	p.SnapshotRefIndexLoadTimeout = ParamItem{
+		Key:          "dataCoord.snapshot.refIndexLoadTimeout",
+		Version:      "2.6.15",
+		DefaultValue: "30s",
+		Doc: "Per-snapshot timeout for loading RefIndex from S3 inside the loader loop. " +
+			"A single hung S3 read must not block the loader Range, otherwise no other " +
+			"snapshot's RefIndex can be loaded and GC remains in fail-closed coarse block " +
+			"for every collection with a snapshot, leaking storage. On timeout the RefIndex " +
+			"is marked Failed and will be retried on the next loader tick.",
+	}
+	p.SnapshotRefIndexLoadTimeout.Init(base.mgr)
 
 	p.SnapshotMaxCompactionProtectionSeconds = ParamItem{
 		Key:          "dataCoord.snapshot.maxCompactionProtectionSeconds",

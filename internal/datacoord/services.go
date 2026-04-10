@@ -2078,6 +2078,18 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		zap.String("description", req.GetDescription()),
 		zap.Int64("compactionProtectionSeconds", req.GetCompactionProtectionSeconds()))
 
+	// Defense-in-depth: re-validate compaction_protection_seconds on the DataCoord side.
+	// Proxy also validates this, but a buggy or malicious client could bypass Proxy by
+	// calling this RPC directly. Range validation must be enforced by the owner of the feature.
+	if req.GetCompactionProtectionSeconds() < 0 {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("compaction_protection_seconds must be non-negative")), nil
+	}
+	maxCompactionProtectionSeconds := paramtable.Get().DataCoordCfg.SnapshotMaxCompactionProtectionSeconds.GetAsInt64()
+	if req.GetCompactionProtectionSeconds() > maxCompactionProtectionSeconds {
+		return merr.Status(merr.WrapErrParameterInvalidMsg(
+			fmt.Sprintf("compaction_protection_seconds must not exceed %d", maxCompactionProtectionSeconds))), nil
+	}
+
 	// Check if snapshot name already exists
 	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err == nil {
 		log.Warn("CreateSnapshot failed: snapshot name already exists")

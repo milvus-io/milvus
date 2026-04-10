@@ -361,12 +361,13 @@ func (sm *snapshotManager) CreateSnapshot(
 	}
 
 	// Block compaction commit for this collection during snapshot creation.
-	// This prevents segment state changes between GenSnapshot (captures segment list)
-	// and SaveSnapshot (sets up per-segment protection).
-	if compactionProtectionSeconds > 0 {
-		sm.snapshotMeta.SetSnapshotPending(collectionID)
-		defer sm.snapshotMeta.ClearSnapshotPending(collectionID)
-	}
+	// This MUST be unconditional (not gated on compactionProtectionSeconds): even when
+	// the user requests zero long-term protection, the snapshot must still be atomic
+	// within the GenSnapshot → SaveSnapshot window, otherwise concurrent compaction
+	// could drop segments that the in-flight snapshot is about to reference, leaving
+	// the freshly-created snapshot immediately broken.
+	sm.snapshotMeta.SetSnapshotPending(collectionID)
+	defer sm.snapshotMeta.ClearSnapshotPending(collectionID)
 
 	// Allocate snapshot ID
 	snapshotID, err := sm.allocator.AllocID(ctx)

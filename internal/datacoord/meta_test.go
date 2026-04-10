@@ -805,6 +805,67 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(task)
 		suite.NoError(err)
 	})
+
+	// Regression: L0 delete compaction must bypass snapshot protection checks entirely.
+	// Snapshots only reference sealed L1/L2 segments; blocking L0 here would cause
+	// delta log accumulation, query latency spikes, and write stalls.
+	suite.Run("L0 compaction passes even when collection is snapshot-pending", func() {
+		sm := createTestSnapshotMetaLoaded(suite.T())
+		sm.SetSnapshotPending(100)
+
+		m := &meta{
+			segments:     latestSegments,
+			snapshotMeta: sm,
+		}
+
+		l0Task := &datapb.CompactionTask{
+			PlanID:        8001,
+			InputSegments: []UniqueID{1},
+			CollectionID:  100,
+			Type:          datapb.CompactionType_Level0DeleteCompaction,
+		}
+		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(l0Task)
+		suite.NoError(err)
+	})
+
+	suite.Run("L0 compaction passes even when input segment is snapshot-protected", func() {
+		sm := createTestSnapshotMetaLoaded(suite.T())
+		futureTs := uint64(time.Now().Unix()) + 3600
+		sm.segmentProtectionMu.Lock()
+		sm.segmentProtectionUntil[1] = futureTs
+		sm.segmentProtectionMu.Unlock()
+
+		m := &meta{
+			segments:     latestSegments,
+			snapshotMeta: sm,
+		}
+
+		l0Task := &datapb.CompactionTask{
+			PlanID:        8002,
+			InputSegments: []UniqueID{1},
+			CollectionID:  100,
+			Type:          datapb.CompactionType_Level0DeleteCompaction,
+		}
+		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(l0Task)
+		suite.NoError(err)
+	})
+
+	// Regression: collection-level block should produce ErrCompactionBlocked,
+	// not ErrServiceInternal, so SRE alerting does not treat it as a P0 fault.
+	suite.Run("rejection uses ErrCompactionBlocked, not ErrServiceInternal", func() {
+		sm := createTestSnapshotMetaLoaded(suite.T())
+		sm.SetSnapshotPending(100)
+
+		m := &meta{
+			segments:     latestSegments,
+			snapshotMeta: sm,
+		}
+
+		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(task)
+		suite.Error(err)
+		suite.True(errors.Is(err, merr.ErrCompactionBlocked))
+		suite.False(errors.Is(err, merr.ErrServiceInternal))
+	})
 }
 
 func (suite *MetaBasicSuite) TestSetSegment() {

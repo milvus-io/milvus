@@ -1337,6 +1337,17 @@ func WrapErrDuplicatedCompactionTask(msg ...string) error {
 	return err
 }
 
+// WrapErrCompactionBlocked indicates that a compaction task is blocked by snapshot protection.
+// This is a business-level rejection (not a service fault) that the scheduler should handle
+// with low-frequency backoff, not with P0 alerting.
+func WrapErrCompactionBlocked(reason string, msg ...string) error {
+	err := wrapFieldsWithDesc(ErrCompactionBlocked, reason)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 func WrapErrOldSessionExists(msg ...string) error {
 	err := error(ErrOldSessionExists)
 	if len(msg) > 0 {

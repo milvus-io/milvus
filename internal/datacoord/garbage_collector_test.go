@@ -595,10 +595,9 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
 			cli: mockChunkManager,
 		})
-		mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
-		defer mockIsRefIndexLoaded.UnPatch()
-		mockGetSnapshotByBuildID := mockey.Mock((*snapshotMeta).GetSnapshotByBuildID).Return([]UniqueID{}).Build()
-		defer mockGetSnapshotByBuildID.UnPatch()
+		// Snapshot layer transparent: no buildID is blocked.
+		mockIsBuildIDBlocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
 		gc.recycleUnusedSegIndexes(context.TODO(), nil)
 	})
 
@@ -617,10 +616,8 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
 			cli: mockChunkManager,
 		})
-		mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
-		defer mockIsRefIndexLoaded.UnPatch()
-		mockGetSnapshotByBuildID := mockey.Mock((*snapshotMeta).GetSnapshotByBuildID).Return([]UniqueID{}).Build()
-		defer mockGetSnapshotByBuildID.UnPatch()
+		mockIsBuildIDBlocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(false).Build()
+		defer mockIsBuildIDBlocked.UnPatch()
 		gc.recycleUnusedSegIndexes(context.TODO(), nil)
 	})
 }
@@ -1410,10 +1407,9 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			cli:           cm,
 			dropTolerance: 1,
 		})
-	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
-	defer mockIsRefIndexLoaded.UnPatch()
-	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).Return([]UniqueID{}).Build()
-	defer mockGetSnapshotBySegment.UnPatch()
+	// Snapshot layer transparent: no segment is blocked.
+	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(false).Build()
+	defer mockIsSegBlocked.UnPatch()
 	gc.recycleDroppedSegments(context.TODO(), signal)
 
 	/*
@@ -1895,15 +1891,12 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 	mock1 := mockey.Mock(meta.GetSnapshotMeta).Return(smMeta).Build()
 	defer mock1.UnPatch()
 
-	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
-	defer mockIsRefIndexLoaded.UnPatch()
-
-	mock2 := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).To(func(ctx context.Context, collectionID, segmentID int64) []int64 {
-		if segmentID == 1001 {
-			return []int64{1, 2} // Segment 1001 is referenced by snapshots 1 and 2
-		}
-		return []int64{} // Segment 1002 is not referenced
-	}).Build()
+	// New O(1) API: IsSegmentGCBlocked encodes both "loaded state" and "is referenced".
+	// Block segment 1001; leave 1002 unblocked.
+	mock2 := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).To(
+		func(sm *snapshotMeta, collID, segID int64) bool {
+			return segID == 1001
+		}).Build()
 	defer mock2.UnPatch()
 
 	mock3 := mockey.Mock((*ServerHandler).ListLoadedSegments).To(func(h *ServerHandler, ctx context.Context) ([]int64, error) {
@@ -2017,15 +2010,12 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 	}
 
 	// Setup mocks
-	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
-	defer mockIsRefIndexLoaded.UnPatch()
-
-	mock1 := mockey.Mock((*snapshotMeta).GetSnapshotByBuildID).To(func(buildID int64) []int64 {
-		if buildID == 401 {
-			return []int64{3, 4} // BuildID 401 is referenced by snapshots 3 and 4
-		}
-		return []int64{} // BuildID 402 is not referenced
-	}).Build()
+	// New O(1) API: IsBuildIDGCBlocked encodes both "loaded state" and "is referenced".
+	// Block buildID 401; leave 402 unblocked.
+	mock1 := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).To(
+		func(sm *snapshotMeta, collID, buildID int64) bool {
+			return buildID == 401
+		}).Build()
 	defer mock1.UnPatch()
 
 	mock2 := mockey.Mock((*datacoord.Catalog).ListSegmentIndexes).To(func(c *datacoord.Catalog, ctx context.Context, collectionID int64) ([]*model.SegmentIndex, error) {
@@ -2149,17 +2139,9 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SnapshotReference(t *testing.
 	mockParseSegID := mockey.Mock(storage.ParseSegmentIDByBinlog).Return(int64(1001), nil).Build()
 	defer mockParseSegID.UnPatch()
 
-	// Mock IsRefIndexLoadedForCollection to return true (per-collection check for known segments)
-	mockCollLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
-	defer mockCollLoaded.UnPatch()
-
-	// Mock IsAllRefIndexLoaded (used as fallback for segments not in meta)
-	mockAllLoaded := mockey.Mock((*snapshotMeta).IsAllRefIndexLoaded).Return(true).Build()
-	defer mockAllLoaded.UnPatch()
-
-	// Mock GetSnapshotBySegment to return snapshot IDs (makes segment referenced)
-	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).Return([]int64{1, 2}).Build()
-	defer mockGetSnapshotBySegment.UnPatch()
+	// New O(1) API: IsSegmentGCBlocked directly returns "protected".
+	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(true).Build()
+	defer mockIsSegBlocked.UnPatch()
 
 	// Execute
 	gc.recycleUnusedBinlogFiles(ctx)
@@ -2293,11 +2275,14 @@ func TestGarbageCollector_recycleUnusedIndexFiles_SnapshotReference(t *testing.T
 	collectionID := int64(100)
 	indexID := int64(301)
 
-	// Setup mock for WalkWithPrefix to find index directory
+	// Setup mock for WalkWithPrefix to find index directory.
+	// Note: the outer walk runs against common.SegmentIndexPath ("index_files"), not "indexes".
+	// We match that prefix so the walker callback actually fires and exercises the
+	// segIdx != nil + IsBuildIDGCBlocked branch below.
 	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(func(cm *storage.LocalChunkManager, ctx context.Context, prefix string, recursive bool, fn storage.ChunkObjectWalkFunc) error {
-		if strings.Contains(prefix, "indexes") {
+		if strings.Contains(prefix, common.SegmentIndexPath) {
 			chunkInfo := &storage.ChunkObjectInfo{
-				FilePath:   fmt.Sprintf("gc/indexes/%d/1/", buildID),
+				FilePath:   fmt.Sprintf("gc/index_files/%d/1/", buildID),
 				ModifyTime: time.Now().Add(-time.Hour),
 			}
 			fn(chunkInfo)
@@ -2319,17 +2304,9 @@ func TestGarbageCollector_recycleUnusedIndexFiles_SnapshotReference(t *testing.T
 	mockGetSnapMeta := mockey.Mock(meta.GetSnapshotMeta).Return(smMeta).Build()
 	defer mockGetSnapMeta.UnPatch()
 
-	// Mock IsAllRefIndexLoaded (pre-fetched outside the walk loop)
-	mockAllLoaded := mockey.Mock((*snapshotMeta).IsAllRefIndexLoaded).Return(true).Build()
-	defer mockAllLoaded.UnPatch()
-
-	// Mock IsRefIndexLoadedForCollection
-	mockIsRefLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
-	defer mockIsRefLoaded.UnPatch()
-
-	// Mock GetSnapshotByBuildID to return snapshot IDs (buildID is referenced by snapshot)
-	mockGetSnapshotByBuildID := mockey.Mock((*snapshotMeta).GetSnapshotByBuildID).Return([]int64{1, 2}).Build()
-	defer mockGetSnapshotByBuildID.UnPatch()
+	// New O(1) API: IsBuildIDGCBlocked returns true (buildID protected by snapshot).
+	mockIsBuildIDBlocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).Return(true).Build()
+	defer mockIsBuildIDBlocked.UnPatch()
 
 	removeWithPrefixCalled := false
 	mockRemoveWithPrefix := mockey.Mock((*storage.LocalChunkManager).RemoveWithPrefix).To(func(cm *storage.LocalChunkManager, ctx context.Context, prefix string) error {
@@ -2400,14 +2377,17 @@ func TestGarbageCollector_recycleUnusedTextIndexFiles_SnapshotReference(t *testi
 		}).Build()
 	defer mockRemove.UnPatch()
 
-	// Mock WalkWithPrefix to simulate text index files
+	// Mock WalkWithPrefix to simulate text index files. Production builds the prefix via
+	// metautil.BuildTextIndexPrefix which uses common.TextIndexPath ("text_log"), so the
+	// substring match MUST reference that constant — a human-readable string like
+	// "text_index" would silently never match and hide regressions.
 	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
 		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
 			recursive bool, fn storage.ChunkObjectWalkFunc,
 		) error {
-			if strings.Contains(prefix, "text_index") {
+			if strings.Contains(prefix, common.TextIndexPath) {
 				chunkInfo := &storage.ChunkObjectInfo{
-					FilePath:   "gc/text_index/401/1/100/10/1001/101/file1",
+					FilePath:   "gc/text_log/401/1/100/10/1001/101/file1",
 					ModifyTime: time.Now().Add(-time.Hour),
 				}
 				fn(chunkInfo)
@@ -2416,14 +2396,9 @@ func TestGarbageCollector_recycleUnusedTextIndexFiles_SnapshotReference(t *testi
 		}).Build()
 	defer mockWalk.UnPatch()
 
-	// Mock IsRefIndexLoadedForCollection to return true (RefIndex is loaded)
-	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
-	defer mockIsRefIndexLoaded.UnPatch()
-
-	// Mock GetSnapshotBySegment to return snapshot IDs (segment is protected)
-	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).
-		Return([]int64{1, 2}).Build()
-	defer mockGetSnapshotBySegment.UnPatch()
+	// New O(1) API: IsSegmentGCBlocked returns true (segment protected by snapshot).
+	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(true).Build()
+	defer mockIsSegBlocked.UnPatch()
 
 	// Execute
 	gc.recycleUnusedTextIndexFiles(ctx, nil)
@@ -2488,14 +2463,16 @@ func TestGarbageCollector_recycleUnusedJSONIndexFiles_SnapshotReference(t *testi
 		}).Build()
 	defer mockRemove.UnPatch()
 
-	// Mock WalkWithPrefix to simulate JSON index files
+	// Mock WalkWithPrefix to simulate JSON index files. Production builds the prefix using
+	// common.JSONIndexPath ("json_key_index_log"), so the substring match MUST reference
+	// that constant — a shorthand like "json_index" would silently never match.
 	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
 		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
 			recursive bool, fn storage.ChunkObjectWalkFunc,
 		) error {
-			if strings.Contains(prefix, "json_index") {
+			if strings.Contains(prefix, common.JSONIndexPath) {
 				chunkInfo := &storage.ChunkObjectInfo{
-					FilePath:   "gc/json_index/402/1/100/10/1002/102/json_file1",
+					FilePath:   "gc/json_key_index_log/402/1/100/10/1002/102/json_file1",
 					ModifyTime: time.Now().Add(-time.Hour),
 				}
 				fn(chunkInfo)
@@ -2504,14 +2481,9 @@ func TestGarbageCollector_recycleUnusedJSONIndexFiles_SnapshotReference(t *testi
 		}).Build()
 	defer mockWalk.UnPatch()
 
-	// Mock IsRefIndexLoadedForCollection to return true (RefIndex is loaded)
-	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
-	defer mockIsRefIndexLoaded.UnPatch()
-
-	// Mock GetSnapshotBySegment to return snapshot IDs (segment is protected)
-	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).
-		Return([]int64{1, 2}).Build()
-	defer mockGetSnapshotBySegment.UnPatch()
+	// New O(1) API: IsSegmentGCBlocked returns true (segment protected by snapshot).
+	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(true).Build()
+	defer mockIsSegBlocked.UnPatch()
 
 	// Execute
 	gc.recycleUnusedJSONIndexFiles(ctx, nil)
@@ -2522,7 +2494,8 @@ func TestGarbageCollector_recycleUnusedJSONIndexFiles_SnapshotReference(t *testi
 }
 
 // TestGarbageCollector_recycleUnusedBinlogFiles_SkipWhenRefIndexNotLoaded tests that binlog GC
-// is skipped when IsRefIndexLoadedForCollection returns false (startup window).
+// is skipped when the unified IsSegmentGCBlocked returns true due to an unloaded RefIndex
+// (fail-closed coarse block during the startup window).
 func TestGarbageCollector_recycleUnusedBinlogFiles_SkipWhenRefIndexNotLoaded(t *testing.T) {
 	ctx := context.Background()
 
@@ -2577,15 +2550,10 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SkipWhenRefIndexNotLoaded(t *
 	mockParseSegID := mockey.Mock(storage.ParseSegmentIDByBinlog).Return(int64(1001), nil).Build()
 	defer mockParseSegID.UnPatch()
 
-	// Mock IsAllRefIndexLoaded (pre-fetched before walk, used for segments not in meta)
-	mockAllLoaded := mockey.Mock((*snapshotMeta).IsAllRefIndexLoaded).Return(false).Build()
-	defer mockAllLoaded.UnPatch()
-
-	// Mock IsRefIndexLoadedForCollection to return false (per-collection check since segment is in meta)
-	mockCollLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(false).Build()
-	defer mockCollLoaded.UnPatch()
-
-	// Do NOT mock GetSnapshotBySegment - it should not be called
+	// New O(1) API: IsSegmentGCBlocked returns true because the collection's RefIndex
+	// is unloaded (fail-closed coarse block during startup window).
+	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(true).Build()
+	defer mockIsSegBlocked.UnPatch()
 
 	gc.recycleUnusedBinlogFiles(ctx)
 
@@ -2593,7 +2561,7 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SkipWhenRefIndexNotLoaded(t *
 }
 
 // TestGarbageCollector_recycleUnusedTextIndexFiles_SkipWhenRefIndexNotLoaded tests that text index GC
-// is skipped when IsRefIndexLoadedForCollection returns false (startup window).
+// is skipped when the unified IsSegmentGCBlocked returns true due to an unloaded RefIndex.
 func TestGarbageCollector_recycleUnusedTextIndexFiles_SkipWhenRefIndexNotLoaded(t *testing.T) {
 	ctx := context.Background()
 
@@ -2645,13 +2613,15 @@ func TestGarbageCollector_recycleUnusedTextIndexFiles_SkipWhenRefIndexNotLoaded(
 		}).Build()
 	defer mockRemove.UnPatch()
 
+	// Substring match references common.TextIndexPath ("text_log") to stay in sync with
+	// production metautil.BuildTextIndexPrefix — a shorthand would silently never match.
 	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
 		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
 			recursive bool, fn storage.ChunkObjectWalkFunc,
 		) error {
-			if strings.Contains(prefix, "text_index") {
+			if strings.Contains(prefix, common.TextIndexPath) {
 				chunkInfo := &storage.ChunkObjectInfo{
-					FilePath:   "gc/text_index/401/1/100/10/1001/101/file1",
+					FilePath:   "gc/text_log/401/1/100/10/1001/101/file1",
 					ModifyTime: time.Now().Add(-time.Hour),
 				}
 				fn(chunkInfo)
@@ -2660,11 +2630,9 @@ func TestGarbageCollector_recycleUnusedTextIndexFiles_SkipWhenRefIndexNotLoaded(
 		}).Build()
 	defer mockWalk.UnPatch()
 
-	// Mock IsRefIndexLoadedForCollection to return false (RefIndex not loaded yet)
-	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(false).Build()
-	defer mockIsRefIndexLoaded.UnPatch()
-
-	// Do NOT mock GetSnapshotBySegment - it should not be called
+	// New O(1) API: IsSegmentGCBlocked returns true due to unloaded RefIndex (fail-closed).
+	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(true).Build()
+	defer mockIsSegBlocked.UnPatch()
 
 	gc.recycleUnusedTextIndexFiles(ctx, nil)
 
@@ -2672,7 +2640,7 @@ func TestGarbageCollector_recycleUnusedTextIndexFiles_SkipWhenRefIndexNotLoaded(
 }
 
 // TestGarbageCollector_recycleUnusedJSONIndexFiles_SkipWhenRefIndexNotLoaded tests that JSON index GC
-// is skipped when IsRefIndexLoadedForCollection returns false (startup window).
+// is skipped when the unified IsSegmentGCBlocked returns true due to an unloaded RefIndex.
 func TestGarbageCollector_recycleUnusedJSONIndexFiles_SkipWhenRefIndexNotLoaded(t *testing.T) {
 	ctx := context.Background()
 
@@ -2724,13 +2692,15 @@ func TestGarbageCollector_recycleUnusedJSONIndexFiles_SkipWhenRefIndexNotLoaded(
 		}).Build()
 	defer mockRemove.UnPatch()
 
+	// Substring match references common.JSONIndexPath ("json_key_index_log") to stay in
+	// sync with production — a shorthand like "json_index" would silently never match.
 	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
 		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
 			recursive bool, fn storage.ChunkObjectWalkFunc,
 		) error {
-			if strings.Contains(prefix, "json_index") {
+			if strings.Contains(prefix, common.JSONIndexPath) {
 				chunkInfo := &storage.ChunkObjectInfo{
-					FilePath:   "gc/json_index/402/1/100/10/1002/102/json_file1",
+					FilePath:   "gc/json_key_index_log/402/1/100/10/1002/102/json_file1",
 					ModifyTime: time.Now().Add(-time.Hour),
 				}
 				fn(chunkInfo)
@@ -2739,11 +2709,9 @@ func TestGarbageCollector_recycleUnusedJSONIndexFiles_SkipWhenRefIndexNotLoaded(
 		}).Build()
 	defer mockWalk.UnPatch()
 
-	// Mock IsRefIndexLoadedForCollection to return false (RefIndex not loaded yet)
-	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(false).Build()
-	defer mockIsRefIndexLoaded.UnPatch()
-
-	// Do NOT mock GetSnapshotBySegment - it should not be called
+	// New O(1) API: IsSegmentGCBlocked returns true due to unloaded RefIndex (fail-closed).
+	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(true).Build()
+	defer mockIsSegBlocked.UnPatch()
 
 	gc.recycleUnusedJSONIndexFiles(ctx, nil)
 
@@ -2803,13 +2771,13 @@ func TestGarbageCollector_recycleUnusedIndexFiles_SegIdxNil_SnapshotProtection(t
 	mockGetSnapMeta := mockey.Mock(meta.GetSnapshotMeta).Return(smMeta).Build()
 	defer mockGetSnapMeta.UnPatch()
 
-	// Mock IsAllRefIndexLoaded to return true (all RefIndexes loaded)
-	mockAllLoaded := mockey.Mock((*snapshotMeta).IsAllRefIndexLoaded).Return(true).Build()
-	defer mockAllLoaded.UnPatch()
-
-	// Mock GetSnapshotByBuildID to return snapshot IDs (buildID is referenced by snapshot)
-	mockGetSnapshotByBuildID := mockey.Mock((*snapshotMeta).GetSnapshotByBuildID).Return([]int64{1}).Build()
-	defer mockGetSnapshotByBuildID.UnPatch()
+	// New O(1) API: mock IsBuildIDGCBlocked to return true for our buildID (the orphan
+	// branch passes collectionID = -1 since it has no segIdx context).
+	mockIsBuildIDBlocked := mockey.Mock((*snapshotMeta).IsBuildIDGCBlocked).To(
+		func(sm *snapshotMeta, collID, bid int64) bool {
+			return bid == buildID
+		}).Build()
+	defer mockIsBuildIDBlocked.UnPatch()
 
 	removeWithPrefixCalled := false
 	mockRemoveWithPrefix := mockey.Mock((*storage.LocalChunkManager).RemoveWithPrefix).To(
@@ -2878,13 +2846,12 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SegmentNil_SnapshotProtection
 	mockParseSegID := mockey.Mock(storage.ParseSegmentIDByBinlog).Return(int64(1001), nil).Build()
 	defer mockParseSegID.UnPatch()
 
-	// Mock IsAllRefIndexLoaded to return true (all RefIndexes loaded)
-	mockAllLoaded := mockey.Mock((*snapshotMeta).IsAllRefIndexLoaded).Return(true).Build()
-	defer mockAllLoaded.UnPatch()
-
-	// Mock GetSnapshotBySegment to return snapshot IDs (segment is protected)
-	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).Return([]int64{1, 2}).Build()
-	defer mockGetSnapshotBySegment.UnPatch()
+	// New O(1) API: IsSegmentGCBlocked returns true so the file is kept.
+	// The caller passes collectionID = -1 (segment is nil in this test), which exercises
+	// the "global fail-closed" branch of the new API — but here we short-circuit to true
+	// directly to simulate a snapshot referencing segment 1001.
+	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(true).Build()
+	defer mockIsSegBlocked.UnPatch()
 
 	gc.recycleUnusedBinlogFiles(ctx)
 
@@ -2960,14 +2927,9 @@ func TestGarbageCollector_recycleUnusedJSONStatsFiles_SnapshotReference(t *testi
 		}).Build()
 	defer mockWalk.UnPatch()
 
-	// Mock IsRefIndexLoadedForCollection to return true
-	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
-	defer mockIsRefIndexLoaded.UnPatch()
-
-	// Mock GetSnapshotBySegment to return snapshot IDs (segment is protected)
-	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).
-		Return([]int64{1, 2}).Build()
-	defer mockGetSnapshotBySegment.UnPatch()
+	// New O(1) API: IsSegmentGCBlocked returns true for the referenced segment.
+	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(true).Build()
+	defer mockIsSegBlocked.UnPatch()
 
 	gc.recycleUnusedJSONStatsFiles(ctx, nil)
 
@@ -3093,10 +3055,9 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 	removeObjectFilesCalled := false
 	droppedSegmentIDs := []int64{}
 
-	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
-	defer mockIsRefIndexLoaded.UnPatch()
-	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).Return([]int64{}).Build()
-	defer mockGetSnapshotBySegment.UnPatch()
+	// Snapshot layer transparent: no segment is blocked.
+	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(false).Build()
+	defer mockIsSegBlocked.UnPatch()
 	mockListLoaded := mockey.Mock((*ServerHandler).ListLoadedSegments).Return([]int64{}, nil).Build()
 	defer mockListLoaded.UnPatch()
 	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true).Build()
@@ -3178,13 +3139,9 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_SkipV3(t *testing.T) {
 
 	removedFiles := []string{}
 
-	// Mock snapshot methods to avoid nil pointer on snapshotMeta internals
-	mockAllLoaded := mockey.Mock((*snapshotMeta).IsAllRefIndexLoaded).Return(true).Build()
-	defer mockAllLoaded.UnPatch()
-	mockCollLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoadedForCollection).Return(true).Build()
-	defer mockCollLoaded.UnPatch()
-	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).Return([]int64{}).Build()
-	defer mockGetSnapshotBySegment.UnPatch()
+	// Snapshot layer transparent: no segment is blocked.
+	mockIsSegBlocked := mockey.Mock((*snapshotMeta).IsSegmentGCBlocked).Return(false).Build()
+	defer mockIsSegBlocked.UnPatch()
 
 	// Mock WalkWithPrefix to return V3 files under insert_log
 	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(

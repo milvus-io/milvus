@@ -79,11 +79,13 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 	}).Build()
 	defer mockSaveSnapshot.UnPatch()
 
-	// Create snapshot manager
+	// Create snapshot manager. We need a properly-initialized snapshotMeta so that
+	// the unconditional SetSnapshotPending / ClearSnapshotPending calls (required for
+	// GenSnapshot → SaveSnapshot atomicity) don't panic on uninitialized maps.
 	sm := NewSnapshotManager(
-		nil,             // meta
-		&snapshotMeta{}, // snapshotMeta
-		nil,             // copySegmentMeta
+		nil,                             // meta
+		createTestSnapshotMetaLoaded(t), // snapshotMeta
+		nil,                             // copySegmentMeta
 		mockAllocator,
 		mockHandler,
 		nil, // broker
@@ -194,7 +196,7 @@ func TestSnapshotManager_CreateSnapshot_AllocatorError(t *testing.T) {
 
 	sm := NewSnapshotManager(
 		nil,
-		&snapshotMeta{},
+		createTestSnapshotMetaLoaded(t),
 		nil,
 		mockAllocator,
 		nil,
@@ -231,7 +233,7 @@ func TestSnapshotManager_CreateSnapshot_GenSnapshotError(t *testing.T) {
 
 	sm := NewSnapshotManager(
 		nil,
-		&snapshotMeta{},
+		createTestSnapshotMetaLoaded(t),
 		nil,
 		mockAllocator,
 		mockHandler,
@@ -276,7 +278,7 @@ func TestSnapshotManager_CreateSnapshot_SaveError(t *testing.T) {
 
 	sm := NewSnapshotManager(
 		nil,
-		&snapshotMeta{},
+		createTestSnapshotMetaLoaded(t),
 		nil,
 		mockAllocator,
 		mockHandler,
@@ -373,7 +375,13 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *test
 	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100))
 }
 
-func TestSnapshotManager_CreateSnapshot_NoSnapshotPendingWithoutProtection(t *testing.T) {
+// Regression for PR #48227 review comment #4: even when the user requests zero
+// long-term compaction protection, CreateSnapshot must hold SetSnapshotPending
+// across the GenSnapshot → SaveSnapshot window. Otherwise concurrent compaction
+// could drop segments that the in-flight snapshot is about to reference, leaving
+// the snapshot immediately broken. Before the fix the SetSnapshotPending call was
+// gated on compactionProtectionSeconds > 0.
+func TestSnapshotManager_CreateSnapshot_PendingHeldEvenWithoutLongTermProtection(t *testing.T) {
 	ctx := context.Background()
 
 	mockAllocator := allocator.NewMockAllocator(t)
@@ -394,9 +402,12 @@ func TestSnapshotManager_CreateSnapshot_NoSnapshotPendingWithoutProtection(t *te
 
 	snapshotMetaInstance := createTestSnapshotMetaLoaded(t)
 
-	// Mock SaveSnapshot to verify snapshot pending is NOT set when compactionProtectionSeconds is 0
+	// While SaveSnapshot is in flight, the collection MUST be marked as blocked so
+	// concurrent compaction commits see the TOCTOU guard and back off. We observe
+	// this by intercepting SaveSnapshot and asserting the block is visible at that point.
 	mockSaveSnapshot := mockey.Mock((*snapshotMeta).SaveSnapshot).To(func(sm *snapshotMeta, ctx context.Context, data *SnapshotData) error {
-		assert.False(t, sm.IsCollectionCompactionBlocked(data.SnapshotInfo.GetCollectionId()))
+		assert.True(t, sm.IsCollectionCompactionBlocked(data.SnapshotInfo.GetCollectionId()),
+			"collection must be blocked during SaveSnapshot even with protection=0")
 		return nil
 	}).Build()
 	defer mockSaveSnapshot.UnPatch()
@@ -413,6 +424,10 @@ func TestSnapshotManager_CreateSnapshot_NoSnapshotPendingWithoutProtection(t *te
 
 	_, err := sm.CreateSnapshot(ctx, 100, "test_snap", "desc", 0) // compactionProtectionSeconds = 0
 	assert.NoError(t, err)
+
+	// After CreateSnapshot returns, the deferred ClearSnapshotPending must have run.
+	assert.False(t, snapshotMetaInstance.IsCollectionCompactionBlocked(100),
+		"block must be released once CreateSnapshot finishes")
 }
 
 func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnAllocError(t *testing.T) {
