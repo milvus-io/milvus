@@ -223,8 +223,8 @@ ManifestGroupTranslator::get_cells(
                               meta_.chunk_memory_size_[cid]});
     }
 
-    // Create factory using ChunkReader — reads a batch of row groups at once
-    auto factory = milvus::segcore::MakeChunkReaderFactory(chunk_reader_);
+    // Create factory using ChunkReader — reads row groups via streaming reader
+    auto factory = milvus::segcore::MakeChunkStreamingFactory(chunk_reader_);
 
     // Submit cell-batch loading tasks
     auto& pool = milvus::ThreadPools::GetThreadPool(

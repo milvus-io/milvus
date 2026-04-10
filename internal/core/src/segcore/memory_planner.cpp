@@ -251,7 +251,7 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
 std::vector<std::future<void>>
 LoadCellBatchAsync(milvus::OpContext* op_ctx,
                    std::vector<CellSpec> cell_specs,
-                   BatchReaderFactory reader_factory,
+                   StreamingReaderFactory reader_factory,
                    std::shared_ptr<CellReaderChannel>& channel,
                    int64_t memory_limit,
                    milvus::proto::common::LoadPriority priority) {
@@ -337,7 +337,7 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
         std::max<int64_t>(memory_limit / static_cast<int64_t>(batches.size()),
                           FILE_SLICE_SIZE.load());
     auto shared_factory =
-        std::make_shared<BatchReaderFactory>(std::move(reader_factory));
+        std::make_shared<StreamingReaderFactory>(std::move(reader_factory));
 
     std::vector<std::future<void>> futures;
     futures.reserve(batches.size());
@@ -356,30 +356,30 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
             });
             CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
 
-            auto tables_result = (*shared_factory)(batch.file_idx,
+            auto reader_result = (*shared_factory)(batch.file_idx,
                                                    batch.rg_offset,
                                                    batch.rg_count,
                                                    reader_memory_limit);
-            AssertInfo(tables_result.ok(),
-                       "[StorageV2] Failed to read batch: " +
-                           tables_result.status().ToString());
-            auto all_tables = std::move(tables_result).ValueOrDie();
-            AssertInfo(all_tables.size() == static_cast<size_t>(batch.rg_count),
-                       "reader returns less tables than expected, batch rg "
-                       "count: {}, result size: {}",
-                       batch.rg_count,
-                       all_tables.size());
+            AssertInfo(reader_result.ok(),
+                       "[StorageV2] Failed to create streaming reader: " +
+                           reader_result.status().ToString());
+            auto reader = std::move(reader_result).ValueOrDie();
 
-            int64_t table_offset = 0;
+            // Stream row groups per-cell: read only what each cell needs,
+            // push immediately, so previous cell's tables can be freed
+            // before next cell is read.
             for (const auto& cell : batch.cells) {
                 auto cell_result = std::make_shared<CellLoadResult>();
                 cell_result->cid = cell.cid;
                 cell_result->tables.reserve(cell.rg_count);
                 for (int64_t i = 0; i < cell.rg_count; ++i) {
+                    auto table_result = reader->ReadNext();
+                    AssertInfo(table_result.ok(),
+                               "[StorageV2] Failed to read row group: " +
+                                   table_result.status().ToString());
                     cell_result->tables.push_back(
-                        std::move(all_tables[table_offset + i]));
+                        std::move(table_result).ValueOrDie());
                 }
-                table_offset += cell.rg_count;
                 channel->push(std::move(cell_result));
             }
         }));
@@ -388,16 +388,40 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
     return futures;
 }
 
-BatchReaderFactory
-MakeFileReaderFactory(std::vector<std::string> remote_files,
-                      milvus_storage::ArrowFileSystemPtr fs) {
+// ---- File-based streaming reader ----
+
+class FileSequentialReader : public SequentialRowGroupReader {
+ public:
+    explicit FileSequentialReader(
+        std::shared_ptr<milvus_storage::FileRowGroupReader> reader)
+        : reader_(std::move(reader)) {
+    }
+
+    ~FileSequentialReader() override {
+        (void)reader_->Close();
+    }
+
+    arrow::Result<std::shared_ptr<arrow::Table>>
+    ReadNext() override {
+        std::shared_ptr<arrow::Table> table;
+        ARROW_RETURN_NOT_OK(reader_->ReadNextRowGroup(&table));
+        return table;
+    }
+
+ private:
+    std::shared_ptr<milvus_storage::FileRowGroupReader> reader_;
+};
+
+StreamingReaderFactory
+MakeFileStreamingFactory(std::vector<std::string> remote_files,
+                         milvus_storage::ArrowFileSystemPtr fs) {
     auto files =
         std::make_shared<std::vector<std::string>>(std::move(remote_files));
     return [files, fs](size_t batch_key,
                        int64_t rg_offset,
                        int64_t total_rg_count,
                        int64_t reader_memory_limit)
-               -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+               -> arrow::Result<std::unique_ptr<SequentialRowGroupReader>> {
         ARROW_ASSIGN_OR_RAISE(auto reader,
                               milvus_storage::FileRowGroupReader::Make(
                                   fs,
@@ -405,29 +429,42 @@ MakeFileReaderFactory(std::vector<std::string> remote_files,
                                   nullptr,
                                   reader_memory_limit,
                                   milvus::storage::GetReaderProperties()));
-        auto close_guard =
-            folly::makeGuard([&reader]() { (void)reader->Close(); });
         ARROW_RETURN_NOT_OK(
             reader->SetRowGroupOffsetAndCount(rg_offset, total_rg_count));
-        std::vector<std::shared_ptr<arrow::Table>> tables;
-        tables.reserve(total_rg_count);
-        for (int64_t i = 0; i < total_rg_count; ++i) {
-            std::shared_ptr<arrow::Table> table;
-            ARROW_RETURN_NOT_OK(reader->ReadNextRowGroup(&table));
-            tables.push_back(std::move(table));
-        }
-        return tables;
+        return std::make_unique<FileSequentialReader>(std::move(reader));
     };
 }
 
-BatchReaderFactory
-MakeChunkReaderFactory(
+// ---- ChunkReader-based streaming reader ----
+
+class ChunkSequentialReader : public SequentialRowGroupReader {
+ public:
+    explicit ChunkSequentialReader(
+        std::vector<std::shared_ptr<arrow::Table>> tables)
+        : tables_(std::move(tables)), pos_(0) {
+    }
+
+    arrow::Result<std::shared_ptr<arrow::Table>>
+    ReadNext() override {
+        if (pos_ >= tables_.size()) {
+            return nullptr;
+        }
+        return std::move(tables_[pos_++]);
+    }
+
+ private:
+    std::vector<std::shared_ptr<arrow::Table>> tables_;
+    size_t pos_;
+};
+
+StreamingReaderFactory
+MakeChunkStreamingFactory(
     std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader) {
     return [chunk_reader](size_t /*batch_key*/,
                           int64_t rg_offset,
                           int64_t total_rg_count,
                           int64_t /*reader_memory_limit*/)
-               -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
+               -> arrow::Result<std::unique_ptr<SequentialRowGroupReader>> {
         std::vector<int64_t> rg_indices(total_rg_count);
         std::iota(rg_indices.begin(), rg_indices.end(), rg_offset);
         ARROW_ASSIGN_OR_RAISE(
@@ -441,7 +478,7 @@ MakeChunkReaderFactory(
                 arrow::Table::FromRecordBatches({std::move(batch)}));
             tables.push_back(std::move(table));
         }
-        return tables;
+        return std::make_unique<ChunkSequentialReader>(std::move(tables));
     };
 }
 
