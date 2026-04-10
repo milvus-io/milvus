@@ -98,7 +98,7 @@ minio:
   # minio.address and minio.port together generate the valid access to MinIO or S3 service.
   # MinIO preferentially acquires the valid IP address from the environment variable MINIO_ADDRESS when Milvus is started.
   # Default value applies when MinIO or S3 is running on the same network with Milvus.
-  address: localhost:9000
+  address: localhost
   port: 9000 # Port of MinIO or S3 service.
   # Access key ID that MinIO or S3 issues to user for authorized access.
   # Environment variable: MINIO_ACCESS_KEY_ID or minio.accessKeyID
@@ -235,7 +235,7 @@ pulsar:
   # Default value applies when Pulsar is running on the same network with Milvus.
   address: localhost
   port: 6650 # Port of Pulsar service.
-  webport: 80 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
+  webport: 18080 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
   # The maximum size of each message in Pulsar. Unit: Byte.
   # By default, Pulsar can transmit at most 2MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
   # If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
@@ -989,10 +989,6 @@ common:
     middlePriorityRatio: -1 # amplification ratio for middle priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
-    # Hash algorithm used for internal hashing (e.g. telemetry fingerprints, config digests).
-    # Supported values: sha256 (default), sha3 (SHA3-256, per NIST SP 800-185).
-    # Changing this value will invalidate any previously computed hashes.
-    hashAlgorithm: sha256
     authorizationEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
@@ -1003,6 +999,7 @@ common:
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
     exprEnabled: false # Whether to enable the /expr endpoint for debugging. When enabled, only root user can access it via HTTP Basic Auth on Proxy nodes.
+    hashAlgorithm: sha256 # Hash algorithm for internal hashing (e.g. telemetry fingerprints, config digests). Supported values: sha256 (default), sha3 (SHA3-256). Changing this invalidates previously computed hashes.
     rbac:
       overrideBuiltInPrivilegeGroups:
         enabled: false # Whether to override build-in privilege groups
