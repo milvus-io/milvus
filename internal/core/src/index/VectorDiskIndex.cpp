@@ -511,14 +511,7 @@ VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
                               KnowhereStatusString(res.error()),
                               res.what()));
     }
-    auto tensor = res.value()->GetTensor();
-    auto row_num = res.value()->GetRows();
-    auto dim = res.value()->GetDim();
-    int64_t data_size = milvus::GetVecRowSize<T>(dim) * row_num;
-    std::vector<uint8_t> raw_data;
-    raw_data.resize(data_size);
-    memcpy(raw_data.data(), tensor, data_size);
-    return raw_data;
+    return this->template DecodeVectorByIdsResult<T>(res.value());
 }
 
 template <typename T>
@@ -536,22 +529,7 @@ VectorDiskAnnIndex<T>::GetEmbListByIds(const DatasetPtr dataset,
                               KnowhereStatusString(res.error()),
                               res.what()));
     }
-
-    auto result = res.value();
-    auto tensor = result->GetTensor();
-    auto dim = result->GetDim();
-    auto num_el_ids = result->GetRows();
-    const size_t* offsets_ptr =
-        result->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
-    AssertInfo(offsets_ptr != nullptr, "EMB_LIST_OFFSET not found in result");
-
-    size_t total_vecs = offsets_ptr[num_el_ids];
-    int64_t data_size = milvus::GetVecRowSize<T>(dim) * total_vecs;
-    std::vector<uint8_t> raw_data(data_size);
-    memcpy(raw_data.data(), tensor, data_size);
-
-    std::vector<size_t> offsets(offsets_ptr, offsets_ptr + num_el_ids + 1);
-    return {std::move(raw_data), std::move(offsets)};
+    return this->template DecodeEmbListByIdsResult<T>(res.value());
 }
 
 template <typename T>

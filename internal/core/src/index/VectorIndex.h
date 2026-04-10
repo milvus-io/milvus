@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <map>
 #include <memory>
 #include <string>
@@ -31,6 +32,7 @@
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
 #include "common/OpContext.h"
+#include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 
 namespace milvus::index {
@@ -213,6 +215,40 @@ class VectorIndex : public IndexBase {
     }
 
  protected:
+    template <typename T>
+    static std::vector<uint8_t>
+    DecodeVectorByIdsResult(const knowhere::DataSetPtr& result) {
+        auto tensor = result->GetTensor();
+        auto row_num = result->GetRows();
+        auto dim = result->GetDim();
+        size_t data_size =
+            static_cast<size_t>(milvus::GetVecRowSize<T>(dim)) * row_num;
+        std::vector<uint8_t> raw_data(data_size);
+        std::memcpy(raw_data.data(), tensor, data_size);
+        return raw_data;
+    }
+
+    template <typename T>
+    static std::pair<std::vector<uint8_t>, std::vector<size_t>>
+    DecodeEmbListByIdsResult(const knowhere::DataSetPtr& result) {
+        auto tensor = result->GetTensor();
+        auto dim = result->GetDim();
+        auto num_el_ids = result->GetRows();
+        const size_t* offsets_ptr =
+            result->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
+        AssertInfo(offsets_ptr != nullptr,
+                   "EMB_LIST_OFFSET not found in result");
+
+        size_t total_vecs = offsets_ptr[num_el_ids];
+        size_t data_size =
+            static_cast<size_t>(milvus::GetVecRowSize<T>(dim)) * total_vecs;
+        std::vector<uint8_t> raw_data(data_size);
+        std::memcpy(raw_data.data(), tensor, data_size);
+
+        std::vector<size_t> offsets(offsets_ptr, offsets_ptr + num_el_ids + 1);
+        return {std::move(raw_data), std::move(offsets)};
+    }
+
     milvus::OffsetMapping offset_mapping_;
 
  private:
