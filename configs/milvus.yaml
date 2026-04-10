@@ -989,6 +989,10 @@ common:
     middlePriorityRatio: -1 # amplification ratio for middle priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
+    # Hash algorithm used for internal hashing (e.g. telemetry fingerprints, config digests).
+    # Supported values: sha256 (default), sha3 (SHA3-256, per NIST SP 800-185).
+    # Changing this value will invalidate any previously computed hashes.
+    hashAlgorithm: sha256
     authorizationEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
