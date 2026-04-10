@@ -235,17 +235,22 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 
 	indexType := it.newIndexParams[common.IndexTypeKey]
 	var fieldDataSize uint64
-	var err error
 
-	// Ignore the error here, this param will only be used for diskann and aisaq
-	if it.req.GetField().GetDataType() == schemapb.DataType_ArrayOfVector {
+	// Estimate field data size, only used for diskann and aisaq
+	dim := uint64(it.req.GetDim())
+	numRows := uint64(it.req.GetNumRows())
+	switch it.req.GetField().GetDataType() {
+	case schemapb.DataType_BinaryVector:
+		fieldDataSize = dim / 8 * numRows
+	case schemapb.DataType_FloatVector:
+		fieldDataSize = dim * numRows * 4
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		fieldDataSize = dim * numRows * 2
+	case schemapb.DataType_ArrayOfVector:
 		fieldDataSize = getFieldDataSizeFromBinlogs(it.req.GetInsertLogs(), it.req.GetField().GetFieldID())
-	} else {
-		fieldDataSize, _ = estimateFieldDataSize(it.req.GetDim(), it.req.GetNumRows(), it.req.GetField().GetDataType())
 	}
 	if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
-		err = indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize))
-		if err != nil {
+		if err := indexparams.SetDiskIndexBuildParams(it.newIndexParams, int64(fieldDataSize)); err != nil {
 			log.Warn("failed to fill disk index params", zap.Error(err))
 			return err
 		}

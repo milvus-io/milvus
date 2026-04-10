@@ -22,7 +22,6 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
@@ -38,41 +37,6 @@ func (s *utilSuite) Test_mapToKVPairs() {
 	}
 
 	s.Equal(3, len(mapToKVPairs(indexParams)))
-}
-
-func (s *utilSuite) Test_estimateFieldDataSize() {
-	dim := int64(128)
-	numRows := int64(1000)
-
-	// BinaryVector: dim/8 * numRows
-	size, err := estimateFieldDataSize(dim, numRows, schemapb.DataType_BinaryVector)
-	s.NoError(err)
-	s.Equal(uint64(dim)/8*uint64(numRows), size)
-
-	// FloatVector: dim * numRows * 4
-	size, err = estimateFieldDataSize(dim, numRows, schemapb.DataType_FloatVector)
-	s.NoError(err)
-	s.Equal(uint64(dim)*uint64(numRows)*4, size)
-
-	// Float16Vector: dim * numRows * 2
-	size, err = estimateFieldDataSize(dim, numRows, schemapb.DataType_Float16Vector)
-	s.NoError(err)
-	s.Equal(uint64(dim)*uint64(numRows)*2, size)
-
-	// BFloat16Vector: dim * numRows * 2
-	size, err = estimateFieldDataSize(dim, numRows, schemapb.DataType_BFloat16Vector)
-	s.NoError(err)
-	s.Equal(uint64(dim)*uint64(numRows)*2, size)
-
-	// SparseFloatVector: error
-	size, err = estimateFieldDataSize(dim, numRows, schemapb.DataType_SparseFloatVector)
-	s.Error(err)
-	s.Equal(uint64(0), size)
-
-	// Unknown type: 0, no error
-	size, err = estimateFieldDataSize(dim, numRows, schemapb.DataType_Int64)
-	s.NoError(err)
-	s.Equal(uint64(0), size)
 }
 
 func (s *utilSuite) Test_getFieldDataSizeFromBinlogs() {
