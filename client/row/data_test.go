@@ -52,7 +52,7 @@ func (s *RowsSuite) TestRowsToColumns() {
 
 	s.Run("mol", func() {
 		type MolStruct struct {
-			ID  int64  `milvus:"primary_key"`
+			ID  int64 `milvus:"primary_key"`
 			Mol string
 		}
 		schema := entity.NewSchema().

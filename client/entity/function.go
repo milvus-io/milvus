@@ -28,8 +28,8 @@ type FunctionType = schemapb.FunctionType
 
 // provide package alias
 const (
-	FunctionTypeUnknown       = schemapb.FunctionType_Unknown
-	FunctionTypeBM25          = schemapb.FunctionType_BM25
+	FunctionTypeUnknown        = schemapb.FunctionType_Unknown
+	FunctionTypeBM25           = schemapb.FunctionType_BM25
 	FunctionTypeMinHash        = schemapb.FunctionType_MinHash
 	FunctionTypeTextEmbedding  = schemapb.FunctionType_TextEmbedding
 	FunctionTypeRerank         = schemapb.FunctionType_Rerank
