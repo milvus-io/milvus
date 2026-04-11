@@ -96,6 +96,14 @@ class IndexBase {
         return JsonCastType::UNKNOWN;
     }
 
+    // Returns a bitmap indicating which rows have valid indexed values.
+    // Used by JSON Path Index for EXISTS queries: valid_bitset_[i] = true
+    // means row i has a value at the indexed path.
+    virtual TargetBitmap
+    Exists() {
+        ThrowInfo(NotImplemented, "Exists() not supported for this index type");
+    }
+
     // TODO: how to get the cell byte size?
     virtual cachinglayer::ResourceUsage
     CellByteSize() const {

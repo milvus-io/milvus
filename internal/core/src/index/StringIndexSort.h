@@ -115,6 +115,13 @@ class StringIndexSort : public StringIndex {
     TargetBitmap
     IsNotNull() override;
 
+    TargetBitmap
+    Exists() override {
+        TargetBitmap res(total_num_rows_, true);
+        res &= valid_bitset_;
+        return res;
+    }
+
     const TargetBitmap
     Range(const std::string& value, OpType op) override;
 

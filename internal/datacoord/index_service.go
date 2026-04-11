@@ -181,6 +181,20 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 		// set nested path as json path
 		setIndexParam(req.GetIndexParams(), common.JSONPathKey, nestedPath)
+
+		// JSON path index on STL_SORT, BITMAP, HYBRID requires scalar index engine version >= 3.
+		indexType := indexparamcheck.IndexType(pkgcommon.GetIndexType(req.GetIndexParams()))
+		if indexType == indexparamcheck.IndexSTLSORT ||
+			indexType == indexparamcheck.IndexBitmap ||
+			indexType == indexparamcheck.IndexHybrid {
+			if s.indexEngineVersionManager.ResolveScalarIndexVersion() < 3 {
+				err := merr.WrapErrParameterInvalidMsg(
+					"JSON path index with %s requires scalar index engine version >= 3, current resolved version: %d",
+					indexType, s.indexEngineVersionManager.ResolveScalarIndexVersion())
+				log.Warn("scalar index engine version too low for JSON path index", zap.Error(err))
+				return merr.Status(err), nil
+			}
+		}
 	}
 
 	if req.GetIndexName() == "" {

@@ -4,8 +4,11 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -14,7 +17,21 @@ type STLSORTChecker struct {
 	scalarIndexChecker
 }
 
+var validSTLSORTJSONCastTypes = []string{"DOUBLE", "VARCHAR"}
+
 func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
+	if typeutil.IsJSONType(dataType) {
+		castType, exist := params[common.JSONCastTypeKey]
+		if !exist {
+			return merr.WrapErrParameterMissing(common.JSONCastTypeKey, "json index must specify cast type")
+		}
+		if !lo.Contains(validSTLSORTJSONCastTypes, castType) {
+			return merr.WrapErrParameterInvalidMsg("json_cast_type %v is not supported for STL_SORT index", castType)
+		}
+		if _, exist := params[common.JSONPathKey]; !exist {
+			return merr.WrapErrParameterMissing(common.JSONPathKey, "json index must specify json path")
+		}
+	}
 	return c.scalarIndexChecker.CheckTrain(dataType, elementType, params)
 }
 
@@ -25,6 +42,9 @@ func (c *STLSORTChecker) CheckValidDataType(indexType IndexType, field *schemapb
 		if !typeutil.IsArithmetic(elemType) && !typeutil.IsStringType(elemType) && !typeutil.IsTimestamptzType(elemType) {
 			return errors.New(fmt.Sprintf("STL_SORT are only supported on numeric, varchar or timestamptz field, got struct sub-field of %s", field.GetElementType()))
 		}
+		return nil
+	}
+	if typeutil.IsJSONType(dataType) {
 		return nil
 	}
 	if !typeutil.IsArithmetic(dataType) && !typeutil.IsStringType(dataType) && !typeutil.IsTimestamptzType(dataType) {

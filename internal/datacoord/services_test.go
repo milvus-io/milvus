@@ -2382,7 +2382,7 @@ func TestServer_CreateSnapshot_DuplicateName(t *testing.T) {
 		defer mockGetSnapshot.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -2493,7 +2493,7 @@ func TestServer_DropSnapshot(t *testing.T) {
 		defer mockBroadcast.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -2533,7 +2533,7 @@ func TestServer_DropSnapshot(t *testing.T) {
 		defer mockBroadcast.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -2574,7 +2574,7 @@ func TestServer_DropSnapshot(t *testing.T) {
 		defer mockBroadcast.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -2615,7 +2615,7 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 		defer mockDescribe.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -2648,7 +2648,7 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 		defer mockDescribe.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -2686,7 +2686,7 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 		defer mockDescribe.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -2731,7 +2731,7 @@ func TestServer_ListSnapshots(t *testing.T) {
 		defer mockList.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -2755,7 +2755,7 @@ func TestServer_ListSnapshots(t *testing.T) {
 		defer mockList.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -2779,7 +2779,7 @@ func TestServer_ListSnapshots(t *testing.T) {
 		defer mockList.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -2856,7 +2856,7 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 		defer mockRead.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -2900,7 +2900,7 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		defer mockGet.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 

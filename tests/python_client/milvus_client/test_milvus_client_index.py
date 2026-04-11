@@ -742,15 +742,23 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
+_json_path_index_params_invalid = [
+    ("INVERTED", "BOOL"),
+    ("INVERTED", "DOUBLE"),
+    ("INVERTED", "VARCHAR"),
+    ("INVERTED", "JSON"),
+    ("STL_SORT", "DOUBLE"),
+    ("STL_SORT", "VARCHAR"),
+    ("BITMAP", "BOOL"),
+    ("BITMAP", "VARCHAR"),
+]
+
+
 class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
     """ Test case of search interface """
 
-    @pytest.fixture(scope="function", params=["TRIE", "STL_SORT", "BITMAP"])
+    @pytest.fixture(scope="function", params=["TRIE"])
     def not_supported_varchar_scalar_index(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=["INVERTED"])
-    def supported_varchar_scalar_index(self, request):
         yield request.param
 
     @pytest.fixture(scope="function", params=[DataType.INT8.name, DataType.INT16.name, DataType.INT32.name,
@@ -762,8 +770,25 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
     def not_supported_json_cast_type(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["Json", "BOOL", "double", "varchar"])
-    def supported_json_cast_type(self, request):
+    @pytest.fixture(scope="function", params=_json_path_index_params_invalid, ids=[f"{t[0]}_{t[1]}" for t in _json_path_index_params_invalid])
+    def json_index_params(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function")
+    def supported_varchar_scalar_index(self, json_index_params):
+        """Index type from the combined (index_type, cast_type) fixture.
+        For tests that hardcode cast_type (e.g. 'double'), use
+        supported_double_scalar_index instead."""
+        yield json_index_params[0]
+
+    @pytest.fixture(scope="function")
+    def supported_json_cast_type(self, json_index_params):
+        yield json_index_params[1]
+
+    @pytest.fixture(scope="function", params=["INVERTED", "STL_SORT"])
+    def supported_double_scalar_index(self, request):
+        """Index types that support DOUBLE cast type. Use for tests that
+        hardcode json_cast_type to 'double'."""
         yield request.param
 
     """
@@ -959,10 +984,10 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
     @pytest.mark.parametrize("enable_dynamic_field", [False])
     @pytest.mark.parametrize("invalid_json_path", [1, 1.0, '/'])
     def test_milvus_client_json_path_index_invalid_json_path(self, enable_dynamic_field, invalid_json_path,
-                                                             supported_varchar_scalar_index):
+                                                             supported_double_scalar_index):
         """
-        target: test json path index with invalid json_cast_type
-        method: create json path index with invalid json_cast_type
+        target: test json path index with invalid json_path
+        method: create json path index with invalid json_path
         expected: raise exception
         """
         client = self._client()
@@ -982,7 +1007,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name=json_field_name, index_name="json_index",
-                               index_type=supported_varchar_scalar_index,
+                               index_type=supported_double_scalar_index,
                                params={"json_cast_type": "Double", "json_path": invalid_json_path})
         # 3. create index
         error = {ct.err_code: 65535, ct.err_msg: f"cannot parse identifier: {invalid_json_path}"}
@@ -990,7 +1015,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
                           check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_json_path_index_not_exist_field_non_dynamic(self, supported_varchar_scalar_index):
+    def test_milvus_client_json_path_index_not_exist_field_non_dynamic(self, supported_double_scalar_index):
         """
         target: test json path index with not exist field in non dynamic field scenario
         method: create json path index with not exist field with enable_dynamic_field disabled
@@ -1006,7 +1031,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
+        index_params.add_index(field_name=json_field_name, index_type=supported_double_scalar_index,
                                params={"json_cast_type": "double", "json_path": f"{json_field_name}['a']"})
         error = {ct.err_code: 65535, ct.err_msg: f"cannot create index on non-exist field: {json_field_name}"}
         self.create_collection(client, collection_name, schema=schema, index_params=index_params,
@@ -1014,7 +1039,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_different_index_same_json_path(self, enable_dynamic_field, supported_varchar_scalar_index):
+    def test_milvus_client_different_index_same_json_path(self, enable_dynamic_field, supported_double_scalar_index):
         """
         target: test create different index with different json_cast_type on the same json path of the same field
         method: create different index with different json_cast_type on the same
@@ -1038,13 +1063,13 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name=json_field_name, index_name="json_index",
-                               index_type=supported_varchar_scalar_index,
+                               index_type=supported_double_scalar_index,
                                params={"json_cast_type": "double", "json_path": f"{json_field_name}['a']"})
         self.create_index(client, collection_name, index_params)
         # 4. prepare another index params
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=json_field_name, index_name="json_index",
-                               index_type=supported_varchar_scalar_index,
+                               index_type=supported_double_scalar_index,
                                params={"json_cast_type": "varchar", "json_path": f"{json_field_name}['a']"})
         # 5. create index
         error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one distinct index is allowed per field"}
@@ -1141,6 +1166,18 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
                           check_task=CheckTasks.err_res, check_items=error)
 
 
+_json_path_index_params_valid = [
+    ("INVERTED", "BOOL"),
+    ("INVERTED", "DOUBLE"),
+    ("INVERTED", "VARCHAR"),
+    ("INVERTED", "JSON"),
+    ("STL_SORT", "DOUBLE"),
+    ("STL_SORT", "VARCHAR"),
+    ("BITMAP", "BOOL"),
+    ("BITMAP", "VARCHAR"),
+]
+
+
 class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
     """ Test case of search interface """
 
@@ -1148,13 +1185,17 @@ class TestMilvusClientJsonPathIndexValid(TestMilvusClientV2Base):
     # def not_supported_varchar_scalar_index(self, request):
     #     yield request.param
 
-    @pytest.fixture(scope="function", params=["INVERTED"])
-    def supported_varchar_scalar_index(self, request):
+    @pytest.fixture(scope="function", params=_json_path_index_params_valid, ids=[f"{t[0]}_{t[1]}" for t in _json_path_index_params_valid])
+    def json_index_params(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "BOOL", "double", "varchar", "bool"])
-    def supported_json_cast_type(self, request):
-        yield request.param
+    @pytest.fixture(scope="function")
+    def supported_varchar_scalar_index(self, json_index_params):
+        yield json_index_params[0]
+
+    @pytest.fixture(scope="function")
+    def supported_json_cast_type(self, json_index_params):
+        yield json_index_params[1]
 
     """
     ******************************************************************

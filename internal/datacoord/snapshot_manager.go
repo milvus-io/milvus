@@ -38,11 +38,13 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -294,6 +296,9 @@ type snapshotManager struct {
 	handler Handler       // For generating snapshot data
 	broker  broker.Broker // For querying partition information
 
+	// Index engine version manager for compatibility checks during restore
+	indexEngineVersionManager IndexEngineVersionManager
+
 	// Helper closures
 	getChannelsByCollectionID func(context.Context, int64) ([]RWChannel, error) // For channel mapping
 
@@ -323,6 +328,7 @@ func NewSnapshotManager(
 	handler Handler,
 	broker broker.Broker,
 	getChannelsFunc func(context.Context, int64) ([]RWChannel, error),
+	ievm IndexEngineVersionManager,
 ) SnapshotManager {
 	return &snapshotManager{
 		meta:                      meta,
@@ -332,6 +338,7 @@ func NewSnapshotManager(
 		handler:                   handler,
 		broker:                    broker,
 		getChannelsByCollectionID: getChannelsFunc,
+		indexEngineVersionManager: ievm,
 	}
 }
 
@@ -728,6 +735,11 @@ func (sm *snapshotManager) RestoreIndexes(
 
 		// Validate the index params (basic validation without JSON path parsing)
 		if err := ValidateIndexParams(index); err != nil {
+			return fmt.Errorf("failed to validate index %s: %w", indexInfo.GetIndexName(), err)
+		}
+
+		// Check scalar index engine version for JSON path indexes with new types
+		if err := sm.checkJsonPathIndexVersion(index); err != nil {
 			return fmt.Errorf("failed to validate index %s: %w", indexInfo.GetIndexName(), err)
 		}
 
@@ -1246,4 +1258,29 @@ func (sm *snapshotManager) calculateTimeCost(job CopySegmentJob) uint64 {
 		return uint64((job.GetCompleteTs() - job.GetStartTs()) / 1e6) // Convert nanoseconds to milliseconds
 	}
 	return 0
+}
+
+// checkJsonPathIndexVersion rejects JSON path indexes with STL_SORT, BITMAP,
+// or HYBRID if the cluster's scalar index engine version is below 3.
+func (sm *snapshotManager) checkJsonPathIndexVersion(index *model.Index) error {
+	indexType := indexparamcheck.IndexType(GetIndexType(index.IndexParams))
+	if indexType != indexparamcheck.IndexSTLSORT &&
+		indexType != indexparamcheck.IndexBitmap &&
+		indexType != indexparamcheck.IndexHybrid {
+		return nil
+	}
+
+	indexParams := funcutil.KeyValuePair2Map(index.IndexParams)
+	if _, hasPath := indexParams[common.JSONPathKey]; !hasPath {
+		return nil
+	}
+
+	if sm.indexEngineVersionManager != nil &&
+		sm.indexEngineVersionManager.ResolveScalarIndexVersion() < 3 {
+		return merr.WrapErrParameterInvalidMsg(
+			"JSON path index with %s requires scalar index engine version >= 3, "+
+				"current resolved version: %d; please complete the rolling upgrade first",
+			indexType, sm.indexEngineVersionManager.ResolveScalarIndexVersion())
+	}
+	return nil
 }

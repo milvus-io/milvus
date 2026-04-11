@@ -97,6 +97,13 @@ class BitmapIndex : public ScalarIndex<T> {
     TargetBitmap
     IsNotNull() override;
 
+    TargetBitmap
+    Exists() override {
+        TargetBitmap res(total_num_rows_, true);
+        res &= valid_bitset_;
+        return res;
+    }
+
     const TargetBitmap
     Range(const T& value, OpType op) override;
 

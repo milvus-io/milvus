@@ -3595,16 +3595,32 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                                  "limit": limit})
 
 
+_json_path_index_params = [
+    ("INVERTED", "BOOL"),
+    ("INVERTED", "DOUBLE"),
+    ("INVERTED", "VARCHAR"),
+    ("INVERTED", "JSON"),
+    ("STL_SORT", "DOUBLE"),
+    ("STL_SORT", "VARCHAR"),
+    ("BITMAP", "BOOL"),
+    ("BITMAP", "VARCHAR"),
+]
+
+
 class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
     """ Test case of search interface """
 
-    @pytest.fixture(scope="function", params=["INVERTED"])
-    def supported_varchar_scalar_index(self, request):
+    @pytest.fixture(scope="function", params=_json_path_index_params, ids=[f"{t[0]}_{t[1]}" for t in _json_path_index_params])
+    def json_index_params(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["JSON", "VARCHAR", "double", "bool"])
-    def supported_json_cast_type(self, request):
-        yield request.param
+    @pytest.fixture(scope="function")
+    def supported_varchar_scalar_index(self, json_index_params):
+        yield json_index_params[0]
+
+    @pytest.fixture(scope="function")
+    def supported_json_cast_type(self, json_index_params):
+        yield json_index_params[1]
 
     """
     ******************************************************************

@@ -88,6 +88,7 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 		mockHandler,
 		nil, // broker
 		nil, // getChannelsFunc
+		nil, // indexEngineVersionManager
 	)
 
 	// Execute
@@ -115,6 +116,7 @@ func TestSnapshotManager_CreateSnapshot_DuplicateName(t *testing.T) {
 		nil,
 		nil,
 		nil,
+	nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -149,6 +151,7 @@ func TestSnapshotManager_CreateSnapshot_AllocatorError(t *testing.T) {
 		nil,
 		nil,
 		nil,
+	nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -267,6 +270,7 @@ func TestSnapshotManager_DropSnapshot_Success(t *testing.T) {
 		nil,
 		nil,
 		nil,
+	nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -293,6 +297,7 @@ func TestSnapshotManager_DropSnapshot_NotFound_Idempotent(t *testing.T) {
 		nil,
 		nil,
 		nil,
+	nil, /* indexEngineVersionManager */
 	)
 
 	// Execute - should succeed even if snapshot doesn't exist (idempotent)
@@ -325,6 +330,7 @@ func TestSnapshotManager_DropSnapshot_Error(t *testing.T) {
 		nil,
 		nil,
 		nil,
+	nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -360,6 +366,7 @@ func TestSnapshotManager_GetSnapshot_Success(t *testing.T) {
 		nil,
 		nil,
 		nil,
+	nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -387,6 +394,7 @@ func TestSnapshotManager_GetSnapshot_NotFound(t *testing.T) {
 		nil,
 		nil,
 		nil,
+	nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -429,6 +437,7 @@ func TestSnapshotManager_DescribeSnapshot_Success(t *testing.T) {
 		nil,
 		nil,
 		nil,
+	nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -456,6 +465,7 @@ func TestSnapshotManager_DescribeSnapshot_NotFound(t *testing.T) {
 		nil,
 		nil,
 		nil,
+	nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -489,6 +499,7 @@ func TestSnapshotManager_ListSnapshots_Success(t *testing.T) {
 		nil,
 		nil,
 		nil,
+	nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
@@ -516,6 +527,7 @@ func TestSnapshotManager_ListSnapshots_Error(t *testing.T) {
 		nil,
 		nil,
 		nil,
+	nil, /* indexEngineVersionManager */
 	)
 
 	// Execute
