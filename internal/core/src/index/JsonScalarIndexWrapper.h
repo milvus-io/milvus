@@ -70,6 +70,16 @@ class JsonScalarIndexWrapper : public BaseIndex {
     }
 
     void
+    BuildWithFieldData(
+        const std::vector<FieldDataPtr>& field_datas) override {
+        auto result = ConvertJsonToTypedFieldData<T>(
+            field_datas, json_schema_, nested_path_, cast_type_,
+            cast_function_);
+        non_exist_offsets_ = std::move(result.non_exist_offsets);
+        BaseIndex::BuildWithFieldData(result.field_datas);
+    }
+
+    void
     Build(const Config& config) override {
         auto json_field_datas =
             storage::CacheRawDataAndFillMissing(json_file_manager_, config);

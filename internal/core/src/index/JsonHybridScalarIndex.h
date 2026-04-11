@@ -25,6 +25,7 @@
 #include "common/JsonCastFunction.h"
 #include "common/JsonCastType.h"
 #include "index/HybridScalarIndex.h"
+#include "index/Utils.h"
 #include "index/JsonIndexBuilder.h"
 #include "index/JsonScalarIndexWrapper.h"
 #include "log/Log.h"
@@ -53,6 +54,35 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
           json_schema_(json_schema) {
         json_file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(original_ctx);
+    }
+
+    void
+    BuildWithFieldData(
+        const std::vector<FieldDataPtr>& field_datas) override {
+        auto result = ConvertJsonToTypedFieldData<T>(
+            field_datas, json_schema_, nested_path_, cast_type_,
+            cast_function_);
+        non_exist_offsets_ = std::move(result.non_exist_offsets);
+
+        std::set<T> distinct_vals;
+        for (const auto& data : result.field_datas) {
+            auto n = data->get_num_rows();
+            for (size_t i = 0; i < n; ++i) {
+                if (data->is_valid(i)) {
+                    auto val =
+                        reinterpret_cast<const T*>(data->RawValue(i));
+                    distinct_vals.insert(*val);
+                    if (distinct_vals.size() >=
+                        this->bitmap_index_cardinality_limit_) {
+                        break;
+                    }
+                }
+            }
+        }
+        this->SelectIndexTypeByCardinality(distinct_vals.size());
+        this->BuildInternal(result.field_datas);
+        this->is_built_ = true;
+        this->ComputeByteSize();
     }
 
     void
