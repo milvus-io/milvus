@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/log"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -127,7 +126,6 @@ func (queue *taskQueue) Len() int {
 	for _, tasks := range queue.buckets {
 		taskNum += len(tasks)
 	}
-
 	return taskNum
 }
 
@@ -151,6 +149,107 @@ func (queue *taskQueue) Range(fn func(task Task) bool) {
 	defer queue.mu.RUnlock()
 	for priority := len(queue.buckets) - 1; priority >= 0; priority-- {
 		for _, task := range queue.buckets[priority] {
+			if !fn(task) {
+				return
+			}
+		}
+	}
+}
+
+type nodeTaskQueue struct {
+	mu sync.RWMutex
+	// NodeID -> TaskPriority -> TaskID -> Task
+	buckets map[int64][]map[int64]Task
+}
+
+func newNodeTaskQueue() *nodeTaskQueue {
+	return &nodeTaskQueue{
+		buckets: make(map[int64][]map[int64]Task),
+	}
+}
+
+// Len returns the total number of unique tasks across all nodes.
+// A task appearing in multiple node buckets (e.g. Move task) is counted once.
+func (queue *nodeTaskQueue) Len() int {
+	queue.mu.RLock()
+	defer queue.mu.RUnlock()
+	seen := make(map[int64]struct{})
+	for _, nodeBuckets := range queue.buckets {
+		for _, bucket := range nodeBuckets {
+			for taskID := range bucket {
+				seen[taskID] = struct{}{}
+			}
+		}
+	}
+	return len(seen)
+}
+
+// LenByNode returns the number of tasks related to the specified node.
+func (queue *nodeTaskQueue) LenByNode(nodeID int64) int {
+	queue.mu.RLock()
+	defer queue.mu.RUnlock()
+	nodeBuckets, ok := queue.buckets[nodeID]
+	if !ok {
+		return 0
+	}
+	n := 0
+	for _, bucket := range nodeBuckets {
+		n += len(bucket)
+	}
+	return n
+}
+
+func (queue *nodeTaskQueue) Add(task Task) {
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	for _, action := range task.Actions() {
+		queue.addToBucket(action.Node(), task)
+		if la, ok := action.(*LeaderAction); ok {
+			queue.addToBucket(la.GetLeaderID(), task)
+		}
+	}
+}
+
+func (queue *nodeTaskQueue) Remove(task Task) {
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	for _, action := range task.Actions() {
+		queue.removeFromBucket(action.Node(), task)
+		if la, ok := action.(*LeaderAction); ok {
+			queue.removeFromBucket(la.GetLeaderID(), task)
+		}
+	}
+}
+
+func (queue *nodeTaskQueue) addToBucket(nodeID int64, task Task) {
+	nodeBuckets, ok := queue.buckets[nodeID]
+	if !ok {
+		nodeBuckets = make([]map[int64]Task, len(TaskPriorities))
+		for i := range nodeBuckets {
+			nodeBuckets[i] = make(map[int64]Task)
+		}
+		queue.buckets[nodeID] = nodeBuckets
+	}
+	nodeBuckets[task.Priority()][task.ID()] = task
+}
+
+func (queue *nodeTaskQueue) removeFromBucket(nodeID int64, task Task) {
+	if nodeBuckets, ok := queue.buckets[nodeID]; ok {
+		delete(nodeBuckets[task.Priority()], task.ID())
+	}
+}
+
+// RangeByNode iterates tasks related to the specified node,
+// ordered by priority from high to low.
+func (queue *nodeTaskQueue) RangeByNode(nodeID int64, fn func(task Task) bool) {
+	queue.mu.RLock()
+	defer queue.mu.RUnlock()
+	nodeBuckets, ok := queue.buckets[nodeID]
+	if !ok {
+		return
+	}
+	for priority := len(nodeBuckets) - 1; priority >= 0; priority-- {
+		for _, task := range nodeBuckets[priority] {
 			if !fn(task) {
 				return
 			}
@@ -308,12 +407,12 @@ type taskScheduler struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
-	scheduleMu   sync.Mutex           // guards schedule()
+	scheduleMu   sync.Mutex           // guards schedule() and RemoveByNode()
 	collKeyLock  *lock.KeyLock[int64] // guards Add()
 	tasks        *ConcurrentMap[UniqueID, struct{}]
 	segmentTasks *ConcurrentMap[replicaSegmentIndex, Task]
 	channelTasks *ConcurrentMap[replicaChannelIndex, Task]
-	processQueue *taskQueue
+	processQueue *nodeTaskQueue
 	waitQueue    *taskQueue
 
 	taskStats            *expirable.LRU[UniqueID, Task]
@@ -351,7 +450,7 @@ func NewScheduler(ctx context.Context,
 		tasks:            NewConcurrentMap[UniqueID, struct{}](),
 		segmentTasks:     NewConcurrentMap[replicaSegmentIndex, Task](),
 		channelTasks:     NewConcurrentMap[replicaChannelIndex, Task](),
-		processQueue:     newTaskQueue(),
+		processQueue:     newNodeTaskQueue(),
 		waitQueue:        newTaskQueue(),
 		taskStats:        expirable.NewLRU[UniqueID, Task](256, nil, time.Minute*15),
 		segmentTaskDelta: NewExecutingTaskDelta(),
@@ -796,7 +895,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 	promoteDur := tr.RecordSpan()
 
 	log.Debug("process tasks related to node",
-		zap.Int("processingTaskNum", scheduler.processQueue.Len()),
+		zap.Int("processingTaskNum", scheduler.processQueue.LenByNode(node)),
 		zap.Int("waitingTaskNum", scheduler.waitQueue.Len()),
 		zap.Int("segmentTaskNum", scheduler.segmentTasks.Len()),
 		zap.Int("channelTaskNum", scheduler.channelTasks.Len()),
@@ -805,11 +904,11 @@ func (scheduler *taskScheduler) schedule(node int64) {
 	// Process tasks
 	toProcess := make([]Task, 0)
 	toRemove := make([]Task, 0)
-	scheduler.processQueue.Range(func(task Task) bool {
-		if scheduler.preProcess(task) && scheduler.isRelated(task, node) {
+	scheduler.processQueue.RangeByNode(node, func(task Task) bool {
+		scheduler.preProcess(task)
+		if task.Status() == TaskStatusStarted {
 			toProcess = append(toProcess, task)
-		}
-		if task.Status() != TaskStatusStarted {
+		} else {
 			toRemove = append(toRemove, task)
 		}
 
@@ -845,7 +944,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 	)
 
 	log.Info("process tasks related to node done",
-		zap.Int("processingTaskNum", scheduler.processQueue.Len()),
+		zap.Int("processingTaskNum", scheduler.processQueue.LenByNode(node)),
 		zap.Int("waitingTaskNum", scheduler.waitQueue.Len()),
 		zap.Int("segmentTaskNum", scheduler.segmentTasks.Len()),
 		zap.Int("channelTaskNum", scheduler.channelTasks.Len()),
@@ -857,30 +956,21 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 		if action.Node() == node {
 			return true
 		}
-		if task, ok := task.(*SegmentTask); ok {
-			taskType := GetTaskType(task)
-			var segment *datapb.SegmentInfo
-			if taskType == TaskTypeMove || taskType == TaskTypeUpdate {
-				segment = scheduler.targetMgr.GetSealedSegment(task.ctx, task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
-			} else {
-				segment = scheduler.targetMgr.GetSealedSegment(task.ctx, task.CollectionID(), task.SegmentID(), meta.NextTarget)
-			}
-			if segment == nil {
-				continue
-			}
-			if task.replica == nil {
-				continue
-			}
-			leader := scheduler.getReplicaShardLeader(task.Shard(), task.ReplicaID())
-			if leader == nil {
-				continue
-			}
-			if leader.Node == node {
-				return true
-			}
+		// LeaderAction.Node() returns the worker node, but the RPC is sent to the
+		// leader node. Match the leader node as well so that LeaderTasks are
+		// dispatched promptly when the leader reports dist.
+		if la, ok := action.(*LeaderAction); ok && la.GetLeaderID() == node {
+			return true
 		}
 	}
 	return false
+}
+
+func actionExecutorNode(action Action) int64 {
+	if la, ok := action.(*LeaderAction); ok {
+		return la.GetLeaderID()
+	}
+	return action.Node()
 }
 
 // preProcess checks the finished actions of task,
@@ -948,11 +1038,12 @@ func (scheduler *taskScheduler) process(task Task) bool {
 	)
 
 	actions, step := task.Actions(), task.Step()
-	executor, ok := scheduler.executors.Get(actions[step].Node())
+	nodeID := actionExecutorNode(actions[step])
+	executor, ok := scheduler.executors.Get(nodeID)
 	if !ok {
 		log.Warn("no executor for QueryNode",
 			zap.Int("step", step),
-			zap.Int64("nodeID", actions[step].Node()))
+			zap.Int64("nodeID", nodeID))
 		return false
 	}
 
@@ -969,6 +1060,9 @@ func (scheduler *taskScheduler) check(task Task, checkDistExist bool) error {
 }
 
 func (scheduler *taskScheduler) RemoveByNode(node int64) {
+	scheduler.scheduleMu.Lock()
+	defer scheduler.scheduleMu.Unlock()
+
 	scheduler.segmentTasks.Range(func(_ replicaSegmentIndex, task Task) bool {
 		if scheduler.isRelated(task, node) {
 			scheduler.remove(task)
