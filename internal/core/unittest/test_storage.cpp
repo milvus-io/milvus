@@ -64,6 +64,9 @@ get_azure_storage_config() {
                           false,
                           false,
                           30000,
+                          30000,
+                          10,
+                          25,
                           "",
                           false,
                           100};

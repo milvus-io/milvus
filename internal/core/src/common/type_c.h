@@ -89,6 +89,9 @@ typedef struct CStorageConfig {
     bool useIAM;
     bool useVirtualHost;
     int64_t requestTimeoutMs;
+    int64_t connectTimeoutMs;
+    int32_t maxRetries;
+    int64_t retryBaseDelayMs;
     const char* gcp_credential_json;
     bool use_custom_part_upload;
     uint32_t max_connections;

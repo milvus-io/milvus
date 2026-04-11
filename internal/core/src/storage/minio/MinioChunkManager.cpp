@@ -18,6 +18,7 @@
 
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
+#include <aws/core/client/DefaultRetryStrategy.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -398,6 +399,22 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     config.requestTimeoutMs = storage_config.requestTimeoutMs == 0
                                   ? DEFAULT_CHUNK_MANAGER_REQUEST_TIMEOUT_MS
                                   : storage_config.requestTimeoutMs;
+
+    if (storage_config.connectTimeoutMs > 0) {
+        config.connectTimeoutMs = storage_config.connectTimeoutMs;
+    }
+
+    if (storage_config.maxRetries > 0) {
+        long scale_factor = storage_config.retryBaseDelayMs > 0
+                                ? static_cast<long>(
+                                      storage_config.retryBaseDelayMs)
+                                : 25L;
+        config.retryStrategy =
+            Aws::MakeShared<Aws::Client::DefaultRetryStrategy>(
+                "MinioRetryStrategy",
+                static_cast<long>(storage_config.maxRetries),
+                scale_factor);
+    }
 
     if (storage_config.max_connections > 0) {
         config.maxConnections = storage_config.max_connections;

@@ -1469,6 +1469,9 @@ type MinioConfig struct {
 	Region             ParamItem `refreshable:"false"`
 	UseVirtualHost     ParamItem `refreshable:"false"`
 	RequestTimeoutMs   ParamItem `refreshable:"false"`
+	ConnectTimeoutMs   ParamItem `refreshable:"false"`
+	MaxRetries         ParamItem `refreshable:"false"`
+	RetryBaseDelayMs   ParamItem `refreshable:"false"`
 	MaxConnections     ParamItem `refreshable:"false"`
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
 	UseCRC32C          ParamItem `refreshable:"false"`
@@ -1685,6 +1688,33 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export:       true,
 	}
 	p.RequestTimeoutMs.Init(base.mgr)
+
+	p.ConnectTimeoutMs = ParamItem{
+		Key:          "minio.connectTimeoutMs",
+		Version:      "2.6.14",
+		DefaultValue: "30000",
+		Doc:          "TCP connect timeout for minio/S3 client in milliseconds. Default 30000 (30s). Tune up when the object storage endpoint is flaky or far away.",
+		Export:       true,
+	}
+	p.ConnectTimeoutMs.Init(base.mgr)
+
+	p.MaxRetries = ParamItem{
+		Key:          "minio.maxRetries",
+		Version:      "2.6.14",
+		DefaultValue: "10",
+		Doc:          "Maximum number of retries for minio/S3 requests on network/5xx/throttle errors. Default 10 (AWS SDK default).",
+		Export:       true,
+	}
+	p.MaxRetries.Init(base.mgr)
+
+	p.RetryBaseDelayMs = ParamItem{
+		Key:          "minio.retryBaseDelayMs",
+		Version:      "2.6.14",
+		DefaultValue: "25",
+		Doc:          "Base delay in milliseconds for exponential backoff between minio/S3 retry attempts. Default 25ms (AWS SDK default).",
+		Export:       true,
+	}
+	p.RetryBaseDelayMs.Init(base.mgr)
 
 	p.MaxConnections = ParamItem{
 		Key:          "minio.maxConnections",
