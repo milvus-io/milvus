@@ -105,10 +105,6 @@ class HybridScalarIndex : public ScalarIndex<T> {
         return internal_index_->IsNotNull();
     }
 
-    const TargetBitmap&
-    Exists() override {
-        return internal_index_->Exists();
-    }
 
     const TargetBitmap
     Query(const DatasetPtr& dataset) override {
