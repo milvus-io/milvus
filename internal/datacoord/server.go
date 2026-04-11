@@ -741,6 +741,7 @@ func (s *Server) collectMetaMetrics(ctx context.Context) {
 		case <-ticker.C:
 			s.meta.statsTaskMeta.updateMetrics()
 			s.meta.indexMeta.updateIndexTasksMetrics()
+			s.meta.indexMeta.updateIndexRowsProgressMetrics()
 		}
 	}
 }
