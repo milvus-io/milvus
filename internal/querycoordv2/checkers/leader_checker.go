@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
@@ -92,18 +91,17 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 
 		replicas := c.meta.ReplicaManager.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
-			nodes := replica.GetRWNodes()
-			if streamingutil.IsStreamingServiceEnabled() {
-				nodes = replica.GetRWSQNodes()
-			}
-			for _, node := range nodes {
-				delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
-				for _, d := range delegatorList {
-					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(d.View.Channel), meta.WithReplica(replica))
-					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica, d.View, dist)...)
-					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica, d.View, dist)...)
-					tasks = append(tasks, c.findNeedSyncPartitionStats(ctx, replica, d.View, node)...)
-				}
+			// PATCH: Do not filter delegators via replica.GetRWSQNodes(), which can
+			// become stale after streaming node restart and cause LeaderChecker to
+			// silently skip active delegators. Instead enumerate all delegators
+			// that belong to this replica via WithReplica2Channel — this mirrors
+			// the logic used by observers/target_observer.go which works correctly.
+			delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
+			for _, d := range delegatorList {
+				dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(d.View.Channel), meta.WithReplica(replica))
+				tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica, d.View, dist)...)
+				tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica, d.View, dist)...)
+				tasks = append(tasks, c.findNeedSyncPartitionStats(ctx, replica, d.View, d.Node)...)
 			}
 		}
 	}
