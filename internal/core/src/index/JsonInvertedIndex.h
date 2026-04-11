@@ -77,6 +77,8 @@ class JsonInvertedIndexParseErrorRecorder {
 };
 
 template <typename T>
+// JSON path inverted index for sealed segments only.
+// Growing segments use brute-force scanning on raw JSON data instead.
 class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
  public:
     JsonInvertedIndex(
@@ -169,8 +171,8 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         return res_set;
     }
 
-    // Returns a bitmap indicating which rows have values that are indexed.
-    TargetBitmap
+    // Returns a cached bitmap indicating which rows have the indexed path.
+    const TargetBitmap&
     Exists() override;
 
     void
@@ -206,6 +208,19 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     // For example, if the JSON path is "/a", this vector will store rows like
     // null, {}, {"a": null}, etc.
     std::vector<size_t> non_exist_offsets_;
+    TargetBitmap exists_bitset_;
+
+    void
+    BuildExistsBitset() {
+        int64_t count = this->Count();
+        exists_bitset_ = TargetBitmap(count, true);
+        for (auto offset : non_exist_offsets_) {
+            if (static_cast<int64_t>(offset) >= count) {
+                break;
+            }
+            exists_bitset_.reset(offset);
+        }
+    }
 };
 
 }  // namespace milvus::index

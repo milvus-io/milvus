@@ -140,19 +140,12 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
 
         this->is_built_ = true;
         this->ComputeByteSize();
+        BuildExistsBitset();
     }
 
-    TargetBitmap
+    const TargetBitmap&
     Exists() override {
-        int64_t count = this->Count();
-        TargetBitmap bitset(count, true);
-        auto end = std::lower_bound(non_exist_offsets_.begin(),
-                                    non_exist_offsets_.end(),
-                                    static_cast<size_t>(count));
-        for (auto iter = non_exist_offsets_.begin(); iter != end; ++iter) {
-            bitset.reset(*iter);
-        }
-        return bitset;
+        return exists_bitset_;
     }
 
     void
@@ -182,6 +175,7 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
         }
         LOG_INFO("LoadEntries JsonHybridScalarIndex done, has_non_exist: {}",
                  has_non_exist);
+        BuildExistsBitset();
     }
 
     JsonCastType
@@ -190,12 +184,25 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
     }
 
  private:
+    void
+    BuildExistsBitset() {
+        int64_t count = this->Count();
+        exists_bitset_ = TargetBitmap(count, true);
+        for (auto offset : non_exist_offsets_) {
+            if (static_cast<int64_t>(offset) >= count) {
+                break;
+            }
+            exists_bitset_.reset(offset);
+        }
+    }
+
     JsonCastType cast_type_;
     std::string nested_path_;
     JsonCastFunction cast_function_;
     proto::schema::FieldSchema json_schema_;
     storage::MemFileManagerImplPtr json_file_manager_;
     std::vector<size_t> non_exist_offsets_;
+    TargetBitmap exists_bitset_;
 };
 
 }  // namespace milvus::index

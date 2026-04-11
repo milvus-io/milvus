@@ -101,7 +101,10 @@ const (
 
 const (
 	MinimalScalarIndexEngineVersion = int32(0)
-	// Scalar index version 3: adds JSON path index support for STL_SORT, BITMAP, and HYBRID index types.
+	// Scalar index version 3:
+	// - Scalar index format v3
+	// - JSON path index support for STL_SORT, BITMAP, and HYBRID index types
+	// - HYBRID/AUTOINDEX high-cardinality scalar indexes switched from INVERTED to STL_SORT
 	CurrentScalarIndexEngineVersion = int32(3)
 	MaximumScalarIndexEngineVersion = int32(3)
 )

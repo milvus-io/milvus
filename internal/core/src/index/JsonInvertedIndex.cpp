@@ -81,30 +81,13 @@ JsonInvertedIndex<T>::build_index_for_json(
         });
 
     error_recorder_.PrintErrStats();
+    BuildExistsBitset();
 }
 
 template <typename T>
-TargetBitmap
+const TargetBitmap&
 JsonInvertedIndex<T>::Exists() {
-    int64_t count = this->Count();
-    TargetBitmap bitset(count, true);
-
-    auto fill_bitset = [this, count, &bitset]() {
-        auto end = std::lower_bound(
-            non_exist_offsets_.begin(), non_exist_offsets_.end(), count);
-        for (auto iter = non_exist_offsets_.begin(); iter != end; ++iter) {
-            bitset.reset(*iter);
-        }
-    };
-
-    if (this->is_growing_) {
-        std::shared_lock<folly::SharedMutex> lock(this->mutex_);
-        fill_bitset();
-    } else {
-        fill_bitset();
-    }
-
-    return bitset;
+    return exists_bitset_;
 }
 
 template <typename T>
@@ -134,6 +117,7 @@ JsonInvertedIndex<T>::LoadIndexMetas(
             std::move(index_datas.at(INDEX_NON_EXIST_OFFSET_FILE_NAME));
         fill_non_exist_offset(non_exist_offset_data->PayloadData(),
                               non_exist_offset_data->PayloadSize());
+        BuildExistsBitset();
         return;
     }
     std::vector<std::string> non_exist_offset_files;
@@ -161,6 +145,7 @@ JsonInvertedIndex<T>::LoadIndexMetas(
             fill_non_exist_offset(non_exist_offset_codec->PayloadData(),
                                   non_exist_offset_codec->PayloadSize());
         }
+        BuildExistsBitset();
         return;
     }
 
@@ -171,6 +156,7 @@ JsonInvertedIndex<T>::LoadIndexMetas(
     // Use null_offset_ as the source for non_exist_offsets_ to maintain
     // backward compatibility. This ensures Exists() behaves like v2.5.x IsNotNull().
     non_exist_offsets_ = this->null_offset_;
+    BuildExistsBitset();
 }
 
 template <typename T>
@@ -235,6 +221,7 @@ JsonInvertedIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     }
     LOG_INFO("LoadEntries JsonInvertedIndex done, has_non_exist: {}",
              has_non_exist);
+    BuildExistsBitset();
 }
 
 template class JsonInvertedIndex<bool>;
