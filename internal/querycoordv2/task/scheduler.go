@@ -1129,9 +1129,7 @@ func WrapTaskLog(task Task, fields ...zap.Field) []zap.Field {
 }
 
 func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error {
-	log := log.Ctx(task.Context()).With(
-		zap.String("task", task.String()),
-	)
+	log := log.Ctx(task.Context())
 
 	// Get replica, but only fail if we need it for RO node check
 	// NilReplica (ID=-1) is used for reduce-only tasks like unsubscribe channel
@@ -1139,7 +1137,7 @@ func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error
 	if task.ReplicaID() != -1 {
 		replica = scheduler.meta.Get(scheduler.ctx, task.ReplicaID())
 		if replica == nil {
-			log.Warn("task stale due to replica not found")
+			log.Warn("task stale due to replica not found", zap.String("task", task.String()))
 			return merr.WrapErrReplicaNotFound(task.ReplicaID())
 		}
 	}
@@ -1159,6 +1157,7 @@ func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error
 			)
 			if len(existsInDist) > 0 {
 				log.Info("task stale due to segment already loaded in dist",
+					zap.String("task", task.String()),
 					zap.Int64("segmentID", segmentTask.SegmentID()))
 				return merr.WrapErrServiceInternal("segment already loaded in dist")
 			}
@@ -1183,17 +1182,17 @@ func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error
 
 		nodeInfo := scheduler.nodeMgr.Get(targetNode)
 		if nodeInfo == nil {
-			log.Warn("task stale due to node not found", zap.Int64("nodeID", targetNode))
+			log.Warn("task stale due to node not found", zap.String("task", task.String()), zap.Int64("nodeID", targetNode))
 			return merr.WrapErrNodeNotFound(targetNode)
 		}
 		if action.Type() == ActionTypeGrow {
 			if nodeInfo.IsStoppingState() {
-				log.Warn("task stale due to node offline", zap.Int64("nodeID", targetNode))
+				log.Warn("task stale due to node offline", zap.String("task", task.String()), zap.Int64("nodeID", targetNode))
 				return merr.WrapErrNodeOffline(targetNode)
 			}
 
 			if replica != nil && (replica.ContainRONode(targetNode) || replica.ContainROSQNode(targetNode)) {
-				log.Warn("task stale due to node becomes ro node", zap.Int64("nodeID", targetNode))
+				log.Warn("task stale due to node becomes ro node", zap.String("task", task.String()), zap.Int64("nodeID", targetNode))
 				return merr.WrapErrNodeStateUnexpected(targetNode, "node becomes ro node")
 			}
 		}
