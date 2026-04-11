@@ -55,6 +55,11 @@ var segmentsVersion = semver.Version{
 	Patch: 4,
 }
 
+// pendingTaskInfo records the memory footprint of a dispatched-but-not-yet-reported task.
+type pendingTaskInfo struct {
+	memoryBytes int64
+}
+
 type Executor struct {
 	nodeID    int64
 	doneCh    chan struct{}
@@ -66,10 +71,14 @@ type Executor struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
-	executingTasks    *typeutil.ConcurrentSet[string] // task index
-	channelTaskNum    atomic.Int32                    // channel task pool counter
-	nonChannelTaskNum atomic.Int32                    // non-channel task pool counter
-	executedFlag      chan struct{}
+	executingTasks *typeutil.ConcurrentSet[string] // task index dedup
+	channelTaskNum atomic.Int32                    // channel task pool counter (streaming nodes)
+
+	// Segment pool: tracks tasks dispatched since last dist pull that QN hasn't reported yet.
+	// Each task is recorded individually; count and memory are derived from the set.
+	// Reset on dist pull (QN report becomes authoritative), removed on task completion.
+	pendingMu  sync.RWMutex
+	pendingSet map[string]pendingTaskInfo // taskIndex -> info
 }
 
 func NewExecutor(nodeID int64,
@@ -91,8 +100,19 @@ func NewExecutor(nodeID int64,
 		nodeMgr:   nodeMgr,
 
 		executingTasks: typeutil.NewConcurrentSet[string](),
-		executedFlag:   make(chan struct{}, 1),
+		pendingSet:     make(map[string]pendingTaskInfo),
 	}
+}
+
+// pendingSnapshot returns the current pending task count and total memory.
+func (ex *Executor) pendingSnapshot() (count int32, memBytes int64) {
+	ex.pendingMu.RLock()
+	defer ex.pendingMu.RUnlock()
+	for _, info := range ex.pendingSet {
+		count++
+		memBytes += info.memoryBytes
+	}
+	return
 }
 
 func (ex *Executor) Start(ctx context.Context) {
@@ -102,20 +122,9 @@ func (ex *Executor) Stop() {
 	ex.wg.Wait()
 }
 
-func (ex *Executor) GetTotalTaskExecutionCap() int32 {
-	nodeInfo := ex.nodeMgr.Get(ex.nodeID)
-	if nodeInfo == nil || nodeInfo.CPUNum() == 0 {
-		return Params.QueryCoordCfg.TaskExecutionCap.GetAsInt32()
-	}
-
-	ret := int32(math.Ceil(float64(nodeInfo.CPUNum()) * Params.QueryCoordCfg.QueryNodeTaskParallelismFactor.GetAsFloat()))
-
-	return ret
-}
-
-// GetChannelTaskCap returns the capacity reserved for channel tasks.
+// GetChannelTaskCap returns the capacity reserved for channel tasks (streaming nodes).
 func (ex *Executor) GetChannelTaskCap() int32 {
-	total := ex.GetTotalTaskExecutionCap()
+	total := ex.getTotalCap()
 	fraction := Params.QueryCoordCfg.ChannelTaskCapFraction.GetAsFloat()
 	if fraction < 0 {
 		fraction = 0
@@ -130,17 +139,22 @@ func (ex *Executor) GetChannelTaskCap() int32 {
 	return cap
 }
 
-// GetNonChannelTaskCap returns the capacity for segment/leader/other tasks.
-// NOTE: when channelTaskCapFraction is 1.0, both pools get min-cap=1,
-// so the sum of channel + non-channel caps may exceed total. This is
-// intentional to guarantee liveness for both task types.
-func (ex *Executor) GetNonChannelTaskCap() int32 {
-	total := ex.GetTotalTaskExecutionCap()
-	nonChannelCap := total - ex.GetChannelTaskCap()
-	if nonChannelCap < 1 {
-		nonChannelCap = 1
+func (ex *Executor) getTotalCap() int32 {
+	nodeInfo := ex.nodeMgr.Get(ex.nodeID)
+	if nodeInfo == nil || nodeInfo.CPUNum() == 0 {
+		return Params.QueryCoordCfg.TaskExecutionCap.GetAsInt32()
 	}
-	return nonChannelCap
+	return int32(math.Ceil(float64(nodeInfo.CPUNum()) * Params.QueryCoordCfg.QueryNodeTaskParallelismFactor.GetAsFloat()))
+}
+
+// getSegmentPoolCap returns max concurrent segment tasks for this node.
+func (ex *Executor) getSegmentPoolCap() int32 {
+	total := ex.getTotalCap()
+	segCap := total - ex.GetChannelTaskCap()
+	if segCap < 1 {
+		segCap = 1
+	}
+	return segCap
 }
 
 // Execute executes the given action,
@@ -154,24 +168,58 @@ func (ex *Executor) Execute(task Task, step int) bool {
 
 	_, isChannel := task.Actions()[step].(*ChannelAction)
 	if isChannel {
+		// Channel pool: simple count-based gate (streaming nodes, no memory gate)
 		cur := ex.channelTaskNum.Inc()
 		if cur > ex.GetChannelTaskCap() {
 			ex.channelTaskNum.Dec()
 			ex.executingTasks.Remove(task.Index())
-			log.Debug("channel task rejected: pool full",
-				zap.Int32("current", cur),
-				zap.Int32("cap", ex.GetChannelTaskCap()))
 			return false
 		}
 	} else {
-		cur := ex.nonChannelTaskNum.Inc()
-		if cur > ex.GetNonChannelTaskCap() {
-			ex.nonChannelTaskNum.Dec()
-			ex.executingTasks.Remove(task.Index())
-			log.Debug("non-channel task rejected: pool full",
-				zap.Int32("current", cur),
-				zap.Int32("cap", ex.GetNonChannelTaskCap()))
-			return false
+		// Segment pool: pendingSet with memory + CPU gate (query nodes)
+		var taskMem int64
+		if segTask, ok := task.(*SegmentTask); ok {
+			taskMem = segTask.SegmentSize()
+		}
+
+		nodeInfo := ex.nodeMgr.Get(ex.nodeID)
+		if nodeInfo != nil {
+			ex.pendingMu.Lock()
+			var pendingCount int32
+			var pendingMem int64
+			for _, info := range ex.pendingSet {
+				pendingCount++
+				pendingMem += info.memoryBytes
+			}
+
+			// Memory gate: remaining = capacity - (QN.usedMemory + pendingMemory × factor)
+			pendingFactor := Params.QueryCoordCfg.PendingMemoryFactor.GetAsFloat()
+			effectiveUsedMB := nodeInfo.UsedMemory() + float64(pendingMem)*pendingFactor/(1024*1024)
+			remainingMB := nodeInfo.MemCapacity() - effectiveUsedMB
+			if remainingMB > 0 {
+				taskMB := float64(taskMem) / (1024 * 1024)
+				if taskMB > 0 && taskMB > remainingMB {
+					ex.pendingMu.Unlock()
+					ex.executingTasks.Remove(task.Index())
+					return false
+				}
+			}
+
+			// CPU gate: pendingCount >= segment pool cap
+			if pendingCount >= ex.getSegmentPoolCap() {
+				ex.pendingMu.Unlock()
+				ex.executingTasks.Remove(task.Index())
+				return false
+			}
+
+			// Gate passed — insert into pending set while still holding the lock
+			ex.pendingSet[task.Index()] = pendingTaskInfo{memoryBytes: taskMem}
+			ex.pendingMu.Unlock()
+		} else {
+			// No node info — no gate, but still track pending
+			ex.pendingMu.Lock()
+			ex.pendingSet[task.Index()] = pendingTaskInfo{memoryBytes: taskMem}
+			ex.pendingMu.Unlock()
 		}
 	}
 
@@ -203,28 +251,41 @@ func (ex *Executor) Execute(task Task, step int) bool {
 	return true
 }
 
-func (ex *Executor) GetExecutedFlag() <-chan struct{} {
-	return ex.executedFlag
+// HasPendingTasks returns true if there are segment tasks dispatched but not yet confirmed by QN.
+func (ex *Executor) HasPendingTasks() bool {
+	ex.pendingMu.RLock()
+	defer ex.pendingMu.RUnlock()
+	return len(ex.pendingSet) > 0
 }
 
+func (ex *Executor) removePending(index string) {
+	ex.pendingMu.Lock()
+	delete(ex.pendingSet, index)
+	ex.pendingMu.Unlock()
+}
+
+// ResetPending clears the pending task set.
+// Called by dist_handler after receiving fresh QN data, since QN's report
+// is now authoritative and includes all tasks we previously dispatched.
+func (ex *Executor) ResetPending() {
+	ex.pendingMu.Lock()
+	ex.pendingSet = make(map[string]pendingTaskInfo)
+	ex.pendingMu.Unlock()
+}
+
+// removeTask cleans up tracking state after a task action completes.
 func (ex *Executor) removeTask(task Task, step int) {
 	if task.Err() != nil {
 		log.Info("execute action done, remove it",
 			zap.Int64("taskID", task.ID()),
 			zap.Int("step", step),
 			zap.Error(task.Err()))
-	} else {
-		select {
-		case ex.executedFlag <- struct{}{}:
-		default:
-		}
 	}
-
 	ex.executingTasks.Remove(task.Index())
 	if _, isChannel := task.Actions()[step].(*ChannelAction); isChannel {
 		ex.channelTaskNum.Dec()
 	} else {
-		ex.nonChannelTaskNum.Dec()
+		ex.removePending(task.Index())
 	}
 }
 

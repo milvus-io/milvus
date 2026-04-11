@@ -290,7 +290,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 			}
 
 			for i := range c.collectionIDs {
-				plans := balancer.GetAssignPolicy().AssignSegment(ctx, c.collectionIDs[i], c.assignments[i], c.nodes, false)
+				plans := balancer.GetAssignPolicy().AssignSegment(ctx, c.collectionIDs[i], c.assignments[i], c.nodes)
 				if c.unstableAssignment {
 					assertSegmentPlanNumAndTargetNodeMatch(&suite.Suite, c.expectPlans[i], plans)
 				} else {
@@ -358,7 +358,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegmentWithGrowing() {
 			NumOfGrowingRows: 50,
 		},
 	})
-	plans := balancer.GetAssignPolicy().AssignSegment(ctx, 1, toAssign, lo.Keys(distributions), false)
+	plans := balancer.GetAssignPolicy().AssignSegment(ctx, 1, toAssign, lo.Keys(distributions))
 	for _, p := range plans {
 		suite.Equal(int64(2), p.To)
 	}

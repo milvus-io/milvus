@@ -60,7 +60,7 @@ func TestScoreBasedAssignPolicy_AssignSegment_BasicFunctionality(t *testing.T) {
 	}
 
 	nodes := []int64{1, 2, 3}
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	plans := policy.AssignSegment(context.Background(), 100, segments, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 3, len(plans))
@@ -111,7 +111,7 @@ func TestScoreBasedAssignPolicy_AssignSegment_PrefersLowScoreNode(t *testing.T) 
 	}
 
 	nodes := []int64{1, 2, 3}
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	plans := policy.AssignSegment(context.Background(), 100, segments, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 1, len(plans))
@@ -135,7 +135,7 @@ func TestScoreBasedAssignPolicy_AssignSegment_EmptyNodes(t *testing.T) {
 	}
 	nodes := []int64{}
 
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	plans := policy.AssignSegment(context.Background(), 100, segments, nodes)
 
 	assert.Nil(t, plans)
 }
@@ -162,46 +162,10 @@ func TestScoreBasedAssignPolicy_AssignSegment_EmptySegments(t *testing.T) {
 	segments := []*meta.Segment{}
 	nodes := []int64{1}
 
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	plans := policy.AssignSegment(context.Background(), 100, segments, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 0, len(plans))
-}
-
-// TestScoreBasedAssignPolicy_AssignSegment_ForceAssign tests force assignment behavior
-func TestScoreBasedAssignPolicy_AssignSegment_ForceAssign(t *testing.T) {
-	nodeManager := session.NewNodeManager()
-	mockScheduler := task.NewMockScheduler(t)
-	mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	dist := meta.NewDistributionManager(nodeManager)
-	metaMgr := meta.NewMeta(nil, nil, nodeManager)
-
-	// Add node in non-normal state
-	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Version:  common.Version,
-		Address:  "localhost",
-		Hostname: "node",
-	}))
-	nodeManager.Get(1).SetState(session.NodeStateStopping)
-
-	policy := newScoreBasedAssignPolicy(nodeManager, mockScheduler, dist, metaMgr)
-
-	segments := []*meta.Segment{
-		{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 1000}},
-	}
-	nodes := []int64{1}
-
-	// Without force assign - should return nil (no normal nodes)
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
-	assert.Nil(t, plans)
-
-	// With force assign - should proceed
-	plansForced := policy.AssignSegment(context.Background(), 100, segments, nodes, true)
-	assert.NotNil(t, plansForced)
-	assert.Equal(t, 1, len(plansForced))
-	assert.Equal(t, int64(1), plansForced[0].To)
 }
 
 // TestScoreBasedAssignPolicy_CalculateSegmentScore tests segment score calculation
@@ -310,7 +274,7 @@ func TestScoreBasedAssignPolicy_AssignChannel_BasicFunctionality(t *testing.T) {
 	}
 
 	nodes := []int64{1, 2, 3}
-	plans := policy.AssignChannel(context.Background(), 100, channels, nodes, false)
+	plans := policy.AssignChannel(context.Background(), 100, channels, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 2, len(plans))
@@ -386,7 +350,7 @@ func TestScoreBasedAssignPolicy_AssignChannel_PrefersLowScoreNode(t *testing.T) 
 	}
 
 	nodes := []int64{1, 2, 3}
-	plans := policy.AssignChannel(context.Background(), 100, channels, nodes, false)
+	plans := policy.AssignChannel(context.Background(), 100, channels, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 1, len(plans))
@@ -501,7 +465,7 @@ func TestScoreBasedAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
 	channels := []*meta.DmChannel{}
 	nodes := []int64{1}
 
-	plans := policy.AssignChannel(context.Background(), 100, channels, nodes, false)
+	plans := policy.AssignChannel(context.Background(), 100, channels, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 0, len(plans))
@@ -528,7 +492,7 @@ func TestScoreBasedAssignPolicy_AssignChannel_EmptyNodes(t *testing.T) {
 	}
 	nodes := []int64{}
 
-	plans := policy.AssignChannel(context.Background(), 100, channels, nodes, false)
+	plans := policy.AssignChannel(context.Background(), 100, channels, nodes)
 
 	assert.Nil(t, plans)
 }

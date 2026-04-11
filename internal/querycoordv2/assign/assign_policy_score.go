@@ -108,17 +108,10 @@ func (p *ScoreBasedAssignPolicy) AssignSegment(
 	collectionID int64,
 	segments []*meta.Segment,
 	nodes []int64,
-	forceAssign bool,
 ) []SegmentAssignPlan {
-	balanceBatchSize := math.MaxInt64
-
 	// Filter nodes
-	if !forceAssign {
-		nodeFilter := newCommonSegmentNodeFilter(p.nodeManager)
-		filteredNodes := nodeFilter.FilterNodes(ctx, nodes, forceAssign)
-		nodes = filteredNodes
-		balanceBatchSize = paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
-	}
+	nodeFilter := newCommonSegmentNodeFilter(p.nodeManager)
+	nodes = nodeFilter.FilterNodes(ctx, nodes)
 
 	if len(nodes) == 0 {
 		return nil
@@ -157,7 +150,7 @@ func (p *ScoreBasedAssignPolicy) AssignSegment(
 		sourceNode := nodeItemsMap[s.Node]
 
 		// If segment's node exists, check if there's enough benefit
-		if !forceAssign && sourceNode != nil {
+		if sourceNode != nil {
 			evaluator := &commonScoreBasedBenefitEvaluator{}
 			if !evaluator.HasEnoughBenefitForNodes(sourceNode, targetNode, scoreChanges) {
 				// Push back without changes if no enough benefit
@@ -191,10 +184,6 @@ func (p *ScoreBasedAssignPolicy) AssignSegment(
 
 		// Push back the updated node
 		queue.Push(targetNode)
-
-		if len(plans) >= balanceBatchSize {
-			break
-		}
 	}
 
 	return plans
@@ -307,14 +296,10 @@ func (p *ScoreBasedAssignPolicy) AssignChannel(
 	collectionID int64,
 	channels []*meta.DmChannel,
 	nodes []int64,
-	forceAssign bool,
 ) []ChannelAssignPlan {
 	// Filter nodes
-	if !forceAssign {
-		nodeFilter := newCommonChannelNodeFilter(p.nodeManager)
-		filteredNodes := nodeFilter.FilterNodes(ctx, nodes, forceAssign)
-		nodes = filteredNodes
-	}
+	nodeFilter := newCommonChannelNodeFilter(p.nodeManager)
+	nodes = nodeFilter.FilterNodes(ctx, nodes)
 
 	if len(nodes) == 0 {
 		return nil
@@ -357,7 +342,7 @@ func (p *ScoreBasedAssignPolicy) AssignChannel(
 		sourceNode := nodeItemsMap[c.Node]
 
 		// Check benefit if source node exists
-		if !forceAssign && sourceNode != nil {
+		if sourceNode != nil {
 			evaluator := &commonScoreBasedBenefitEvaluator{}
 			if !evaluator.HasEnoughBenefitForNodes(sourceNode, targetNode, scoreChanges) {
 				// Push back without changes if no enough benefit

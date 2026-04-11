@@ -1428,14 +1428,7 @@ func (suite *TaskSuite) dispatchAndWait(node int64) {
 }
 
 func (suite *TaskSuite) assertExecutedFlagChan(targetNode int64) {
-	flagChan := suite.scheduler.GetExecutedFlag(targetNode)
-	if flagChan != nil {
-		select {
-		case <-flagChan:
-		default:
-			suite.FailNow("task not executed")
-		}
-	}
+	// No-op: executedFlag mechanism has been removed in favor of adaptive dist pull intervals.
 }
 
 func (suite *TaskSuite) TestLeaderTaskRemove() {

@@ -1299,6 +1299,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		LastModifyTs:    lastModifyTs,
 		MemCapacityInMB: float64(hardware.GetMemoryCount() / 1024 / 1024),
 		CpuNum:          int64(hardware.GetCPUNum()),
+		UsedMemoryInMB:  float64(hardware.GetUsedMemoryCount() / 1024 / 1024),
 	}, nil
 }
 

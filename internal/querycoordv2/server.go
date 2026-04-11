@@ -792,6 +792,12 @@ func (s *Server) handleNodeDown(node int64) {
 	// clean node's metrics
 	metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(node))
 	s.metricsCacheManager.InvalidateSystemInfoMetrics()
+
+	// Trigger checkers immediately so SegmentChecker detects missing segments
+	// without waiting for the next check interval (up to 1s)
+	if s.checkerController != nil {
+		s.checkerController.Check()
+	}
 }
 
 func (s *Server) handleNodeStopping(node int64) {

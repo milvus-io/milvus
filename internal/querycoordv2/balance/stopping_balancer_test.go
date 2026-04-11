@@ -78,9 +78,9 @@ func (suite *StoppingBalancerTestSuite) SetupTest() {
 	// Create a mock assign policy for testing
 	mockAssignPolicy := assign.NewMockAssignPolicy(suite.T())
 	// Set up default expectations for the mock
-	mockAssignPolicy.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+	mockAssignPolicy.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return([]assign.SegmentAssignPlan{}).Maybe()
-	mockAssignPolicy.EXPECT().AssignChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+	mockAssignPolicy.EXPECT().AssignChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return([]assign.ChannelAssignPlan{}).Maybe()
 
 	suite.balancer = NewStoppingBalancer(suite.dist, suite.targetMgr, mockAssignPolicy, suite.nodeManager)
@@ -228,7 +228,7 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_WithRONodes() {
 	mockPolicy.ExpectedCalls = nil // Clear default expectations
 	mockPolicy.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything, mock.MatchedBy(func(nodes []int64) bool {
 		return len(nodes) == 2 && nodes[0] == 1 && nodes[1] == 2 // RW nodes
-	}), mock.Anything).Return([]assign.SegmentAssignPlan{
+	})).Return([]assign.SegmentAssignPlan{
 		{Segment: segments[0], To: 1}, // Move segment 101 from node 3 to node 1
 		{Segment: segments[1], To: 2}, // Move segment 102 from node 4 to node 2
 	}).Maybe() // May or may not be called depending on channel balance
@@ -236,7 +236,7 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_WithRONodes() {
 	// Mock channel assignment - Only node 3 has a channel, so called once
 	mockPolicy.EXPECT().AssignChannel(mock.Anything, mock.Anything, mock.Anything, mock.MatchedBy(func(nodes []int64) bool {
 		return len(nodes) == 2 && nodes[0] == 1 && nodes[1] == 2 // RW nodes
-	}), mock.Anything).Return([]assign.ChannelAssignPlan{
+	})).Return([]assign.ChannelAssignPlan{
 		{Channel: dmChannels[0], To: 1}, // Move channel from node 3 to node 1
 	}).Once() // Only called once for node 3 which has the channel
 

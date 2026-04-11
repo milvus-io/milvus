@@ -169,7 +169,7 @@ func (suite *CheckerControllerSuite) TestBasic() {
 			}
 		}
 	}).Return(nil)
-	suite.scheduler.EXPECT().GetSegmentTaskNum().Return(0).Maybe()
+	suite.scheduler.EXPECT().GetSegmentTaskNum(mock.Anything).Return(0).Maybe()
 	suite.scheduler.EXPECT().GetChannelTaskNum().Return(0).Maybe()
 	suite.scheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()

@@ -161,7 +161,7 @@ func (b *RoundRobinBalancer) genSegmentPlan(ctx context.Context, replica *meta.R
 		return nil
 	}
 
-	segmentPlans := b.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segmentsToMove, nodesWithLessSegment, false)
+	segmentPlans := b.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segmentsToMove, nodesWithLessSegment)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
 		segmentPlans[i].Replica = replica
@@ -202,7 +202,7 @@ func (b *RoundRobinBalancer) genChannelPlan(ctx context.Context, replica *meta.R
 		return nil
 	}
 
-	channelPlans := b.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, nodesWithLessChannel, false)
+	channelPlans := b.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, nodesWithLessChannel)
 	for i := range channelPlans {
 		channelPlans[i].From = channelPlans[i].Channel.Node
 		channelPlans[i].Replica = replica

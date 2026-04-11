@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // RowCountBasedAssignPolicy implements priority queue-based assignment strategy for both segments and channels
@@ -102,11 +101,10 @@ func (p *RowCountBasedAssignPolicy) AssignSegment(
 	collectionID int64,
 	segments []*meta.Segment,
 	nodes []int64,
-	forceAssign bool,
 ) []SegmentAssignPlan {
 	// Filter nodes
 	nodeFilter := newCommonSegmentNodeFilter(p.nodeManager)
-	filteredNodes := nodeFilter.FilterNodes(ctx, nodes, forceAssign)
+	filteredNodes := nodeFilter.FilterNodes(ctx, nodes)
 	if len(filteredNodes) == 0 {
 		return nil
 	}
@@ -128,8 +126,6 @@ func (p *RowCountBasedAssignPolicy) AssignSegment(
 		return segments[i].GetNumOfRows() > segments[j].GetNumOfRows()
 	})
 
-	// Apply batch size limit
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
 	plans := make([]SegmentAssignPlan, 0, len(segments))
 
 	// Assign segments using priority queue
@@ -142,9 +138,6 @@ func (p *RowCountBasedAssignPolicy) AssignSegment(
 			Segment: s,
 		}
 		plans = append(plans, plan)
-		if len(plans) >= balanceBatchSize {
-			break
-		}
 
 		// Update node's score and push back to queue
 		ni.AddCurrentScoreDelta(float64(s.GetNumOfRows()))
@@ -160,11 +153,10 @@ func (p *RowCountBasedAssignPolicy) AssignChannel(
 	collectionID int64,
 	channels []*meta.DmChannel,
 	nodes []int64,
-	forceAssign bool,
 ) []ChannelAssignPlan {
 	// Filter nodes
 	nodeFilter := newCommonChannelNodeFilter(p.nodeManager)
-	filteredNodes := nodeFilter.FilterNodes(ctx, nodes, forceAssign)
+	filteredNodes := nodeFilter.FilterNodes(ctx, nodes)
 	if len(filteredNodes) == 0 {
 		return nil
 	}

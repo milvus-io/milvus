@@ -664,6 +664,7 @@ message GetDataDistributionResponse {
     int64 lastModifyTs = 6;
     double memCapacityInMB = 7;
     int64 cpu_num = 8;
+    double usedMemoryInMB = 9;
 }
 
 message LeaderView {
@@ -902,8 +903,9 @@ message CheckerInfo {
 
 message SegmentTarget {
   int64 ID = 1;
-  data.SegmentLevel level = 2; 
+  data.SegmentLevel level = 2;
   int64 num_of_rows = 3;
+  int64 size = 4;
 }
 
 message PartitionTarget {

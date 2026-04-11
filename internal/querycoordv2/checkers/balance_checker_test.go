@@ -423,7 +423,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_EmptyReplicas(t *testin
 	config := balanceConfig{}
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 
-	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, []int64{}, config, false)
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, []int64{}, config, false, 0)
 
 	assert.Empty(t, segmentTasks)
 	assert.Empty(t, channelTasks)
@@ -493,7 +493,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_Success(t *testing.T) {
 	defer mockPrintPlans.UnPatch()
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
-	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false)
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false, 0)
 
 	assert.Len(t, segmentTasks, 1)
 	assert.Len(t, channelTasks, 1)
@@ -512,7 +512,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NilReplica(t *testing.T
 	defer mockReplicaGet.UnPatch()
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
-	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false)
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false, 0)
 
 	assert.Empty(t, segmentTasks)
 	assert.Empty(t, channelTasks)
@@ -573,7 +573,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_StoppingBalanceHighPrio
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	// Call with isStoppingBalance=true
-	checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, true)
+	checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, true, 0)
 
 	// Verify LoadPriority is set to HIGH for stopping balance
 	assert.Len(t, capturedPlans, 1)
@@ -632,7 +632,7 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NormalBalanceLowPriorit
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	// Call with isStoppingBalance=false
-	checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false)
+	checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config, false, 0)
 
 	// Verify LoadPriority is set to LOW for normal balance
 	assert.Len(t, capturedPlans, 1)
@@ -695,6 +695,10 @@ func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
 		// First call returns true for EnableStoppingBalance
 		mockGetAsBool := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
 		defer mockGetAsBool.UnPatch()
+
+		// Mock GetAsInt for StoppingBalanceSegmentFactor etc.
+		mockGetAsInt := mockey.Mock((*paramtable.ParamItem).GetAsInt).Return(5).Build()
+		defer mockGetAsInt.UnPatch()
 
 		// Mock GetValue for stopping balance assign policy
 		mockGetValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("RoundRobin").Build()
@@ -800,6 +804,10 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 		mockStoppingBalanceEnabled := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
 		defer mockStoppingBalanceEnabled.UnPatch()
 
+		// Mock GetAsInt for StoppingBalanceSegmentFactor etc.
+		mockGetAsInt := mockey.Mock((*paramtable.ParamItem).GetAsInt).Return(5).Build()
+		defer mockGetAsInt.UnPatch()
+
 		// Mock GetValue for stopping balance assign policy
 		mockGetValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("RoundRobin").Build()
 		defer mockGetValue.UnPatch()
@@ -852,6 +860,10 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 		// Return true for both EnableStoppingBalance and AutoBalance
 		mockGetAsBool := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
 		defer mockGetAsBool.UnPatch()
+
+		// Mock GetAsInt for StoppingBalanceSegmentFactor, NormalBalanceSegmentFactor etc.
+		mockGetAsInt := mockey.Mock((*paramtable.ParamItem).GetAsInt).Return(5).Build()
+		defer mockGetAsInt.UnPatch()
 
 		// Mock GetValue for stopping balance assign policy
 		mockGetValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("RoundRobin").Build()
@@ -918,6 +930,10 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 		// return false for stopping balance enabled, true for auto balance enabled
 		mockParams := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(mockey.Sequence(false).Times(1).Then(true)).Build()
 		defer mockParams.UnPatch()
+
+		// Mock GetAsInt for NormalBalanceSegmentFactor etc.
+		mockGetAsInt := mockey.Mock((*paramtable.ParamItem).GetAsInt).Return(5).Build()
+		defer mockGetAsInt.UnPatch()
 
 		// Mock GetValue for balancer type
 		mockGetValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("RoundRobin").Build()
@@ -1953,4 +1969,155 @@ func TestBalanceChecker_Check_TimeoutWarning(t *testing.T) {
 
 	assert.Nil(t, result)
 	assert.Greater(t, duration, 100*time.Millisecond) // Should trigger log
+}
+
+// =============================================================================
+// Recovery Skip Tests — Balance skipped when grow tasks exist
+// =============================================================================
+
+func TestBalanceChecker_SkipWhenRecoveryTasksExist(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("SkipsAllBalance_WhenGrowTasksExist", func(t *testing.T) {
+		checker := createTestBalanceChecker()
+		ctx := context.Background()
+
+		// Mock GetSegmentTaskNum to report grow tasks exist
+		mockGetSegmentTaskNum := mockey.Mock(
+			mockey.GetMethod(checker.scheduler, "GetSegmentTaskNum"),
+		).To(func(filters ...task.TaskFilter) int {
+			// Simulate: when called with TaskTypeGrow filter, return >0
+			if len(filters) > 0 {
+				return 5
+			}
+			return 0
+		}).Build()
+		defer mockGetSegmentTaskNum.UnPatch()
+
+		// processBalanceQueue should NOT be called at all
+		processQueueCalled := false
+		mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
+			func(ctx context.Context,
+				balancer balance.Balance,
+				getReplicasFunc func(context.Context, int64) []int64,
+				constructQueueFunc func(context.Context) *assign.PriorityQueue,
+				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
+				isStoppingBalance bool,
+			) (int, int) {
+				processQueueCalled = true
+				return 0, 0
+			}).Build()
+		defer mockProcessQueue.UnPatch()
+
+		result := checker.Check(ctx)
+
+		assert.Nil(t, result, "Should return nil")
+		assert.False(t, processQueueCalled, "processBalanceQueue should NOT be called when recovery tasks exist")
+	})
+
+	t.Run("RunsBalance_WhenNoGrowTasks", func(t *testing.T) {
+		checker := createTestBalanceChecker()
+		ctx := context.Background()
+
+		// Mock GetSegmentTaskNum to report no grow tasks
+		mockGetSegmentTaskNum := mockey.Mock(
+			mockey.GetMethod(checker.scheduler, "GetSegmentTaskNum"),
+		).To(func(filters ...task.TaskFilter) int {
+			return 0
+		}).Build()
+		defer mockGetSegmentTaskNum.UnPatch()
+
+		// Mock paramtable for the rest of Check
+		mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+		defer mockParamGet.UnPatch()
+
+		mockGetAsBool := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(false).Build()
+		defer mockGetAsBool.UnPatch()
+
+		mockLoadConfig := mockey.Mock((*BalanceChecker).loadBalanceConfig).Return(balanceConfig{
+			segmentBatchSize: 5,
+			channelBatchSize: 5,
+		}).Build()
+		defer mockLoadConfig.UnPatch()
+
+		// IsActive returns false → skip normal balance → returns nil
+		mockIsActive := mockey.Mock((*checkerActivation).IsActive).Return(false).Build()
+		defer mockIsActive.UnPatch()
+
+		result := checker.Check(ctx)
+		// Should reach past the recovery check and into the stopping/normal balance logic
+		assert.Nil(t, result)
+	})
+
+	t.Run("SkipsStoppingBalance_WhenGrowTasksExist", func(t *testing.T) {
+		checker := createTestBalanceChecker()
+		ctx := context.Background()
+
+		// Mock GetSegmentTaskNum: return 10 for any filter (grow tasks exist)
+		mockGetSegmentTaskNum := mockey.Mock(
+			mockey.GetMethod(checker.scheduler, "GetSegmentTaskNum"),
+		).Return(10).Build()
+		defer mockGetSegmentTaskNum.UnPatch()
+
+		// Enable stopping balance
+		mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+		defer mockParamGet.UnPatch()
+
+		mockGetAsBool := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
+		defer mockGetAsBool.UnPatch()
+
+		// processBalanceQueue should NOT be called
+		processQueueCalled := false
+		mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
+			func(ctx context.Context,
+				balancer balance.Balance,
+				getReplicasFunc func(context.Context, int64) []int64,
+				constructQueueFunc func(context.Context) *assign.PriorityQueue,
+				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
+				isStoppingBalance bool,
+			) (int, int) {
+				processQueueCalled = true
+				return 0, 0
+			}).Build()
+		defer mockProcessQueue.UnPatch()
+
+		result := checker.Check(ctx)
+		assert.Nil(t, result)
+		assert.False(t, processQueueCalled,
+			"Even stopping balance should be skipped when recovery tasks exist")
+	})
+}
+
+func TestBalanceChecker_RecoverySkip_ZeroGrowTasks(t *testing.T) {
+	paramtable.Init()
+
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+
+	// No grow tasks → balance should proceed
+	mockGetSegmentTaskNum := mockey.Mock(
+		mockey.GetMethod(checker.scheduler, "GetSegmentTaskNum"),
+	).Return(0).Build()
+	defer mockGetSegmentTaskNum.UnPatch()
+
+	// Mock to track if we get past the recovery check
+	loadConfigCalled := false
+	mockLoadConfig := mockey.Mock((*BalanceChecker).loadBalanceConfig).To(func() balanceConfig {
+		loadConfigCalled = true
+		return balanceConfig{segmentBatchSize: 1, channelBatchSize: 1}
+	}).Build()
+	defer mockLoadConfig.UnPatch()
+
+	// Mock the rest so it doesn't crash
+	mockParamGet := mockey.Mock(paramtable.Get).Return(&paramtable.ComponentParam{}).Build()
+	defer mockParamGet.UnPatch()
+
+	mockGetAsBool := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(false).Build()
+	defer mockGetAsBool.UnPatch()
+
+	mockIsActive := mockey.Mock((*checkerActivation).IsActive).Return(false).Build()
+	defer mockIsActive.UnPatch()
+
+	checker.Check(ctx)
+	assert.True(t, loadConfigCalled, "loadBalanceConfig should be called when no grow tasks exist")
 }

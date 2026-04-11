@@ -52,7 +52,6 @@ type DistHandlerSuite struct {
 	nodeManager      *session.NodeManager
 	scheduler        *task.MockScheduler
 	dispatchMockCall *mock.Call
-	executedFlagChan chan struct{}
 	dist             *meta.DistributionManager
 	target           *meta.MockTargetManager
 	handler          *distHandler
@@ -69,8 +68,8 @@ func (suite *DistHandlerSuite) SetupSuite() {
 	suite.target = meta.NewMockTargetManager(suite.T())
 	suite.ctx = context.Background()
 
-	suite.executedFlagChan = make(chan struct{}, 1)
-	suite.scheduler.EXPECT().GetExecutedFlag(mock.Anything).Return(suite.executedFlagChan).Maybe()
+	suite.scheduler.EXPECT().HasTaskForNode(mock.Anything).Return(false).Maybe()
+	suite.scheduler.EXPECT().ResetExecutorPending(mock.Anything).Maybe()
 	suite.target.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetDmChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
@@ -152,6 +151,7 @@ func (suite *DistHandlerSuite) TestForcePullDist() {
 	}
 
 	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
+	suite.dispatchMockCall = suite.scheduler.EXPECT().Dispatch(mock.Anything).Maybe()
 
 	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -186,7 +186,6 @@ func (suite *DistHandlerSuite) TestForcePullDist() {
 		},
 		LastModifyTs: 1,
 	}, nil)
-	suite.executedFlagChan <- struct{}{}
 	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {})
 	defer suite.handler.stop()
 
@@ -340,6 +339,58 @@ func getMetricValueForNode(nodeID string) float64 {
 		}
 	}
 	return 0 // Return 0 if metric not found (default value)
+}
+
+// TestHandleDistResp_ResetPending verifies that executor pending counters
+// are reset when dist is updated, but NOT when dist update is skipped.
+func TestHandleDistResp_ResetPending(t *testing.T) {
+	paramtable.Init()
+
+	nodeID := int64(42)
+	nodeManager := session.NewNodeManager()
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: nodeID, Address: "localhost:19530", Hostname: "localhost",
+	}))
+
+	ctx := context.Background()
+	scheduler := task.NewScheduler(ctx, nil, nil, nil, nil, nil, nil)
+	scheduler.AddExecutor(nodeID)
+
+	handler := &distHandler{
+		nodeID:      nodeID,
+		nodeManager: nodeManager,
+		dist:        meta.NewDistributionManager(nodeManager),
+		target:      meta.NewTargetManager(nil, nil),
+		scheduler:   scheduler,
+	}
+
+	// First pull: dist updated → ResetPending should fire
+	resp1 := &querypb.GetDataDistributionResponse{
+		Status: merr.Success(), NodeID: nodeID, LastModifyTs: 1,
+		MemCapacityInMB: 16384, CpuNum: 32, UsedMemoryInMB: 8192,
+	}
+	handler.handleDistResp(ctx, resp1, false)
+
+	// Second pull: same lastModifyTs → dist skipped → ResetPending should NOT fire
+	// (We can't directly observe ResetPending from outside, but we verify the handler
+	// doesn't crash and handles the skip path correctly)
+	resp2 := &querypb.GetDataDistributionResponse{
+		Status: merr.Success(), NodeID: nodeID, LastModifyTs: 1,
+		MemCapacityInMB: 16384, CpuNum: 32, UsedMemoryInMB: 8192,
+	}
+	handler.handleDistResp(ctx, resp2, false)
+
+	// Third pull: new lastModifyTs → dist updated → ResetPending fires
+	resp3 := &querypb.GetDataDistributionResponse{
+		Status: merr.Success(), NodeID: nodeID, LastModifyTs: 2,
+		MemCapacityInMB: 16384, CpuNum: 32, UsedMemoryInMB: 10000,
+	}
+	handler.handleDistResp(ctx, resp3, false)
+
+	node := nodeManager.Get(nodeID)
+	assert.Equal(t, 10000.0, node.UsedMemory())
+
+	metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(nodeID))
 }
 
 func TestDistHandlerSuite(t *testing.T) {

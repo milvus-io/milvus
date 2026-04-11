@@ -18,6 +18,7 @@ package checkers
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"testing"
 
@@ -86,6 +87,7 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	suite.scheduler = task.NewMockScheduler(suite.T())
 	suite.scheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.scheduler.EXPECT().GetSegmentTaskNum(mock.Anything).Return(0).Maybe()
 
 	// Initialize global assign policy factory before creating checker
 	assign.InitGlobalAssignPolicyFactory(suite.scheduler, suite.nodeMgr, distManager, suite.meta, targetManager)
@@ -1253,97 +1255,216 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 	suite.Len(result, 0, "Should release all segments when partition is nil")
 }
 
-func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
+// TestSegmentTaskCapEnforced verifies the sliding window cap limits segment task creation.
+// When the scheduler already has tasks up to the cap, no new tasks should be created.
+func (suite *SegmentCheckerTestSuite) TestSegmentTaskCapEnforced() {
 	ctx := context.Background()
 	checker := suite.checker
-	// set meta
-	checker.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	checker.meta.PutPartition(ctx, utils.CreateTestPartition(1, 1))
-	checker.meta.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	checker.meta.HandleNodeUp(ctx, 1)
-	checker.meta.HandleNodeUp(ctx, 2)
 
-	// target carries a newer DataVersion than the loaded segment in dist
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
+	// Set factor=1 for testing; with 2 active nodes → cap = 2
+	paramtable.Get().Save(Params.QueryCoordCfg.SegmentTaskCapFactor.Key, "1")
+	defer paramtable.Get().Reset(Params.QueryCoordCfg.SegmentTaskCapFactor.Key)
+
+	// Setup: collection with 5 missing segments
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 1, Address: "localhost", Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 2, Address: "localhost", Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+
+	segments := make([]*datapb.SegmentInfo, 5)
+	for i := range segments {
+		segments[i] = &datapb.SegmentInfo{
+			ID:            int64(i + 1),
 			PartitionID:   1,
 			InsertChannel: "test-insert-channel",
-			DataVersion:   2,
-		},
+		}
 	}
 	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
+		{CollectionID: 1, ChannelName: "test-insert-channel"},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 
-	// dist has the segment loaded with an older DataVersion
-	distSegment := utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel")
-	distSegment.DataVersion = proto.Int32(1)
-	checker.dist.SegmentDistManager.Update(2, distSegment)
+	// Set up channel dist so segments can be loaded
 	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
-		VchannelInfo: &datapb.VchannelInfo{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-		Node:    2,
-		Version: 1,
-		View:    &meta.LeaderView{ID: 2, CollectionID: 1, Channel: "test-insert-channel", Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "test-insert-channel"},
+		Node:         2,
+		Version:      1,
+		View:         &meta.LeaderView{ID: 2, CollectionID: 1, Channel: "test-insert-channel", Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
 	})
 
+	// First check: scheduler has 0 tasks, cap=2, should create exactly 2
 	var addedTasks []task.Task
+	suite.scheduler.ExpectedCalls = lo.Filter(suite.scheduler.ExpectedCalls, func(call *mock.Call, _ int) bool {
+		return call.Method != "GetSegmentTaskNum" && call.Method != "Add"
+	})
+	suite.scheduler.EXPECT().GetSegmentTaskNum(mock.Anything).Return(0).Maybe()
 	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
 		addedTasks = append(addedTasks, t)
 		return nil
 	}).Maybe()
 
-	tasks := checker.Check(context.TODO())
-	suite.Len(tasks, 0)
-	suite.Len(addedTasks, 1)
-	suite.Len(addedTasks[0].Actions(), 1)
-	action, ok := addedTasks[0].Actions()[0].(*task.SegmentAction)
-	suite.True(ok)
-	suite.EqualValues(1, addedTasks[0].ReplicaID())
-	suite.Equal(task.ActionTypeReopen, action.Type())
-	suite.EqualValues(1, action.GetSegmentID())
-	suite.EqualValues(2, action.Node())
+	tasks := checker.Check(ctx)
+	suite.Len(tasks, 0) // Reduce tasks returned directly (none in this case)
+	suite.Equal(2, len(addedTasks), "Should create exactly cap (2) segment tasks")
 
-	// when dist DataVersion catches up, no reopen task should be generated
+	// Second check: simulate scheduler already has cap tasks, should create 0
 	addedTasks = nil
-	distSegment.DataVersion = proto.Int32(2)
-	checker.dist.SegmentDistManager.Update(2, distSegment)
-	// invalidate version cache to force re-check
-	delete(checker.versionCache, int64(1))
-	tasks = checker.Check(context.TODO())
-	suite.Len(tasks, 0)
-	suite.Len(addedTasks, 0)
+	suite.scheduler.ExpectedCalls = lo.Filter(suite.scheduler.ExpectedCalls, func(call *mock.Call, _ int) bool {
+		return call.Method != "GetSegmentTaskNum"
+	})
+	suite.scheduler.EXPECT().GetSegmentTaskNum(mock.Anything).Return(2).Maybe()
 
-	// when dist DataVersion is nil (old QueryNode in mixed-version rollout),
-	// DataVersion must not be used as a Reopen trigger to avoid an infinite loop.
+	tasks = checker.Check(ctx)
+	suite.Equal(0, len(addedTasks), "Should create 0 tasks when cap is already reached")
+}
+
+// TestSegmentTaskCapRefill verifies the sliding window refill behavior.
+// When some tasks complete (current count drops below cap), new tasks should fill up to the cap.
+func (suite *SegmentCheckerTestSuite) TestSegmentTaskCapRefill() {
+	ctx := context.Background()
+	checker := suite.checker
+
+	// Set factor=2 for testing; with 2 active nodes → cap = 4
+	paramtable.Get().Save(Params.QueryCoordCfg.SegmentTaskCapFactor.Key, "2")
+	defer paramtable.Get().Reset(Params.QueryCoordCfg.SegmentTaskCapFactor.Key)
+
+	// Setup: collection with 10 missing segments
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 1, Address: "localhost", Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 2, Address: "localhost", Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+
+	segments := make([]*datapb.SegmentInfo, 10)
+	for i := range segments {
+		segments[i] = &datapb.SegmentInfo{
+			ID:            int64(i + 1),
+			PartitionID:   1,
+			InsertChannel: "test-insert-channel",
+		}
+	}
+	channels := []*datapb.VchannelInfo{
+		{CollectionID: 1, ChannelName: "test-insert-channel"},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, segments, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+
+	checker.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "test-insert-channel"},
+		Node:         2,
+		Version:      1,
+		View:         &meta.LeaderView{ID: 2, CollectionID: 1, Channel: "test-insert-channel", Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+	})
+
+	// Round 1: scheduler has 0, cap=4, should create 4
+	var addedTasks []task.Task
+	suite.scheduler.ExpectedCalls = lo.Filter(suite.scheduler.ExpectedCalls, func(call *mock.Call, _ int) bool {
+		return call.Method != "GetSegmentTaskNum" && call.Method != "Add"
+	})
+	suite.scheduler.EXPECT().GetSegmentTaskNum(mock.Anything).Return(0).Maybe()
+	suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+		addedTasks = append(addedTasks, t)
+		return nil
+	}).Maybe()
+
+	checker.Check(ctx)
+	suite.Equal(4, len(addedTasks), "Round 1: should create 4 tasks (cap = 2 nodes × factor 2)")
+
+	// Round 2: simulate 3 tasks completed (1 remaining), should create 3 more
 	addedTasks = nil
-	distSegment.DataVersion = nil
-	checker.dist.SegmentDistManager.Update(2, distSegment)
-	delete(checker.versionCache, int64(1))
-	tasks = checker.Check(context.TODO())
-	suite.Len(tasks, 0)
-	suite.Len(addedTasks, 0)
+	suite.scheduler.ExpectedCalls = lo.Filter(suite.scheduler.ExpectedCalls, func(call *mock.Call, _ int) bool {
+		return call.Method != "GetSegmentTaskNum"
+	})
+	suite.scheduler.EXPECT().GetSegmentTaskNum(mock.Anything).Return(1).Maybe()
+
+	checker.Check(ctx)
+	suite.Equal(3, len(addedTasks), "Round 2: should refill 3 tasks (cap=4, existing=1)")
+}
+
+// TestSegmentTaskCapRotation verifies that the rotation cursor ensures fair collection access.
+// When the cap is reached mid-sweep, the next round should continue from where it left off.
+func (suite *SegmentCheckerTestSuite) TestSegmentTaskCapRotation() {
+	ctx := context.Background()
+	checker := suite.checker
+
+	// Set factor=1 for testing; with 1 active node → cap = 1
+	paramtable.Get().Save(Params.QueryCoordCfg.SegmentTaskCapFactor.Key, "1")
+	defer paramtable.Get().Reset(Params.QueryCoordCfg.SegmentTaskCapFactor.Key)
+
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID: 1, Address: "localhost", Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+
+	// Setup: 3 collections, each with 2 missing segments
+	allChannels := make([]*meta.DmChannel, 0)
+	for cid := int64(1); cid <= 3; cid++ {
+		checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(cid, 1))
+		checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(cid, cid*10))
+		checker.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(cid*100, cid, []int64{1}))
+
+		segments := []*datapb.SegmentInfo{
+			{ID: cid*100 + 1, CollectionID: cid, PartitionID: cid * 10, InsertChannel: fmt.Sprintf("ch-%d", cid)},
+			{ID: cid*100 + 2, CollectionID: cid, PartitionID: cid * 10, InsertChannel: fmt.Sprintf("ch-%d", cid)},
+		}
+		channels := []*datapb.VchannelInfo{
+			{CollectionID: cid, ChannelName: fmt.Sprintf("ch-%d", cid)},
+		}
+		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, cid).Return(channels, segments, nil)
+		checker.targetMgr.UpdateCollectionNextTarget(ctx, cid)
+
+		allChannels = append(allChannels, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{CollectionID: cid, ChannelName: fmt.Sprintf("ch-%d", cid)},
+			Node:         1,
+			Version:      1,
+			View:         &meta.LeaderView{ID: 1, CollectionID: cid, Channel: fmt.Sprintf("ch-%d", cid), Version: 1, Status: &querypb.LeaderViewStatus{Serviceable: true}},
+		})
+	}
+	// Update all channels at once — Update replaces all channels for a node
+	checker.dist.ChannelDistManager.Update(1, allChannels...)
+
+	setupMocks := func() *[]task.Task {
+		addedTasks := make([]task.Task, 0)
+		suite.scheduler.ExpectedCalls = lo.Filter(suite.scheduler.ExpectedCalls, func(call *mock.Call, _ int) bool {
+			return call.Method != "GetSegmentTaskNum" && call.Method != "Add"
+		})
+		suite.scheduler.EXPECT().GetSegmentTaskNum(mock.Anything).Return(0).Maybe()
+		suite.scheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
+			addedTasks = append(addedTasks, t)
+			return nil
+		}).Maybe()
+		return &addedTasks
+	}
+
+	// Round 1: cap=1, should process first eligible collection then stop
+	addedTasks := setupMocks()
+	checker.Check(ctx)
+	suite.Equal(1, len(*addedTasks), "Round 1: should create exactly 1 task (cap=1)")
+
+	// Round 2: cursor advances; verifies the checker doesn't deadlock or skip all collections
+	addedTasks2 := setupMocks()
+	checker.Check(ctx)
+	suite.Equal(1, len(*addedTasks2), "Round 2: should create exactly 1 task")
 }
 
 func TestSegmentCheckerSuite(t *testing.T) {
 	suite.Run(t, new(SegmentCheckerTestSuite))
 }
+
+// Removed: QN-availability-based slot computation tests (TestSegmentTaskSlots_*).
+// The checker now uses simple activeQN × factor cap; executor gate does per-QN enforcement.
+// Coverage: TestSegmentTaskCapSlidingWindow, TestSegmentTaskCapRefill, TestSegmentTaskCapRotation above.

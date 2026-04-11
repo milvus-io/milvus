@@ -235,50 +235,81 @@ func (_c *MockScheduler_GetChannelTaskNum_Call) RunAndReturn(run func(...TaskFil
 	return _c
 }
 
-// GetExecutedFlag provides a mock function with given fields: nodeID
-func (_m *MockScheduler) GetExecutedFlag(nodeID int64) <-chan struct{} {
+// HasTaskForNode provides a mock function with given fields: nodeID
+func (_m *MockScheduler) HasTaskForNode(nodeID int64) bool {
 	ret := _m.Called(nodeID)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetExecutedFlag")
+		panic("no return value specified for HasTaskForNode")
 	}
 
-	var r0 <-chan struct{}
-	if rf, ok := ret.Get(0).(func(int64) <-chan struct{}); ok {
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(int64) bool); ok {
 		r0 = rf(nodeID)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(<-chan struct{})
-		}
+		r0 = ret.Get(0).(bool)
 	}
 
 	return r0
 }
 
-// MockScheduler_GetExecutedFlag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetExecutedFlag'
-type MockScheduler_GetExecutedFlag_Call struct {
+// MockScheduler_HasTaskForNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasTaskForNode'
+type MockScheduler_HasTaskForNode_Call struct {
 	*mock.Call
 }
 
-// GetExecutedFlag is a helper method to define mock.On call
+// HasTaskForNode is a helper method to define mock.On call
 //   - nodeID int64
-func (_e *MockScheduler_Expecter) GetExecutedFlag(nodeID interface{}) *MockScheduler_GetExecutedFlag_Call {
-	return &MockScheduler_GetExecutedFlag_Call{Call: _e.mock.On("GetExecutedFlag", nodeID)}
+func (_e *MockScheduler_Expecter) HasTaskForNode(nodeID interface{}) *MockScheduler_HasTaskForNode_Call {
+	return &MockScheduler_HasTaskForNode_Call{Call: _e.mock.On("HasTaskForNode", nodeID)}
 }
 
-func (_c *MockScheduler_GetExecutedFlag_Call) Run(run func(nodeID int64)) *MockScheduler_GetExecutedFlag_Call {
+func (_c *MockScheduler_HasTaskForNode_Call) Run(run func(nodeID int64)) *MockScheduler_HasTaskForNode_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(int64))
 	})
 	return _c
 }
 
-func (_c *MockScheduler_GetExecutedFlag_Call) Return(_a0 <-chan struct{}) *MockScheduler_GetExecutedFlag_Call {
+func (_c *MockScheduler_HasTaskForNode_Call) Return(_a0 bool) *MockScheduler_HasTaskForNode_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockScheduler_GetExecutedFlag_Call) RunAndReturn(run func(int64) <-chan struct{}) *MockScheduler_GetExecutedFlag_Call {
+func (_c *MockScheduler_HasTaskForNode_Call) RunAndReturn(run func(int64) bool) *MockScheduler_HasTaskForNode_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ResetExecutorPending provides a mock function with given fields: nodeID
+func (_m *MockScheduler) ResetExecutorPending(nodeID int64) {
+	_m.Called(nodeID)
+}
+
+// MockScheduler_ResetExecutorPending_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResetExecutorPending'
+type MockScheduler_ResetExecutorPending_Call struct {
+	*mock.Call
+}
+
+// ResetExecutorPending is a helper method to define mock.On call
+//   - nodeID int64
+func (_e *MockScheduler_Expecter) ResetExecutorPending(nodeID interface{}) *MockScheduler_ResetExecutorPending_Call {
+	return &MockScheduler_ResetExecutorPending_Call{Call: _e.mock.On("ResetExecutorPending", nodeID)}
+}
+
+func (_c *MockScheduler_ResetExecutorPending_Call) Run(run func(nodeID int64)) *MockScheduler_ResetExecutorPending_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockScheduler_ResetExecutorPending_Call) Return() *MockScheduler_ResetExecutorPending_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockScheduler_ResetExecutorPending_Call) RunAndReturn(run func(int64)) *MockScheduler_ResetExecutorPending_Call {
 	_c.Call.Return(run)
 	return _c
 }

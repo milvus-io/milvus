@@ -68,12 +68,9 @@ func (dh *distHandler) start(ctx context.Context) {
 	defer dh.wg.Done()
 	log := log.Ctx(ctx).With(zap.Int64("nodeID", dh.nodeID)).WithRateGroup("qcv2.distHandler", 1, 60)
 	log.Info("start dist handler")
-	distInterval := Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
-	ticker := time.NewTicker(distInterval)
+	currentInterval := Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
+	ticker := time.NewTicker(currentInterval)
 	defer ticker.Stop()
-	flagInterval := Params.QueryCoordCfg.CheckExecutedFlagInterval.GetAsDuration(time.Millisecond)
-	checkExecutedFlagTicker := time.NewTicker(flagInterval)
-	defer checkExecutedFlagTicker.Stop()
 	failures := 0
 	for {
 		select {
@@ -83,36 +80,19 @@ func (dh *distHandler) start(ctx context.Context) {
 		case <-dh.c:
 			log.Info("close dist handler")
 			return
-		case <-checkExecutedFlagTicker.C:
-			executedFlagChan := dh.scheduler.GetExecutedFlag(dh.nodeID)
-			if executedFlagChan != nil {
-				select {
-				case <-executedFlagChan:
-					dh.pullDist(ctx, &failures, false)
-				default:
-				}
-			}
-			// only reset when interval updated
-			newFlagInterval := Params.QueryCoordCfg.CheckExecutedFlagInterval.GetAsDuration(time.Millisecond)
-			if newFlagInterval != flagInterval {
-				flagInterval = newFlagInterval
-				select {
-				case <-checkExecutedFlagTicker.C:
-				default:
-				}
-				checkExecutedFlagTicker.Reset(flagInterval)
-			}
 		case <-ticker.C:
 			dh.pullDist(ctx, &failures, true)
-			// only reset when interval updated
-			newDistInterval := Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
-			if newDistInterval != distInterval {
-				distInterval = newDistInterval
-				select {
-				case <-ticker.C:
-				default:
-				}
-				ticker.Reset(distInterval)
+
+			// Adaptive interval: re-read config each tick to support hot-reload
+			distInterval := Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond)
+			fastInterval := Params.QueryCoordCfg.DistPullIntervalFast.GetAsDuration(time.Millisecond)
+			newInterval := distInterval
+			if dh.scheduler.HasTaskForNode(dh.nodeID) {
+				newInterval = fastInterval
+			}
+			if newInterval != currentInterval {
+				currentInterval = newInterval
+				ticker.Reset(currentInterval)
 			}
 		}
 	}
@@ -166,9 +146,15 @@ func (dh *distHandler) handleDistResp(ctx context.Context, resp *querypb.GetData
 			session.WithChannelCnt(len(resp.GetChannels())),
 			session.WithMemCapacity(resp.GetMemCapacityInMB()),
 			session.WithCPUNum(resp.GetCpuNum()),
+			session.WithUsedMemory(resp.GetUsedMemoryInMB()),
 		)
 		dh.updateSegmentsDistribution(ctx, resp)
 		dh.updateChannelsDistribution(ctx, resp)
+
+		// Reset executor's local pending counters since QN's report is now authoritative.
+		// Only reset when stats were actually updated — if dist was skipped (lastModifyTs unchanged),
+		// the node's usedMemory is stale and pending compensation must be preserved.
+		dh.scheduler.ResetExecutorPending(dh.nodeID)
 	}
 
 	if dispatchTask {

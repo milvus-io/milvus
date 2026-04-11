@@ -23,12 +23,12 @@ func (_m *MockAssignPolicy) EXPECT() *MockAssignPolicy_Expecter {
 }
 
 // AssignChannel provides a mock function
-func (_m *MockAssignPolicy) AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
-	ret := _m.Called(ctx, collectionID, channels, nodes, forceAssign)
+func (_m *MockAssignPolicy) AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan {
+	ret := _m.Called(ctx, collectionID, channels, nodes)
 
 	var r0 []ChannelAssignPlan
-	if rf, ok := ret.Get(0).(func(context.Context, int64, []*meta.DmChannel, []int64, bool) []ChannelAssignPlan); ok {
-		r0 = rf(ctx, collectionID, channels, nodes, forceAssign)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []*meta.DmChannel, []int64) []ChannelAssignPlan); ok {
+		r0 = rf(ctx, collectionID, channels, nodes)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]ChannelAssignPlan)
@@ -44,13 +44,13 @@ type MockAssignPolicy_AssignChannel_Call struct {
 }
 
 // AssignChannel is a helper method to define mock.On call
-func (_e *MockAssignPolicy_Expecter) AssignChannel(ctx interface{}, collectionID interface{}, channels interface{}, nodes interface{}, forceAssign interface{}) *MockAssignPolicy_AssignChannel_Call {
-	return &MockAssignPolicy_AssignChannel_Call{Call: _e.mock.On("AssignChannel", ctx, collectionID, channels, nodes, forceAssign)}
+func (_e *MockAssignPolicy_Expecter) AssignChannel(ctx interface{}, collectionID interface{}, channels interface{}, nodes interface{}) *MockAssignPolicy_AssignChannel_Call {
+	return &MockAssignPolicy_AssignChannel_Call{Call: _e.mock.On("AssignChannel", ctx, collectionID, channels, nodes)}
 }
 
-func (_c *MockAssignPolicy_AssignChannel_Call) Run(run func(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool)) *MockAssignPolicy_AssignChannel_Call {
+func (_c *MockAssignPolicy_AssignChannel_Call) Run(run func(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64)) *MockAssignPolicy_AssignChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].([]*meta.DmChannel), args[3].([]int64), args[4].(bool))
+		run(args[0].(context.Context), args[1].(int64), args[2].([]*meta.DmChannel), args[3].([]int64))
 	})
 	return _c
 }
@@ -60,7 +60,7 @@ func (_c *MockAssignPolicy_AssignChannel_Call) Return(_a0 []ChannelAssignPlan) *
 	return _c
 }
 
-func (_c *MockAssignPolicy_AssignChannel_Call) RunAndReturn(run func(context.Context, int64, []*meta.DmChannel, []int64, bool) []ChannelAssignPlan) *MockAssignPolicy_AssignChannel_Call {
+func (_c *MockAssignPolicy_AssignChannel_Call) RunAndReturn(run func(context.Context, int64, []*meta.DmChannel, []int64) []ChannelAssignPlan) *MockAssignPolicy_AssignChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -71,12 +71,12 @@ func (_c *MockAssignPolicy_AssignChannel_Call) Maybe() *MockAssignPolicy_AssignC
 }
 
 // AssignSegment provides a mock function
-func (_m *MockAssignPolicy) AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool) []SegmentAssignPlan {
-	ret := _m.Called(ctx, collectionID, segments, nodes, forceAssign)
+func (_m *MockAssignPolicy) AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
+	ret := _m.Called(ctx, collectionID, segments, nodes)
 
 	var r0 []SegmentAssignPlan
-	if rf, ok := ret.Get(0).(func(context.Context, int64, []*meta.Segment, []int64, bool) []SegmentAssignPlan); ok {
-		r0 = rf(ctx, collectionID, segments, nodes, forceAssign)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []*meta.Segment, []int64) []SegmentAssignPlan); ok {
+		r0 = rf(ctx, collectionID, segments, nodes)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]SegmentAssignPlan)
@@ -92,13 +92,13 @@ type MockAssignPolicy_AssignSegment_Call struct {
 }
 
 // AssignSegment is a helper method to define mock.On call
-func (_e *MockAssignPolicy_Expecter) AssignSegment(ctx interface{}, collectionID interface{}, segments interface{}, nodes interface{}, forceAssign interface{}) *MockAssignPolicy_AssignSegment_Call {
-	return &MockAssignPolicy_AssignSegment_Call{Call: _e.mock.On("AssignSegment", ctx, collectionID, segments, nodes, forceAssign)}
+func (_e *MockAssignPolicy_Expecter) AssignSegment(ctx interface{}, collectionID interface{}, segments interface{}, nodes interface{}) *MockAssignPolicy_AssignSegment_Call {
+	return &MockAssignPolicy_AssignSegment_Call{Call: _e.mock.On("AssignSegment", ctx, collectionID, segments, nodes)}
 }
 
-func (_c *MockAssignPolicy_AssignSegment_Call) Run(run func(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool)) *MockAssignPolicy_AssignSegment_Call {
+func (_c *MockAssignPolicy_AssignSegment_Call) Run(run func(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64)) *MockAssignPolicy_AssignSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].([]*meta.Segment), args[3].([]int64), args[4].(bool))
+		run(args[0].(context.Context), args[1].(int64), args[2].([]*meta.Segment), args[3].([]int64))
 	})
 	return _c
 }
@@ -108,7 +108,7 @@ func (_c *MockAssignPolicy_AssignSegment_Call) Return(_a0 []SegmentAssignPlan) *
 	return _c
 }
 
-func (_c *MockAssignPolicy_AssignSegment_Call) RunAndReturn(run func(context.Context, int64, []*meta.Segment, []int64, bool) []SegmentAssignPlan) *MockAssignPolicy_AssignSegment_Call {
+func (_c *MockAssignPolicy_AssignSegment_Call) RunAndReturn(run func(context.Context, int64, []*meta.Segment, []int64) []SegmentAssignPlan) *MockAssignPolicy_AssignSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }

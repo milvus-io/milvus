@@ -288,7 +288,8 @@ type Scheduler interface {
 	Add(task Task) error
 	Dispatch(node int64)
 	RemoveByNode(node int64)
-	GetExecutedFlag(nodeID int64) <-chan struct{}
+	HasTaskForNode(nodeID int64) bool
+	ResetExecutorPending(nodeID int64)
 	GetChannelTaskNum(filters ...TaskFilter) int
 	GetSegmentTaskNum(filters ...TaskFilter) int
 	GetTasksJSON() string
@@ -323,6 +324,9 @@ type taskScheduler struct {
 	// nodeID -> collectionID -> taskDelta
 	segmentTaskDelta *ExecutingTaskDelta
 	channelTaskDelta *ExecutingTaskDelta
+
+	// schedCache caches replica/node lookups during schedule(). Set under scheduleMu.
+	schedCache *scheduleCache
 }
 
 func NewScheduler(ctx context.Context,
@@ -609,12 +613,82 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 	return nil
 }
 
+type shardReplicaKey struct {
+	shard     string
+	replicaID int64
+}
+
+// scheduleCache caches expensive lookups within a single schedule() call.
+// During recovery, thousands of tasks share the same replica and target the
+// same few nodes. Caching avoids O(tasks) RWMutex acquisitions on
+// ReplicaManager and NodeManager per schedule() iteration.
+type scheduleCache struct {
+	replicas  map[int64]*meta.Replica
+	nodeInfos map[int64]*session.NodeInfo
+}
+
+func newScheduleCache() *scheduleCache {
+	return &scheduleCache{
+		replicas:  make(map[int64]*meta.Replica),
+		nodeInfos: make(map[int64]*session.NodeInfo),
+	}
+}
+
 func (scheduler *taskScheduler) getReplicaShardLeader(channelName string, replicaID int64) *meta.DmChannel {
 	replica := scheduler.meta.Get(scheduler.ctx, replicaID)
 	if replica == nil {
 		return nil
 	}
 	return scheduler.distMgr.ChannelDistManager.GetShardLeader(channelName, replica)
+}
+
+// getCachedShardLeader returns the leader node for a shard+replica, using a cache
+// when available. Returns -1 if no leader is found. All tasks on the same shard
+// share a leader, so this avoids O(n) repeated lookups during batch dispatch.
+func (scheduler *taskScheduler) getCachedShardLeader(shard string, replicaID int64, cache map[shardReplicaKey]int64) int64 {
+	key := shardReplicaKey{shard: shard, replicaID: replicaID}
+	if cache != nil {
+		if leaderNode, ok := cache[key]; ok {
+			return leaderNode
+		}
+	}
+	leaderNode := int64(-1)
+	leader := scheduler.getReplicaShardLeader(shard, replicaID)
+	if leader != nil {
+		leaderNode = leader.Node
+	}
+	if cache != nil {
+		cache[key] = leaderNode
+	}
+	return leaderNode
+}
+
+// cachedGetReplica returns the replica for the given ID, using the schedule
+// cache when available. May return nil if the replica doesn't exist.
+func (scheduler *taskScheduler) cachedGetReplica(replicaID int64) *meta.Replica {
+	if c := scheduler.schedCache; c != nil {
+		if r, ok := c.replicas[replicaID]; ok {
+			return r
+		}
+		r := scheduler.meta.ReplicaManager.Get(scheduler.ctx, replicaID)
+		c.replicas[replicaID] = r
+		return r
+	}
+	return scheduler.meta.ReplicaManager.Get(scheduler.ctx, replicaID)
+}
+
+// cachedGetNodeInfo returns the node info for the given ID, using the schedule
+// cache when available. May return nil if the node doesn't exist.
+func (scheduler *taskScheduler) cachedGetNodeInfo(nodeID int64) *session.NodeInfo {
+	if c := scheduler.schedCache; c != nil {
+		if n, ok := c.nodeInfos[nodeID]; ok {
+			return n
+		}
+		n := scheduler.nodeMgr.Get(nodeID)
+		c.nodeInfos[nodeID] = n
+		return n
+	}
+	return scheduler.nodeMgr.Get(nodeID)
 }
 
 func (scheduler *taskScheduler) tryPromoteAll() {
@@ -707,13 +781,45 @@ func (scheduler *taskScheduler) decExecutingTaskDelta(task Task) {
 	}
 }
 
-func (scheduler *taskScheduler) GetExecutedFlag(nodeID int64) <-chan struct{} {
-	executor, ok := scheduler.executors.Get(nodeID)
-	if !ok {
-		return nil
+func (scheduler *taskScheduler) HasTaskForNode(nodeID int64) bool {
+	// Check if executor has in-flight tasks (RPC in progress or pending dispatch)
+	if executor, ok := scheduler.executors.Get(nodeID); ok {
+		if executor.HasPendingTasks() {
+			return true
+		}
 	}
 
-	return executor.GetExecutedFlag()
+	// Check queued tasks
+	hasTask := false
+	scheduler.processQueue.Range(func(task Task) bool {
+		for _, action := range task.Actions() {
+			if action.Node() == nodeID {
+				hasTask = true
+				return false
+			}
+		}
+		return true
+	})
+	if hasTask {
+		return true
+	}
+	scheduler.waitQueue.Range(func(task Task) bool {
+		for _, action := range task.Actions() {
+			if action.Node() == nodeID {
+				hasTask = true
+				return false
+			}
+		}
+		return true
+	})
+	return hasTask
+}
+
+func (scheduler *taskScheduler) ResetExecutorPending(nodeID int64) {
+	executor, ok := scheduler.executors.Get(nodeID)
+	if ok {
+		executor.ResetPending()
+	}
 }
 
 type TaskFilter func(task Task) bool
@@ -797,6 +903,12 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		return
 	}
 
+	// Cache replica and node lookups for this schedule() call.
+	// During recovery, thousands of tasks share the same replica and target
+	// the same few nodes — caching avoids O(tasks) RWMutex acquisitions.
+	scheduler.schedCache = newScheduleCache()
+	defer func() { scheduler.schedCache = nil }()
+
 	tr := timerecord.NewTimeRecorder("")
 	log := log.Ctx(scheduler.ctx).With(
 		zap.Int64("nodeID", node),
@@ -812,11 +924,13 @@ func (scheduler *taskScheduler) schedule(node int64) {
 		zap.Int("channelTaskNum", scheduler.channelTasks.Len()),
 	)
 
-	// Process tasks
+	// Process tasks. Use a shard leader cache to avoid repeated expensive lookups
+	// during recovery when thousands of Grow tasks share a few shard leaders.
 	toProcess := make([]Task, 0)
 	toRemove := make([]Task, 0)
+	shardLeaderCache := make(map[shardReplicaKey]int64)
 	scheduler.processQueue.Range(func(task Task) bool {
-		if scheduler.preProcess(task) && scheduler.isRelated(task, node) {
+		if scheduler.preProcess(task) && scheduler.isRelatedWithCache(task, node, shardLeaderCache) {
 			toProcess = append(toProcess, task)
 		}
 		if task.Status() != TaskStatusStarted {
@@ -863,6 +977,12 @@ func (scheduler *taskScheduler) schedule(node int64) {
 }
 
 func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
+	return scheduler.isRelatedWithCache(task, node, nil)
+}
+
+// isRelatedWithCache checks if a task is related to a node, using an optional
+// shard leader cache to avoid repeated expensive lookups during batch dispatch.
+func (scheduler *taskScheduler) isRelatedWithCache(task Task, node int64, shardLeaderCache map[shardReplicaKey]int64) bool {
 	for _, action := range task.Actions() {
 		if action.Node() == node {
 			return true
@@ -881,11 +1001,8 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 			if task.replica == nil {
 				continue
 			}
-			leader := scheduler.getReplicaShardLeader(task.Shard(), task.ReplicaID())
-			if leader == nil {
-				continue
-			}
-			if leader.Node == node {
+			leaderNode := scheduler.getCachedShardLeader(task.Shard(), task.ReplicaID(), shardLeaderCache)
+			if leaderNode == node {
 				return true
 			}
 		}
@@ -1133,11 +1250,12 @@ func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error
 		zap.String("task", task.String()),
 	)
 
-	// Get replica, but only fail if we need it for RO node check
+	// Get replica using cache — during recovery thousands of tasks share the same
+	// replicaID, so this avoids O(tasks) RLock acquisitions on ReplicaManager.
 	// NilReplica (ID=-1) is used for reduce-only tasks like unsubscribe channel
 	var replica *meta.Replica
 	if task.ReplicaID() != -1 {
-		replica = scheduler.meta.Get(scheduler.ctx, task.ReplicaID())
+		replica = scheduler.cachedGetReplica(task.ReplicaID())
 		if replica == nil {
 			log.Warn("task stale due to replica not found")
 			return merr.WrapErrReplicaNotFound(task.ReplicaID())
@@ -1181,7 +1299,9 @@ func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error
 			targetNode = a.Node()
 		}
 
-		nodeInfo := scheduler.nodeMgr.Get(targetNode)
+		// Use cached node lookup — all tasks target the same few nodes during
+		// recovery, avoiding O(tasks) RLock acquisitions on NodeManager.
+		nodeInfo := scheduler.cachedGetNodeInfo(targetNode)
 		if nodeInfo == nil {
 			log.Warn("task stale due to node not found", zap.Int64("nodeID", targetNode))
 			return merr.WrapErrNodeNotFound(targetNode)

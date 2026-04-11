@@ -80,7 +80,8 @@ func (suite *DistControllerTestSuite) SetupTest() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
-	suite.mockScheduler.EXPECT().GetExecutedFlag(mock.Anything).Return(nil).Maybe()
+	suite.mockScheduler.EXPECT().HasTaskForNode(mock.Anything).Return(false).Maybe()
+	suite.mockScheduler.EXPECT().ResetExecutorPending(mock.Anything).Maybe()
 
 	suite.controller = NewDistController(suite.mockCluster, suite.nodeMgr, distManager, targetManager, suite.mockScheduler, func(collectionID ...int64) {})
 }

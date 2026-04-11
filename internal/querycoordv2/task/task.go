@@ -329,6 +329,7 @@ type SegmentTask struct {
 	loadPriority commonpb.LoadPriority
 	// for balance segment task, expected load and release execution on the same shard leader
 	shardLeaderID int64
+	segmentSize   int64
 }
 
 // NewSegmentTask creates a SegmentTask with actions,
@@ -401,6 +402,14 @@ func (task *SegmentTask) ShardLeaderID() int64 {
 
 func (task *SegmentTask) SetShardLeaderID(id int64) {
 	task.shardLeaderID = id
+}
+
+func (task *SegmentTask) SegmentSize() int64 {
+	return task.segmentSize
+}
+
+func (task *SegmentTask) SetSegmentSize(size int64) {
+	task.segmentSize = size
 }
 
 type ChannelTask struct {

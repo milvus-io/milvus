@@ -69,7 +69,7 @@ func TestRowCountBasedAssignPolicy_AssignSegment_PriorityToLeastLoaded(t *testin
 	}
 
 	nodes := []int64{1, 2, 3}
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	plans := policy.AssignSegment(context.Background(), 100, segments, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 1, len(plans))
@@ -110,7 +110,7 @@ func TestRowCountBasedAssignPolicy_AssignSegment_MultipleSegments(t *testing.T) 
 	}
 
 	nodes := []int64{1, 2}
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	plans := policy.AssignSegment(context.Background(), 100, segments, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 4, len(plans))
@@ -137,7 +137,7 @@ func TestRowCountBasedAssignPolicy_AssignSegment_EmptyNodes(t *testing.T) {
 	}
 	nodes := []int64{}
 
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	plans := policy.AssignSegment(context.Background(), 100, segments, nodes)
 
 	assert.Nil(t, plans)
 }
@@ -242,7 +242,7 @@ func TestRowCountBasedAssignPolicy_AssignChannel_PriorityToLeastLoaded(t *testin
 	}
 
 	nodes := []int64{1, 2, 3}
-	plans := policy.AssignChannel(context.Background(), 100, channels, nodes, false)
+	plans := policy.AssignChannel(context.Background(), 100, channels, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 1, len(plans))
@@ -283,7 +283,7 @@ func TestRowCountBasedAssignPolicy_AssignChannel_MultipleChannels(t *testing.T) 
 	}
 
 	nodes := []int64{1, 2}
-	plans := policy.AssignChannel(context.Background(), 100, channels, nodes, false)
+	plans := policy.AssignChannel(context.Background(), 100, channels, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 4, len(plans))
@@ -378,7 +378,7 @@ func TestRowCountBasedAssignPolicy_AssignSegment_EmptySegments(t *testing.T) {
 	segments := []*meta.Segment{}
 	nodes := []int64{1}
 
-	plans := policy.AssignSegment(context.Background(), 100, segments, nodes, false)
+	plans := policy.AssignSegment(context.Background(), 100, segments, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 0, len(plans))
@@ -405,7 +405,7 @@ func TestRowCountBasedAssignPolicy_AssignChannel_EmptyChannels(t *testing.T) {
 	channels := []*meta.DmChannel{}
 	nodes := []int64{1}
 
-	plans := policy.AssignChannel(context.Background(), 100, channels, nodes, false)
+	plans := policy.AssignChannel(context.Background(), 100, channels, nodes)
 
 	assert.NotNil(t, plans)
 	assert.Equal(t, 0, len(plans))

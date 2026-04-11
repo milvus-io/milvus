@@ -160,7 +160,7 @@ func (b *RowCountBasedBalancer) genSegmentPlan(ctx context.Context, replica *met
 		return nil
 	}
 
-	segmentPlans := b.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segmentsToMove, nodesWithLessRow, false)
+	segmentPlans := b.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segmentsToMove, nodesWithLessRow)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
 		segmentPlans[i].Replica = replica
@@ -200,7 +200,7 @@ func (b *RowCountBasedBalancer) genChannelPlan(ctx context.Context, br *balanceR
 			return nil
 		}
 
-		channelPlans := b.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, nodeWithLessChannel, false)
+		channelPlans := b.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, nodeWithLessChannel)
 		for i := range channelPlans {
 			channelPlans[i].From = channelPlans[i].Channel.Node
 			channelPlans[i].Replica = replica

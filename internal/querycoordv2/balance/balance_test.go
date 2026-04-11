@@ -136,7 +136,7 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 				nodeInfo.SetState(c.states[i])
 				suite.roundRobinBalancer.nodeManager.Add(nodeInfo)
 			}
-			plans := suite.roundRobinBalancer.GetAssignPolicy().AssignSegment(ctx, 0, c.assignments, c.nodeIDs, false)
+			plans := suite.roundRobinBalancer.GetAssignPolicy().AssignSegment(ctx, 0, c.assignments, c.nodeIDs)
 			suite.ElementsMatch(c.expectPlans, plans)
 		})
 	}
@@ -209,7 +209,7 @@ func (suite *BalanceTestSuite) TestAssignChannel() {
 				nodeInfo.SetState(c.states[i])
 				suite.roundRobinBalancer.nodeManager.Add(nodeInfo)
 			}
-			plans := suite.roundRobinBalancer.GetAssignPolicy().AssignChannel(ctx, 1, c.assignments, c.nodeIDs, false)
+			plans := suite.roundRobinBalancer.GetAssignPolicy().AssignChannel(ctx, 1, c.assignments, c.nodeIDs)
 			suite.ElementsMatch(c.expectPlans, plans)
 		})
 	}

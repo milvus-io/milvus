@@ -107,7 +107,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.Int64("srcNode", srcNode))
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	policy := balancer.GetAssignPolicy()
-	plans := policy.AssignSegment(ctx, collectionID, segments, dstNodes, true)
+	plans := policy.AssignSegment(ctx, collectionID, segments, dstNodes)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica
@@ -189,7 +189,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 
 	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	policy := balancer.GetAssignPolicy()
-	plans := policy.AssignChannel(ctx, collectionID, channels, dstNodes, true)
+	plans := policy.AssignChannel(ctx, collectionID, channels, dstNodes)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica

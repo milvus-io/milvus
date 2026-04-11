@@ -62,7 +62,7 @@ func (chanPlan *ChannelAssignPlan) String() string {
 type AssignPolicy interface {
 	// AssignSegment assigns segments to nodes based on the policy
 	// Returns a list of segment assignment plans
-	AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool) []SegmentAssignPlan
+	AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan
 
 	// AssignChannel assigns channels to nodes based on the policy
 	// Returns a list of channel assignment plans

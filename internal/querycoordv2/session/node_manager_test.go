@@ -232,6 +232,35 @@ func (s *NodeManagerSuite) TestMemCapacityFunctionality() {
 	s.Equal(2048.75, node.MemCapacity())
 }
 
+func (s *NodeManagerSuite) TestUsedMemoryFunctionality() {
+	node := NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost:19530",
+		Hostname: "test-host",
+	})
+
+	// Test initial used memory
+	s.Equal(float64(0), node.UsedMemory())
+
+	// Test WithUsedMemory option
+	node.UpdateStats(WithUsedMemory(2048.5))
+	s.Equal(2048.5, node.UsedMemory())
+
+	// Test updating used memory
+	node.UpdateStats(WithUsedMemory(4096.0))
+	s.Equal(4096.0, node.UsedMemory())
+
+	// Test combined with other stats
+	node.UpdateStats(
+		WithMemCapacity(8192.0),
+		WithUsedMemory(3000.0),
+		WithCPUNum(16),
+	)
+	s.Equal(8192.0, node.MemCapacity())
+	s.Equal(3000.0, node.UsedMemory())
+	s.Equal(int64(16), node.CPUNum())
+}
+
 func (s *NodeManagerSuite) TestNodeInfoLabels() {
 	info := ImmutableNodeInfo{
 		NodeID:   1,
@@ -253,6 +282,29 @@ func (s *NodeManagerSuite) TestNodeInfoLabels() {
 
 	info.Labels[sessionutil.LabelResourceGroup] = "rg1"
 	s.Equal("rg1", info2.ResourceGroupName())
+}
+
+func (s *NodeManagerSuite) TestGetActiveNodeCount() {
+	// Empty manager
+	s.Equal(0, s.nodeManager.GetActiveNodeCount())
+
+	// Add 3 normal nodes
+	for i := int64(1); i <= 3; i++ {
+		s.nodeManager.Add(NewNodeInfo(ImmutableNodeInfo{NodeID: i}))
+	}
+	s.Equal(3, s.nodeManager.GetActiveNodeCount())
+
+	// Stop one node — should not be counted as active
+	s.nodeManager.Stopping(2)
+	s.Equal(2, s.nodeManager.GetActiveNodeCount())
+
+	// Stop another
+	s.nodeManager.Stopping(3)
+	s.Equal(1, s.nodeManager.GetActiveNodeCount())
+
+	// Remove a node
+	s.nodeManager.Remove(1)
+	s.Equal(0, s.nodeManager.GetActiveNodeCount())
 }
 
 func TestNodeManagerSuite(t *testing.T) {
