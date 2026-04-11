@@ -130,6 +130,11 @@ func (impl *flusherComponents) WhenDropCollection(vchannel string) {
 }
 
 // HandleMessage handles the plain message.
+//
+// Contract: ctx MUST be a stable context that is not cancelled by the DSS failure
+// handler (i.e. not failCtx from WALFlusherImpl.Execute). Per-message delivery needs
+// to be atomic across all vchannels; a mid-call cancel leaves partial state that
+// diverges from the recovery-storage checkpoint. See wal_flusher.go dispatch() doc.
 func (impl *flusherComponents) HandleMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	// AlterReplicateConfig is a coordinator-only message, skip it in flusher.
 	if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
@@ -146,6 +151,11 @@ func (impl *flusherComponents) HandleMessage(ctx context.Context, msg message.Im
 }
 
 // broadcastToAllDataSyncService broadcasts the message to all data sync services.
+//
+// Contract: callers MUST pass a stable context — not one cancelled by the DSS failure
+// handler — because a mid-loop cancel leaves earlier vchannels written and later ones
+// skipped, while ObserveMessage (deferred in the caller) still advances the recovery
+// checkpoint, causing data loss on flusher restart. See wal_flusher.go dispatch() doc.
 func (impl *flusherComponents) broadcastToAllDataSyncService(ctx context.Context, msg message.ImmutableMessage) error {
 	for _, ds := range impl.dataServices {
 		if err := ds.HandleMessage(ctx, msg); err != nil {

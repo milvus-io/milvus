@@ -84,6 +84,15 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 	}()
 
 	// Create a derived context with cancel-cause so that DSS write failures can trigger flusher shutdown.
+	//
+	// Context split:
+	//   - failCtx: gates the OUTER scanner loop only (the select below). When a DSS async
+	//     failure fires failCancel, we stop pulling new messages from the scanner and exit.
+	//   - impl.notifier.Context(): governs every INNER per-message operation (dispatch,
+	//     HandleMessage, broadcast, ObserveMessage). Once a message is pulled from the scanner
+	//     we MUST complete its delivery atomically — otherwise partial MsgPack delivery races
+	//     with ObserveMessage advancing the recovery-storage checkpoint, which would cause the
+	//     re-opened flusher to skip partially-flushed data. See PR #48928 review discussion.
 	failCtx, failCancel := context.WithCancelCause(impl.notifier.Context())
 	defer failCancel(nil)
 
@@ -131,7 +140,10 @@ func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) 
 				return nil
 			}
 			impl.metrics.ObserveMetrics(msg.TimeTick())
-			if err := impl.dispatch(failCtx, msg); err != nil {
+			// Pass the stable notifier context (NOT failCtx) into dispatch, so that a concurrent
+			// DSS failure firing failCancel mid-dispatch cannot interrupt in-flight per-message
+			// delivery. An async DSS failure only affects the next scanner iteration via failCtx.Done().
+			if err := impl.dispatch(impl.notifier.Context(), msg); err != nil {
 				return nil
 			}
 		}
@@ -230,6 +242,14 @@ func (impl *WALFlusherImpl) generateScanner(ctx context.Context, l wal.WAL, chec
 }
 
 // dispatch dispatches the message to the related handler for flusher components.
+//
+// The caller MUST pass a stable context that is not cancelled by the DSS failure handler
+// (typically impl.notifier.Context()). Dispatch of a single WAL message must be atomic:
+// either every target vchannel receives every MsgPack AND ObserveMessage advances the
+// recovery checkpoint, or none of it happens. Passing a cancellable failCtx here would
+// allow a mid-dispatch cancel to leave some vchannels written and some not, while
+// ObserveMessage still unconditionally advances the recovery-storage checkpoint, causing
+// the re-opened flusher to skip data that was never actually flushed.
 func (impl *WALFlusherImpl) dispatch(ctx context.Context, msg message.ImmutableMessage) (err error) {
 	if msg.MessageType() == message.MessageTypeTimeTick && !msg.IsPersisted() {
 		// Currently, milvus use the timetick to synchronize the system periodically,

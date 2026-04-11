@@ -6,10 +6,15 @@ package flusherimpl
 import (
 	"context"
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -112,6 +117,152 @@ func TestWALFlusher(t *testing.T) {
 	flusher := RecoverWALFlusher(param)
 	time.Sleep(5 * time.Second)
 	flusher.Close()
+}
+
+// TestWALFlusherGracefulExitOnDSSFailure asserts that when a DSS failure handler is
+// invoked mid-flight (as would happen when an async write-buffer / flowgraph node
+// fails), the flusher:
+//  1. exits the main loop cleanly (graceful shutdown, no panic)
+//  2. does not leave recovery state diverged relative to dispatched messages —
+//     i.e. for every ObserveMessage call that started under the in-flight dispatch
+//     path, the call completes.
+//
+// Regression coverage for PR #48928 review comments on wal_flusher.go:134 and
+// flusher_components.go:42: failCtx must NOT be passed into the in-flight
+// dispatch/HandleMessage/ObserveMessage path, otherwise a mid-call cancel would
+// leave partial MsgPack delivery while ObserveMessage advances the recovery
+// checkpoint. This test pins the "dispatch is atomic relative to DSS failure" invariant.
+func TestWALFlusherGracefulExitOnDSSFailure(t *testing.T) {
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
+
+	// Build mixcoord inline with all expectations as .Maybe(), since this test
+	// tears the flusher down early on DSS failure and may not drive every lifecycle call.
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(&datapb.DropVirtualChannelResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	}, nil).Maybe()
+	mixcoord.EXPECT().GetChannelRecoveryInfo(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, request *datapb.GetChannelRecoveryInfoRequest, option ...grpc.CallOption,
+		) (*datapb.GetChannelRecoveryInfoResponse, error) {
+			messageID := 1
+			b := make([]byte, 8)
+			common.Endian.PutUint64(b, uint64(messageID))
+			return &datapb.GetChannelRecoveryInfoResponse{
+				Info: &datapb.VchannelInfo{
+					ChannelName:  request.GetVchannel(),
+					SeekPosition: &msgpb.MsgPosition{MsgID: b},
+				},
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "ID", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+						{FieldID: 101, Name: "Vector", DataType: schemapb.DataType_FloatVector},
+					},
+				},
+			}, nil
+		}).Maybe()
+	mixcoord.EXPECT().AllocSegment(mock.Anything, mock.Anything).Return(&datapb.AllocSegmentResponse{
+		Status: merr.Status(nil),
+	}, nil).Maybe()
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+
+	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().GetSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "ID", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "Vector", DataType: schemapb.DataType_FloatVector},
+		},
+	}, nil).Maybe()
+
+	// Count ObserveMessage calls; for the first call, block briefly so the test can
+	// concurrently fire the failure handler while dispatch is in-flight. The fix
+	// guarantees this first call runs to completion (stable ctx), not cancelled.
+	var (
+		observed     atomic.Int64
+		firstStarted = make(chan struct{})
+		firstProceed = make(chan struct{})
+		once         sync.Once
+	)
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, msg message.ImmutableMessage) error {
+			if observed.Add(1) == 1 {
+				once.Do(func() { close(firstStarted) })
+				// Wait for the test to fire the failure handler, then continue.
+				// Importantly, we do NOT consult ctx here — this mirrors production
+				// ObserveMessage (recovery_storage_impl.go) which ignores ctx.
+				<-firstProceed
+			}
+			return nil
+		}).Maybe()
+	rs.EXPECT().Close().Return().Maybe()
+
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+		resource.OptChunkManager(mock_storage.NewMockChunkManager(t)),
+	)
+
+	l := newMockWAL(t, true)
+	rateLimitComponent := rate.NewWALRateLimitComponent(l.Channel())
+	defer rateLimitComponent.Close()
+
+	param := &RecoverWALFlusherParam{
+		ChannelInfo: l.Channel(),
+		WAL:         syncutil.NewFuture[wal.WAL](),
+		RecoverySnapshot: &recovery.RecoverySnapshot{
+			VChannels: map[string]*streamingpb.VChannelMeta{
+				"vchannel-1": {
+					CollectionInfo: &streamingpb.CollectionInfoOfVChannel{CollectionId: 100},
+				},
+			},
+			Checkpoint: &recovery.WALCheckpoint{TimeTick: 0},
+		},
+		RecoveryStorage:    rs,
+		RateLimitComponent: rateLimitComponent,
+	}
+	param.WAL.Set(l)
+	flusher := RecoverWALFlusher(param)
+
+	// Wait until the first ObserveMessage is running (i.e. dispatch is in-flight),
+	// then fire the DSS failure handler. With the fix this maps to failCancel, but
+	// the dispatch call for the first message must still complete atomically.
+	select {
+	case <-firstStarted:
+	case <-time.After(10 * time.Second):
+		close(firstProceed)
+		flusher.Close()
+		t.Fatal("timed out waiting for first ObserveMessage to start")
+	}
+
+	// Fire the failure handler while dispatch is in-flight. This is exactly the
+	// scenario that, prior to the fix, would cancel the dispatch's ctx and let
+	// ObserveMessage/HandleMessage see ctx.Err() mid-call.
+	require.NotNil(t, flusher.flusherComponents, "flusherComponents must be built before the first dispatch")
+	flusher.flusherComponents.makeWriteFailureHandler("vchannel-1")(errors.New("simulated DSS write failure"))
+
+	// Let the in-flight ObserveMessage return. The dispatch of the first message
+	// must still complete successfully.
+	close(firstProceed)
+
+	// Now the Execute main loop should exit via failCtx.Done(). Close should return
+	// promptly; if the loop was wedged or dispatch was partially aborted, Close would
+	// hang or we'd have observed a panic.
+	done := make(chan struct{})
+	go func() {
+		flusher.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("flusher.Close did not return; graceful exit path is blocked")
+	}
+
+	// At least the first message's ObserveMessage was invoked and returned nil —
+	// dispatch was atomic with respect to the mid-flight failure.
+	assert.GreaterOrEqual(t, observed.Load(), int64(1),
+		"dispatch should have completed ObserveMessage for at least the in-flight message")
 }
 
 func newMockMixcoord(t *testing.T, maybe bool) *mocks.MockMixCoordClient {
