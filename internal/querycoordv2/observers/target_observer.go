@@ -393,21 +393,36 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		return false
 	}
 
+	// Iterate through each replica to check if all its delegators are ready.
+	// This approach ensures each replica has at least one ready delegator for every channel.
+	// This prevents the issue where some replicas may lack nodes during dynamic replica scaling,
+	// while the total count still meets the threshold.
 	collectionReadyLeaders := make([]*meta.LeaderView, 0)
-	for channel := range channelNames {
-		channelReadyLeaders := lo.Filter(ob.distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel)), func(leader *meta.LeaderView, _ int) bool {
-			return utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, leader, meta.NextTarget) == nil
-		})
+	replicas := ob.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+	for _, replica := range replicas {
+		for channel := range channelNames {
+			// Filter leaders by replica to ensure we only check leaders belonging to this replica
+			channelReadyLeaders := lo.Filter(ob.distMgr.LeaderViewManager.GetByFilter(
+				meta.WithReplica2LeaderView(replica),
+				meta.WithChannelName2LeaderView(channel),
+			), func(leader *meta.LeaderView, _ int) bool {
+				return utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, leader, meta.NextTarget) == nil
+			})
 
-		// to avoid stuck here in dynamic increase replica case, we just check available delegator number
-		if int32(len(channelReadyLeaders)) < replicaNum {
-			log.RatedInfo(10, "channel not ready",
-				zap.Int("readyReplicaNum", len(channelReadyLeaders)),
-				zap.String("channelName", channel),
-			)
-			return false
+			if len(channelReadyLeaders) > 0 {
+				collectionReadyLeaders = append(collectionReadyLeaders, channelReadyLeaders...)
+			}
 		}
-		collectionReadyLeaders = append(collectionReadyLeaders, channelReadyLeaders...)
+	}
+
+	// Check that every channel has at least one ready leader across all replicas
+	readyChannelNames := lo.Uniq(lo.Map(collectionReadyLeaders, func(leader *meta.LeaderView, _ int) string { return leader.Channel }))
+	if !lo.Every(readyChannelNames, lo.Keys(channelNames)) {
+		log.RatedInfo(10, "not all channels have ready leaders",
+			zap.Int("readyChannels", len(readyChannelNames)),
+			zap.Int("totalChannels", len(channelNames)),
+		)
+		return false
 	}
 
 	var partitions []int64
