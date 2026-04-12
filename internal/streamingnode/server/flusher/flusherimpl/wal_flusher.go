@@ -243,7 +243,7 @@ func (impl *WALFlusherImpl) generateScanner(ctx context.Context, l wal.WAL, chec
 
 // dispatch dispatches the message to the related handler for flusher components.
 //
-// The caller MUST pass a stable context that is not cancelled by the DSS failure handler
+// The caller MUST pass a stable context that is not canceled by the DSS failure handler
 // (typically impl.notifier.Context()). Dispatch of a single WAL message must be atomic:
 // either every target vchannel receives every MsgPack AND ObserveMessage advances the
 // recovery checkpoint, or none of it happens. Passing a cancellable failCtx here would

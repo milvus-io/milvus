@@ -177,7 +177,7 @@ func TestWALFlusherGracefulExitOnDSSFailure(t *testing.T) {
 
 	// Count ObserveMessage calls; for the first call, block briefly so the test can
 	// concurrently fire the failure handler while dispatch is in-flight. The fix
-	// guarantees this first call runs to completion (stable ctx), not cancelled.
+	// guarantees this first call runs to completion (stable ctx), not canceled.
 	var (
 		observed     atomic.Int64
 		firstStarted = make(chan struct{})
