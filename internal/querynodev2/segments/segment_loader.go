@@ -168,22 +168,6 @@ func NewLoader(
 	manager *Manager,
 	cm storage.ChunkManager,
 ) *segmentLoader {
-	cpuNum := hardware.GetCPUNum()
-	ioPoolSize := cpuNum * 8
-	// make sure small machines could load faster
-	if ioPoolSize < 32 {
-		ioPoolSize = 32
-	}
-	// limit the number of concurrency
-	if ioPoolSize > 256 {
-		ioPoolSize = 256
-	}
-
-	if configPoolSize := paramtable.Get().QueryNodeCfg.IoPoolSize.GetAsInt(); configPoolSize > 0 {
-		ioPoolSize = configPoolSize
-	}
-
-	log.Info("SegmentLoader created", zap.Int("ioPoolSize", ioPoolSize))
 	duf := NewDiskUsageFetcher(ctx)
 	go duf.Start()
 
