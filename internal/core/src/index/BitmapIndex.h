@@ -264,6 +264,44 @@ class BitmapIndex : public ScalarIndex<T> {
             case proto::plan::OpType::Match: {
                 return PatternQuery(pattern);
             }
+            case proto::plan::OpType::RegexMatch: {
+                if constexpr (!std::is_same_v<T, std::string>) {
+                    ThrowInfo(
+                        ErrorCode::OpTypeInvalid,
+                        "RegexMatch only supported for string type");
+                    return TargetBitmap{};
+                } else {
+                    AssertInfo(is_built_, "index has not been built");
+                    PartialRegexMatcher matcher(pattern);
+                    TargetBitmap res(total_num_rows_, false);
+                    if (is_mmap_) {
+                        for (const auto& [key, bitmap] :
+                             bitmap_info_map_) {
+                            if (matcher(key)) {
+                                for (const auto& v : bitmap) {
+                                    res.set(v);
+                                }
+                            }
+                        }
+                    } else if (build_mode_ ==
+                               BitmapIndexBuildMode::ROARING) {
+                        for (const auto& [key, bitmap] : data_) {
+                            if (matcher(key)) {
+                                for (const auto& v : bitmap) {
+                                    res.set(v);
+                                }
+                            }
+                        }
+                    } else {
+                        for (const auto& [key, bitset] : bitsets_) {
+                            if (matcher(key)) {
+                                res |= bitset;
+                            }
+                        }
+                    }
+                    return res;
+                }
+            }
             default:
                 ThrowInfo(ErrorCode::OpTypeInvalid,
                           "not supported op type: {} for index PatternMatch",

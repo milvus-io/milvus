@@ -1126,6 +1126,9 @@ struct fmt::formatter<milvus::OpType> : formatter<string_view> {
             case milvus::OpType::InnerMatch:
                 name = "InnerMatch";
                 break;
+            case milvus::OpType::RegexMatch:
+                name = "RegexMatch";
+                break;
         }
         return formatter<string_view>::format(name, ctx);
     }

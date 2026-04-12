@@ -359,6 +359,428 @@ split_by_wildcard(const std::string& literal) {
     return result;
 }
 
+// Extract runs of literal bytes from a regex pattern that are GUARANTEED to
+// appear in any matching string.  Only these "required literals" are safe to
+// use as AND-conditions in the ngram coarse filter.
+//
+// Key correctness rules:
+//   1. Alternation `|` at any nesting level means we cannot determine which
+//      branch will match, so no literal from either branch is guaranteed.
+//      → Return empty immediately.
+//   2. Quantifiers that allow zero occurrences (`?`, `*`, `{0,...}`) make the
+//      preceding element optional.  The last character of the current literal
+//      run must be removed before saving, since it might not be present.
+//   3. `+` means "one or more" — the preceding element IS required, but the
+//      repetition breaks contiguity with the following literal.  Save the
+//      current run (including the repeated char) and start a new run.
+//   4. Shorthand character classes (`\d`, `\w`, `\s`, etc.) are not literal.
+//   5. `(?i)` or other inline flags containing `i` → return empty (case-
+//      insensitive matching invalidates case-sensitive ngram lookups).
+//
+// This is deliberately conservative: returning fewer literals (or empty) is
+// always safe — it just means less ngram filtering and more brute-force
+// Phase-2 work.  Returning a wrong literal causes false negatives.
+std::vector<std::string>
+extract_literals_from_regex(const std::string& pattern) {
+    auto is_metachar = [](char c) -> bool {
+        return c == '.' || c == '+' || c == '*' || c == '?' || c == '^' ||
+               c == '$' || c == '{' || c == '}' || c == '(' || c == ')' ||
+               c == '|' || c == '[' || c == ']';
+    };
+
+    // WHITELIST approach: only escaped regex metacharacters are guaranteed
+    // to produce a literal byte.  Everything else (\d, \w, \n, \t, \x,
+    // \p, \0, etc.) is a character class, control char, or special escape
+    // — NOT a guaranteed literal in the matched text.
+    auto is_escaped_literal = [&](char next) -> bool {
+        switch (next) {
+            case '.': case '+': case '*': case '?': case '^': case '$':
+            case '{': case '}': case '(': case ')': case '|': case '[':
+            case ']': case '\\': case '/': case '-':
+                return true;
+            default:
+                return false;
+        }
+    };
+
+    // ── Pre-scan: bail out if any unescaped `|` exists (at any depth). ──
+    {
+        bool in_char_class = false;
+        for (size_t i = 0; i < pattern.size(); ++i) {
+            char c = pattern[i];
+            if (c == '\\' && i + 1 < pattern.size()) {
+                ++i;  // skip escaped char
+                continue;
+            }
+            if (c == '[') {
+                in_char_class = true;
+                continue;
+            }
+            if (c == ']') {
+                in_char_class = false;
+                continue;
+            }
+            if (!in_char_class && c == '|') {
+                return {};  // alternation → cannot safely AND literals
+            }
+        }
+    }
+
+    // ── Pre-scan: bail out on case-insensitive flag (?i), (?mi), etc. ──
+    // RE2 flag groups are (?flags) or (?flags:...) where flags are only
+    // [imsU-].  Named groups like (?P<id>...) or (?<name>...) must NOT
+    // be mistaken for flag groups.
+    for (size_t i = 0; i + 2 < pattern.size(); ++i) {
+        if (pattern[i] == '(' && pattern[i + 1] == '?') {
+            // Scan flag characters: only [imsU-] are valid flags
+            for (size_t j = i + 2; j < pattern.size(); ++j) {
+                char fc = pattern[j];
+                if (fc == ')' || fc == ':') break;
+                if (fc == 'i') return {};  // case-insensitive
+                // If we hit a non-flag character, this is not a flag
+                // group (e.g. (?P<...), (?<...), (?'...'))
+                if (fc != 'm' && fc != 's' && fc != 'U' && fc != '-') {
+                    break;
+                }
+            }
+        }
+    }
+
+    // ── Parse {n}, {n,}, {n,m} quantifier ──
+    // Returns (min, exact, end_pos). exact=true means {n} (min==max).
+    // Returns (-1, false, pos) on parse failure.
+    auto parse_quantifier =
+        [](const std::string& pat,
+           size_t pos) -> std::tuple<int, bool, size_t> {
+        if (pos >= pat.size() || pat[pos] != '{') return {-1, false, pos};
+        size_t j = pos + 1;
+        int n = 0;
+        bool has_n = false;
+        while (j < pat.size() && pat[j] >= '0' && pat[j] <= '9') {
+            n = n * 10 + (pat[j] - '0');
+            has_n = true;
+            ++j;
+        }
+        if (!has_n || j >= pat.size()) return {-1, false, pos};
+        if (pat[j] == '}') return {n, true, j + 1};  // {n} exact
+        if (pat[j] == ',') {
+            ++j;
+            while (j < pat.size() && pat[j] >= '0' && pat[j] <= '9') ++j;
+            if (j < pat.size() && pat[j] == '}')
+                return {n, false, j + 1};  // {n,m} or {n,}
+        }
+        return {-1, false, pos};
+    };
+
+    // ── Main extraction loop ──
+    std::vector<std::string> result;
+    std::string current;
+    std::vector<size_t> group_start_stack;  // tracks group start in `current`
+
+    auto flush = [&]() {
+        if (!current.empty()) {
+            result.push_back(std::move(current));
+            current.clear();
+        }
+    };
+
+    // Handle a variable-count quantifier on an element (char or group content).
+    // Flushes current (including min copies), then starts new segment with
+    // min copies so the next literal is contiguous with the last repetition.
+    auto flush_variable_quantifier = [&](const std::string& element,
+                                         int min_count) {
+        // current already has one copy of element appended.
+        // Add min_count-1 more copies.
+        for (int r = 1; r < min_count; ++r) current += element;
+        flush();
+        // Start new segment with min_count copies for contiguity with what follows
+        for (int r = 0; r < min_count; ++r) current += element;
+    };
+
+    for (size_t i = 0; i < pattern.size();) {
+        char c = pattern[i];
+
+        // ── Escape sequence ──
+        if (c == '\\' && i + 1 < pattern.size()) {
+            char next = pattern[i + 1];
+            if (is_escaped_literal(next)) {
+                // Check for quantifier after the escaped char
+                size_t after = i + 2;
+                if (after < pattern.size()) {
+                    char q = pattern[after];
+                    if (q == '?' || q == '*') {
+                        // Optional element → don't include
+                        flush();
+                        i = after + 1;
+                        continue;
+                    }
+                    if (q == '{') {
+                        auto [min_count, exact, end_pos] =
+                            parse_quantifier(pattern, after);
+                        if (min_count <= 0) {
+                            flush();
+                            i = end_pos;
+                            continue;
+                        }
+                        std::string elem(1, next);
+                        if (exact) {
+                            // {n} exact: expand, keep contiguity
+                            for (int r = 0; r < min_count; ++r)
+                                current += next;
+                            i = end_pos;
+                        } else {
+                            // {n,m} or {n,}: expand min, break contiguity
+                            current += next;
+                            flush_variable_quantifier(elem, min_count);
+                            i = end_pos;
+                        }
+                        continue;
+                    }
+                    if (q == '+') {
+                        // Required, variable — flush with repeat start
+                        std::string elem(1, next);
+                        current += next;
+                        flush_variable_quantifier(elem, 1);
+                        i = after + 1;
+                        continue;
+                    }
+                }
+                current += next;
+                i += 2;
+            } else {
+                // Shorthand class (\d, \w, \s, \p, \P, etc.) → split
+                flush();
+                i += 2;
+                // \p{...} and \P{...} — consume the braced property name
+                if ((next == 'p' || next == 'P') && i < pattern.size() &&
+                    pattern[i] == '{') {
+                    while (i < pattern.size() && pattern[i] != '}') ++i;
+                    if (i < pattern.size()) ++i;  // skip '}'
+                }
+            }
+            continue;
+        }
+
+        // ── Character class [...] ──
+        if (c == '[') {
+            flush();
+            ++i;
+            // Skip to closing ], handling \]
+            while (i < pattern.size() && pattern[i] != ']') {
+                if (pattern[i] == '\\' && i + 1 < pattern.size()) ++i;
+                ++i;
+            }
+            if (i < pattern.size()) ++i;  // skip ']'
+            // Character class may be followed by a quantifier — skip it
+            if (i < pattern.size() &&
+                (pattern[i] == '?' || pattern[i] == '*' || pattern[i] == '+')) {
+                ++i;
+            } else if (i < pattern.size() && pattern[i] == '{') {
+                while (i < pattern.size() && pattern[i] != '}') ++i;
+                if (i < pattern.size()) ++i;
+            }
+            continue;
+        }
+
+        // ── Grouping (...) ──
+        // We already bailed on `|`, so group content is sequential.
+        // For non-optional groups, we can "penetrate" the parentheses
+        // and continue accumulating literals from the group content.
+        // For optional groups (followed by ?, *, {0,...}), we flush
+        // and skip the entire group.
+        if (c == '(') {
+            ++i;
+            // Skip group flags like (?:...), (?P<name>...), (?i...) etc.
+            // These are non-content prefixes inside the group.
+            bool is_flag_group = false;
+            if (i < pattern.size() && pattern[i] == '?') {
+                // (?:...) non-capturing, (?P<...) named, (?i...) flags
+                // Skip to the actual content or end of flag-only group
+                size_t flag_start = i;
+                ++i;  // skip '?'
+                // Skip flag chars and special prefixes
+                while (i < pattern.size()) {
+                    char fc = pattern[i];
+                    if (fc == ':') {
+                        ++i;  // skip ':', content follows
+                        break;
+                    }
+                    if (fc == ')') {
+                        // Flag-only group like (?i) — already consumed
+                        // by pre-scan, just skip past ')'
+                        ++i;
+                        is_flag_group = true;
+                        break;
+                    }
+                    if (fc == 'P' || fc == '<' || fc == '\'') {
+                        // Named group — skip to '>' or '\'' then ':'
+                        while (i < pattern.size() && pattern[i] != ')' &&
+                               pattern[i] != ':') {
+                            if (pattern[i] == '>' || pattern[i] == '\'') {
+                                ++i;
+                                break;
+                            }
+                            ++i;
+                        }
+                        if (i < pattern.size() && pattern[i] == ':') ++i;
+                        break;
+                    }
+                    // Flag character (i, m, s, U, etc.)
+                    ++i;
+                }
+            }
+            if (is_flag_group) continue;
+
+            // Find the matching ')' to check the quantifier after it
+            size_t content_start = i;
+            int depth = 1;
+            size_t close_pos = i;
+            while (close_pos < pattern.size() && depth > 0) {
+                if (pattern[close_pos] == '\\' &&
+                    close_pos + 1 < pattern.size()) {
+                    close_pos += 2;
+                    continue;
+                }
+                if (pattern[close_pos] == '(') ++depth;
+                if (pattern[close_pos] == ')') --depth;
+                if (depth > 0) ++close_pos;
+            }
+            // close_pos now points at the matching ')'
+            size_t after_close = close_pos + 1;
+
+            // Check quantifier after ')'
+            if (after_close < pattern.size()) {
+                char q = pattern[after_close];
+                if (q == '?' || q == '*') {
+                    // Optional group — flush and skip
+                    flush();
+                    i = after_close + 1;
+                    continue;
+                }
+                if (q == '{') {
+                    auto [min_count, exact, end_pos] =
+                        parse_quantifier(pattern, after_close);
+                    if (min_count <= 0) {
+                        // {0,...} optional — flush and skip
+                        flush();
+                        i = end_pos;
+                        continue;
+                    }
+                    // Required group with {n} or {n,m}
+                    // Penetrate: parse group content, then expand
+                    group_start_stack.push_back(current.size());
+                    // i is at content_start, will parse group content
+                    // Store quantifier info for ')' handler
+                    // We handle it when we reach ')' below
+                    continue;
+                }
+                if (q == '+') {
+                    // Required, variable — penetrate, expand at ')'
+                    group_start_stack.push_back(current.size());
+                    continue;
+                }
+            }
+
+            // No quantifier — required group, just penetrate
+            group_start_stack.push_back(current.size());
+            continue;
+        }
+
+        // ── Close group ')' ──
+        if (c == ')') {
+            ++i;
+            size_t group_start = group_start_stack.empty()
+                                     ? 0
+                                     : group_start_stack.back();
+            if (!group_start_stack.empty()) group_start_stack.pop_back();
+            std::string group_content = current.substr(group_start);
+
+            if (i < pattern.size()) {
+                char q = pattern[i];
+                if (q == '+') {
+                    // {1,} variable — expand
+                    flush_variable_quantifier(group_content, 1);
+                    ++i;
+                    continue;
+                }
+                if (q == '{') {
+                    auto [min_count, exact, end_pos] =
+                        parse_quantifier(pattern, i);
+                    if (min_count > 0) {
+                        if (exact) {
+                            // {n} exact: expand, keep contiguity
+                            for (int r = 1; r < min_count; ++r)
+                                current += group_content;
+                        } else {
+                            // {n,m} variable: expand min, break
+                            flush_variable_quantifier(
+                                group_content, min_count);
+                        }
+                        i = end_pos;
+                        continue;
+                    }
+                }
+            }
+            // No quantifier after ) — just continue (content already in current)
+            continue;
+        }
+
+        // ── Other metacharacter ──
+        if (is_metachar(c)) {
+            flush();
+            ++i;
+            continue;
+        }
+
+        // ── Regular literal character ──
+        // Peek ahead for quantifier
+        if (i + 1 < pattern.size()) {
+            char q = pattern[i + 1];
+            if (q == '?' || q == '*') {
+                // This character is optional
+                flush();  // flush what we have (without this char)
+                i += 2;
+                continue;
+            }
+            if (q == '{') {
+                auto [min_count, exact, end_pos] =
+                    parse_quantifier(pattern, i + 1);
+                if (min_count <= 0) {
+                    // {0,...} optional
+                    flush();
+                    i = end_pos;
+                    continue;
+                }
+                std::string elem(1, c);
+                if (exact) {
+                    // {n} exact: expand, keep contiguity
+                    for (int r = 0; r < min_count; ++r) current += c;
+                    i = end_pos;
+                } else {
+                    // {n,m} or {n,}: expand min, break contiguity
+                    current += c;
+                    flush_variable_quantifier(elem, min_count);
+                    i = end_pos;
+                }
+                continue;
+            }
+            if (q == '+') {
+                // Required, variable — flush with repeat start
+                std::string elem(1, c);
+                current += c;
+                flush_variable_quantifier(elem, 1);
+                i += 2;
+                continue;
+            }
+        }
+
+        current += c;
+        ++i;
+    }
+    flush();
+    return result;
+}
+
 bool
 NgramInvertedIndex::CanHandleLiteral(const std::string& literal,
                                      proto::plan::OpType op_type) const {
@@ -375,6 +797,18 @@ NgramInvertedIndex::CanHandleLiteral(const std::string& literal,
                 }
             }
             return true;
+        }
+        case proto::plan::OpType::RegexMatch: {
+            auto literals = extract_literals_from_regex(literal);
+            if (literals.empty()) {
+                return false;
+            }
+            for (const auto& l : literals) {
+                if (l.length() >= min_gram_) {
+                    return true;
+                }
+            }
+            return false;
         }
         case proto::plan::OpType::InnerMatch:
         case proto::plan::OpType::PrefixMatch:
@@ -483,6 +917,17 @@ NgramInvertedIndex::ExecutePhase1(const std::string& literal,
                        l.length(),
                        min_gram_);
         }
+    } else if (op_type == proto::plan::OpType::RegexMatch) {
+        auto all_literals = extract_literals_from_regex(literal);
+        // Only keep literals that are long enough for ngram
+        for (const auto& l : all_literals) {
+            if (l.length() >= min_gram_) {
+                literals_vec.push_back(l);
+            }
+        }
+        AssertInfo(!literals_vec.empty(),
+                   "ExecutePhase1: RegexMatch pattern must have non-empty "
+                   "literals >= min_gram");
     } else {
         AssertInfo(literal.length() >= min_gram_,
                    "ExecutePhase1: literal length {} < min_gram {}",
@@ -619,6 +1064,18 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
                 });
                 break;
             }
+            case proto::plan::OpType::RegexMatch: {
+                PartialRegexMatcher matcher(literal);
+                apply_predicate([&matcher, this](const milvus::Json& data) {
+                    auto x =
+                        data.template at<std::string_view>(this->nested_path_);
+                    if (x.error()) {
+                        return false;
+                    }
+                    return matcher(x.value());
+                });
+                break;
+            }
             default:
                 break;
         }
@@ -661,6 +1118,13 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
             case proto::plan::OpType::Match: {
                 // Use LikePatternMatcher optimized for LIKE patterns
                 LikePatternMatcher matcher(literal);
+                apply_predicate([&matcher](const std::string_view& data) {
+                    return matcher(data);
+                });
+                break;
+            }
+            case proto::plan::OpType::RegexMatch: {
+                PartialRegexMatcher matcher(literal);
                 apply_predicate([&matcher](const std::string_view& data) {
                     return matcher(data);
                 });

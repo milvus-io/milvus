@@ -281,6 +281,276 @@ func TestExpr_Like(t *testing.T) {
 	assert.Equal(t, `8%-0`, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
 }
 
+func TestExpr_RegexMatch(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// --- Regex-to-LIKE optimization tests ---
+
+	// Pure literal "abc" → InnerMatch (substring)
+	expr := `A =~ "abc"`
+	plan, err := CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_InnerMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "abc", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// "^abc" → PrefixMatch
+	expr = `A =~ "^abc"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_PrefixMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "abc", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// "abc$" → PostfixMatch
+	expr = `A =~ "abc$"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_PostfixMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "abc", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// "^abc$" → Equal
+	expr = `A =~ "^abc$"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_Equal, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "abc", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// Escaped metacharacter "file\\.txt" → InnerMatch("file.txt")
+	expr = `A =~ "file\\.txt"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_InnerMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "file.txt", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// --- Patterns that stay as RegexMatch ---
+
+	// Regex with metacharacters → stays RegexMatch
+	expr = `A =~ "a.*b"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "a.*b", plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// Character class → stays RegexMatch
+	expr = `A =~ "[0-9]+"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+
+	// Empty pattern → stays RegexMatch (matches everything)
+	expr = `A =~ ""`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+
+	// --- Patterns that MUST stay RegexMatch (never downgrade to LIKE) ---
+
+	// Unicode property \p{...}
+	expr = `A =~ "\\p{Han}+"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk: 0, MetricType: "", SearchParams: "", RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+
+	// Named group (?P<name>...)
+	expr = `A =~ "(?P<user>[a-z]+)@host"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk: 0, MetricType: "", SearchParams: "", RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+
+	// Inline flag (?m)
+	expr = `A =~ "(?m)^start"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk: 0, MetricType: "", SearchParams: "", RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+
+	// Shorthand class \d
+	expr = `A =~ "\\d{3}-\\d{4}"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk: 0, MetricType: "", SearchParams: "", RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	assert.Equal(t, planpb.OpType_RegexMatch, plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp())
+
+	// --- Error cases ---
+
+	// Invalid regex pattern — unclosed bracket
+	expr = `A =~ "[unclosed"`
+	assertInvalidExpr(t, helper, expr)
+
+	// Non-string field — should error
+	expr = `Int64Field =~ "abc"`
+	assertInvalidExpr(t, helper, expr)
+
+	// --- Negation ---
+
+	// !~ with pure literal → NOT(InnerMatch)
+	expr = `A !~ "abc"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	predicates := plan.GetVectorAnns().GetPredicates()
+	assert.Equal(t, planpb.UnaryExpr_Not, predicates.GetUnaryExpr().GetOp())
+	assert.Equal(t, planpb.OpType_InnerMatch, predicates.GetUnaryExpr().GetChild().GetUnaryRangeExpr().GetOp())
+	assert.Equal(t, "abc", predicates.GetUnaryExpr().GetChild().GetUnaryRangeExpr().GetValue().GetStringVal())
+
+	// !~ with metacharacters → NOT(RegexMatch)
+	expr = `A !~ "a.*b"`
+	plan, err = CreateSearchPlan(helper, expr, "FloatVectorField", &planpb.QueryInfo{
+		Topk:         0,
+		MetricType:   "",
+		SearchParams: "",
+		RoundDecimal: 0,
+	}, nil, nil)
+	assert.NoError(t, err, expr)
+	assert.NotNil(t, plan)
+	predicates = plan.GetVectorAnns().GetPredicates()
+	assert.Equal(t, planpb.UnaryExpr_Not, predicates.GetUnaryExpr().GetOp())
+	assert.Equal(t, planpb.OpType_RegexMatch, predicates.GetUnaryExpr().GetChild().GetUnaryRangeExpr().GetOp())
+
+	// --- JSON and other field types ---
+	validExprs := []string{
+		`JSONField["A"] =~ "abc"`,
+		`VarCharField =~ "^prefix"`,
+	}
+	for _, exprStr := range validExprs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	// --- Comprehensive tryOptimizeRegexToLike edge cases ---
+
+	// Helper to check op type for =~ expressions
+	checkOp := func(t *testing.T, exprStr string, expectedOp planpb.OpType) {
+		t.Helper()
+		p, e := CreateSearchPlan(helper, exprStr, "FloatVectorField", &planpb.QueryInfo{
+			Topk: 0, MetricType: "", SearchParams: "", RoundDecimal: 0,
+		}, nil, nil)
+		assert.NoError(t, e, exprStr)
+		assert.NotNil(t, p, exprStr)
+		assert.Equal(t, expectedOp,
+			p.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetOp(),
+			"wrong OpType for: %s", exprStr)
+	}
+	checkVal := func(t *testing.T, exprStr string, expectedOp planpb.OpType, expectedVal string) {
+		t.Helper()
+		p, e := CreateSearchPlan(helper, exprStr, "FloatVectorField", &planpb.QueryInfo{
+			Topk: 0, MetricType: "", SearchParams: "", RoundDecimal: 0,
+		}, nil, nil)
+		assert.NoError(t, e, exprStr)
+		assert.NotNil(t, p, exprStr)
+		ure := p.GetVectorAnns().GetPredicates().GetUnaryRangeExpr()
+		assert.Equal(t, expectedOp, ure.GetOp(), "wrong OpType for: %s", exprStr)
+		assert.Equal(t, expectedVal, ure.GetValue().GetStringVal(), "wrong value for: %s", exprStr)
+	}
+
+	// Optimizable patterns
+	checkVal(t, `A =~ "hello"`, planpb.OpType_InnerMatch, "hello")
+	checkVal(t, `A =~ "^hello"`, planpb.OpType_PrefixMatch, "hello")
+	checkVal(t, `A =~ "hello$"`, planpb.OpType_PostfixMatch, "hello")
+	checkVal(t, `A =~ "^hello$"`, planpb.OpType_Equal, "hello")
+	checkVal(t, `A =~ "^$"`, planpb.OpType_Equal, "")
+	checkVal(t, `A =~ "hello world"`, planpb.OpType_InnerMatch, "hello world")
+	checkVal(t, `A =~ "file\\.txt"`, planpb.OpType_InnerMatch, "file.txt")
+	checkVal(t, `A =~ "^file\\.txt$"`, planpb.OpType_Equal, "file.txt")
+	checkVal(t, `A =~ "a\\(b\\)"`, planpb.OpType_InnerMatch, "a(b)")
+	checkVal(t, `A =~ "price\\$10"`, planpb.OpType_InnerMatch, "price$10")
+	checkVal(t, `A =~ "back\\\\slash"`, planpb.OpType_InnerMatch, "back\\slash")
+
+	// Non-optimizable: metacharacters → stay RegexMatch
+	checkOp(t, `A =~ "a.*b"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "a.b"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "[a-z]"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "a+"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "a?"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "a{2}"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "(abc)"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "a|b"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ ""`, planpb.OpType_RegexMatch)
+
+	// Non-optimizable: shorthand classes, control chars, special escapes
+	checkOp(t, `A =~ "\\d+"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "\\w+"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "\\s"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "\\b"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "\\n"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "\\t"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "\\x41"`, planpb.OpType_RegexMatch)
+
+	// Non-optimizable: Unicode property, named groups, inline flags
+	checkOp(t, `A =~ "\\p{Han}"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "(?P<name>[a-z]+)"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "(?i)hello"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "(?m)^start"`, planpb.OpType_RegexMatch)
+	checkOp(t, `A =~ "(?s)a.b"`, planpb.OpType_RegexMatch)
+
+	// Edge: escaped $ at end should NOT be treated as anchor
+	checkVal(t, `A =~ "price\\$"`, planpb.OpType_InnerMatch, "price$")
+	checkVal(t, `A =~ "^price\\$"`, planpb.OpType_PrefixMatch, "price$")
+}
+
 func TestExpr_TextMatch(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)
