@@ -254,6 +254,16 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
             case proto::plan::OpType::Match: {
                 return PatternQuery(pattern);
             }
+            case proto::plan::OpType::RegexMatch: {
+                // Convert RE2 regex to tantivy-compatible pattern:
+                // 1. Replace unescaped . with [\s\S] (tantivy . doesn't
+                //    match \n, but RE2 dot_nl=true does)
+                // 2. Wrap with [\s\S]*(?:...)[\s\S]* for substring semantics
+                auto tantivy_pattern = regex_to_tantivy_pattern(pattern);
+                TargetBitmap bitset(Count());
+                wrapper_->regex_query(tantivy_pattern, &bitset);
+                return bitset;
+            }
             default:
                 ThrowInfo(
                     ErrorCode::OpTypeInvalid,

@@ -469,9 +469,17 @@ IsLikeExpr(std::shared_ptr<Expr> input) {
             case proto::plan::PostfixMatch:
             case proto::plan::InnerMatch:
             case proto::plan::Match:
+            case proto::plan::RegexMatch:
                 return true;
             default:
                 return false;
+        }
+    }
+    // Also check NOT(like/regex) — e.g. !~ expands to NOT(RegexMatch)
+    if (input->name() == "PhyUnaryExpr") {
+        auto& children = input->GetInputsRef();
+        if (!children.empty()) {
+            return IsLikeExpr(children[0]);
         }
     }
     return false;

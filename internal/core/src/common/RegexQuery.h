@@ -81,6 +81,176 @@ RegexMatcher::operator()(const std::string_view& operand) {
     return RE2::FullMatch(sp, *re2_);
 }
 
+// PartialRegexMatcher using RE2 for partial regex matching (substring match)
+// Unlike RegexMatcher which uses RE2::FullMatch, this uses RE2::PartialMatch
+struct PartialRegexMatcher {
+    template <typename T>
+    inline bool
+    operator()(const T& operand) const {
+        return false;
+    }
+
+    explicit PartialRegexMatcher(const std::string& pattern) {
+        RE2::Options options;
+        options.set_dot_nl(true);  // Make . match \n
+        options.set_log_errors(false);
+        // Use UTF-8 mode so regex engine natively understands Unicode
+        // codepoints — consistent with Tantivy's Unicode regex engine.
+        options.set_encoding(RE2::Options::EncodingUTF8);
+        re2_ = std::make_unique<RE2>(pattern, options);
+        AssertInfo(re2_->ok(),
+                   "Failed to compile regex pattern: " + re2_->error());
+    }
+
+ private:
+    std::unique_ptr<RE2> re2_;
+};
+
+template <>
+inline bool
+PartialRegexMatcher::operator()(const std::string& operand) const {
+    return RE2::PartialMatch(operand, *re2_);
+}
+
+template <>
+inline bool
+PartialRegexMatcher::operator()(const std::string_view& operand) const {
+    re2::StringPiece sp(operand.data(), operand.size());
+    return RE2::PartialMatch(sp, *re2_);
+}
+
+// Replace unescaped `.` in a regex pattern with `[\s\S]` so that dot
+// matches newline — aligning with RE2's dot_nl=true.  Escaped dots (\.)
+// and dots inside character classes ([.]) are left unchanged.
+// Respects inline (?s)/(?-s) flags: only replaces `.` when dot-all is
+// active.  Tracks scoped flag groups (?s:...) and (?-s:...) with a stack.
+// Also wraps the entire pattern with [\s\S]*(?:...)[\s\S]* for substring
+// matching semantics when wrap_for_substring is true.
+inline std::string
+regex_to_tantivy_pattern(const std::string& pattern,
+                         bool wrap_for_substring = true) {
+    std::string result;
+    result.reserve(pattern.size() * 2);
+    bool in_char_class = false;
+
+    // dot_all starts true (matching RE2 dot_nl=true config)
+    bool dot_all = true;
+
+    // Stack for scoped flag groups (?flags:...).  Each entry records the
+    // group nesting depth at which the scope was opened and the dot_all
+    // state to restore when the group closes.
+    struct FlagScope {
+        int depth;
+        bool prev_dot_all;
+    };
+    std::vector<FlagScope> flag_stack;
+    int group_depth = 0;
+
+    for (size_t i = 0; i < pattern.size(); ++i) {
+        char c = pattern[i];
+
+        if (c == '\\' && i + 1 < pattern.size()) {
+            // Escaped character — pass through unchanged.
+            result += c;
+            result += pattern[++i];
+        } else if (c == '[') {
+            in_char_class = true;
+            result += c;
+        } else if (c == ']' && in_char_class) {
+            in_char_class = false;
+            result += c;
+        } else if (in_char_class) {
+            result += c;
+        } else if (c == '(' && i + 1 < pattern.size() &&
+                   pattern[i + 1] == '?') {
+            // Potential flag group: (?flags), (?flags:...), or a special
+            // group like (?:...), (?P<>...), (?=...), etc.
+            // Only [imsU-] are valid flag characters in RE2.
+            size_t j = i + 2;
+            bool setting = true;
+            bool found_s_set = false;
+            bool found_s_clear = false;
+            bool is_flag_group = true;
+
+            while (j < pattern.size()) {
+                char fc = pattern[j];
+                if (fc == 'i' || fc == 'm' || fc == 's' || fc == 'U') {
+                    if (fc == 's') {
+                        if (setting)
+                            found_s_set = true;
+                        else
+                            found_s_clear = true;
+                    }
+                    ++j;
+                } else if (fc == '-') {
+                    setting = false;
+                    ++j;
+                } else if (fc == ':' || fc == ')') {
+                    break;
+                } else {
+                    is_flag_group = false;
+                    break;
+                }
+            }
+
+            if (is_flag_group && j < pattern.size() &&
+                (pattern[j] == ':' || pattern[j] == ')') &&
+                // Must have parsed at least one flag character to be a
+                // flag group (bare `(?:` is a non-capturing group, not a
+                // flag group — it has zero flag chars before the colon).
+                j > i + 2) {
+                bool new_dot_all = dot_all;
+                if (found_s_set)
+                    new_dot_all = true;
+                if (found_s_clear)
+                    new_dot_all = false;
+
+                if (pattern[j] == ':') {
+                    // Scoped flag group (?flags:...) — push state.
+                    group_depth++;
+                    flag_stack.push_back({group_depth, dot_all});
+                    dot_all = new_dot_all;
+                } else {
+                    // Unscoped flag (?flags) — modify current state,
+                    // no group opened.
+                    dot_all = new_dot_all;
+                }
+                // Copy the flag syntax verbatim.
+                result.append(pattern, i, j - i + 1);
+                i = j;  // loop's ++i will advance past terminator
+            } else {
+                // Not a flag group (e.g. (?:...), (?P<>...), (?=...)).
+                // Treat '(' as a regular group opener.
+                group_depth++;
+                result += c;
+            }
+        } else if (c == '(') {
+            group_depth++;
+            result += c;
+        } else if (c == ')') {
+            if (!flag_stack.empty() &&
+                flag_stack.back().depth == group_depth) {
+                dot_all = flag_stack.back().prev_dot_all;
+                flag_stack.pop_back();
+            }
+            group_depth--;
+            result += c;
+        } else if (c == '.') {
+            if (dot_all) {
+                result += "[\\s\\S]";
+            } else {
+                result += '.';
+            }
+        } else {
+            result += c;
+        }
+    }
+    if (wrap_for_substring) {
+        return "[\\s\\S]*(?:" + result + ")[\\s\\S]*";
+    }
+    return result;
+}
+
 // Extract fixed prefix from LIKE pattern (before first % or _)
 // Examples: "abc%def" -> "abc", "ab_cd%" -> "ab", "%abc" -> ""
 std::string

@@ -12,7 +12,9 @@
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
@@ -55,6 +57,9 @@
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "common/RegexQuery.h"
+#include "common/Volnitsky.h"
+#include "index/NgramInvertedIndex.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 
@@ -1863,4 +1868,667 @@ TEST(StringExpr, IsNotNullAndNullCondition) {
         bool expected_data = str_valid_data[i] && int_valid_data[i];
         ASSERT_EQ(final[i], expected_data) << "Data mismatch at index " << i;
     }
+}
+
+TEST(StringExpr, RegexMatch) {
+    auto schema = GenTestSchema();
+    const auto& fvec_meta = schema->operator[](FieldName("fvec"));
+    const auto& str_meta = schema->operator[](FieldName("str"));
+
+    auto gen_regex_plan =
+        [&, fvec_meta, str_meta](
+            std::string pattern) -> std::unique_ptr<proto::plan::PlanNode> {
+        auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
+                                               proto::schema::DataType::VarChar,
+                                               false,
+                                               false);
+        auto unary_range_expr =
+            test::GenUnaryRangeExpr(proto::plan::OpType::RegexMatch, pattern);
+        unary_range_expr->set_allocated_column_info(column_info);
+
+        auto expr = test::GenExpr().release();
+        expr->set_allocated_unary_range_expr(unary_range_expr);
+
+        proto::plan::VectorType vector_type =
+            proto::plan::VectorType::FloatVector;
+        auto anns = GenAnns(expr, vector_type, fvec_meta.get_id().get(), "$0");
+
+        auto plan_node = std::make_unique<proto::plan::PlanNode>();
+        plan_node->set_allocated_vector_anns(anns);
+        return plan_node;
+    };
+
+    // Test cases: {pattern, expected_match_func}
+    // PartialRegexMatcher uses RE2::PartialMatch (substring semantics)
+    std::vector<std::tuple<std::string, std::function<bool(const std::string&)>>>
+        testcases{
+            // Pure literal — substring match
+            {"abc",
+             [](const std::string& val) {
+                 return val.find("abc") != std::string::npos;
+             }},
+            // Regex with character class
+            {"[0-9]+",
+             [](const std::string& val) {
+                 PartialRegexMatcher m("[0-9]+");
+                 return m(val);
+             }},
+            // Anchored start
+            {"^[a-z]",
+             [](const std::string& val) {
+                 PartialRegexMatcher m("^[a-z]");
+                 return m(val);
+             }},
+            // Empty pattern — matches everything
+            {"",
+             [](const std::string& val) { return true; }},
+            // Dot matches any
+            {"a.c",
+             [](const std::string& val) {
+                 PartialRegexMatcher m("a.c");
+                 return m(val);
+             }},
+        };
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    std::vector<std::string> str_col;
+    int num_iters = 100;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        auto new_str_col = raw_data.get_col(str_meta.get_id());
+        auto begin = FIELD_DATA(new_str_col, string).begin();
+        auto end = FIELD_DATA(new_str_col, string).end();
+        str_col.insert(str_col.end(), begin, end);
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    for (const auto& [pattern, ref_func] : testcases) {
+        auto plan_proto = gen_regex_plan(pattern);
+        auto plan = ProtoParser(schema).CreatePlan(*plan_proto);
+        BitsetType final_result;
+        final_result = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
+        EXPECT_EQ(final_result.size(), N * num_iters);
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final_result[i];
+            auto ref = ref_func(str_col[i]);
+            ASSERT_EQ(ans, ref)
+                << "RegexMatch pattern=\"" << pattern << "\" index=" << i
+                << " val=\"" << str_col[i] << "\"";
+        }
+    }
+}
+
+TEST(StringExpr, RegexMatchPartialMatchSemantics) {
+    // Verify that RegexMatch uses PartialMatch (substring), not FullMatch
+    PartialRegexMatcher partial("abc");
+    EXPECT_TRUE(partial(std::string("xyzabcdef")));   // substring match
+    EXPECT_TRUE(partial(std::string("abc")));          // exact match
+    EXPECT_TRUE(partial(std::string("123abc456")));    // middle match
+    EXPECT_FALSE(partial(std::string("ab")));          // no match
+    EXPECT_FALSE(partial(std::string("ABc")));         // case sensitive
+
+    // Contrast with RegexMatcher (FullMatch) — only matches entire string
+    RegexMatcher full("abc");
+    EXPECT_FALSE(full(std::string("xyzabcdef")));
+    EXPECT_TRUE(full(std::string("abc")));
+
+    // Anchors
+    PartialRegexMatcher start_anchor("^hello");
+    EXPECT_TRUE(start_anchor(std::string("hello world")));
+    EXPECT_FALSE(start_anchor(std::string("say hello")));
+
+    PartialRegexMatcher end_anchor("world$");
+    EXPECT_TRUE(end_anchor(std::string("hello world")));
+    EXPECT_FALSE(end_anchor(std::string("world cup")));
+
+    PartialRegexMatcher both_anchors("^exact$");
+    EXPECT_TRUE(both_anchors(std::string("exact")));
+    EXPECT_FALSE(both_anchors(std::string("not exact")));
+
+    // Case insensitive flag
+    PartialRegexMatcher case_insensitive("(?i)hello");
+    EXPECT_TRUE(case_insensitive(std::string("HELLO")));
+    EXPECT_TRUE(case_insensitive(std::string("Hello World")));
+    EXPECT_TRUE(case_insensitive(std::string("say hello")));
+
+    // dot_nl: dot matches newline (RE2 dot_nl=true)
+    PartialRegexMatcher dot_nl("a.b");
+    EXPECT_TRUE(dot_nl(std::string("a\nb")));
+    EXPECT_TRUE(dot_nl(std::string("aXb")));
+}
+
+TEST(StringExpr, ExtractLiteralsFromRegex) {
+    // Test the regex literal extraction function used by ngram index.
+    // We test via PartialRegexMatcher to verify end-to-end correctness,
+    // and also verify that the patterns the extractor CAN'T handle
+    // still produce correct results via Phase-2 brute-force.
+
+    // Pure literal — should match as substring
+    PartialRegexMatcher m1("timeout");
+    EXPECT_TRUE(m1(std::string("connection timeout error")));
+    EXPECT_FALSE(m1(std::string("connection error")));
+
+    // Multiple literals separated by regex constructs
+    PartialRegexMatcher m2("error.*timeout");
+    EXPECT_TRUE(m2(std::string("error: connection timeout")));
+    EXPECT_FALSE(m2(std::string("timeout then error")));  // wrong order
+
+    // Character classes — no literals extractable
+    PartialRegexMatcher m3("[a-z]+");
+    EXPECT_TRUE(m3(std::string("hello")));
+    EXPECT_FALSE(m3(std::string("12345")));
+
+    // Escaped metacharacters should be literal
+    PartialRegexMatcher m4("file\\.txt");
+    EXPECT_TRUE(m4(std::string("open file.txt now")));
+    EXPECT_FALSE(m4(std::string("open fileTtxt now")));  // dot is literal
+
+    // Complex pattern with mixed literals and regex
+    PartialRegexMatcher m5("user_[0-9]+@gmail\\.com");
+    EXPECT_TRUE(m5(std::string("contact user_123@gmail.com today")));
+    EXPECT_FALSE(m5(std::string("contact user_abc@gmail.com today")));
+
+    // ── Patterns that previously caused false negatives (Issue #1) ──
+
+    // Alternation: foo|bar — only one branch needs to match
+    PartialRegexMatcher m6("foo|bar");
+    EXPECT_TRUE(m6(std::string("just foo")));
+    EXPECT_TRUE(m6(std::string("just bar")));
+    EXPECT_FALSE(m6(std::string("just baz")));
+
+    // Optional character: colou?r
+    PartialRegexMatcher m7("colou?r");
+    EXPECT_TRUE(m7(std::string("my color")));     // no 'u'
+    EXPECT_TRUE(m7(std::string("my colour")));    // with 'u'
+    EXPECT_FALSE(m7(std::string("my colouur")));  // two 'u's — doesn't match
+
+    // Optional with *: ab*c
+    PartialRegexMatcher m8("ab*c");
+    EXPECT_TRUE(m8(std::string("xacy")));     // zero 'b'
+    EXPECT_TRUE(m8(std::string("xabcy")));    // one 'b'
+    EXPECT_TRUE(m8(std::string("xabbcy")));   // two 'b'
+
+    // Inline flags: (?i)error
+    PartialRegexMatcher m9("(?i)error");
+    EXPECT_TRUE(m9(std::string("ERROR happened")));
+    EXPECT_TRUE(m9(std::string("Error Log")));
+
+    // Group with alternation: (cat|dog)food
+    PartialRegexMatcher m10("(cat|dog)food");
+    EXPECT_TRUE(m10(std::string("buy catfood")));
+    EXPECT_TRUE(m10(std::string("buy dogfood")));
+    EXPECT_FALSE(m10(std::string("buy hamsterfood")));
+
+    // ── Named group with 'i' in name must NOT be treated as (?i) ──
+    // Regression: (?P<id>...) was falsely triggering case-insensitive
+    // detection because the 'i' in 'id' matched the flag scanner.
+    PartialRegexMatcher named_i("(?P<id>[a-z]+)xyz");
+    EXPECT_TRUE(named_i(std::string("abcxyz")));
+    EXPECT_FALSE(named_i(std::string("ABCxyz")));  // case sensitive!
+
+    PartialRegexMatcher named_i2("(?P<item>\\d+)abc");
+    EXPECT_TRUE(named_i2(std::string("123abc")));
+    EXPECT_FALSE(named_i2(std::string("123ABC")));  // case sensitive!
+
+    // Actual (?i) flag should still work
+    PartialRegexMatcher real_ci("(?i)abc");
+    EXPECT_TRUE(real_ci(std::string("ABC")));
+
+    // (?mi) — multiline + case-insensitive
+    PartialRegexMatcher multi_ci("(?mi)^hello");
+    EXPECT_TRUE(multi_ci(std::string("world\nHELLO")));
+
+    // ── Group penetration: abc(de)fg should match as "abcdefg" ──
+    PartialRegexMatcher gp1("abc(de)fg");
+    EXPECT_TRUE(gp1(std::string("xabcdefgy")));
+    EXPECT_FALSE(gp1(std::string("xabcfgy")));  // "de" is required
+
+    // Non-capturing group: abc(?:de)fg
+    PartialRegexMatcher gp2("abc(?:de)fg");
+    EXPECT_TRUE(gp2(std::string("xabcdefgy")));
+    EXPECT_FALSE(gp2(std::string("xabcfgy")));
+
+    // Optional group: abc(de)?fg — "de" is optional
+    PartialRegexMatcher gp3("abc(de)?fg");
+    EXPECT_TRUE(gp3(std::string("xabcdefgy")));
+    EXPECT_TRUE(gp3(std::string("xabcfgy")));  // "de" absent, still matches
+
+    // Quantified group: abc(de)+fg — "de" required (1+)
+    PartialRegexMatcher gp4("abc(de)+fg");
+    EXPECT_TRUE(gp4(std::string("xabcdefgy")));
+    EXPECT_TRUE(gp4(std::string("xabcdededefgy")));
+    EXPECT_FALSE(gp4(std::string("xabcfgy")));
+
+    // Nested required groups: abc((de)fg(hi))jk
+    PartialRegexMatcher gp5("abc((de)fg(hi))jk");
+    EXPECT_TRUE(gp5(std::string("abcdefghijk")));
+    EXPECT_FALSE(gp5(std::string("abcdefgjk")));  // missing "hi"
+
+    // Escaped hyphen \- treated as literal
+    PartialRegexMatcher esc_hyphen("a\\-b");
+    EXPECT_TRUE(esc_hyphen(std::string("xa-by")));
+    EXPECT_FALSE(esc_hyphen(std::string("xaby")));
+
+    // ── Unicode property \p{...} ──
+    // \p{Han} matches CJK characters
+    PartialRegexMatcher m11("\\p{Han}+foo");
+    EXPECT_TRUE(m11(std::string("\xe4\xb8\xad" "foo")));   // 中foo
+    EXPECT_TRUE(m11(std::string("\xe4\xb8\xad\xe6\x96\x87" "foo")));  // 中文foo
+    EXPECT_FALSE(m11(std::string("abcfoo")));            // no Han chars
+
+    // \p{Latin} matches Latin characters
+    PartialRegexMatcher m12("\\p{Latin}+123");
+    EXPECT_TRUE(m12(std::string("abc123")));
+    EXPECT_FALSE(m12(std::string("123123")));
+
+    // Named group (?P<name>...)
+    PartialRegexMatcher m13("(?P<user>[a-z]+)@host");
+    EXPECT_TRUE(m13(std::string("alice@host")));
+    EXPECT_FALSE(m13(std::string("ALICE@host")));  // lowercase only
+
+    // dot_nl: dot matches newline (RE2 dot_nl=true)
+    PartialRegexMatcher m14("start.*end");
+    EXPECT_TRUE(m14(std::string("start\nmiddle\nend")));
+
+    // ── Quantifiers {n}, {n,m}, {n,} ──
+    PartialRegexMatcher q1("a{3}");
+    EXPECT_TRUE(q1(std::string("xaaay")));
+    EXPECT_FALSE(q1(std::string("xaay")));
+
+    PartialRegexMatcher q2("a{2,4}b");
+    EXPECT_TRUE(q2(std::string("aab")));
+    EXPECT_TRUE(q2(std::string("aaaab")));
+    EXPECT_FALSE(q2(std::string("ab")));
+    // "aaaaab" matches because PartialMatch finds substring "aaaab" (4 a's + b)
+    EXPECT_TRUE(q2(std::string("aaaaab")));
+
+    PartialRegexMatcher q3("x{1,}y");
+    EXPECT_TRUE(q3(std::string("xy")));
+    EXPECT_TRUE(q3(std::string("xxxy")));
+    EXPECT_FALSE(q3(std::string("y")));
+
+    // ── Non-capturing group (?:...) ──
+    PartialRegexMatcher nc1("(?:abc)+");
+    EXPECT_TRUE(nc1(std::string("abcabc")));
+    EXPECT_TRUE(nc1(std::string("xabcy")));
+    EXPECT_FALSE(nc1(std::string("xyz")));
+
+    // ── Control character escapes \n, \t, \r ──
+    PartialRegexMatcher ctl1("hello\\tworld");
+    EXPECT_TRUE(ctl1(std::string("hello\tworld")));
+    EXPECT_FALSE(ctl1(std::string("hellotworld")));  // literal t, not tab
+
+    PartialRegexMatcher ctl2("line1\\nline2");
+    EXPECT_TRUE(ctl2(std::string("line1\nline2")));
+    EXPECT_FALSE(ctl2(std::string("line1nline2")));
+
+    // ── Hex escape \x41 = 'A' ──
+    PartialRegexMatcher hex1("\\x41BC");
+    EXPECT_TRUE(hex1(std::string("ABC")));
+    EXPECT_FALSE(hex1(std::string("xBC")));
+
+    // ── Negated character class [^...] ──
+    PartialRegexMatcher neg1("[^0-9]+abc");
+    EXPECT_TRUE(neg1(std::string("xxxabc")));
+    EXPECT_FALSE(neg1(std::string("123abc")));  // digits only before abc
+
+    // ── Complex real-world patterns ──
+    // Email-like
+    PartialRegexMatcher email("[a-zA-Z0-9.]+@[a-zA-Z0-9]+\\.[a-zA-Z]{2,}");
+    EXPECT_TRUE(email(std::string("user@example.com")));
+    EXPECT_TRUE(email(std::string("contact user@test.org today")));
+    EXPECT_FALSE(email(std::string("user@.com")));
+
+    // IP address-like
+    PartialRegexMatcher ip("\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}");
+    EXPECT_TRUE(ip(std::string("192.168.1.1")));
+    EXPECT_TRUE(ip(std::string("server at 10.0.0.1 is down")));
+    EXPECT_FALSE(ip(std::string("192.168.1")));
+
+    // Phone number
+    PartialRegexMatcher phone("\\d{3}-\\d{3}-\\d{4}");
+    EXPECT_TRUE(phone(std::string("call 555-123-4567 now")));
+    EXPECT_FALSE(phone(std::string("call 55-123-4567 now")));
+
+    // ── Multiline flag (?m) ──
+    PartialRegexMatcher ml("(?m)^ERROR");
+    EXPECT_TRUE(ml(std::string("OK\nERROR: fail")));
+    EXPECT_TRUE(ml(std::string("ERROR at start")));
+
+    // ── Edge cases ──
+    // Empty string matching
+    PartialRegexMatcher empty_pat("");
+    EXPECT_TRUE(empty_pat(std::string("anything")));
+    EXPECT_TRUE(empty_pat(std::string("")));
+
+    // Only metacharacters
+    PartialRegexMatcher only_meta(".*");
+    EXPECT_TRUE(only_meta(std::string("anything")));
+    EXPECT_TRUE(only_meta(std::string("")));
+
+    // ^$ matches only empty string in PartialMatch
+    PartialRegexMatcher caret_dollar("^$");
+    EXPECT_TRUE(caret_dollar(std::string("")));
+    EXPECT_FALSE(caret_dollar(std::string("notempty")));
+
+    // Escaped backslash
+    PartialRegexMatcher esc_bs("a\\\\b");
+    EXPECT_TRUE(esc_bs(std::string("a\\b")));
+    EXPECT_FALSE(esc_bs(std::string("a/b")));
+
+    // Alternation in group
+    PartialRegexMatcher alt_grp("(https?|ftp)://");
+    EXPECT_TRUE(alt_grp(std::string("https://example.com")));
+    EXPECT_TRUE(alt_grp(std::string("ftp://files.com")));
+    EXPECT_FALSE(alt_grp(std::string("smtp://mail.com")));
+
+    // Unicode: mixed CJK and ASCII
+    PartialRegexMatcher cjk("\\p{Han}+[0-9]+");
+    EXPECT_TRUE(cjk(std::string("\xe4\xb8\xad\xe6\x96\x87" "123")));  // 中文123
+    EXPECT_FALSE(cjk(std::string("abc123")));
+}
+
+// Tests ported from ClickHouse's regex edge cases
+// (gtest_optimize_re.cpp, 00144_empty_regexp.sql, 00218_like_regexp_newline.sql)
+TEST(StringExpr, RegexMatchClickHouseEdgeCases) {
+    // ── Empty pattern matches everything (ClickHouse: match('Hello','')=1) ──
+    PartialRegexMatcher empty("");
+    EXPECT_TRUE(empty(std::string("Hello")));
+    EXPECT_TRUE(empty(std::string("")));
+    EXPECT_TRUE(empty(std::string("anything at all")));
+
+    // ── ".*" and ".*?" match everything ──
+    PartialRegexMatcher dotstar(".*");
+    EXPECT_TRUE(dotstar(std::string("")));
+    EXPECT_TRUE(dotstar(std::string("abc")));
+    EXPECT_TRUE(dotstar(std::string("abc\ndef")));
+
+    PartialRegexMatcher dotstar_lazy(".*?");
+    EXPECT_TRUE(dotstar_lazy(std::string("")));
+    EXPECT_TRUE(dotstar_lazy(std::string("abc")));
+
+    // ── dot_nl: . matches \n (RE2 dot_nl=true) ──
+    // ClickHouse default: . matches \n
+    PartialRegexMatcher dot_nl1("c.d");
+    EXPECT_TRUE(dot_nl1(std::string("abc\ndef")));  // c\nd matches c.d
+    EXPECT_TRUE(dot_nl1(std::string("abcXdef")));   // cXd matches
+
+    PartialRegexMatcher dot_nl2("abc.def");
+    EXPECT_TRUE(dot_nl2(std::string("abc\ndef")));  // \n matches .
+    EXPECT_TRUE(dot_nl2(std::string("abcXdef")));
+
+    // Multi-line with . spanning \n
+    PartialRegexMatcher dot_nl3("a.*z");
+    EXPECT_TRUE(dot_nl3(std::string("a\n\n\nz")));  // .* spans multiple \n
+
+    // ── (?-s) disables dot_nl: . should NOT match \n ──
+    PartialRegexMatcher no_dot_nl("(?-s)c.d");
+    EXPECT_FALSE(no_dot_nl(std::string("abc\ndef")));  // \n does NOT match .
+    EXPECT_TRUE(no_dot_nl(std::string("abcXdef")));    // X matches .
+
+    // ── regex_to_tantivy_pattern: (?s)/(?-s) flag awareness ──
+    // Default: dot_all=true, . → [\s\S]
+    EXPECT_EQ(regex_to_tantivy_pattern("c.d", false), "c[\\s\\S]d");
+    // (?-s) disables dot_all: . stays as .
+    EXPECT_EQ(regex_to_tantivy_pattern("(?-s)c.d", false), "(?-s)c.d");
+    // (?s) re-enables dot_all after (?-s)
+    EXPECT_EQ(regex_to_tantivy_pattern("(?-s)a.b(?s)c.d", false),
+              "(?-s)a.b(?s)c[\\s\\S]d");
+    // Scoped flag group: (?-s:...) only affects inside
+    EXPECT_EQ(regex_to_tantivy_pattern("a.b(?-s:c.d)e.f", false),
+              "a[\\s\\S]b(?-s:c.d)e[\\s\\S]f");
+    // Scoped (?s:...) inside (?-s) context
+    EXPECT_EQ(regex_to_tantivy_pattern("(?-s)a.b(?s:c.d)e.f", false),
+              "(?-s)a.b(?s:c[\\s\\S]d)e.f");
+    // Escaped dot is never replaced
+    EXPECT_EQ(regex_to_tantivy_pattern("c\\.d", false), "c\\.d");
+    // Dot inside character class is never replaced
+    EXPECT_EQ(regex_to_tantivy_pattern("[.]", false), "[.]");
+    // Non-capturing group (?:...) is NOT a flag group
+    EXPECT_EQ(regex_to_tantivy_pattern("(?:c.d)", false), "(?:c[\\s\\S]d)");
+    // Combined flags: (?i-s) clears s
+    EXPECT_EQ(regex_to_tantivy_pattern("(?i-s)c.d", false), "(?i-s)c.d");
+    // wrap_for_substring wrapping
+    EXPECT_EQ(regex_to_tantivy_pattern("a.b", true),
+              "[\\s\\S]*(?:a[\\s\\S]b)[\\s\\S]*");
+
+    // ── Alternation edge cases ──
+    // Simple alternation
+    PartialRegexMatcher alt1("abc|xyz");
+    EXPECT_TRUE(alt1(std::string("xxxabcyyy")));
+    EXPECT_TRUE(alt1(std::string("xxxxyzzz")));  // xyz at end
+    EXPECT_FALSE(alt1(std::string("xxxyyy")));
+
+    // Alternation with empty branch: (abc|) matches everything
+    PartialRegexMatcher alt_empty("(abc|)");
+    EXPECT_TRUE(alt_empty(std::string("xyz")));  // empty branch matches
+    EXPECT_TRUE(alt_empty(std::string("abc")));
+
+    // Three-way alternation
+    PartialRegexMatcher alt3("abc|fgk|xyz");
+    EXPECT_TRUE(alt3(std::string("fgk")));
+    EXPECT_TRUE(alt3(std::string("xxxyz")));  // xyz at end
+    EXPECT_FALSE(alt3(std::string("hello")));
+
+    // ── Optional group: (de)?  ──
+    PartialRegexMatcher opt_grp("abc(de)?fg");
+    EXPECT_TRUE(opt_grp(std::string("abcdefg")));  // with group
+    EXPECT_TRUE(opt_grp(std::string("abcfg")));    // without group
+    EXPECT_FALSE(opt_grp(std::string("abceg")));
+
+    // ── Quantified group: (abc){2,3} ──
+    PartialRegexMatcher rep_grp("(ab){2,3}c");
+    EXPECT_TRUE(rep_grp(std::string("ababc")));
+    EXPECT_TRUE(rep_grp(std::string("abababc")));
+    EXPECT_FALSE(rep_grp(std::string("abc")));
+
+    // ── Named groups — three syntax variants (ClickHouse tests all three) ──
+    // (?P<name>...) — Python/RE2 style
+    PartialRegexMatcher ng1("(?P<num>\\d+)abc");
+    EXPECT_TRUE(ng1(std::string("123abc")));
+    EXPECT_FALSE(ng1(std::string("xyzabc")));
+
+    // ── Unicode multi-byte characters ──
+    // ¥ (U+00A5) — use RE2 Unicode codepoint syntax \x{00A5}
+    PartialRegexMatcher yen("\\x{00A5}\\d+");
+    EXPECT_TRUE(yen(std::string("\xc2\xa5" "100")));     // ¥100
+    EXPECT_FALSE(yen(std::string("$100")));
+
+    // Emoji: 😀 (U+1F600) — RE2 hex codepoint
+    PartialRegexMatcher emoji(".+\\x{1F600}");
+    EXPECT_TRUE(emoji(std::string("hello\xf0\x9f\x98\x80")));  // hello😀
+    EXPECT_FALSE(emoji(std::string("hello")));
+
+    // ── Strings with embedded \n, \t, \r ──
+    PartialRegexMatcher tab("a\\tb");
+    EXPECT_TRUE(tab(std::string("a\tb")));
+    EXPECT_FALSE(tab(std::string("a b")));
+    EXPECT_FALSE(tab(std::string("atb")));
+
+    PartialRegexMatcher cr("a\\rb");
+    EXPECT_TRUE(cr(std::string("a\rb")));
+
+    // ── Non-greedy quantifiers ──
+    PartialRegexMatcher lazy("a.+?b");
+    EXPECT_TRUE(lazy(std::string("aXb")));
+    EXPECT_TRUE(lazy(std::string("aXXXb")));
+
+    // ── Nested groups ──
+    PartialRegexMatcher nested("((a)(b(c)))");
+    EXPECT_TRUE(nested(std::string("xabcy")));
+    EXPECT_FALSE(nested(std::string("xacy")));
+
+    // ── Backreference rejected by RE2 ──
+    // \1 should fail to compile in RE2
+    EXPECT_THROW(PartialRegexMatcher("(a)\\1"), std::exception);
+
+    // ── Very long literal match ──
+    std::string long_lit(200, 'a');
+    PartialRegexMatcher long_m(long_lit);
+    EXPECT_TRUE(long_m(std::string(200, 'a')));
+    EXPECT_TRUE(long_m(std::string(300, 'a')));
+    EXPECT_FALSE(long_m(std::string(199, 'a')));
+
+    // ── Escaped metacharacters as literals ──
+    PartialRegexMatcher esc1("a\\.b\\.c");
+    EXPECT_TRUE(esc1(std::string("a.b.c")));
+    EXPECT_FALSE(esc1(std::string("aXbXc")));
+
+    PartialRegexMatcher esc2("\\(\\)\\[\\]\\{\\}");
+    EXPECT_TRUE(esc2(std::string("()[]{}stuff")));
+    EXPECT_FALSE(esc2(std::string("stuff")));
+
+    // ── \b word boundary ──
+    PartialRegexMatcher wb("\\berror\\b");
+    EXPECT_TRUE(wb(std::string("an error occurred")));
+    EXPECT_FALSE(wb(std::string("noerrorhere")));
+
+    // ── Case sensitivity ──
+    PartialRegexMatcher cs("Hello");
+    EXPECT_TRUE(cs(std::string("say Hello")));
+    EXPECT_FALSE(cs(std::string("say hello")));  // case sensitive
+
+    PartialRegexMatcher ci("(?i)hello");
+    EXPECT_TRUE(ci(std::string("say HELLO")));
+    EXPECT_TRUE(ci(std::string("say hello")));
+    EXPECT_TRUE(ci(std::string("say Hello")));
+}
+
+
+// Direct unit tests for extract_literals_from_regex.
+// Validates that the extractor never produces false negatives:
+// every extracted literal MUST appear in any string that matches the regex.
+TEST(StringExpr, ExtractLiteralsFromRegexDirect) {
+    using milvus::index::extract_literals_from_regex;
+
+    auto expect_lits = [](const std::string& pattern,
+                          const std::vector<std::string>& expected,
+                          const char* label) {
+        auto got = extract_literals_from_regex(pattern);
+        EXPECT_EQ(got, expected)
+            << "pattern: \"" << pattern << "\" (" << label << ")";
+    };
+
+    auto expect_empty = [](const std::string& pattern, const char* label) {
+        auto got = extract_literals_from_regex(pattern);
+        EXPECT_TRUE(got.empty())
+            << "pattern: \"" << pattern << "\" should produce empty (" << label
+            << "), got " << got.size() << " literals";
+    };
+
+    // ── Pure literals ──
+    expect_lits("hello", {"hello"}, "pure literal");
+    expect_lits("abc def", {"abc def"}, "literal with space");
+
+    // ── Metacharacters split literals ──
+    expect_lits("abc.*def", {"abc", "def"}, ".* splits");
+    expect_lits("abc.def", {"abc", "def"}, ". splits");
+    expect_lits("abc+def", {"abc", "cdef"}, "+ flushes then restarts with repeated char");
+
+    // ── Anchors are metacharacters ──
+    expect_lits("^hello$", {"hello"}, "anchors stripped");
+    expect_lits("^hello", {"hello"}, "^ stripped");
+
+    // ── Escaped metacharacters are literal ──
+    expect_lits("file\\.txt", {"file.txt"}, "escaped dot");
+    expect_lits("a\\+b", {"a+b"}, "escaped plus");
+    expect_lits("a\\\\b", {"a\\b"}, "escaped backslash");
+    expect_lits("a\\-b", {"a-b"}, "escaped hyphen");
+
+    // ── Shorthand classes are non-literal ──
+    expect_lits("\\d+hello", {"hello"}, "\\d is non-literal");
+    expect_lits("hello\\w+world", {"hello", "world"}, "\\w splits");
+
+    // ── Alternation → bail out ──
+    expect_empty("foo|bar", "alternation");
+    expect_empty("abc(de|fg)hi", "nested alternation");
+    expect_empty("(cat|dog)food", "group alternation");
+
+    // ── Case-insensitive → bail out ──
+    expect_empty("(?i)hello", "(?i) flag");
+    expect_empty("(?mi)hello", "(?mi) flag");
+    expect_empty("(?is)hello", "(?is) flag");
+
+    // ── Named groups must NOT trigger (?i) ──
+    // Regression: (?P<id>...) was falsely treated as case-insensitive
+    expect_lits("(?P<id>\\d+)abc", {"abc"}, "named group (?P<id>)");
+    expect_lits("(?P<item>\\w+)xyz", {"xyz"}, "named group (?P<item>)");
+
+    // ── Optional elements ──
+    expect_lits("colou?r", {"colo", "r"}, "? removes preceding char");
+    expect_lits("ab*c", {"a", "c"}, "* removes preceding char");
+    expect_lits("abc(de)?fg", {"abc", "fg"}, "optional group skipped");
+
+    // ── Quantifier expansion ──
+    expect_lits("a{3}bc", {"aaabc"}, "{3} exact expansion");
+    expect_lits("a{2,4}bc", {"aa", "aabc"}, "{2,4} variable expansion");
+
+    // ── + quantifier: required, breaks contiguity, restarts ──
+    expect_lits("xa+bc", {"xa", "abc"}, "+ flush and restart");
+
+    // ── Group penetration ──
+    expect_lits("abc(de)fg", {"abcdefg"}, "required group penetration");
+    expect_lits("abc(?:de)fg", {"abcdefg"}, "non-capturing group penetration");
+    expect_lits("abc(de)+fg", {"abcde", "defg"},
+                "group + quantifier");
+
+    // ── Unicode property \p{...} consumed ──
+    expect_lits("\\p{Han}foo", {"foo"}, "\\p{Han} consumed");
+    expect_lits("\\P{Latin}bar", {"bar"}, "\\P{Latin} consumed");
+
+    // ── Control char escapes are non-literal ──
+    expect_lits("hello\\nworld", {"hello", "world"}, "\\n is non-literal");
+    expect_lits("a\\tb", {"a", "b"}, "\\t is non-literal");
+
+    // ── Character classes ──
+    expect_lits("[a-z]+hello", {"hello"}, "char class skipped");
+    expect_lits("abc[0-9]def", {"abc", "def"}, "char class splits");
+
+    // ── Empty / all-meta patterns ──
+    expect_empty("", "empty pattern");
+    expect_empty(".*", "all-meta .*");
+    expect_empty("[a-z]+", "pure char class");
+    expect_empty("\\d+", "pure shorthand");
+
+    // ── Verify no false negatives: for every pattern+input pair,
+    //    if RE2 PartialMatch succeeds, every extracted literal must
+    //    appear in the input string. ──
+    auto verify_no_false_neg = [](const std::string& pattern,
+                                  const std::string& input,
+                                  const char* label) {
+        PartialRegexMatcher matcher(pattern);
+        if (!matcher(input)) return;  // doesn't match, nothing to check
+
+        auto lits = extract_literals_from_regex(pattern);
+        for (const auto& lit : lits) {
+            EXPECT_NE(input.find(lit), std::string::npos)
+                << "FALSE NEGATIVE: pattern=\"" << pattern << "\" input=\""
+                << input << "\" extracted literal=\"" << lit
+                << "\" not found in input (" << label << ")";
+        }
+    };
+
+    verify_no_false_neg("error.*timeout", "error: connection timeout",
+                        "multi-literal");
+    verify_no_false_neg("colou?r", "color red", "optional char");
+    verify_no_false_neg("colou?r", "colour blue", "optional char present");
+    verify_no_false_neg("\\p{Han}+foo",
+                        "\xe4\xb8\xad" "foo", "Unicode Han");
+    verify_no_false_neg("(?P<id>\\d+)abc", "123abc", "named group");
+    verify_no_false_neg("a{3}bc", "aaabc", "exact quantifier");
+    verify_no_false_neg("file\\.txt", "open file.txt now", "escaped dot");
+    verify_no_false_neg("abc(de)fg", "xabcdefgy", "group penetration");
+    verify_no_false_neg("abc(de)?fg", "xabcfgy", "optional group absent");
 }
