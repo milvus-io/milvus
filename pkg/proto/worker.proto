@@ -112,6 +112,9 @@ message CreateJobRequest {
   repeated data.FieldBinlog insert_logs = 31;
   repeated common.KeyValuePair plugin_context = 32;
   string manifest = 33;
+  // External collection fields (empty for regular collections)
+  string external_source = 34;
+  string external_spec = 35;
 }
 
 message QueryJobsRequest {
