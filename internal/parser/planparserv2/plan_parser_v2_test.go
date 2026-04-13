@@ -1788,6 +1788,10 @@ func Test_ArrayLength(t *testing.T) {
 		`array_length(StringArrayField) <= 1`,
 		`array_length(StringArrayField) > 5`,
 		`array_length(StringArrayField) >= 5`,
+		// struct array sub-field
+		`array_length(struct_array[sub_str]) == 3`,
+		`array_length(struct_array[sub_int]) > 1`,
+		`array_length(struct_array[sub_int]) <= 10`,
 	}
 	for _, expr = range exprs {
 		_, err = CreateSearchPlan(schema, expr, "FloatVectorField", &planpb.QueryInfo{
