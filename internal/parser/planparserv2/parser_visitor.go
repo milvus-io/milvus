@@ -857,8 +857,8 @@ func (v *ParserVisitor) getColumnInfoFromStructIndexField(identifier string) (*p
 	}
 
 	fieldName := parts[0]
-	index := strings.TrimRight(parts[1], "]")
-	subField := strings.TrimRight(parts[2], "]")
+	index := strings.TrimSuffix(parts[1], "]")
+	subField := strings.TrimSuffix(parts[2], "]")
 
 	structFieldName := fieldName + "[" + subField + "]"
 	field, err := v.schema.GetFieldFromName(structFieldName)
