@@ -312,6 +312,7 @@ const (
 	TimezoneKey             = "timezone"
 	AllowInsertAutoIDKey    = "allow_insert_auto_id"
 	DisableFuncRuntimeCheck = "disable_func_runtime_check"
+	MaxFieldIDKey           = "max_field_id"
 
 	// query mode
 	QueryModeKey       = "query_mode"

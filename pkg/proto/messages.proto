@@ -306,6 +306,7 @@ message AlterCollectionMessageUpdates {
     common.ConsistencyLevel consistency_level = 6; // consistency level should be updated.
     repeated common.KeyValuePair properties   = 7; // collection properties should be updated.
     AlterLoadConfigOfAlterCollection alter_load_config = 8; // alter load config of alter collection.
+    repeated int64 dropped_field_ids                   = 9; // field IDs dropped from schema, used to cascade-delete indexes in ack callback.
 }
 
 // AlterLoadConfigOfAlterCollection is the body of alter load config of alter collection message.

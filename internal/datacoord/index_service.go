@@ -1016,8 +1016,13 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 		for _, index := range indexes {
 			field := typeutil.GetField(schema, index.FieldID)
 			if field == nil {
-				log.Warn("field not found", zap.String("indexName", req.IndexName), zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("fieldID", index.FieldID))
-				return merr.Status(merr.WrapErrFieldNotFound(index.FieldID)), nil
+				// Field already dropped from schema (cascade drop from DropCollectionField),
+				// skip validation and proceed with index cleanup
+				log.Info("field already dropped from schema, proceeding with index drop",
+					zap.String("indexName", req.IndexName),
+					zap.Int64("collectionID", req.GetCollectionID()),
+					zap.Int64("fieldID", index.FieldID))
+				continue
 			}
 			if typeutil.IsVectorType(field.GetDataType()) {
 				log.Warn("vector index cannot be dropped on loaded collection", zap.String("indexName", req.IndexName), zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("fieldID", index.FieldID))

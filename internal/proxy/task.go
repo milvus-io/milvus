@@ -836,10 +836,19 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 	if action == nil {
 		return merr.WrapErrParameterInvalidMsg("action is nil in alter schema task")
 	}
-	addRequest := action.GetAddRequest()
-	if addRequest == nil {
-		return merr.WrapErrParameterInvalidMsg("add_request is nil, only add operation is supported for now")
+
+	switch action.GetOp().(type) {
+	case *milvuspb.AlterCollectionSchemaRequest_Action_AddRequest:
+		return t.preExecuteAdd(ctx)
+	case *milvuspb.AlterCollectionSchemaRequest_Action_DropRequest:
+		return t.preExecuteDrop(ctx)
+	default:
+		return merr.WrapErrParameterInvalidMsg("unknown action type in alter collection schema request")
 	}
+}
+
+func (t *alterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
+	addRequest := t.GetAction().GetAddRequest()
 
 	fieldInfos := addRequest.GetFieldInfos()
 	funcSchemas := addRequest.GetFuncSchema()
@@ -914,18 +923,45 @@ func (t *alterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+func (t *alterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
+	dropReq := t.GetAction().GetDropRequest()
+
+	switch id := dropReq.GetIdentifier().(type) {
+	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FunctionName:
+		return validateDropFunction(t.oldSchema, id.FunctionName)
+
+	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId:
+		fieldName := ""
+		for _, f := range t.oldSchema.Fields {
+			if f.FieldID == id.FieldId {
+				fieldName = f.Name
+				break
+			}
+		}
+		if fieldName == "" {
+			return merr.WrapErrParameterInvalidMsg("field not found with id: %d", id.FieldId)
+		}
+		return validateDropField(t.oldSchema, fieldName)
+
+	case *milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName:
+		return validateDropField(t.oldSchema, id.FieldName)
+
+	default:
+		return merr.WrapErrParameterInvalidMsg("drop request must specify field_name, field_id, or function_name")
+	}
+}
+
 func (t *alterCollectionSchemaTask) Execute(ctx context.Context) error {
-	action := t.GetAction()
-	if action != nil {
-		addRequest := action.GetAddRequest()
-		if addRequest != nil {
-			for _, fieldInfo := range addRequest.GetFieldInfos() {
-				if fieldInfo != nil && fieldInfo.GetFieldSchema() != nil {
-					fieldInfo.GetFieldSchema().IsFunctionOutput = true
-				}
+	// For AddRequest, mark all new fields as function output before sending to RootCoord.
+	// DropRequest needs no extra processing here; RootCoord handles it entirely.
+	if addRequest := t.GetAction().GetAddRequest(); addRequest != nil {
+		for _, fieldInfo := range addRequest.GetFieldInfos() {
+			if fieldInfo != nil && fieldInfo.GetFieldSchema() != nil {
+				fieldInfo.GetFieldSchema().IsFunctionOutput = true
 			}
 		}
 	}
+
 	var err error
 	t.AlterCollectionSchemaResponse, err = t.mixCoord.AlterCollectionSchema(ctx, t.AlterCollectionSchemaRequest)
 	return merr.CheckRPCCall(t.GetAlterStatus(), err)
@@ -933,6 +969,93 @@ func (t *alterCollectionSchemaTask) Execute(ctx context.Context) error {
 
 func (t *alterCollectionSchemaTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+// validateDropField validates that a field can be safely dropped from the schema.
+func validateDropField(schema *schemapb.CollectionSchema, fieldName string) error {
+	if fieldName == "" {
+		return merr.WrapErrParameterInvalidMsg("field name is empty")
+	}
+
+	// Find the target field
+	var targetField *schemapb.FieldSchema
+	for _, field := range schema.Fields {
+		if field.Name == fieldName {
+			targetField = field
+			break
+		}
+	}
+	if targetField == nil {
+		return merr.WrapErrParameterInvalidMsg("field not found: %s", fieldName)
+	}
+
+	// Check: cannot drop system fields
+	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName}, fieldName) {
+		return merr.WrapErrParameterInvalidMsg("cannot drop system field: %s", fieldName)
+	}
+
+	// Check: cannot drop primary key field
+	if targetField.IsPrimaryKey {
+		return merr.WrapErrParameterInvalidMsg("cannot drop primary key field: %s", fieldName)
+	}
+
+	// Check: cannot drop partition key field
+	if targetField.IsPartitionKey {
+		return merr.WrapErrParameterInvalidMsg("cannot drop partition key field: %s", fieldName)
+	}
+
+	// Check: cannot drop clustering key field
+	if targetField.GetIsClusteringKey() {
+		return merr.WrapErrParameterInvalidMsg("cannot drop clustering key field: %s", fieldName)
+	}
+
+	// Check: cannot drop dynamic field; use AlterCollection to disable dynamic schema instead.
+	if targetField.IsDynamic {
+		return merr.WrapErrParameterInvalidMsg("cannot drop dynamic field: %s, use AlterCollection to disable dynamic schema instead", fieldName)
+	}
+
+	// Check: cannot drop the last vector field
+	if typeutil.IsVectorType(targetField.DataType) {
+		vectorCount := 0
+		for _, f := range schema.Fields {
+			if typeutil.IsVectorType(f.DataType) {
+				vectorCount++
+			}
+		}
+		if vectorCount <= 1 {
+			return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field: %s", fieldName)
+		}
+	}
+
+	// Check: field must not be referenced by any function
+	for _, fn := range schema.Functions {
+		for _, inputName := range fn.InputFieldNames {
+			if inputName == fieldName {
+				return merr.WrapErrParameterInvalidMsg("field is referenced by function %s as input, drop function first", fn.Name)
+			}
+		}
+		for _, outputName := range fn.OutputFieldNames {
+			if outputName == fieldName {
+				return merr.WrapErrParameterInvalidMsg("field is referenced by function %s as output, drop function first", fn.Name)
+			}
+		}
+	}
+
+	return nil
+}
+
+// validateDropFunction checks that the function exists in the schema.
+func validateDropFunction(schema *schemapb.CollectionSchema, functionName string) error {
+	if functionName == "" {
+		return merr.WrapErrParameterInvalidMsg("function name is empty")
+	}
+
+	for _, fn := range schema.Functions {
+		if fn.Name == functionName {
+			return nil
+		}
+	}
+	return merr.WrapErrParameterInvalidMsg("function not found: %s", functionName)
 }
 
 type dropCollectionTask struct {

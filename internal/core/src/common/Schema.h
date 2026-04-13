@@ -329,6 +329,11 @@ class Schema {
         return fields_;
     }
 
+    bool
+    has_field(FieldId field_id) const {
+        return fields_.count(field_id) > 0;
+    }
+
     const std::unordered_map<FieldId, FieldMeta>
     get_field_metas(const std::vector<FieldId>& field_ids) {
         std::unordered_map<FieldId, FieldMeta> field_metas;

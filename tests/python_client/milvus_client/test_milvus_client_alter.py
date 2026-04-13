@@ -250,10 +250,6 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True},
                                          check_task=CheckTasks.err_res, check_items=error)
         error = {ct.err_code: 999,
-                 ct.err_msg: "dynamic schema cannot supported to be disabled: invalid parameter"}
-        self.alter_collection_properties(client, collection_name, properties={"dynamicfield.enabled": False},
-                                         check_task=CheckTasks.err_res, check_items=error)
-        error = {ct.err_code: 999,
                  ct.err_msg: "can not delete mmap properties if collection loaded"}
         self.drop_collection_properties(client, collection_name, property_keys=["mmap.enabled"],
                                         check_task=CheckTasks.err_res, check_items=error)

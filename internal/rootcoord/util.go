@@ -549,6 +549,24 @@ func nextFieldID(coll *model.Collection) int64 {
 		}
 	}
 
+	// Check persisted max_field_id in Properties to handle dropped fields.
+	// When a field is dropped, its ID may have been the highest; without this
+	// check, a subsequent AddField could reuse the dropped field's ID.
+	for _, kv := range coll.Properties {
+		if kv.Key == common.MaxFieldIDKey {
+			v, err := strconv.ParseInt(kv.Value, 10, 64)
+			if err != nil {
+				log.Warn("failed to parse max_field_id property, metadata may be corrupted",
+					zap.String("value", kv.Value),
+					zap.Error(err),
+				)
+			} else if v > maxFieldID {
+				maxFieldID = v
+			}
+			break
+		}
+	}
+
 	return maxFieldID + 1
 }
 

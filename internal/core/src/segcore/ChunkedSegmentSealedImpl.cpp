@@ -972,9 +972,20 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         std::vector<FieldId> milvus_field_ids;
         milvus_field_ids.reserve(field_id_list.size());
         for (int i = 0; i < field_id_list.size(); ++i) {
-            milvus_field_ids.emplace_back(field_id_list.Get(i));
-            merged_in_load_list = merged_in_load_list ||
-                                  schema_->ShouldLoadField(milvus_field_ids[i]);
+            auto fid = FieldId(field_id_list.Get(i));
+            // Defense-in-depth for legacy binlog meta (child_field_ids empty):
+            // dropped fields are normally filtered at ComputeDiffBinlogs level,
+            // but legacy data reads field IDs from parquet which may still
+            // contain dropped fields.
+            if (!schema_->has_field(fid)) {
+                continue;
+            }
+            milvus_field_ids.emplace_back(fid);
+            merged_in_load_list =
+                merged_in_load_list || schema_->ShouldLoadField(fid);
+        }
+        if (milvus_field_ids.empty()) {
+            continue;
         }
 
         auto mmap_dir_path =
