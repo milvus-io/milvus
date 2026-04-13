@@ -7,6 +7,7 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/errs"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
@@ -117,6 +118,10 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 		return nil, errors.Wrapf(errs.ErrClosed, "produce on closed producer")
 	}
 	defer p.lifetime.Done()
+
+	ctx, span := otel.Tracer("milvus.streaming.wal").Start(ctx, "wal.append.client")
+	defer span.End()
+	msg.WithTraceContext(ctx)
 
 	for {
 		// get producer.

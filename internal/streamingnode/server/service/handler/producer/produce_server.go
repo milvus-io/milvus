@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -200,10 +201,19 @@ func (p *ProduceServer) handleProduce(req *streamingpb.ProduceMessageRequest) {
 		return
 	}
 
+	// Extract the client-injected trace context and open a server-side span so
+	// the WAL append is linked to the originating client request in traces.
+	msgCtx := message.ExtractTraceContext(p.produceServer.Context(), msg.Properties())
+	msgCtx, span := otel.Tracer("milvus.streaming.wal").Start(msgCtx, "wal.append.server")
+
 	// Append message to wal.
 	// Concurrent append request can be executed concurrently.
-	p.wal.AppendAsync(p.produceServer.Context(), msg, func(appendResult *wal.AppendResult, err error) {
+	p.wal.AppendAsync(msgCtx, msg, func(appendResult *wal.AppendResult, err error) {
 		defer func() {
+			if err != nil {
+				span.RecordError(err)
+			}
+			span.End()
 			metricsGuard.Finish(err)
 			p.appendWG.Done()
 		}()

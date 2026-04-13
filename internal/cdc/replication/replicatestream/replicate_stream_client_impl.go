@@ -24,6 +24,8 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -224,25 +226,7 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 			}
 			if msg.MessageType() == message.MessageTypeTxn {
 				txnMsg := message.AsImmutableTxnMessage(msg)
-
-				// send txn begin message
-				beginMsg := txnMsg.Begin()
-				err := r.sendMessage(beginMsg)
-				if err != nil {
-					return err
-				}
-
-				// send txn messages
-				err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
-					return r.sendMessage(msg)
-				})
-				if err != nil {
-					return err
-				}
-
-				// send txn commit message
-				commitMsg := txnMsg.Commit()
-				err = r.sendMessage(commitMsg)
+				err = r.sendTxnMessage(txnMsg)
 				if err != nil {
 					return err
 				}
@@ -256,9 +240,68 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 	}
 }
 
-func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err error) {
+// doSend is a thin wrapper around r.client.Send used as a seam for mocking in tests.
+func (r *replicateStreamClient) doSend(req *milvuspb.ReplicateRequest) error {
+	return r.client.Send(req)
+}
+
+// sendMessage sends a single message, rooted at a fresh context.Background().
+func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) error {
+	return r.sendMessageWithCtx(context.Background(), msg)
+}
+
+// rawMapProps is a thin wrapper around map[string]string that satisfies the
+// message.RProperties interface without allocating a new struct type at each
+// call site.
+type rawMapProps map[string]string
+
+func (p rawMapProps) Get(k string) (string, bool) { v, ok := p[k]; return v, ok }
+func (p rawMapProps) Exist(k string) bool         { _, ok := p[k]; return ok }
+func (p rawMapProps) ToRawMap() map[string]string { return map[string]string(p) }
+
+// sendMessageWithCtx sends a single message wrapped in a cdc.replicate span.
+//
+// If parentCtx already carries a valid span (the txn case), the new span is
+// created as a child.  Otherwise a new root span is created on
+// context.Background() with a W3C Link back to the primary WAL span that was
+// persisted in msg's _tc property.
+//
+// The outgoing ReplicateRequest's _tc is replaced with the cdc.replicate span
+// context so that the secondary cluster's handling nests under the CDC span,
+// not under the (potentially long-expired) primary span.
+func (r *replicateStreamClient) sendMessageWithCtx(parentCtx context.Context, msg message.ImmutableMessage) (err error) {
+	// Serialize the message proto first — we need the raw properties map both
+	// for extracting the primary span context and for the outgoing request.
+	immutableMessage := msg.IntoImmutableMessageProto()
+
+	// Determine span start options.
+	var startOpts []trace.SpanStartOption
+	spanCtx := trace.SpanContextFromContext(parentCtx)
+	if !spanCtx.IsValid() {
+		// Not inside a parent span (non-txn path): link to the primary WAL span.
+		primarySC := message.ExtractSpanContextFromProperties(rawMapProps(immutableMessage.GetProperties()))
+		if primarySC.IsValid() {
+			startOpts = append(startOpts, trace.WithLinks(trace.Link{SpanContext: primarySC}))
+		}
+		parentCtx = context.Background()
+	}
+
+	ctx, span := otel.Tracer("milvus.streaming.wal").Start(parentCtx, "cdc.replicate", startOpts...)
 	defer func() {
-		logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("revision", r.channel.ModRevision))
+		if err != nil {
+			span.RecordError(err)
+		}
+		span.End()
+	}()
+
+	defer func() {
+		var channelKey string
+		var channelRevision int64
+		if r.channel != nil {
+			channelKey = r.channel.Key
+			channelRevision = r.channel.ModRevision
+		}
+		logger := mlog.With(mlog.String("key", channelKey), mlog.Int64("revision", channelRevision))
 		if err != nil {
 			logger.Warn(r.ctx, "send message failed", mlog.Err(err), mlog.FieldMessage(msg))
 		} else {
@@ -266,7 +309,14 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 			logger.Debug(r.ctx, "send message success", mlog.FieldMessage(msg))
 		}
 	}()
-	immutableMessage := msg.IntoImmutableMessageProto()
+
+	// Build the outgoing properties with _tc overwritten to carry the CDC span context.
+	clonedProps := make(map[string]string, len(immutableMessage.GetProperties()))
+	for k, v := range immutableMessage.GetProperties() {
+		clonedProps[k] = v
+	}
+	message.InjectTraceContextIntoMap(ctx, clonedProps)
+
 	req := &milvuspb.ReplicateRequest{
 		Request: &milvuspb.ReplicateRequest_ReplicateMessage{
 			ReplicateMessage: &milvuspb.ReplicateMessage{
@@ -274,12 +324,52 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 				Message: &commonpb.ImmutableMessage{
 					Id:         msg.MessageID().IntoProto(),
 					Payload:    immutableMessage.GetPayload(),
-					Properties: immutableMessage.GetProperties(),
+					Properties: clonedProps,
 				},
 			},
 		},
 	}
-	return r.client.Send(req)
+	return r.doSend(req)
+}
+
+// sendTxnMessage wraps the entire begin+bodies+commit sequence in a single
+// cdc.replicate.txn span (with a Link to the primary WAL txn span) and sends
+// each message as a child cdc.replicate span.
+func (r *replicateStreamClient) sendTxnMessage(txnMsg message.ImmutableTxnMessage) (err error) {
+	// Extract the primary span context from the Begin message's _tc.
+	// Use IntoImmutableMessageProto to get the raw properties map so we avoid
+	// an extra interface call through Properties().
+	beginMsg := txnMsg.Begin()
+	beginProto := beginMsg.IntoImmutableMessageProto()
+	primarySC := message.ExtractSpanContextFromProperties(rawMapProps(beginProto.GetProperties()))
+	var startOpts []trace.SpanStartOption
+	if primarySC.IsValid() {
+		startOpts = append(startOpts, trace.WithLinks(trace.Link{SpanContext: primarySC}))
+	}
+
+	ctx, span := otel.Tracer("milvus.streaming.wal").Start(context.Background(), "cdc.replicate.txn", startOpts...)
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+		}
+		span.End()
+	}()
+
+	// send txn begin message
+	if err = r.sendMessageWithCtx(ctx, beginMsg); err != nil {
+		return err
+	}
+
+	// send txn body messages
+	if err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
+		return r.sendMessageWithCtx(ctx, msg)
+	}); err != nil {
+		return err
+	}
+
+	// send txn commit message
+	err = r.sendMessageWithCtx(ctx, txnMsg.Commit())
+	return
 }
 
 func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {

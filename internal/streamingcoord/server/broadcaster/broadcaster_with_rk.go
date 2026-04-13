@@ -14,6 +14,16 @@ type broadcasterWithRK struct {
 }
 
 func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	// Inject the caller's trace context into the broadcast message so that
+	// the DDL ack callback (which may run post-restart after the original
+	// caller span is long gone) can still extract and parent its span.
+	// We use InjectTraceContextIntoMap because BroadcastMutableMessage exposes
+	// only RProperties (read-only); ToRawMap() returns the underlying map
+	// directly (zero-copy), so the write is reflected in the message.
+	if msg != nil {
+		message.InjectTraceContextIntoMap(ctx, msg.Properties().ToRawMap())
+	}
+
 	// consume the guards after the broadcast is called to avoid double unlock.
 	guards := b.guards
 	b.guards = nil

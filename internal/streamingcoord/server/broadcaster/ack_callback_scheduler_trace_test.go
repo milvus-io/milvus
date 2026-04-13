@@ -1,0 +1,59 @@
+//go:build test
+
+package broadcaster
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+)
+
+func TestRunAckCallbackWithTrace_OpensChildSpan(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+	)
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(prev)
+
+	// Simulate a broadcast message with a persisted _tc pointing at the
+	// original DDL caller's trace.
+	originCtx, originSpan := otel.Tracer("test").Start(context.Background(), "ddl.caller")
+	originTraceID := trace.SpanContextFromContext(originCtx).TraceID()
+	originSpan.End()
+
+	msg := buildTestBroadcastMessageForTrace(t)
+	// Inject _tc into msg Properties directly via InjectTraceContextIntoMap.
+	message.InjectTraceContextIntoMap(originCtx, msg.Properties().ToRawMap())
+
+	var innerCalled bool
+	var childTraceID trace.TraceID
+	err := runAckCallbackWithTrace(msg, func(spanCtx context.Context) error {
+		innerCalled = true
+		childTraceID = trace.SpanContextFromContext(spanCtx).TraceID()
+		return nil
+	})
+
+	assert.NoError(t, err)
+	assert.True(t, innerCalled)
+	assert.Equal(t, originTraceID, childTraceID, "ack callback span must share trace id with persisted parent")
+
+	spans := exporter.GetSpans()
+	var found bool
+	for _, s := range spans {
+		if s.Name == "broadcast.ack_callback" {
+			assert.Equal(t, originTraceID, s.SpanContext.TraceID())
+			found = true
+		}
+	}
+	assert.True(t, found, "broadcast.ack_callback span must be emitted")
+}

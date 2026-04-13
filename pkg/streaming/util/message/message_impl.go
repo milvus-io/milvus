@@ -1,6 +1,7 @@
 package message
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -103,6 +104,13 @@ func (m *messageImpl) WithBarrierTimeTick(tt uint64) MutableMessage {
 // WithWALTerm sets the wal term of current message.
 func (m *messageImpl) WithWALTerm(term int64) MutableMessage {
 	m.properties.Set(messageWALTerm, EncodeInt64(term))
+	return m
+}
+
+// WithTraceContext injects the current ctx's span context into message
+// properties under the reserved _tc key. No-op when ctx has no active span.
+func (m *messageImpl) WithTraceContext(ctx context.Context) MutableMessage {
+	InjectTraceContext(ctx, m.properties)
 	return m
 }
 
