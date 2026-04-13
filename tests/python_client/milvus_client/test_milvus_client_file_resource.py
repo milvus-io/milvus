@@ -343,21 +343,43 @@ class TestMilvusClientFileResourceList(FileResourceTestBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_list_empty(self, file_resource_env):
         """
-        target: list when no resources exist
-        method: ensure clean state then call list
-        expected: empty list
+        target: removed resources no longer appear in list
+        method: add 2 resources -> remove both -> list
+        expected: neither name appears in the list (concurrent-safe)
         """
         client = self._client()
-        # 1. best-effort cleanup
+        # 1. add 2 resources
+        names = [cf.gen_unique_str(prefix) for _ in range(2)]
+        for n in names:
+            self.add_file_resource(client, n, JIEBA_DICT_PATH)
+        # 2. remove them
+        for n in names:
+            self.remove_file_resource(client, n)
+        # 3. verify neither name appears in list
+        res, _ = self.list_file_resources(client)
+        listed = {r.name for r in res}
+        for n in names:
+            assert n not in listed, f"{n} should not appear after removal"
+
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/48612")
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_list_force_cleanup_all_resources(self, file_resource_env):
+        """
+        target: reproduce panic when force-removing in-use resources under concurrency
+        method: list all resources -> force remove each (including those in use by
+                other parallel workers) -> list again
+        expected: with -n 6, removing in-use resources may trigger server panic
+        """
+        client = self._client()
+        # 1. force remove all existing resources (may fail for in-use ones)
         res, _ = self.list_file_resources(client)
         for r in res:
             try:
-                self.remove_file_resource(client, r.name)
+                client.remove_file_resource(name=r.name)
             except Exception:
                 pass
-        # 2. list should be empty
+        # 2. list remaining resources (may not be empty under concurrency)
         res, _ = self.list_file_resources(client)
-        assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_list_after_add(self, file_resource_env):
@@ -367,19 +389,12 @@ class TestMilvusClientFileResourceList(FileResourceTestBase):
         expected: all 3 names present
         """
         client = self._client()
-        # 1. best-effort cleanup
-        res, _ = self.list_file_resources(client)
-        for r in res:
-            try:
-                self.remove_file_resource(client, r.name)
-            except Exception:
-                pass
-        # 2. add 3 resources
+        # 1. add 3 resources
         names = [cf.gen_unique_str(prefix) for _ in range(3)]
         paths = [JIEBA_DICT_PATH, SYNONYMS_PATH, STOPWORDS_PATH]
         for n, p in zip(names, paths):
             self.add_file_resource(client, n, p)
-        # 3. list and verify
+        # 2. list and verify
         res, _ = self.list_file_resources(client)
         listed = {r.name for r in res}
         for n in names:
@@ -393,21 +408,14 @@ class TestMilvusClientFileResourceList(FileResourceTestBase):
         expected: removed resource absent, other 2 present
         """
         client = self._client()
-        # 1. best-effort cleanup
-        res, _ = self.list_file_resources(client)
-        for r in res:
-            try:
-                self.remove_file_resource(client, r.name)
-            except Exception:
-                pass
-        # 2. add 3 resources
+        # 1. add 3 resources
         names = [cf.gen_unique_str(prefix) for _ in range(3)]
         paths = [JIEBA_DICT_PATH, SYNONYMS_PATH, STOPWORDS_PATH]
         for n, p in zip(names, paths):
             self.add_file_resource(client, n, p)
-        # 3. remove the first one
+        # 2. remove the first one
         self.remove_file_resource(client, names[0])
-        # 4. list and verify
+        # 3. list and verify
         res, _ = self.list_file_resources(client)
         listed = {r.name for r in res}
         assert names[0] not in listed
