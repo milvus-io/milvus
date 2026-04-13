@@ -3295,6 +3295,37 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 				t.Logf("err=%s", err)
 			})
 		}
+
+		t.Run("range_filter_without_radius", func(t *testing.T) {
+			// range_filter without radius should be rejected: range_filter is a secondary
+			// bound that only makes sense when a primary radius boundary is also set.
+			// Without radius, the engine silently ignores range_filter and falls back to
+			// regular top-K search (issue #48915).
+			spRangeFilterOnly := make([]*commonpb.KeyValuePair, len(noRoundDecimal))
+			copy(spRangeFilterOnly, noRoundDecimal)
+			resetSearchParamsValue(spRangeFilterOnly, ParamsKey, `{"nprobe": 10, "range_filter": 0.5}`)
+			searchInfo, err := parseSearchInfo(spRangeFilterOnly, nil, nil, false)
+			assert.Error(t, err)
+			assert.Nil(t, searchInfo)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "range_filter")
+			assert.Contains(t, err.Error(), "radius")
+		})
+
+		t.Run("range_filter_with_not_radius_key", func(t *testing.T) {
+			// "not_radius" contains "radius" as a substring; a naive strings.Contains
+			// check would falsely treat this as a range search and skip the validation.
+			// gjson.Get does an exact JSON key lookup so this must still be rejected.
+			spBadKey := make([]*commonpb.KeyValuePair, len(noRoundDecimal))
+			copy(spBadKey, noRoundDecimal)
+			resetSearchParamsValue(spBadKey, ParamsKey, `{"nprobe": 10, "not_radius": 1, "range_filter": 0.5}`)
+			searchInfo, err := parseSearchInfo(spBadKey, nil, nil, false)
+			assert.Error(t, err)
+			assert.Nil(t, searchInfo)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "range_filter")
+			assert.Contains(t, err.Error(), "radius")
+		})
 	})
 	t.Run("check iterator and groupBy", func(t *testing.T) {
 		normalParam := getValidSearchParams()

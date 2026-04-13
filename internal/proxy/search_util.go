@@ -9,6 +9,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -120,7 +121,7 @@ type SearchInfo struct {
 // and whether a filter expression is present. The caller supplies hasFilter
 // because the DSL/expression is not available inside parseSearchInfo.
 func (s *SearchInfo) DetermineSearchType(hasFilter bool) internalpb.SearchType {
-	isRangeSearch := strings.Contains(s.planInfo.GetSearchParams(), radiusKey)
+	isRangeSearch := gjson.Get(s.planInfo.GetSearchParams(), radiusKey).Exists()
 	hasGroupBy := s.planInfo.GetGroupByFieldId() > 0
 	if isRangeSearch || hasGroupBy || s.isIterator || s.iterativeFilter {
 		return internalpb.SearchType_DEFAULT
@@ -551,8 +552,12 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			"Not allowed to do groupBy when doing iteration")
 	}
 
-	isRangeSearch = strings.Contains(searchParamStr, radiusKey)
+	isRangeSearch = gjson.Get(searchParamStr, radiusKey).Exists()
 	isIterativeFilter = (hints == iterativeFilterKey) || strings.Contains(searchParamStr, iterativeFilterKey)
+	if !isRangeSearch && gjson.Get(searchParamStr, rangeFilterKey).Exists() {
+		return nil, merr.WrapErrParameterInvalid("range_filter", "",
+			"range_filter requires radius to be set; range_filter alone is not a valid range search parameter")
+	}
 	if isRangeSearch && groupByFieldId > 0 {
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do range-search when doing search-group-by")
