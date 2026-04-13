@@ -128,7 +128,6 @@ func (m *messageImpl) WithReplicateHeader(rh *ReplicateHeader) MutableMessage {
 	return m
 }
 
-
 // WithTimeTick sets the time tick of current message.
 func (m *messageImpl) WithTimeTick(tt uint64) MutableMessage {
 	m.properties.Set(messageTimeTick, EncodeUint64(tt))
