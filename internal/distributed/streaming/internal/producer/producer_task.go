@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -153,7 +155,16 @@ func (g *ProduceGuard) produceTxn(ctx context.Context, msgs ...message.MutableMe
 }
 
 // produceWithTxnOnce produces the messages with a transaction once.
-func (g *ProduceGuard) produceWithTxnOnce(ctx context.Context, msgs ...message.MutableMessage) (*types.AppendResult, error) {
+func (g *ProduceGuard) produceWithTxnOnce(ctx context.Context, msgs ...message.MutableMessage) (_ *types.AppendResult, err error) {
+	ctx, span := otel.Tracer("milvus.streaming.wal").Start(ctx, "wal.txn")
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+
 	// a txn batch should always belong to one vchannel.
 	txn, err := g.beginTxn(ctx, msgs[0].VChannel())
 	if err != nil {

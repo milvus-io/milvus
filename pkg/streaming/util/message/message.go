@@ -1,6 +1,9 @@
 package message
 
 import (
+	"context"
+
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -124,6 +127,12 @@ type MutableMessage interface {
 	// WithReplicateHeader sets the replicate header of current message.
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithReplicateHeader(rh *ReplicateHeader) MutableMessage
+
+	// WithTraceContext injects the current ctx's W3C trace span context into
+	// the message under the reserved _tc property. No-op when ctx has no active
+	// span. Used to propagate trace across the WAL write RPC boundary.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithTraceContext(ctx context.Context) MutableMessage
 
 	// IntoImmutableMessage converts the mutable message to immutable message.
 	IntoImmutableMessage(msgID MessageID) ImmutableMessage

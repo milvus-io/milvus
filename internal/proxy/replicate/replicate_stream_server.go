@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -127,8 +128,14 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 		mlog.FieldMessage(msg),
 	)
 
+	// Extract trace context persisted by the CDC sender so that this append
+	// nests under the cdc.replicate span (or its cdc.replicate.txn parent).
+	msgCtx := message.ExtractTraceContext(p.streamServer.Context(), msg.Properties())
+	msgCtx, span := otel.Tracer("milvus.streaming.wal").Start(msgCtx, "wal.replicate.append")
+	defer span.End()
+
 	// Append message to wal.
-	_, err = streaming.WAL().Replicate().Append(ctx, msg)
+	_, err = streaming.WAL().Replicate().Append(msgCtx, msg)
 	if err == nil {
 		p.sendReplicateResult(sourceTs, msg)
 		return nil
@@ -138,6 +145,7 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 		p.sendReplicateResult(sourceTs, msg)
 		return nil
 	}
+	span.RecordError(err)
 	// unexpected error, will close the stream and wait for client to reconnect.
 	mlog.Warn(ctx, "append replicate message to wal failed", mlog.FieldMessage(msg), mlog.Err(err))
 	return err
