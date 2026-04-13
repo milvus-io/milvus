@@ -369,9 +369,11 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
                        "count: {}, result size: {}",
                        batch.rg_count,
                        all_tables.size());
+            CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
 
             int64_t table_offset = 0;
             for (const auto& cell : batch.cells) {
+                CheckCancellation(op_ctx, -1, "LoadCellBatchAsync");
                 auto cell_result = std::make_shared<CellLoadResult>();
                 cell_result->cid = cell.cid;
                 cell_result->tables.reserve(cell.rg_count);
