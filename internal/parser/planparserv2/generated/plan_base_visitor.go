@@ -183,6 +183,10 @@ func (v *BasePlanVisitor) VisitBitAnd(ctx *BitAndContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitStructIndexField(ctx *StructIndexFieldContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitIsNull(ctx *IsNullContext) interface{} {
 	return v.VisitChildren(ctx)
 }

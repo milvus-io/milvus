@@ -849,7 +849,32 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 	}, nil
 }
 
-func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField antlr.TerminalNode) (*planpb.ColumnInfo, error) {
+func (v *ParserVisitor) getColumnInfoFromStructIndexField(identifier string) (*planpb.ColumnInfo, error) {
+	// Parse "struct_arr[0][sub_field]" -> fieldName="struct_arr", index="0", subField="sub_field"
+	parts := strings.SplitN(identifier, "[", 3)
+	if len(parts) != 3 {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid struct index field identifier: %s", identifier)
+	}
+
+	fieldName := parts[0]
+	index := strings.TrimRight(parts[1], "]")
+	subField := strings.TrimRight(parts[2], "]")
+
+	structFieldName := fieldName + "[" + subField + "]"
+	field, err := v.schema.GetFieldFromName(structFieldName)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", structFieldName, err)
+	}
+
+	return &planpb.ColumnInfo{
+		FieldId:     field.FieldID,
+		DataType:    field.DataType,
+		NestedPath:  []string{index},
+		ElementType: field.GetElementType(),
+	}, nil
+}
+
+func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, structIndexField antlr.TerminalNode) (*planpb.ColumnInfo, error) {
 	if identifier != nil {
 		childExpr, err := v.translateIdentifier(identifier.GetText())
 		if err != nil {
@@ -860,6 +885,10 @@ func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField ant
 
 	if structSubField != nil {
 		return v.getColumnInfoFromStructSubField(structSubField.GetText())
+	}
+
+	if structIndexField != nil {
+		return v.getColumnInfoFromStructIndexField(structIndexField.GetText())
 	}
 
 	return v.getColumnInfoFromJSONIdentifier(child.GetText())
@@ -892,7 +921,12 @@ func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 
 // VisitRange translates expr to range plan.
 func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
-	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), ctx.StructSubFieldIdentifier())
+	columnInfo, err := v.getChildColumnInfo(
+		ctx.Identifier(),
+		ctx.JSONIdentifier(),
+		ctx.StructSubFieldIdentifier(),
+		ctx.StructIndexFieldIdentifier(),
+	)
 	if err != nil {
 		return err
 	}
@@ -973,7 +1007,12 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 
 // VisitReverseRange parses the expression like "1 > a > 0".
 func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) interface{} {
-	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), ctx.StructSubFieldIdentifier())
+	columnInfo, err := v.getChildColumnInfo(
+		ctx.Identifier(),
+		ctx.JSONIdentifier(),
+		ctx.StructSubFieldIdentifier(),
+		ctx.StructIndexFieldIdentifier(),
+	)
 	if err != nil {
 		return err
 	}
@@ -1411,7 +1450,7 @@ func (v *ParserVisitor) VisitStructField(ctx *parser.StructFieldContext) interfa
 	// Look up the field directly by its full name
 	field, err := v.schema.GetFieldFromName(identifier)
 	if err != nil {
-		return fmt.Errorf("struct field not found: %s, error: %s", identifier, err)
+		return merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", identifier, err)
 	}
 
 	return &ExprWithType{
@@ -1427,6 +1466,28 @@ func (v *ParserVisitor) VisitStructField(ctx *parser.StructFieldContext) interfa
 			},
 		},
 		dataType:      field.DataType,
+		nodeDependent: true,
+	}
+}
+
+// VisitStructIndexField handles struct_arr[index][sub_field] syntax for accessing
+// a specific element's sub-field in a struct array.
+func (v *ParserVisitor) VisitStructIndexField(ctx *parser.StructIndexFieldContext) interface{} {
+	identifier := ctx.StructIndexFieldIdentifier().GetText()
+	columnInfo, err := v.getColumnInfoFromStructIndexField(identifier)
+	if err != nil {
+		return err
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ColumnExpr{
+				ColumnExpr: &planpb.ColumnExpr{
+					Info: columnInfo,
+				},
+			},
+		},
+		dataType:      columnInfo.GetDataType(),
 		nodeDependent: true,
 	}
 }
@@ -1538,7 +1599,7 @@ func (v *ParserVisitor) VisitEmptyArray(ctx *parser.EmptyArrayContext) interface
 }
 
 func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{} {
-	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil)
+	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -1582,7 +1643,7 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 }
 
 func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
-	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil)
+	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -1789,9 +1850,24 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 }
 
 func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interface{} {
-	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil)
-	if err != nil {
-		return err
+	var columnInfo *planpb.ColumnInfo
+	var err error
+	if ctx.StructFieldIdentifier() != nil {
+		identifier := ctx.StructFieldIdentifier().GetText()
+		field, fieldErr := v.schema.GetFieldFromName(identifier)
+		if fieldErr != nil {
+			return merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", identifier, fieldErr)
+		}
+		columnInfo = &planpb.ColumnInfo{
+			FieldId:     field.FieldID,
+			DataType:    field.DataType,
+			ElementType: field.GetElementType(),
+		}
+	} else {
+		columnInfo, err = v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
+		if err != nil {
+			return err
+		}
 	}
 	if columnInfo == nil ||
 		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
