@@ -22,6 +22,7 @@ import (
 	"path"
 	"strconv"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -43,6 +44,25 @@ type BulkPackWriterV3 struct {
 	*BulkPackWriterV2
 
 	manifestPath string
+
+	// initialManifestPath captures the manifest path observed when Write was
+	// first invoked. resetForRetry restores manifestPath to this value so each
+	// retry attempt restarts from the same base manifest version. Touching this
+	// invariant breaks the retry correctness argument — see
+	// ccmd/pack_writer_v3_retry_plan.md.
+	initialManifestPath string
+
+	// pendingMetaCacheActions accumulates RollStats / MergeBm25Stats actions
+	// that writeStats / writeBM25Stasts would otherwise apply directly to the
+	// metaCache. They are deferred and drained by SyncTask.Run only after a
+	// successful Write, so that retried attempts do not double-apply.
+	pendingMetaCacheActions []metacache.SegmentAction
+
+	// singlePKStats holds the per-batch PK statistic computed once per Write
+	// call. It is reused across retry attempts and passed explicitly into the
+	// serializer's *With variants so merged-stats computation can include this
+	// batch without requiring the metaCache to be updated yet.
+	singlePKStats *storage.PrimaryKeyStats
 }
 
 func NewBulkPackWriterV3(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
@@ -57,6 +77,17 @@ func NewBulkPackWriterV3(metaCache metacache.MetaCache, schema *schemapb.Collect
 	}
 }
 
+// Write performs the four manifest-mutating steps for a SyncPack inside a
+// retry loop. The retry handles loon transaction conflicts (currently
+// surfaced as packed.ErrLoonTransient — see internal/storagev2/packed
+// /ffi_common.go for the reason this is coarse-grained today).
+//
+// Each attempt restarts from bw.initialManifestPath via resetForRetry so the
+// manifest read base does not drift across retries. metaCache mutations
+// produced by writeStats / writeBM25Stasts are accumulated in
+// bw.pendingMetaCacheActions and applied via a deferred drainer that runs
+// only when Write returns nil — this is what makes retries idempotent on
+// metaCache without exposing the pending list to callers.
 func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	inserts map[int64]*datapb.FieldBinlog,
 	deltas *datapb.FieldBinlog,
@@ -67,27 +98,53 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	err error,
 ) {
 	log := log.Ctx(ctx)
+	bw.initialManifestPath = bw.manifestPath
 
-	if inserts, manifest, err = bw.writeInserts(ctx, pack); err != nil {
-		log.Error("failed to write insert data", zap.Error(err))
-		return
-	}
-	// Update manifestPath after writeInserts
-	bw.manifestPath = manifest
+	// Drain deferred metaCache actions on successful Write only. If the retry
+	// loop terminates with an error we leave the metaCache untouched, so a
+	// failed sync does not pollute bloom-filter / BM25 history.
+	defer func() {
+		if err != nil {
+			return
+		}
+		if len(bw.pendingMetaCacheActions) == 0 {
+			return
+		}
+		bw.metaCache.UpdateSegments(
+			metacache.MergeSegmentAction(bw.pendingMetaCacheActions...),
+			metacache.WithSegmentIDs(pack.segmentID),
+		)
+	}()
 
-	// writeStats for V3 adds bloom filter stats to manifest
-	if stats, err = bw.writeStats(ctx, pack); err != nil {
-		log.Error("failed to process stats blob", zap.Error(err))
-		return
-	}
-	// writeDelta for V3 updates manifest and returns nil FieldBinlog
-	if manifest, err = bw.writeDelta(ctx, pack); err != nil {
-		log.Error("failed to process delta blob", zap.Error(err))
-		return
-	}
-	// writeBM25Stasts for V3 adds BM25 stats to manifest
-	if bm25Stats, err = bw.writeBM25Stasts(ctx, pack); err != nil {
-		log.Error("failed to process bm25 stats blob", zap.Error(err))
+	err = retry.Do(ctx, func() error {
+		bw.resetForRetry()
+
+		var innerErr error
+		if inserts, manifest, innerErr = bw.writeInserts(ctx, pack); innerErr != nil {
+			log.Warn("failed to write insert data", zap.Error(innerErr))
+			return classifyLoonErr(innerErr)
+		}
+		// Update manifestPath after writeInserts
+		bw.manifestPath = manifest
+
+		// writeStats for V3 adds bloom filter stats to manifest
+		if stats, innerErr = bw.writeStats(ctx, pack); innerErr != nil {
+			log.Warn("failed to process stats blob", zap.Error(innerErr))
+			return classifyLoonErr(innerErr)
+		}
+		// writeDelta for V3 updates manifest and returns nil FieldBinlog
+		if manifest, innerErr = bw.writeDelta(ctx, pack); innerErr != nil {
+			log.Warn("failed to process delta blob", zap.Error(innerErr))
+			return classifyLoonErr(innerErr)
+		}
+		// writeBM25Stasts for V3 adds BM25 stats to manifest
+		if bm25Stats, innerErr = bw.writeBM25Stasts(ctx, pack); innerErr != nil {
+			log.Warn("failed to process bm25 stats blob", zap.Error(innerErr))
+			return classifyLoonErr(innerErr)
+		}
+		return nil
+	}, bw.writeRetryOpts...)
+	if err != nil {
 		return
 	}
 
@@ -96,6 +153,37 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	manifest = bw.manifestPath
 	size = bw.sizeWritten
 	return
+}
+
+// classifyLoonErr maps loon FFI failures to retryable errors and everything
+// else to retry.Unrecoverable so the outer retry loop terminates immediately.
+//
+// NOTE: today milvus-storage does not expose structured error codes, so
+// packed.ErrLoonTransient covers ALL loon errors, including non-recoverable
+// IO failures. The bounded retry budget keeps the worst case finite. Once
+// milvus-storage adds explicit error codes, narrow the retryable set here so
+// only the concurrent-transaction case retries.
+func classifyLoonErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, packed.ErrLoonTransient) {
+		return err
+	}
+	return retry.Unrecoverable(err)
+}
+
+// resetForRetry restores per-attempt state. It MUST restore manifestPath to
+// initialManifestPath — see the field doc on initialManifestPath for why.
+func (bw *BulkPackWriterV3) resetForRetry() {
+	bw.manifestPath = bw.initialManifestPath
+	bw.sizeWritten = 0
+	bw.pendingMetaCacheActions = bw.pendingMetaCacheActions[:0]
+	bw.singlePKStats = nil
+	// Files written under _stats/ and _delta/ by previous failed attempts are
+	// intentionally NOT cleaned up here: they are unreferenced by any
+	// committed manifest and will be reclaimed by loon GC. See
+	// ccmd/pack_writer_v3_retry_plan.md decision (2).
 }
 
 func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, string, error) {
@@ -112,21 +200,15 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack) (m
 	tsFrom, tsTo := bw.getTsRange(rec)
 	pluginContextPtr := bw.getPluginContext(pack.collectionID)
 
-	var logs map[int64]*datapb.FieldBinlog
-	var manifestPath string
-
-	if err := retry.Do(ctx, func() error {
-		var err error
-		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, rec, tsFrom, tsTo)
-		if err != nil {
-			log.Warn("failed to write inserts into storage",
-				zap.Int64("collectionID", pack.collectionID),
-				zap.Int64("segmentID", pack.segmentID),
-				zap.Error(err))
-			return err
-		}
-		return nil
-	}, bw.writeRetryOpts...); err != nil {
+	// NOTE: this used to wrap the call below in its own retry.Do; the outer
+	// BulkPackWriterV3.Write retry loop now covers it, so we drop the inner
+	// retry to avoid Attempts^2 amplification.
+	logs, manifestPath, err := bw.writeInsertsIntoStorage(ctx, pluginContextPtr, rec, tsFrom, tsTo)
+	if err != nil {
+		log.Ctx(ctx).Warn("failed to write inserts into storage",
+			zap.Int64("collectionID", pack.collectionID),
+			zap.Int64("segmentID", pack.segmentID),
+			zap.Error(err))
 		return nil, "", err
 	}
 	return logs, manifestPath, nil
@@ -281,10 +363,15 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack) (map
 	if err != nil {
 		return nil, err
 	}
+	bw.singlePKStats = singlePKStats
 
-	// Update metacache (same as base class)
-	actions := []metacache.SegmentAction{metacache.RollStats(singlePKStats)}
-	bw.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(pack.segmentID))
+	// DEFERRED: do NOT call metaCache.UpdateSegments(RollStats(...)) here.
+	// Stash the action; SyncTask.Run applies it after Write returns success
+	// so that retries do not double-roll the bloom filter. The merged-stats
+	// path below uses serializeMergedPkStatsWith to inject this batch
+	// explicitly without depending on the metaCache being updated yet.
+	bw.pendingMetaCacheActions = append(bw.pendingMetaCacheActions,
+		metacache.RollStats(singlePKStats))
 
 	pkFieldID := serializer.pkField.GetFieldID()
 	basePath, _, err := packed.UnmarshalManifestPath(bw.manifestPath)
@@ -326,7 +413,9 @@ func (bw *BulkPackWriterV3) writeStats(ctx context.Context, pack *SyncPack) (map
 
 	// Write merged stats on flush
 	if pack.isFlush && pack.level != datapb.SegmentLevel_L0 {
-		mergedStatsBlob, err := serializer.serializeMergedPkStats(pack)
+		// Use the *With variant to include this batch's PK stats explicitly,
+		// since the corresponding RollStats has been deferred above.
+		mergedStatsBlob, err := serializer.serializeMergedPkStatsWith(pack, singlePKStats)
 		if err != nil {
 			return nil, err
 		}
@@ -423,13 +512,18 @@ func (bw *BulkPackWriterV3) writeBM25Stasts(ctx context.Context, pack *SyncPack)
 		fs.memorySize += int64(len(blob.Value))
 	}
 
-	// Update metacache (same as base class)
-	actions := []metacache.SegmentAction{metacache.MergeBm25Stats(pack.bm25Stats)}
-	bw.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(pack.segmentID))
+	// DEFERRED: do NOT apply MergeBm25Stats to the metaCache here. Stash the
+	// action; SyncTask.Run applies it after a successful Write so retries do
+	// not double-merge the BM25 stats. The merged-stats path below uses
+	// serializeMergedBM25StatsWith to inject this batch explicitly.
+	bw.pendingMetaCacheActions = append(bw.pendingMetaCacheActions,
+		metacache.MergeBm25Stats(pack.bm25Stats))
 
 	// Write merged BM25 stats on flush
 	if pack.isFlush && pack.level != datapb.SegmentLevel_L0 && hasBM25Function(bw.schema) {
-		mergedBM25Blob, err := serializer.serializeMergedBM25Stats(pack)
+		// Use the *With variant to include this batch's bm25 stats explicitly,
+		// since the corresponding MergeBm25Stats has been deferred above.
+		mergedBM25Blob, err := serializer.serializeMergedBM25StatsWith(pack, pack.bm25Stats)
 		if err != nil {
 			return nil, err
 		}
