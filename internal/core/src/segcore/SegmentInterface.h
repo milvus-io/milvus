@@ -246,7 +246,7 @@ class SegmentInterface {
     FinishLoad() = 0;
 
     virtual void
-    SetLoadInfo(const milvus::proto::segcore::SegmentLoadInfo& load_info) = 0;
+    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) = 0;
 
     virtual void
     Load(milvus::tracer::TraceContext& trace_ctx,
@@ -439,9 +439,8 @@ class SegmentInternalInterface : public SegmentInterface {
                          const std::string& nested_path) const override;
 
     virtual void
-    SetLoadInfo(
-        const milvus::proto::segcore::SegmentLoadInfo& load_info) override {
-        load_info_ = load_info;
+    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) override {
+        load_info_ = std::move(load_info);
     }
 
  public:

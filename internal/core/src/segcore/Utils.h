@@ -27,7 +27,7 @@
 namespace milvus::segcore {
 
 void
-ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data);
+ParsePksFromFieldData(std::vector<PkType>& pks, DataArray& data);
 
 void
 ParsePksFromFieldData(DataType data_type,

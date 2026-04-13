@@ -195,8 +195,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     FinishLoad() override;
 
     void
-    SetLoadInfo(
-        const milvus::proto::segcore::SegmentLoadInfo& load_info) override;
+    SetLoadInfo(milvus::proto::segcore::SegmentLoadInfo load_info) override;
 
     void
     Load(milvus::tracer::TraceContext& trace_ctx,
