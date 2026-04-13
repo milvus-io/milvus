@@ -241,7 +241,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
         auto arr = GenSortedArr<T>(nb);
         scalar_index->Build(nb, arr.data());
 
-        auto create_index_result = index->UploadV3({});
+        auto create_index_result = index->UploadUnified({});
         auto index_files = create_index_result->GetIndexFiles();
         auto copy_index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
@@ -250,7 +250,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
         load_config["index_files"] = index_files;
         load_config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
-        copy_index->LoadV3(load_config);
+        copy_index->LoadUnified(load_config);
 
         auto copy_scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(copy_index.get());

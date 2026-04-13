@@ -164,11 +164,15 @@ ScalarIndex<double>::BuildWithRawDataForUT(size_t n,
 
 template <typename T>
 IndexStatsPtr
-ScalarIndex<T>::UploadV3(const Config& config) {
-    AssertInfo(file_manager_ != nullptr,
-               "file_manager_ is null, UploadV3 requires a valid file manager");
+ScalarIndex<T>::UploadUnified(const Config& config) {
+    AssertInfo(
+        file_manager_ != nullptr,
+        "file_manager_ is null, UploadUnified requires a valid file manager");
 
     // Build filename: milvus_packed_<type>_index.v3
+    // The ".v3" suffix encodes the on-disk file format version (matches
+    // MILVUS_V3_FORMAT_VERSION in IndexEntryWriter.h), not the scalar index
+    // engine version. See pkg/common/common.go for the distinction.
     auto type_str = ToString(GetIndexType());
     std::transform(
         type_str.begin(), type_str.end(), type_str.begin(), ::tolower);
@@ -176,7 +180,7 @@ ScalarIndex<T>::UploadV3(const Config& config) {
 
     // Create the IndexEntryWriter
     auto writer =
-        file_manager_->CreateIndexEntryWriterV3(filename, is_index_file_);
+        file_manager_->CreateIndexEntryWriterUnified(filename, is_index_file_);
     AssertInfo(writer != nullptr,
                "failed to create IndexEntryWriter for V3 format");
 
@@ -190,7 +194,7 @@ ScalarIndex<T>::UploadV3(const Config& config) {
     // Get actual file size from writer
     auto file_size = writer->GetTotalBytesWritten();
 
-    LOG_INFO("UploadV3 completed for index type: {}, file size: {}",
+    LOG_INFO("UploadUnified completed for index type: {}, file size: {}",
              index_type_,
              file_size);
 
@@ -207,23 +211,24 @@ ScalarIndex<T>::UploadV3(const Config& config) {
 
 template <typename T>
 void
-ScalarIndex<T>::LoadV3(const Config& config) {
-    AssertInfo(file_manager_ != nullptr,
-               "file_manager_ is null, LoadV3 requires a valid file manager");
+ScalarIndex<T>::LoadUnified(const Config& config) {
+    AssertInfo(
+        file_manager_ != nullptr,
+        "file_manager_ is null, LoadUnified requires a valid file manager");
 
     // Get the packed index file path from config
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value() && !index_files.value().empty(),
-               "index_files is required for LoadV3");
+               "index_files is required for LoadUnified");
 
     // For V3 format, there should be exactly one packed file
     AssertInfo(index_files.value().size() == 1,
-               "LoadV3 expects exactly one packed index file, got: {}",
+               "LoadUnified expects exactly one packed index file, got: {}",
                index_files.value().size());
     const auto& packed_file = index_files.value()[0];
 
-    LOG_INFO("LoadV3: loading packed index file: {}", packed_file);
+    LOG_INFO("LoadUnified: loading packed index file: {}", packed_file);
 
     // Open the file using the file manager
     auto input = file_manager_->OpenInputStream(packed_file, is_index_file_);
@@ -242,7 +247,7 @@ ScalarIndex<T>::LoadV3(const Config& config) {
 
     LoadEntries(*reader, config);
 
-    LOG_INFO("LoadV3 completed for index type: {}", index_type_);
+    LOG_INFO("LoadUnified completed for index type: {}", index_type_);
 }
 
 template class ScalarIndex<bool>;

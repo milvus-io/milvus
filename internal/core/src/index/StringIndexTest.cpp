@@ -356,13 +356,13 @@ TEST_F(StringIndexMarisaTest, Codec) {
     auto copy_index = milvus::index::CreateStringIndexMarisa(file_manager_ctx);
 
     {
-        auto create_index_result = index->UploadV3({});
+        auto create_index_result = index->UploadUnified({});
         auto index_files = create_index_result->GetIndexFiles();
         Config load_config;
         load_config["index_files"] = index_files;
         load_config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
-        copy_index->LoadV3(load_config);
+        copy_index->LoadUnified(load_config);
     }
 
     {
@@ -440,13 +440,13 @@ TEST_F(StringIndexMarisaTest, BaseIndexCodec) {
     auto copy_index = milvus::index::CreateStringIndexMarisa(file_manager_ctx);
 
     {
-        auto create_index_result = index->UploadV3({});
+        auto create_index_result = index->UploadUnified({});
         auto index_files = create_index_result->GetIndexFiles();
         Config load_config;
         load_config["index_files"] = index_files;
         load_config[milvus::LOAD_PRIORITY] =
             milvus::proto::common::LoadPriority::HIGH;
-        copy_index->LoadV3(load_config);
+        copy_index->LoadUnified(load_config);
     }
 
     {
