@@ -725,12 +725,12 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	switch strings.ToLower(paramtable.Get().CommonCfg.SearchRequeryPolicy.GetValue()) {
 	case "always":
 		t.needRequery = true
-	case "outputvector":
-		t.needRequery = len(vectorOutputFields) > 0
 	case "outputfields":
+		t.needRequery = len(t.request.GetOutputFields()) > 0
+	case "outputvector":
 		fallthrough
 	default:
-		t.needRequery = len(t.request.GetOutputFields()) > 0
+		t.needRequery = len(vectorOutputFields) > 0
 	}
 	var rerankInputFieldIDs []int64
 	if t.rerankMeta != nil {

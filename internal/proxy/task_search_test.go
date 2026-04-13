@@ -5909,10 +5909,16 @@ func TestSearchTask_SearchRequeryPolicy(t *testing.T) {
 			expectedRequery: false,
 		},
 		{
-			name:            "default_fallback_to_outputfields",
+			name:            "default_fallback_to_outputvector_with_vector",
+			policy:          "unknown_value",
+			outputFields:    []string{"pk", "vec"},
+			expectedRequery: true,
+		},
+		{
+			name:            "default_fallback_to_outputvector_without_vector",
 			policy:          "unknown_value",
 			outputFields:    []string{"pk", "title"},
-			expectedRequery: true,
+			expectedRequery: false,
 		},
 	}
 
