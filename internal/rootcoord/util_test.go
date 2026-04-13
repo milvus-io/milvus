@@ -511,6 +511,36 @@ func Test_nextFieldID(t *testing.T) {
 			},
 			want: common.StartOfUserFieldID + 8,
 		},
+		{
+			name: "collection with max_field_id property after field drop",
+			args: args{
+				coll: &model.Collection{
+					Fields: []*model.Field{
+						{FieldID: common.StartOfUserFieldID},     // 100
+						{FieldID: common.StartOfUserFieldID + 1}, // 101
+					},
+					Properties: []*commonpb.KeyValuePair{
+						{Key: common.MaxFieldIDKey, Value: "102"},
+					},
+				},
+			},
+			want: common.StartOfUserFieldID + 3, // 103, not 102
+		},
+		{
+			name: "max_field_id property smaller than current fields",
+			args: args{
+				coll: &model.Collection{
+					Fields: []*model.Field{
+						{FieldID: common.StartOfUserFieldID},     // 100
+						{FieldID: common.StartOfUserFieldID + 5}, // 105
+					},
+					Properties: []*commonpb.KeyValuePair{
+						{Key: common.MaxFieldIDKey, Value: "102"},
+					},
+				},
+			},
+			want: common.StartOfUserFieldID + 6, // 106, current fields dominate
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -686,5 +716,47 @@ func TestCheckStructArrayFieldSchema_MaxCapacityValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "same max_capacity")
 		assert.Contains(t, err.Error(), "my_struct")
 		assert.Contains(t, err.Error(), "sub_b")
+	})
+}
+
+func Test_updateMaxFieldIDProperty(t *testing.T) {
+	t.Run("add to empty properties", func(t *testing.T) {
+		props := updateMaxFieldIDProperty(nil, 105)
+		assert.Len(t, props, 1)
+		assert.Equal(t, common.MaxFieldIDKey, props[0].Key)
+		assert.Equal(t, "105", props[0].Value)
+	})
+
+	t.Run("update existing property", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{
+			{Key: "other_key", Value: "other_value"},
+			{Key: common.MaxFieldIDKey, Value: "100"},
+		}
+		result := updateMaxFieldIDProperty(props, 105)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "105", result[1].Value)
+	})
+
+	t.Run("update existing property does not mutate original", func(t *testing.T) {
+		original := &commonpb.KeyValuePair{Key: common.MaxFieldIDKey, Value: "100"}
+		props := []*commonpb.KeyValuePair{
+			{Key: "other_key", Value: "other_value"},
+			original,
+		}
+		result := updateMaxFieldIDProperty(props, 105)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "105", result[1].Value)
+		// verify original is NOT modified
+		assert.Equal(t, "100", original.Value)
+	})
+
+	t.Run("append to non-empty properties", func(t *testing.T) {
+		props := []*commonpb.KeyValuePair{
+			{Key: "other_key", Value: "other_value"},
+		}
+		result := updateMaxFieldIDProperty(props, 103)
+		assert.Len(t, result, 2)
+		assert.Equal(t, common.MaxFieldIDKey, result[1].Key)
+		assert.Equal(t, "103", result[1].Value)
 	})
 }
