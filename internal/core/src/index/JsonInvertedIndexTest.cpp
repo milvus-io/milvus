@@ -9,9 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <boost/filesystem.hpp>
-#include <gtest/gtest.h>
-#include <simdjson.h>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -20,6 +17,11 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <arrow/api.h>
+#include <boost/filesystem.hpp>
+#include <gtest/gtest.h>
+#include <simdjson.h>
 
 #include "NamedType/named_type_impl.hpp"
 #include "bitset/bitset.h"
@@ -445,10 +447,23 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
     for (size_t i = 0; i < 20; ++i) {
         valid_data[i / 8] &= ~(1U << (i % 8));
     }
-    json_field->FillFieldData(jsons.data(),
-                              valid_data.data(),
-                              jsons.size(),
-                              0);
+
+    arrow::BinaryBuilder builder;
+    for (size_t i = 0; i < jsons.size(); ++i) {
+        auto is_valid = (valid_data[i / 8] >> (i % 8)) & 1U;
+        if (!is_valid) {
+            ASSERT_TRUE(builder.AppendNull().ok());
+            continue;
+        }
+        auto data = jsons[i].data();
+        ASSERT_TRUE(
+            builder.Append(data.data(), static_cast<int32_t>(data.size()))
+                .ok());
+    }
+
+    std::shared_ptr<arrow::Array> json_array;
+    ASSERT_TRUE(builder.Finish(&json_array).ok());
+    json_field->FillFieldData(json_array);
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
 
@@ -464,9 +479,9 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         << "non_exist_offset should be sliced into parts";
 
     auto slice_meta_bin = binary_set.binary_map_.at(INDEX_FILE_SLICE_META);
-    auto slice_meta = Config::parse(std::string(
-        reinterpret_cast<const char*>(slice_meta_bin->data.get()),
-        slice_meta_bin->size));
+    auto slice_meta = Config::parse(
+        std::string(reinterpret_cast<const char*>(slice_meta_bin->data.get()),
+                    slice_meta_bin->size));
 
     auto slice_num_for = [&](const std::string& target_key) {
         for (const auto& item : slice_meta[META]) {
@@ -486,8 +501,8 @@ TEST(JsonIndexTest, TestSlicedOffsetFilesLoadIndependently) {
         for (int i = 0; i < slice_num_for(target_key); ++i) {
             auto slice_name = GenSlicedFileName(target_key, i);
             auto bin = binary_set.binary_map_.at(slice_name);
-            result[slice_name] =
-                std::make_unique<storage::IndexData>(bin->data.get(), bin->size);
+            result[slice_name] = std::make_unique<storage::IndexData>(
+                bin->data.get(), bin->size);
         }
         return result;
     };
