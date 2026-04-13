@@ -933,3 +933,32 @@ func testForceKill(serverName string) {
 	// trigger a force kill
 	etcdCli.Revoke(context.Background(), *session.LeaseID)
 }
+
+// TestIsEmbeddedQueryNode verifies that IsEmbeddedQueryNode correctly detects
+// whether the process is running as an embedded QueryNode inside a StreamingNode.
+// EnableEmbededQueryNodeLabel() is called before any component starts (in
+// GetMilvusRoles), so by the time QueryNode.Register() runs, the env var is set.
+func TestIsEmbeddedQueryNode(t *testing.T) {
+	key := NewServerLabel(typeutil.QueryNodeRole, LabelStreamingNodeEmbeddedQueryNode)
+	// Save and restore the original env state to avoid test pollution.
+	original, hadOriginal := os.LookupEnv(key)
+	defer func() {
+		if hadOriginal {
+			os.Setenv(key, original)
+		} else {
+			os.Unsetenv(key)
+		}
+	}()
+
+	// Default: not embedded.
+	os.Unsetenv(key)
+	assert.False(t, IsEmbeddedQueryNode(), "should not be embedded when env var is unset")
+
+	// After EnableEmbededQueryNodeLabel(): embedded.
+	EnableEmbededQueryNodeLabel()
+	assert.True(t, IsEmbeddedQueryNode(), "should be embedded after EnableEmbededQueryNodeLabel()")
+
+	// After unsetting again: not embedded.
+	os.Unsetenv(key)
+	assert.False(t, IsEmbeddedQueryNode(), "should not be embedded after unsetting env var")
+}
