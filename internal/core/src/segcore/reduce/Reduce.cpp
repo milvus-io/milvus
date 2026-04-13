@@ -65,10 +65,11 @@ ReduceHelper::Initialize() {
     std::partial_sum(slice_nqs_.begin(),
                      slice_nqs_.end(),
                      slice_nqs_prefix_sum_.begin() + 1);
-    AssertInfo(slice_nqs_prefix_sum_[num_slices_] == total_nq_,
-               "illegal req sizes, slice_nqs_prefix_sum_[last] = " +
-                   std::to_string(slice_nqs_prefix_sum_[num_slices_]) +
-                   ", total_nq = " + std::to_string(total_nq_));
+    AssertInfo(
+        slice_nqs_prefix_sum_[num_slices_] == total_nq_,
+        "illegal req sizes, slice_nqs_prefix_sum_[last] = {}, total_nq = {}",
+        slice_nqs_prefix_sum_[num_slices_],
+        total_nq_);
 
     // init final_search_records and final_read_topKs
     final_search_records_.resize(num_segments_);
@@ -108,13 +109,13 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
     auto nq = search_result->total_nq_;
     auto topK = search_result->unity_topK_;
     AssertInfo(search_result->seg_offsets_.size() == nq * topK,
-               "wrong seg offsets size, size = " +
-                   std::to_string(search_result->seg_offsets_.size()) +
-                   ", expected size = " + std::to_string(nq * topK));
+               "wrong seg offsets size, size = {}, expected size = {}",
+               search_result->seg_offsets_.size(),
+               nq * topK);
     AssertInfo(search_result->distances_.size() == nq * topK,
-               "wrong distances size, size = " +
-                   std::to_string(search_result->distances_.size()) +
-                   ", expected size = " + std::to_string(nq * topK));
+               "wrong distances size, size = {}, expected size = {}",
+               search_result->distances_.size(),
+               nq * topK);
     std::vector<int64_t> real_topks(nq, 0);
     uint32_t valid_index = 0;
     auto segment = static_cast<SegmentInterface*>(search_result->segment_);
@@ -232,6 +233,7 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
     if (nq_end - nq_begin <= 1)
         return;
 
+    std::vector<size_t> indices;
     size_t start = nq_begin;
     while (start < nq_end) {
         // find scope with same scores
@@ -243,8 +245,8 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
         }
 
         if (end - start > 1) {
-            // Create lightweight index array for sorting
-            std::vector<size_t> indices(end - start);
+            // Reuse indices vector to avoid repeated heap allocation
+            indices.resize(end - start);
             std::iota(indices.begin(), indices.end(), 0);
 
             // Sort indices by comparing primary keys
@@ -528,9 +530,10 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
         }
         case milvus::DataType::VARCHAR: {
             auto ids = std::make_unique<milvus::proto::schema::StringArray>();
-            std::vector<std::string> string_pks(result_count);
-            // TODO: prevent mem copy
-            *ids->mutable_data() = {string_pks.begin(), string_pks.end()};
+            ids->mutable_data()->Reserve(result_count);
+            for (int i = 0; i < result_count; i++) {
+                ids->mutable_data()->Add();
+            }
             search_result_data->mutable_ids()->set_allocated_str_id(
                 ids.release());
             break;
@@ -570,9 +573,10 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
             for (auto ki = topk_start; ki < topk_end; ki++) {
                 auto loc = search_result->result_offsets_[ki];
                 AssertInfo(loc < result_count && loc >= 0,
-                           "invalid loc when GetSearchResultDataSlice, loc = " +
-                               std::to_string(loc) + ", result_count = " +
-                               std::to_string(result_count));
+                           "invalid loc when GetSearchResultDataSlice, loc = "
+                           "{}, result_count = {}",
+                           loc,
+                           result_count);
                 // set result pks
                 switch (pk_type) {
                     case milvus::DataType::INT64: {
@@ -639,9 +643,9 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
     }
 
     AssertInfo(search_result_data->scores_size() == result_count,
-               "wrong scores size, size = " +
-                   std::to_string(search_result_data->scores_size()) +
-                   ", expected size = " + std::to_string(result_count));
+               "wrong scores size, size = {}, expected size = {}",
+               search_result_data->scores_size(),
+               result_count);
     // fill other wanted data
     FillOtherData(result_count, nq_begin, nq_end, search_result_data);
 
