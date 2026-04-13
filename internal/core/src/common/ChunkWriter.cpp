@@ -288,7 +288,7 @@ ArrayChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
             auto str = array->GetView(i);
             ScalarFieldProto scalar_array;
             scalar_array.ParseFromArray(str.data(), str.size());
-            arrays.emplace_back(Array(scalar_array));
+            arrays.emplace_back(scalar_array);
         }
         if (nullable_) {
             null_bitmaps.emplace_back(
@@ -469,7 +469,7 @@ void
 SparseFloatVectorChunkWriter::write_to_target(
     const arrow::ArrayVector& array_vec,
     const std::shared_ptr<ChunkTarget>& target) {
-    std::vector<std::string> strs;
+    std::vector<std::string_view> strs;
     strs.reserve(row_nums_);
     std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
 
@@ -892,8 +892,11 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
                             ~(ChunkTarget::ALIGNED_SIZE - 1);
         auto padding_size = aligned_size - written;
         if (padding_size > 0) {
-            std::string padding(padding_size, 0);
-            target->write(padding.data(), padding_size);
+            // Use a stack buffer to avoid heap allocation for padding zeros.
+            // ChunkTarget::ALIGNED_SIZE is typically small (e.g. 64/512),
+            // so padding_size is always < ALIGNED_SIZE.
+            char padding[ChunkTarget::ALIGNED_SIZE] = {};
+            target->write(padding, padding_size);
         }
     }
 

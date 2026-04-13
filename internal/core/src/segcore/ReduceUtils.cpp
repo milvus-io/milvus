@@ -311,10 +311,10 @@ AssembleGroupByValues(
             }
         }
 
-        mutable_group_by_field_value->mutable_valid_data()->MergeFrom(
-            *valid_data);
-        mutable_group_by_field_value->mutable_scalars()->MergeFrom(
-            *group_by_res_values.get());
+        mutable_group_by_field_value->mutable_valid_data()->Swap(
+            valid_data.get());
+        mutable_group_by_field_value->mutable_scalars()->Swap(
+            group_by_res_values.get());
     }
 }
 

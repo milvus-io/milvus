@@ -209,10 +209,9 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                         return ExecArrayContains<std::string>(context);
                     }
                     default:
-                        ThrowInfo(
-                            DataTypeInvalid,
-                            fmt::format("unsupported array sub element type {}",
-                                        val_type));
+                        ThrowInfo(DataTypeInvalid,
+                                  "unsupported array sub element type {}",
+                                  val_type);
                 }
             } else {
                 if (expr_->same_type_) {
@@ -265,10 +264,9 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                         return ExecArrayContainsAll<std::string>(context);
                     }
                     default:
-                        ThrowInfo(
-                            DataTypeInvalid,
-                            fmt::format("unsupported array sub element type {}",
-                                        val_type));
+                        ThrowInfo(DataTypeInvalid,
+                                  "unsupported array sub element type {}",
+                                  val_type);
                 }
             } else {
                 if (expr_->same_type_) {
@@ -1349,7 +1347,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
-    auto elements = expr_->vals_;
+    const auto& elements = expr_->vals_;
     std::unordered_set<int> elements_index;
     for (int i = 0; i < static_cast<int>(elements.size()); i++) {
         elements_index.insert(i);
@@ -1444,8 +1442,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
                         }
                         default:
                             ThrowInfo(DataTypeInvalid,
-                                      fmt::format("unsupported data type {}",
-                                                  element.val_case()));
+                                      "unsupported data type {}",
+                                      element.val_case());
                     }
                     if (tmp_elements_index.size() == 0) {
                         return true;
@@ -1510,7 +1508,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
         return nullptr;
     }
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    auto elements = expr_->vals_;
+    const auto& elements = expr_->vals_;
     std::set<int> elements_index;
     for (int i = 0; i < static_cast<int>(elements.size()); i++) {
         elements_index.insert(i);
@@ -1633,8 +1631,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
                         }
                         default:
                             ThrowInfo(DataTypeInvalid,
-                                      fmt::format("unsupported data type {}",
-                                                  element.val_case()));
+                                      "unsupported data type {}",
+                                      element.val_case());
                     }
                     if (tmp_elements_index.size() == 0) {
                         res_view[row_offset] = true;
@@ -1920,11 +1918,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
-    auto elements = expr_->vals_;
-    std::unordered_set<int> elements_index;
-    for (int i = 0; i < static_cast<int>(elements.size()); i++) {
-        elements_index.insert(i);
-    }
+    const auto& elements = expr_->vals_;
 
     size_t processed_cursor = 0;
     auto execute_sub_batch =
@@ -2012,8 +2006,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
                         }
                         default:
                             ThrowInfo(DataTypeInvalid,
-                                      fmt::format("unsupported data type {}",
-                                                  element.val_case()));
+                                      "unsupported data type {}",
+                                      element.val_case());
                     }
                 }
             }
@@ -2070,7 +2064,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
         return nullptr;
     }
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    auto elements = expr_->vals_;
+    const auto& elements = expr_->vals_;
     if (elements.empty()) {
         MoveCursor();
         return std::make_shared<ColumnVector>(
@@ -2189,8 +2183,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                         }
                         default:
                             ThrowInfo(DataTypeInvalid,
-                                      fmt::format("unsupported data type {}",
-                                                  element.val_case()));
+                                      "unsupported data type {}",
+                                      element.val_case());
                     }
                 }
             }

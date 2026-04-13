@@ -208,7 +208,7 @@ CachedSearchIterator::ValidateSearchInfo(const SearchInfo& search_info) {
                   "Iterator v2 SearchInfo is not set");
     }
 
-    auto iterator_v2_info = search_info.iterator_v2_info_.value();
+    const auto& iterator_v2_info = search_info.iterator_v2_info_.value();
     if (iterator_v2_info.batch_size != batch_size_) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Batch size mismatch, expect %d, but got %d",
@@ -341,7 +341,7 @@ CachedSearchIterator::Init(const SearchInfo& search_info) {
                   "Iterator v2 info is not set, cannot initialize iterator");
     }
 
-    auto iterator_v2_info = search_info.iterator_v2_info_.value();
+    const auto& iterator_v2_info = search_info.iterator_v2_info_.value();
     if (iterator_v2_info.batch_size == 0) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Batch size is 0, cannot initialize iterator");

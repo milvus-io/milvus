@@ -174,11 +174,12 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
         if (boost::filesystem::is_directory(*iter)) {
             LOG_WARN("{} is a directory", iter->path().string());
         } else {
-            LOG_INFO("trying to add index file: {}", iter->path().string());
-            AssertInfo(disk_file_manager_->AddFile(iter->path().string()),
+            auto file_path_str = iter->path().string();
+            LOG_INFO("trying to add index file: {}", file_path_str);
+            AssertInfo(disk_file_manager_->AddFile(file_path_str),
                        "failed to add index file: {}",
-                       iter->path().string());
-            LOG_INFO("index file: {} added", iter->path().string());
+                       file_path_str);
+            LOG_INFO("index file: {} added", file_path_str);
         }
     }
 
@@ -764,6 +765,7 @@ void
 InvertedIndexTantivy<std::string>::build_index_for_array(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     int64_t offset = 0;
+    std::vector<std::string> output;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
@@ -775,7 +777,7 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
                 Assert(IsStringDataType(
                     static_cast<DataType>(schema_.element_type())));
             }
-            std::vector<std::string> output;
+            output.clear();
             for (int64_t j = 0; j < array_column[i].length(); j++) {
                 output.push_back(
                     array_column[i].template get_data<std::string>(j));
@@ -828,6 +830,7 @@ InvertedIndexTantivy<std::string>::build_index_for_array_nested(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     int64_t offset = 0;
     int64_t row_offset = 0;
+    std::vector<std::string> output;
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
@@ -841,9 +844,8 @@ InvertedIndexTantivy<std::string>::build_index_for_array_nested(
             Assert(IsStringDataType(
                 static_cast<DataType>(schema_.element_type())));
 
-            std::vector<std::string> output;
+            output.clear();
             auto length = array_column[i].length();
-            output.reserve(length);
             for (int64_t j = 0; j < length; j++) {
                 output.push_back(
                     array_column[i].template get_data<std::string>(j));
