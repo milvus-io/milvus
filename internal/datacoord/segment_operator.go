@@ -69,6 +69,16 @@ func SetJsonKeyIndexLogs(jsonKeyIndexLogs map[int64]*datapb.JsonKeyStats) Segmen
 	}
 }
 
+func SetManifestPath(manifestPath string) SegmentOperator {
+	return func(segment *SegmentInfo) bool {
+		if segment.GetManifestPath() == manifestPath {
+			return false
+		}
+		segment.ManifestPath = manifestPath
+		return true
+	}
+}
+
 type segmentCriterion struct {
 	collectionID int64
 	channel      string

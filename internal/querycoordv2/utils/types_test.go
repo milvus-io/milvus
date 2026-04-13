@@ -93,8 +93,9 @@ func TestPackSegmentLoadInfo_ManifestPath(t *testing.T) {
 
 	t.Run("manifest set clears legacy stats fields", func(t *testing.T) {
 		seg := &datapb.SegmentInfo{
-			ID:           100,
-			ManifestPath: "base/path@5",
+			ID:             100,
+			StorageVersion: 3,
+			ManifestPath:   "base/path@5",
 			Statslogs: []*datapb.FieldBinlog{
 				{FieldID: 1},
 			},

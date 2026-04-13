@@ -351,42 +351,27 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 }
 
 func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResult) error {
-	var err error
+	var operators []SegmentOperator
+	var segmentID int64
+
+	if result.GetManifest() != "" {
+		operators = append(operators, SetManifestPath(result.GetManifest()))
+	}
+
 	switch st.GetSubJobType() {
 	case indexpb.StatsSubJob_TextIndexJob:
-		err = st.meta.UpdateSegment(st.GetSegmentID(), SetTextIndexLogs(result.GetTextStatsLogs()))
-		if err != nil {
-			log.Ctx(ctx).Warn("save text index stats result failed", zap.Int64("taskID", st.GetTaskID()),
-				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
-			break
-		}
+		segmentID = st.GetSegmentID()
+		operators = append(operators, SetTextIndexLogs(result.GetTextStatsLogs()))
 	case indexpb.StatsSubJob_JsonKeyIndexJob:
-		err = st.meta.UpdateSegment(st.GetSegmentID(), SetJsonKeyIndexLogs(result.GetJsonKeyStatsLogs()))
-		if err != nil {
-			log.Ctx(ctx).Warn("save json key index stats result failed", zap.Int64("taskId", st.GetTaskID()),
-				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
-			break
-		}
+		segmentID = st.GetSegmentID()
+		operators = append(operators, SetJsonKeyIndexLogs(result.GetJsonKeyStatsLogs()))
 	case indexpb.StatsSubJob_Sort:
-		// For V2 segments (no manifest), persist statsLogs and bm25Logs.
-		// For V3 segments (manifest set), stats are already in manifest.
-		segment := st.meta.GetHealthySegment(ctx, st.GetTargetSegmentID())
-		if segment != nil && segment.GetManifestPath() == "" {
-			var operators []SegmentOperator
-			if len(result.GetStatsLogs()) > 0 {
-				operators = append(operators, SetStatslogs(result.GetStatsLogs()))
-			}
-			if len(result.GetBm25Logs()) > 0 {
-				operators = append(operators, SetBm25Statslogs(result.GetBm25Logs()))
-			}
-			if len(operators) > 0 {
-				err = st.meta.UpdateSegment(st.GetTargetSegmentID(), operators...)
-				if err != nil {
-					log.Ctx(ctx).Warn("save sort stats result failed", zap.Int64("taskID", st.GetTaskID()),
-						zap.Int64("segmentID", st.GetTargetSegmentID()), zap.Error(err))
-					break
-				}
-			}
+		segmentID = st.GetTargetSegmentID()
+		if len(result.GetStatsLogs()) > 0 {
+			operators = append(operators, SetStatslogs(result.GetStatsLogs()))
+		}
+		if len(result.GetBm25Logs()) > 0 {
+			operators = append(operators, SetBm25Statslogs(result.GetBm25Logs()))
 		}
 	case indexpb.StatsSubJob_BM25Job:
 	// bm25 logs are generated during with segment flush.
@@ -394,27 +379,13 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		log.Ctx(ctx).Warn("unexpected sub job type", zap.String("type", st.GetSubJobType().String()))
 	}
 
+	err := st.meta.UpdateSegment(segmentID, operators...)
 	// if segment is not found, it means the segment is already dropped,
 	// so we can ignore the error and mark task as finished.
 	if err != nil && !errors.Is(err, merr.ErrSegmentNotFound) {
+		log.Ctx(ctx).Warn("save stats result failed", zap.Int64("taskId", st.GetTaskID()),
+			zap.Int64("segmentID", st.GetSegmentID()), zap.String("taskType", st.GetSubJobType().String()), zap.Error(err))
 		return err
-	}
-
-	// Update segment manifest version so subsequent stats tasks use the latest version.
-	if manifest := result.GetManifest(); manifest != "" {
-		segID := st.GetSegmentID()
-		if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
-			segID = st.GetTargetSegmentID()
-		}
-		if updateErr := st.meta.UpdateSegmentsInfo(ctx, UpdateManifest(segID, manifest)); updateErr != nil {
-			log.Ctx(ctx).Warn("failed to update manifest after stats task",
-				zap.Int64("taskID", st.GetTaskID()),
-				zap.Int64("segmentID", segID),
-				zap.Error(updateErr))
-			if !errors.Is(updateErr, merr.ErrSegmentNotFound) {
-				return updateErr
-			}
-		}
 	}
 
 	log.Ctx(ctx).Info("SetJobInfo for stats task success", zap.Int64("taskID", st.GetTaskID()),

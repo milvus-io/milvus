@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -91,9 +92,9 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 	// Deltalogs are always populated (delta log loading has its own manifest path)
 	loadInfo.Deltalogs = segment.Deltalogs
 
-	// When manifest_path is set, stats are stored in the manifest.
+	// When using storage v3, stats are stored in the manifest.
 	// Skip populating legacy stats fields - the reader will load from manifest.
-	if segment.GetManifestPath() == "" {
+	if segment.GetStorageVersion() < storage.StorageV3 {
 		loadInfo.Statslogs = segment.Statslogs
 		loadInfo.Bm25Logs = segment.Bm25Statslogs
 		loadInfo.TextStatsLogs = segment.GetTextStatsLogs()

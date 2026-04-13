@@ -1282,8 +1282,8 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
-		if segment.ManifestPath == "" {
-			log.Ctx(context.TODO()).Warn("meta update: update manifest version failed - no manifest path",
+		if segment.GetStorageVersion() < storage.StorageV3 {
+			log.Ctx(context.TODO()).Warn("meta update: update manifest version failed - not a v3 segment",
 				zap.Int64("segmentID", segmentID))
 			return false
 		}

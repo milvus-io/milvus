@@ -888,6 +888,7 @@ func TestSnapshotWriter_Save_WithStorageV2Manifest(t *testing.T) {
 	snapshotData := createTestSnapshotData()
 
 	// Add manifest_path to segment
+	snapshotData.Segments[0].StorageVersion = storage.StorageV3
 	snapshotData.Segments[0].ManifestPath = "s3://bucket/collection/partition/segment1/manifest.json"
 
 	metadataPath, err := writer.Save(context.Background(), snapshotData)
@@ -917,6 +918,7 @@ func TestSnapshotReader_ReadSnapshot_WithStorageV2Manifest(t *testing.T) {
 	// Write a snapshot with StorageV2 manifest
 	writer := NewSnapshotWriter(cm)
 	snapshotData := createTestSnapshotData()
+	snapshotData.Segments[0].StorageVersion = 3
 	snapshotData.Segments[0].ManifestPath = "s3://bucket/collection/partition/segment1/manifest.json"
 
 	metadataPath, err := writer.Save(context.Background(), snapshotData)
