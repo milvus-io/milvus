@@ -52,7 +52,6 @@ type DistHandlerSuite struct {
 	nodeManager      *session.NodeManager
 	scheduler        *task.MockScheduler
 	dispatchMockCall *mock.Call
-	executedFlagChan chan struct{}
 	dist             *meta.DistributionManager
 	target           *meta.MockTargetManager
 	handler          *distHandler
@@ -69,8 +68,6 @@ func (suite *DistHandlerSuite) SetupSuite() {
 	suite.target = meta.NewMockTargetManager(suite.T())
 	suite.ctx = context.Background()
 
-	suite.executedFlagChan = make(chan struct{}, 1)
-	suite.scheduler.EXPECT().GetExecutedFlag(mock.Anything).Return(suite.executedFlagChan).Maybe()
 	suite.target.EXPECT().GetSealedSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetDmChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	suite.target.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(1011).Maybe()
@@ -143,54 +140,6 @@ func (suite *DistHandlerSuite) TestGetDistributionFailed() {
 	defer suite.handler.stop()
 
 	time.Sleep(3 * time.Second)
-}
-
-func (suite *DistHandlerSuite) TestForcePullDist() {
-	if suite.dispatchMockCall != nil {
-		suite.dispatchMockCall.Unset()
-		suite.dispatchMockCall = nil
-	}
-
-	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
-
-	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.client.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{
-		Status: merr.Success(),
-		NodeID: 1,
-		Channels: []*querypb.ChannelVersionInfo{
-			{
-				Channel:    "test-channel-1",
-				Collection: 1,
-				Version:    1,
-			},
-		},
-		Segments: []*querypb.SegmentVersionInfo{
-			{
-				ID:         1,
-				Collection: 1,
-				Partition:  1,
-				Channel:    "test-channel-1",
-				Version:    1,
-			},
-		},
-
-		LeaderViews: []*querypb.LeaderView{
-			{
-				Collection: 1,
-				Channel:    "test-channel-1",
-			},
-		},
-		LastModifyTs: 1,
-	}, nil)
-	suite.executedFlagChan <- struct{}{}
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {})
-	defer suite.handler.stop()
-
-	time.Sleep(300 * time.Millisecond)
 }
 
 func (suite *DistHandlerSuite) TestHandlerWithSyncDelegatorChanges() {
