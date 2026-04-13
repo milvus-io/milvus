@@ -408,11 +408,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100, Params.CollectionObserverInterval.GetAsInt())
 		params.Reset("queryCoord.collectionObserverInterval")
 
-		assert.Equal(t, 100, Params.CheckExecutedFlagInterval.GetAsInt())
-		params.Save("queryCoord.checkExecutedFlagInterval", "200")
-		assert.Equal(t, 200, Params.CheckExecutedFlagInterval.GetAsInt())
-		params.Reset("queryCoord.checkExecutedFlagInterval")
-
 		assert.Equal(t, 0.1, Params.DelegatorMemoryOverloadFactor.GetAsFloat())
 		assert.Equal(t, 5, Params.CollectionBalanceSegmentBatchSize.GetAsInt())
 		assert.Equal(t, 1, Params.CollectionBalanceChannelBatchSize.GetAsInt())

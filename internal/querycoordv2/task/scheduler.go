@@ -288,7 +288,6 @@ type Scheduler interface {
 	Add(task Task) error
 	Dispatch(node int64)
 	RemoveByNode(node int64)
-	GetExecutedFlag(nodeID int64) <-chan struct{}
 	GetChannelTaskNum(filters ...TaskFilter) int
 	GetSegmentTaskNum(filters ...TaskFilter) int
 	GetTasksJSON() string
@@ -705,15 +704,6 @@ func (scheduler *taskScheduler) decExecutingTaskDelta(task Task) {
 	case *ChannelTask:
 		scheduler.channelTaskDelta.Sub(task)
 	}
-}
-
-func (scheduler *taskScheduler) GetExecutedFlag(nodeID int64) <-chan struct{} {
-	executor, ok := scheduler.executors.Get(nodeID)
-	if !ok {
-		return nil
-	}
-
-	return executor.GetExecutedFlag()
 }
 
 type TaskFilter func(task Task) bool

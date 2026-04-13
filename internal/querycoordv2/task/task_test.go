@@ -498,7 +498,6 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 
 	// Process tasks
 	suite.dispatchAndWait(targetNode)
-	suite.assertExecutedFlagChan(targetNode)
 	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
 
 	// Process tasks done
@@ -1425,17 +1424,6 @@ func (suite *TaskSuite) dispatchAndWait(node int64) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	suite.FailNow("executor hangs in executing tasks", "count=%d keys=%+v", count, keys)
-}
-
-func (suite *TaskSuite) assertExecutedFlagChan(targetNode int64) {
-	flagChan := suite.scheduler.GetExecutedFlag(targetNode)
-	if flagChan != nil {
-		select {
-		case <-flagChan:
-		default:
-			suite.FailNow("task not executed")
-		}
-	}
 }
 
 func (suite *TaskSuite) TestLeaderTaskRemove() {
