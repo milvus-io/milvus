@@ -1763,9 +1763,11 @@ func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvusp
 
 	for _, grant := range meta.GetGrants() {
 		privName := grant.GetGrantor().GetPrivilege().GetName()
-		if util.IsPrivilegeNameDefined(privName) {
+		switch {
+		case util.IsAnyWord(privName):
+		case util.IsPrivilegeNameDefined(privName):
 			grant.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(privName)
-		} else {
+		default:
 			grant.Grantor.Privilege.Name = util.PrivilegeGroupNameForMetastore(privName)
 		}
 		if err := kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Grant); err != nil {
