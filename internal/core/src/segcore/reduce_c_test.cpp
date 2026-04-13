@@ -429,12 +429,8 @@ TEST(CApiTest, ReduceRefreshClearsUnselectedSegments) {
     std::vector<CSearchResult> results(num_segments);
 
     milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
-    auto binary_plan =
-        schema_handle.ParseSearch("",
-                                  "fakevec",
-                                  topK,
-                                  "L2",
-                                  R"({"nprobe": 10})");
+    auto binary_plan = schema_handle.ParseSearch(
+        "", "fakevec", topK, "L2", R"({"nprobe": 10})");
 
     void* plan = nullptr;
     auto status = CreateSearchPlanByExpr(
@@ -494,8 +490,7 @@ TEST(CApiTest, ReduceRefreshClearsUnselectedSegments) {
         if (sr->result_offsets_.size() > 0) {
             // Selected segment: should have exactly topK results
             EXPECT_EQ(sr->distances_.size(), topK)
-                << "Selected segment " << i
-                << " should have topK distances";
+                << "Selected segment " << i << " should have topK distances";
             selected_count++;
         } else {
             // Unselected segment: distances_ must be cleared to 0
