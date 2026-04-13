@@ -33,9 +33,6 @@ service DataCoord {
   // FlushAll flushes all data in the cluster.
   rpc FlushAll(FlushAllRequest) returns(FlushAllResponse) {}
 
-  rpc CreateExternalCollection(msg.CreateCollectionRequest) returns (CreateExternalCollectionResponse) {}
-
-
   // AllocSegment alloc a new growing segment, add it into segment meta.
   rpc AllocSegment(AllocSegmentRequest) returns (AllocSegmentResponse) {}
 
@@ -1388,10 +1385,6 @@ message DropCompactionPlanRequest {
   int64 planID = 1;
 }
 
-message CreateExternalCollectionResponse {
-  common.Status status = 1;
-}
-
 message UpdateExternalCollectionRequest {
   common.MsgBase base = 1;
   int64 collectionID = 2;
@@ -1411,14 +1404,6 @@ message UpdateExternalCollectionResponse {
   repeated SegmentInfo updatedSegments = 3;
   index.JobState state = 4;
   string fail_reason = 5;
-}
-
-message QueryExternalCollectionRequest {
-  int64 taskID = 1;
-}
-
-message DropExternalCollectionRequest {
-  int64 taskID = 1;
 }
 
 // External Table Refresh Messages
@@ -1486,9 +1471,6 @@ message ListRefreshExternalCollectionJobsResponse {
   common.Status status = 1;
   repeated ExternalCollectionRefreshJob jobs = 2;
 }
-
-// Note: QueryExternalCollectionRequest and DropExternalCollectionRequest are kept
-// for internal use by the unified task system, but are not exposed as separate RPCs
 
 message CreateSnapshotRequest {
   common.MsgBase base = 1;
