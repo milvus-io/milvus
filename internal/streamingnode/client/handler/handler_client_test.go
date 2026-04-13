@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
@@ -180,6 +181,7 @@ func TestHandlerClient_GetSalvageCheckpoint(t *testing.T) {
 	ctx := context.Background()
 
 	// Remote WAL returns "not implemented"; Watch returns Canceled to exit the loop.
+	service.EXPECT().GetService(mock.Anything).Return(nil, errors.New("not implemented"))
 	cps, err := handler.GetSalvageCheckpoint(ctx, "pchannel")
 	assert.Error(t, err)
 	assert.Nil(t, cps)
