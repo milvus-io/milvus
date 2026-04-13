@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/filesystem.hpp>
+#include <string_view>
 #include "common/Slice.h"  // for INDEX_FILE_SLICE_META and Disassemble
 #include "common/EasyAssert.h"
 #include "log/Log.h"
@@ -19,6 +20,8 @@
 #include "index/RTreeIndex.h"
 
 namespace milvus::index {
+
+static constexpr size_t kMetaJsonSuffixLen = sizeof(".meta.json") - 1;
 
 static std::string
 GetRTreeTempPrefix() {
@@ -103,7 +106,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     AssertInfo(index_files_opt.has_value(),
                "index file paths are empty when loading R-Tree index");
 
-    auto files = index_files_opt.value();
+    auto files = std::move(*index_files_opt);
 
     // 1. Extract and load null_offset file(s) if present
     {
@@ -131,9 +134,10 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             null_offset_files.push_back(*it);
             for (auto& f : files) {
                 auto filename = GetFileName(f);
-                static const std::string kName = "index_null_offset";
+                static constexpr std::string_view kName = "index_null_offset";
                 if (filename.size() >= kName.size() &&
-                    filename.substr(0, kName.size()) == kName) {
+                    filename.compare(
+                        0, kName.size(), kName.data(), kName.size()) == 0) {
                     null_offset_files.push_back(f);
                 }
             }
@@ -205,8 +209,7 @@ RTreeIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     if (base_path.empty()) {
         for (const auto& p : local_paths) {
             if (ends_with(p, ".meta.json")) {
-                base_path =
-                    p.substr(0, p.size() - std::string(".meta.json").size());
+                base_path = p.substr(0, p.size() - kMetaJsonSuffixLen);
                 break;
             }
         }

@@ -32,25 +32,23 @@ using namespace milvus;
 milvus::storage::StorageConfig
 get_storage_config(const milvus::proto::clustering::StorageConfig& config) {
     auto storage_config = milvus::storage::StorageConfig();
-    storage_config.address = std::string(config.address());
-    storage_config.bucket_name = std::string(config.bucket_name());
-    storage_config.access_key_id = std::string(config.access_keyid());
-    storage_config.access_key_value = std::string(config.secret_access_key());
-    storage_config.root_path = std::string(config.root_path());
-    storage_config.storage_type = std::string(config.storage_type());
-    storage_config.cloud_provider = std::string(config.cloud_provider());
-    storage_config.iam_endpoint = std::string(config.iamendpoint());
-    storage_config.cloud_provider = std::string(config.cloud_provider());
+    storage_config.address = config.address();
+    storage_config.bucket_name = config.bucket_name();
+    storage_config.access_key_id = config.access_keyid();
+    storage_config.access_key_value = config.secret_access_key();
+    storage_config.root_path = config.root_path();
+    storage_config.storage_type = config.storage_type();
+    storage_config.cloud_provider = config.cloud_provider();
+    storage_config.iam_endpoint = config.iamendpoint();
     storage_config.useSSL = config.usessl();
     storage_config.sslCACert = config.sslcacert();
     storage_config.useIAM = config.useiam();
     storage_config.region = config.region();
     storage_config.useVirtualHost = config.use_virtual_host();
     storage_config.requestTimeoutMs = config.request_timeout_ms();
-    storage_config.gcp_credential_json =
-        std::string(config.gcpcredentialjson());
+    storage_config.gcp_credential_json = config.gcpcredentialjson();
     storage_config.max_connections = config.max_connections();
-    storage_config.tls_min_version = std::string(config.ssl_tls_min_version());
+    storage_config.tls_min_version = config.ssl_tls_min_version();
     storage_config.use_crc32c_checksum = config.use_crc32c_checksum();
 
     return storage_config;
@@ -114,7 +112,7 @@ Analyze(CAnalyze* res_analyze,
             throw SegcoreError(
                 DataTypeInvalid,
                 fmt::format("invalid data type for clustering is {}",
-                            std::to_string(int(field_type))));
+                            int(field_type)));
         }
         auto clusteringJob =
             std::make_unique<milvus::clustering::KmeansClustering>(

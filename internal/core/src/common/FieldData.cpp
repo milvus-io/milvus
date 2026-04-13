@@ -276,13 +276,13 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             std::vector<Array> values(element_count);
             int null_number = 0;
             for (size_t index = 0; index < element_count; ++index) {
-                ScalarFieldProto field_data;
-                if (array_array->GetString(index) == "") {
+                auto str = array_array->GetString(index);
+                if (str.empty()) {
                     null_number++;
                     continue;
                 }
-                auto success =
-                    field_data.ParseFromString(array_array->GetString(index));
+                ScalarFieldProto field_data;
+                auto success = field_data.ParseFromString(str);
                 AssertInfo(success, "parse from string failed");
                 values[index] = Array(field_data);
             }
@@ -404,9 +404,9 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
         }
         default: {
             ThrowInfo(DataTypeInvalid,
-                      GetName() + "::FillFieldData" +
-                          " not support data type " +
-                          GetDataTypeName(data_type_));
+                      "{}::FillFieldData not support data type {}",
+                      GetName(),
+                      GetDataTypeName(data_type_));
         }
     }
 }
@@ -547,9 +547,9 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
         }
         default: {
             ThrowInfo(DataTypeInvalid,
-                      GetName() + "::FillFieldData" +
-                          " not support data type " +
-                          GetDataTypeName(data_type_));
+                      "{}::FillFieldData not support data type {}",
+                      GetName(),
+                      GetDataTypeName(data_type_));
         }
     }
 }
@@ -614,8 +614,8 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
                 type, nullable, cap_rows);
         default:
             ThrowInfo(DataTypeInvalid,
-                      "InitScalarFieldData not support data type " +
-                          GetDataTypeName(type));
+                      "InitScalarFieldData not support data type {}",
+                      GetDataTypeName(type));
     }
 }
 

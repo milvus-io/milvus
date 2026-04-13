@@ -32,8 +32,8 @@ Collection::Collection(const std::string_view schema_proto) {
     if (!suc) {
         LOG_WARN("unmarshal schema string failed");
     }
-    collection_name_ = collection_schema.name();
     schema_ = Schema::ParseFrom(collection_schema);
+    collection_name_ = std::move(*collection_schema.mutable_name());
 }
 
 Collection::Collection(const void* schema_proto, const int64_t length) {
@@ -44,8 +44,8 @@ Collection::Collection(const void* schema_proto, const int64_t length) {
         LOG_WARN("unmarshal schema string failed");
     }
 
-    collection_name_ = collection_schema.name();
     schema_ = Schema::ParseFrom(collection_schema);
+    collection_name_ = std::move(*collection_schema.mutable_name());
 }
 
 void

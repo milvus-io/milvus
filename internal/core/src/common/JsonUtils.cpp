@@ -1,5 +1,12 @@
 #include "common/JsonUtils.h"
 
+#include <simdjson.h>
+#include <stdlib.h>
+#include <algorithm>
+#include <utility>
+#include <cstddef>
+#include <stdexcept>
+
 namespace milvus {
 
 // Parse a JSON Pointer into unescaped path segments
@@ -29,7 +36,7 @@ parse_json_pointer(const std::string& pointer) {
             token.replace(pos, 2, "~");
             pos += 1;
         }
-        tokens.push_back(token);
+        tokens.push_back(std::move(token));
         start = end + 1;
     }
     return tokens;

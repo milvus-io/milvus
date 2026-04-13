@@ -175,6 +175,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
         auto max_chunk = upper_div(active_count, vec_size_per_chunk);
 
+        std::vector<size_t> offsets;
         for (int chunk_id = current_chunk_id; chunk_id < max_chunk;
              ++chunk_id) {
             auto chunk_data = vec_ptr->get_chunk_data(chunk_id);
@@ -186,7 +187,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
             query::dataset::RawDataset sub_data;
             std::unique_ptr<uint8_t[]> buf = nullptr;
-            std::vector<size_t> offsets;
             if (data_type != DataType::VECTOR_ARRAY) {
                 sub_data = query::dataset::RawDataset{
                     element_begin, dim, size_per_chunk, chunk_data};
@@ -202,6 +202,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 }
 
                 buf = std::make_unique<uint8_t[]>(size);
+                offsets.clear();
                 offsets.reserve(size_per_chunk + 1);
                 offsets.push_back(0);
 

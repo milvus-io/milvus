@@ -366,7 +366,7 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
 
     const auto& inputs = expr->GetInputsRef();
     for (int i = 0; i < inputs.size(); i++) {
-        auto input = inputs[i];
+        const auto& input = inputs[i];
 
         if (input->IsSource() && input->GetColumnInfo().has_value()) {
             auto column = input->GetColumnInfo().value();

@@ -67,8 +67,9 @@ CollectionIndexMeta::HasField(FieldId fieldId) const {
 
 const FieldIndexMeta&
 CollectionIndexMeta::GetFieldIndexMeta(FieldId fieldId) const {
-    assert(fieldMetas_.find(fieldId) != fieldMetas_.end());
-    return fieldMetas_.at(fieldId);
+    auto it = fieldMetas_.find(fieldId);
+    assert(it != fieldMetas_.end());
+    return it->second;
 }
 
 std::string

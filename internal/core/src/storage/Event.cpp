@@ -189,7 +189,7 @@ std::vector<uint8_t>
 DescriptorEventData::Serialize() {
     auto fix_part_data = fix_part.Serialize();
     nlohmann::json extras_json;
-    for (auto v : extras) {
+    for (const auto& v : extras) {
         if (v.first == NULLABLE) {
             extras_json.emplace(v.first, std::any_cast<bool>(v.second));
         } else if (v.first == EZID) {
@@ -313,8 +313,7 @@ BaseEventData::Serialize() {
                     auto size =
                         field_data->is_valid(offset) ? string_view.size() : -1;
                     payload_writer->add_one_binary_payload(
-                        reinterpret_cast<const uint8_t*>(
-                            std::string(string_view).c_str()),
+                        reinterpret_cast<const uint8_t*>(string_view.data()),
                         size);
                 }
                 break;

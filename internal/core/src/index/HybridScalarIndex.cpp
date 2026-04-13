@@ -176,7 +176,6 @@ template <typename T>
 ScalarIndexType
 HybridScalarIndex<T>::SelectIndexBuildType(
     const std::vector<FieldDataPtr>& field_datas) {
-    std::set<T> distinct_vals;
     if (IsPrimitiveType(field_type_)) {
         return SelectBuildTypeForPrimitiveType(field_datas);
     } else if (IsArrayType(field_type_)) {
@@ -334,6 +333,7 @@ HybridScalarIndex<T>::GetRemoteIndexTypeFile(
         auto file_name = file.substr(file.find_last_of('/') + 1);
         if (file_name == index::INDEX_TYPE) {
             ret = file;
+            break;
         }
     }
     AssertInfo(!ret.empty(), "index type file not found for hybrid index");

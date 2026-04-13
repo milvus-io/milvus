@@ -1,5 +1,6 @@
 #include "storage/KeyRetriever.h"
 #include "common/EasyAssert.h"
+#include "fmt/format.h"
 #include "log/Log.h"
 #include "parquet/properties.h"
 #include "storage/PluginLoader.h"
@@ -33,12 +34,11 @@ GetReaderProperties() {
 
 std::string
 EncodeKeyMetadata(int64_t ez_id, int64_t collection_id, std::string key) {
-    return std::to_string(ez_id) + "_" + std::to_string(collection_id) + "_" +
-           key;
+    return fmt::format("{}_{}_{}", ez_id, collection_id, key);
 }
 
 std::shared_ptr<CPluginContext>
-DecodeKeyMetadata(std::string key_metadata) {
+DecodeKeyMetadata(const std::string& key_metadata) {
     auto context = std::make_shared<CPluginContext>();
     try {
         auto first_pos = key_metadata.find("_");

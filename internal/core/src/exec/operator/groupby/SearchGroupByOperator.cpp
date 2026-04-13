@@ -384,7 +384,7 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
     std::sort(res.begin(), res.end(), customComparator);
 
     //4. save groupBy results
-    for (auto iter = res.cbegin(); iter != res.cend(); iter++) {
+    for (auto iter = res.begin(); iter != res.end(); ++iter) {
         offsets.emplace_back(std::get<0>(*iter));
         distances.emplace_back(std::get<1>(*iter));
         group_by_values.emplace_back(std::move(std::get<2>(*iter)));

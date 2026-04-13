@@ -34,7 +34,7 @@ GetHistogram(std::string&& func) {
             .Register(getPrometheusClient().GetRegistry());
 
     // default buckets: [0.005, 0.01, ..., 1.0]
-    return hist_family.Add({{"func", func}}, cgoCallDurationbuckets);
+    return hist_family.Add({{"func", std::move(func)}}, cgoCallDurationbuckets);
 }
 
 FuncScopeMetric::FuncScopeMetric(const char* f)

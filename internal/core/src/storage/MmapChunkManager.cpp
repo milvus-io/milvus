@@ -261,12 +261,13 @@ void
 MmapChunkManager::UnRegister(
     const MmapChunkDescriptor::ID descriptor_inner_id) {
     std::unique_lock<std::shared_mutex> lck(mtx_);
-    if (blocks_table_.find(descriptor_inner_id) != blocks_table_.end()) {
-        auto& blocks = blocks_table_[descriptor_inner_id];
+    auto it = blocks_table_.find(descriptor_inner_id);
+    if (it != blocks_table_.end()) {
+        auto& blocks = it->second;
         for (auto i = 0; i < blocks.size(); i++) {
             blocks_handler_->Deallocate(std::move(blocks[i]));
         }
-        blocks_table_.erase(descriptor_inner_id);
+        blocks_table_.erase(it);
     }
 }
 

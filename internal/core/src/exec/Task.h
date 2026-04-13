@@ -44,7 +44,7 @@ class Task : public std::enable_shared_from_this<Task> {
 
     static std::shared_ptr<Task>
     Create(const std::string& task_id,
-           const plan::PlanFragment& plan_fragment,
+           plan::PlanFragment plan_fragment,
            int destination,
            std::shared_ptr<QueryContext> query_ctx,
            ConsumerSupplier supplier,
