@@ -98,7 +98,7 @@ minio:
   # minio.address and minio.port together generate the valid access to MinIO or S3 service.
   # MinIO preferentially acquires the valid IP address from the environment variable MINIO_ADDRESS when Milvus is started.
   # Default value applies when MinIO or S3 is running on the same network with Milvus.
-  address: localhost
+  address: localhost:9000
   port: 9000 # Port of MinIO or S3 service.
   # Access key ID that MinIO or S3 issues to user for authorized access.
   # Environment variable: MINIO_ACCESS_KEY_ID or minio.accessKeyID
@@ -235,7 +235,7 @@ pulsar:
   # Default value applies when Pulsar is running on the same network with Milvus.
   address: localhost
   port: 6650 # Port of Pulsar service.
-  webport: 18080 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
+  webport: 80 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
   # The maximum size of each message in Pulsar. Unit: Byte.
   # By default, Pulsar can transmit at most 2MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
   # If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
