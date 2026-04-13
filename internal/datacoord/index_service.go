@@ -1113,8 +1113,6 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		}
 	}
 
-	log.Debug("GetIndexInfos successfully", zap.String("indexName", req.GetIndexName()))
-
 	return ret, nil
 }
 

@@ -335,23 +335,6 @@ message StatsTask {
     repeated internal.FileResourceInfo file_resources = 13;
 }
 
-message UpdateExternalCollectionTask {
-    int64 collectionID = 1;
-    int64 taskID = 2;
-    int64 version = 3;
-    int64 nodeID = 4;
-    JobState state = 5;
-    string fail_reason = 6;
-    string external_source = 7;
-    string external_spec = 8;
-    // Fields for job tracking
-    int64 job_id = 9;            // Unique job identifier for API tracking
-    int64 start_time = 10;       // Job start timestamp (Unix ms)
-    int64 end_time = 11;         // Job end timestamp (Unix ms, 0 if not completed)
-    int64 progress = 12;         // Progress percentage (0-100)
-    string collection_name = 13; // Collection name for API response
-}
-
 enum StatsSubJob {
     None = 0;
     // deprecated, after v2.6.0, move to compaction

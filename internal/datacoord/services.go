@@ -2041,14 +2041,6 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partit
 	return s.meta.DropSegmentsOfPartition(ctx, partitionIDs)
 }
 
-// CreateExternalCollection is a no-op stub to satisfy the DataCoordServer interface.
-// External collection creation goes through the standard CreateCollection flow in RootCoord.
-func (s *Server) CreateExternalCollection(_ context.Context, _ *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
-	return &datapb.CreateExternalCollectionResponse{
-		Status: merr.Status(merr.WrapErrServiceInternal("CreateExternalCollection is not supported, use CreateCollection instead")),
-	}, nil
-}
-
 // DropSegmentsByTime drop segments that were updated before the flush timestamp for TruncateCollection
 func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
