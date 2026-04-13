@@ -18,6 +18,11 @@ func IsReplicationRemovedByAlterReplicateConfigMessage(msg message.ImmutableMess
 	}
 
 	replicateConfig := header.ReplicateConfiguration
+	// Nil or empty config means topology is being cleared — all replication is removed.
+	if replicateConfig == nil || len(replicateConfig.GetClusters()) == 0 {
+		return true
+	}
+
 	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	currentCluster := replicateutil.MustNewConfigHelper(currentClusterID, replicateConfig).GetCurrentCluster()
 	_, err := currentCluster.GetTargetChannel(replicateInfo.GetSourceChannelName(),
