@@ -20,9 +20,9 @@ namespace milvus::segcore {
 
 static YAML::Node
 subnode(const YAML::Node& parent, const std::string& key) {
-    AssertInfo(parent.IsMap(), "wrong type node when getting key[" + key + "]");
+    AssertInfo(parent.IsMap(), "wrong type node when getting key[{}]", key);
     auto& node = parent[key];
-    AssertInfo(node.IsDefined(), "key[" + key + "] not found in sub-node");
+    AssertInfo(node.IsDefined(), "key[{}] not found in sub-node", key);
     return node;
 }
 

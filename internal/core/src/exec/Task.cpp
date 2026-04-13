@@ -66,7 +66,7 @@ Task::Create(const std::string& task_id,
 
 std::shared_ptr<Task>
 Task::Create(const std::string& task_id,
-             const plan::PlanFragment& plan_fragment,
+             plan::PlanFragment plan_fragment,
              int destination,
              std::shared_ptr<QueryContext> query_ctx,
              ConsumerSupplier supplier,

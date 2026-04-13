@@ -308,13 +308,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         return nullptr;
     }
 
-    auto execute_sub_batch =
-        [lower_inclusive, upper_inclusive](
-            Index* index_ptr, HighPrecisionType val1, HighPrecisionType val2) {
-            BinaryRangeIndexFunc<T> func;
-            return std::move(
-                func(index_ptr, val1, val2, lower_inclusive, upper_inclusive));
-        };
+    auto execute_sub_batch = [lower_inclusive, upper_inclusive](
+                                 Index* index_ptr,
+                                 HighPrecisionType val1,
+                                 HighPrecisionType val2) {
+        BinaryRangeIndexFunc<T> func;
+        return func(index_ptr, val1, val2, lower_inclusive, upper_inclusive);
+    };
     auto res = ProcessIndexChunks<T>(execute_sub_batch, val1, val2);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "

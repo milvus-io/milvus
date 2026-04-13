@@ -1427,52 +1427,52 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         switch (op_type) {
             case proto::plan::GreaterThan: {
                 UnaryIndexFunc<T, proto::plan::GreaterThan> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::GreaterEqual: {
                 UnaryIndexFunc<T, proto::plan::GreaterEqual> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::LessThan: {
                 UnaryIndexFunc<T, proto::plan::LessThan> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::LessEqual: {
                 UnaryIndexFunc<T, proto::plan::LessEqual> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::Equal: {
                 UnaryIndexFunc<T, proto::plan::Equal> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::NotEqual: {
                 UnaryIndexFunc<T, proto::plan::NotEqual> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::PrefixMatch: {
                 UnaryIndexFunc<T, proto::plan::PrefixMatch> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::PostfixMatch: {
                 UnaryIndexFunc<T, proto::plan::PostfixMatch> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::InnerMatch: {
                 UnaryIndexFunc<T, proto::plan::InnerMatch> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             case proto::plan::Match: {
                 UnaryIndexFunc<T, proto::plan::Match> func;
-                res = std::move(func(index_ptr, val));
+                res = func(index_ptr, val);
                 break;
             }
             default:

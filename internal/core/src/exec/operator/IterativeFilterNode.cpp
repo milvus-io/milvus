@@ -223,6 +223,8 @@ PhyIterativeFilterNode::GetOutput() {
         }
 
         // Reuse memory allocation across batches and nqs
+        FixedVector<int32_t> offsets;
+        FixedVector<float> distances;
         FixedVector<int32_t> doc_offsets;
         std::vector<int64_t> element_to_doc_mapping;
         std::unordered_map<int64_t, bool> doc_eval_cache;
@@ -232,8 +234,8 @@ PhyIterativeFilterNode::GetOutput() {
             EvalCtx eval_ctx(operator_context_->get_exec_context());
             int topk = 0;
             while (iterator->HasNext() && topk < unity_topk) {
-                FixedVector<int32_t> offsets;
-                FixedVector<float> distances;
+                offsets.clear();
+                distances.clear();
                 // remain unfilled size as iterator batch size
                 int64_t batch_size = unity_topk - topk;
                 offsets.reserve(batch_size);
@@ -260,6 +262,11 @@ PhyIterativeFilterNode::GetOutput() {
                 doc_eval_cache.clear();
                 unique_doc_ids.clear();
 
+                // eval_offsets points to the offset vector used for
+                // expression evaluation — either the deduplicated
+                // doc_offsets (element-level) or the raw offsets
+                // (non-element-level, avoids a copy).
+                FixedVector<int32_t>* eval_offsets;
                 if (element_level) {
                     // 1. Convert element_ids to doc_ids and do filter on those doc_ids
                     // 2. element_ids with doc_ids that pass the filter are what we interested in
@@ -276,12 +283,13 @@ PhyIterativeFilterNode::GetOutput() {
                     for (auto doc_id : unique_doc_ids) {
                         doc_offsets.emplace_back(static_cast<int32_t>(doc_id));
                     }
+                    eval_offsets = &doc_offsets;
                 } else {
-                    doc_offsets = offsets;
+                    eval_offsets = &offsets;
                 }
 
                 if (is_native_supported_) {
-                    eval_ctx.set_offset_input(&doc_offsets);
+                    eval_ctx.set_offset_input(eval_offsets);
                     std::vector<VectorPtr> results;
                     exprs_->Eval(0, 1, true, eval_ctx, results);
                     AssertInfo(

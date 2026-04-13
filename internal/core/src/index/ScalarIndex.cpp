@@ -91,8 +91,9 @@ ScalarIndex<std::string>::BuildWithRawDataForUT(size_t n,
     auto ok = arr.ParseFromArray(values, n);
     Assert(ok);
 
-    // TODO :: optimize here. avoid memory copy.
-    std::vector<std::string> vecs{arr.data().begin(), arr.data().end()};
+    std::vector<std::string> vecs{
+        std::make_move_iterator(arr.mutable_data()->begin()),
+        std::make_move_iterator(arr.mutable_data()->end())};
     Build(arr.data_size(), vecs.data());
 }
 

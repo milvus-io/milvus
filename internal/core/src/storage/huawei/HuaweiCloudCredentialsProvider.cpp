@@ -168,7 +168,7 @@ HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider::Reload() {
         if (!token.empty() && token.back() == '\n') {
             token.pop_back();
         }
-        m_token = token;
+        m_token = std::move(token);
     } else {
         m_stsFailureCount++;
         LOG_WARN(

@@ -302,7 +302,7 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load ngram index");
-    auto files_value = index_files.value();
+    auto files_value = std::move(*index_files);
 
     LoadIndexMetas(files_value, config);
     RetainTantivyIndexFiles(files_value);
@@ -345,7 +345,7 @@ split_by_wildcard(const std::string& literal) {
                 escape_mode = true;
             } else if (c == '%' || c == '_') {
                 if (r.length() > 0) {
-                    result.push_back(r);
+                    result.push_back(std::move(r));
                     r.clear();
                 }
             } else {
@@ -354,7 +354,7 @@ split_by_wildcard(const std::string& literal) {
         }
     }
     if (r.length() > 0) {
-        result.push_back(r);
+        result.push_back(std::move(r));
     }
     return result;
 }
