@@ -1382,7 +1382,6 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 	}
 	p.SearchRequeryPolicy.Init(base.mgr)
 
-
 	p.QNFileResourceMode = ParamItem{
 		Key:          "common.fileResource.mode.queryNode",
 		Version:      "2.6.8",

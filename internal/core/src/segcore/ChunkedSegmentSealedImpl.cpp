@@ -4330,7 +4330,7 @@ ChunkedSegmentSealedImpl::LoadBatchTextIndexes(
     for (auto& [field_id, load_text_index_info] : text_indexes_to_load) {
         auto future = pool.Submit(
             [this, op_ctx, info = std::move(load_text_index_info)]() mutable
-                -> void { LoadTextIndex(op_ctx, std::move(info)); });
+            -> void { LoadTextIndex(op_ctx, std::move(info)); });
         load_index_futures.emplace_back(std::move(future));
     }
 
@@ -4533,20 +4533,7 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
         load_field_futures.push_back(std::move(future));
     }
 
-    LOG_INFO("[LoadFieldDataBatch][WaitStart] segment {} waiting {} tasks",
-             id_,
-             load_field_futures.size());
-    for (size_t i = 0; i < load_field_futures.size(); ++i) {
-        LOG_DEBUG("[LoadFieldDataBatch][WaitOne] segment {} future {}/{}",
-                  id_,
-                  i + 1,
-                  load_field_futures.size());
-        load_field_futures[i].get();
-        LOG_DEBUG("[LoadFieldDataBatch][WaitOneDone] segment {} future {}/{}",
-                  id_,
-                  i + 1,
-                  load_field_futures.size());
-    }
+    storage::WaitAllFutures(load_field_futures);
 }
 
 void
