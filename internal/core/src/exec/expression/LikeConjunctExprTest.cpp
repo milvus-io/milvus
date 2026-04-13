@@ -227,7 +227,7 @@ TEST(LikeConjunctExpr, TestMultiFieldMultiLikeWithRetrieve) {
             auto index =
                 std::make_shared<index::NgramInvertedIndex>(ctx, ngram_params);
             index->Build(config);
-            auto create_index_result = index->UploadV3({});
+            auto create_index_result = index->UploadUnified({});
             auto index_files = create_index_result->GetIndexFiles();
 
             std::map<std::string, std::string> index_params{

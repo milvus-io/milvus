@@ -207,7 +207,7 @@ class HybridIndexTestV1 : public testing::Test {
         ctx.set_for_loading_index(true);
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
-        index_->LoadV3(config);
+        index_->LoadUnified(config);
     }
 
     virtual void
