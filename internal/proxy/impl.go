@@ -66,6 +66,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -7682,10 +7683,15 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 
 	log.Debug(rpcReceived(method))
 
-	// Validate collection name
+	// Validate inputs before any RPC or cache lookup
 	if err := validateCollectionName(req.GetCollectionName()); err != nil {
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(err),
+		}, nil
+	}
+	if _, err := externalspec.ParseExternalSpec(req.GetExternalSpec()); err != nil {
+		return &milvuspb.RefreshExternalCollectionResponse{
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg("invalid external spec: %s", err.Error())),
 		}, nil
 	}
 

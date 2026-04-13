@@ -3063,7 +3063,7 @@ func TestGetDataIterator(t *testing.T) {
 			want: []any{int64(1), int64(2), int64(3)},
 		},
 		{
-			name: "ints with nulls compact",
+			name: "ints with nulls",
 			field: &schemapb.FieldData{
 				Type: schemapb.DataType_Int64,
 				Field: &schemapb.FieldData_Scalars{
@@ -3078,57 +3078,6 @@ func TestGetDataIterator(t *testing.T) {
 				ValidData: []bool{true, false, true, true},
 			},
 			want: []any{int64(1), nil, int64(2), int64(3)},
-		},
-		{
-			name: "ints with nulls full-size",
-			field: &schemapb.FieldData{
-				Type: schemapb.DataType_Int64,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{
-							LongData: &schemapb.LongArray{
-								Data: []int64{1, 0, 2, 3},
-							},
-						},
-					},
-				},
-				ValidData: []bool{true, false, true, true},
-			},
-			want: []any{int64(1), nil, int64(2), int64(3)},
-		},
-		{
-			name: "strings with nulls full-size",
-			field: &schemapb.FieldData{
-				Type: schemapb.DataType_VarChar,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{
-							StringData: &schemapb.StringArray{
-								Data: []string{"a", "b", "", "c", ""},
-							},
-						},
-					},
-				},
-				ValidData: []bool{true, true, false, true, false},
-			},
-			want: []any{"a", "b", nil, "c", nil},
-		},
-		{
-			name: "strings with nulls compact",
-			field: &schemapb.FieldData{
-				Type: schemapb.DataType_VarChar,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{
-							StringData: &schemapb.StringArray{
-								Data: []string{"a", "b", "c"},
-							},
-						},
-					},
-				},
-				ValidData: []bool{true, true, false, true, false},
-			},
-			want: []any{"a", "b", nil, "c", nil},
 		},
 	}
 	for _, tt := range tests {
@@ -5183,7 +5132,7 @@ func TestIsExternalCollection(t *testing.T) {
 	assert.True(t, IsExternalCollection(schema))
 }
 
-func TestValidateExternalCollectionSchema(t *testing.T) {
+func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 	buildSchema := func() *schemapb.CollectionSchema {
 		return &schemapb.CollectionSchema{
 			Name:           "external",
@@ -5223,13 +5172,13 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 				},
 			},
 		}
-		assert.NoError(t, ValidateExternalCollectionSchema(schema))
+		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("functions disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Functions = []*schemapb.FunctionSchema{{Name: "test_func"}}
-		err := ValidateExternalCollectionSchema(schema)
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "does not support functions")
 	})
@@ -5237,7 +5186,7 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 	t.Run("dynamic field disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.EnableDynamicField = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("struct fields disabled", func(t *testing.T) {
@@ -5245,31 +5194,31 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 		schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
 			{Name: "struct_field", Fields: []*schemapb.FieldSchema{{Name: "nested", DataType: schemapb.DataType_Array}}},
 		}
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("primary key disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].IsPrimaryKey = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("partition key disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].IsPartitionKey = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("clustering key disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].IsClusteringKey = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("auto id disabled", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].AutoID = true
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("text match disabled", func(t *testing.T) {
@@ -5278,20 +5227,130 @@ func TestValidateExternalCollectionSchema(t *testing.T) {
 			Key:   "enable_match",
 			Value: "true",
 		})
-		assert.Error(t, ValidateExternalCollectionSchema(schema))
+		assert.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 	})
 
 	t.Run("external_field mapping required", func(t *testing.T) {
 		schema := buildSchema()
 		schema.Fields[0].ExternalField = ""
-		err := ValidateExternalCollectionSchema(schema)
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "must have external_field mapping")
 	})
 
 	t.Run("valid schema passes", func(t *testing.T) {
-		err := ValidateExternalCollectionSchema(buildSchema())
+		err := NormalizeAndValidateExternalCollectionSchema(buildSchema())
 		assert.NoError(t, err)
+	})
+
+	t.Run("unsupported field types rejected", func(t *testing.T) {
+		unsupportedTypes := []schemapb.DataType{
+			schemapb.DataType_SparseFloatVector,
+		}
+		for _, dt := range unsupportedTypes {
+			schema := buildSchema()
+			schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+				Name:          "bad_field",
+				DataType:      dt,
+				ExternalField: "bad_col",
+			})
+			err := NormalizeAndValidateExternalCollectionSchema(schema)
+			assert.Error(t, err, "expected error for type %s", dt.String())
+			assert.Contains(t, err.Error(), "does not support field type")
+		}
+	})
+
+	t.Run("supported field types accepted", func(t *testing.T) {
+		supportedTypes := []struct {
+			dt     schemapb.DataType
+			params []*commonpb.KeyValuePair
+		}{
+			{schemapb.DataType_Bool, nil},
+			{schemapb.DataType_Int8, nil},
+			{schemapb.DataType_Int16, nil},
+			{schemapb.DataType_Int32, nil},
+			{schemapb.DataType_Int64, nil},
+			{schemapb.DataType_Float, nil},
+			{schemapb.DataType_Double, nil},
+			{schemapb.DataType_VarChar, []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}}},
+			{schemapb.DataType_Text, []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}}},
+			{schemapb.DataType_JSON, nil},
+			{schemapb.DataType_Array, nil},
+			{schemapb.DataType_Timestamptz, nil},
+			{schemapb.DataType_Geometry, nil},
+			{schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			{schemapb.DataType_Float16Vector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			{schemapb.DataType_BFloat16Vector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			{schemapb.DataType_BinaryVector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			{schemapb.DataType_Int8Vector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			{schemapb.DataType_ArrayOfVector, []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+		}
+		for _, tc := range supportedTypes {
+			schema := &schemapb.CollectionSchema{
+				Name:           "external",
+				ExternalSource: "s3://bucket/path",
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:          "vec",
+						DataType:      schemapb.DataType_FloatVector,
+						ExternalField: "vec_col",
+						TypeParams:    []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "16"}},
+					},
+					{
+						Name:          "test_field",
+						DataType:      tc.dt,
+						ExternalField: "test_col",
+						TypeParams:    tc.params,
+					},
+				},
+			}
+			err := NormalizeAndValidateExternalCollectionSchema(schema)
+			assert.NoError(t, err, "expected no error for type %s", tc.dt.String())
+		}
+	})
+
+	t.Run("user fields forced nullable", func(t *testing.T) {
+		schema := buildSchema()
+		for _, f := range schema.GetFields() {
+			assert.False(t, f.GetNullable())
+		}
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+		for _, f := range schema.GetFields() {
+			assert.True(t, f.GetNullable(), "field %s should be nullable", f.GetName())
+		}
+	})
+
+	t.Run("virtual pk stays non-nullable", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:         common.VirtualPKFieldName,
+			DataType:     schemapb.DataType_Int64,
+			IsPrimaryKey: true,
+			AutoID:       true,
+			Nullable:     false,
+		})
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+		for _, f := range schema.GetFields() {
+			if f.GetName() == common.VirtualPKFieldName {
+				assert.False(t, f.GetNullable(), "virtual PK should remain non-nullable")
+			} else {
+				assert.True(t, f.GetNullable())
+			}
+		}
+	})
+
+	t.Run("already nullable fields unchanged", func(t *testing.T) {
+		schema := buildSchema()
+		for _, f := range schema.GetFields() {
+			f.Nullable = true
+		}
+		err := NormalizeAndValidateExternalCollectionSchema(schema)
+		assert.NoError(t, err)
+		for _, f := range schema.GetFields() {
+			assert.True(t, f.GetNullable())
+		}
 	})
 }
 

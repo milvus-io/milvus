@@ -19,6 +19,7 @@ package external
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -29,41 +30,44 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-type UpdateExternalTaskSuite struct {
+type RefreshExternalCollectionTaskSuite struct {
 	suite.Suite
 	collectionID int64
 	taskID       int64
 }
 
-func (s *UpdateExternalTaskSuite) SetupSuite() {
+func (s *RefreshExternalCollectionTaskSuite) SetupSuite() {
 	s.collectionID = 1000
 	s.taskID = 1
 }
 
-func (s *UpdateExternalTaskSuite) TestNewUpdateExternalTask() {
+func (s *RefreshExternalCollectionTaskSuite) TestNewRefreshExternalCollectionTask() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:   s.collectionID,
 		TaskID:         s.taskID,
 		ExternalSource: "test_source",
 		ExternalSpec:   "test_spec",
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 
 	s.NotNil(task)
 	s.Equal(s.collectionID, task.req.GetCollectionID())
 	s.Equal(s.taskID, task.req.GetTaskID())
 	s.Equal(indexpb.JobState_JobStateInit, task.GetState())
-	s.Contains(task.Name(), "UpdateExternalTask")
+	s.Contains(task.Name(), "RefreshExternalCollectionTask")
 }
 
-func (s *UpdateExternalTaskSuite) TestTaskLifecycle() {
+func (s *RefreshExternalCollectionTaskSuite) TestTaskLifecycle() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:   s.collectionID,
 		TaskID:         s.taskID,
 		ExternalSource: "test_source",
@@ -86,7 +90,7 @@ func (s *UpdateExternalTaskSuite) TestTaskLifecycle() {
 		},
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 
 	// Test OnEnqueue
 	err := task.OnEnqueue(ctx)
@@ -107,27 +111,27 @@ func (s *UpdateExternalTaskSuite) TestTaskLifecycle() {
 	s.Equal(int64(1), task.GetSlot())
 }
 
-func (s *UpdateExternalTaskSuite) TestPreExecuteWithNilRequest() {
+func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteWithNilRequest() {
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is deferred below
 	defer cancel()
-	task := &UpdateExternalTask{
-		ctx:    ctx,
-		cancel: cancel,
-		req:    nil,
+	task := &RefreshExternalCollectionTask{
+		ctx: ctx,
+		req: nil,
 	}
 
 	err := task.PreExecute(ctx)
 	s.Error(err)
 }
 
-func (s *UpdateExternalTaskSuite) TestSetAndGetState() {
+func (s *RefreshExternalCollectionTaskSuite) TestSetAndGetState() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID: s.collectionID,
 		TaskID:       s.taskID,
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 
 	task.SetState(indexpb.JobState_JobStateInProgress, "")
 	s.Equal(indexpb.JobState_JobStateInProgress, task.GetState())
@@ -137,57 +141,71 @@ func (s *UpdateExternalTaskSuite) TestSetAndGetState() {
 	s.Equal("test failure", task.failReason)
 }
 
-func (s *UpdateExternalTaskSuite) TestReset() {
+func (s *RefreshExternalCollectionTaskSuite) TestReset() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID: s.collectionID,
 		TaskID:       s.taskID,
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	task.Reset()
 
 	s.Nil(task.ctx)
-	s.Nil(task.cancel)
 	s.Nil(task.req)
 	s.Nil(task.tr)
 	s.Nil(task.updatedSegments)
 }
 
-func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_Empty() {
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Empty() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID: s.collectionID,
 		TaskID:       s.taskID,
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	result, err := task.balanceFragmentsToSegments(context.Background(), []packed.Fragment{})
 	s.NoError(err)
 	s.Nil(result)
 }
 
-func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_SingleFragment() {
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_SingleFragment() {
 	paramtable.Init()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:           s.collectionID,
 		TaskID:                 s.taskID,
 		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
 		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", ExternalField: "text_col"},
+				{FieldID: 101, Name: "vec", ExternalField: "vec_col"},
+			},
+		},
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
-	task.parsedSpec = &ExternalSpec{Format: "parquet"}
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
 		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
-	defer m.UnPatch()
+	defer m1.UnPatch()
+
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(map[string]int64{"text_col": 64, "vec_col": 512}, nil).Build()
+	defer m2.UnPatch()
 
 	fragments := []packed.Fragment{
 		{FragmentID: 1, RowCount: 500},
@@ -199,29 +217,53 @@ func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_SingleFragment(
 	s.Equal(int64(500), result[0].GetNumOfRows())
 	s.Equal(storage.StorageV3, result[0].GetStorageVersion(),
 		"external segments should have StorageVersion=V3")
+
+	// Verify fake binlogs
+	s.Len(result[0].GetBinlogs(), 1)
+	fb := result[0].GetBinlogs()[0]
+	s.Equal(int64(0), fb.GetFieldID(), "should use DefaultShortColumnGroupID")
+	s.ElementsMatch([]int64{100, 101}, fb.GetChildFields())
+	s.Len(fb.GetBinlogs(), 1)
+	binlog := fb.GetBinlogs()[0]
+	s.Equal(int64(500), binlog.GetEntriesNum())
+	// avgBytesPerRow = 64 + 512 = 576, memorySize = 576 * 500 = 288000
+	s.Equal(int64(288000), binlog.GetMemorySize())
+	s.Equal(int64(288000), binlog.GetLogSize())
 }
 
-func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_MultipleFragments() {
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_MultipleFragments() {
 	paramtable.Init()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:           s.collectionID,
 		TaskID:                 s.taskID,
 		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
 		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", ExternalField: "text_col"},
+			},
+		},
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	task.nextAllocID = task.preallocatedIDRange.Begin
-	task.parsedSpec = &ExternalSpec{Format: "parquet"}
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 
-	m := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
 		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
 			return fmt.Sprintf("%s/manifest.json", basePath), nil
 		}).Build()
-	defer m.UnPatch()
+	defer m1.UnPatch()
+
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(map[string]int64{"text_col": 100}, nil).Build()
+	defer m2.UnPatch()
 
 	fragments := []packed.Fragment{
 		{FragmentID: 1, RowCount: 300000},
@@ -234,10 +276,16 @@ func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_MultipleFragmen
 	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
 	s.NoError(err)
 
-	// Verify all segments have StorageVersion=V3
+	// Verify all segments have StorageVersion=V3 and fake binlogs
 	for i, seg := range result {
 		s.Equal(storage.StorageV3, seg.GetStorageVersion(),
 			"segment %d should have StorageVersion=V3", i)
+		s.NotEmpty(seg.GetBinlogs(), "segment %d should have fake binlogs", i)
+		fb := seg.GetBinlogs()[0]
+		s.Equal(int64(0), fb.GetFieldID())
+		s.Equal([]int64{100}, fb.GetChildFields())
+		// MemorySize = avgBytesPerRow(100) * numRows
+		s.Equal(int64(100)*seg.GetNumOfRows(), fb.GetBinlogs()[0].GetMemorySize())
 	}
 
 	// Verify total rows are preserved
@@ -264,42 +312,45 @@ func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegments_MultipleFragmen
 	}
 }
 
-func (s *UpdateExternalTaskSuite) TestPreExecuteContextCanceled() {
+func (s *RefreshExternalCollectionTaskSuite) TestPreExecuteContextCanceled() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID: s.collectionID,
 		TaskID:       s.taskID,
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	cancel()
 
 	err := task.PreExecute(ctx)
 	s.ErrorIs(err, context.Canceled)
 }
 
-func (s *UpdateExternalTaskSuite) TestExecuteContextCanceled() {
+func (s *RefreshExternalCollectionTaskSuite) TestExecuteContextCanceled() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID: s.collectionID,
 		TaskID:       s.taskID,
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	cancel()
 
 	err := task.Execute(ctx)
 	s.ErrorIs(err, context.Canceled)
 }
 
-func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegmentsContextCanceled() {
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegmentsContextCanceled() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID: s.collectionID,
 		TaskID:       s.taskID,
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	cancel()
 
 	result, err := task.balanceFragmentsToSegments(ctx, []packed.Fragment{{FragmentID: 1, RowCount: 10}})
@@ -307,9 +358,10 @@ func (s *UpdateExternalTaskSuite) TestBalanceFragmentsToSegmentsContextCanceled(
 	s.Nil(result)
 }
 
-func (s *UpdateExternalTaskSuite) TestOrganizeSegments_AllFragmentsExist() {
+func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_AllFragmentsExist() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID: s.collectionID,
 		TaskID:       s.taskID,
 		CurrentSegments: []*datapb.SegmentInfo{
@@ -318,7 +370,7 @@ func (s *UpdateExternalTaskSuite) TestOrganizeSegments_AllFragmentsExist() {
 		},
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 
 	// Simulate current segment fragments mapping (use FilePath as identifier)
 	currentSegmentFragments := packed.SegmentFragments{
@@ -343,13 +395,14 @@ func (s *UpdateExternalTaskSuite) TestOrganizeSegments_AllFragmentsExist() {
 	s.Empty(task.GetNewSegments())
 }
 
-func (s *UpdateExternalTaskSuite) TestOrganizeSegments_FragmentRemoved() {
+func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_FragmentRemoved() {
 	s.T().Skip("Skip test that requires CGO FFI calls for manifest creation")
 }
 
-func (s *UpdateExternalTaskSuite) TestOrganizeSegments_PartialFragmentRemoved() {
+func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_PartialFragmentRemoved() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID: s.collectionID,
 		TaskID:       s.taskID,
 		CurrentSegments: []*datapb.SegmentInfo{
@@ -360,7 +413,7 @@ func (s *UpdateExternalTaskSuite) TestOrganizeSegments_PartialFragmentRemoved() 
 		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 
 	// S1 has file1, S2 has file2, S3 has file3
 	currentSegmentFragments := packed.SegmentFragments{
@@ -385,136 +438,11 @@ func (s *UpdateExternalTaskSuite) TestOrganizeSegments_PartialFragmentRemoved() 
 	s.Empty(task.GetNewSegments(), "No orphan fragments to create new segments from")
 }
 
-func (s *UpdateExternalTaskSuite) TestOrganizeSegments_NewFragmentsAdded() {
+func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_NewFragmentsAdded() {
 	s.T().Skip("Skip test that requires CGO FFI calls for manifest creation")
 }
 
-func (s *UpdateExternalTaskSuite) TestNewSegmentRowMapping() {
-	fragments := []packed.Fragment{
-		{FragmentID: 1, RowCount: 100},
-		{FragmentID: 2, RowCount: 200},
-		{FragmentID: 3, RowCount: 150},
-	}
-
-	mapping := NewSegmentRowMapping(1001, fragments)
-
-	s.Equal(int64(1001), mapping.SegmentID)
-	s.Equal(int64(450), mapping.TotalRows)
-	s.Len(mapping.Ranges, 3)
-
-	// Check ranges
-	s.Equal(int64(1), mapping.Ranges[0].FragmentID)
-	s.Equal(int64(0), mapping.Ranges[0].StartRow)
-	s.Equal(int64(100), mapping.Ranges[0].EndRow)
-
-	s.Equal(int64(2), mapping.Ranges[1].FragmentID)
-	s.Equal(int64(100), mapping.Ranges[1].StartRow)
-	s.Equal(int64(300), mapping.Ranges[1].EndRow)
-
-	s.Equal(int64(3), mapping.Ranges[2].FragmentID)
-	s.Equal(int64(300), mapping.Ranges[2].StartRow)
-	s.Equal(int64(450), mapping.Ranges[2].EndRow)
-}
-
-func (s *UpdateExternalTaskSuite) TestGetFragmentByRowIndex() {
-	fragments := []packed.Fragment{
-		{FragmentID: 1, RowCount: 100},
-		{FragmentID: 2, RowCount: 200},
-		{FragmentID: 3, RowCount: 150},
-	}
-	mapping := NewSegmentRowMapping(1001, fragments)
-
-	// Test first fragment
-	r := mapping.GetFragmentByRowIndex(0)
-	s.NotNil(r)
-	s.Equal(int64(1), r.FragmentID)
-
-	r = mapping.GetFragmentByRowIndex(99)
-	s.NotNil(r)
-	s.Equal(int64(1), r.FragmentID)
-
-	// Test second fragment
-	r = mapping.GetFragmentByRowIndex(100)
-	s.NotNil(r)
-	s.Equal(int64(2), r.FragmentID)
-
-	r = mapping.GetFragmentByRowIndex(299)
-	s.NotNil(r)
-	s.Equal(int64(2), r.FragmentID)
-
-	// Test third fragment
-	r = mapping.GetFragmentByRowIndex(300)
-	s.NotNil(r)
-	s.Equal(int64(3), r.FragmentID)
-
-	r = mapping.GetFragmentByRowIndex(449)
-	s.NotNil(r)
-	s.Equal(int64(3), r.FragmentID)
-
-	// Test out of range
-	r = mapping.GetFragmentByRowIndex(-1)
-	s.Nil(r)
-
-	r = mapping.GetFragmentByRowIndex(450)
-	s.Nil(r)
-
-	r = mapping.GetFragmentByRowIndex(1000)
-	s.Nil(r)
-}
-
-func (s *UpdateExternalTaskSuite) TestGetFragmentByRowIndex_LocalIndex() {
-	fragments := []packed.Fragment{
-		{FragmentID: 1, RowCount: 100},
-		{FragmentID: 2, RowCount: 200},
-	}
-	mapping := NewSegmentRowMapping(1001, fragments)
-
-	// Row 0 -> fragment 1, local index 0
-	r := mapping.GetFragmentByRowIndex(0)
-	s.NotNil(r)
-	s.Equal(int64(1), r.FragmentID)
-	s.Equal(int64(0), 0-r.StartRow) // local index
-
-	// Row 50 -> fragment 1, local index 50
-	r = mapping.GetFragmentByRowIndex(50)
-	s.NotNil(r)
-	s.Equal(int64(1), r.FragmentID)
-	s.Equal(int64(50), 50-r.StartRow)
-
-	// Row 100 -> fragment 2, local index 0
-	r = mapping.GetFragmentByRowIndex(100)
-	s.NotNil(r)
-	s.Equal(int64(2), r.FragmentID)
-	s.Equal(int64(0), 100-r.StartRow)
-
-	// Row 150 -> fragment 2, local index 50
-	r = mapping.GetFragmentByRowIndex(150)
-	s.NotNil(r)
-	s.Equal(int64(2), r.FragmentID)
-	s.Equal(int64(50), 150-r.StartRow)
-
-	// Row 299 -> fragment 2, local index 199
-	r = mapping.GetFragmentByRowIndex(299)
-	s.NotNil(r)
-	s.Equal(int64(2), r.FragmentID)
-	s.Equal(int64(199), 299-r.StartRow)
-}
-
-func (s *UpdateExternalTaskSuite) TestSegmentRowMapping_EmptyFragments() {
-	mapping := NewSegmentRowMapping(1001, []packed.Fragment{})
-
-	s.Equal(int64(0), mapping.TotalRows)
-	s.Len(mapping.Ranges, 0)
-
-	r := mapping.GetFragmentByRowIndex(0)
-	s.Nil(r)
-}
-
-func (s *UpdateExternalTaskSuite) TestMappingsComputedDuringOrganize() {
-	s.T().Skip("Skip test that requires CGO FFI calls for manifest creation")
-}
-
-func (s *UpdateExternalTaskSuite) TestSplitFileToFragments_SmallFile() {
+func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_SmallFile() {
 	// File smaller than limit - should return single fragment
 	fragments := packed.SplitFileToFragments("/data/small.parquet", 500000, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
 
@@ -526,7 +454,7 @@ func (s *UpdateExternalTaskSuite) TestSplitFileToFragments_SmallFile() {
 	s.Equal(int64(500000), fragments[0].RowCount)
 }
 
-func (s *UpdateExternalTaskSuite) TestSplitFileToFragments_ExactLimit() {
+func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_ExactLimit() {
 	// File exactly at limit - should return single fragment
 	fragments := packed.SplitFileToFragments("/data/exact.parquet", packed.DefaultFragmentRowLimit, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
 
@@ -537,7 +465,7 @@ func (s *UpdateExternalTaskSuite) TestSplitFileToFragments_ExactLimit() {
 	s.Equal(int64(packed.DefaultFragmentRowLimit), fragments[0].RowCount)
 }
 
-func (s *UpdateExternalTaskSuite) TestSplitFileToFragments_LargeFile() {
+func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_LargeFile() {
 	// File with 2.5 million rows - should split into 3 fragments
 	totalRows := int64(2500000)
 	fragments := packed.SplitFileToFragments("/data/large.parquet", totalRows, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
@@ -566,7 +494,7 @@ func (s *UpdateExternalTaskSuite) TestSplitFileToFragments_LargeFile() {
 	s.Equal(int64(500000), fragments[2].RowCount)
 }
 
-func (s *UpdateExternalTaskSuite) TestSplitFileToFragments_BaseFragmentID() {
+func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_BaseFragmentID() {
 	// Test with non-zero base fragment ID
 	fragments := packed.SplitFileToFragments("/data/test.parquet", 2500000, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(100))
 
@@ -576,7 +504,7 @@ func (s *UpdateExternalTaskSuite) TestSplitFileToFragments_BaseFragmentID() {
 	s.Equal(int64(102), fragments[2].FragmentID)
 }
 
-func (s *UpdateExternalTaskSuite) TestSplitFileToFragments_ZeroRows() {
+func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_ZeroRows() {
 	// Empty file - should return single fragment with zero rows
 	fragments := packed.SplitFileToFragments("/data/empty.parquet", 0, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
 
@@ -584,7 +512,7 @@ func (s *UpdateExternalTaskSuite) TestSplitFileToFragments_ZeroRows() {
 	s.Equal(int64(0), fragments[0].RowCount)
 }
 
-func (s *UpdateExternalTaskSuite) TestSplitFileToFragments_TenMillionRows() {
+func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_TenMillionRows() {
 	// 10 million rows - should split into 10 fragments
 	totalRows := int64(10000000)
 	fragments := packed.SplitFileToFragments("/data/huge.parquet", totalRows, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
@@ -609,12 +537,12 @@ func (s *UpdateExternalTaskSuite) TestSplitFileToFragments_TenMillionRows() {
 	}
 }
 
-func (s *UpdateExternalTaskSuite) TestCreateManifestForSegment() {
+func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment() {
 	// Skip: createManifestForSegment calls packed.CreateSegmentManifestWithBasePath which requires CGO FFI
 	s.T().Skip("Skip test that requires CGO FFI calls for manifest creation")
 }
 
-func (s *UpdateExternalTaskSuite) TestPreAllocatedSegmentIDs() {
+func (s *RefreshExternalCollectionTaskSuite) TestPreAllocatedSegmentIDs() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -624,7 +552,7 @@ func (s *UpdateExternalTaskSuite) TestPreAllocatedSegmentIDs() {
 		End:   2000,
 	}
 
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:           s.collectionID,
 		TaskID:                 s.taskID,
 		PreAllocatedSegmentIds: idRange,
@@ -632,7 +560,7 @@ func (s *UpdateExternalTaskSuite) TestPreAllocatedSegmentIDs() {
 		CurrentSegments:        []*datapb.SegmentInfo{},
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 
 	// Before Execute(), pre-allocated fields should not be initialized
 	s.Nil(task.preallocatedIDRange)
@@ -649,7 +577,7 @@ func (s *UpdateExternalTaskSuite) TestPreAllocatedSegmentIDs() {
 	s.Equal(int64(1000), task.nextAllocID)
 }
 
-func (s *UpdateExternalTaskSuite) TestPreAllocatedIDAllocation() {
+func (s *RefreshExternalCollectionTaskSuite) TestPreAllocatedIDAllocation() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -659,7 +587,7 @@ func (s *UpdateExternalTaskSuite) TestPreAllocatedIDAllocation() {
 		End:   5010, // Only 10 IDs available
 	}
 
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:           s.collectionID,
 		TaskID:                 s.taskID,
 		PreAllocatedSegmentIds: idRange,
@@ -667,7 +595,7 @@ func (s *UpdateExternalTaskSuite) TestPreAllocatedIDAllocation() {
 		CurrentSegments:        []*datapb.SegmentInfo{},
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 
 	// Manually initialize (simulating Execute)
 	task.preallocatedIDRange = idRange
@@ -684,19 +612,19 @@ func (s *UpdateExternalTaskSuite) TestPreAllocatedIDAllocation() {
 	s.Equal(task.preallocatedIDRange.End, task.nextAllocID)
 }
 
-func (s *UpdateExternalTaskSuite) TestMissingPreAllocatedIDs() {
+func (s *RefreshExternalCollectionTaskSuite) TestMissingPreAllocatedIDs() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Create request WITHOUT pre-allocated IDs
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:    s.collectionID,
 		TaskID:          s.taskID,
 		CurrentSegments: []*datapb.SegmentInfo{},
 		// PreAllocatedSegmentIds is nil
 	}
 
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 
 	// Execute should fail because pre-allocated IDs are missing
 	err := task.Execute(ctx)
@@ -704,117 +632,58 @@ func (s *UpdateExternalTaskSuite) TestMissingPreAllocatedIDs() {
 	s.Contains(err.Error(), "pre-allocated segment IDs not provided")
 }
 
-func (s *UpdateExternalTaskSuite) TestGetSegmentResults() {
+func (s *RefreshExternalCollectionTaskSuite) TestPreExecute_NilSchema() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	// Create request with pre-allocated IDs
-	idRange := &datapb.IDRange{
-		Begin: 1000,
-		End:   2000,
-	}
-
-	req := &datapb.UpdateExternalCollectionRequest{
-		CollectionID:           s.collectionID,
-		TaskID:                 s.taskID,
-		PreAllocatedSegmentIds: idRange,
-		CurrentSegments: []*datapb.SegmentInfo{
-			{ID: 100, CollectionID: s.collectionID, NumOfRows: 1000},
-		},
-	}
-
-	task := NewUpdateExternalTask(ctx, cancel, req)
-
-	// Simulate task execution result with real pre-allocated IDs
-	task.keptSegmentIDs = []int64{100}
-	task.newSegments = []*datapb.SegmentInfo{
-		{ID: 1000, NumOfRows: 2000},
-		{ID: 1001, NumOfRows: 1500},
-	}
-	task.updatedSegments = []*datapb.SegmentInfo{
-		{ID: 100, NumOfRows: 1000},  // Kept segment (from currentSegments)
-		{ID: 1000, NumOfRows: 2000}, // New segment (from pre-allocated range)
-		{ID: 1001, NumOfRows: 1500}, // New segment (from pre-allocated range)
-	}
-
-	task.segmentMappings = map[int64]*SegmentRowMapping{
-		100:  {SegmentID: 100, TotalRows: 1000},
-		1000: {SegmentID: 1000, TotalRows: 2000},
-		1001: {SegmentID: 1001, TotalRows: 1500},
-	}
-
-	// Get results
-	results := task.GetSegmentResults()
-
-	// Verify
-	s.Equal(3, len(results))
-
-	// Check kept segment
-	s.Equal(int64(100), results[0].Segment.GetID())
-	s.False(results[0].IsNew, "Segment 100 should not be new (it's in currentSegments)")
-
-	// Check new segments
-	s.Equal(int64(1000), results[1].Segment.GetID())
-	s.True(results[1].IsNew, "Segment 1000 should be new (not in currentSegments)")
-
-	s.Equal(int64(1001), results[2].Segment.GetID())
-	s.True(results[2].IsNew, "Segment 1001 should be new (not in currentSegments)")
-
-	// Verify kept/new getters
-	s.Equal([]int64{100}, task.GetKeptSegmentIDs())
-	s.Len(task.GetNewSegments(), 2)
-	s.Equal(int64(1000), task.GetNewSegments()[0].GetID())
-	s.Equal(int64(1001), task.GetNewSegments()[1].GetID())
-}
-
-func (s *UpdateExternalTaskSuite) TestPreExecute_NilSchema() {
-	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:   s.collectionID,
 		TaskID:         s.taskID,
 		ExternalSource: "test_source",
 		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
 		// Schema is nil
 	}
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	err := task.PreExecute(ctx)
 	s.Error(err)
 	s.Contains(err.Error(), "schema is nil")
 }
 
-func (s *UpdateExternalTaskSuite) TestPreExecute_NilStorageConfig() {
+func (s *RefreshExternalCollectionTaskSuite) TestPreExecute_NilStorageConfig() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:   s.collectionID,
 		TaskID:         s.taskID,
 		ExternalSource: "test_source",
 		Schema:         &schemapb.CollectionSchema{},
 		// StorageConfig is nil
 	}
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	err := task.PreExecute(ctx)
 	s.Error(err)
 	s.Contains(err.Error(), "storage config is nil")
 }
 
-func (s *UpdateExternalTaskSuite) TestPreExecute_EmptyExternalSource() {
+func (s *RefreshExternalCollectionTaskSuite) TestPreExecute_EmptyExternalSource() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:  s.collectionID,
 		TaskID:        s.taskID,
 		Schema:        &schemapb.CollectionSchema{},
 		StorageConfig: &indexpb.StorageConfig{StorageType: "local"},
 		// ExternalSource is empty
 	}
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	err := task.PreExecute(ctx)
 	s.Error(err)
 	s.Contains(err.Error(), "external source is empty")
 }
 
-func (s *UpdateExternalTaskSuite) TestPreExecute_InvalidExternalSpec() {
+func (s *RefreshExternalCollectionTaskSuite) TestPreExecute_InvalidExternalSpec() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:   s.collectionID,
 		TaskID:         s.taskID,
 		ExternalSource: "test_source",
@@ -822,15 +691,16 @@ func (s *UpdateExternalTaskSuite) TestPreExecute_InvalidExternalSpec() {
 		Schema:         &schemapb.CollectionSchema{},
 		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
 	}
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	err := task.PreExecute(ctx)
 	s.Error(err)
 	s.Contains(err.Error(), "failed to parse external spec")
 }
 
-func (s *UpdateExternalTaskSuite) TestPreExecute_UnsupportedFormat() {
+func (s *RefreshExternalCollectionTaskSuite) TestPreExecute_UnsupportedFormat() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &datapb.UpdateExternalCollectionRequest{
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:   s.collectionID,
 		TaskID:         s.taskID,
 		ExternalSource: "test_source",
@@ -838,44 +708,123 @@ func (s *UpdateExternalTaskSuite) TestPreExecute_UnsupportedFormat() {
 		Schema:         &schemapb.CollectionSchema{},
 		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
 	}
-	task := NewUpdateExternalTask(ctx, cancel, req)
+	task := NewRefreshExternalCollectionTask(ctx, req)
 	err := task.PreExecute(ctx)
 	s.Error(err)
 	s.Contains(err.Error(), "unsupported format")
 }
 
-func (s *UpdateExternalTaskSuite) TestParseExternalSpec() {
+func (s *RefreshExternalCollectionTaskSuite) TestParseExternalSpec() {
 	// Empty spec defaults to parquet
-	spec, err := ParseExternalSpec("")
+	spec, err := externalspec.ParseExternalSpec("")
 	s.NoError(err)
 	s.Equal("parquet", spec.Format)
 
 	// Lance-table format
-	spec, err = ParseExternalSpec(`{"format":"lance-table"}`)
+	spec, err = externalspec.ParseExternalSpec(`{"format":"lance-table"}`)
 	s.NoError(err)
 	s.Equal("lance-table", spec.Format)
 
 	// Vortex format
-	spec, err = ParseExternalSpec(`{"format":"vortex"}`)
+	spec, err = externalspec.ParseExternalSpec(`{"format":"vortex"}`)
 	s.NoError(err)
 	s.Equal("vortex", spec.Format)
 
 	// Missing format defaults to parquet
-	spec, err = ParseExternalSpec(`{}`)
+	spec, err = externalspec.ParseExternalSpec(`{}`)
 	s.NoError(err)
 	s.Equal("parquet", spec.Format)
 
 	// Invalid JSON
-	_, err = ParseExternalSpec("not-json")
+	_, err = externalspec.ParseExternalSpec("not-json")
 	s.Error(err)
 
 	// Unsupported format
-	_, err = ParseExternalSpec(`{"format":"avro"}`)
+	_, err = externalspec.ParseExternalSpec(`{"format":"avro"}`)
 	s.Error(err)
 	s.Contains(err.Error(), "unsupported format")
 }
 
-func (s *UpdateExternalTaskSuite) TestFragmentKey() {
+func (s *RefreshExternalCollectionTaskSuite) TestParseExternalSpec_ExtfsWhitelist() {
+	// Valid extfs keys
+	spec, err := externalspec.ParseExternalSpec(`{"format":"parquet","extfs":{"use_iam":"true","region":"us-west-2"}}`)
+	s.NoError(err)
+	s.Equal("true", spec.Extfs["use_iam"])
+	s.Equal("us-west-2", spec.Extfs["region"])
+
+	// All allowed keys should be accepted
+	spec, err = externalspec.ParseExternalSpec(`{"format":"parquet","extfs":{"use_ssl":"false","use_virtual_host":"false","cloud_provider":"aws","iam_endpoint":"https://sts.amazonaws.com","storage_type":"remote","ssl_ca_cert":"cert"}}`)
+	s.NoError(err)
+	s.Len(spec.Extfs, 6)
+
+	// Credential keys are now allowed for cross-bucket scenarios
+	spec, err = externalspec.ParseExternalSpec(`{"format":"parquet","extfs":{"access_key_id":"AKIA..."}}`)
+	s.NoError(err)
+	s.Equal("AKIA...", spec.Extfs["access_key_id"])
+
+	spec, err = externalspec.ParseExternalSpec(`{"format":"parquet","extfs":{"access_key_value":"secret"}}`)
+	s.NoError(err)
+	s.Equal("secret", spec.Extfs["access_key_value"])
+
+	// Unknown key
+	_, err = externalspec.ParseExternalSpec(`{"format":"parquet","extfs":{"unknown_key":"val"}}`)
+	s.Error(err)
+	s.Contains(err.Error(), "not allowed")
+
+	// Empty extfs is fine
+	spec, err = externalspec.ParseExternalSpec(`{"format":"parquet","extfs":{}}`)
+	s.NoError(err)
+	s.Empty(spec.Extfs)
+
+	// No extfs field is fine
+	spec, err = externalspec.ParseExternalSpec(`{"format":"parquet"}`)
+	s.NoError(err)
+	s.Nil(spec.Extfs)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestParseExternalSpec_ExtfsBooleanValidation() {
+	// Valid boolean values
+	_, err := externalspec.ParseExternalSpec(`{"format":"parquet","extfs":{"use_iam":"true"}}`)
+	s.NoError(err)
+	_, err = externalspec.ParseExternalSpec(`{"format":"parquet","extfs":{"use_ssl":"false"}}`)
+	s.NoError(err)
+
+	// Invalid boolean values
+	_, err = externalspec.ParseExternalSpec(`{"format":"parquet","extfs":{"use_iam":"maybe"}}`)
+	s.Error(err)
+	s.Contains(err.Error(), "must be \"true\" or \"false\"")
+
+	_, err = externalspec.ParseExternalSpec(`{"format":"parquet","extfs":{"use_ssl":"1"}}`)
+	s.Error(err)
+
+	_, err = externalspec.ParseExternalSpec(`{"format":"parquet","extfs":{"use_virtual_host":"yes"}}`)
+	s.Error(err)
+
+	// Non-boolean keys accept any string value
+	_, err = externalspec.ParseExternalSpec(`{"format":"parquet","extfs":{"region":"any-value-is-ok"}}`)
+	s.NoError(err)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestExternalSpec_BuildExtfsOverrides() {
+	spec := &externalspec.ExternalSpec{
+		Format: "parquet",
+		Extfs:  map[string]string{"region": "us-west-2", "use_iam": "true"},
+	}
+	overrides := spec.BuildExtfsOverrides("extfs.99.")
+	s.Equal("us-west-2", overrides["extfs.99.region"])
+	s.Equal("true", overrides["extfs.99.use_iam"])
+	s.Len(overrides, 2)
+
+	// Empty extfs returns nil
+	spec2 := &externalspec.ExternalSpec{Format: "parquet"}
+	s.Nil(spec2.BuildExtfsOverrides("extfs.99."))
+
+	// Nil extfs returns nil
+	spec3 := &externalspec.ExternalSpec{Format: "parquet", Extfs: map[string]string{}}
+	s.Nil(spec3.BuildExtfsOverrides("extfs.99."))
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestFragmentKey() {
 	f1 := packed.Fragment{FilePath: "/data/file1.parquet", StartRow: 0, EndRow: 1000}
 	f2 := packed.Fragment{FilePath: "/data/file1.parquet", StartRow: 1000, EndRow: 2000}
 	f3 := packed.Fragment{FilePath: "/data/file2.parquet", StartRow: 0, EndRow: 1000}
@@ -891,7 +840,7 @@ func (s *UpdateExternalTaskSuite) TestFragmentKey() {
 	s.Equal(fragmentKey(f1), fragmentKey(f4))
 }
 
-func (s *UpdateExternalTaskSuite) TestGetColumnNamesFromSchema() {
+func (s *RefreshExternalCollectionTaskSuite) TestGetColumnNamesFromSchema() {
 	// Nil schema
 	columns := packed.GetColumnNamesFromSchema(nil)
 	s.Nil(columns)
@@ -927,6 +876,813 @@ func (s *UpdateExternalTaskSuite) TestGetColumnNamesFromSchema() {
 	s.Equal([]string{"external_id", "vector"}, columns)
 }
 
-func TestUpdateExternalTaskSuite(t *testing.T) {
-	suite.Run(t, new(UpdateExternalTaskSuite))
+func (s *RefreshExternalCollectionTaskSuite) TestFetchFragmentsFromExternalSource_EmptyManifest() {
+	ctx := context.Background()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:        s.collectionID,
+		TaskID:              s.taskID,
+		ExternalSource:      "s3:///bucket/path",
+		ExternalSpec:        `{"format":"parquet"}`,
+		ExploreManifestPath: "", // empty
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	_, err := task.fetchFragmentsFromExternalSource(ctx)
+	s.Error(err)
+	s.Contains(err.Error(), "manifest path is required")
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestFetchFragmentsFromExternalSource_Success() {
+	paramtable.Init()
+	ctx := context.Background()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:        s.collectionID,
+		TaskID:              s.taskID,
+		ExternalSource:      "s3:///bucket/path",
+		ExternalSpec:        `{"format":"parquet"}`,
+		ExploreManifestPath: "/manifests/explore.json",
+		FileIndexBegin:      0,
+		FileIndexEnd:        5,
+		StorageConfig:       &indexpb.StorageConfig{StorageType: "local", BucketName: "/tmp"},
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+	task.columns = []string{"col1"}
+
+	mockFetch := mockey.Mock(packed.FetchFragmentsFromExternalSourceWithRange).
+		Return([]packed.Fragment{
+			{FragmentID: 0, FilePath: "f1.parquet", StartRow: 0, EndRow: 1000, RowCount: 1000},
+		}, nil).Build()
+	defer mockFetch.UnPatch()
+
+	frags, err := task.fetchFragmentsFromExternalSource(ctx)
+	s.NoError(err)
+	s.Len(frags, 1)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_CreateManifestError() {
+	paramtable.Init()
+	ctx := context.Background()
+	tmpDir := s.T().TempDir()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		ExternalSource: "s3:///bucket/path",
+		ExternalSpec:   `{"format":"parquet"}`,
+		StorageConfig:  &indexpb.StorageConfig{StorageType: "local", BucketName: tmpDir, RootPath: tmpDir},
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+	task.columns = []string{"col1"}
+	task.preallocatedIDRange = &datapb.IDRange{Begin: 1, End: 100}
+	task.nextAllocID = 1
+
+	// Mock createManifestForSegment to return error
+	mockCM := mockey.Mock((*RefreshExternalCollectionTask).createManifestForSegment).
+		Return("", fmt.Errorf("create manifest failed")).Build()
+	defer mockCM.UnPatch()
+
+	fragments := []packed.Fragment{
+		{FragmentID: 0, FilePath: "f.parquet", RowCount: 100, StartRow: 0, EndRow: 100},
+	}
+	_, err := task.balanceFragmentsToSegments(ctx, fragments)
+	s.Error(err)
+	s.Contains(err.Error(), "create manifest failed")
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_ContextCanceled() {
+	paramtable.Init()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancel()
+	tmpDir := s.T().TempDir()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		ExternalSource: "s3:///bucket/path",
+		ExternalSpec:   `{"format":"parquet"}`,
+		StorageConfig:  &indexpb.StorageConfig{StorageType: "local", BucketName: tmpDir, RootPath: tmpDir},
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+	task.columns = []string{"col1"}
+	task.preallocatedIDRange = &datapb.IDRange{Begin: 1, End: 100}
+	task.nextAllocID = 1
+
+	// createManifestForSegment should not be called because ctx is canceled
+	mockCM := mockey.Mock((*RefreshExternalCollectionTask).createManifestForSegment).
+		Return("/manifest", nil).Build()
+	defer mockCM.UnPatch()
+
+	fragments := []packed.Fragment{
+		{FragmentID: 0, FilePath: "f.parquet", RowCount: 100, StartRow: 0, EndRow: 100},
+	}
+	_, err := task.balanceFragmentsToSegments(ctx, fragments)
+	s.Error(err)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestExternalSpec_BuildFormatProperties() {
+	// Non-iceberg format returns empty map
+	spec := &externalspec.ExternalSpec{Format: "parquet"}
+	props := spec.BuildFormatProperties()
+	s.Empty(props)
+
+	// Iceberg-table without snapshot ID returns empty
+	spec2 := &externalspec.ExternalSpec{Format: "iceberg-table"}
+	props2 := spec2.BuildFormatProperties()
+	s.Empty(props2)
+
+	// Iceberg-table with snapshot ID sets the property
+	snapID := int64(42)
+	spec3 := &externalspec.ExternalSpec{Format: "iceberg-table", SnapshotID: &snapID}
+	props3 := spec3.BuildFormatProperties()
+	s.Equal("42", props3["iceberg.snapshot_id"])
+	s.Len(props3, 1)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBuildFakeBinlogs() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk"},
+			{FieldID: 100, Name: "text"},
+			{FieldID: 101, Name: "vec"},
+		},
+	}
+
+	binlogs := buildFakeBinlogs(999, 1000, 512000, schema)
+	s.Len(binlogs, 1)
+	fb := binlogs[0]
+	s.Equal(int64(0), fb.GetFieldID(), "should use DefaultShortColumnGroupID=0")
+	s.ElementsMatch([]int64{1, 100, 101}, fb.GetChildFields())
+	s.Len(fb.GetBinlogs(), 1)
+	s.Equal(int64(999), fb.GetBinlogs()[0].GetLogID(), "logID should be segmentID")
+	s.Equal(int64(1000), fb.GetBinlogs()[0].GetEntriesNum())
+	s.Equal(int64(512000), fb.GetBinlogs()[0].GetMemorySize())
+	s.Equal(int64(512000), fb.GetBinlogs()[0].GetLogSize())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBuildFakeBinlogs_NilSchema() {
+	binlogs := buildFakeBinlogs(888, 500, 100000, nil)
+	s.Len(binlogs, 1)
+	s.Empty(binlogs[0].GetChildFields())
+	s.Equal(int64(500), binlogs[0].GetBinlogs()[0].GetEntriesNum())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestSumFieldSizes() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk"},                                    // no ExternalField
+			{FieldID: 100, Name: "text", ExternalField: "text_col"},     // external
+			{FieldID: 101, Name: "vec", ExternalField: "embedding_col"}, // external
+		},
+	}
+
+	fieldSizes := map[string]int64{
+		"text_col":      64,
+		"embedding_col": 512,
+		"extra_col":     999, // not in schema, should be ignored
+	}
+
+	total := sumFieldSizes(fieldSizes, schema)
+	s.Equal(int64(576), total, "should sum only external fields: 64+512")
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestSumFieldSizes_NilSchema() {
+	fieldSizes := map[string]int64{"a": 10, "b": 20}
+	total := sumFieldSizes(fieldSizes, nil)
+	s.Equal(int64(30), total, "nil schema should sum all fields")
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_SamplingFails() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", ExternalField: "text_col"},
+			},
+		},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	// Sampling fails on the only manifest. The previous behavior silently
+	// emitted MemorySize=0 segments, which collapsed QueryNode's resource
+	// estimator and risked OOM on load. Current behavior is to fail the
+	// task so the task-level retry path can try again with a clean state.
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(nil, fmt.Errorf("sampling error")).Build()
+	defer m2.UnPatch()
+
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 500},
+	}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.Error(err, "sampling failure must surface as a task error, not a silent MemorySize=0")
+	s.Contains(err.Error(), "sampling failed")
+	s.Nil(result)
+}
+
+// Regression: the samplePerSegment=true branch of Phase 3 was previously
+// uncovered by tests. This exercise is three parts:
+//  1. All per-segment samples succeed → each segment gets its own
+//     distinct MemorySize (proving per-segment semantics actually take
+//     effect rather than collapsing to the first value).
+//  2. First segment sample fails, later segments succeed → the zero-fill
+//     pass retroactively backfills the first slot with the first
+//     successful average (fallbackAvg).
+//  3. All per-segment samples fail → task fails (no silent MemorySize=0).
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerSegmentSampling_AllSucceed() {
+	paramtable.Init()
+	key := paramtable.Get().QueryNodeCfg.ExternalCollectionSamplePerSegment.Key
+	paramtable.Get().Save(key, "true")
+	defer paramtable.Get().Reset(key)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", ExternalField: "text_col"},
+			},
+		},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	// Return distinct sizes per call so we can prove per-segment samples
+	// actually land in distinct slots.
+	var callCount int32
+	perCallSizes := []int64{50, 100, 200}
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig, specExtfs map[string]string) (map[string]int64, error) {
+			idx := int(atomic.AddInt32(&callCount, 1)) - 1
+			if idx >= len(perCallSizes) {
+				idx = len(perCallSizes) - 1
+			}
+			return map[string]int64{"text_col": perCallSizes[idx]}, nil
+		}).Build()
+	defer m2.UnPatch()
+
+	// 3 fragments each above targetRowsPerSegment → 3 segments.
+	targetRows := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+	rowsPerFragment := targetRows * 2 // force one segment per fragment
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: rowsPerFragment},
+		{FragmentID: 2, RowCount: rowsPerFragment},
+		{FragmentID: 3, RowCount: rowsPerFragment},
+	}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.NoError(err)
+	s.Len(result, 3, "expected 3 segments for 3 oversized fragments")
+
+	// Each segment's MemorySize reflects its own sample (size * rowCount).
+	// SampleExternalFieldSizes is called per-segment in manifest order.
+	for i, seg := range result {
+		expectedSize := perCallSizes[i] * rowsPerFragment
+		actual := seg.GetBinlogs()[0].GetBinlogs()[0].GetMemorySize()
+		s.Equal(expectedSize, actual, "segment %d MemorySize should match its own sample", i)
+	}
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerSegmentSampling_FirstFailBackfills() {
+	paramtable.Init()
+	key := paramtable.Get().QueryNodeCfg.ExternalCollectionSamplePerSegment.Key
+	paramtable.Get().Save(key, "true")
+	defer paramtable.Get().Reset(key)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", ExternalField: "text_col"},
+			},
+		},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	// First call fails; second and third succeed. Verify the first slot
+	// is retroactively backfilled with the first successful average (150),
+	// not the third (250), since fallbackAvg latches on the first success.
+	var callCount int32
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig, specExtfs map[string]string) (map[string]int64, error) {
+			idx := int(atomic.AddInt32(&callCount, 1)) - 1
+			switch idx {
+			case 0:
+				return nil, fmt.Errorf("transient sample failure")
+			case 1:
+				return map[string]int64{"text_col": 150}, nil
+			default:
+				return map[string]int64{"text_col": 250}, nil
+			}
+		}).Build()
+	defer m2.UnPatch()
+
+	targetRows := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+	rowsPerFragment := targetRows * 2
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: rowsPerFragment},
+		{FragmentID: 2, RowCount: rowsPerFragment},
+		{FragmentID: 3, RowCount: rowsPerFragment},
+	}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.NoError(err)
+	s.Len(result, 3)
+
+	// Expected: [150*rows, 150*rows, 250*rows]
+	// - segment 0: backfilled from fallbackAvg=150
+	// - segment 1: native sample 150
+	// - segment 2: native sample 250
+	s.Equal(int64(150)*rowsPerFragment, result[0].GetBinlogs()[0].GetBinlogs()[0].GetMemorySize(), "segment 0 should be backfilled from fallbackAvg")
+	s.Equal(int64(150)*rowsPerFragment, result[1].GetBinlogs()[0].GetBinlogs()[0].GetMemorySize())
+	s.Equal(int64(250)*rowsPerFragment, result[2].GetBinlogs()[0].GetBinlogs()[0].GetMemorySize())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PerSegmentSampling_AllFail() {
+	paramtable.Init()
+	key := paramtable.Get().QueryNodeCfg.ExternalCollectionSamplePerSegment.Key
+	paramtable.Get().Save(key, "true")
+	defer paramtable.Get().Reset(key)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", ExternalField: "text_col"},
+			},
+		},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(nil, fmt.Errorf("all samples failed")).Build()
+	defer m2.UnPatch()
+
+	targetRows := paramtable.Get().DataNodeCfg.ExternalCollectionTargetRowsPerSegment.GetAsInt64()
+	rowsPerFragment := targetRows * 2
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: rowsPerFragment},
+		{FragmentID: 2, RowCount: rowsPerFragment},
+	}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.Error(err, "all per-segment samples failing must surface as a task error")
+	s.Contains(err.Error(), "sampling failed")
+	s.Nil(result)
+}
+
+// Regression: if the schema has no ExternalField-mapped fields, sumFieldSizes
+// returns 0 even when SampleExternalFieldSizes itself "succeeds". The old
+// code treated this as a successful zero-sized sample and wrote MemorySize=0
+// fake binlogs into every segment, which feeds QueryNode a degenerate
+// EstimatedBytesPerRow=0 and risks OOM on load. Current behavior: fail the
+// task.
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_ZeroSumTreatedAsFailure() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				// Schema with NO ExternalField set — sumFieldSizes returns 0.
+				{FieldID: 100, Name: "native_only"},
+			},
+		},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	// Sampling "succeeds" but returns sizes for a column the schema
+	// doesn't reference — sumFieldSizes totals to 0.
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(map[string]int64{"orphan_col": 128}, nil).Build()
+	defer m2.UnPatch()
+
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 500},
+	}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.Error(err, "zero-sum sample must surface as a task error")
+	s.Contains(err.Error(), "sampling failed")
+	s.Nil(result)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_InsufficientIDs() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 101}, // only 1 ID, need 2
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema:                 &schemapb.CollectionSchema{},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 500},
+	}
+
+	_, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.Error(err)
+	s.Contains(err.Error(), "insufficient pre-allocated IDs")
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_ManifestCreateFails() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema:                 &schemapb.CollectionSchema{},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		Return("", fmt.Errorf("storage error")).Build()
+	defer m1.UnPatch()
+
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 500},
+	}
+
+	_, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.Error(err)
+	s.Contains(err.Error(), "failed to create manifest")
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_ContextCancelDuringManifest() {
+	paramtable.Init()
+
+	// Use a real cancelable context that we pass to balanceFragmentsToSegments
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema:                 &schemapb.CollectionSchema{},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	// Mock manifest creation: first call cancels ctx and returns error
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(_ context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			cancel() // cancel the ctx we pass to balanceFragmentsToSegments
+			return "", fmt.Errorf("cancelled")
+		}).Build()
+	defer m1.UnPatch()
+
+	// Use multiple fragments so there are multiple works — ctx cancel is checked
+	// in the task dispatch loop (L643) and after wg.Wait (L657)
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 300},
+		{FragmentID: 2, RowCount: 400},
+		{FragmentID: 3, RowCount: 500},
+	}
+
+	// Pass the cancelable ctx so L643 `ctx.Err()` and L657 `ctx.Err()` can trigger
+	_, err := task.balanceFragmentsToSegments(ctx, fragments)
+	s.Error(err)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_EnsureContextInLoop() {
+	paramtable.Init()
+
+	// Pre-cancel the context to trigger ensureContext inside for loops (L517, L558)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema:                 &schemapb.CollectionSchema{},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 100},
+		{FragmentID: 2, RowCount: 200},
+	}
+
+	// Cancel immediately — the first ensureContext (L508) passes because it checks
+	// before cancel. We need to cancel between L508 and L517.
+	// Use a goroutine trick: mock ensureContext behavior isn't possible directly,
+	// so just cancel and pass the canceled ctx.
+	cancel()
+	_, err := task.balanceFragmentsToSegments(ctx, fragments)
+	s.ErrorIs(err, context.Canceled)
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_EmptyBinSkipped() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "s3://bucket/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				// Non-zero sample is required now that a zero sum is
+				// treated as a sampling failure. The intent of this test
+				// is the bin-skipping behavior, not the sampling path.
+				{FieldID: 100, Name: "text", ExternalField: "text_col"},
+			},
+		},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(map[string]int64{"text_col": 64}, nil).Build()
+	defer m2.UnPatch()
+
+	// One tiny fragment but targetRowsPerSegment is large — only 1 bin used, others empty
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 100},
+	}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.NoError(err)
+	s.Len(result, 1)
+	s.Equal(int64(100), result[0].GetNumOfRows())
+}
+
+// TestBalanceFragmentsToSegments_PassesStorageConfigAndSpecExtfs verifies that
+// balanceFragmentsToSegments correctly passes storageConfig and specExtfs
+// (built from parsedSpec) to SampleExternalFieldSizes. This is the core change
+// that eliminates the dependency on C++ LoonFFIPropertiesSingleton.
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_PassesStorageConfigAndSpecExtfs() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	expectedStorageConfig := &indexpb.StorageConfig{
+		StorageType:     "minio",
+		Address:         "localhost:9000",
+		BucketName:      "test-bucket",
+		AccessKeyID:     "minioadmin",
+		SecretAccessKey: "minioadmin",
+	}
+
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          expectedStorageConfig,
+		ExternalSource:         "s3://s3.us-west-2.amazonaws.com/ext-bucket/data/",
+		ExternalSpec:           `{"format":"parquet","extfs":{"region":"us-west-2","use_ssl":"true","cloud_provider":"aws"}}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "vec", ExternalField: "vec_col"},
+			},
+		},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	// Parse the spec so BuildExtfsOverrides works correctly
+	parsed, err := externalspec.ParseExternalSpec(req.GetExternalSpec())
+	s.Require().NoError(err)
+	task.parsedSpec = parsed
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, sc *indexpb.StorageConfig) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	var capturedStorageConfig *indexpb.StorageConfig
+	var capturedSpecExtfs map[string]string
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig, specExtfs map[string]string) (map[string]int64, error) {
+			capturedStorageConfig = storageConfig
+			capturedSpecExtfs = specExtfs
+			return map[string]int64{"vec_col": 3072}, nil
+		}).Build()
+	defer m2.UnPatch()
+
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 500},
+	}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.NoError(err)
+	s.Len(result, 1)
+
+	// Verify storageConfig was passed through (not nil)
+	s.NotNil(capturedStorageConfig, "storageConfig must be passed to SampleExternalFieldSizes")
+	s.Equal(expectedStorageConfig.GetAddress(), capturedStorageConfig.GetAddress())
+	s.Equal(expectedStorageConfig.GetBucketName(), capturedStorageConfig.GetBucketName())
+	s.Equal(expectedStorageConfig.GetStorageType(), capturedStorageConfig.GetStorageType())
+
+	// Verify specExtfs contains the extfs overrides from ExternalSpec
+	s.NotNil(capturedSpecExtfs, "specExtfs must be passed to SampleExternalFieldSizes")
+	extfsPrefix := packed.ExtfsPrefixForCollection(s.collectionID)
+	s.Equal("us-west-2", capturedSpecExtfs[extfsPrefix+"region"])
+	s.Equal("true", capturedSpecExtfs[extfsPrefix+"use_ssl"])
+	s.Equal("aws", capturedSpecExtfs[extfsPrefix+"cloud_provider"])
+}
+
+// TestBalanceFragmentsToSegments_NilSpecExtfsWhenNoExtfsInSpec verifies that
+// when ExternalSpec has no extfs overrides (same-bucket scenario), specExtfs
+// is empty but storageConfig is still passed.
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_NilSpecExtfsWhenNoExtfsInSpec() {
+	paramtable.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:           s.collectionID,
+		TaskID:                 s.taskID,
+		PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+		StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource:         "/local/data/",
+		ExternalSpec:           `{"format":"parquet"}`,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "text", ExternalField: "text_col"},
+			},
+		},
+	}
+
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+	task.nextAllocID = task.preallocatedIDRange.Begin
+	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+
+	m1 := mockey.Mock(packed.CreateSegmentManifestWithBasePath).
+		To(func(ctx context.Context, basePath, format string, columns []string, fragments []packed.Fragment, sc *indexpb.StorageConfig) (string, error) {
+			return fmt.Sprintf("%s/manifest.json", basePath), nil
+		}).Build()
+	defer m1.UnPatch()
+
+	var capturedStorageConfig *indexpb.StorageConfig
+	var capturedSpecExtfs map[string]string
+	m2 := mockey.Mock(packed.SampleExternalFieldSizes).
+		To(func(manifestPath string, rows int, collectionID int64, externalSource, externalSpec string, storageConfig *indexpb.StorageConfig, specExtfs map[string]string) (map[string]int64, error) {
+			capturedStorageConfig = storageConfig
+			capturedSpecExtfs = specExtfs
+			return map[string]int64{"text_col": 64}, nil
+		}).Build()
+	defer m2.UnPatch()
+
+	fragments := []packed.Fragment{
+		{FragmentID: 1, RowCount: 100},
+	}
+
+	result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.NoError(err)
+	s.Len(result, 1)
+
+	// storageConfig is always passed
+	s.NotNil(capturedStorageConfig)
+	s.Equal("local", capturedStorageConfig.GetStorageType())
+
+	// No extfs overrides — specExtfs should be empty (no extfs.* keys)
+	extfsPrefix := packed.ExtfsPrefixForCollection(s.collectionID)
+	for k := range capturedSpecExtfs {
+		s.Falsef(len(k) > len(extfsPrefix) && k[:len(extfsPrefix)] == extfsPrefix,
+			"unexpected extfs key in specExtfs: %s", k)
+	}
+}
+
+func TestRefreshExternalCollectionTaskSuite(t *testing.T) {
+	suite.Run(t, new(RefreshExternalCollectionTaskSuite))
 }

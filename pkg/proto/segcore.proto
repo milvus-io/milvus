@@ -134,4 +134,6 @@ message SegmentLoadInfo {
   map<int64, JsonKeyStats> jsonKeyStatsLogs = 19;
   common.LoadPriority priority = 20;
   string manifest_path = 21;
+  bool use_take_for_output = 22;  // when true, use take() API for output field retrieval instead of bulk_subscript
+  int64 estimated_bytes_per_row = 23;  // sampled avg memory bytes per row (from Take API); used as fallback when format metadata lacks size stats
 }

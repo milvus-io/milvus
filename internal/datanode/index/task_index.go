@@ -325,6 +325,8 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 			it.req.GetPartitionID(),
 			it.req.GetSegmentID())
 		buildIndexParams.Manifest = it.req.GetManifest()
+		buildIndexParams.ExternalSource = it.req.GetExternalSource()
+		buildIndexParams.ExternalSpec = it.req.GetExternalSpec()
 	}
 	log.Info("create index", zap.Any("buildIndexParams", buildIndexParams))
 

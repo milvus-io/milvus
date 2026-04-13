@@ -484,6 +484,159 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 }
 
+func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollectionTTLExtSpec" + funcutil.RandomString(10)
+
+	// Create collection with a ttl field.
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
+		DbName: dbName,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	testSchema := &schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "description",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "field1", DataType: schemapb.DataType_Int64},
+			{Name: "ttl", DataType: schemapb.DataType_Timestamptz, Nullable: true},
+		},
+	}
+	schemaBytes, err := proto.Marshal(testSchema)
+	require.NoError(t, err)
+	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:           dbName,
+		CollectionName:   collectionName,
+		Properties:       []*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "1"}},
+		Schema:           schemaBytes,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// Set ExternalSource + ExternalSpec + TTL field in a single AlterCollection request.
+	// This exercises the code path where TTL schema refresh must preserve ExternalSource/ExternalSpec.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/ttl-path"},
+			{Key: common.CollectionExternalSpec, Value: `{"format":"iceberg"}`},
+			{Key: common.CollectionTTLFieldKey, Value: "ttl"},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/ttl-path")
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"iceberg"}`)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+
+	// Set TTL field only (no ExternalSource/ExternalSpec) — should NOT carry over stale external values.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionTTLFieldKey, Value: "ttl"},
+		},
+	})
+	// Idempotent — same TTL value, no schema change expected.
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// Set TTL field with invalid field name should fail.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/new"},
+			{Key: common.CollectionTTLFieldKey, Value: "nonexistent_field"},
+		},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+}
+
+func assertExternalSource(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, expectedSource string) {
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	require.NoError(t, err)
+	require.Equal(t, expectedSource, coll.ExternalSource)
+}
+
+func assertExternalSpec(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, expectedSpec string) {
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	require.NoError(t, err)
+	require.Equal(t, expectedSpec, coll.ExternalSpec)
+}
+
+func TestDDLCallbacksAlterCollectionProperties_ExternalSpec(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollectionExtSpec" + funcutil.RandomString(10)
+
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+	// Initially external source/spec should be empty.
+	assertExternalSource(t, ctx, core, dbName, collectionName, "")
+	assertExternalSpec(t, ctx, core, dbName, collectionName, "")
+
+	// Alter collection to set external_source and external_spec.
+	resp, err := core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/path"},
+			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet"}`},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/path")
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet"}`)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+
+	// Update external_source only.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/new-path"},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/new-path")
+	// external_spec should be reset to empty since only source was sent in this request.
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+
+	// Update external_spec only.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSpec, Value: `{"format":"lance","version":3}`},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"lance","version":3}`)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+
+	// Mix external_source with normal properties.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: common.CollectionExternalSource, Value: "s3://bucket/mixed"},
+			{Key: common.CollectionExternalSpec, Value: `{"format":"parquet"}`},
+			{Key: common.CollectionDescription, Value: "updated description"},
+		},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertExternalSource(t, ctx, core, dbName, collectionName, "s3://bucket/mixed")
+	assertExternalSpec(t, ctx, core, dbName, collectionName, `{"format":"parquet"}`)
+	assertDescription(t, ctx, core, dbName, collectionName, "updated description")
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+}
+
 func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string) {
 	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 		DbName: dbName,

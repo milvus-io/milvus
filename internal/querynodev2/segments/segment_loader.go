@@ -161,6 +161,12 @@ type resourceEstimateFactor struct {
 	TieredEvictionEnabled           bool
 	TieredEvictableMemoryCacheRatio float64
 	TieredEvictableDiskCacheRatio   float64
+	// externalRawDataFactor is the peak-memory safety factor for external
+	// segments. External tables always download, decompress and deserialize
+	// row groups into Arrow buffers regardless of mmap / TieredEviction
+	// settings, so peak transient memory = rawDataSize * factor. Defaults
+	// to 2.0 via paramtable queryNode.externalCollection.rawDataFactor.
+	externalRawDataFactor float64
 }
 
 func NewLoader(
@@ -1671,6 +1677,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		jsonKeyStatsExpansionFactor: paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.GetAsFloat(),
 		textIndexExpansionFactor:    paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
 		TieredEvictionEnabled:       paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+		externalRawDataFactor:       paramtable.Get().QueryNodeCfg.ExternalCollectionRawDataFactor.GetAsFloat(),
 	}
 	maxSegmentSize := uint64(0)
 	predictMemUsage := memUsage
@@ -2133,6 +2140,44 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		} else {
 			if !multiplyFactor.TieredEvictionEnabled {
 				segDiskLoadingSize += uint64(getBinlogDataMemorySize(fieldBinlog))
+			}
+		}
+	}
+
+	// PART 2.5: external segment adjustments
+	//
+	// External segments carry pre-computed MemorySize in fake binlogs (from
+	// DataNode Take sampling). Two adjustments are needed:
+	//  1. Apply externalRawDataFactor to compensate sampling variance.
+	//  2. If all external fields use lazy load (warmup=disable), subtract
+	//     the raw data size since it won't be loaded eagerly.
+	//  3. Write EstimatedBytesPerRow for the C++ ManifestGroupTranslator so
+	//     the tiered-cache layer sizes chunks correctly.
+	if typeutil.IsExternalCollection(schema) && loadInfo.GetNumOfRows() > 0 {
+		// Derive EstimatedBytesPerRow from fake binlog MemorySize.
+		var fakeBinlogMemSize int64
+		for _, fb := range loadInfo.BinlogPaths {
+			fakeBinlogMemSize += getBinlogDataMemorySize(fb)
+		}
+		if loadInfo.GetNumOfRows() > 0 {
+			loadInfo.EstimatedBytesPerRow = fakeBinlogMemSize / loadInfo.GetNumOfRows()
+		}
+
+		// Apply safety factor for sampling variance.
+		factor := multiplyFactor.externalRawDataFactor
+		if factor > 1.0 {
+			extraMem := uint64(float64(fakeBinlogMemSize) * (factor - 1.0))
+			segMemoryLoadingSize += extraMem
+		}
+
+		// If all external fields use lazy load, raw data won't be loaded
+		// eagerly — subtract it from the memory estimate (PART 2 already
+		// added it).
+		if isExternalCollectionLazyLoad(schema) {
+			if segMemoryLoadingSize >= uint64(fakeBinlogMemSize) {
+				segMemoryLoadingSize -= uint64(fakeBinlogMemSize)
+			} else {
+				segMemoryLoadingSize = 0
 			}
 		}
 	}

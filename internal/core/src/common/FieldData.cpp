@@ -36,6 +36,7 @@
 #include "common/Json.h"
 #include "pb/schema.pb.h"
 #include "simdjson/padded_string.h"
+#include "storage/Util.h"
 
 namespace milvus {
 
@@ -220,6 +221,27 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(array_info.first, array_info.second);
         }
         case DataType::TIMESTAMPTZ: {
+            // External Parquet: TimestampArray with time unit.
+            // Internal binlog: Int64Array (raw microseconds).
+            if (array->type()->id() == arrow::Type::TIMESTAMP) {
+                auto ts_array =
+                    std::dynamic_pointer_cast<arrow::TimestampArray>(array);
+                auto ts_type = std::static_pointer_cast<arrow::TimestampType>(
+                    array->type());
+                auto unit = ts_type->unit();
+                std::vector<int64_t> values(element_count);
+                for (size_t i = 0; i < element_count; i++) {
+                    values[i] = storage::ConvertToMicroseconds(
+                        ts_array->Value(i), unit);
+                }
+                if (nullable_) {
+                    return FillFieldData(values.data(),
+                                         array->null_bitmap_data(),
+                                         element_count,
+                                         array->offset());
+                }
+                return FillFieldData(values.data(), element_count);
+            }
             auto array_info =
                 GetDataInfoFromArray<arrow::Int64Array,
                                      arrow::Type::type::INT64>(array);
@@ -241,16 +263,29 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(string_array);
         }
         case DataType::JSON: {
-            // The code here is not referenced.
-            // A subclass named FieldDataJsonImpl is implemented, which overloads this function.
-            AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
-                       "inconsistent data type");
-            auto json_array =
-                std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+            // External Parquet stores JSON as utf8 (StringArray).
+            // Internal binlog stores as binary (BinaryArray).
+            // Both contain identical UTF-8 bytes.
             std::vector<Json> values(element_count);
-            for (size_t index = 0; index < element_count; ++index) {
-                values[index] =
-                    Json(simdjson::padded_string(json_array->GetString(index)));
+            if (array->type()->id() == arrow::Type::type::STRING) {
+                auto string_array =
+                    std::dynamic_pointer_cast<arrow::StringArray>(array);
+                for (size_t index = 0; index < element_count; ++index) {
+                    values[index] = Json(simdjson::padded_string(
+                        string_array->GetString(index)));
+                }
+            } else {
+                AssertInfo(
+                    array->type()->id() == arrow::Type::type::BINARY,
+                    "inconsistent data type for JSON, expected BINARY or "
+                    "STRING, got {}",
+                    array->type()->ToString());
+                auto json_array =
+                    std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+                for (size_t index = 0; index < element_count; ++index) {
+                    values[index] = Json(
+                        simdjson::padded_string(json_array->GetString(index)));
+                }
             }
             if (nullable_) {
                 return FillFieldData(values.data(),
@@ -261,25 +296,66 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(values.data(), element_count);
         }
         case DataType::GEOMETRY: {
-            AssertInfo(array->type()->id() == arrow::Type::type::BINARY,
-                       "inconsistent data type");
-            auto geometry_array =
-                std::dynamic_pointer_cast<arrow::BinaryArray>(array);
-            AssertInfo(geometry_array != nullptr,
-                       "null geometry arrow binary array");
-            std::vector<uint8_t> values(element_count);
-            for (size_t index = 0; index < element_count; ++index) {
-                values[index] = *geometry_array->GetValue(index, 0);
+            // External Parquet may store as WKT text (StringArray) or
+            // WKB binary (BinaryArray). Both are accepted.
+            if (array->type()->id() == arrow::Type::type::STRING) {
+                auto string_array =
+                    std::dynamic_pointer_cast<arrow::StringArray>(array);
+                std::vector<std::string> values(element_count);
+                for (size_t index = 0; index < element_count; ++index) {
+                    values[index] = string_array->GetString(index);
+                }
+                if (nullable_) {
+                    return FillFieldData(values.data(),
+                                         array->null_bitmap_data(),
+                                         element_count,
+                                         array->offset());
+                }
+                return FillFieldData(values.data(), element_count);
+            } else {
+                AssertInfo(
+                    array->type()->id() == arrow::Type::type::BINARY,
+                    "inconsistent data type for GEOMETRY, expected BINARY "
+                    "or STRING, got {}",
+                    array->type()->ToString());
+                auto geometry_array =
+                    std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+                AssertInfo(geometry_array != nullptr,
+                           "null geometry arrow binary array");
+                std::vector<std::string> values(element_count);
+                for (size_t index = 0; index < element_count; ++index) {
+                    auto val = geometry_array->GetView(index);
+                    values[index] = std::string(val.data(), val.size());
+                }
+                if (nullable_) {
+                    return FillFieldData(values.data(),
+                                         array->null_bitmap_data(),
+                                         element_count,
+                                         array->offset());
+                }
+                return FillFieldData(values.data(), element_count);
             }
-            if (nullable_) {
-                return FillFieldData(values.data(),
-                                     array->null_bitmap_data(),
-                                     element_count,
-                                     array->offset());
-            }
-            return FillFieldData(values.data(), element_count);
         }
         case DataType::ARRAY: {
+            // External Parquet: ListArray with native element types.
+            // Internal binlog: BinaryArray with serialized protobuf.
+            if (array->type_id() == arrow::Type::LIST) {
+                auto list_array =
+                    std::dynamic_pointer_cast<arrow::ListArray>(array);
+                std::vector<Array> values(element_count);
+                for (size_t index = 0; index < element_count; ++index) {
+                    auto sf =
+                        storage::ArrowListToScalarFieldProto(list_array, index);
+                    values[index] = Array(sf);
+                }
+                if (nullable_) {
+                    return FillFieldData(values.data(),
+                                         array->null_bitmap_data(),
+                                         element_count,
+                                         array->offset());
+                }
+                return FillFieldData(values.data(), element_count);
+            }
             auto array_array =
                 std::dynamic_pointer_cast<arrow::BinaryArray>(array);
             std::vector<Array> values(element_count);

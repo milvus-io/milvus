@@ -17,6 +17,7 @@
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -47,6 +48,7 @@
 #include "milvus-storage/reader.h"
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
+#include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/Util.h"
@@ -71,7 +73,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     milvus::proto::common::LoadPriority load_priority,
     bool eager_load,
     const std::string& warmup_policy,
-    const std::string& cache_key_suffix)
+    const std::string& cache_key_suffix,
+    int64_t fallback_bytes_per_row)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -155,9 +158,32 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     for (size_t cell_id = 0; cell_id < num_cells; ++cell_id) {
         auto [start, end] = meta_.get_row_group_range(cell_id);
         int64_t cell_size = 0;
+        int64_t cell_rows = 0;
         for (size_t i = start; i < end; ++i) {
+            cell_rows += static_cast<int64_t>(row_group_rows[i]);
             cumulative_rows += static_cast<int64_t>(row_group_rows[i]);
             cell_size += static_cast<int64_t>(row_group_sizes[i]);
+        }
+        // Some formats (e.g. Vortex) report memory_size=0 when their
+        // metadata lacks uncompressed size statistics.  Use the sampled
+        // avg bytes/row from the Take API (passed via SegmentLoadInfo)
+        // as a data-driven fallback; fall back to 4KB/row only if no
+        // sampling data is available.
+        if (cell_size == 0 && cell_rows > 0) {
+            constexpr int64_t kLastResortBytesPerRow = 4096;
+            int64_t bpr = fallback_bytes_per_row > 0 ? fallback_bytes_per_row
+                                                     : kLastResortBytesPerRow;
+            cell_size = cell_rows * bpr;
+            LOG_WARN(
+                "[StorageV2] translator {} cell {} has zero memory_size "
+                "from format metadata, estimating {} bytes "
+                "({} rows * {} bytes/row, sampled={})",
+                key_,
+                cell_id,
+                cell_size,
+                cell_rows,
+                bpr,
+                fallback_bytes_per_row > 0);
         }
         meta_.num_rows_until_chunk_.push_back(cumulative_rows);
         meta_.chunk_memory_size_.push_back(cell_size);
@@ -236,6 +262,7 @@ std::vector<
 ManifestGroupTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    auto get_cells_start = std::chrono::high_resolution_clock::now();
     // Check for cancellation before loading group chunks
     CheckCancellation(ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
 
@@ -355,6 +382,15 @@ ManifestGroupTranslator::get_cells(
         cells.emplace_back(cid, std::move(it->second));
     }
 
+    auto get_cells_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - get_cells_start)
+            .count();
+    LOG_INFO("[get_cells] translator {} loaded {} cells in {}ms",
+             key_,
+             cids.size(),
+             get_cells_ms);
+
     return cells;
 }
 
@@ -362,7 +398,32 @@ std::unique_ptr<milvus::GroupChunk>
 ManifestGroupTranslator::load_group_chunk(
     const std::vector<std::shared_ptr<arrow::Table>>& tables,
     const milvus::cachinglayer::cid_t cid) {
+    auto lgc_start = std::chrono::high_resolution_clock::now();
     assert(!tables.empty());
+
+    // Log input table sizes
+    int64_t total_rows = 0;
+    int64_t total_bytes = 0;
+    for (const auto& t : tables) {
+        total_rows += t->num_rows();
+        for (int c = 0; c < t->num_columns(); c++) {
+            for (const auto& chunk : t->column(c)->chunks()) {
+                auto data = chunk->data();
+                for (const auto& buf : data->buffers) {
+                    if (buf)
+                        total_bytes += buf->size();
+                }
+            }
+        }
+    }
+    LOG_INFO(
+        "[load_group_chunk] translator {} cid {} start: {} rows, {:.1f}MB "
+        "arrow data",
+        key_,
+        cid,
+        total_rows,
+        total_bytes / 1048576.0);
+
     // Use the first table's schema as reference for field iteration
     const auto& schema = tables[0]->schema();
 
@@ -427,22 +488,12 @@ ManifestGroupTranslator::load_group_chunk(
         array_vecs.push_back(std::move(merged_array_vec));
     }
 
-    // Normalize vector arrays from LIST/FIXED_SIZE_LIST to FixedSizeBinary.
-    // External parquet files store vectors as list-of-float; Milvus expects
-    // FixedSizeBinary. Only run for external fields — normal collections
-    // already store vectors as FIXED_SIZE_BINARY (or BINARY for nullable).
+    // Normalize all arrow arrays for ChunkWriter compatibility.
+    // Handles: vectors (nullable/non-nullable), strings, timestamps,
+    // arrays, vector arrays, JSON, geometry.
     for (size_t idx = 0; idx < field_ids.size(); ++idx) {
-        if (field_metas[idx].is_external_field() &&
-            IsVectorDataType(field_metas[idx].get_data_type()) &&
-            !IsSparseFloatVectorDataType(field_metas[idx].get_data_type()) &&
-            !IsVectorArrayDataType(field_metas[idx].get_data_type()) &&
-            !array_vecs[idx].empty() &&
-            array_vecs[idx][0]->type_id() != arrow::Type::FIXED_SIZE_BINARY) {
-            array_vecs[idx] = storage::NormalizeVectorArraysToFixedSizeBinary(
-                array_vecs[idx],
-                field_metas[idx].get_data_type(),
-                field_metas[idx].get_dim());
-        }
+        array_vecs[idx] = storage::NormalizeArrowForChunkWriter(
+            array_vecs[idx], field_metas[idx]);
     }
 
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
@@ -490,6 +541,18 @@ ManifestGroupTranslator::load_group_chunk(
                                     filepath.string(),
                                     load_priority_);
     }
+
+    auto lgc_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::high_resolution_clock::now() - lgc_start)
+                      .count();
+    LOG_INFO(
+        "[load_group_chunk] translator {} cid {} done: {}ms, {} fields, "
+        "use_mmap={}",
+        key_,
+        cid,
+        lgc_ms,
+        field_ids.size(),
+        use_mmap_);
 
     return std::make_unique<milvus::GroupChunk>(chunks);
 }

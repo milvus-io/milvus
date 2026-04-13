@@ -197,6 +197,9 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.ExternalSource = updates.Schema.ExternalSource
 			c.ExternalSpec = updates.Schema.ExternalSpec
 			c.DoPhysicalBackfill = updates.Schema.DoPhysicalBackfill
+		case message.FieldMaskCollectionExternalSpec:
+			c.ExternalSource = updates.Schema.ExternalSource
+			c.ExternalSpec = updates.Schema.ExternalSpec
 		}
 	}
 }

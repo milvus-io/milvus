@@ -43,8 +43,10 @@ StringChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
     // tuple <data, size, offset>
     std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
     for (const auto& data : array_vec) {
-        // for bson, we use binary array to store the string
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        AssertInfo(array != nullptr,
+                   "StringChunkWriter expects BinaryArray, got {}",
+                   data->type()->ToString());
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
             size += str.size();

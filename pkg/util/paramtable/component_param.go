@@ -1382,6 +1382,7 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 	}
 	p.SearchRequeryPolicy.Init(base.mgr)
 
+
 	p.QNFileResourceMode = ParamItem{
 		Key:          "common.fileResource.mode.queryNode",
 		Version:      "2.6.8",
@@ -3515,6 +3516,12 @@ type queryNodeConfig struct {
 	IDFReadBufferSize ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
+
+	// external collection
+	ExternalCollectionUseTakeForOutput ParamItem `refreshable:"true"`
+	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
+	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
+	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -4702,6 +4709,42 @@ user-task-polling:
 		Export:       true,
 	}
 	p.PartialResultRequiredDataRatio.Init(base.mgr)
+
+	p.ExternalCollectionUseTakeForOutput = ParamItem{
+		Key:          "queryNode.externalCollection.useTakeForOutput",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          `When true, use take() API to fetch output fields from external storage instead of bulk_subscript`,
+		Export:       false,
+	}
+	p.ExternalCollectionUseTakeForOutput.Init(base.mgr)
+
+	p.ExternalCollectionSamplePerSegment = ParamItem{
+		Key:          "queryNode.externalCollection.samplePerSegment",
+		Version:      "2.6.0",
+		DefaultValue: "false",
+		Doc:          "When true, sample each segment for size estimation; when false, sample once per collection",
+		Export:       false,
+	}
+	p.ExternalCollectionSamplePerSegment.Init(base.mgr)
+
+	p.ExternalCollectionSampleRows = ParamItem{
+		Key:          "queryNode.externalCollection.sampleRows",
+		Version:      "2.6.0",
+		DefaultValue: "100",
+		Doc:          "Number of rows to read via Take API for sampling external segment size",
+		Export:       false,
+	}
+	p.ExternalCollectionSampleRows.Init(base.mgr)
+
+	p.ExternalCollectionRawDataFactor = ParamItem{
+		Key:          "queryNode.externalCollection.rawDataFactor",
+		Version:      "2.6.0",
+		DefaultValue: "2.0",
+		Doc:          "Peak memory amplification factor for external segment loading. External tables always download, decompress, and deserialize entire row groups into Arrow buffers regardless of mmap/eviction settings, so peak transient memory = rawDataSize * this factor.",
+		Export:       false,
+	}
+	p.ExternalCollectionRawDataFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -4859,6 +4902,7 @@ type dataCoordConfig struct {
 	ExternalCollectionJobRetention     ParamItem `refreshable:"true"`
 	ExternalCollectionDropRatioWarn    ParamItem `refreshable:"true"` // warn if dropping more than this ratio of segments (0-1)
 	ExternalCollectionPreAllocSegments ParamItem `refreshable:"true"`
+	ExternalCollectionFilesPerTask     ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -6084,11 +6128,20 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 	p.ExternalCollectionPreAllocSegments = ParamItem{
 		Key:          "dataCoord.externalCollectionPreAllocSegments",
 		Version:      "2.6.8",
-		Doc:          "The number of segment IDs to pre-allocate for each external collection refresh task.",
-		DefaultValue: "1000",
+		Doc:          "The number of IDs to pre-allocate for each external collection refresh task. Each segment consumes 2 IDs (1 for segment, 1 for fake binlog logID).",
+		DefaultValue: "10000",
 		PanicIfEmpty: false,
 	}
 	p.ExternalCollectionPreAllocSegments.Init(base.mgr)
+
+	p.ExternalCollectionFilesPerTask = ParamItem{
+		Key:          "dataCoord.externalCollectionFilesPerTask",
+		Version:      "2.6.8",
+		Doc:          "Minimum number of external files per refresh task. Controls task splitting granularity.",
+		DefaultValue: "10000",
+		PanicIfEmpty: false,
+	}
+	p.ExternalCollectionFilesPerTask.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",

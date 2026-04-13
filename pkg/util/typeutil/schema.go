@@ -2182,8 +2182,15 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 	return nil, errors.New("primary field is not found")
 }
 
-// ValidateExternalCollectionSchema ensures unsupported features are disabled for external collections.
-func ValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
+// NormalizeAndValidateExternalCollectionSchema ensures unsupported features are
+// disabled for external collections AND mutates each user field to set
+// nullable=true. The mutation is intentional: external Parquet sources may
+// contain nulls in any column, and a non-nullable field would silently produce
+// incorrect results when reading those nulls. The function is named
+// "NormalizeAndValidate" so callers know it has a write-back side effect; the
+// older "Validate*" name is preserved as a thin alias for source compatibility
+// with code that has not been updated yet.
+func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
 	if !IsExternalCollection(schema) {
 		return nil
 	}
@@ -2205,6 +2212,12 @@ func ValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
 		if field.GetName() == common.RowIDFieldName || field.GetName() == common.TimeStampFieldName ||
 			field.GetName() == common.VirtualPKFieldName {
 			continue
+		}
+
+		// Force nullable for external fields: Parquet columns can contain nulls.
+		// Non-nullable fields would silently produce incorrect results.
+		if !field.GetNullable() {
+			field.Nullable = true
 		}
 
 		if field.GetIsPrimaryKey() {
@@ -2229,9 +2242,51 @@ func ValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
 		if field.GetExternalField() == "" {
 			return fmt.Errorf("field '%s' in external collection %s must have external_field mapping", field.GetName(), schema.GetName())
 		}
+
+		// Validate field data type is supported for external collections.
+		// Only types with reliable Parquet serde are allowed. Types with
+		// internal-only serialization formats (protobuf binary, custom
+		// encoding) or schema mismatches between Milvus Arrow mapping and
+		// standard Parquet formats are rejected.
+		if !isExternalFieldTypeSupported(field.GetDataType()) {
+			return fmt.Errorf("external collection %s does not support field type %s on field %s",
+				schema.GetName(), field.GetDataType().String(), field.GetName())
+		}
 	}
 
 	return nil
+}
+
+// isExternalFieldTypeSupported returns true if the given data type can be
+// reliably used in external collections (both load and take modes).
+//
+// Blocked types and reasons:
+//   - SparseFloatVector: Custom binary encoding incompatible with external files
+func isExternalFieldTypeSupported(dt schemapb.DataType) bool {
+	switch dt {
+	case schemapb.DataType_Bool,
+		schemapb.DataType_Int8,
+		schemapb.DataType_Int16,
+		schemapb.DataType_Int32,
+		schemapb.DataType_Int64,
+		schemapb.DataType_Float,
+		schemapb.DataType_Double,
+		schemapb.DataType_VarChar,
+		schemapb.DataType_Text,
+		schemapb.DataType_JSON,
+		schemapb.DataType_Array,
+		schemapb.DataType_Timestamptz,
+		schemapb.DataType_Geometry,
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_BinaryVector,
+		schemapb.DataType_Int8Vector,
+		schemapb.DataType_ArrayOfVector:
+		return true
+	default:
+		return false
+	}
 }
 
 func IsFieldSparseFloatVector(schema *schemapb.CollectionSchema, fieldID int64) bool {
@@ -2521,14 +2576,15 @@ func GetDataIterator(field *schemapb.FieldData) func(int) any {
 				return getData(field, idx)
 			}
 		}
-		// Compact format: data array only contains valid entries.
-		// Build a mapping from logical index to physical index.
-		idxs := make([]int, len(validData))
-		cnt := 0
-		for i, valid := range validData {
+
+		// Compact format: data array only contains valid values.
+		// Build index mapping from position to valid-data offset.
+		idxs := make([]int, len(field.ValidData))
+		validCnt := 0
+		for i, valid := range field.ValidData {
 			if valid {
-				idxs[i] = cnt
-				cnt++
+				idxs[i] = validCnt
+				validCnt++
 			} else {
 				idxs[i] = -1
 			}

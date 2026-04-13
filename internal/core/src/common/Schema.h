@@ -407,6 +407,11 @@ class Schema {
     const ArrowSchemaPtr
     BuildReaderArrowSchema() const;
 
+    // Get the list of external column names (parquet column names) for
+    // external collections. Used as needed_columns for schemaless Reader.
+    std::shared_ptr<std::vector<std::string>>
+    GetExternalColumnNames() const;
+
     // Resolve a column group column name to a FieldId.
     // Normal collections: column name is the numeric field ID string.
     // External collections: column name is the parquet field name mapped

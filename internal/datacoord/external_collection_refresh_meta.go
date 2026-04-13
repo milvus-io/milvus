@@ -248,11 +248,25 @@ func (m *externalCollectionRefreshMeta) GetAllJobs() map[int64]*datapb.ExternalC
 	return result
 }
 
-// UpdateJobState updates job state
-func (m *externalCollectionRefreshMeta) UpdateJobState(jobID int64, state indexpb.JobState, failReason string) error {
+// mutateJob applies a persisted in-place mutation to a refresh job under the
+// collection-scoped lock. It centralises the lock → refetch → clone → mutate →
+// save → reindex pattern that every Job mutator needs.
+//
+// The mutate callback receives a cloned job and may return:
+//   - (false, nil)  -> apply: save & reindex the clone; returns (true, nil)
+//   - (true,  nil)  -> skip: no-op (e.g. terminal-state guard); returns (false, nil)
+//   - (_,     err)  -> abort: propagate err (no save); returns (false, err)
+//
+// The first return value is whether the mutation was actually persisted, so
+// callers can conditionally log success without running the log on skip paths.
+func (m *externalCollectionRefreshMeta) mutateJob(
+	jobID int64,
+	opName string,
+	mutate func(*datapb.ExternalCollectionRefreshJob) (skip bool, err error),
+) (applied bool, err error) {
 	job, ok := m.jobs.Get(jobID)
 	if !ok {
-		return fmt.Errorf("job %d not found", jobID)
+		return false, fmt.Errorf("job %d not found", jobID)
 	}
 
 	m.jobLock.Lock(job.GetCollectionId())
@@ -261,95 +275,91 @@ func (m *externalCollectionRefreshMeta) UpdateJobState(jobID int64, state indexp
 	// Re-fetch after lock
 	job, ok = m.jobs.Get(jobID)
 	if !ok {
-		return fmt.Errorf("job %d not found", jobID)
+		return false, fmt.Errorf("job %d not found", jobID)
 	}
 
 	cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
-	cloneJob.State = state
-	cloneJob.FailReason = failReason
-
-	if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
-		cloneJob.EndTime = time.Now().UnixMilli()
-		if state == indexpb.JobState_JobStateFinished {
-			cloneJob.Progress = 100
-		}
+	skip, err := mutate(cloneJob)
+	if err != nil {
+		return false, err
+	}
+	if skip {
+		return false, nil
 	}
 
 	if err := m.catalog.SaveExternalCollectionRefreshJob(m.ctx, cloneJob); err != nil {
-		log.Warn("update job state failed",
+		log.Warn(opName+" failed",
 			zap.Int64("jobID", jobID),
 			zap.Error(err))
-		return err
+		return false, err
 	}
 
 	m.jobs.Insert(jobID, cloneJob)
 	m.addToCollectionJobs(cloneJob)
+	return true, nil
+}
 
-	log.Info("update job state success",
-		zap.Int64("jobID", jobID),
-		zap.String("state", state.String()))
-	return nil
+// UpdateJobState updates job state.
+//
+// Returns (applied, err):
+//   - applied=true means the state was actually persisted.
+//   - applied=false, err=nil means the terminal-state guard skipped the write
+//     because the job already reached Finished/Failed. Callers that perform
+//     follow-up actions conditional on the transition (fire onJobFailed, mark
+//     tasks as failed, etc.) MUST check applied and short-circuit when false.
+//     This is the critical signal that prevents tryTimeoutJob from racing an
+//     eager Finished transition and poisoning the manager's notifiedJobs map.
+//   - applied=false, err!=nil means a persistence / lookup failure.
+func (m *externalCollectionRefreshMeta) UpdateJobState(jobID int64, state indexpb.JobState, failReason string) (bool, error) {
+	applied, err := m.mutateJob(jobID, "update job state", func(job *datapb.ExternalCollectionRefreshJob) (bool, error) {
+		// Terminal-state guard: once a job has reached Finished or Failed it must
+		// not be transitioned again. Without this guard a stale-snapshot caller
+		// (e.g. tryTimeoutJob using a job pointer captured before aggregateJobState
+		// transitioned the job to Finished in the same processJob cycle) could
+		// silently overwrite a successful Finished as Failed("timeout").
+		if job.GetState() == indexpb.JobState_JobStateFinished ||
+			job.GetState() == indexpb.JobState_JobStateFailed {
+			log.Info("skip update job state, already in terminal state",
+				zap.Int64("jobID", jobID),
+				zap.String("currentState", job.GetState().String()),
+				zap.String("requestedState", state.String()))
+			return true, nil
+		}
+
+		job.State = state
+		job.FailReason = failReason
+		if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
+			job.EndTime = time.Now().UnixMilli()
+			if state == indexpb.JobState_JobStateFinished {
+				job.Progress = 100
+			}
+		}
+		return false, nil
+	})
+	if applied {
+		log.Info("update job state success",
+			zap.Int64("jobID", jobID),
+			zap.String("state", state.String()))
+	}
+	return applied, err
 }
 
 // UpdateJobProgress updates job progress
 func (m *externalCollectionRefreshMeta) UpdateJobProgress(jobID int64, progress int64) error {
-	job, ok := m.jobs.Get(jobID)
-	if !ok {
-		return fmt.Errorf("job %d not found", jobID)
-	}
-
-	m.jobLock.Lock(job.GetCollectionId())
-	defer m.jobLock.Unlock(job.GetCollectionId())
-
-	job, ok = m.jobs.Get(jobID)
-	if !ok {
-		return fmt.Errorf("job %d not found", jobID)
-	}
-
-	cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
-	cloneJob.Progress = progress
-
-	if err := m.catalog.SaveExternalCollectionRefreshJob(m.ctx, cloneJob); err != nil {
-		log.Warn("update job progress failed",
-			zap.Int64("jobID", jobID),
-			zap.Error(err))
-		return err
-	}
-
-	m.jobs.Insert(jobID, cloneJob)
-	m.addToCollectionJobs(cloneJob)
-	return nil
+	_, err := m.mutateJob(jobID, "update job progress", func(job *datapb.ExternalCollectionRefreshJob) (bool, error) {
+		job.Progress = progress
+		return false, nil
+	})
+	return err
 }
 
 // AddTaskIDToJob adds a taskID to job's task_ids list
 func (m *externalCollectionRefreshMeta) AddTaskIDToJob(jobID int64, taskID int64) error {
-	job, ok := m.jobs.Get(jobID)
-	if !ok {
-		return fmt.Errorf("job %d not found", jobID)
-	}
-
-	m.jobLock.Lock(job.GetCollectionId())
-	defer m.jobLock.Unlock(job.GetCollectionId())
-
-	job, ok = m.jobs.Get(jobID)
-	if !ok {
-		return fmt.Errorf("job %d not found", jobID)
-	}
-
-	cloneJob := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
-	cloneJob.TaskIds = append(cloneJob.TaskIds, taskID)
-
-	if err := m.catalog.SaveExternalCollectionRefreshJob(m.ctx, cloneJob); err != nil {
-		log.Warn("add taskID to job failed",
-			zap.Int64("jobID", jobID),
-			zap.Int64("taskID", taskID),
-			zap.Error(err))
-		return err
-	}
-
-	m.jobs.Insert(jobID, cloneJob)
-	m.addToCollectionJobs(cloneJob)
-	return nil
+	_, err := m.mutateJob(jobID, "add taskID to job", func(job *datapb.ExternalCollectionRefreshJob) (bool, error) {
+		job.TaskIds = append(job.TaskIds, taskID)
+		return false, nil
+	})
+	return err
 }
 
 // DropJob removes a job and all its associated tasks
@@ -482,108 +492,90 @@ func (m *externalCollectionRefreshMeta) GetTaskState(taskID int64) indexpb.JobSt
 	return task.GetState()
 }
 
-// UpdateTaskState updates task state
-func (m *externalCollectionRefreshMeta) UpdateTaskState(taskID int64, state indexpb.JobState, failReason string) error {
+// mutateTask is the Task counterpart of mutateJob: it applies a persisted
+// in-place mutation to a refresh task under the jobID-scoped task lock.
+// See mutateJob for the skip/apply/abort return semantics.
+func (m *externalCollectionRefreshMeta) mutateTask(
+	taskID int64,
+	opName string,
+	mutate func(*datapb.ExternalCollectionRefreshTask) (skip bool, err error),
+) (applied bool, cloned *datapb.ExternalCollectionRefreshTask, err error) {
 	task, ok := m.tasks.Get(taskID)
 	if !ok {
-		return fmt.Errorf("task %d not found", taskID)
+		return false, nil, fmt.Errorf("task %d not found", taskID)
 	}
 
 	m.taskLock.Lock(task.GetJobId())
 	defer m.taskLock.Unlock(task.GetJobId())
 
+	// Re-fetch after lock
 	task, ok = m.tasks.Get(taskID)
 	if !ok {
-		return fmt.Errorf("task %d not found", taskID)
+		return false, nil, fmt.Errorf("task %d not found", taskID)
 	}
 
 	cloneTask := proto.Clone(task).(*datapb.ExternalCollectionRefreshTask)
-	cloneTask.State = state
-	cloneTask.FailReason = failReason
-	if state == indexpb.JobState_JobStateFinished {
-		cloneTask.Progress = 100
+	skip, err := mutate(cloneTask)
+	if err != nil {
+		return false, nil, err
+	}
+	if skip {
+		return false, nil, nil
 	}
 
 	if err := m.catalog.SaveExternalCollectionRefreshTask(m.ctx, cloneTask); err != nil {
-		log.Warn("update task state failed",
+		log.Warn(opName+" failed",
 			zap.Int64("taskID", taskID),
 			zap.Error(err))
-		return err
+		return false, nil, err
 	}
 
 	m.tasks.Insert(taskID, cloneTask)
 	m.addToJobTasks(cloneTask)
+	return true, cloneTask, nil
+}
 
-	log.Info("update task state success",
-		zap.Int64("taskID", taskID),
-		zap.String("state", state.String()))
-	return nil
+// UpdateTaskState updates task state
+func (m *externalCollectionRefreshMeta) UpdateTaskState(taskID int64, state indexpb.JobState, failReason string) error {
+	applied, _, err := m.mutateTask(taskID, "update task state", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
+		task.State = state
+		task.FailReason = failReason
+		if state == indexpb.JobState_JobStateFinished {
+			task.Progress = 100
+		}
+		return false, nil
+	})
+	if applied {
+		log.Info("update task state success",
+			zap.Int64("taskID", taskID),
+			zap.String("state", state.String()))
+	}
+	return err
 }
 
 // UpdateTaskProgress updates task progress
 func (m *externalCollectionRefreshMeta) UpdateTaskProgress(taskID int64, progress int64) error {
-	task, ok := m.tasks.Get(taskID)
-	if !ok {
-		return fmt.Errorf("task %d not found", taskID)
-	}
-
-	m.taskLock.Lock(task.GetJobId())
-	defer m.taskLock.Unlock(task.GetJobId())
-
-	task, ok = m.tasks.Get(taskID)
-	if !ok {
-		return fmt.Errorf("task %d not found", taskID)
-	}
-
-	cloneTask := proto.Clone(task).(*datapb.ExternalCollectionRefreshTask)
-	cloneTask.Progress = progress
-
-	if err := m.catalog.SaveExternalCollectionRefreshTask(m.ctx, cloneTask); err != nil {
-		log.Warn("update task progress failed",
-			zap.Int64("taskID", taskID),
-			zap.Error(err))
-		return err
-	}
-
-	m.tasks.Insert(taskID, cloneTask)
-	m.addToJobTasks(cloneTask)
-	return nil
+	_, _, err := m.mutateTask(taskID, "update task progress", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
+		task.Progress = progress
+		return false, nil
+	})
+	return err
 }
 
 // UpdateTaskVersion updates task version and nodeID
 func (m *externalCollectionRefreshMeta) UpdateTaskVersion(taskID, nodeID int64) error {
-	task, ok := m.tasks.Get(taskID)
-	if !ok {
-		return fmt.Errorf("task %d not found", taskID)
-	}
-
-	m.taskLock.Lock(task.GetJobId())
-	defer m.taskLock.Unlock(task.GetJobId())
-
-	task, ok = m.tasks.Get(taskID)
-	if !ok {
-		return fmt.Errorf("task %d not found", taskID)
-	}
-
-	cloneTask := proto.Clone(task).(*datapb.ExternalCollectionRefreshTask)
-	cloneTask.Version++
-	cloneTask.NodeId = nodeID
-
-	if err := m.catalog.SaveExternalCollectionRefreshTask(m.ctx, cloneTask); err != nil {
-		log.Warn("update task version failed",
+	applied, cloned, err := m.mutateTask(taskID, "update task version", func(task *datapb.ExternalCollectionRefreshTask) (bool, error) {
+		task.Version++
+		task.NodeId = nodeID
+		return false, nil
+	})
+	if applied {
+		log.Info("update task version success",
 			zap.Int64("taskID", taskID),
-			zap.Error(err))
-		return err
+			zap.Int64("nodeID", nodeID),
+			zap.Int64("newVersion", cloned.GetVersion()))
 	}
-
-	m.tasks.Insert(taskID, cloneTask)
-	m.addToJobTasks(cloneTask)
-
-	log.Info("update task version success",
-		zap.Int64("taskID", taskID),
-		zap.Int64("nodeID", nodeID),
-		zap.Int64("newVersion", cloneTask.GetVersion()))
-	return nil
+	return err
 }
 
 // DropTask removes a task

@@ -249,7 +249,91 @@ Schema::BuildReaderArrowSchema() const {
                           !IsSparseFloatVectorDataType(meta.get_data_type())
                       ? meta.get_dim()
                       : 1;
-        auto arrow_data_type = GetArrowDataType(meta.get_data_type(), dim);
+        // For external collections, override the Arrow type for fields
+        // whose internal binlog mapping differs from standard Parquet format.
+        std::shared_ptr<arrow::DataType> arrow_data_type;
+        switch (meta.get_data_type()) {
+            case DataType::JSON:
+            case DataType::GEOMETRY:
+                // Milvus maps to binary() but external Parquet uses utf8()
+                arrow_data_type = arrow::utf8();
+                break;
+            case DataType::TIMESTAMPTZ:
+                // Milvus maps to int64() but external Parquet uses timestamp
+                arrow_data_type =
+                    arrow::timestamp(arrow::TimeUnit::MICRO, "UTC");
+                break;
+            case DataType::ARRAY: {
+                // Milvus maps to binary() (protobuf) but external Parquet
+                // uses list(element_type)
+                auto elem_type = meta.get_element_type();
+                std::shared_ptr<arrow::DataType> elem_arrow;
+                switch (elem_type) {
+                    case DataType::BOOL:
+                        elem_arrow = arrow::boolean();
+                        break;
+                    case DataType::INT8:
+                        elem_arrow = arrow::int8();
+                        break;
+                    case DataType::INT16:
+                        elem_arrow = arrow::int16();
+                        break;
+                    case DataType::INT32:
+                        elem_arrow = arrow::int32();
+                        break;
+                    case DataType::INT64:
+                        elem_arrow = arrow::int64();
+                        break;
+                    case DataType::FLOAT:
+                        elem_arrow = arrow::float32();
+                        break;
+                    case DataType::DOUBLE:
+                        elem_arrow = arrow::float64();
+                        break;
+                    case DataType::VARCHAR:
+                    case DataType::STRING:
+                        elem_arrow = arrow::utf8();
+                        break;
+                    default:
+                        elem_arrow = arrow::utf8();
+                        break;
+                }
+                arrow_data_type = arrow::list(elem_arrow);
+                break;
+            }
+            case DataType::VECTOR_ARRAY: {
+                // External Parquet stores as list(list(float32/int8/...))
+                // Milvus internal uses list(fixed_size_binary(N))
+                // Map element vector type to its scalar Arrow primitive type.
+                std::shared_ptr<arrow::DataType> elem_arrow_type;
+                switch (meta.get_element_type()) {
+                    case DataType::VECTOR_FLOAT:
+                        elem_arrow_type = arrow::float32();
+                        break;
+                    case DataType::VECTOR_FLOAT16:
+                    case DataType::VECTOR_BFLOAT16:
+                        // fp16/bf16 have no Arrow primitive, stored as
+                        // fixed_size_binary in both internal and external
+                        elem_arrow_type = arrow::fixed_size_binary(dim * 2);
+                        break;
+                    case DataType::VECTOR_BINARY:
+                        elem_arrow_type =
+                            arrow::fixed_size_binary((dim + 7) / 8);
+                        break;
+                    case DataType::VECTOR_INT8:
+                        elem_arrow_type = arrow::int8();
+                        break;
+                    default:
+                        elem_arrow_type = arrow::fixed_size_binary(dim * 4);
+                        break;
+                }
+                arrow_data_type = arrow::list(arrow::list(elem_arrow_type));
+                break;
+            }
+            default:
+                arrow_data_type = GetArrowDataType(meta.get_data_type(), dim);
+                break;
+        }
         auto arrow_field = std::make_shared<arrow::Field>(
             meta.get_external_field(),
             arrow_data_type,
@@ -259,6 +343,18 @@ Schema::BuildReaderArrowSchema() const {
         external_fields.push_back(arrow_field);
     }
     return arrow::schema(external_fields);
+}
+
+std::shared_ptr<std::vector<std::string>>
+Schema::GetExternalColumnNames() const {
+    auto columns = std::make_shared<std::vector<std::string>>();
+    for (const auto& field_id : field_ids_) {
+        auto it = fields_.find(field_id);
+        if (it != fields_.end() && it->second.is_external_field()) {
+            columns->push_back(it->second.get_external_field());
+        }
+    }
+    return columns;
 }
 
 FieldId

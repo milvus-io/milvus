@@ -156,6 +156,12 @@ class NullableVectorChunkWriter final : public ChunkWriterBase {
         size_t size = 0;
         size_t row_nums = 0;
 
+        AssertInfo(
+            !array_vec.empty() &&
+                array_vec[0]->type_id() == arrow::Type::BINARY,
+            "NullableVectorChunkWriter expects BinaryArray, got {}",
+            array_vec.empty() ? "empty" : array_vec[0]->type()->ToString());
+
         for (const auto& data : array_vec) {
             row_nums += data->length();
             auto binary_array =

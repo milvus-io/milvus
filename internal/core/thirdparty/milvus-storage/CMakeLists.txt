@@ -15,7 +15,7 @@
 milvus_add_pkg_config("milvus-storage")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
 
-set( milvus-storage_VERSION 4351a0c)
+set( milvus-storage_VERSION fd3757b)
 set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
@@ -35,6 +35,21 @@ set(WITH_BENCHMARK OFF CACHE BOOL "" FORCE)
 # Conan 2.x: CMAKE_PREFIX_PATH is set by conan_toolchain.cmake.
 # find_package(Protobuf) sets Protobuf_PROTOC_EXECUTABLE automatically.
 # Fallback: search CMAKE_BINARY_DIR/bin for protoc installed by conan imports.
+
+# milvus-storage uses find_package(Azure REQUIRED) which relies on Arrow's FindAzure.cmake.
+# Workaround: pre-find azure-sdk via Conan's Find module, then write a stub FindAzure.cmake.
+find_package(azure-sdk-for-cpp QUIET)
+if(azure-sdk-for-cpp_FOUND)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/FindAzure.cmake"
+        "set(Azure_FOUND TRUE)\n"
+        "set(azure-core-cpp_FOUND TRUE)\n"
+        "set(azure-identity-cpp_FOUND TRUE)\n"
+        "set(azure-storage-blobs-cpp_FOUND TRUE)\n"
+        "set(azure-storage-common-cpp_FOUND TRUE)\n"
+        "set(azure-storage-files-datalake-cpp_FOUND TRUE)\n"
+    )
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
 find_program(_PROTOC_PROGRAM protoc
     PATHS "${CMAKE_BINARY_DIR}/bin"
     NO_DEFAULT_PATH)
