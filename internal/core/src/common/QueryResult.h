@@ -344,14 +344,6 @@ struct SearchResult {
                (!element_level_ && vector_iterators_.has_value());
     }
 
-    std::optional<std::vector<std::shared_ptr<VectorIterator>>>
-    GetIterators() {
-        if (element_level_) {
-            return element_iterators_;
-        } else {
-            return vector_iterators_;
-        }
-    }
     // For two-stage search: count of rows that pass the filter in this segment
     // Set to -1 when not applicable (normal search mode)
     // Each segment's SearchResult has its own valid_count, preserved separately

@@ -66,7 +66,10 @@
 namespace milvus::segcore {
 
 void
-ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data) {
+// Takes a non-const DataArray& because VARCHAR strings are moved (not copied)
+// into the PkType variant vector. Callers must ensure the DataArray is
+// discarded after this call — the VARCHAR fields will be in a moved-from state.
+ParsePksFromFieldData(std::vector<PkType>& pks, DataArray& data) {
     auto data_type = static_cast<DataType>(data.type());
     switch (data_type) {
         case DataType::INT64: {
@@ -76,8 +79,11 @@ ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data) {
             break;
         }
         case DataType::VARCHAR: {
-            auto& src_data = data.scalars().string_data().data();
-            std::copy(src_data.begin(), src_data.end(), pks.begin());
+            auto* src_data =
+                data.mutable_scalars()->mutable_string_data()->mutable_data();
+            for (size_t i = 0; i < pks.size(); i++) {
+                pks[i] = std::move(*src_data->Mutable(i));
+            }
             break;
         }
         default: {
@@ -789,6 +795,15 @@ CreateDataArrayFrom(const void* data_raw,
 }
 
 // TODO remove merge dataArray, instead fill target entity when get data slice
+//
+// IMPORTANT: This function uses std::move to transfer string/bytes data from
+// the per-segment output_fields_data_ (accessed via MergeBase) into the merged
+// DataArray. This is safe because each per-segment DataArray is discarded after
+// MergeDataArray completes — the caller (GetSearchResultDataSlice) never reads
+// the per-segment output_fields_data_ again after this point. Each offset
+// within a segment is referenced at most once in merge_bases (guaranteed by the
+// deduplication in ReduceSearchResultForOneNQ), so no element is moved twice.
+// If this invariant changes, the std::move calls below must be revisited.
 std::unique_ptr<DataArray>
 MergeDataArray(std::vector<MergeBase>& merge_bases,
                const FieldMeta& field_meta) {
@@ -852,14 +867,16 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 obj->assign(data + physical_offset * num_bytes, num_bytes);
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_SPARSE_U32_F32) {
-                auto& src_vec = src_field_data->vectors().sparse_float_vector();
+                auto* mutable_src_vec = src_field_data->mutable_vectors()
+                                            ->mutable_sparse_float_vector();
                 auto dst = vector_array->mutable_sparse_float_vector();
-                if (src_vec.dim() > dst->dim()) {
-                    dst->set_dim(src_vec.dim());
+                if (mutable_src_vec->dim() > dst->dim()) {
+                    dst->set_dim(mutable_src_vec->dim());
                 }
                 vector_array->set_dim(dst->dim());
-                auto& src_contents = src_vec.contents(physical_offset);
-                *(dst->mutable_contents()->Add()) = src_contents;
+                *(dst->mutable_contents()->Add()) =
+                    std::move(*mutable_src_vec->mutable_contents()->Mutable(
+                        physical_offset));
             } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
                 auto data = VEC_FIELD_DATA(src_field_data, int8);
                 auto obj = vector_array->mutable_int8_vector();
@@ -927,30 +944,41 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             }
             case DataType::VARCHAR:
             case DataType::TEXT: {
-                auto& data = FIELD_DATA(src_field_data, string);
+                auto* mutable_src = src_field_data->mutable_scalars()
+                                        ->mutable_string_data()
+                                        ->mutable_data();
                 auto obj = scalar_array->mutable_string_data();
-                *(obj->mutable_data()->Add()) = data[src_offset];
+                *(obj->mutable_data()->Add()) =
+                    std::move(*mutable_src->Mutable(src_offset));
                 break;
             }
             case DataType::JSON: {
-                auto& data = FIELD_DATA(src_field_data, json);
+                auto* mutable_src = src_field_data->mutable_scalars()
+                                        ->mutable_json_data()
+                                        ->mutable_data();
                 auto obj = scalar_array->mutable_json_data();
-                *(obj->mutable_data()->Add()) = data[src_offset];
+                *(obj->mutable_data()->Add()) =
+                    std::move(*mutable_src->Mutable(src_offset));
                 break;
             }
             case DataType::GEOMETRY: {
-                auto& data = FIELD_DATA(src_field_data, geometry);
+                auto* mutable_src = src_field_data->mutable_scalars()
+                                        ->mutable_geometry_data()
+                                        ->mutable_data();
                 auto obj = scalar_array->mutable_geometry_data();
-                *(obj->mutable_data()->Add()) = std::string(
-                    data[src_offset].data(), data[src_offset].size());
+                *(obj->mutable_data()->Add()) =
+                    std::move(*mutable_src->Mutable(src_offset));
                 break;
             }
             case DataType::ARRAY: {
-                auto& data = FIELD_DATA(src_field_data, array);
                 auto obj = scalar_array->mutable_array_data();
                 obj->set_element_type(
                     proto::schema::DataType(field_meta.get_element_type()));
-                *(obj->mutable_data()->Add()) = data[src_offset];
+                auto* mutable_src = src_field_data->mutable_scalars()
+                                        ->mutable_array_data()
+                                        ->mutable_data();
+                *(obj->mutable_data()->Add()) =
+                    std::move(*mutable_src->Mutable(src_offset));
                 break;
             }
             default: {
