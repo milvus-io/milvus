@@ -736,6 +736,15 @@ func withValidMixCoord() Opt {
 		}, nil,
 	)
 
+	// Default: no schema-version consistency stats → trivially consistent (schema v0).
+	// Tests that need to exercise the consistency gate override this on a per-test basis.
+	mixc.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(
+		&datapb.GetCollectionStatisticsResponse{
+			Status: merr.Success(),
+			Stats:  []*commonpb.KeyValuePair{},
+		}, nil,
+	).Maybe()
+
 	mixc.EXPECT().BroadcastAlteredCollection(mock.Anything, mock.Anything).Return(
 		merr.Success(), nil,
 	)
