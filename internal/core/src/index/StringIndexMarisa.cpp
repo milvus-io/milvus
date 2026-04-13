@@ -503,7 +503,7 @@ StringIndexMarisa::PatternMatch(const std::string& pattern,
     if (op != proto::plan::OpType::Match &&
         op != proto::plan::OpType::PostfixMatch &&
         op != proto::plan::OpType::InnerMatch) {
-        ThrowInfo(Unsupported,
+        PanicInfo(Unsupported,
                   "StringIndexMarisa::PatternMatch only supports Match, "
                   "PrefixMatch, PostfixMatch, InnerMatch, got op: {}",
                   static_cast<int>(op));
