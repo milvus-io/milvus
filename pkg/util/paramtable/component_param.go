@@ -2674,7 +2674,6 @@ type queryCoordConfig struct {
 	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 
 	CollectionObserverInterval         ParamItem `refreshable:"false"`
-	CheckExecutedFlagInterval          ParamItem `refreshable:"false"`
 	CollectionBalanceSegmentBatchSize  ParamItem `refreshable:"true"`
 	CollectionBalanceChannelBatchSize  ParamItem `refreshable:"true"`
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
@@ -3248,15 +3247,6 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.CollectionObserverInterval.Init(base.mgr)
-
-	p.CheckExecutedFlagInterval = ParamItem{
-		Key:          "queryCoord.checkExecutedFlagInterval",
-		Version:      "2.4.4",
-		DefaultValue: "100",
-		Doc:          "the interval of check executed flag to force to pull dist",
-		Export:       true,
-	}
-	p.CheckExecutedFlagInterval.Init(base.mgr)
 
 	p.CollectionBalanceSegmentBatchSize = ParamItem{
 		Key:          "queryCoord.collectionBalanceSegmentBatchSize",

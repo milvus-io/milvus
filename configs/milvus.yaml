@@ -452,7 +452,6 @@ queryCoord:
   stoppingBalanceAssignPolicy: ScoreBased # assign policy for stopping balance, options: RoundRobin, RowCount, ScoreBased
   channelExclusiveNodeFactor: 4 # the least node number for enable channel's exclusive mode
   collectionObserverInterval: 200 # the interval of collection observer
-  checkExecutedFlagInterval: 100 # the interval of check executed flag to force to pull dist
   updateCollectionLoadStatusInterval: 5 # 5m, max interval of updating collection loaded status for check health
   channelTaskCapFraction: 0.3 # fraction of total task execution capacity reserved for channel tasks per node (0.0-1.0)
   # Duration (in seconds) that a query node remains marked as resource exhausted after reaching resource limits.
