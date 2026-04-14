@@ -1411,7 +1411,7 @@ func (v *ParserVisitor) VisitStructField(ctx *parser.StructFieldContext) interfa
 	// Look up the field directly by its full name
 	field, err := v.schema.GetFieldFromName(identifier)
 	if err != nil {
-		return fmt.Errorf("struct field not found: %s, error: %s", identifier, err)
+		return merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", identifier, err)
 	}
 
 	return &ExprWithType{
@@ -1789,9 +1789,25 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 }
 
 func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interface{} {
-	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil)
-	if err != nil {
-		return err
+	var columnInfo *planpb.ColumnInfo
+	var err error
+	if ctx.StructFieldIdentifier() != nil {
+		// Handle struct_arr[sub_field] syntax: look up the full field name directly
+		identifier := ctx.StructFieldIdentifier().GetText()
+		field, fieldErr := v.schema.GetFieldFromName(identifier)
+		if fieldErr != nil {
+			return merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", identifier, fieldErr)
+		}
+		columnInfo = &planpb.ColumnInfo{
+			FieldId:     field.FieldID,
+			DataType:    field.DataType,
+			ElementType: field.GetElementType(),
+		}
+	} else {
+		columnInfo, err = v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil)
+		if err != nil {
+			return err
+		}
 	}
 	if columnInfo == nil ||
 		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {

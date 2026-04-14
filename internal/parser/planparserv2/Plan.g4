@@ -36,7 +36,7 @@ expr:
 	| op=(STEuqals | STTouches | STOverlaps | STCrosses | STContains | STIntersects | STWithin) '(' Identifier ',' StringLiteral ')'  # SpatialBinary
 	| STDWithin'('Identifier','StringLiteral',' expr')'                                                     # STDWithin
 	| STIsValid'('Identifier')'                                  			 	                            # STIsValid
-	| ArrayLength'('(Identifier | JSONIdentifier)')'                                                        # ArrayLength
+	| ArrayLength'('(Identifier | JSONIdentifier | StructFieldIdentifier)')'                                 # ArrayLength
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                                                        # Call
 	| expr op1 = (LT | LE) (Identifier | JSONIdentifier | StructSubFieldIdentifier) op2 = (LT | LE) expr	# Range
 	| expr op1 = (GT | GE) (Identifier | JSONIdentifier | StructSubFieldIdentifier) op2 = (GT | GE) expr    # ReverseRange
