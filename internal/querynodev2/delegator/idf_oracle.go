@@ -400,8 +400,9 @@ func streamOneFile(ctx context.Context, cm storage.ChunkManager, remotePath, loc
 	defer f.Close()
 
 	if parseInto != nil {
+		br := bufio.NewReaderSize(reader, paramtable.Get().QueryNodeCfg.IDFReadBufferSize.GetAsInt())
 		bw := bufio.NewWriter(f)
-		tee := io.TeeReader(reader, bw)
+		tee := io.TeeReader(br, bw)
 		err = parseInto.DeserializeFromReader(tee)
 		if err != nil {
 			return 0, err
