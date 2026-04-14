@@ -2251,6 +2251,49 @@ TEST(Sealed, QueryAllNullableFields) {
 using VectorArrayTestParam =
     std::tuple<DataType, std::string, int, std::string>;
 
+void
+VerifyVectorResults(const VectorFieldProto& result_vec,
+                    const VectorFieldProto& expected_vec,
+                    DataType element_type) {
+    switch (element_type) {
+        case DataType::VECTOR_FLOAT: {
+            auto result_data = result_vec.float_vector().data();
+            auto expected_data = expected_vec.float_vector().data();
+            EXPECT_EQ(result_data.size(), expected_data.size());
+            for (int64_t i = 0; i < result_data.size(); ++i) {
+                EXPECT_NEAR(result_data[i], expected_data[i], 1e-6f);
+            }
+            break;
+        }
+        case DataType::VECTOR_BINARY: {
+            auto result_data = result_vec.binary_vector();
+            auto expected_data = expected_vec.binary_vector();
+            EXPECT_EQ(result_data, expected_data);
+            break;
+        }
+        case DataType::VECTOR_FLOAT16: {
+            auto result_data = result_vec.float16_vector();
+            auto expected_data = expected_vec.float16_vector();
+            EXPECT_EQ(result_data, expected_data);
+            break;
+        }
+        case DataType::VECTOR_BFLOAT16: {
+            auto result_data = result_vec.bfloat16_vector();
+            auto expected_data = expected_vec.bfloat16_vector();
+            EXPECT_EQ(result_data, expected_data);
+            break;
+        }
+        case DataType::VECTOR_INT8: {
+            auto result_data = result_vec.int8_vector();
+            auto expected_data = expected_vec.int8_vector();
+            EXPECT_EQ(result_data, expected_data);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
 class SealedVectorArrayTest
     : public ::testing::TestWithParam<VectorArrayTestParam> {
  protected:
@@ -2270,49 +2313,6 @@ class SealedVectorArrayTest
         // Ensure dim is valid for binary vectors
         if (element_type == DataType::VECTOR_BINARY) {
             ASSERT_EQ(dim % 8, 0) << "Binary vector dim must be multiple of 8";
-        }
-    }
-
-    void
-    VerifyVectorResults(const VectorFieldProto& result_vec,
-                        const VectorFieldProto& expected_vec,
-                        DataType element_type) {
-        switch (element_type) {
-            case DataType::VECTOR_FLOAT: {
-                auto result_data = result_vec.float_vector().data();
-                auto expected_data = expected_vec.float_vector().data();
-                EXPECT_EQ(result_data.size(), expected_data.size());
-                for (int64_t i = 0; i < result_data.size(); ++i) {
-                    EXPECT_NEAR(result_data[i], expected_data[i], 1e-6f);
-                }
-                break;
-            }
-            case DataType::VECTOR_BINARY: {
-                auto result_data = result_vec.binary_vector();
-                auto expected_data = expected_vec.binary_vector();
-                EXPECT_EQ(result_data, expected_data);
-                break;
-            }
-            case DataType::VECTOR_FLOAT16: {
-                auto result_data = result_vec.float16_vector();
-                auto expected_data = expected_vec.float16_vector();
-                EXPECT_EQ(result_data, expected_data);
-                break;
-            }
-            case DataType::VECTOR_BFLOAT16: {
-                auto result_data = result_vec.bfloat16_vector();
-                auto expected_data = expected_vec.bfloat16_vector();
-                EXPECT_EQ(result_data, expected_data);
-                break;
-            }
-            case DataType::VECTOR_INT8: {
-                auto result_data = result_vec.int8_vector();
-                auto expected_data = expected_vec.int8_vector();
-                EXPECT_EQ(result_data, expected_data);
-                break;
-            }
-            default:
-                break;
         }
     }
 };
