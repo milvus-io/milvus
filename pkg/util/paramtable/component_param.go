@@ -5380,7 +5380,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.levelzero.forceSelectAllSegments",
 		Version:      "2.6.15",
 		DefaultValue: "false",
-		Doc:          "When enabled, L0 compaction selects all L1/L2 segments regardless of position filtering. " +
+		Doc: "When enabled, L0 compaction selects all L1/L2 segments regardless of position filtering. " +
 			"Use during repair to bypass wrong StartPosition metadata from the import position bug.",
 		Export: false,
 	}
