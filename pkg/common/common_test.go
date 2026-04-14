@@ -486,11 +486,12 @@ func TestQueryMode(t *testing.T) {
 		assert.Equal(t, QueryModeLargeTopK, GetQueryMode(kvs...))
 	})
 
-	t.Run("GetQueryMode case insensitive", func(t *testing.T) {
+	t.Run("GetQueryMode is case sensitive", func(t *testing.T) {
 		kvs := []*commonpb.KeyValuePair{
 			{Key: QueryModeKey, Value: "Large_TopK"},
 		}
-		assert.Equal(t, QueryModeLargeTopK, GetQueryMode(kvs...))
+		assert.NotEqual(t, QueryModeLargeTopK, GetQueryMode(kvs...))
+		assert.Equal(t, "Large_TopK", GetQueryMode(kvs...))
 	})
 
 	t.Run("GetQueryMode returns empty when not present", func(t *testing.T) {
@@ -531,6 +532,28 @@ func TestQueryMode(t *testing.T) {
 			{Key: QueryModeKey, Value: "invalid"},
 		}
 		assert.Error(t, ValidateQueryMode(kvs...))
+	})
+
+	t.Run("ValidateQueryMode rejects wrong case value", func(t *testing.T) {
+		for _, val := range []string{"LARGE_TOPK", "Large_TopK", "Large_Topk"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: QueryModeKey, Value: val},
+			}
+			err := ValidateQueryMode(kvs...)
+			assert.Error(t, err, "value %q should be rejected", val)
+			assert.Contains(t, err.Error(), "valid values")
+		}
+	})
+
+	t.Run("ValidateQueryMode rejects wrong case key", func(t *testing.T) {
+		for _, key := range []string{"QUERY_MODE", "Query_Mode", "Query_mode"} {
+			kvs := []*commonpb.KeyValuePair{
+				{Key: key, Value: "large_topk"},
+			}
+			err := ValidateQueryMode(kvs...)
+			assert.Error(t, err, "key %q should be rejected", key)
+			assert.Contains(t, err.Error(), "did you mean")
+		}
 	})
 }
 
