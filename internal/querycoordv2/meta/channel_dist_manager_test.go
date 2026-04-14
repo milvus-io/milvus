@@ -138,26 +138,26 @@ func (suite *ChannelDistManagerSuite) TestGetBy() {
 	}
 
 	// Test GetByCollection
-	channels = dist.GetByCollectionAndFilter(suite.collection)
+	channels = dist.GetByFilter(WithCollectionID2Channel(suite.collection))
 	suite.Len(channels, 4)
 	suite.AssertCollection(channels, suite.collection)
-	channels = dist.GetByCollectionAndFilter(-1)
+	channels = dist.GetByFilter(WithCollectionID2Channel(-1))
 	suite.Len(channels, 0)
 
 	// Test GetByNodeAndCollection
 	// 1. Valid node and valid collection
 	for _, node := range suite.nodes {
-		channels := dist.GetByCollectionAndFilter(suite.collection, WithNodeID2Channel(node))
+		channels := dist.GetByFilter(WithCollectionID2Channel(suite.collection), WithNodeID2Channel(node))
 		suite.AssertNode(channels, node)
 		suite.AssertCollection(channels, suite.collection)
 	}
 
 	// 2. Valid node and invalid collection
-	channels = dist.GetByCollectionAndFilter(-1, WithNodeID2Channel(suite.nodes[1]))
+	channels = dist.GetByFilter(WithCollectionID2Channel(-1), WithNodeID2Channel(suite.nodes[1]))
 	suite.Len(channels, 0)
 
 	// 3. Invalid node and valid collection
-	channels = dist.GetByCollectionAndFilter(suite.collection, WithNodeID2Channel(-1))
+	channels = dist.GetByFilter(WithCollectionID2Channel(suite.collection), WithNodeID2Channel(-1))
 	suite.Len(channels, 0)
 }
 
@@ -434,4 +434,20 @@ func TestGetChannelDistJSON(t *testing.T) {
 	for _, channel := range channels {
 		checkResult(channel)
 	}
+
+	channels = manager.GetChannelDist(100)
+	assert.Len(t, channels, 1)
+	assert.Equal(t, int64(100), channels[0].CollectionID)
+	assert.Equal(t, "channel-1", channels[0].ChannelName)
+
+	views := manager.GetLeaderView(0)
+	assert.Len(t, views, 2)
+
+	views = manager.GetLeaderView(100)
+	assert.Len(t, views, 1)
+	assert.Equal(t, int64(100), views[0].CollectionID)
+	assert.Equal(t, "channel-1", views[0].Channel)
+
+	views = manager.GetLeaderView(300)
+	assert.Len(t, views, 0)
 }

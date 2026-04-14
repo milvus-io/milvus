@@ -58,7 +58,7 @@ func WaitCollectionReleased(ctx context.Context, dist *meta.DistributionManager,
 				return partitionSet.Contain(segment.GetPartitionID())
 			})
 		} else {
-			channels = dist.ChannelDistManager.GetByCollectionAndFilter(collection)
+			channels = dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collection))
 		}
 
 		currentChannelCount := len(channels)

@@ -929,7 +929,7 @@ func (s *Server) GetLeakedResourcesByCollection(ctx context.Context, collectionI
 			leakedSegments++
 		}
 	}
-	for _, ch := range s.dist.ChannelDistManager.GetByCollectionAndFilter(collectionID) {
+	for _, ch := range s.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID)) {
 		if !validNodes.Contain(ch.Node) {
 			leakedChannels++
 		}
